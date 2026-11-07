@@ -4,6 +4,9 @@ import att.metrics.InspectionMetrics;
 import static att.metrics.InspectionMetrics.Stage.*;
 
 import att.server.api.WorkerRequest;
+import att.server.api.source.SourceManagementContracts.RevisionIdentity;
+import att.server.api.source.SourceManagementContracts.RevisionKind;
+import att.server.api.source.SourceManagementContracts.RevisionSet;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -85,6 +88,10 @@ final class ServerRuntime implements AutoCloseable {
     final PackageRegistry packageRegistry;
     private final SourcePublicationBarrier sourcePublicationBarrier;
     private final SourceFileTransaction sourceFileTransaction;
+    private final JobSourceClosureStore jobSourceClosures;
+    private final SourcePublicationLifecycle sourcePublicationLifecycle;
+    private final ConcurrentHashMap<String,String> observedSourceRevisionIds=new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String,ScheduleSourceOverride> scheduledSourceOverrides=new ConcurrentHashMap<>();
     final JobStore store;
     private final LoadProgressPersistence loadProgressPersistence;
     final AuthService auth;
@@ -204,9 +211,18 @@ final class ServerRuntime implements AutoCloseable {
         Path centralRoot=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toRealPath();
         sourceRecoveryRoots.put(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG+":"+ChangeSetPublisher.CENTRAL_SCOPE_ID,centralRoot);
         sourceFileTransaction.recover(sourceRecoveryRoots,store::persistSourcePublicationAudit);
-        for(Map.Entry<String,Path> entry:config.packages.entrySet())
+        for(Map.Entry<String,Path> entry:config.packages.entrySet()) {
             sourceFileTransaction.registerRoot(ChangeSetPublisher.PACKAGE_SOURCE,entry.getKey(),entry.getValue());
+            Path snapshot=sourceFileTransaction.pin(ChangeSetPublisher.PACKAGE_SOURCE,entry.getKey(),entry.getValue());
+            observedSourceRevisionIds.put(sourceRevisionKey(ChangeSetPublisher.PACKAGE_SOURCE,entry.getKey()),
+                    immutableSourceRevisionId(ChangeSetPublisher.PACKAGE_SOURCE,entry.getKey(),entry.getValue(),snapshot));
+        }
         sourceFileTransaction.registerRoot(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,centralRoot);
+        Path centralSnapshot=sourceFileTransaction.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,centralRoot);
+        observedSourceRevisionIds.put(sourceRevisionKey(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID),
+                immutableSourceRevisionId(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,centralRoot,centralSnapshot));
+        jobSourceClosures=new JobSourceClosureStore(config.dataDir);
+        sourcePublicationLifecycle=new SourcePublicationLifecycle(this::invalidateSourceScope);
         packageRegistry=new PackageRegistry(config,clock,
                 java.time.Duration.ofMillis(PackageRegistry.DEBOUNCE_MILLIS),
                 java.time.Duration.ofMillis(PackageRegistry.MAX_OBSERVATION_MILLIS),
@@ -449,6 +465,13 @@ final class ServerRuntime implements AutoCloseable {
             JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));
             if(spec.configuration()!=null)view.put("configuration",spec.configuration());
             view.put("definition",spec.definition());view.put("revisionPolicy","reject-package-changes");view.put("revision",spec.revision());
+            if(spec.value.path("sourceProvenance").isObject()) {
+                Map<String,Object> source=JSON.convertValue(spec.value.get("sourceProvenance"),Map.class);
+                view.put("sourceProvenance",source);
+                boolean retained=jobSourceClosures.hasOwner(JobSourceClosureStore.JOB_OWNER_PREFIX+id);
+                view.put("sourceSnapshotAvailable",retained);
+                if(!retained)view.put("requiredAction","validate-again");
+            }
             if(spec.value.has("sourcePath"))view.put("sourcePath",spec.value.get("sourcePath").asText());
         }
         if(record.get("rerunOfJobId")!=null)view.put("rerunOfJobId",record.get("rerunOfJobId"));
@@ -738,12 +761,33 @@ final class ServerRuntime implements AutoCloseable {
     }
     private Map<String,Object> submit(String command,JsonNode input,String principal,boolean serverIssuedDraft,String scheduleOccurrenceId,boolean scheduleIssued,String rerunOfJobId,String replayIntent,JobExecutionSpec prevalidatedSpec,boolean fileBackedReplay,JobProvenance provenance) throws Exception {
         admissionLifecycle.readLock().lock();
+        sourcePublicationBarrier.readLock().lock();
         try {
         if(closing)throw new QueueFullException("Server is shutting down");
         long requestReceivedNanos=System.nanoTime();
         if(!List.of("run","debug","load","validate").contains(command))throw new IllegalArgumentException("Unsupported job command");
         String packageId=required(input,"packageId");
         PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+        LoadSchedule scheduledSource=null;String scheduledSourceOwner=null;JobSourceClosureStore.SourceSnapshot scheduledSnapshot=null;
+        ScheduleSourceOverride sourceOverride=scheduleOccurrenceId==null?null:scheduledSourceOverrides.remove(scheduleOccurrenceId);
+        if(sourceOverride!=null) {
+            scheduledSource=sourceOverride.schedule;
+            scheduledSourceOwner=sourceOverride.owner;
+            scheduledSnapshot=sourceOverride.snapshot;
+            if(!packageId.equals(scheduledSource.packageId))throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Schedule source scope changed.");
+        } else if(scheduleOccurrenceId!=null) {
+            Map<String,Object> occurrence=store.scheduleExecution(scheduleOccurrenceId);
+            scheduledSource=occurrence==null?null:store.schedule(String.valueOf(occurrence.get("scheduleId")));
+            if(scheduledSource!=null&&scheduledSource.sourceProvenance!=null) {
+                String approvedFingerprint=JobSourceClosureStore.validationFingerprint(scheduledSource.sourceProvenance);
+                if(java.util.Objects.equals(approvedFingerprint,scheduledSource.expectedRevisionDigest)) {
+                    scheduledSourceOwner=scheduleSourceOwner(scheduledSource.id,scheduledSource.snapshotVersion);
+                    try {scheduledSnapshot=jobSourceClosures.snapshotForOwner(scheduledSourceOwner);}
+                    catch(Exception stale) {throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Schedule source snapshot is unavailable. Review and replace the Schedule snapshot.");}
+                    if(!packageId.equals(scheduledSource.packageId))throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Schedule source scope changed.");
+                }
+            }
+        }
         boolean loadAdmission="load".equals(command);
         // Reject requests that already cannot be admitted before any legacy direct-request inspection runs.
         // The final semaphore acquisition below remains authoritative when concurrent submissions race this check.
@@ -770,7 +814,7 @@ final class ServerRuntime implements AutoCloseable {
                 validatePackageBackedReplayLoadLimits(config.inlineLoad,scenario);
             } else if(scheduleIssued)validateScheduledLoadLimits(config.inlineLoad,scenario);else enforceInlineLoadLimits(scenario);
         }
-        Path root=pinPackageRoot(registry,packageId);
+        Path root=scheduledSnapshot==null?pinPackageRoot(registry,packageId):scheduledSnapshot.packageRoot;
         if(root==null)throw new IllegalArgumentException("Unknown packageId");
         validatePackageRoot(root);
         ObjectNode pinned=((ObjectNode)input).deepCopy();
@@ -781,8 +825,16 @@ final class ServerRuntime implements AutoCloseable {
             if(!packageId.equals(retainedConfiguration.get("packageId"))||!java.util.Objects.equals(requestedEnvironment,retainedConfiguration.get("environment")))
                 throw new IllegalArgumentException("Configuration evidence differs from the approved execution");
         }
-        PinnedExecutionConfiguration selectedConfiguration=resolvePinnedExecutionConfiguration(
-                packageId,root,requestedEnvironment,retainedConfiguration);
+        PinnedExecutionConfiguration selectedConfiguration;
+        if(scheduledSnapshot!=null) {
+            Map<String,Object> approved=scheduledSource.configuration==null?null:
+                    att.server.api.ConfigurationSnapshot.copy(scheduledSource.configuration);
+            if(approved==null||!packageId.equals(approved.get("packageId"))
+                    ||!java.util.Objects.equals(requestedEnvironment,approved.get("environment"))
+                    ||(retainedConfiguration!=null&&!sameConfigurationEvidence(retainedConfiguration,approved)))
+                throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Schedule Config snapshot is unavailable. Review and replace the Schedule snapshot.");
+            selectedConfiguration=new PinnedExecutionConfiguration(approved,scheduledSnapshot.workerConfigPath,scheduledSnapshot.configRoot);
+        } else selectedConfiguration=resolvePinnedExecutionConfiguration(packageId,root,requestedEnvironment,retainedConfiguration);
         Map<String,Object> configuration=selectedConfiguration.evidence;
         pinned.put("environment",(String)configuration.get("environment"));
         pinned.set("configurationProvenance",JSON.valueToTree(configuration));
@@ -828,6 +880,14 @@ final class ServerRuntime implements AutoCloseable {
             if(exact!=null) {request.caseIds=JSON.convertValue(exact,List.class);request.tags=null;request.excludeTags=null;request.all=false;request.rerunFailed=false;}
         }
         configuration=configurationRevision(configuration,request.expectedRevisionDigest);request.configurationProvenance=configuration;
+        JobSourceClosureStore.SourceProvenance sourceProvenance=null;
+        if(List.of("run","debug","load").contains(command)) {
+            if(scheduledSnapshot!=null)sourceProvenance=jobSourceClosures.provenance(
+                    JobSourceClosureStore.revisionsFromProvenance(scheduledSource.sourceProvenance),
+                    JobSourceClosureStore.validationFingerprint(scheduledSource.sourceProvenance));
+            else sourceProvenance=jobSourceProvenance(packageId,registry,root,selectedConfiguration,configuration,
+                    request.expectedRevisionDigest,scheduleOccurrenceId);
+        }
         if(executionSpec==null&&replayUnavailable==null)replayUnavailable="This job type or Server capability does not support safe replay. Configure a new run.";
         if(rerunOfJobId!=null&&prevalidatedSpec!=null) {
             JsonNode replay=prevalidatedSpec.value.path("replay");
@@ -842,13 +902,34 @@ final class ServerRuntime implements AutoCloseable {
         if(loadAdmission&&!loadSlots.tryAcquire()){loadCapacityRejections.incrementAndGet();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
         if(!admissionSlots.tryAcquire()){if(loadAdmission)loadSlots.release();queueCapacityRejections.incrementAndGet();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
         AdmissionLease lease=new AdmissionLease(admissionSlots,loadAdmission?loadSlots:null);
-        String id=null;Path jobPath=null;boolean persisted=false,handedOff=false;
+        String id=null;Path jobPath=null;boolean persisted=false,handedOff=false;att.server.api.source.SourceManagementContracts.SourceLease sourceLease=null;
         try {
             id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();request.jobId=id;
+            if(sourceProvenance!=null) {
+                try {
+                    if(scheduledSnapshot!=null) {
+                        sourceLease=jobSourceClosures.retainOwner(scheduledSourceOwner,JobSourceClosureStore.JOB_OWNER_PREFIX+id);
+                        if(!scheduledSnapshot.leaseId.equals(sourceLease.leaseId()))throw new java.io.IOException("Schedule source lease identity changed");
+                    } else {
+                        var leaseRequest=new att.server.api.source.SourceManagementContracts.SourceLeaseRequest(packageId,
+                                configuration.get("environment") instanceof String?(String)configuration.get("environment"):null,
+                                sourceProvenance.revisions,Collections.emptyList(),JobSourceClosureStore.JOB_OWNER_PREFIX+id);
+                        sourceLease=jobSourceClosures.acquire(leaseRequest);
+                        jobSourceClosures.bindWorkerConfiguration(sourceLease.leaseId(),selectedConfiguration.workerConfigPath);
+                    }
+                } catch(Exception staleSource) {
+                    throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Package or Config source revision is unavailable. Validate the execution again.");
+                }
+                if(executionSpec!=null)executionSpec=JobExecutionSpec.parse(executionSpec).withSourceProvenance(sourceProvenance.view()).json();
+            }
             jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
             JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob,config.maxEventJournalBytes,
                     config.maxEventJournalMemoryBytes,eventCompactions,eventNotifications,this::recordCompactionFailure);
             Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
+            if(sourceProvenance!=null) {
+                job.sourceLeaseId=sourceLease.leaseId();
+                job.sourceProvenance=sourceProvenance.view();
+            }
             if(provenance==null) {
                 job.submissionSource="manual";job.originatingScheduleId=originatingScheduleId;job.executionPrincipal=config.authenticationRequired?principal:null;job.submittedBy=config.authenticationRequired?principal:null;
             } else {
@@ -859,6 +940,7 @@ final class ServerRuntime implements AutoCloseable {
             job.executionSpec=executionSpec;job.replayUnavailable=replayUnavailable;job.rerunOfJobId=rerunOfJobId;job.replayIntent=replayIntent;job.replayOwner=replayOwner;if(job.originatingScheduleId==null)job.originatingScheduleId=originatingScheduleId;
             Map<String,Object> summaryFields=new LinkedHashMap<>();summaryFields.put("command",command);summaryFields.put("packageId",packageId);
             summaryFields.put("configuration",configuration);
+            if(sourceProvenance!=null)summaryFields.put("sourceProvenance",sourceProvenance.view());
             Files.write(jobPath.resolve("output/configuration.json"),JSON.writeValueAsBytes(configuration));
             if(request.scenario!=null)summaryFields.put("scenario",request.scenario);
             Object resolvedEnvironment=configuration.get("environment");
@@ -889,10 +971,11 @@ final class ServerRuntime implements AutoCloseable {
             return acceptedView;
         } catch(Exception failure) {
             if(!handedOff){if(id!=null){FutureTask<Void> task=tasks.remove(id);if(task!=null)task.cancel(false);jobs.remove(id);leases.remove(id);if(persisted)try{store.deleteJob(id);}catch(Exception ignored){}if(jobPath!=null)try{deleteTree(jobPath);}catch(Exception ignored){}}
+                if(sourceLease!=null)sourceLease.close();
                 lease.release();if(failure instanceof QueueFullException)try{store.audit(principal,"SUBMIT",id,packageId,"REJECTED_QUEUE_FULL");}catch(Exception ignored){} }
             throw failure;
         }
-        } finally {admissionLifecycle.readLock().unlock();}
+        } finally {sourcePublicationBarrier.readLock().unlock();admissionLifecycle.readLock().unlock();}
     }
     Process startWorkerProcess(ProcessBuilder builder) throws java.io.IOException {
         // JDK 17 process reapers inherit the spawning thread's context loader.
@@ -910,10 +993,13 @@ final class ServerRuntime implements AutoCloseable {
         thread.setDaemon(true);stderrDrainers.put(thread,process);thread.start();
     }
     private void execute(Job job,Path jobPath,AdmissionLease lease) {
-        sourcePublicationBarrier.readLock().lock();
         job.workerStartedNanos=System.nanoTime();
         ExecutionWorkerPool.Lease warm=null;
         try {
+            if(!sourceDispatchValid(job)) {
+                finishQuietly(job,"ERROR",3,"ATT-SOURCE-REVISION-STALE","The approved source snapshot is unavailable; validate the execution again.");
+                return;
+            }
             // Inspector work must not hold the cancellation/process-publication lock.
             String warmRevision=prewarmRevision(job);
             Path approvedRoot=acceptedPackageRoot(job);
@@ -927,8 +1013,13 @@ final class ServerRuntime implements AutoCloseable {
                     // one that follows launch always sees and terminates that exact process.
                     if(job.terminal())return;
                     if(closing){finishQuietly(job,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown stopped the queued Worker");return;}
+                    if(!sourceDispatchValid(job)) {
+                        finishQuietly(job,"ERROR",3,"ATT-SOURCE-REVISION-STALE","The approved source snapshot is unavailable; validate the execution again.");
+                        return;
+                    }
                     transition(job,"PREPARING");
-                    validateAcceptedPackageRoot(approvedRoot);
+                    if(job.sourceLeaseId==null)validateAcceptedPackageRoot(approvedRoot);
+                    else validatePinnedPackageRevisionRoot(approvedRoot);
                     job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
                     if(warmRevision!=null) {
                         Path selectedRoot=packageRoot(job.packageId);
@@ -974,19 +1065,29 @@ final class ServerRuntime implements AutoCloseable {
               else finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));
           }}
         finally {
-            try {
-                stopWorkerTree(job);
-                OutputStream workerInput=job.workerControlStream;job.workerControlStream=null;
-                if(workerInput!=null)try{workerInput.close();}catch(Exception ignored){}
-                if(warm!=null&&job.processFence!=null&&job.processFence.stopped())try{warm.transferred();}catch(Exception ignored) { }
-                boolean stopped=job.processFence==null ? job.process==null||!job.process.isAlive() : job.processFence.stopped();
-                if(stopped&&job.process!=null){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;if(!closing)try{store.update(job);}catch(Exception ignored){}}
-                tasks.remove(job.id);completed.incrementAndGet();
-                // A terminal RESULT is not the execution cleanup fence. Publish only
-                // after cleanup and admission release, never while this Job is active.
-                if(!releaseStoppedWorker(job,lease)&&!closing&&deferredWorkerReleaseIds.add(job.id))deferredWorkerReleases.add(job);
-            } finally { sourcePublicationBarrier.readLock().unlock(); }
+            stopWorkerTree(job);
+            OutputStream workerInput=job.workerControlStream;job.workerControlStream=null;
+            if(workerInput!=null)try{workerInput.close();}catch(Exception ignored){}
+            if(warm!=null&&job.processFence!=null&&job.processFence.stopped())try{warm.transferred();}catch(Exception ignored) { }
+            boolean stopped=job.processFence==null ? job.process==null||!job.process.isAlive() : job.processFence.stopped();
+            if(stopped&&job.process!=null){if(job.workerTerminatedNanos==0)job.workerTerminatedNanos=System.nanoTime();job.process=null;if(!closing)try{store.update(job);}catch(Exception ignored){}}
+            tasks.remove(job.id);completed.incrementAndGet();
+            // A terminal RESULT is not the execution cleanup fence. Publish only
+            // after cleanup and admission release, never while this Job is active.
+            if(!releaseStoppedWorker(job,lease)&&!closing&&deferredWorkerReleaseIds.add(job.id))deferredWorkerReleases.add(job);
         }
+    }
+
+    private boolean sourceDispatchValid(Job job) {
+        return job.sourceLeaseId==null||jobSourceClosures.verifyDispatch(job.sourceLeaseId,
+                JobSourceClosureStore.JOB_OWNER_PREFIX+job.id,acceptedPackageRoot(job),Paths.get(job.request.config));
+    }
+
+    private static void validatePinnedPackageRevisionRoot(Path root) throws Exception {
+        if(root==null||Files.isSymbolicLink(root)||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                ||!Files.isReadable(root)||!Files.isExecutable(root)||!ServerConfig.hasReadSearchPermissionBits(root)
+                ||!root.isAbsolute()||!root.equals(root.toRealPath()))
+            throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Package source snapshot is no longer safely available.");
     }
     int reconcileWorkerReleases() {
         int budget=Math.min(64,deferredWorkerReleases.size());
@@ -1125,13 +1226,16 @@ final class ServerRuntime implements AutoCloseable {
                         Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing
                                 ?new LinkedHashMap<>((Map<String,Object>)existing):new LinkedHashMap<>();
                         summary.put("configuration",job.request.configurationProvenance);enriched.put("summary",summary);
+                        if(job.sourceProvenance!=null)summary.put("sourceProvenance",job.sourceProvenance);
                     }
                     result=att.server.api.LoadTerminalResult.projectOperationResult(enriched,status,code);
                     attachJobDiagnostics((Map<String,Object>)result,job);
                 } else if(result instanceof Map<?,?> original&&job.request.configurationProvenance!=null) {
                     Map<String,Object> enriched=new LinkedHashMap<>((Map<String,Object>)original);
                     Map<String,Object> summary=enriched.get("summary") instanceof Map<?,?> existing?new LinkedHashMap<>((Map<String,Object>)existing):new LinkedHashMap<>();
-                    summary.put("configuration",job.request.configurationProvenance);enriched.put("summary",summary);result=enriched;
+                    summary.put("configuration",job.request.configurationProvenance);
+                    if(job.sourceProvenance!=null)summary.put("sourceProvenance",job.sourceProvenance);
+                    enriched.put("summary",summary);result=enriched;
                 }
                 job.resultJson=result==null?"{}":JSON.writeValueAsString(result);
                 job.resultReceived=true;
@@ -1407,6 +1511,7 @@ final class ServerRuntime implements AutoCloseable {
             synchronized(active) {
                 Map<String,Object> view=active.view();
                 view.put("pinned",false);
+                if(active.sourceLeaseId!=null)view.put("sourceSnapshotAvailable",jobSourceClosures.hasOwner(JobSourceClosureStore.JOB_OWNER_PREFIX+id));
                 // Only terminal jobs can be pinned. Keep active polling independent
                 // of database connection/flush costs.
                 if(active.terminal()) {
@@ -1417,6 +1522,7 @@ final class ServerRuntime implements AutoCloseable {
             }
         }
         Map<String,Object> record=store.get(id);if(record==null)throw new NotFoundException();
+        if(record.containsKey("sourceProvenance"))record.put("sourceSnapshotAvailable",jobSourceClosures.hasOwner(JobSourceClosureStore.JOB_OWNER_PREFIX+id));
         Map<String,String> replayMetadata=store.executionSpec(id);
         if(replayMetadata!=null&&replayMetadata.get("rerunOfJobId")!=null)record.put("rerunOfJobId",replayMetadata.get("rerunOfJobId"));
         record.put("executionType",Job.executionType(String.valueOf(record.get("command"))));
@@ -1781,7 +1887,11 @@ final class ServerRuntime implements AutoCloseable {
         } catch(java.io.IOException unavailable) {
             throw new IllegalArgumentException("Configured Package root is no longer registered under the original allowed root, canonical, and accessible",unavailable);
         }
-        try { return sourceFileTransaction.pin(ChangeSetPublisher.PACKAGE_SOURCE,id,configured); }
+        try {
+            Path snapshot=sourceFileTransaction.pin(ChangeSetPublisher.PACKAGE_SOURCE,id,configured);
+            observeSourceRevision(ChangeSetPublisher.PACKAGE_SOURCE,id,configured,snapshot);
+            return snapshot;
+        }
         catch(Exception unavailable) { throw new IllegalStateException("Package source revision is unavailable",unavailable); }
     }
     private Map<String,Path> packageRoots() {
@@ -1793,10 +1903,133 @@ final class ServerRuntime implements AutoCloseable {
     }
     private Path centralSourceRoot() {
         Path configured=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toAbsolutePath().normalize();
-        try { return sourceFileTransaction.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
-                ChangeSetPublisher.CENTRAL_SCOPE_ID,configured.toRealPath()); }
+        try {
+            Path canonical=configured.toRealPath();
+            Path snapshot=sourceFileTransaction.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,canonical);
+            observeSourceRevision(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,canonical,snapshot);
+            return snapshot;
+        }
         catch(Exception unavailable) { throw new IllegalStateException("Central source revision is unavailable",unavailable); }
     }
+
+    private void observeSourceRevision(String domain,String scopeId,Path configuredRoot,Path snapshot) throws Exception {
+        String key=sourceRevisionKey(domain,scopeId);
+        String current=immutableSourceRevisionId(domain,scopeId,configuredRoot,snapshot);
+        String previous=observedSourceRevisionIds.put(key,current);
+        if(previous!=null&&!previous.equals(current)) {
+            if(ChangeSetPublisher.PACKAGE_SOURCE.equals(domain))sourcePublicationLifecycle.invalidate(
+                    new att.server.api.source.SourceManagementContracts.InvalidationScope(scopeId,null,
+                            List.of("PACKAGE_RESOURCE","RESOURCE_INDEX","LOAD_CATALOG","VALIDATION","SCHEDULE_REVIEW")));
+        }
+    }
+
+    /** Scoped refresh primitive for the central Config activation adapter. */
+    void invalidateEffectiveConfiguration(String packageId,String environment) {
+        sourcePublicationLifecycle.invalidate(new att.server.api.source.SourceManagementContracts.InvalidationScope(
+                packageId,environment,List.of("EFFECTIVE_CONFIGURATION","VALIDATION","SCHEDULE_REVIEW")));
+    }
+
+    void retireSourceRevision(att.server.api.source.SourceManagementContracts.RevisionIdentity revision) throws java.io.IOException {
+        jobSourceClosures.retire(revision);
+    }
+
+    att.server.api.source.SourceManagementContracts.ActivationStatus sourceActivationStatus(String scopeId) {
+        return sourcePublicationLifecycle.activationStatus(scopeId);
+    }
+
+    void recordSourceActivationStatus(att.server.api.source.SourceManagementContracts.ActivationStatus status) {
+        sourcePublicationLifecycle.recordActivationStatus(status);
+    }
+
+    private static String sourceRevisionKey(String domain,String scopeId) { return domain+":"+scopeId; }
+
+    private String immutableSourceRevisionId(String domain,String scopeId,Path configuredRoot,Path snapshot) throws Exception {
+        if(snapshot==null)throw new java.io.IOException("Source revision is unavailable");
+        Path candidate=snapshot.toAbsolutePath().normalize();
+        Path name=candidate.getFileName();
+        if(name==null||!name.toString().matches("R[A-F0-9]{32}")
+                ||!sourceFileTransaction.ownsRevision(domain,scopeId,configuredRoot,candidate))
+            throw new java.io.IOException("Source revision is unavailable");
+        return name.toString();
+    }
+
+    void notifySourcePublished(String domain,String scopeId,Map<String,Object> publication,String requestId) {
+        try {
+            att.server.api.source.SourceManagementContracts.Domain sourceDomain=ChangeSetPublisher.PACKAGE_SOURCE.equals(domain)
+                    ?att.server.api.source.SourceManagementContracts.Domain.PACKAGE_SOURCE
+                    :att.server.api.source.SourceManagementContracts.Domain.CENTRAL_RUNTIME_CONFIG;
+            String key=sourceRevisionKey(domain,scopeId);
+            String before=observedSourceRevisionIds.get(key);
+            Path configured,root;
+            if(ChangeSetPublisher.PACKAGE_SOURCE.equals(domain)) {
+                PackageRegistry.Snapshot registry=packageRegistry.snapshot();configured=registry.packages.get(scopeId);
+                if(configured==null)return;
+                root=sourceFileTransaction.pin(domain,scopeId,configured);
+            } else {
+                configured=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toAbsolutePath().normalize().toRealPath();
+                root=sourceFileTransaction.pin(domain,scopeId,configured);
+            }
+            String after=immutableSourceRevisionId(domain,scopeId,configured,root);
+            observedSourceRevisionIds.put(key,after);
+            att.server.api.source.SourceManagementContracts.RevisionSet beforeSet=sourceRevisionSetForPublication(sourceDomain,scopeId,before);
+            att.server.api.source.SourceManagementContracts.RevisionSet afterSet=sourceRevisionSetForPublication(sourceDomain,scopeId,after);
+            List<String> paths=new ArrayList<>();
+            Object raw=publication==null?null:publication.get("changedFiles");
+            if(raw instanceof List<?> rows)for(Object row:rows)if(row instanceof Map<?,?> value&&value.get("path") instanceof String path)paths.add(path);
+            if(paths.isEmpty()&&(publication!=null&&publication.containsKey("manifestDigest")))paths.add("package.yaml");
+            sourcePublicationLifecycle.committed(new att.server.api.source.SourceManagementContracts.PublicationEvent(
+                    sourceDomain,scopeId,requestId,beforeSet,afterSet,paths));
+        } catch(Exception unavailable) {
+            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to record a scoped source refresh event");
+        }
+    }
+
+    private static att.server.api.source.SourceManagementContracts.RevisionSet sourceRevisionSetForPublication(
+            att.server.api.source.SourceManagementContracts.Domain domain,String scopeId,String revision) {
+        att.server.api.source.SourceManagementContracts.RevisionIdentity identity=null;
+        if(revision!=null&&!revision.isBlank()) {
+            att.server.api.source.SourceManagementContracts.RevisionKind kind=domain==att.server.api.source.SourceManagementContracts.Domain.PACKAGE_SOURCE
+                    ?att.server.api.source.SourceManagementContracts.RevisionKind.BUSINESS_SOURCE
+                    :att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE;
+            identity=att.server.api.source.SourceManagementContracts.RevisionIdentity.of(kind,scopeId,revision);
+        }
+        return domain==att.server.api.source.SourceManagementContracts.Domain.PACKAGE_SOURCE
+                ?new att.server.api.source.SourceManagementContracts.RevisionSet(null,identity,null,null,null,null,null,null,null)
+                :new att.server.api.source.SourceManagementContracts.RevisionSet(null,null,null,null,identity,null,null,null,null);
+    }
+
+    private void invalidateSourceScope(att.server.api.source.SourceManagementContracts.InvalidationScope scope) {
+        if(scope==null||scope.packageId==null)return;
+        boolean configurationScope=scope.resourceKinds.contains("EFFECTIVE_CONFIGURATION");
+        Set<String> removed=new java.util.HashSet<>();
+        synchronized(draftLock) {
+            runDrafts.entrySet().removeIf(entry->{boolean match=sourceScopeMatches(scope,entry.getValue().packageId,
+                    entry.getValue().workerInput.path("environment").asText(null));if(match)removed.add(entry.getKey());return match;});
+            debugDrafts.entrySet().removeIf(entry->{boolean match=sourceScopeMatches(scope,entry.getValue().packageId,entry.getValue().environment);if(match)removed.add(entry.getKey());return match;});
+            quickLoadDrafts.entrySet().removeIf(entry->{boolean match=sourceScopeMatches(scope,entry.getValue().packageId,entry.getValue().environment);if(match)removed.add(entry.getKey());return match;});
+            advancedLoadDrafts.entrySet().removeIf(entry->{boolean match=sourceScopeMatches(scope,entry.getValue().packageId,entry.getValue().environment);if(match)removed.add(entry.getKey());return match;});
+            catalogLoadDrafts.entrySet().removeIf(entry->{boolean match=sourceScopeMatches(scope,entry.getValue().packageId,entry.getValue().environment);if(match)removed.add(entry.getKey());return match;});
+            scheduleExecutionReviews.entrySet().removeIf(entry->{boolean match=sourceScopeMatches(scope,entry.getValue().packageId(),null);if(match)removed.add(entry.getValue().draftId());return match;});
+            replayReviews.entrySet().removeIf(entry->{boolean match=sourceScopeMatches(scope,entry.getValue().packageId,optionalText(entry.getValue().definition,"environment"));if(match)removed.add(entry.getValue().draftId);return match;});
+            for(String id:removed)registryBoundDrafts.remove(id);
+        }
+        try {
+            if(configurationScope)store.markScheduleConfigurationChanged(scope.packageId,scope.environment,clock.instant().toString());
+            else if(scope.environment==null)store.markPackageSchedulesSourceChanged(scope.packageId,
+                    observedSourceRevisionIds.get(sourceRevisionKey(ChangeSetPublisher.PACKAGE_SOURCE,scope.packageId)),
+                    config.scheduling.packageChangePolicy,clock.instant().toString());
+            else store.markScheduleConfigurationChanged(scope.packageId,scope.environment,clock.instant().toString());
+        } catch(Exception failure) {
+            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to mark affected schedules for source review");
+        }
+    }
+
+    private static boolean sourceScopeMatches(att.server.api.source.SourceManagementContracts.InvalidationScope scope,String packageId,String environment) {
+        return scope.packageId.equals(packageId)&&(scope.environment==null||java.util.Objects.equals(scope.environment,environment));
+    }
+
+    private static String text(Object value) { return value instanceof String?(String)value:null; }
     private Path workerConfigPath() throws Exception {
         Path sourceRoot=centralSourceRoot();
         return workerConfigPath(sourceRoot);
@@ -1813,9 +2046,19 @@ final class ServerRuntime implements AutoCloseable {
     static final class PinnedExecutionConfiguration {
         final Map<String,Object> evidence;
         final Path workerConfigPath;
-        PinnedExecutionConfiguration(Map<String,Object> evidence,Path workerConfigPath) {
+        final Path sourceRoot;
+        PinnedExecutionConfiguration(Map<String,Object> evidence,Path workerConfigPath,Path sourceRoot) {
             this.evidence=att.server.api.ConfigurationSnapshot.copy(evidence);
             this.workerConfigPath=workerConfigPath;
+            this.sourceRoot=sourceRoot;
+        }
+    }
+    private static final class ScheduleSourceOverride {
+        final String owner;
+        final LoadSchedule schedule;
+        final JobSourceClosureStore.SourceSnapshot snapshot;
+        ScheduleSourceOverride(String owner,LoadSchedule schedule,JobSourceClosureStore.SourceSnapshot snapshot) {
+            this.owner=owner;this.schedule=schedule;this.snapshot=snapshot;
         }
     }
     Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String principal) throws Exception {
@@ -1850,7 +2093,7 @@ final class ServerRuntime implements AutoCloseable {
         request.expectedRevisionDigest=prior==null?null:prior.revision;
         Map<String,Object> result=executeInspection(root,request);
         Object revision=result.remove("revisionDigest");
-        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision)));
+        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision,sourcePublicationLifecycle.generation(packageId,null))));
         if("list".equals(action)) {
             Object next=result.remove("nextOffset");
             if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,type,normalizedQuery,normalizedSort,normalizedDirection,((Number)next).intValue(),(String)revision,principal));
@@ -1880,7 +2123,7 @@ final class ServerRuntime implements AutoCloseable {
             item.put("createQuickLoad",template&&config.inlineLoad.enabled&&Boolean.TRUE.equals(item.get("createQuickLoad")));
         }
         Object revision=result.remove("revisionDigest");Object next=result.remove("nextOffset");
-        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision)));
+        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision,sourcePublicationLifecycle.generation(packageId,null))));
         if(next instanceof Number&&revision instanceof String)
             result.put("nextCursor",encodeCursor(packageId,"load",normalizedQuery,"name","asc",((Number)next).intValue(),(String)revision,principal));
         else result.put("nextCursor",null);
@@ -1902,7 +2145,7 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-detail";request.inspectionPath=resourceId;
         Map<String,Object> result=executeInspection(root,request);
         Object revision=result.remove("revisionDigest");
-        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision)));
+        if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision,sourcePublicationLifecycle.generation(packageId,null))));
         return result;
     }
     Map<String,Object> validateLoadCatalogScenario(String packageId,String resourceId,String environment,String principal) throws Exception {
@@ -3045,7 +3288,7 @@ final class ServerRuntime implements AutoCloseable {
         }
         Map<String,Object> resolved=resolveExecutionConfiguration(packageId,root,selection,pinnedWorkerConfig);
         if(retainedEvidence!=null&&!sameConfigurationEvidence(retainedEvidence,resolved))throw new StaleDraftException();
-        return new PinnedExecutionConfiguration(resolved,pinnedWorkerConfig);
+        return new PinnedExecutionConfiguration(resolved,pinnedWorkerConfig,pinnedCentralRoot);
     }
     private static boolean sameConfigurationEvidence(Map<String,Object> retained,Map<String,Object> resolved) {
         for(String key:List.of("packageId","environment","environmentOrigin","manifestDigest","globalDigest","configurationIdentity"))
@@ -3060,6 +3303,82 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> result=new LinkedHashMap<>(evidence);
         if(revision!=null)result.put("packageRevision",revision);
         return att.server.api.ConfigurationSnapshot.copy(result);
+    }
+
+    private JobSourceClosureStore.SourceProvenance buildSourceProvenance(String packageId,PackageRegistry.Snapshot registry,
+            Path packageSnapshot,PinnedExecutionConfiguration configurationSnapshot,Map<String,Object> configuration,
+            String validationFingerprint,LoadSchedule schedule) throws Exception {
+        Path configuredPackageRoot=registry.packages.get(packageId);
+        if(configuredPackageRoot==null)throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The Package registration changed during execution acceptance.");
+        String packageRevision=immutableSourceRevisionId(ChangeSetPublisher.PACKAGE_SOURCE,packageId,configuredPackageRoot,packageSnapshot);
+        Path configuredCentralRoot=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toAbsolutePath().normalize().toRealPath();
+        String configRevision=immutableSourceRevisionId(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                ChangeSetPublisher.CENTRAL_SCOPE_ID,configuredCentralRoot,configurationSnapshot.sourceRoot);
+        RevisionIdentity business=RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE,packageId,packageRevision);
+        RevisionIdentity configSource=RevisionIdentity.of(RevisionKind.CONFIG_SOURCE,ChangeSetPublisher.CENTRAL_SCOPE_ID,configRevision);
+        jobSourceClosures.registerSnapshot(business,ChangeSetPublisher.PACKAGE_SOURCE,packageSnapshot);
+        jobSourceClosures.registerSnapshot(configSource,ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,configurationSnapshot.sourceRoot);
+
+        String environment=String.valueOf(configuration.get("environment"));
+        String manifestDigest=requiredDigest(configuration.get("manifestDigest"),"Package Manifest revision");
+        String effectiveDigest=requiredDigest(configuration.get("configurationIdentity"),"Effective Config revision");
+        String schemaDigest=requiredDigest(configuration.get("schemaRegistryDigest"),"Engine schema revision");
+        RevisionIdentity registration=RevisionIdentity.of(RevisionKind.PACKAGE_REGISTRATION,packageId,registry.revision);
+        RevisionIdentity manifest=RevisionIdentity.of(RevisionKind.PACKAGE_MANIFEST,packageId,manifestDigest);
+        RevisionIdentity effective=RevisionIdentity.of(RevisionKind.EFFECTIVE_CONFIG,packageId+"@"+environment,effectiveDigest);
+        RevisionIdentity environmentRevision=new RevisionIdentity(RevisionKind.ENVIRONMENT,environment,packageId,effectiveDigest);
+        RevisionIdentity schema=RevisionIdentity.of(RevisionKind.ENGINE_SCHEMA,"embedded-engine-schema",schemaDigest);
+        RevisionIdentity scheduleSnapshot=schedule==null?null:new RevisionIdentity(RevisionKind.SCHEDULE_SNAPSHOT,
+                schedule.id,"snapshot",Long.toString(Math.max(1L,schedule.snapshotVersion)));
+        RevisionSet revisions=new RevisionSet(registration,business,null,manifest,configSource,effective,
+                environmentRevision,schema,scheduleSnapshot);
+        return jobSourceClosures.provenance(revisions,validationFingerprint);
+    }
+
+    private JobSourceClosureStore.SourceProvenance jobSourceProvenance(String packageId,PackageRegistry.Snapshot registry,
+            Path packageSnapshot,PinnedExecutionConfiguration configurationSnapshot,Map<String,Object> configuration,
+            String validationFingerprint,String scheduleOccurrenceId) throws Exception {
+        LoadSchedule schedule=null;
+        if(scheduleOccurrenceId!=null) {
+            Map<String,Object> occurrence=store.scheduleExecution(scheduleOccurrenceId);
+            schedule=occurrence==null?null:store.schedule(String.valueOf(occurrence.get("scheduleId")));
+        }
+        return buildSourceProvenance(packageId,registry,packageSnapshot,configurationSnapshot,configuration,validationFingerprint,schedule);
+    }
+
+    private att.server.api.source.SourceManagementContracts.SourceLease captureScheduleSource(LoadSchedule schedule) throws Exception {
+        if(schedule.id==null||schedule.expectedRevisionDigest==null||!schedule.expectedRevisionDigest.matches("[a-f0-9]{64}"))
+            throw new JobConflictException("ATT-SOURCE-REVISION-STALE","A Schedule needs a validated immutable source revision.");
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+        Path packageSnapshot=pinPackageRoot(registry,schedule.packageId);
+        if(packageSnapshot==null)throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Package revision is unavailable.");
+        validatePackageRoot(packageSnapshot);
+        PinnedExecutionConfiguration selected=resolvePinnedExecutionConfiguration(schedule.packageId,packageSnapshot,
+                schedule.environment,schedule.configuration);
+        verifyPackageRevision(schedule.packageId,schedule.environment,schedule.expectedRevisionDigest);
+        Map<String,Object> configuration=configurationRevision(selected.evidence,schedule.expectedRevisionDigest);
+        JobSourceClosureStore.SourceProvenance provenance=buildSourceProvenance(schedule.packageId,registry,packageSnapshot,
+                selected,configuration,schedule.expectedRevisionDigest,schedule);
+        String owner=scheduleSourceOwner(schedule.id,schedule.snapshotVersion);
+        var lease=jobSourceClosures.acquire(new att.server.api.source.SourceManagementContracts.SourceLeaseRequest(
+                schedule.packageId,schedule.environment,provenance.revisions,Collections.emptyList(),owner));
+        try {
+            jobSourceClosures.bindWorkerConfiguration(lease.leaseId(),selected.workerConfigPath);
+            schedule.sourceLeaseId=lease.leaseId();schedule.sourceProvenance=provenance.view();
+            schedule.configuration=configuration;schedule.packageRootIdentity=packageRootIdentity(registry.packages.get(schedule.packageId));
+            schedule.sourceStatus=null;schedule.currentSourceRevision=null;schedule.configurationStatus=null;
+            return lease;
+        } catch(Exception failure) {lease.close();throw failure;}
+    }
+
+    private static String scheduleSourceOwner(String scheduleId,long snapshotVersion) {
+        return JobSourceClosureStore.SCHEDULE_OWNER_PREFIX+scheduleId+":"+snapshotVersion;
+    }
+
+    private void releaseScheduleSource(LoadSchedule schedule) {
+        if(schedule==null||schedule.id==null)return;
+        try {jobSourceClosures.releaseOwner(scheduleSourceOwner(schedule.id,schedule.snapshotVersion));}
+        catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to release retired Schedule source ownership");}
     }
     private static Map<String,Object> retainedConfiguration(Map<String,Object> preview) {
         return att.server.api.ConfigurationSnapshot.copy((Map<?,?>)preview.get("configuration"));
@@ -3862,6 +4181,8 @@ final class ServerRuntime implements AutoCloseable {
         view.put("revisionPolicy",schedule.expectedRevisionDigest!=null?effectivePackageChangePolicy(schedule):"validate-current-package");
         view.put("effectivePackageChangePolicy",effectivePackageChangePolicy(schedule));view.put("serverPackageChangePolicy",config.scheduling.packageChangePolicy);
         view.put("storedRevisionDigest",schedule.expectedRevisionDigest);view.remove("packageRootIdentity");
+        view.remove("sourceLeaseId");
+        if(schedule.sourceProvenance!=null)view.put("sourceSnapshotAvailable",jobSourceClosures.hasOwner(scheduleSourceOwner(schedule.id,schedule.snapshotVersion)));
         view.remove("inlineScenario");view.remove("inlineDebugInput");view.remove("debugResourceId");view.remove("expectedRevisionDigest");view.remove("catalogSnapshot");
         view.put("jobType",schedule.effectiveJobType());
         view.put("targetIdentity",schedule.inlineScenario==null?(schedule.listSummary==null?Map.of():schedule.listSummary):JobListIdentity.load(JSON.valueToTree(schedule.inlineScenario)));
@@ -3890,38 +4211,46 @@ final class ServerRuntime implements AutoCloseable {
     }
     List<Map<String,Object>> loadScheduleExecutions(String id,int limit) throws Exception {requireSchedulingEnabled();if(store.schedule(id)==null&&store.scheduleExecutions(id,1).isEmpty())throw new NotFoundException();return store.scheduleExecutions(id,limit);}
     LoadSchedule createLoadSchedule(JsonNode input,String principal) throws Exception {
-        requireSchedulingEnabled();
-        requireLocalOperator(principal);
-        String submittedDraftId=optionalText(input,"draftId");
-        if(submittedDraftId!=null)requireCurrentRegistryBinding(submittedDraftId);
-        AdvancedLoadDraftState savedDraft=null;
-        if(input.hasNonNull("draftId")) synchronized(draftLock) {
-            expireDrafts();AdvancedLoadDraftState candidate=advancedLoadDrafts.get(input.path("draftId").asText());
-            if(candidate!=null&&candidate.principal.equals(principal)&&candidate.savedScenarioId!=null)savedDraft=candidate;
-        }
-        LoadSchedule schedule=buildLoadSchedule(input,null,principal);schedule.id="S"+UUID.randomUUID().toString().replace("-","").toUpperCase();schedule.createdBy=principal;schedule.executionPrincipal=principal;schedule.createdAt=clock.instant().toString();
-        if(input.hasNonNull("draftId"))for(ReplayReview review:replayReviews.values())if(review.draftId.equals(input.path("draftId").asText())&&review.principal.equals(principal)) {
-            ownedExecutionSpec(review.source,principal);
-            if(!review.expiresAt.isAfter(clock.instant()))throw new NotFoundException();
-            requireCurrentRegistryBinding(review.draftId);
-            schedule.sourceJobId=review.source;
-            JobExecutionSpec spec=JobExecutionSpec.parse(store.executionSpec(review.source).get("spec"));
-            verifyPackageRevision(schedule.packageId,schedule.environment,spec.revision());
-            schedule.expectedRevisionDigest=spec.revision();
-        }
-        admissionLifecycle.readLock().lock();
+        sourcePublicationBarrier.readLock().lock();
+        att.server.api.source.SourceManagementContracts.SourceLease sourceLease=null;boolean persisted=false;
         try {
+            requireSchedulingEnabled();requireLocalOperator(principal);
+            String submittedDraftId=optionalText(input,"draftId");
             if(submittedDraftId!=null)requireCurrentRegistryBinding(submittedDraftId);
-            if(savedDraft==null)store.createSchedule(schedule,config.scheduling.maxSchedules);
-            else synchronized(draftLock) {
-                requireLiveDraft(savedDraft.expiresAt);
-                requireCurrentRegistryBinding(savedDraft.id);
-                if(advancedLoadDrafts.get(savedDraft.id)!=savedDraft)throw new StaleDraftException();
-                schedule.savedScenarioId=savedDraft.savedScenarioId;schedule.savedScenarioRevision=savedDraft.savedScenarioRevision;
-                store.createScheduleFromSaved(schedule,savedDraft.savedScenarioOwner,savedDraft.savedScenarioRevision,config.scheduling.maxSchedules);
+            AdvancedLoadDraftState savedDraft=null;
+            if(input.hasNonNull("draftId")) synchronized(draftLock) {
+                expireDrafts();AdvancedLoadDraftState candidate=advancedLoadDrafts.get(input.path("draftId").asText());
+                if(candidate!=null&&candidate.principal.equals(principal)&&candidate.savedScenarioId!=null)savedDraft=candidate;
             }
-        } finally {admissionLifecycle.readLock().unlock();}
-        store.audit(principal,"SCHEDULE_CREATE",null,schedule.packageId,"CREATED");return schedule;
+            LoadSchedule schedule=buildLoadSchedule(input,null,principal);schedule.id="S"+UUID.randomUUID().toString().replace("-","").toUpperCase();schedule.createdBy=principal;schedule.executionPrincipal=principal;schedule.createdAt=clock.instant().toString();
+            if(input.hasNonNull("draftId"))for(ReplayReview review:replayReviews.values())if(review.draftId.equals(input.path("draftId").asText())&&review.principal.equals(principal)) {
+                ownedExecutionSpec(review.source,principal);
+                if(!review.expiresAt.isAfter(clock.instant()))throw new NotFoundException();
+                requireCurrentRegistryBinding(review.draftId);
+                schedule.sourceJobId=review.source;
+                JobExecutionSpec spec=JobExecutionSpec.parse(store.executionSpec(review.source).get("spec"));
+                verifyPackageRevision(schedule.packageId,schedule.environment,spec.revision());
+                schedule.expectedRevisionDigest=spec.revision();
+            }
+            sourceLease=captureScheduleSource(schedule);
+            admissionLifecycle.readLock().lock();
+            try {
+                if(submittedDraftId!=null)requireCurrentRegistryBinding(submittedDraftId);
+                if(savedDraft==null)store.createSchedule(schedule,config.scheduling.maxSchedules);
+                else synchronized(draftLock) {
+                    requireLiveDraft(savedDraft.expiresAt);
+                    requireCurrentRegistryBinding(savedDraft.id);
+                    if(advancedLoadDrafts.get(savedDraft.id)!=savedDraft)throw new StaleDraftException();
+                    schedule.savedScenarioId=savedDraft.savedScenarioId;schedule.savedScenarioRevision=savedDraft.savedScenarioRevision;
+                    store.createScheduleFromSaved(schedule,savedDraft.savedScenarioOwner,savedDraft.savedScenarioRevision,config.scheduling.maxSchedules);
+                }
+                persisted=true;
+            } finally {admissionLifecycle.readLock().unlock();}
+            store.audit(principal,"SCHEDULE_CREATE",null,schedule.packageId,"CREATED");return schedule;
+        } catch(Exception failure) {
+            if(sourceLease!=null&&!persisted)sourceLease.close();
+            throw failure;
+        } finally {sourcePublicationBarrier.readLock().unlock();}
     }
     Map<String,Object> previewLoadSchedule(JsonNode input) {
         if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
@@ -4072,6 +4401,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     private LoadSchedule replaceScheduleExecutionReviewed(String id,String principal,String draftId,long expected) throws Exception {
         admissionLifecycle.readLock().lock();
+        sourcePublicationBarrier.readLock().lock();
         try {
           requireCurrentRegistryBinding(draftId);
           synchronized(draftLock) {
@@ -4091,7 +4421,10 @@ final class ServerRuntime implements AutoCloseable {
                 history.add(Map.of("previousVersion",prior.snapshotVersion,"version",replacement.snapshotVersion,"actor",principal,"at",replacement.updatedAt,"revisionDigest",review.revision(),"changeSummary","Package scenario settings replaced"));
                 if(history.size()>20)history=new ArrayList<>(history.subList(history.size()-20,history.size()));replacement.snapshotHistory=history;
                 requireLiveDraft(review.expiresAt());verifyPackageRevision(review.packageId(),replacement.environment,review.revision());
-                LoadSchedule saved=store.updateScheduleAuthorized(replacement,prior.updatedAt,"local".equals(config.authMode)?principal:null);if(saved==null)throw new NotFoundException();
+                var sourceLease=captureScheduleSource(replacement);LoadSchedule saved;
+                try {saved=store.updateScheduleAuthorized(replacement,prior.updatedAt,"local".equals(config.authMode)?principal:null);if(saved==null)throw new NotFoundException();}
+                catch(Exception failure){sourceLease.close();throw failure;}
+                releaseScheduleSource(prior);
                 scheduleExecutionReviews.remove(draftId);store.audit(principal,"SCHEDULE_EXECUTION_REPLACE",null,saved.packageId,"version="+prior.snapshotVersion+"->"+saved.snapshotVersion);return saved;
             }
             String executionDraftId=review.draftId();
@@ -4112,31 +4445,61 @@ final class ServerRuntime implements AutoCloseable {
             history.add(Map.of("previousVersion",prior.snapshotVersion,"version",replacement.snapshotVersion,"actor",principal,"at",replacement.updatedAt,"revisionDigest",review.revision(),"changeSummary",review.executionType().toUpperCase(java.util.Locale.ROOT)+" execution snapshot replaced"));
             if(history.size()>20)history=new ArrayList<>(history.subList(history.size()-20,history.size()));replacement.snapshotHistory=history;
             requireLiveDraft(review.expiresAt());verifyPackageRevision(review.packageId(),replacement.environment,review.revision());
-            LoadSchedule saved=store.updateScheduleAuthorized(replacement,prior.updatedAt,"local".equals(config.authMode)?principal:null);if(saved==null)throw new NotFoundException();
+            var sourceLease=captureScheduleSource(replacement);LoadSchedule saved;
+            try {saved=store.updateScheduleAuthorized(replacement,prior.updatedAt,"local".equals(config.authMode)?principal:null);if(saved==null)throw new NotFoundException();}
+            catch(Exception failure){sourceLease.close();throw failure;}
+            releaseScheduleSource(prior);
             scheduleExecutionReviews.remove(draftId);store.audit(principal,"SCHEDULE_EXECUTION_REPLACE",null,saved.packageId,"version="+prior.snapshotVersion+"->"+saved.snapshotVersion);return saved;
           }
-        } finally {admissionLifecycle.readLock().unlock();}
+        } finally {sourcePublicationBarrier.readLock().unlock();admissionLifecycle.readLock().unlock();}
     }
 
     LoadSchedule updateLoadSchedule(String id,JsonNode input,String principal) throws Exception {
-        requireLocalOperator(principal);
-        requireSchedulingEnabled();LoadSchedule prior=store.schedule(id);if(prior==null)throw new NotFoundException();
-        LoadSchedule schedule=buildLoadSchedule(input,prior,principal);schedule.id=id;schedule.createdBy=prior.createdBy;schedule.createdAt=prior.createdAt;
-        schedule.updatedBy=principal;schedule.updatedAt=clock.instant().toString();
-        if("load".equals(prior.effectiveJobType())&&prior.inlineScenario==null&&
-                (!java.util.Objects.equals(prior.scenario,schedule.scenario)||!java.util.Objects.equals(prior.load,schedule.load)
-                 ||!java.util.Objects.equals(prior.packageId,schedule.packageId)||!java.util.Objects.equals(prior.environment,schedule.environment))) {
-            schedule.snapshotVersion=prior.snapshotVersion+1;
-            List<Map<String,Object>> history=new ArrayList<>(prior.snapshotHistory==null?List.of():prior.snapshotHistory);
-            Map<String,Object> event=new LinkedHashMap<>();event.put("previousVersion",prior.snapshotVersion);event.put("version",schedule.snapshotVersion);event.put("actor",principal);event.put("at",schedule.updatedAt);event.put("changeSummary","Package scenario settings replaced");
-            if(schedule.expectedRevisionDigest!=null)event.put("revisionDigest",schedule.expectedRevisionDigest);history.add(event);
-            if(history.size()>20)history=new ArrayList<>(history.subList(history.size()-20,history.size()));schedule.snapshotHistory=history;
+        sourcePublicationBarrier.readLock().lock();
+        att.server.api.source.SourceManagementContracts.SourceLease sourceLease=null;boolean persisted=false;
+        try {
+            requireLocalOperator(principal);requireSchedulingEnabled();LoadSchedule prior=store.schedule(id);if(prior==null)throw new NotFoundException();
+            LoadSchedule schedule=buildLoadSchedule(input,prior,principal);schedule.id=id;schedule.createdBy=prior.createdBy;schedule.createdAt=prior.createdAt;
+            schedule.updatedBy=principal;schedule.updatedAt=clock.instant().toString();
+            if(!sameScheduleExecutionSnapshot(prior,schedule))schedule.snapshotVersion=prior.snapshotVersion+1;
+            if(schedule.snapshotVersion!=prior.snapshotVersion||prior.sourceProvenance==null) {
+                if(schedule.snapshotVersion==prior.snapshotVersion)schedule.snapshotVersion++;
+                List<Map<String,Object>> history=new ArrayList<>(prior.snapshotHistory==null?List.of():prior.snapshotHistory);
+                Map<String,Object> event=new LinkedHashMap<>();event.put("previousVersion",prior.snapshotVersion);event.put("version",schedule.snapshotVersion);event.put("actor",principal);event.put("at",schedule.updatedAt);event.put("changeSummary","Immutable execution source snapshot refreshed");
+                if(schedule.expectedRevisionDigest!=null)event.put("revisionDigest",schedule.expectedRevisionDigest);history.add(event);
+                if(history.size()>20)history=new ArrayList<>(history.subList(history.size()-20,history.size()));schedule.snapshotHistory=history;
+                sourceLease=captureScheduleSource(schedule);
+            }
+            if(!prior.enabled&&schedule.enabled||!java.util.Objects.equals(prior.cron,schedule.cron)||!LoadSchedule.sameInstant(prior.runAt,schedule.runAt)||!prior.timezone.equals(schedule.timezone))
+                schedule.nextRunAt=schedule.runAt==null?nextRun(schedule.cron,schedule.timezone,clock.instant()).toString():futureRunAt(schedule.runAt);
+            else schedule.nextRunAt=prior.nextRunAt;
+            LoadSchedule updated=store.updateSchedule(schedule,prior.updatedAt);if(updated==null)throw new NotFoundException();persisted=true;
+            if(sourceLease!=null)releaseScheduleSource(prior);
+            store.audit(principal,"SCHEDULE_UPDATE",null,schedule.packageId,"UPDATED");return updated;
+        } catch(Exception failure) {
+            if(sourceLease!=null&&!persisted)sourceLease.close();
+            throw failure;
+        } finally {sourcePublicationBarrier.readLock().unlock();}
+    }
+
+    private boolean sameScheduleExecutionSnapshot(LoadSchedule left,LoadSchedule right) {
+        if(!java.util.Objects.equals(left.packageId,right.packageId)
+                ||!java.util.Objects.equals(left.environment,right.environment)
+                ||!java.util.Objects.equals(left.expectedRevisionDigest,right.expectedRevisionDigest)
+                ||!java.util.Objects.equals(left.debugTargetType,right.debugTargetType)
+                ||!java.util.Objects.equals(left.debugTargetId,right.debugTargetId)
+                ||!java.util.Objects.equals(left.debugResourceId,right.debugResourceId))return false;
+        for(String field:List.of("configurationIdentity","manifestDigest","globalDigest")) {
+            Object a=left.configuration==null?null:left.configuration.get(field),b=right.configuration==null?null:right.configuration.get(field);
+            if(!java.util.Objects.equals(a,b))return false;
         }
-        if(!prior.enabled&&schedule.enabled||!java.util.Objects.equals(prior.cron,schedule.cron)||!LoadSchedule.sameInstant(prior.runAt,schedule.runAt)||!prior.timezone.equals(schedule.timezone))
-            schedule.nextRunAt=schedule.runAt==null?nextRun(schedule.cron,schedule.timezone,clock.instant()).toString():futureRunAt(schedule.runAt);
-        else schedule.nextRunAt=prior.nextRunAt;
-        LoadSchedule updated=store.updateSchedule(schedule,prior.updatedAt);if(updated==null)throw new NotFoundException();
-        store.audit(principal,"SCHEDULE_UPDATE",null,schedule.packageId,"UPDATED");return updated;
+        return jsonEqual(left.runInput,right.runInput)&&jsonEqual(left.inlineScenario,right.inlineScenario)
+                &&jsonEqual(left.inlineDebugInput,right.inlineDebugInput)&&jsonEqual(left.load,right.load)
+                &&java.util.Objects.equals(left.scenario,right.scenario);
+    }
+
+    private static boolean jsonEqual(Object left,Object right) {
+        return java.util.Objects.equals(left==null?null:JSON.valueToTree(left),right==null?null:JSON.valueToTree(right));
     }
     LoadSchedule setLoadScheduleEnabled(String id,boolean enabled,String principal) throws Exception {
         requireLocalOperator(principal);
@@ -4153,7 +4516,7 @@ final class ServerRuntime implements AutoCloseable {
         store.audit(principal,enabled?"SCHEDULE_RESUME":"SCHEDULE_PAUSE",null,schedule.packageId,enabled?"ENABLED":"PAUSED");
         return schedule;
     }
-    void deleteLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();requireLocalOperator(principal);LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();store.deleteSchedule(id);store.audit(principal,"SCHEDULE_DELETE",null,schedule.packageId,"DELETED");}
+    void deleteLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();requireLocalOperator(principal);LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();store.deleteSchedule(id);releaseScheduleSource(schedule);store.audit(principal,"SCHEDULE_DELETE",null,schedule.packageId,"DELETED");}
     Map<String,Object> triggerLoadSchedule(String id,String principal) throws Exception {
         requireSchedulingEnabled();requireLocalOperator(principal);
         LoadSchedule schedule=store.authorizeManualScheduleExecution(id,principal,"local".equals(config.authMode),clock.instant().toString());
@@ -4175,14 +4538,71 @@ final class ServerRuntime implements AutoCloseable {
                 ?(schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()?schedule.createdBy:schedule.executionPrincipal)
                 :executionPrincipal;
         JobProvenance provenance=new JobProvenance(schedule.id,schedule.createdBy,actualExecutionPrincipal,triggeredBy,triggeredBy);
+        LoadSchedule approved=schedule.copy();
         schedule=prepareScheduledExecution(schedule,executionPrincipal);
-        Map<String,Object> accepted="run".equals(schedule.effectiveJobType())
-                ?submitScheduledRun(schedule,occurrenceId,actualExecutionPrincipal,provenance)
-                :"debug".equals(schedule.effectiveJobType())
-                ? submitScheduledDebug(schedule,occurrenceId,actualExecutionPrincipal,provenance)
-                : submitScheduledLoad(schedule,occurrenceId,actualExecutionPrincipal,provenance);
-        store.audit(executionPrincipal,"SCHEDULE_EXECUTE",String.valueOf(accepted.get("jobId")),schedule.packageId,"ACCEPTED");
-        return accepted;
+        ScheduleSourceOverride sourceOverride=null;
+        if(!java.util.Objects.equals(approved.expectedRevisionDigest,schedule.expectedRevisionDigest)) {
+            sourceOverride=captureRevalidatedScheduleSource(approved,schedule,occurrenceId);
+            if(scheduledSourceOverrides.putIfAbsent(occurrenceId,sourceOverride)!=null) {
+                jobSourceClosures.releaseOwner(sourceOverride.owner);
+                throw new ScheduleConflictException();
+            }
+        }
+        try {
+            Map<String,Object> accepted="run".equals(schedule.effectiveJobType())
+                    ?submitScheduledRun(schedule,occurrenceId,actualExecutionPrincipal,provenance)
+                    :"debug".equals(schedule.effectiveJobType())
+                    ? submitScheduledDebug(schedule,occurrenceId,actualExecutionPrincipal,provenance)
+                    : submitScheduledLoad(schedule,occurrenceId,actualExecutionPrincipal,provenance);
+            store.audit(executionPrincipal,"SCHEDULE_EXECUTE",String.valueOf(accepted.get("jobId")),schedule.packageId,"ACCEPTED");
+            return accepted;
+        } finally {
+            if(sourceOverride!=null) {
+                scheduledSourceOverrides.remove(occurrenceId,sourceOverride);
+                jobSourceClosures.releaseOwner(sourceOverride.owner);
+            }
+        }
+    }
+
+    private ScheduleSourceOverride captureRevalidatedScheduleSource(LoadSchedule approved,LoadSchedule execution,
+                                                                    String occurrenceId) throws Exception {
+        if(occurrenceId==null||occurrenceId.isBlank()||approved.configuration==null||approved.sourceProvenance==null)
+            throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Schedule source snapshot is unavailable. Review and replace the Schedule snapshot.");
+        sourcePublicationBarrier.readLock().lock();
+        try {
+        String approvedOwner=scheduleSourceOwner(approved.id,approved.snapshotVersion);
+        JobSourceClosureStore.SourceSnapshot approvedSnapshot=jobSourceClosures.snapshotForOwner(approvedOwner);
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+        Path packageSnapshot=pinPackageRoot(registry,execution.packageId);
+        if(packageSnapshot==null)throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Package revision is unavailable.");
+        WorkerRequest request=inspectionRequest(execution.packageId,packageSnapshot,execution.environment,approvedSnapshot.workerConfigPath);
+        request.inspectionAction="revision";
+        String current=String.valueOf(executeInspection(packageSnapshot,request).get("revisionDigest"));
+        if(!execution.expectedRevisionDigest.equals(current))
+            throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The Package changed again while the Schedule was being revalidated.");
+        PinnedExecutionConfiguration configSnapshot=new PinnedExecutionConfiguration(approved.configuration,
+                approvedSnapshot.workerConfigPath,approvedSnapshot.configRoot);
+        Map<String,Object> configuration=rebindScheduleConfiguration(approved,packageSnapshot,configSnapshot,
+                execution.expectedRevisionDigest);
+        PinnedExecutionConfiguration selected=new PinnedExecutionConfiguration(configuration,
+                approvedSnapshot.workerConfigPath,approvedSnapshot.configRoot);
+        JobSourceClosureStore.SourceProvenance provenance=buildSourceProvenance(execution.packageId,registry,packageSnapshot,
+                selected,configuration,execution.expectedRevisionDigest,execution);
+        String owner=JobSourceClosureStore.SCHEDULE_OWNER_PREFIX+"execution:"+occurrenceId;
+        var lease=jobSourceClosures.acquire(new att.server.api.source.SourceManagementContracts.SourceLeaseRequest(
+                execution.packageId,execution.environment,provenance.revisions,Collections.emptyList(),owner));
+        try {
+            jobSourceClosures.bindWorkerConfiguration(lease.leaseId(),approvedSnapshot.workerConfigPath);
+            LoadSchedule source=execution.copy();
+            source.configuration=configuration;
+            source.sourceLeaseId=lease.leaseId();source.sourceProvenance=provenance.view();
+            execution.configuration=configuration;execution.sourceLeaseId=lease.leaseId();execution.sourceProvenance=provenance.view();
+            return new ScheduleSourceOverride(owner,source,jobSourceClosures.snapshotForOwner(owner));
+        } catch(Exception failure) {
+            lease.close();
+            throw failure;
+        }
+        } finally {sourcePublicationBarrier.readLock().unlock();}
     }
 
     private Map<String,Object> submitScheduledRun(LoadSchedule schedule,String occurrenceId,String executionPrincipal,JobProvenance provenance) throws Exception {
@@ -4191,8 +4611,8 @@ final class ServerRuntime implements AutoCloseable {
         if(retained!=null)retained.withScheduleSnapshot(schedule.id,schedule.snapshotVersion);
         return submit("run",input,executionPrincipal,true,occurrenceId,true,null,null,retained,false,provenance);
     }
-    private void validateScheduledRun(LoadSchedule schedule) throws Exception {
-        Path root=packageRoot(schedule.packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+    private void validateScheduledRun(LoadSchedule schedule,Path root) throws Exception {
+        if(root==null)throw new NotFoundException();validatePackageRoot(root);
         if(schedule.runInput==null||schedule.expectedRevisionDigest==null)throw new IllegalArgumentException("Scheduled RUN snapshot is incomplete");
         if(schedule.inlineDebugInput!=null){validateScheduledDebugInput(root,schedule);return;}
         WorkerRequest request=JSON.convertValue(schedule.runInput,WorkerRequest.class);
@@ -4207,7 +4627,9 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private String effectivePackageChangePolicy(LoadSchedule schedule){return schedule.packageChangePolicy==null?config.scheduling.packageChangePolicy:schedule.packageChangePolicy;}
-    private static String packageRootIdentity(Path root) throws Exception {
+    private static String packageRootIdentity(Path configuredRoot) throws Exception {
+        if(configuredRoot==null)throw new IllegalArgumentException("Package registration is unavailable");
+        Path root=configuredRoot.toRealPath();
         return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(root.toRealPath().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     }
     private void requireScheduleRevision(LoadSchedule schedule,String revision) {
@@ -4229,7 +4651,9 @@ final class ServerRuntime implements AutoCloseable {
         Path root=packageRoot(original.packageId);
         if(root==null||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Configured schedule package is no longer available");
         validatePackageRoot(root);
-        if(original.packageRootIdentity!=null&&!original.packageRootIdentity.equals(packageRootIdentity(root)))throw new IllegalArgumentException("Schedule package registration changed; review a replacement schedule");
+        Path configuredPackageRoot=packageRegistry.snapshot().packages.get(original.packageId);
+        if(original.packageRootIdentity!=null&&(configuredPackageRoot==null||!original.packageRootIdentity.equals(packageRootIdentity(configuredPackageRoot))))
+            throw new IllegalArgumentException("Schedule package registration changed; review a replacement schedule");
         LoadSchedule execution=original.copy();
         if(original.expectedRevisionDigest!=null) {
             WorkerRequest request=inspectionRequest(original.packageId,root,original.environment);
@@ -4238,17 +4662,35 @@ final class ServerRuntime implements AutoCloseable {
             if(!current.matches("[a-f0-9]{64}"))throw new IllegalStateException("Schedule revision validation did not return a revision");
             if(!current.equals(original.expectedRevisionDigest)) {
                 String policy=effectivePackageChangePolicy(original);
-                if(!"ignore".equals(policy))throw new ScheduleSourceChangedException(original.expectedRevisionDigest,current,policy);
+                if(!"ignore".equals(policy)) {
+                    // A restored tree can have a new immutable storage path. Validate the approved
+                    // snapshot itself so path-derived config identity does not make restored bytes stale.
+                    if(original.sourceProvenance!=null)try {
+                        JobSourceClosureStore.SourceSnapshot approved=jobSourceClosures.snapshotForOwner(
+                                scheduleSourceOwner(original.id,original.snapshotVersion));
+                        String approvedTree=SourceRevisionStore.treeDigest(approved.packageRoot),currentTree=SourceRevisionStore.treeDigest(root);
+                        if(approvedTree.equals(currentTree)) {
+                            root=approved.packageRoot;
+                            request=inspectionRequest(original.packageId,root,original.environment,approved.workerConfigPath);
+                            request.inspectionAction="revision";
+                            current=String.valueOf(executeInspection(root,request).get("revisionDigest"));
+                        }
+                    } catch(Exception unavailable) { /* The normal stale-schedule result below is fail-closed. */ }
+                    if(!original.expectedRevisionDigest.equals(current))
+                        throw new ScheduleSourceChangedException(original.expectedRevisionDigest,current,policy);
+                }
                 // Legacy records lack the registration identity needed to safely opt into a different source.
-                if(original.packageRootIdentity==null)throw new IllegalArgumentException("This legacy schedule requires a reviewed replacement before revalidating a changed package");
-                execution.expectedRevisionDigest=current;
-                if(execution.runInput!=null)execution.runInput.put("expectedRevisionDigest",current);
-                ValidatedScheduledScenario validated=validateScheduleInputs(root,execution);
-                if(validated!=null){execution.inlineScenario=deepMap(validated.scenario);execution.expectedRevisionDigest=validated.revisionDigest;execution.validatedSensitiveSource=validated.containsSensitiveValues;}
-                store.recordScheduleSourceChange(original,current,false,clock.instant().toString());
-                store.audit(principal,"SCHEDULE_SOURCE_REVALIDATED",null,original.packageId,"schedule="+original.id+";stored="+original.expectedRevisionDigest+";current="+current+";policy="+policy+";source="+(original.packageChangePolicy==null?"server":"schedule"));
-                refreshScheduleConfiguration(execution,original,root);
-                return execution;
+                if("ignore".equals(policy)) {
+                    if(original.packageRootIdentity==null)throw new IllegalArgumentException("This legacy schedule requires a reviewed replacement before revalidating a changed package");
+                    execution.expectedRevisionDigest=current;
+                    if(execution.runInput!=null)execution.runInput.put("expectedRevisionDigest",current);
+                    ValidatedScheduledScenario validated=validateScheduleInputs(root,execution);
+                    if(validated!=null){execution.inlineScenario=deepMap(validated.scenario);execution.expectedRevisionDigest=validated.revisionDigest;execution.validatedSensitiveSource=validated.containsSensitiveValues;}
+                    store.recordScheduleSourceChange(original,current,false,clock.instant().toString());
+                    store.audit(principal,"SCHEDULE_SOURCE_REVALIDATED",null,original.packageId,"schedule="+original.id+";stored="+original.expectedRevisionDigest+";current="+current+";policy="+policy+";source="+(original.packageChangePolicy==null?"server":"schedule"));
+                    if(execution.configuration==null)refreshScheduleConfiguration(execution,original,root);
+                    return execution;
+                }
             }
         }
         ValidatedScheduledScenario validated=validateScheduleInputs(root,execution);
@@ -4263,8 +4705,26 @@ final class ServerRuntime implements AutoCloseable {
         if(approved.configuration!=null){current.put("approvedConfigurationIdentity",approved.configuration.get("configurationIdentity"));current.put("environmentOrigin",approved.configuration.get("environmentOrigin"));Map<String,Object> origins=new LinkedHashMap<>((Map<String,Object>)current.get("origins"));origins.put("environment",approved.configuration.get("environmentOrigin"));current.put("origins",origins);Map<String,Object> paths=new LinkedHashMap<>((Map<String,Object>)current.get("authoredPaths"));paths.put("environment",((Map<?,?>)approved.configuration.get("authoredPaths")).get("environment"));current.put("authoredPaths",paths);}
         execution.configuration=configurationRevision(current,execution.expectedRevisionDigest);
     }
+    private Map<String,Object> rebindScheduleConfiguration(LoadSchedule approved,Path packageRoot,
+                                                            PinnedExecutionConfiguration sourceConfig,
+                                                            String packageRevision) throws Exception {
+        Map<String,Object> accepted=approved.configuration;
+        String origin=String.valueOf(accepted.get("environmentOrigin"));
+        String selection=("global".equals(origin)||"package".equals(origin))?null:approved.environment;
+        Map<String,Object> current=new LinkedHashMap<>(resolveExecutionConfiguration(approved.packageId,packageRoot,
+                selection,sourceConfig.workerConfigPath));
+        if(!java.util.Objects.equals(current.get("environment"),accepted.get("environment")))
+            throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Schedule Environment is no longer available in the selected Package and Config snapshots.");
+        current.put("approvedConfigurationIdentity",accepted.get("configurationIdentity"));
+        current.put("environmentOrigin",accepted.get("environmentOrigin"));
+        Map<String,Object> origins=new LinkedHashMap<>((Map<String,Object>)current.get("origins"));
+        origins.put("environment",accepted.get("environmentOrigin"));current.put("origins",origins);
+        Map<String,Object> paths=new LinkedHashMap<>((Map<String,Object>)current.get("authoredPaths"));
+        paths.put("environment",((Map<?,?>)accepted.get("authoredPaths")).get("environment"));current.put("authoredPaths",paths);
+        return configurationRevision(current,packageRevision);
+    }
     private ValidatedScheduledScenario validateScheduleInputs(Path root,LoadSchedule schedule) throws Exception {
-        if("run".equals(schedule.effectiveJobType()))validateScheduledRun(schedule);
+        if("run".equals(schedule.effectiveJobType()))validateScheduledRun(schedule,root);
         else if("debug".equals(schedule.effectiveJobType()))validateScheduledDebugInput(root,schedule);
         else return validateScheduleScenario(root,schedule);
         return null;
@@ -4509,7 +4969,7 @@ final class ServerRuntime implements AutoCloseable {
             if(!s.packageId.equals(snapshot.path("packageId").asText())||!java.util.Objects.equals(s.environment,expectedEnvironment)||!sameRuntimeConfig)
                 throw new IllegalArgumentException("A RUN snapshot is immutable; create a new schedule for changed values");
             if(input.has("scenario")||s.load!=null&&!s.load.isEmpty())throw new IllegalArgumentException("RUN schedules cannot use Load fields");
-            if(validateExecution&&prior==null)validateScheduledRun(s);
+            if(validateExecution&&prior==null)validateScheduledRun(s,root);
         } else if("debug".equals(s.effectiveJobType())) {
             if(s.config!=null&&!"config/config.yaml".equals(s.config))throw new IllegalArgumentException("A Debug schedule must use the configuration validated by the Debug draft");
             if(prior!=null&&debugSnapshotInputChanged(prior,s,input))throw new IllegalArgumentException("A Debug snapshot is immutable; create a new schedule for changed values");
@@ -4545,9 +5005,10 @@ final class ServerRuntime implements AutoCloseable {
             if(s.inlineScenario!=null)s.inlineScenario=deepMap(validated.scenario);
         }
         if(s.configuration!=null)s.configuration=configurationRevision(s.configuration,s.expectedRevisionDigest);
-        if(prior==null)s.packageRootIdentity=packageRootIdentity(root);
+        Path registeredPackageRoot=packageRegistry.snapshot().packages.get(s.packageId);
+        if(prior==null)s.packageRootIdentity=packageRootIdentity(registeredPackageRoot);
         else if(validateExecution) {
-            if("load".equals(s.effectiveJobType())&&s.inlineScenario==null&&!java.util.Objects.equals(prior.packageId,s.packageId))s.packageRootIdentity=packageRootIdentity(root);
+            if("load".equals(s.effectiveJobType())&&s.inlineScenario==null&&!java.util.Objects.equals(prior.packageId,s.packageId))s.packageRootIdentity=packageRootIdentity(registeredPackageRoot);
             validateScheduleForActivation(s,principal);
         }
         s.nextRunAt=s.runAt==null?nextRun(s.cron,s.timezone,clock.instant()).toString():s.runAt;
@@ -5544,7 +6005,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!artifactLifecycle.writeLock().tryLock())return;
         try {
             for(String id:store.expiredJobIds(cutoff))if(!jobs.containsKey(id)&&!pendingArtifactJobs.contains(id)&&!store.workerMayBeAlive(id))try{
-                if(store.markDeleting(id,cutoff)){deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);}
+                if(store.markDeleting(id,cutoff)){deleteTree(config.dataDir.resolve("jobs").resolve(id));store.deleteJob(id);jobSourceClosures.releaseOwner(JobSourceClosureStore.JOB_OWNER_PREFIX+id);}
             }catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to remove expired ATT Server job "+id);}
         } finally {artifactLifecycle.writeLock().unlock();}
     }
@@ -5598,6 +6059,7 @@ final class ServerRuntime implements AutoCloseable {
                     if(!store.markDeleting(id, cutoff, bytes<0?null:bytes)) { protectedJobs++; eligible--; continue; }
                     if(bytes<0 || !JobDirectoryUsage.deleteJobDirectory(directory)) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Job "+id+" was marked for storage deletion and will be reconciled"); continue; }
                     store.deleteJobWithAudit(id,"system:job-retention","JOB_STORAGE_EVICT",deletedOutcome(bytes));
+                    jobSourceClosures.releaseOwner(JobSourceClosureStore.JOB_OWNER_PREFIX+id);
                     deleted++; reclaimed=saturatedAdd(reclaimed, Math.max(0L, bytes)); remaining=Math.max(0L, remaining-Math.max(0L, bytes));
                 } finally { artifactLifecycle.writeLock().unlock(); }
             }
@@ -5700,6 +6162,7 @@ final class ServerRuntime implements AutoCloseable {
                 String actor=store.deletionActor(id);
                 if(actor==null)store.deleteJobWithAudit(id,"system:job-retention","JOB_STORAGE_EVICT",deletedOutcome(bytes));
                 else store.deleteJobWithAudit(id,actor,"JOB_DELETE","DELETED_AFTER_RECOVERY");
+                jobSourceClosures.releaseOwner(JobSourceClosureStore.JOB_OWNER_PREFIX+id);
             } catch(Exception failure) {
                 complete=false;
                 java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to reconcile deleting ATT Server job "+id+": "+safeMessage(failure));

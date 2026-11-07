@@ -83,6 +83,78 @@ class ServerRuntimeJobReplayTest {
         }
         fail("Job did not finish: "+id);
     }
+
+    private static void awaitRunning(ServerRuntime runtime,String id) throws Exception {
+        Instant deadline=Instant.now().plusSeconds(30);
+        while(Instant.now().isBefore(deadline)) {
+            String status=String.valueOf(runtime.jobRecord(id).get("status"));
+            if("RUNNING".equals(status))return;
+            if(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(status))fail("Job ended before RUNNING: "+id+" status="+status);
+            Thread.sleep(10);
+        }
+        fail("Job did not start: "+id);
+    }
+
+    @Test void acceptedRunningAndQueuedJobsKeepPackageAndConfigAWhileNewJobUsesB() throws Exception {
+        Fixture fixture=fixture();String runningId,queuedId,newId;Path packageA,configA,packageB,configB;
+        Path runtimeConfig=temp.resolve("unified-runtime/config/config.yaml");
+        Path template=fixture.root.resolve("templates/SIMPLE/template.yaml");
+        String configSourceA=Files.readString(runtimeConfig);
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            JsonNode loadScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6","workloads",List.of(
+                    Map.of("id","hold-a","target",Map.of("type","template","id","SIMPLE"),"load",Map.of("users",1,"duration","8s")))));
+            var loadInput=ServerRuntime.JSON.createObjectNode();loadInput.put("packageId","p");loadInput.put("environment","SIT");loadInput.set("scenario",loadScenario);
+            Map<String,Object> loadDraft=runtime.createAdvancedLoadDraft(loadInput,"alice");
+            runningId=String.valueOf(runtime.submitAdvancedLoadDraft(submit(String.valueOf(loadDraft.get("draftId"))),"alice").get("jobId"));
+            awaitRunning(runtime,runningId);
+            Job running=runtime.jobs.get(runningId);assertNotNull(running);
+            packageA=Path.of(running.request.packageRoot);configA=Path.of(running.request.config);
+
+            var runDefinition=ServerRuntime.JSON.createObjectNode();runDefinition.put("schemaVersion",RunDefinition.VERSION);runDefinition.put("executionType","run");runDefinition.put("packageId","p");runDefinition.put("environment","SIT");
+            runDefinition.putObject("options").put("debug",true);runDefinition.putObject("target").put("type","template").put("id","SIMPLE");runDefinition.putObject("input");
+            Map<String,Object> queuedDraft=runtime.createRunDraft(runDefinition,"alice");
+            queuedId=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(queuedDraft.get("draftId"))),"alice","alice").get("jobId"));
+            Job queued=runtime.jobs.get(queuedId);assertNotNull(queued);
+            assertEquals("QUEUED",queued.status,"The second accepted Job waits behind the running LOAD Worker");
+            assertEquals(packageA,Path.of(queued.request.packageRoot));assertEquals(configA,Path.of(queued.request.config));
+
+            Files.writeString(template,"schemaVersion: att-template/v3.6\nname: SIMPLE\ndescription: Package B assertion fixture\nactions:\n  fail: {type: assert, assert: '#{1 == 2}'}\n");
+            Files.writeString(runtimeConfig,configSourceA+"\n# central Config B\n");
+            Map<String,Object> newDraft=runtime.createRunDraft(runDefinition,"alice");
+            newId=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(newDraft.get("draftId"))),"alice","alice").get("jobId"));
+            Job newJob=runtime.jobs.get(newId);assertNotNull(newJob);
+            packageB=Path.of(newJob.request.packageRoot);configB=Path.of(newJob.request.config);
+            assertNotEquals(packageA,packageB);assertNotEquals(configA,configB);
+            assertTrue(Files.readString(packageA.resolve("templates/SIMPLE/template.yaml")).contains("message: once"));
+            assertEquals(configSourceA,Files.readString(configA));
+            assertTrue(Files.readString(packageB.resolve("templates/SIMPLE/template.yaml")).contains("type: assert"));
+            assertTrue(Files.readString(configB).contains("central Config B"));
+
+            await(runtime,runningId);await(runtime,queuedId);await(runtime,newId);
+            assertEquals("PASS",runtime.jobRecord(runningId).get("status"));
+            assertEquals("PASS",runtime.jobRecord(queuedId).get("status"));
+            assertEquals("FAIL",runtime.jobRecord(newId).get("status"));
+            assertEquals(sourceRevision(runtime,runningId,"businessSource"),sourceRevision(runtime,queuedId,"businessSource"));
+            assertEquals(sourceRevision(runtime,runningId,"configSource"),sourceRevision(runtime,queuedId,"configSource"));
+            assertNotEquals(sourceRevision(runtime,runningId,"businessSource"),sourceRevision(runtime,newId,"businessSource"));
+            assertNotEquals(sourceRevision(runtime,runningId,"configSource"),sourceRevision(runtime,newId,"configSource"));
+        }
+        try(ServerRuntime restarted=fixture.open()) {
+            assertEquals(true,restarted.jobRecord(runningId).get("sourceSnapshotAvailable"));
+            assertEquals(true,restarted.jobRecord(queuedId).get("sourceSnapshotAvailable"));
+            assertNotNull(restarted.jobReplay(runningId,"alice").get("sourceProvenance"));
+            assertNotNull(restarted.jobReplay(queuedId,"alice").get("sourceProvenance"));
+            assertEquals("PASS",restarted.jobRecord(runningId).get("status"));
+        }
+    }
+
+    private static String sourceRevision(ServerRuntime runtime,String jobId,String kind) throws Exception {
+        Map<?,?> provenance=(Map<?,?>)runtime.jobRecord(jobId).get("sourceProvenance");
+        Map<?,?> revisions=(Map<?,?>)provenance.get("revisions");
+        return String.valueOf(((Map<?,?>)revisions.get(kind)).get("revision"));
+    }
+
     @Test void schedulePoliciesPreserveSourceAndAllowStaleMetadataEditsAcrossRestart() throws Exception {
         Fixture fixture=fixture();String strictId,pauseId,ignoreId,stored;
         ServerRuntimeTestSupport.MutableClock clock=new ServerRuntimeTestSupport.MutableClock(Instant.parse("2026-10-22T00:00:00Z"));
@@ -97,6 +169,8 @@ class ServerRuntimeJobReplayTest {
             LoadSchedule pause=runtime.createLoadSchedule(pauseRequest,"alice");pauseId=pause.id;
             var ignoreRequest=((com.fasterxml.jackson.databind.node.ObjectNode)request).deepCopy().put("packageChangePolicy","ignore");
             LoadSchedule ignore=runtime.createLoadSchedule(ignoreRequest,"alice");ignoreId=ignore.id;
+            assertNotNull(strict.sourceProvenance);
+            assertEquals(true,runtime.loadScheduleView(strict,"alice").get("sourceSnapshotAvailable"));
             Path unrelated=fixture.root.resolve("templates/BAD/template.yaml");String originalUnrelated=Files.readString(unrelated);
             Files.writeString(unrelated,originalUnrelated+"# unrelated change\n");
             Map<String,Object> blocked=runtime.triggerLoadSchedule(strictId,"alice");
@@ -110,7 +184,9 @@ class ServerRuntimeJobReplayTest {
             assertFalse(runtime.loadSchedule(pauseId).enabled);assertEquals("package-revision-changed",runtime.loadSchedule(pauseId).autoPauseReason);
             assertThrows(ServerRuntime.ScheduleSourceChangedException.class,()->runtime.setLoadScheduleEnabled(pauseId,true,"alice"));
             Map<String,Object> accepted=runtime.triggerLoadSchedule(ignoreId,"alice");assertEquals("submitted",accepted.get("status"),accepted.toString());
-            await(runtime,String.valueOf(accepted.get("jobId")));
+            String acceptedId=String.valueOf(accepted.get("jobId"));
+            await(runtime,acceptedId);
+            assertEquals("PASS",runtime.jobRecord(acceptedId).get("status"),runtime.resultRecord(acceptedId).toString());
             assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
             assertEquals(ignore.runInput,runtime.loadSchedule(ignoreId).runInput);
             assertEquals(1,runtime.store.auditOutcomes("SCHEDULE_SOURCE_REVALIDATED").size());
@@ -119,6 +195,7 @@ class ServerRuntimeJobReplayTest {
             clock.advance(Duration.ofMinutes(16));
             Map<String,Object> restored=runtime.triggerLoadSchedule(strictId,"alice");assertEquals("submitted",restored.get("status"),restored.toString());
             await(runtime,String.valueOf(restored.get("jobId")));
+            assertEquals("PASS",runtime.jobRecord(String.valueOf(restored.get("jobId"))).get("status"),runtime.resultRecord(String.valueOf(restored.get("jobId"))).toString());
             assertNull(runtime.loadSchedule(strictId).sourceStatus,"A successful execution after restoring the pinned package must clear current stale status");
             assertEquals(stored,runtime.loadSchedule(strictId).currentRevisionDigest);
             assertEquals(1,runtime.store.auditOutcomes("SCHEDULE_SOURCE_RESTORED").size());
@@ -126,11 +203,14 @@ class ServerRuntimeJobReplayTest {
         try(ServerRuntime runtime=fixture.open(clock)) {
             assertEquals("Renamed stale RUN",runtime.loadSchedule(strictId).name);
             assertFalse(runtime.loadSchedule(pauseId).enabled);assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
+            assertEquals(true,runtime.loadScheduleView(runtime.loadSchedule(strictId),"alice").get("sourceSnapshotAvailable"),
+                    "Schedule source leases must survive Server restart");
             Path target=fixture.root.resolve("templates/SIMPLE/template.yaml");
             Files.writeString(target,Files.readString(target).replace("message: once","message: compatible latest target"));
             clock.advance(Duration.ofMinutes(16));
             Map<String,Object> compatible=runtime.triggerLoadSchedule(ignoreId,"alice");assertEquals("submitted",compatible.get("status"),compatible.toString());
             await(runtime,String.valueOf(compatible.get("jobId")));
+            assertEquals("PASS",runtime.jobRecord(String.valueOf(compatible.get("jobId"))).get("status"),runtime.resultRecord(String.valueOf(compatible.get("jobId"))).toString());
             assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
             clock.advance(Duration.ofMinutes(16));
             Files.delete(target);

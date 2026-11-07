@@ -3,6 +3,7 @@ package att.server;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.Set;
 
 /** Safe runnable definition, separate from Worker transport, logs and redacted previews. */
@@ -37,6 +38,13 @@ final class JobExecutionSpec {
         if(configuration!=null)value.set("configuration",ServerRuntime.JSON.valueToTree(att.server.api.ConfigurationSnapshot.copy(configuration)));
         return this;
     }
+    JobExecutionSpec withSourceProvenance(Map<String,Object> provenance) {
+        if (provenance != null) {
+            value.set("sourceProvenance", ServerRuntime.JSON.valueToTree(provenance));
+            validate();
+        }
+        return this;
+    }
     String revision(){return value.path("revision").asText();}
     private void validate() {
         String version=value.path("schemaVersion").asText();
@@ -44,8 +52,9 @@ final class JobExecutionSpec {
         if((!currentVersion&&!legacyVersion)||!"reject-package-changes".equals(value.path("revisionPolicy").asText())
                 ||!value.path("revision").asText().matches("[a-f0-9]{64}")||!value.path("definition").isObject())
             throw new IllegalArgumentException("Unsupported execution snapshot");
-        value.fieldNames().forEachRemaining(field->{if(!Set.of("schemaVersion","revisionPolicy","revision","definition","sourcePath","configuration","replay","scheduleSnapshot").contains(field))throw new IllegalArgumentException("Unknown execution snapshot field");});
+        value.fieldNames().forEachRemaining(field->{if(!Set.of("schemaVersion","revisionPolicy","revision","definition","sourcePath","configuration","replay","scheduleSnapshot","sourceProvenance").contains(field))throw new IllegalArgumentException("Unknown execution snapshot field");});
         if(value.has("configuration"))configuration();
+        if(value.has("sourceProvenance"))validateSourceProvenance(value.path("sourceProvenance"));
         if(value.has("replay"))validateReplay(value.path("replay"),currentVersion);
         if(value.has("scheduleSnapshot")) {
             JsonNode snapshot=value.path("scheduleSnapshot");
@@ -81,5 +90,46 @@ final class JobExecutionSpec {
                 ||!replay.path("effectiveRevision").asText("").matches("[a-f0-9]{64}"))
             throw new IllegalArgumentException("Invalid replay provenance");
         replay.fieldNames().forEachRemaining(field->{if(!Set.of("sourceJobId","sourcePolicy","originalRevision","effectiveRevision").contains(field))throw new IllegalArgumentException("Unknown replay provenance field");});
+    }
+
+    private static void validateSourceProvenance(JsonNode provenance) {
+        if (!provenance.isObject() || !"att-job-source-provenance/v1".equals(provenance.path("schemaVersion").asText())
+                || !provenance.path("revisions").isObject()
+                || !Set.of("RETAINED", "UNAVAILABLE").contains(provenance.path("snapshotState").asText()))
+            throw new IllegalArgumentException("Invalid source provenance");
+        provenance.fieldNames().forEachRemaining(field -> {
+            if (!Set.of("schemaVersion", "revisions", "validationFingerprint", "snapshotState").contains(field))
+                throw new IllegalArgumentException("Unknown source provenance field");
+        });
+        String fingerprint = provenance.path("validationFingerprint").asText(null);
+        if (fingerprint != null && !fingerprint.matches("[a-f0-9]{64}"))
+            throw new IllegalArgumentException("Invalid source validation fingerprint");
+        JsonNode revisions = provenance.path("revisions");
+        if (!"att-source-revision-set/v1".equals(revisions.path("schemaVersion").asText()))
+            throw new IllegalArgumentException("Invalid source revision set");
+        revisions.fieldNames().forEachRemaining(field -> {
+            if (!Set.of("schemaVersion", "packageRegistration", "businessSource", "changeSet", "manifest", "configSource",
+                    "effectiveConfig", "environment", "engineSchema", "scheduleSnapshot").contains(field))
+                throw new IllegalArgumentException("Unknown source revision kind");
+        });
+        for (String field : Set.of("packageRegistration", "businessSource", "changeSet", "manifest", "configSource",
+                "effectiveConfig", "environment", "engineSchema", "scheduleSnapshot")) {
+            JsonNode identity = revisions.get(field);
+            if (identity == null || identity.isNull()) continue;
+            if (!identity.isObject() || !"att-source-revision/v1".equals(identity.path("schemaVersion").asText())
+                    || !identity.path("kind").isTextual() || !identity.path("scopeId").isTextual()
+                    || !identity.path("revision").isTextual())
+                throw new IllegalArgumentException("Invalid source revision identity");
+            identity.fieldNames().forEachRemaining(name -> {
+                if (!Set.of("schemaVersion", "kind", "scopeId", "qualifier", "revision").contains(name))
+                    throw new IllegalArgumentException("Unknown source revision identity field");
+            });
+            try {
+                att.server.api.source.SourceManagementContracts.RevisionKind kind =
+                        att.server.api.source.SourceManagementContracts.RevisionKind.valueOf(identity.path("kind").asText());
+                new att.server.api.source.SourceManagementContracts.RevisionIdentity(kind,
+                        identity.path("scopeId").asText(), identity.path("qualifier").asText(null), identity.path("revision").asText());
+            } catch (RuntimeException invalid) { throw new IllegalArgumentException("Invalid source revision identity"); }
+        }
     }
 }

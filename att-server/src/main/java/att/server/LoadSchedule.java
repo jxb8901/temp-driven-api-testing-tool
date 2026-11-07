@@ -39,6 +39,14 @@ final class LoadSchedule {
     public String packageRootIdentity;
     public String sourceStatus;
     public String currentRevisionDigest;
+    /** Published immutable Package source token observed after this snapshot was approved. */
+    public String currentSourceRevision;
+    /** Central Config refresh state; execution keeps the approved Config snapshot until reviewed. */
+    public String configurationStatus;
+    /** Typed, value-free source provenance for this immutable execution snapshot. */
+    public Map<String,Object> sourceProvenance;
+    /** Internal lease identity; never exposed in the Schedule API. */
+    public String sourceLeaseId;
     public String autoPauseReason;
     public String autoPausedAt;
     public String loadModel;
@@ -81,6 +89,9 @@ final class LoadSchedule {
         copy.debugTargetType=debugTargetType;copy.debugTargetId=debugTargetId;copy.debugResourceId=debugResourceId;
         copy.expectedRevisionDigest=expectedRevisionDigest;copy.packageChangePolicy=packageChangePolicy;copy.packageRootIdentity=packageRootIdentity;
         copy.sourceStatus=sourceStatus;copy.currentRevisionDigest=currentRevisionDigest;copy.autoPauseReason=autoPauseReason;copy.autoPausedAt=autoPausedAt;
+        copy.currentSourceRevision=currentSourceRevision;copy.configurationStatus=configurationStatus;
+        copy.sourceProvenance=sourceProvenance==null?null:ServerRuntime.JSON.convertValue(sourceProvenance,Map.class);
+        copy.sourceLeaseId=sourceLeaseId;
         copy.tags=tags==null?List.of():List.copyOf(tags);
         copy.configuration=configuration==null?null:att.server.api.ConfigurationSnapshot.copy(configuration);
         copy.config=config;copy.environment=environment;copy.timezone=timezone;copy.cron=cron;copy.runAt=runAt;
