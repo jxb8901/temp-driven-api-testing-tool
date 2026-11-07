@@ -25,6 +25,7 @@ import java.security.Principal;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.ReentrantLock;
@@ -222,6 +223,132 @@ class ApiServletIntegratedLimitsTest {
                     Collections.singletonMap("path","config/att-server.yaml"),new byte[0]);
             assertSafeSourceFailure(protectedPath,404,"ATT-SERVER-NOT-FOUND");
         }
+    }
+
+    @Test void authoringSourceReadsReturnRequiredChangeSetRevisionPreconditions() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("authoring-revisions-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"authoring-revisions-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("authoring-revisions-libs"))) {
+            addAuthoringUsers(runtime);ApiServlet servlet=servlet(runtime);
+            Captured packageSource=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Collections.singletonMap("type","manifest"),new byte[0]);
+            JsonNode packageBody=ServerRuntime.JSON.readTree(packageSource.body());
+            assertEquals(200,packageSource.status,new String(packageSource.body(),StandardCharsets.UTF_8));
+            assertTrue(packageBody.path("baseSourceRevision").asText().matches("[a-f0-9]{64}"),packageBody.toString());
+            assertTrue(packageBody.path("registryRevision").asText().matches("[a-f0-9]{64}"),packageBody.toString());
+
+            Captured centralSource=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                    Collections.singletonMap("path","config/config.yaml"),new byte[0]);
+            JsonNode centralBody=ServerRuntime.JSON.readTree(centralSource.body());
+            assertEquals(200,centralSource.status,new String(centralSource.body(),StandardCharsets.UTF_8));
+            assertTrue(centralBody.path("baseSourceRevision").asText().matches("[a-f0-9]{64}"),centralBody.toString());
+            assertTrue(centralBody.path("registryRevision").isMissingNode(),centralBody.toString());
+
+            String baseRevision=packageBody.path("baseSourceRevision").asText();
+            String registryRevision=packageBody.path("registryRevision").asText();
+            Map<String,Object> operation=Map.of("operation","create","path","templates/stale-editor.yaml","content","id: stale\n");
+            Captured missingBase=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("registryRevision",registryRevision,"operations",List.of(operation))));
+            assertEquals(400,missingBase.status,new String(missingBase.body(),StandardCharsets.UTF_8));
+            Captured missingRegistry=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("baseSourceRevision",baseRevision,"operations",List.of(operation))));
+            assertEquals(400,missingRegistry.status,new String(missingRegistry.body(),StandardCharsets.UTF_8));
+
+            Field transactionField=ServerRuntime.class.getDeclaredField("sourceFileTransaction");transactionField.setAccessible(true);
+            SourceFileTransaction transaction=(SourceFileTransaction)transactionField.get(runtime);
+            Path configuredPackage=runtime.packageRegistry.snapshot().packages.get("alice").toRealPath();
+            Path active=transaction.pin(ChangeSetPublisher.PACKAGE_SOURCE,"alice",configuredPackage);
+            byte[] external= "id: external\n".getBytes(StandardCharsets.UTF_8);
+            transaction.commit(ChangeSetPublisher.PACKAGE_SOURCE,"alice",active,"alice",baseRevision,"c".repeat(64),
+                    Map.of("templates/external.yaml",new SourceFileTransaction.Write("templates/external.yaml",external,null)),()->{});
+            Captured stale=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("baseSourceRevision",baseRevision,
+                            "registryRevision",registryRevision,"operations",List.of(operation))));
+            assertEquals(409,stale.status,new String(stale.body(),StandardCharsets.UTF_8));
+            stopInspectionProcesses(runtime);
+        }
+    }
+
+    @Test void realChangeSetServletResponsesMatchVersionedSchemaAndNoStoreContract() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("change-set-schema-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        Path libs=workerLibraries("change-set-schema-libs");
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"change-set-schema-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,libs)) {
+            addAuthoringUsers(runtime);
+            ApiServlet servlet=servlet(runtime);
+            com.fasterxml.jackson.databind.JsonNode schemaNode;
+            try(java.io.InputStream stream=getClass().getResourceAsStream("/schemas/att-source-management-v1.schema.json")) {
+                assertNotNull(stream);
+                schemaNode=ServerRuntime.JSON.readTree(stream);
+            }
+            com.networknt.schema.JsonSchema schema=com.networknt.schema.JsonSchemaFactory
+                    .getInstance(com.networknt.schema.SpecVersion.VersionFlag.V202012).getSchema(schemaNode);
+
+            Captured packageSource=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Collections.singletonMap("type","manifest"),new byte[0]);
+            JsonNode packageRevisions=ServerRuntime.JSON.readTree(packageSource.body());
+            assertEquals(200,packageSource.status);
+            Map<String,Object> packageOperation=Map.of("operation","create","path","files/wire.txt","content","safe static file\n");
+            Map<String,Object> packageStage=Map.of("baseSourceRevision",packageRevisions.path("baseSourceRevision").asText(),
+                    "registryRevision",packageRevisions.path("registryRevision").asText(),"operations",List.of(packageOperation));
+            Captured staged=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(packageStage));
+            JsonNode stageBody=assertChangeSetSchema(schema,staged,201);
+            assertEquals("draft",stageBody.path("state").asText());
+            assertTrue(stageBody.path("revisions").path("packageRegistration").isObject());
+            String changeId=stageBody.path("changeSetId").asText();
+
+            for(String action:List.of("validate","review")) {
+                Captured response=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+changeId+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+                assertChangeSetSchema(schema,response,200);
+            }
+            Captured published=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+changeId+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+            assertChangeSetSchema(schema,published,200);
+
+            Captured currentPackage=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Collections.singletonMap("type","manifest"),new byte[0]);
+            JsonNode currentPackageRevisions=ServerRuntime.JSON.readTree(currentPackage.body());
+            Captured discardStage=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("baseSourceRevision",currentPackageRevisions.path("baseSourceRevision").asText(),
+                            "registryRevision",currentPackageRevisions.path("registryRevision").asText(),"operations",
+                            List.of(Map.of("operation","create","path","files/discard.txt","content","discard me\n")))));
+            JsonNode discardDraft=assertChangeSetSchema(schema,discardStage,201);
+            Captured discarded=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"
+                            +discardDraft.path("changeSetId").asText()+"/discard",Collections.emptyMap(),
+                    "{}".getBytes(StandardCharsets.UTF_8));
+            assertChangeSetSchema(schema,discarded,200);
+
+            Captured centralSource=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                    Collections.singletonMap("path","config/config.yaml"),new byte[0]);
+            JsonNode centralRevisions=ServerRuntime.JSON.readTree(centralSource.body());
+            Captured centralStage=invokeAs(servlet,"admin","POST","/configuration/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("baseSourceRevision",centralRevisions.path("baseSourceRevision").asText(),
+                            "operations",List.of(Map.of("operation","replace","path","config/config.yaml",
+                                    "content",Files.readString(runtimeConfig))))));
+            JsonNode centralDraft=assertChangeSetSchema(schema,centralStage,201);
+            assertTrue(centralDraft.path("revisions").path("packageRegistration").isNull(),
+                    "central Config responses preserve absent Package registration identities as null");
+            Captured centralDiscard=invokeAs(servlet,"admin","POST","/configuration/change-sets/"
+                            +centralDraft.path("changeSetId").asText()+"/discard",Collections.emptyMap(),
+                    "{}".getBytes(StandardCharsets.UTF_8));
+            assertChangeSetSchema(schema,centralDiscard,200);
+        }
+    }
+
+    private static JsonNode assertChangeSetSchema(com.networknt.schema.JsonSchema schema,Captured response,int status) throws Exception {
+        assertEquals(status,response.status,new String(response.body(),StandardCharsets.UTF_8));
+        assertEquals("private, no-store",response.headers.get("Cache-Control"));
+        JsonNode body=ServerRuntime.JSON.readTree(response.body());
+        assertEquals("limits-test",body.path("requestId").asText());
+        java.util.Set<com.networknt.schema.ValidationMessage> errors=schema.validate(body);
+        assertTrue(errors.isEmpty(),errors.toString()+" response="+body);
+        return body;
     }
 
     @Test void packageAuthoringSourceTimeoutIs504() throws Exception {

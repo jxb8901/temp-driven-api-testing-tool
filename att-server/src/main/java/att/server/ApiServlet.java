@@ -202,8 +202,13 @@ public final class ApiServlet extends HttpServlet {
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
         if("/validation".equals(path)){validationPost(req,res,requestId,authorizationPrincipal);return;}
+        if(centralChangeSetPath(path)) {
+            if(!requireSystemSettingsWrite(req,res,requestId))return;
+            changeSetPost(req,res,path,requestId,principalExact(req),true);return;
+        }
         if(!requireOperator(req,res,requestId))return;
         if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,authorizationPrincipal);return;}
+        if(packageChangeSetPath(path)) {changeSetPost(req,res,path,requestId,principalExact(req),false);return;}
         if(path.matches("/packages/[^/]+/package-configuration/(?:drafts(?:/[^/]+/(?:validate|review|publish|discard))?|rollback)")) {
             manifestPost(req,res,path,requestId,principalExact(req));return;
         }
@@ -883,7 +888,7 @@ public final class ApiServlet extends HttpServlet {
         String logicalPath=req.getParameter("path");
         if(logicalPath==null||logicalPath.length()>1024){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         try {
-            Map<String,Object> result=runtime.inspectAuthoringCentralSource(logicalPath);
+            Map<String,Object> result=runtime.inspectAuthoringCentralSource(logicalPath,principalExact(req));
             if(!requireSystemSettingsWrite(req,res,requestId))return;
             Object etag=result.get("sourceEtag");if(etag instanceof String)res.setHeader("ETag",(String)etag);
             result.put("requestId",requestId);json(res,200,result);
@@ -934,6 +939,135 @@ public final class ApiServlet extends HttpServlet {
     private static boolean parseOptionalBoolean(String raw,String name){if(raw==null||raw.isEmpty())return false;if("true".equalsIgnoreCase(raw))return true;if("false".equalsIgnoreCase(raw))return false;throw new IllegalArgumentException(name+" must be true or false");}
     private static String principalSearch(HttpServletRequest req){String value=req.getParameter("principal");if(value==null)return null;value=value.strip();if(value.codePointCount(0,value.length())>120)throw new IllegalArgumentException("principal search must be at most 120 characters");for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))throw new IllegalArgumentException("principal search contains an invalid character");return value.isEmpty()?null:value;}
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
+    private void changeSetPost(HttpServletRequest req,HttpServletResponse res,String path,String requestId,
+                               String actor,boolean systemSettingsWrite) throws IOException {
+        if(actor==null||RequestIdentity.ANONYMOUS.equals(actor)) {
+            error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;
+        }
+        if(packageChangeSetPath(path)) {
+            try {
+                runtime.withPackageSourceAuthority(actor,
+                        login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),()->{
+                            changeSetPostAuthorized(req,res,path,requestId,actor,false);return null;
+                        });
+            } catch(IOException failure){throw failure;}
+              catch(Exception failure){error(res,500,"ATT-CHANGESET-FAILED","Change Set action could not be completed",requestId);}
+        } else changeSetPostAuthorized(req,res,path,requestId,actor,systemSettingsWrite);
+    }
+
+    private void changeSetPostAuthorized(HttpServletRequest req,HttpServletResponse res,String path,String requestId,
+                                         String actor,boolean systemSettingsWrite) throws IOException {
+        if(!isJson(req.getContentType())) {
+            error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;
+        }
+        if(!checkOrigin(req,res,requestId,false))return;
+        try {
+            int limit=Math.min(runtime.config.maxRequestBytes,ChangeSetPublisher.MAX_CHANGE_BYTES*2+65536);
+            byte[] bytes=readBoundedBody(req.getInputStream(),limit);
+            if(bytes.length>limit){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Change Set request exceeds its size limit",requestId);return;}
+            JsonNode input=ServerRuntime.JSON.readTree(bytes);
+            if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
+            boolean central=centralChangeSetPath(path);
+            String domain=central?ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG:ChangeSetPublisher.PACKAGE_SOURCE;
+            String scopeId=central?ChangeSetPublisher.CENTRAL_SCOPE_ID:segment(path,2);
+            String[] parts=path.split("/");
+            Map<String,Object> result;
+            int status=200;
+            if((central&&parts.length==3)||(!central&&parts.length==4)) {
+                Set<String> fields=new java.util.HashSet<>(java.util.Arrays.asList("baseSourceRevision","registryRevision","operations"));
+                java.util.Iterator<String> names=input.fieldNames();
+                while(names.hasNext())if(!fields.contains(names.next()))throw new IllegalArgumentException("Unsupported Change Set field");
+                String baseRevision=requiredChangeText(input,"baseSourceRevision");
+                String registryRevision=central?optionalChangeText(input,"registryRevision"):
+                        requiredChangeText(input,"registryRevision");
+                JsonNode raw=input.get("operations");
+                if(raw==null||!raw.isArray()||raw.size()<1||raw.size()>ChangeSetPublisher.MAX_OPERATIONS)
+                    throw new IllegalArgumentException("A Change Set must contain between 1 and 32 file operations");
+                List<ChangeSetPublisher.OperationInput> operations=new ArrayList<>();
+                for(JsonNode item:raw)operations.add(parseChangeOperation(item));
+                result=runtime.changeSetPublisher.stage(domain,scopeId,actor,systemSettingsWrite,baseRevision,registryRevision,operations,requestId);
+                status=201;
+            } else {
+                String id=central?parts[3]:parts[4];
+                String action=central?parts[4]:parts[5];
+                if(!"generate-snapshot".equals(action)&&input.size()!=0)
+                    throw new IllegalArgumentException("Change Set actions accept an empty object");
+                if("validate".equals(action))result=runtime.changeSetPublisher.validate(domain,scopeId,actor,systemSettingsWrite,id,requestId);
+                else if("review".equals(action))result=runtime.changeSetPublisher.review(domain,scopeId,actor,systemSettingsWrite,id,requestId);
+                else if("publish".equals(action))result=runtime.changeSetPublisher.publish(domain,scopeId,actor,systemSettingsWrite,id,requestId);
+                else if("discard".equals(action))result=runtime.changeSetPublisher.discard(domain,scopeId,actor,systemSettingsWrite,id,requestId);
+                else if("generate-snapshot".equals(action)) {
+                    if(central)throw new IllegalArgumentException("Testcase snapshots are Package-scoped");
+                    Set<String> fields=new java.util.HashSet<>(java.util.Arrays.asList(
+                            "expectedSourceRevision","workbookPath","expectedWorkbookHash","expectedSidecarHash"));
+                    java.util.Iterator<String> names=input.fieldNames();
+                    while(names.hasNext())if(!fields.contains(names.next()))throw new IllegalArgumentException("Unsupported snapshot generation field");
+                    result=runtime.changeSetPublisher.generateSnapshot(domain,scopeId,actor,systemSettingsWrite,id,
+                            requiredChangeText(input,"expectedSourceRevision"),requiredChangeText(input,"workbookPath"),
+                            requiredChangeText(input,"expectedWorkbookHash"),requiredChangeText(input,"expectedSidecarHash"),requestId);
+                }
+                else throw new IllegalArgumentException("Unsupported Change Set action");
+            }
+            result.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,status,result);
+        } catch(ChangeSetPublisher.Denied e){error(res,403,centralChangeSetPath(path)?"ATT-SERVER-FORBIDDEN":"ATT-PACKAGE-SOURCE-DENIED",
+                centralChangeSetPath(path)?"SYSTEM_SETTINGS_WRITE is required":"Package source editing is not authorized",requestId);}
+          catch(ChangeSetPublisher.Missing e){error(res,404,"ATT-SERVER-NOT-FOUND","Change Set was not found",requestId);}
+          catch(ChangeSetPublisher.Conflict e){error(res,409,"ATT-CHANGESET-CONFLICT","Source, registry or validation revisions changed; refresh and revalidate",requestId);}
+          catch(ChangeSetPublisher.Capacity e){error(res,429,"ATT-CHANGESET-CAPACITY","Change Set capacity is full",requestId);}
+          catch(ChangeSetPublisher.Busy e){res.setHeader("Retry-After","2");error(res,503,"ATT-CHANGESET-PUBLISH-BUSY","A Worker is using the published source; retry after it releases the revision",requestId);}
+          catch(ChangeSetPublisher.ValidationRejected e){error(res,422,e.code,"Candidate source validation or publication gate rejected the Change Set",requestId);}
+          catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
+          catch(Exception e){error(res,500,"ATT-CHANGESET-FAILED","Change Set action could not be completed",requestId);getServletContext().log("ATT Change Set failed id="+requestId,e);}
+    }
+
+    private static ChangeSetPublisher.OperationInput parseChangeOperation(JsonNode value) {
+        if(value==null||!value.isObject())throw new IllegalArgumentException("Each file operation must be an object");
+        Set<String> fields=new java.util.HashSet<>(java.util.Arrays.asList("operation","path","targetPath","content","contentBase64"));
+        java.util.Iterator<String> names=value.fieldNames();
+        while(names.hasNext())if(!fields.contains(names.next()))throw new IllegalArgumentException("Unsupported file operation field");
+        String operation=requiredChangeText(value,"operation");
+        String path=requiredChangeText(value,"path");
+        String target=optionalChangeText(value,"targetPath");
+        JsonNode content=value.get("content"),base64=value.get("contentBase64");
+        if(content!=null&&base64!=null)throw new IllegalArgumentException("Use only one file content encoding");
+        byte[] bytes=null;
+        if(content!=null) {
+            if(!content.isTextual())throw new IllegalArgumentException("content must be text");
+            bytes=content.asText().getBytes(StandardCharsets.UTF_8);
+        } else if(base64!=null) {
+            if(!base64.isTextual())throw new IllegalArgumentException("contentBase64 must be text");
+            try { bytes=java.util.Base64.getDecoder().decode(base64.asText()); }
+            catch(IllegalArgumentException invalid){throw new IllegalArgumentException("contentBase64 is invalid");}
+        }
+        return new ChangeSetPublisher.OperationInput(operation,path,target,bytes);
+    }
+
+    private static String requiredChangeText(JsonNode value,String field) {
+        JsonNode item=value.get(field);
+        if(item==null||!item.isTextual()||item.asText().isEmpty())throw new IllegalArgumentException(field+" is required");
+        return item.asText();
+    }
+
+    private static String optionalChangeText(JsonNode value,String field) {
+        JsonNode item=value.get(field);
+        if(item==null||item.isNull())return null;
+        if(!item.isTextual()||item.asText().isEmpty())throw new IllegalArgumentException(field+" must be a non-empty string");
+        return item.asText();
+    }
+
+    private static byte[] readBoundedBody(java.io.InputStream input,int limit) throws IOException {
+        java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream(Math.min(limit,8192));
+        byte[] buffer=new byte[8192];int count,total=0;
+        while((count=input.read(buffer))!=-1) {
+            int remaining=limit+1-total;
+            int copied=Math.min(count,Math.max(0,remaining));
+            if(copied>0)output.write(buffer,0,copied);
+            total+=count;
+            if(total>limit)return output.toByteArray();
+        }
+        return output.toByteArray();
+    }
+
     private void manifestGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String actor) throws IOException {
         String[] parts=path.split("/");String action=parts.length==4?"effective":parts[4];
         try {
@@ -983,7 +1117,7 @@ public final class ApiServlet extends HttpServlet {
                 result=switch(parts[6]) {
                     case "validate" -> runtime.manifestPublisher.validate(packageId,actor,id);
                     case "review" -> runtime.manifestPublisher.review(packageId,actor,id);
-                    case "publish" -> runtime.manifestPublisher.publish(packageId,actor,id);
+                    case "publish" -> runtime.manifestPublisher.publish(packageId,actor,id,requestId);
                     case "discard" -> {runtime.manifestPublisher.discard(packageId,actor,id);yield new java.util.LinkedHashMap<>(Map.of("discarded",true));}
                     default -> throw new IllegalArgumentException("Unsupported Manifest action");
                 };
@@ -993,6 +1127,7 @@ public final class ApiServlet extends HttpServlet {
           catch(PackageManifestPublisher.Missing e){error(res,404,"ATT-SERVER-NOT-FOUND","Manifest draft or revision was not found",requestId);}
           catch(PackageManifestPublisher.Conflict e){error(res,409,"ATT-PACKAGE-SOURCE-CONFLICT","Package or configuration sources changed; validate a new draft",requestId);}
           catch(PackageManifestPublisher.Capacity e){error(res,429,"ATT-PACKAGE-SOURCE-CAPACITY","Manifest draft capacity is full",requestId);}
+          catch(SourceFileTransaction.Busy e){res.setHeader("Retry-After","2");error(res,503,"ATT-PACKAGE-SOURCE-PUBLISH-BUSY","A Worker is using the published source; retry after it releases the revision",requestId);}
           catch(ServerRuntime.DraftValidationException e){error(res,400,"ATT-PACKAGE-SOURCE-INVALID",e.getMessage(),requestId,e.diagnostics);}
           catch(ServerRuntime.InspectionConfigurationException e){error(res,422,"ATT-CFG-001",e.summary(),requestId,e.diagnostics);}
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full",requestId);}
@@ -1001,6 +1136,8 @@ public final class ApiServlet extends HttpServlet {
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-PACKAGE-SOURCE-FAILED","Manifest action could not be completed",requestId);getServletContext().log("ATT Manifest action failed id="+requestId,e);}
     }
+    private static boolean packageChangeSetPath(String path){return path.matches("/packages/[^/]+/change-sets(?:/[^/]+/(?:validate|review|publish|discard|generate-snapshot))?");}
+    private static boolean centralChangeSetPath(String path){return path.matches("/configuration/change-sets(?:/[^/]+/(?:validate|review|publish|discard))?");}
     private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/package-configuration(?:/.*)?")||path.matches("/packages/[^/]+/configuration(?:/.*)?")||path.matches("/configuration(?:/.*)?");}
     private static boolean loadPolicyPath(String path){return path.matches("/packages/[^/]+/load-policy");}
     private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}

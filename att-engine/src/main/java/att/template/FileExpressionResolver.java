@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -84,7 +85,9 @@ public final class FileExpressionResolver {
         }
 
         ResolvedFile resolved = resolveFile(path, base);
-        PlanKey key = PlanKey.of(resolved.canonical);
+        // The same bytes can be reached from multiple authored locations. Preserve each
+        // caller's locator context so dependency projections do not collapse inbound refs.
+        PlanKey key = PlanKey.of(resolved.canonical, path, base);
         synchronized (plans) {
             CompiledFilePlan cached = plans.get(key);
             if (cached != null) { hits.incrementAndGet(); return cached; }
@@ -397,9 +400,39 @@ public final class FileExpressionResolver {
         }
         public Path projectRoot() { return projectRoot; }
         public int size() { return plans.size(); }
+        /** Returns value-free compiled dependency metadata without exposing authored file contents. */
+        public List<CompiledFileDependency> dependencies() throws Exception {
+            List<CompiledFileDependency> result = new ArrayList<CompiledFileDependency>();
+            Path root = projectRoot.toRealPath();
+            for (CompiledFilePlan plan : plans.values()) {
+                Path file = plan.file().toRealPath();
+                Path sourceDirectory = plan.sourceDirectory().toRealPath();
+                if (!file.startsWith(root) || !sourceDirectory.startsWith(root))
+                    throw new IllegalArgumentException("Compiled File-expression dependency escapes its Package");
+                byte[] hash = MessageDigest.getInstance("SHA-256").digest(plan.source().getBytes(StandardCharsets.UTF_8));
+                result.add(new CompiledFileDependency(plan.authoredPath(),
+                        root.relativize(sourceDirectory).toString().replace('\\', '/'),
+                        root.relativize(file).toString().replace('\\', '/'), hex(hash)));
+            }
+            return Collections.unmodifiableList(result);
+        }
         private CompiledFilePlan lookup(String authoredPath, Path sourceDirectory) {
             return plans.get(ReferenceKey.of(authoredPath, sourceDirectory));
         }
+    }
+
+    /** Value-free closure entry for dependency and freshness projections. */
+    public static final class CompiledFileDependency {
+        private final String authoredPath, sourceDirectory, logicalPath, sourceFingerprint;
+        private CompiledFileDependency(String authoredPath, String sourceDirectory,
+                                       String logicalPath, String sourceFingerprint) {
+            this.authoredPath = authoredPath; this.sourceDirectory = sourceDirectory;
+            this.logicalPath = logicalPath; this.sourceFingerprint = sourceFingerprint;
+        }
+        public String authoredPath() { return authoredPath; }
+        public String sourceDirectory() { return sourceDirectory; }
+        public String logicalPath() { return logicalPath; }
+        public String sourceFingerprint() { return sourceFingerprint; }
     }
 
     public static final class Stats {
@@ -417,6 +450,12 @@ public final class FileExpressionResolver {
         public long renderedChars() { return renderedChars; }
     }
 
+    private static String hex(byte[] value) {
+        StringBuilder result = new StringBuilder(value.length * 2);
+        for (byte item : value) result.append(String.format("%02x", item & 255));
+        return result.toString();
+    }
+
     private static final class ResolvedFile { private final Path canonical; private ResolvedFile(Path canonical) { this.canonical = canonical; } }
     private static final class Reference {
         private final String authoredPath; private final Path sourceDirectory;
@@ -431,9 +470,24 @@ public final class FileExpressionResolver {
     }
     private static final class PlanKey {
         private final Path path; private final long size; private final long modified;
-        private PlanKey(Path path, long size, long modified) { this.path = path; this.size = size; this.modified = modified; }
-        private static PlanKey of(Path path) throws Exception { return new PlanKey(path, Files.size(path), Files.getLastModifiedTime(path).toMillis()); }
-        @Override public boolean equals(Object value) { if (!(value instanceof PlanKey)) return false; PlanKey other = (PlanKey) value; return size == other.size && modified == other.modified && path.equals(other.path); }
-        @Override public int hashCode() { int result = path.hashCode(); result = 31 * result + Long.valueOf(size).hashCode(); return 31 * result + Long.valueOf(modified).hashCode(); }
+        private final String authoredPath; private final Path sourceDirectory;
+        private PlanKey(Path path, long size, long modified, String authoredPath, Path sourceDirectory) {
+            this.path = path; this.size = size; this.modified = modified;
+            this.authoredPath = authoredPath; this.sourceDirectory = sourceDirectory;
+        }
+        private static PlanKey of(Path path, String authoredPath, Path sourceDirectory) throws Exception {
+            return new PlanKey(path, Files.size(path), Files.getLastModifiedTime(path).toMillis(), authoredPath, sourceDirectory);
+        }
+        @Override public boolean equals(Object value) {
+            if (!(value instanceof PlanKey)) return false;
+            PlanKey other = (PlanKey) value;
+            return size == other.size && modified == other.modified && path.equals(other.path)
+                    && authoredPath.equals(other.authoredPath) && sourceDirectory.equals(other.sourceDirectory);
+        }
+        @Override public int hashCode() {
+            int result = path.hashCode(); result = 31 * result + Long.valueOf(size).hashCode();
+            result = 31 * result + Long.valueOf(modified).hashCode(); result = 31 * result + authoredPath.hashCode();
+            return 31 * result + sourceDirectory.hashCode();
+        }
     }
 }

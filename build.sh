@@ -185,11 +185,15 @@ LOCAL_PACKAGE_DIR="$LOCAL_WORK/$LOCAL_PACKAGE_NAME"
 
 (
   cd "$LOCAL_PACKAGE_DIR"
+  # The release smoke test must execute this extracted install, even when CI or
+  # the caller has configured ATT_HOME for a separate Server test runtime.
+  ATT_HOME="$LOCAL_PACKAGE_DIR"
+  ATT_PACKAGE_ROOT="$LOCAL_PACKAGE_ROOT"
   ORDERS_DB_USERNAME="${ORDERS_DB_USERNAME:-att-build-placeholder}"
   ORDERS_DB_PASSWORD="${ORDERS_DB_PASSWORD:-att-build-placeholder}"
   PAYMENT_MQ_USERNAME="${PAYMENT_MQ_USERNAME:-att-build-placeholder}"
   PAYMENT_MQ_PASSWORD="${PAYMENT_MQ_PASSWORD:-att-build-placeholder}"
-  export ORDERS_DB_USERNAME ORDERS_DB_PASSWORD PAYMENT_MQ_USERNAME PAYMENT_MQ_PASSWORD
+  export ATT_HOME ATT_PACKAGE_ROOT ORDERS_DB_USERNAME ORDERS_DB_PASSWORD PAYMENT_MQ_USERNAME PAYMENT_MQ_PASSWORD
   ./att.sh version | grep -Fx "ATT V$VERSION" >/dev/null
   ./att.sh help >/dev/null
   ./att.sh remote help >/dev/null

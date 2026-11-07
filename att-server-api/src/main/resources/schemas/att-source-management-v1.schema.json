@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://att.example/schemas/att-source-management/v1",
+  "title": "ATT Source Management API v1",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/ChangeSetView"},
+    {"$ref": "#/$defs/ChangeSetPublication"},
+    {"$ref": "#/$defs/ChangeSetDiscard"},
+    {"$ref": "#/$defs/CandidateValidation"},
+    {"$ref": "#/$defs/EffectiveResolution"},
+    {"$ref": "#/$defs/ApiFailure"},
+    {"$ref": "#/$defs/Page"}
+  ],
+  "$defs": {
+    "PackageCategory": {
+      "type": "string",
+      "enum": ["TESTCASE", "TEMPLATE", "FLOW", "LOAD", "TESTDATA", "FILE"]
+    },
+    "RevisionKind": {
+      "type": "string",
+      "enum": ["PACKAGE_REGISTRATION", "BUSINESS_SOURCE", "CHANGE_SET", "PACKAGE_MANIFEST", "CONFIG_SOURCE", "EFFECTIVE_CONFIG", "ENVIRONMENT", "ENGINE_SCHEMA", "SCHEDULE_SNAPSHOT"]
+    },
+    "RevisionIdentity": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "scopeId", "revision"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-revision/v1"},
+        "kind": {"$ref": "#/$defs/RevisionKind"},
+        "scopeId": {"type": "string", "minLength": 1, "maxLength": 160},
+        "qualifier": {"type": ["string", "null"], "maxLength": 160},
+        "revision": {"type": "string", "minLength": 1, "maxLength": 160}
+      },
+      "additionalProperties": false
+    },
+    "RevisionSet": {
+      "type": "object",
+      "required": ["schemaVersion"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-revision-set/v1"},
+        "packageRegistration": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
+        "businessSource": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
+        "changeSet": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
+        "manifest": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
+        "configSource": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
+        "effectiveConfig": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
+        "environment": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
+        "engineSchema": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
+        "scheduleSnapshot": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]}
+      },
+      "additionalProperties": false
+    },
+    "ValidationDiagnostic": {
+      "type": "object",
+      "required": ["code", "severity"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+        "severity": {"enum": ["ERROR", "WARNING", "INFO"]},
+        "logicalPath": {"type": ["string", "null"], "maxLength": 1024},
+        "field": {"type": ["string", "null"], "maxLength": 512},
+        "line": {"type": ["integer", "null"], "minimum": 1},
+        "message": {"type": ["string", "null"], "maxLength": 512},
+        "remedy": {"type": ["string", "null"], "maxLength": 512}
+      },
+      "additionalProperties": false
+    },
+    "ApiFailureStatus": {
+      "type": "string",
+      "enum": ["FORBIDDEN_403", "CONFLICT_409", "TOO_LARGE_413", "INVALID_422"]
+    },
+    "ChangeSetView": {
+      "type": "object",
+      "required": ["schemaVersion", "changeSetId", "domain", "scopeId", "state", "revisions", "etag", "noStore", "categories", "manifestMetadataChanged", "inboundReferences", "diagnostics", "baseSourceRevision", "registryRevision", "manifestRevision", "configRevision", "schemaRevision", "expiresAt", "changedFiles", "validationRevision", "requestId", "snapshotGenerated", "snapshotPath", "snapshotSha256"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-change-set/v1"},
+        "changeSetId": {"type": "string", "minLength": 1, "maxLength": 160},
+        "domain": {"enum": ["PACKAGE_SOURCE", "CENTRAL_RUNTIME_CONFIG"]},
+        "scopeId": {"type": "string", "minLength": 1, "maxLength": 160},
+        "state": {"enum": ["draft", "validated", "reviewed", "published", "conflicted", "rejected"]},
+        "revisions": {"$ref": "#/$defs/RevisionSet"},
+        "etag": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "noStore": {"type": "boolean"},
+        "categories": {"type": "array", "items": {"$ref": "#/$defs/PackageCategory"}, "uniqueItems": true},
+        "manifestMetadataChanged": {"type": "boolean"},
+        "inboundReferences": {"type": "array", "items": {"$ref": "#/$defs/DependencyReference"}},
+        "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/ValidationDiagnostic"}},
+        "baseSourceRevision": {"type": ["string", "null"], "maxLength": 160},
+        "registryRevision": {"type": ["string", "null"], "maxLength": 160},
+        "manifestRevision": {"type": ["string", "null"], "maxLength": 160},
+        "configRevision": {"type": ["string", "null"], "maxLength": 160},
+        "schemaRevision": {"type": ["string", "null"], "maxLength": 160},
+        "expiresAt": {"type": ["string", "null"], "format": "date-time"},
+        "changedFiles": {"type": "array", "items": {"$ref": "#/$defs/ChangedFile"}},
+        "validationRevision": {"type": ["string", "null"], "maxLength": 160},
+        "requestId": {"type": ["string", "null"], "maxLength": 160},
+        "snapshotGenerated": {"type": ["boolean", "null"]},
+        "snapshotPath": {"type": ["string", "null"], "maxLength": 1024},
+        "snapshotSha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "ChangedFile": {
+      "type": "object",
+      "required": ["operation", "path", "oldHash", "newHash", "oldBytes", "newBytes", "automatic", "inboundReferences"],
+      "properties": {
+        "operation": {"enum": ["create", "replace", "move", "delete"]},
+        "path": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "targetPath": {"type": ["string", "null"], "maxLength": 1024},
+        "oldHash": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "newHash": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "oldBytes": {"type": "integer", "minimum": 0},
+        "newBytes": {"type": "integer", "minimum": 0},
+        "automatic": {"type": "boolean"},
+        "updatedFileReferences": {"type": "integer", "minimum": 0},
+        "inboundReferences": {"type": "array", "items": {"$ref": "#/$defs/InboundFileReference"}},
+        "contentSummary": {"type": "string", "maxLength": 512},
+        "contentDiff": {"type": "array", "items": {"type": "string", "maxLength": 32768}}
+      },
+      "additionalProperties": false
+    },
+    "InboundFileReference": {
+      "type": "object",
+      "required": ["descriptorPath", "referenceCount"],
+      "properties": {
+        "descriptorPath": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "referenceCount": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "ChangeSetPublication": {
+      "type": "object",
+      "required": ["schemaVersion", "published", "domain", "scopeId", "changeSetId", "beforeRevision", "revision", "validationRevision", "auditConfirmed", "noStore", "changedFiles", "requestId"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-change-set-publication/v1"},
+        "published": {"const": true}, "domain": {"enum": ["PACKAGE_SOURCE", "CENTRAL_RUNTIME_CONFIG"]},
+        "scopeId": {"type": "string", "minLength": 1, "maxLength": 160},
+        "changeSetId": {"type": "string", "minLength": 1, "maxLength": 160},
+        "beforeRevision": {"type": "string", "maxLength": 160}, "revision": {"type": "string", "maxLength": 160},
+        "validationRevision": {"type": "string", "maxLength": 160}, "auditConfirmed": {"type": "boolean"},
+        "noStore": {"const": true},
+        "configGateRevision": {"type": "string", "maxLength": 160}, "changedFiles": {"type": "array", "items": {"$ref": "#/$defs/ChangedFile"}},
+        "requestId": {"type": "string", "maxLength": 160}
+      },
+      "additionalProperties": false
+    },
+    "ChangeSetDiscard": {
+      "type": "object",
+      "required": ["schemaVersion", "discarded", "changeSetId", "noStore", "requestId"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-change-set-discard/v1"},
+        "discarded": {"const": true}, "changeSetId": {"type": "string", "minLength": 1, "maxLength": 160},
+        "noStore": {"const": true},
+        "requestId": {"type": "string", "maxLength": 160}
+      },
+      "additionalProperties": false
+    },
+    "DependencyReference": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "certainty"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-dependency/v1"},
+        "kind": {"enum": ["PACKAGE_RESOURCE", "MANIFEST", "LOAD_OVERLAY", "TESTDATA", "FILE", "TOOL", "HELPER", "ENVIRONMENT_BINDING", "ENGINE_SCHEMA", "SCHEDULE"]},
+        "packageId": {"type": ["string", "null"], "maxLength": 160},
+        "environment": {"type": ["string", "null"], "maxLength": 64},
+        "logicalId": {"type": ["string", "null"], "maxLength": 512},
+        "canonicalPath": {"type": ["string", "null"], "maxLength": 1024},
+        "sourceFingerprint": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "relationship": {"type": ["string", "null"], "maxLength": 160},
+        "callSite": {"type": ["string", "null"], "maxLength": 512},
+        "certainty": {"enum": ["KNOWN", "UNKNOWN"]}
+      },
+      "additionalProperties": false
+    },
+    "Page": {
+      "type": "object",
+      "required": ["schemaVersion", "items", "totalEstimate", "truncated"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-page/v1"},
+        "items": {"type": "array"},
+        "nextCursor": {"type": ["string", "null"], "maxLength": 512},
+        "totalEstimate": {"type": "integer", "minimum": 0},
+        "truncated": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "ApiFailure": {
+      "type": "object",
+      "required": ["schemaVersion", "status", "code", "message", "currentRevisions"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-api-failure/v1"},
+        "status": {"$ref": "#/$defs/ApiFailureStatus"},
+        "code": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+        "requestId": {"type": ["string", "null"], "maxLength": 160},
+        "message": {"type": ["string", "null"], "maxLength": 512},
+        "currentRevisions": {"$ref": "#/$defs/RevisionSet"}
+      },
+      "additionalProperties": false
+    },
+    "CandidateValidation": {
+      "type": "object",
+      "required": ["schemaVersion", "domain", "scopeId", "state", "coverageComplete", "executionEligible", "validationFingerprint", "revisions", "dependencies", "diagnostics"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-candidate-validation/v1"},
+        "domain": {"enum": ["PACKAGE_SOURCE", "CENTRAL_RUNTIME_CONFIG"]},
+        "scopeId": {"type": "string", "minLength": 1, "maxLength": 160},
+        "state": {"enum": ["VALID", "INVALID", "INCOMPLETE"]},
+        "coverageComplete": {"type": "boolean"},
+        "executionEligible": {"type": "boolean"},
+        "validationFingerprint": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "revisions": {"$ref": "#/$defs/RevisionSet"},
+        "dependencies": {"type": "array", "maxItems": 20000, "items": {"$ref": "#/$defs/DependencyReference"}},
+        "diagnostics": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/ValidationDiagnostic"}}
+      },
+      "additionalProperties": false
+    },
+    "EffectiveResolution": {
+      "type": "object",
+      "required": ["schemaVersion", "packageId", "environment", "effectiveFingerprint", "complete", "revisions", "origins", "semanticFingerprints", "bindings", "dependencies", "diagnostics"],
+      "properties": {
+        "schemaVersion": {"const": "att-effective-resolution/v1"},
+        "packageId": {"type": "string", "minLength": 1, "maxLength": 160},
+        "environment": {"type": "string", "minLength": 1, "maxLength": 64},
+        "effectiveFingerprint": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "complete": {"type": "boolean"}, "revisions": {"$ref": "#/$defs/RevisionSet"},
+        "origins": {"type": "object", "additionalProperties": {"enum": ["REQUEST", "PACKAGE_MANIFEST", "ENVIRONMENT_PROFILE", "GLOBAL_CONFIG", "RUNTIME_DEFAULT", "UNKNOWN"]}},
+        "semanticFingerprints": {"type": "object", "maxProperties": 4096, "additionalProperties": {"type": "string", "pattern": "^[a-f0-9]{64}$"}},
+        "bindings": {"type": "array", "maxItems": 20000, "items": {"$ref": "#/$defs/DependencyReference"}},
+        "dependencies": {"type": "array", "maxItems": 20000, "items": {"$ref": "#/$defs/DependencyReference"}},
+        "diagnostics": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/ValidationDiagnostic"}}
+      },
+      "additionalProperties": false
+    }
+  }
+}
