@@ -123,7 +123,7 @@ class ExecutionWorkerSemanticParityTest {
             runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
             awaitReady(runtime,15);
             publishTemplateRevision(runtime,pkg,"# published before RUN\n");
-            awaitReadyRoot(runtime,runtime.packageRoot("p"),15);
+            awaitReadyRoot(runtime,runtime.executionPackageRoot("p"),15);
             var runDefinition=ServerRuntime.JSON.createObjectNode();
             runDefinition.put("schemaVersion",RunDefinition.VERSION);runDefinition.put("executionType","run");runDefinition.put("packageId","p");
             runDefinition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","case","id","cases.default.C1")));
@@ -137,7 +137,7 @@ class ExecutionWorkerSemanticParityTest {
             assertEquals("warm",workerDispatch(runResult),"A replacement idle Worker must use the exact published Package revision");
 
             publishTemplateRevision(runtime,pkg,"# published before DEBUG\n");
-            awaitReadyRoot(runtime,runtime.packageRoot("p"),15);
+            awaitReadyRoot(runtime,runtime.executionPackageRoot("p"),15);
             var debugDefinition=ServerRuntime.JSON.createObjectNode();debugDefinition.put("packageId","p");
             debugDefinition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id","SIMPLE")));
             debugDefinition.set("input",ServerRuntime.JSON.createObjectNode());

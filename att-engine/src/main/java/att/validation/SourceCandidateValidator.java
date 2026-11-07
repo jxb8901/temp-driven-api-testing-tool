@@ -151,12 +151,23 @@ public final class SourceCandidateValidator {
     public CandidateValidation validateCentralConfig(Path configFile, Path runtimeRoot,
                                                      RevisionSet revisions,
                                                      String validationFingerprint) throws Exception {
+        return validateCentralConfig(configFile, runtimeRoot, null, revisions, validationFingerprint);
+    }
+
+    /**
+     * Validates an online Config candidate against its trusted, revision-bound base. The
+     * baseline is used only for deployment-controlled fields that must remain unchanged.
+     */
+    public CandidateValidation validateCentralConfig(Path configFile, Path runtimeRoot,
+                                                     Path baselineConfigFile, RevisionSet revisions,
+                                                     String validationFingerprint) throws Exception {
         Path config = canonicalFile(configFile, "Runtime Config candidate");
         Path runtime = canonicalDirectory(runtimeRoot, "Runtime Config root");
         if (!config.startsWith(runtime)) throw new IllegalArgumentException("Runtime Config path is outside its source root");
         List<ValidationDiagnostic> diagnostics = new ArrayList<ValidationDiagnostic>();
         List<DependencyReference> dependencies = new ArrayList<DependencyReference>();
-        validateOnlineEligibility(config, diagnostics);
+        Path baseline = baselineConfigFile == null ? null : canonicalFile(baselineConfigFile, "Runtime Config baseline");
+        validateOnlineEligibility(config, baseline, diagnostics);
         AttValidationReport report = RuntimeConfigurationValidator.validate(config, runtime, null,
                 null, "SOURCE-CANDIDATE", true, true, null);
         report.limitOutputBytes(MAX_VALIDATION_REPORT_BYTES);
@@ -244,7 +255,8 @@ public final class SourceCandidateValidator {
         return new PackageValidator(pkg, effective, configFile).validate(options);
     }
 
-    private static void validateOnlineEligibility(Path config, List<ValidationDiagnostic> diagnostics) throws Exception {
+    private static void validateOnlineEligibility(Path config, Path baseline,
+                                                 List<ValidationDiagnostic> diagnostics) throws Exception {
         Object rootValue = YamlSupport.load(config);
         if (!(rootValue instanceof Map)) {
             diagnostics.add(diagnostic("ATT-CONFIG-ONLINE-UNSUPPORTED", Severity.ERROR, "config/config.yaml",
@@ -253,14 +265,28 @@ public final class SourceCandidateValidator {
             return;
         }
         Map<?, ?> root = (Map<?, ?>) rootValue;
+        Map<?, ?> baselineRoot = Collections.emptyMap();
+        if (baseline != null && Files.isRegularFile(baseline, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isSymbolicLink(baseline)) {
+            Object baselineValue = YamlSupport.load(baseline);
+            if (baselineValue instanceof Map) baselineRoot = (Map<?, ?>) baselineValue;
+        }
+        boolean outputDirectoryChanged = baseline == null
+                ? root.containsKey("outputDirectory")
+                : root.containsKey("outputDirectory") != baselineRoot.containsKey("outputDirectory")
+                    || root.containsKey("outputDirectory")
+                        && !java.util.Objects.equals(canonical(root.get("outputDirectory")),
+                                canonical(baselineRoot.get("outputDirectory")));
         for (Object keyValue : root.keySet()) {
-            if (!(keyValue instanceof String) || !ONLINE_CONFIG_FIELDS.contains(keyValue)) {
+            boolean unchangedDeploymentOutput = "outputDirectory".equals(keyValue) && !outputDirectoryChanged;
+            if (!(keyValue instanceof String)
+                    || !ONLINE_CONFIG_FIELDS.contains(keyValue) && !unchangedDeploymentOutput) {
                 diagnostics.add(diagnostic("ATT-CONFIG-ONLINE-UNSUPPORTED", Severity.ERROR, "config/config.yaml",
                         String.valueOf(keyValue), null, "The candidate contains a field that cannot be hot-activated online.",
                         "Remove the unsupported field and apply deployment-controlled changes offline."));
             }
         }
-        if (root.containsKey("outputDirectory")) {
+        if (outputDirectoryChanged) {
             diagnostics.add(diagnostic("ATT-CONFIG-ONLINE-UNSUPPORTED", Severity.ERROR, "config/config.yaml",
                     "outputDirectory", null, "Changing the Worker output root is not supported by online Config publication.",
                     "Keep the configured output root and manage output changes through deployment configuration."));
@@ -480,15 +506,20 @@ public final class SourceCandidateValidator {
                                          Map<String, DependencyReference> output) throws Exception {
         if (snapshot == null || snapshot.projectRoot() == null || !snapshot.projectRoot().equals(packageRoot))
             throw new IllegalArgumentException("Compiled File-expression snapshot does not belong to this Package");
-        for (FileExpressionResolver.CompiledFileDependency plan : snapshot.dependencies()) {
-            String logical = plan.logicalPath();
-            String callSite = plan.sourceDirectory() + ":&{" + plan.authoredPath() + "}";
+        for (FileExpressionResolver.CompiledFileReference reference : snapshot.references()) {
+            String logical = reference.logicalPath();
+            String callSite = boundedCallSite(reference.callSite() + " -> &{" + reference.authoredPath() + "}");
             String fingerprint = fileDigest(packageRoot.resolve(logical));
             String key = logical + "\n" + fingerprint + "\n" + callSite;
             output.putIfAbsent(key, new DependencyReference(DependencyKind.FILE, packageId, environment,
-                    plan.authoredPath(), logical, fingerprint, "canonical-file-expression-plan", callSite,
+                    reference.authoredPath(), logical, fingerprint, "canonical-file-expression-plan", callSite,
                     ReferenceCertainty.KNOWN));
         }
+    }
+
+    private static String boundedCallSite(String value) throws Exception {
+        if (value.length() <= 512) return value;
+        return value.substring(0, 440) + "#" + digest(value).substring(0, 64);
     }
 
     private static void collectPackageResourceDependencies(Path packageRoot, Path configFile,
@@ -711,17 +742,18 @@ public final class SourceCandidateValidator {
         target.put(key, digest(canonical(value)));
     }
 
-    private static String canonicalYaml(Object value) {
+    private static String canonicalYaml(Object value) throws Exception {
         return canonical(value);
     }
 
-    private static String canonical(Object value) {
+    private static String canonical(Object value) throws Exception {
         if (value == null) return "null";
         if (value instanceof Map) {
             Map<String, Object> sorted = new TreeMap<String, Object>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
                 String key = String.valueOf(entry.getKey());
-                if (secretKey(key)) sorted.put(key, entry.getValue() == null ? null : "<protected>");
+                if (secretKey(key)) sorted.put(key, entry.getValue() == null ? null
+                        : "<protected:" + digest(canonical(entry.getValue())) + ">");
                 else if (!"description".equalsIgnoreCase(key)) sorted.put(key, entry.getValue());
             }
             StringBuilder result = new StringBuilder("{");
@@ -743,7 +775,8 @@ public final class SourceCandidateValidator {
     private static boolean secretKey(String key) {
         String normalized = key.toLowerCase(Locale.ROOT).replaceAll("[^a-z]", "");
         return normalized.contains("password") || normalized.contains("secret") || normalized.contains("token")
-                || normalized.contains("credential") || normalized.contains("privatekey");
+                || normalized.contains("credential") || normalized.contains("privatekey")
+                || normalized.contains("apikey") || normalized.contains("authorization");
     }
 
     private static String portablePath(Path root, Path path) {

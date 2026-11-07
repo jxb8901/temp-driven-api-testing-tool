@@ -9,6 +9,7 @@ import att.server.api.source.SourceManagementContracts.RevisionIdentity;
 import att.server.api.source.SourceManagementContracts.RevisionKind;
 import att.server.api.source.SourceManagementContracts.RevisionSet;
 import att.server.api.source.SourceManagementContracts.ValidationState;
+import att.config.SuiteConfigResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -86,6 +87,88 @@ class SourceCandidateValidatorTest {
                 && "outputDirectory".equals(item.field)));
     }
 
+    @Test void allowsUnchangedDeploymentOutputDirectoryWhenOtherConfigFieldsChange() throws Exception {
+        Path baseline = temp.resolve("baseline/config.yaml");
+        write(baseline, "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\noutputDirectory: output\n");
+        write(configFile, "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\noutputDirectory: output\ntimeoutMs: 2400\n");
+        CandidateValidation result = validator.validateCentralConfig(configFile, runtimeRoot, baseline,
+                revisions("central"), FINGERPRINT);
+        assertEquals(ValidationState.VALID, result.state, describe(result));
+
+        for (String candidate : Arrays.asList(
+                "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\noutputDirectory: reports\n",
+                "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\n")) {
+            write(configFile, candidate);
+            CandidateValidation changed = validator.validateCentralConfig(configFile, runtimeRoot, baseline,
+                    revisions("central"), FINGERPRINT);
+            assertEquals(ValidationState.INVALID, changed.state, describe(changed));
+            assertTrue(changed.diagnostics.stream().anyMatch(item -> "ATT-CONFIG-ONLINE-UNSUPPORTED".equals(item.code)
+                    && "outputDirectory".equals(item.field)), describe(changed));
+        }
+
+        write(baseline, "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\n");
+        write(configFile, "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\noutputDirectory: output\n");
+        CandidateValidation added = validator.validateCentralConfig(configFile, runtimeRoot, baseline,
+                revisions("central"), FINGERPRINT);
+        assertEquals(ValidationState.INVALID, added.state, describe(added));
+    }
+
+    @Test void secretReferenceChangesHaveDistinctSafeSemanticFingerprints() throws Exception {
+        Path helperDirectory = Files.createDirectories(runtimeRoot.resolve("config/httphelpers"));
+        write(configFile, "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                + "httphelpers: [config/httphelpers/payments.yaml]\n");
+        Path helper = helperDirectory.resolve("payments.yaml");
+        write(helper, "schemaVersion: att-httphelper/v1.1\nid: payments\nbaseUrl: https://api.example.test\n"
+                + "auth: {type: bearer, token: secret-ref-primary}\n");
+        EffectiveResolution first = validator.resolveEffective("first", "SIT", firstPackage,
+                configFile, runtimeRoot, revisions("first"));
+        write(helper, "schemaVersion: att-httphelper/v1.1\nid: payments\nbaseUrl: https://api.example.test\n"
+                + "auth: {type: bearer, token: secret-ref-secondary}\n");
+        EffectiveResolution second = validator.resolveEffective("first", "SIT", firstPackage,
+                configFile, runtimeRoot, revisions("first"));
+        assertNotEquals(first.effectiveFingerprint, second.effectiveFingerprint);
+        String safeProjection = first.semanticFingerprints.toString() + first.dependencies.toString();
+        assertFalse(safeProjection.contains("secret-ref-primary"), safeProjection);
+        assertTrue(first.complete, first.diagnostics.toString());
+    }
+
+    @Test void effectiveIdentityIncludesSameIdHelperSemanticsAndWorkbookParsingRules() throws Exception {
+        Path helperDirectory = Files.createDirectories(runtimeRoot.resolve("config/httphelpers"));
+        write(configFile, "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                + "httphelpers: [config/httphelpers/payments.yaml]\n");
+        Path helper = helperDirectory.resolve("payments.yaml");
+        write(helper, "schemaVersion: att-httphelper/v1.1\nid: payments\nbaseUrl: https://one.example.test\n"
+                + "auth: {type: none}\n");
+        String helperIdentity = new att.config.FrameworkConfigLoader()
+                .loadDiscovery(configFile, runtimeRoot, firstPackage, null).effectiveConfiguration().identity();
+        write(helper, "# display-only comment\nschemaVersion: att-httphelper/v1.1\nid: payments\n"
+                + "baseUrl: https://one.example.test\nauth: {type: none}\n");
+        String commentIdentity = new att.config.FrameworkConfigLoader()
+                .loadDiscovery(configFile, runtimeRoot, firstPackage, null).effectiveConfiguration().identity();
+        assertEquals(helperIdentity, commentIdentity);
+        write(helper, "schemaVersion: att-httphelper/v1.1\nid: payments\nbaseUrl: https://two.example.test\n"
+                + "auth: {type: none}\n");
+        String endpointIdentity = new att.config.FrameworkConfigLoader()
+                .loadDiscovery(configFile, runtimeRoot, firstPackage, null).effectiveConfiguration().identity();
+        assertNotEquals(helperIdentity, endpointIdentity);
+
+        Path workbook = firstPackage.resolve("testcase/orders.xlsx");
+        Path sidecar = firstPackage.resolve("testcase/orders.yaml");
+        write(sidecar, "schemaVersion: att-sidecar/v2.2\nid: orders\n"
+                + "excel: {sheet: Cases, caseId: Case ID, tags: Tags, headerRows: 1}\n"
+                + "stages: [{key: invoke, template: Payment}]\n");
+        att.config.FrameworkConfig global = new att.config.FrameworkConfigLoader()
+                .loadDiscovery(configFile, runtimeRoot, firstPackage, null);
+        String workbookIdentity = new SuiteConfigResolver(firstPackage, global).resolve(workbook)
+                .effectiveConfiguration().identity();
+        write(sidecar, "schemaVersion: att-sidecar/v2.2\nid: orders\n"
+                + "excel: {sheet: Cases, caseId: External ID, tags: Tags, headerRows: 2}\n"
+                + "stages: [{key: invoke, template: Payment}]\n");
+        String changedWorkbookIdentity = new SuiteConfigResolver(firstPackage, global).resolve(workbook)
+                .effectiveConfiguration().identity();
+        assertNotEquals(workbookIdentity, changedWorkbookIdentity);
+    }
+
     @Test void unchangedTemplateInboundFileReferenceIsValidatedAgainstWholeCandidate() throws Exception {
         Path templateDirectory = Files.createDirectories(firstPackage.resolve("templates/lookup"));
         write(templateDirectory.resolve("template.yaml"), "schemaVersion: att-template/v3.6\nname: Lookup\ndescription: Lookup\nactions:\n"
@@ -155,23 +238,25 @@ class SourceCandidateValidatorTest {
         write(shared.resolve("request.xml"), "<request>${CASE.caseId}</request>\n");
         Path template = Files.createDirectories(firstPackage.resolve("templates/payment"));
         write(template.resolve("template.yaml"), "schemaVersion: att-template/v3.6\nname: Payment\ndescription: Payment\nactions:\n"
-                + "  first: {type: flow, use: payment.first.v1}\n  second: {type: flow, use: payment.second.v1}\n");
+                + "  first: {type: flow, use: payment.first.v1}\n  second: {type: flow, use: payment.first.v1}\n");
         Path firstFlow = Files.createDirectories(firstPackage.resolve("templates/flows/first"));
-        Path secondFlow = Files.createDirectories(firstPackage.resolve("templates/flows/second"));
         write(firstFlow.resolve("flow.yaml"), "schemaVersion: att-flow/v3.6\nid: payment.first.v1\nname: First\ndescription: First\nactions:\n"
-                + "  read: {type: log, message: '&{../../shared/request.xml}'}\n");
-        write(secondFlow.resolve("flow.yaml"), "schemaVersion: att-flow/v3.6\nid: payment.second.v1\nname: Second\ndescription: Second\nactions:\n"
-                + "  read: {type: log, message: '&{../../shared/request.xml}'}\n");
+                + "  read: {type: log, message: '&{../../shared/request.xml}'}\n"
+                + "  repeat: {type: log, message: '&{../../shared/request.xml}'}\n");
 
         EffectiveResolution result = validator.resolveEffective("first", "SIT", firstPackage,
                 configFile, runtimeRoot, revisions("first"));
         java.util.List<DependencyReference> fileRefs = result.dependencies.stream()
                 .filter(item -> item.kind == DependencyKind.FILE && "templates/shared/request.xml".equals(item.canonicalPath))
                 .collect(java.util.stream.Collectors.toList());
-        assertTrue(fileRefs.size() >= 2, fileRefs.stream().map(item -> item.callSite + " -> " + item.canonicalPath)
+        assertTrue(fileRefs.size() >= 4, fileRefs.stream().map(item -> item.callSite + " -> " + item.canonicalPath)
                 .collect(java.util.stream.Collectors.toList()).toString());
-        assertTrue(fileRefs.stream().anyMatch(item -> item.callSite != null && item.callSite.contains("flows/first")));
-        assertTrue(fileRefs.stream().anyMatch(item -> item.callSite != null && item.callSite.contains("flows/second")));
+        assertTrue(fileRefs.stream().anyMatch(item -> item.callSite != null && item.callSite.contains("flows/first")
+                && item.callSite.contains("actions[first]")));
+        assertTrue(fileRefs.stream().anyMatch(item -> item.callSite != null && item.callSite.contains("flows/first")
+                && item.callSite.contains("actions[second]")));
+        assertTrue(fileRefs.stream().map(item -> item.callSite).distinct().count() >= 4,
+                fileRefs.stream().map(item -> item.callSite).collect(java.util.stream.Collectors.toList()).toString());
     }
 
     @Test void loadInventoryLimitsAreInvalidAndMarkCoverageIncomplete() throws Exception {

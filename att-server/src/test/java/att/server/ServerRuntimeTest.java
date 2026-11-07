@@ -10,6 +10,7 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
@@ -267,6 +268,91 @@ class ServerRuntimeTest {
         }
     }
 
+    @Test void workerSnapshotMutationBetweenReadsIsRejectedBeforeAResultIsAccepted() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("source-fence-packages"));
+        Path packageRoot=Files.createDirectory(allowed.resolve("p"));
+        Path first=Files.writeString(packageRoot.resolve("first.txt"),"first-original");
+        Path second=Files.writeString(packageRoot.resolve("second.txt"),"second-original");
+        Path runtimeRoot=Files.createDirectory(temp.resolve("source-fence-runtime"));
+        Path runtimeConfig=Files.createDirectories(runtimeRoot.resolve("config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.13\nenvironment: SIT\n");
+        Path data=Files.createDirectory(temp.resolve("source-fence-data"));
+        Path ready=temp.resolve("source-fence-worker.ready"),release=temp.resolve("source-fence-worker.go");
+        Path observed=temp.resolve("source-fence-worker.values");
+        Path javaExecutable=Path.of(System.getProperty("java.home"),"bin","java");
+        String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        Path serverYaml=temp.resolve("source-fence-server.yaml");
+        Files.writeString(serverYaml,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaExecutable)
+                +"\n  inspection: {enabled: true, maxConcurrent: 1, queuedLimit: 2, timeoutMs: 15000, heapMaxMb: 128, warmup: {enabled: false}}"
+                +"\nworkers: {maxConcurrent: 1, queuedLimit: 1, maxConcurrentLoad: 1}"
+                +"\npackages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverYaml),Files.createDirectory(temp.resolve("source-fence-libs")).toString(),builder->{
+            if(builder.command().contains("--inspection-daemon"))
+                return new ProcessBuilder(javaExecutable.toString(),"-cp",classpath,
+                        ServerRuntimeTestSupport.ConfigurationProcess.class.getName()).start();
+            return new ProcessBuilder(javaExecutable.toString(),"-cp",classpath,
+                    FencedSourceProcess.class.getName(),ready.toString(),release.toString(),observed.toString()).start();
+        });
+        try {
+            Map<String,Object> submitted=runtime.submit("validate",ServerRuntime.JSON.readTree("{\"packageId\":\"p\"}"),"source-fence-test");
+            String id=String.valueOf(submitted.get("jobId"));
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+            while(!Files.isRegularFile(ready)&&System.nanoTime()<deadline)Thread.sleep(10);
+            assertTrue(Files.isRegularFile(ready),"Worker did not reach the between-reads fence");
+            Job job=runtime.jobs.get(id);assertNotNull(job);
+            Path executionRoot=Path.of(Files.readString(ready));
+            assertEquals(executionRoot,Path.of(job.request.packageRoot));
+            Path executionSecond=executionRoot.resolve("second.txt");
+            assertFalse(executionSecond.equals(second),"Worker must read its detached execution snapshot");
+            Path executionConfig=job.acceptedCentralSourceRoot.resolve("config/config.yaml");
+            String originalConfig=Files.readString(executionConfig);
+            Set<java.nio.file.attribute.PosixFilePermission> permissions=Files.getPosixFilePermissions(executionSecond);
+            permissions.add(java.nio.file.attribute.PosixFilePermission.OWNER_WRITE);
+            Files.setPosixFilePermissions(executionSecond,permissions);
+            Files.writeString(executionSecond,"tampered-between-reads");
+            Set<java.nio.file.attribute.PosixFilePermission> configPermissions=Files.getPosixFilePermissions(executionConfig);
+            configPermissions.add(java.nio.file.attribute.PosixFilePermission.OWNER_WRITE);
+            Files.setPosixFilePermissions(executionConfig,configPermissions);
+            Files.writeString(executionConfig,"central-tampered-between-reads");
+            Files.writeString(release,"go");
+            Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,id);
+            assertEquals("ERROR",runtime.jobRecord(id).get("status"),String.valueOf(result));
+            assertEquals("first-original|"+originalConfig+"|tampered-between-reads|central-tampered-between-reads",
+                    Files.readString(observed));
+            assertTrue(runtime.events(id).after(0).stream().anyMatch(event -> {
+                Object eventData=event.get("data");
+                return "diagnostic".equals(event.get("event")) && eventData instanceof Map<?,?>
+                        && "ATT-SERVER-SOURCE-SNAPSHOT-CORRUPTED".equals(((Map<?,?>)eventData).get("code"));
+            }));
+            assertEquals("second-original",Files.readString(second),"The published source revision remains isolated from Worker reads");
+        } finally {Files.writeString(release,"go");runtime.close();}
+    }
+
+    public static class FencedSourceProcess {
+        public static void main(String[] args) throws Exception {
+            Path ready=Path.of(args[0]),release=Path.of(args[1]),observed=Path.of(args[2]);
+            String requestLine=new java.io.BufferedReader(new java.io.InputStreamReader(System.in,java.nio.charset.StandardCharsets.UTF_8)).readLine();
+            JsonNode request=ServerRuntime.JSON.readTree(requestLine);
+            Path root=Path.of(request.path("packageRoot").asText());
+            Path config=Path.of(request.path("config").asText());
+            String first=Files.readString(root.resolve("first.txt"));
+            String firstConfig=Files.readString(config);
+            Path temporary=ready.resolveSibling(ready.getFileName()+".tmp");
+            Files.writeString(temporary,root.toString());
+            Files.move(temporary,ready,java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+            while(!Files.exists(release)&&System.nanoTime()<deadline)Thread.sleep(10);
+            if(!Files.exists(release))throw new java.io.IOException("source snapshot fence timed out");
+            String second=Files.readString(root.resolve("second.txt"));
+            String secondConfig=Files.readString(config);
+            Files.writeString(observed,first+"|"+firstConfig+"|"+second+"|"+secondConfig);
+            System.out.println(ServerRuntime.JSON.writeValueAsString(Map.of("type","RESULT","status","PASS","exitCode",0,
+                    "result",Map.of("summary",Map.of("first",first,"second",second,"config",secondConfig)))));
+            System.out.flush();
+        }
+    }
+
     private static String digest(String text)throws Exception {
         return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
                 .digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
@@ -300,6 +386,7 @@ class ServerRuntimeTest {
                 leased=runtime.executionWorkers.lease("p");assertNotNull(leased);
                 Job job=new Job("J1122334455667788","run","p","test",new att.server.api.WorkerRequest(),
                         new JobEvents(temp.resolve("saturated-events.jsonl"),100));
+                job.request.packageRoot=runtime.executionPackageRoot("p").toString();
                 assertNull(runtime.prewarmRevision(job));
                 assertEquals("no_ready_worker",job.prewarmFallbackReason);
                 assertNull(job.prewarmEligibilityMs,"A cold fallback must not pay for package inspection");
@@ -437,6 +524,12 @@ class ServerRuntimeTest {
         try {
             String id="J0123456789ABCDEF";Job job=new Job(id,"run","p","test",new att.server.api.WorkerRequest(),
                     new JobEvents(runtime.config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),100));
+            Path packageSnapshot=runtime.executionPackageRoot("p");
+            Path centralSnapshot=runtime.executionCentralSourceRoot();
+            job.request.packageRoot=packageSnapshot.toString();
+            job.acceptedPackageTreeDigest=SourceRevisionStore.treeDigest(ChangeSetPublisher.PACKAGE_SOURCE,packageSnapshot);
+            job.acceptedCentralSourceRoot=centralSnapshot;
+            job.acceptedCentralTreeDigest=SourceRevisionStore.treeDigest(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,centralSnapshot);
             long now=System.nanoTime();job.requestReceivedNanos=now-100_000_000L;job.admittedNanos=now-80_000_000L;
             job.workerStartedNanos=now-70_000_000L;job.workerSpawnStartedNanos=now-60_000_000L;job.workerSpawnedNanos=now-50_000_000L;
             job.status="PREPARING";runtime.store.insert(job,"{}");runtime.jobs.put(id,job);

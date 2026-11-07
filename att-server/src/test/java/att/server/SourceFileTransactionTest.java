@@ -171,6 +171,57 @@ class SourceFileTransactionTest {
                 "Removed Helper references are retired from the next immutable central revision");
     }
 
+    @Test void customRuntimeConfigPathIsCapturedAtTheStableWorkerPathAndExportedBack() throws Exception {
+        String domain = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG;
+        Path root = Files.createDirectories(temp.resolve("custom-runtime-root")).toRealPath();
+        Path configured = Files.writeString(root.resolve("runtime.yaml"),
+                "schemaVersion: att-config/v2.12\nenvironment: SIT\n");
+        Files.writeString(Files.createDirectories(root.resolve("config/tools")).resolve("ping.yaml"),
+                "schemaVersion: att-tool/v1\ncommand: [echo]\n");
+        Files.writeString(Files.createDirectories(root.resolve("node_modules/.bin")).resolve("yaml"), "unrelated");
+        Path data = Files.createDirectories(temp.resolve("custom-runtime-data"));
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
+        transaction.registerRoot(domain, "central-custom", root, configured);
+        Path active = transaction.pin(domain, "central-custom", root);
+        assertEquals(Files.readString(configured), Files.readString(active.resolve("config/config.yaml")));
+        assertTrue(Files.exists(active.resolve("config/tools/ping.yaml")));
+        assertFalse(Files.exists(active.resolve("runtime.yaml")));
+        assertFalse(Files.exists(active.resolve("node_modules")));
+
+        byte[] replacement = bytes("schemaVersion: att-config/v2.12\nenvironment: UAT\n");
+        Map<String, SourceFileTransaction.Write> writes = new LinkedHashMap<>();
+        writes.put("config/config.yaml", new SourceFileTransaction.Write("config/config.yaml", replacement,
+                digest(bytes("schemaVersion: att-config/v2.12\nenvironment: SIT\n"))));
+        transaction.commit(domain, "central-custom", active, "admin", BEFORE_REVISION, AFTER_REVISION, writes, () -> { });
+        assertEquals(new String(replacement, StandardCharsets.UTF_8), Files.readString(configured));
+        assertFalse(Files.exists(root.resolve("config/config.yaml")), "The stable revision path must map back to the configured filename");
+        assertEquals("unrelated", Files.readString(root.resolve("node_modules/.bin/yaml")));
+    }
+
+    @Test void executionSnapshotKeepsBothReadsOnTheAcceptedBytesWhenSameOwnerMutatesPinnedRevision() throws Exception {
+        Path root = initialTree();
+        Path data = Files.createDirectories(temp.resolve("execution-snapshot-data"));
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
+        Path revision = transaction.pin(PACKAGE, SCOPE, root);
+        Path execution = transaction.executionPin(PACKAGE, SCOPE, root);
+        assertNotEquals(revision, execution);
+        String expectedExecutionDigest = SourceRevisionStore.treeDigest(PACKAGE, execution);
+
+        String firstRead = Files.readString(execution.resolve("templates/a.yaml"), StandardCharsets.UTF_8);
+        Path changed = revision.resolve("templates/b.yaml");
+        if (!Files.getFileStore(changed).supportsFileAttributeView("posix")) return;
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(changed);
+        permissions.add(PosixFilePermission.OWNER_WRITE);
+        Files.setPosixFilePermissions(changed, permissions);
+        Files.writeString(changed, "tampered between Worker reads", StandardCharsets.UTF_8);
+        String secondRead = Files.readString(execution.resolve("templates/b.yaml"), StandardCharsets.UTF_8);
+        assertEquals("old-a", firstRead);
+        assertEquals("old-b", secondRead);
+        assertEquals(expectedExecutionDigest, SourceRevisionStore.treeDigest(PACKAGE, execution));
+        assertThrows(java.io.IOException.class, () -> transaction.executionPin(PACKAGE, SCOPE, root),
+                "A corrupted published revision must fail closed for new execution snapshots");
+    }
+
     @Test void pinnedRevisionsAreReadOnlyAndDelayedReadersKeepTheirOriginalTree() throws Exception {
         Path root = initialTree();
         Path data = Files.createDirectories(temp.resolve("data"));

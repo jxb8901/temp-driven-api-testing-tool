@@ -59,9 +59,14 @@ final class ChangeSetCandidateValidator implements ChangeSetPublisher.CandidateV
             if (ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(candidate.domain())) {
                 Path runtimeRoot = Files.createDirectory(workspace.resolve("runtime"));
                 materialize(candidate.files(), candidate::read, runtimeRoot);
+                byte[] baselineBytes = candidate.readBaseCentral("config/config.yaml");
+                if (baselineBytes == null) return ChangeSetPublisher.ValidationResult.rejected("ATT-CONFIG-BASELINE-UNAVAILABLE");
+                Path baseline = workspace.resolve("baseline/config.yaml");
+                Files.createDirectories(baseline.getParent());
+                Files.write(baseline, baselineBytes);
                 CandidateValidation result = (CandidateValidation)invokeEngine("validateCentralConfig",
-                        new Class<?>[]{Path.class,Path.class,RevisionSet.class,String.class},
-                        runtimeRoot.resolve("config/config.yaml"),runtimeRoot,revisions,candidateFingerprint);
+                        new Class<?>[]{Path.class,Path.class,Path.class,RevisionSet.class,String.class},
+                        runtimeRoot.resolve("config/config.yaml"),runtimeRoot,baseline,revisions,candidateFingerprint);
                 return result.executionEligible ? ChangeSetPublisher.ValidationResult.accepted(candidateFingerprint)
                         : ChangeSetPublisher.ValidationResult.rejected(validationCode(result));
             }

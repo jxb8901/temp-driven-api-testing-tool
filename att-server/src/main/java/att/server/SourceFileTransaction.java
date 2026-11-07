@@ -101,13 +101,21 @@ final class SourceFileTransaction {
     Lock readLock() { return barrier.readLock(); }
 
     void registerRoot(String domain, String scopeId, Path root) throws Exception { revisions.register(domain, scopeId, root); }
+    void registerRoot(String domain, String scopeId, Path root, Path configuredConfigFile) throws Exception {
+        revisions.register(domain, scopeId, root, configuredConfigFile);
+    }
 
     Path pin(String domain, String scopeId, Path root) throws Exception { return revisions.pin(domain, scopeId, root).root; }
+    Path executionPin(String domain, String scopeId, Path root) throws Exception { return revisions.executionPin(domain, scopeId, root); }
 
     Path registeredRoot(String domain, String scopeId) { return revisions.registeredRoot(domain, scopeId); }
 
     boolean ownsRevision(String domain, String scopeId, Path configuredRoot, Path candidate) {
         return revisions.ownsRevision(domain, scopeId, configuredRoot, candidate);
+    }
+
+    boolean ownsExecutionRevision(String domain, String scopeId, Path configuredRoot, Path candidate) {
+        return revisions.ownsExecutionRevision(domain, scopeId, configuredRoot, candidate);
     }
 
     String commit(String domain, String scopeId, Path root, String actor, String beforeRevision,

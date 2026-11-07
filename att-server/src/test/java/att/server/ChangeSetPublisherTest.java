@@ -248,6 +248,29 @@ class ChangeSetPublisherTest {
         } finally { publisher.close(); }
     }
 
+    @Test void centralPublisherComparesDeploymentOutputDirectoryToItsPinnedBase() throws Exception {
+        String base = "schemaVersion: att-config/v2.13\nenvironment: SIT\noutputDirectory: output\ntimeoutMs: 10000\n";
+        Files.writeString(centralRoot.resolve("config/config.yaml"), base, StandardCharsets.UTF_8);
+        ChangeSetPublisher publisher = publisher(new ChangeSetCandidateValidator(), allowingGate());
+        try {
+            Map<String,Object> unchanged = stageCentral(publisher, List.of(ChangeSetPublisher.OperationInput.replace(
+                    "config/config.yaml", bytes("schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+                            + "outputDirectory: output\ntimeoutMs: 12000\n"))));
+            Map<String,Object> accepted = publisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, String.valueOf(unchanged.get("changeSetId")));
+            assertEquals("validated", accepted.get("state"));
+
+            Map<String,Object> changed = stageCentral(publisher, List.of(ChangeSetPublisher.OperationInput.replace(
+                    "config/config.yaml", bytes("schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+                            + "outputDirectory: reports\ntimeoutMs: 12000\n"))));
+            ChangeSetPublisher.ValidationRejected rejected = assertThrows(ChangeSetPublisher.ValidationRejected.class,
+                    () -> publisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                            ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true,
+                            String.valueOf(changed.get("changeSetId"))));
+            assertEquals("ATT-CONFIG-ONLINE-UNSUPPORTED", rejected.code);
+        } finally { publisher.close(); }
+    }
+
     @Test void publisherRejectsTruncatedLoadInventoryAsNonExecutable() throws Exception {
         Path scenarios=Files.createDirectories(packageRoot.resolve("load/scenarios"));
         for(int index=0;index<=att.validation.SourceCandidateValidator.MAX_LOAD_DESCRIPTORS;index++)

@@ -28,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -79,32 +80,46 @@ final class SourceRevisionStore {
     }
 
     private static final class Registration {
-        final String domain, scopeId;
-        final Path sourceRoot, store, revisions, active, lockFile;
-        Registration(String domain, String scopeId, Path sourceRoot, Path store) {
+        final String domain, scopeId, configuredConfigPath;
+        final Path sourceRoot, store, revisions, executions, active, lockFile;
+        Registration(String domain, String scopeId, Path sourceRoot, Path store, String configuredConfigPath) {
             this.domain = domain; this.scopeId = scopeId; this.sourceRoot = sourceRoot; this.store = store;
-            this.revisions = store.resolve("revisions"); this.active = store.resolve("active");
+            this.configuredConfigPath = configuredConfigPath;
+            this.revisions = store.resolve("revisions"); this.executions = store.resolve("executions");
+            this.active = store.resolve("active");
             this.lockFile = store.resolve("writer.lock");
         }
     }
 
     private final Map<String, Registration> registrations = new ConcurrentHashMap<>();
     private final Map<String, Path> rootsByScope = new ConcurrentHashMap<>();
+    private final Map<String, String> configuredConfigPaths = new ConcurrentHashMap<>();
 
     synchronized void register(String domain, String scopeId, Path root) throws Exception {
+        register(domain, scopeId, root, null);
+    }
+
+    synchronized void register(String domain, String scopeId, Path root, Path configuredConfigFile) throws Exception {
         Path sourceRoot = canonicalRoot(root);
         String scopeKey = scopeKey(domain, scopeId);
+        String configPath = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(domain)
+                ? configuredConfigPath(sourceRoot, configuredConfigFile, configuredConfigPaths.get(scopeKey)) : null;
         Path previousRoot = rootsByScope.get(scopeKey);
-        if (previousRoot != null && previousRoot.equals(sourceRoot)) return;
-        Registration registration = registration(domain, scopeId, sourceRoot);
+        if (previousRoot != null && previousRoot.equals(sourceRoot)) {
+            Registration existing = registrations.get(scopeKey);
+            if (configPath != null && existing != null && !configPath.equals(existing.configuredConfigPath))
+                throw new IOException("Central Runtime Config path changed after source registration");
+            return;
+        }
+        Registration registration = registration(domain, scopeId, sourceRoot, configPath);
         createStoreDirectories(registration);
         try (WriterLock ignored = acquire(registration)) {
             verifyIdentity(registration);
             if (!Files.exists(registration.active, LinkOption.NOFOLLOW_LINKS)) {
                 String id = nextId();
                 Path initial = registration.revisions.resolve(id);
-                copyTree(domain, sourceRoot, initial);
-                String sourceDigest = treeDigest(domain, sourceRoot);
+                copyTree(domain, sourceRoot, initial, configPath, true);
+                String sourceDigest = treeDigestConfigured(domain, sourceRoot, configPath);
                 if (!sourceDigest.equals(treeDigest(domain, initial))) {
                     deleteTree(initial);
                     throw new IOException("Source changed while its initial revision was being captured");
@@ -118,6 +133,7 @@ final class SourceRevisionStore {
         }
         registrations.put(scopeKey, registration);
         rootsByScope.put(scopeKey, sourceRoot);
+        if (configPath != null) configuredConfigPaths.put(scopeKey, configPath);
     }
 
     Revision pin(String domain, String scopeId, Path root) throws Exception {
@@ -133,6 +149,50 @@ final class SourceRevisionStore {
         return pin(domain, scopeId, root);
     }
 
+    /**
+     * Returns a verified execution-only copy of the active revision. Publishers switch
+     * revision pointers and never write this tree, so a delayed Worker cannot observe a
+     * later publication or a same-owner edit to the retained publication tree.
+     */
+    Path executionPin(String domain, String scopeId, Path root) throws Exception {
+        Registration registration = lookup(domain, scopeId, root);
+        try (WriterLock ignored = acquire(registration)) {
+            Revision active = refreshConfiguredSource(registration, false);
+            Path target = registration.executions.resolve(active.id);
+            if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                if (Files.isSymbolicLink(target) || !Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)
+                        || !active.treeDigest.equals(treeDigest(domain, target)))
+                    throw new IOException("Execution source snapshot failed its integrity check");
+                return target;
+            }
+            Path temporary = registration.executions.resolve(".copy-" + UUID.randomUUID());
+            try {
+                copyTree(domain, active.root, temporary);
+                if (!active.treeDigest.equals(treeDigest(domain, temporary)))
+                    throw new IOException("Execution source snapshot failed its integrity check");
+                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
+                restoreTreePermissions(target, active.root);
+                forceDirectory(registration.executions);
+                return target;
+            } catch (Exception failure) {
+                try { deleteTree(temporary); } catch (Exception cleanup) { failure.addSuppressed(cleanup); }
+                if (Files.exists(target, LinkOption.NOFOLLOW_LINKS))
+                    try { deleteTree(target); } catch (Exception cleanup) { failure.addSuppressed(cleanup); }
+                throw failure;
+            }
+        }
+    }
+
+    boolean ownsExecutionRevision(String domain, String scopeId, Path configuredRoot, Path candidate) {
+        try {
+            Registration registration = lookup(domain, scopeId, configuredRoot);
+            Path absolute = candidate.toAbsolutePath().normalize();
+            return absolute.getParent() != null && absolute.getParent().equals(registration.executions)
+                    && absolute.getFileName().toString().matches("R[A-F0-9]{32}")
+                    && Files.isDirectory(absolute, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(absolute);
+        } catch (Exception ignored) { return false; }
+    }
+
     WriterLock lock(String domain, String scopeId, Path root) throws Exception {
         Registration registration = lookup(domain, scopeId, root);
         return acquire(registration);
@@ -146,7 +206,8 @@ final class SourceRevisionStore {
         Registration registration = lookup(domain, scopeId, root);
         Revision active = readActive(registration);
         if (!active.id.equals(id)) throw new IOException("Active source revision changed during configured-source export");
-        if (ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(domain)) exportCentralTree(active.root, registration.sourceRoot);
+        if (ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(domain))
+            exportCentralTree(active.root, registration.sourceRoot, registration.configuredConfigPath);
         else exportTree(active.root, registration.sourceRoot);
         if (!treeDigest(domain, active.root).equals(treeDigest(domain, registration.sourceRoot)))
             throw new IOException("Configured source export failed its integrity check");
@@ -235,7 +296,9 @@ final class SourceRevisionStore {
         }
         Registration registration = registrations.get(scopeKey);
         if (registration == null) {
-            registration = registration(domain, scopeId, sourceRoot);
+            String configPath = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(domain)
+                    ? configuredConfigPaths.getOrDefault(scopeKey, "config/config.yaml") : null;
+            registration = registration(domain, scopeId, sourceRoot, configPath);
             createStoreDirectories(registration);
             verifyIdentity(registration);
             registrations.put(scopeKey, registration);
@@ -243,15 +306,29 @@ final class SourceRevisionStore {
         return registration;
     }
 
-    private Registration registration(String domain, String scopeId, Path sourceRoot) throws IOException {
+    private Registration registration(String domain, String scopeId, Path sourceRoot,
+                                      String configuredConfigPath) throws IOException {
         Path parent = sourceRoot.getParent();
         if (parent == null) throw new IOException("Source root has no parent directory");
         String capturePolicy = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(domain)
                 ? "central-approved-config-v1" : "package-source-v1";
-        String suffix = digest((domain + "\n" + scopeId + "\n" + sourceRoot + "\n" + capturePolicy)
+        String suffix = digest((domain + "\n" + scopeId + "\n" + sourceRoot + "\n" + capturePolicy + "\n"
+                + String.valueOf(configuredConfigPath))
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8)).substring(0, 20);
         String name = "." + sourceRoot.getFileName() + ".att-source-revisions-" + suffix;
-        return new Registration(domain, scopeId, sourceRoot, parent.resolve(name));
+        return new Registration(domain, scopeId, sourceRoot, parent.resolve(name), configuredConfigPath);
+    }
+
+    private static String configuredConfigPath(Path sourceRoot, Path configuredFile, String registeredPath) throws IOException {
+        if (configuredFile == null) return registeredPath == null ? "config/config.yaml" : registeredPath;
+        Path requested = configuredFile.toAbsolutePath().normalize();
+        if (Files.isSymbolicLink(requested) || !Files.isRegularFile(requested, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Configured central Runtime Config file is outside its source root");
+        Path absolute = requested.toRealPath();
+        if (!absolute.startsWith(sourceRoot))
+            throw new IOException("Configured central Runtime Config file is outside its source root");
+        String relative = relativePath(sourceRoot, absolute);
+        return safeRelative(relative);
     }
 
     private void createStoreDirectories(Registration registration) throws Exception {
@@ -263,8 +340,11 @@ final class SourceRevisionStore {
             throw new IOException("Source revision storage is unsafe");
         if (Files.isSymbolicLink(registration.revisions)) throw new IOException("Source revision storage is unsafe");
         Files.createDirectories(registration.revisions);
+        if (Files.isSymbolicLink(registration.executions)) throw new IOException("Execution source storage is unsafe");
+        Files.createDirectories(registration.executions);
         setStorePermissions(registration.store, registration.sourceRoot, true);
         setStorePermissions(registration.revisions, registration.sourceRoot, true);
+        setStorePermissions(registration.executions, registration.sourceRoot, true);
         if (!Files.exists(registration.lockFile, LinkOption.NOFOLLOW_LINKS)) {
             try { Files.createFile(registration.lockFile); }
             catch (java.nio.file.FileAlreadyExistsException raced) { /* Another Server created the shared lock. */ }
@@ -276,7 +356,8 @@ final class SourceRevisionStore {
     private void verifyIdentity(Registration registration) throws Exception {
         Path identity = registration.store.resolve("identity");
         String value = IDENTITY_VERSION + "\t" + enc(registration.domain) + "\t" + enc(registration.scopeId)
-                + "\t" + enc(registration.sourceRoot.toString()) + "\n";
+                + "\t" + enc(registration.sourceRoot.toString()) + "\t"
+                + enc(String.valueOf(registration.configuredConfigPath)) + "\n";
         if (!Files.exists(identity, LinkOption.NOFOLLOW_LINKS)) writeAtomic(identity, value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         else {
             verifyNoLink(identity);
@@ -333,15 +414,19 @@ final class SourceRevisionStore {
     private Revision refreshConfiguredSource(Registration registration, boolean verifyContent) throws Exception {
         Revision active = readActive(registration);
         if (active.transactionId != null) return active;
-        String sourceDigest = treeDigest(registration.domain, registration.sourceRoot);
+        String sourceDigest = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(registration.domain)
+                ? treeDigestConfigured(registration.domain, registration.sourceRoot, registration.configuredConfigPath)
+                : treeDigest(registration.domain, registration.sourceRoot);
         if (sourceDigest.equals(active.treeDigest)) return active;
 
         String id = nextId();
         Path imported = checkedRevision(registration, id);
         try {
-            copyTree(registration.domain, registration.sourceRoot, imported);
+            copyTree(registration.domain, registration.sourceRoot, imported, registration.configuredConfigPath, true);
             String copiedDigest = treeDigest(registration.domain, imported);
-            String sourceDigestAfterCopy = treeDigest(registration.domain, registration.sourceRoot);
+            String sourceDigestAfterCopy = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(registration.domain)
+                    ? treeDigestConfigured(registration.domain, registration.sourceRoot, registration.configuredConfigPath)
+                    : treeDigest(registration.domain, registration.sourceRoot);
             if (!sourceDigest.equals(copiedDigest) || !sourceDigest.equals(sourceDigestAfterCopy))
                 throw new IOException("Configured source changed while its revision was being imported");
             restoreTreePermissions(imported, registration.sourceRoot);
@@ -422,18 +507,18 @@ final class SourceRevisionStore {
     }
 
     /** Export only the approved central Config tree, preserving every unrelated ATT_HOME entry. */
-    private static void exportCentralTree(Path source, Path destination) throws Exception {
-        List<Path> sourceEntries = centralTreeEntries(source);
+    private static void exportCentralTree(Path source, Path destination, String configuredConfigPath) throws Exception {
+        List<Path> sourceEntries = centralTreeEntries(source, "config/config.yaml", false);
         Map<String, Path> desiredFiles = new LinkedHashMap<>();
         List<Path> desiredDirectories = new ArrayList<>();
         for (Path entry : sourceEntries) {
             String relative = relativePath(source, entry);
             if (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) desiredDirectories.add(entry);
-            else desiredFiles.put(relative, entry);
+            else desiredFiles.put("config/config.yaml".equals(relative) ? configuredConfigPath : relative, entry);
         }
 
         Map<Path, Set<PosixFilePermission>> originalDirectoryPermissions = new LinkedHashMap<>();
-        List<Path> destinationEntries = centralTreeEntries(destination);
+        List<Path> destinationEntries = centralTreeEntries(destination, configuredConfigPath, true);
         destinationEntries.add(destination);
         try {
             for (Path directory : destinationEntries) {
@@ -453,7 +538,8 @@ final class SourceRevisionStore {
 
             desiredDirectories.sort(Comparator.comparingInt(Path::getNameCount));
             for (Path sourceDirectory : desiredDirectories) {
-                Path target = destination.resolve(source.relativize(sourceDirectory));
+                String relative = relativePath(source, sourceDirectory);
+                Path target = destination.resolve(relative);
                 if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)
                         && (Files.isSymbolicLink(target) || !Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)))
                     throw new IOException("Configured central Config export directory is unsafe");
@@ -463,15 +549,16 @@ final class SourceRevisionStore {
                 }
             }
 
-            for (Path sourceFile : desiredFiles.values()) {
-                Path target = destination.resolve(source.relativize(sourceFile));
+            for (Map.Entry<String, Path> desired : desiredFiles.entrySet()) {
+                Path target = destination.resolve(desired.getKey());
+                Path sourceFile = desired.getValue();
                 Path parent = target.getParent();
                 if (!Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(parent))
                     throw new IOException("Configured central Config export parent is unsafe");
                 exportRegularFile(sourceFile, target);
             }
 
-            for (Path existing : centralTreeEntries(destination)) {
+            for (Path existing : centralTreeEntries(destination, configuredConfigPath, true)) {
                 if (Files.isDirectory(existing, LinkOption.NOFOLLOW_LINKS)) continue;
                 if (!desiredFiles.containsKey(relativePath(destination, existing))) deleteExisting(existing);
             }
@@ -487,15 +574,21 @@ final class SourceRevisionStore {
     }
 
     private static List<Path> centralTreeEntries(Path root) throws IOException {
+        return centralTreeEntries(root, "config/config.yaml", false);
+    }
+
+    private static List<Path> centralTreeEntries(Path root, String configuredConfigPath,
+                                                 boolean configuredSource) throws IOException {
         List<Path> entries = new ArrayList<>();
-        Set<String> centralFiles = centralSnapshotFiles(root);
+        Set<String> centralFiles = centralSnapshotFiles(root, configuredConfigPath, configuredSource);
         Set<String> centralDirectories = centralSnapshotDirectories(centralFiles);
         final int[] fileCount = {0}, entryCount = {0};
         final long[] byteCount = {0};
         Files.walkFileTree(root, new SimpleFileVisitor<>() {
             @Override public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) throws IOException {
                 String relative = relativePath(root, directory);
-                if (!centralSnapshotDirectory(relative, centralDirectories)) return FileVisitResult.SKIP_SUBTREE;
+                if (!centralSnapshotDirectory(relative, centralDirectories)
+                        && !(configuredSource && pathAncestor(relative, configuredConfigPath))) return FileVisitResult.SKIP_SUBTREE;
                 if (attributes.isSymbolicLink() || Files.isSymbolicLink(directory))
                     throw new IOException("Central Config source contains an unsafe directory link");
                 if (++entryCount[0] > MAX_TREE_ENTRIES) throw new IOException("Central Config exceeds its revision entry limit");
@@ -524,20 +617,34 @@ final class SourceRevisionStore {
      * reference must be immutable and addressable inside this revision.
      */
     private static Set<String> centralSnapshotFiles(Path root) throws IOException {
+        return centralSnapshotFiles(root, "config/config.yaml", false);
+    }
+
+    private static Set<String> centralSnapshotFiles(Path root, String configuredConfigPath,
+                                                     boolean configuredSource) throws IOException {
         Path canonicalRoot = root.toRealPath();
         TreeSet<String> included = new TreeSet<>();
         Deque<Path> yamlQueue = new ArrayDeque<>();
+        String physicalConfigPath = configuredSource ? configuredConfigPath : "config/config.yaml";
+        Path selectedConfig = canonicalRoot.resolve(physicalConfigPath).normalize();
+        if (!selectedConfig.startsWith(canonicalRoot) || configuredSource
+                && (!Files.isRegularFile(selectedConfig, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(selectedConfig)))
+            throw new IOException("Configured central Runtime Config file is unavailable");
         Files.walkFileTree(canonicalRoot, new SimpleFileVisitor<>() {
             @Override public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) throws IOException {
                 String relative = relativePath(canonicalRoot, directory);
-                if (!ChangeSetPublisher.centralSnapshotDirectory(relative)) return FileVisitResult.SKIP_SUBTREE;
+                if (!ChangeSetPublisher.centralSnapshotDirectory(relative)
+                        && !(configuredSource && pathAncestor(relative, physicalConfigPath))) return FileVisitResult.SKIP_SUBTREE;
                 if (attributes.isSymbolicLink() || Files.isSymbolicLink(directory))
                     throw new IOException("Central Config source contains an unsafe directory link");
                 return FileVisitResult.CONTINUE;
             }
             @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
                 String relative = relativePath(canonicalRoot, file);
-                if (!ChangeSetPublisher.centralSnapshotFile(relative)) return FileVisitResult.CONTINUE;
+                boolean selectedConfig = relative.equals(physicalConfigPath);
+                if (!selectedConfig && (!ChangeSetPublisher.centralSnapshotFile(relative)
+                        || configuredSource && !"config/config.yaml".equals(physicalConfigPath)
+                                && "config/config.yaml".equals(relative))) return FileVisitResult.CONTINUE;
                 if (attributes.isSymbolicLink() || Files.isSymbolicLink(file) || !attributes.isRegularFile())
                     throw new IOException("Central Config source contains an unsafe file");
                 included.add(relative);
@@ -589,6 +696,11 @@ final class SourceRevisionStore {
             }
         }
         return included;
+    }
+
+    private static boolean pathAncestor(String directory, String file) {
+        if (directory == null || directory.isEmpty()) return true;
+        return file != null && (file.equals(directory) || file.startsWith(directory + "/"));
     }
 
     private static boolean centralSnapshotDirectory(String relative, Set<String> includedDirectories) {
@@ -800,13 +912,19 @@ final class SourceRevisionStore {
     }
 
     private static void copyTree(String domain, Path source, Path destination) throws Exception {
+        copyTree(domain, source, destination, "config/config.yaml", false);
+    }
+
+    private static void copyTree(String domain, Path source, Path destination,
+                                 String configuredConfigPath, boolean configuredSource) throws Exception {
         Files.createDirectory(destination);
         final List<Path> directories = new ArrayList<>();
         final long[] byteCount = {0L};
         final int[] fileCount = {0},entryCount = {0};
         final boolean central = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(domain);
-        final Set<String> centralFiles = central ? centralSnapshotFiles(source) : Set.of();
+        final Set<String> centralFiles = central ? centralSnapshotFiles(source, configuredConfigPath, configuredSource) : Set.of();
         final Set<String> centralDirectories = central ? centralSnapshotDirectories(centralFiles) : Set.of();
+        final String physicalConfigPath = configuredSource ? configuredConfigPath : "config/config.yaml";
         final long byteLimit = central ? ChangeSetPublisher.MAX_REVISION_BYTES : MAX_TREE_BYTES;
         final long fileByteLimit = central ? ChangeSetPublisher.MAX_REVISION_FILE_BYTES : MAX_TREE_BYTES;
         final int fileLimit = central ? ChangeSetPublisher.MAX_REVISION_FILES : MAX_TREE_FILES;
@@ -814,12 +932,18 @@ final class SourceRevisionStore {
         Files.walkFileTree(source, new SimpleFileVisitor<>() {
             @Override public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) throws IOException {
                 String relativeName = relativePath(source, directory);
-                if (central && !centralSnapshotDirectory(relativeName, centralDirectories)) return FileVisitResult.SKIP_SUBTREE;
+                if (central && !centralSnapshotDirectory(relativeName, centralDirectories)
+                        && !(configuredSource && pathAncestor(relativeName, physicalConfigPath))) return FileVisitResult.SKIP_SUBTREE;
                 if(++entryCount[0]>entryLimit)throw new IOException("Source tree exceeds its revision entry limit");
                 if (Files.isSymbolicLink(directory) || attributes.isSymbolicLink()) throw new IOException("Source tree contains an unsafe directory link");
                 Path relative = source.relativize(directory);
                 Path target = relative.getNameCount() == 0 ? destination : destination.resolve(relative);
-                if (!target.equals(destination)) Files.createDirectory(target);
+                if (!target.equals(destination)) {
+                    if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                        if (Files.isSymbolicLink(target) || !Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS))
+                            throw new IOException("Source revision copy directory is unsafe");
+                    } else Files.createDirectory(target);
+                }
                 directories.add(target);
                 return FileVisitResult.CONTINUE;
             }
@@ -828,18 +952,22 @@ final class SourceRevisionStore {
                 if (central && !centralFiles.contains(relativeName)) return FileVisitResult.CONTINUE;
                 if(++entryCount[0]>entryLimit)throw new IOException("Source tree exceeds its revision entry limit");
                 Path relative = source.relativize(file);
-                Path target = destination.resolve(relative);
+                String targetRelative = central && configuredSource && relativeName.equals(physicalConfigPath)
+                        ? "config/config.yaml" : relativeName;
+                Path target = destination.resolve(targetRelative);
                 if (attributes.isSymbolicLink() || Files.isSymbolicLink(file)) {
                     Path link = Files.readSymbolicLink(file);
                     if (link.isAbsolute() || !file.getParent().resolve(link).normalize().startsWith(source))
                         throw new IOException("Source tree contains an external symbolic link");
-                    Files.createSymbolicLink(target, link);
+                createCopyParent(target, destination);
+                Files.createSymbolicLink(target, link);
                     return FileVisitResult.CONTINUE;
                 }
                 if (!attributes.isRegularFile()) throw new IOException("Source tree contains an unsupported file");
                 byteCount[0] += attributes.size();
                 if (attributes.size() > fileByteLimit || ++fileCount[0] > fileLimit || byteCount[0] > byteLimit)
                     throw new IOException("Source tree exceeds its revision limit");
+                createCopyParent(target, destination);
                 Files.copy(file, target, StandardCopyOption.COPY_ATTRIBUTES);
                 if(attributes.size()>0)forceFile(target);
                 return FileVisitResult.CONTINUE;
@@ -852,6 +980,15 @@ final class SourceRevisionStore {
             setPermissions(target, workingDirectoryPermissions(original));
         }
         forceDirectory(destination);
+    }
+
+    private static void createCopyParent(Path target, Path destination) throws IOException {
+        Path parent = target.getParent();
+        if (parent == null || !parent.normalize().startsWith(destination.normalize()))
+            throw new IOException("Source revision copy target escapes its destination");
+        Files.createDirectories(parent);
+        if (Files.isSymbolicLink(parent) || !Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Source revision copy parent is unsafe");
     }
 
     private static void restoreTreePermissions(Path root, Path originalRoot) throws IOException {
@@ -953,6 +1090,26 @@ final class SourceRevisionStore {
                 digest.update(java.util.HexFormat.of().parseHex(fileDigest(file)));
             }
             digest.update((byte)0xff);
+        }
+        return java.util.HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static String treeDigestConfigured(String domain, Path root, String configuredConfigPath) throws Exception {
+        if (!ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(domain)) return treeDigest(domain, root);
+        Set<String> physicalFiles = centralSnapshotFiles(root, configuredConfigPath, true);
+        TreeMap<String, Path> logicalFiles = new TreeMap<>();
+        for (String physical : physicalFiles) {
+            String logical = physical.equals(configuredConfigPath) ? "config/config.yaml" : physical;
+            if (logicalFiles.put(logical, root.resolve(physical)) != null)
+                throw new IOException("Central Config path mapping contains a collision");
+        }
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        for (Map.Entry<String, Path> entry : logicalFiles.entrySet()) {
+            digest.update(entry.getKey().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            digest.update((byte) 0);
+            digest.update((byte) 'F');
+            digest.update(java.util.HexFormat.of().parseHex(fileDigest(entry.getValue())));
+            digest.update((byte) 0xff);
         }
         return java.util.HexFormat.of().formatHex(digest.digest());
     }

@@ -210,6 +210,19 @@ final class ChangeSetPublisher implements AutoCloseable {
             return bytes;
         }
 
+        /** Trusted base Config bytes bound to this candidate's source fence. */
+        byte[] readBaseCentral(String logicalPath) throws IOException {
+            String path = normalizePath(logicalPath);
+            Path source = base.centralIndex.files.get(path);
+            if (source == null) return null;
+            if (Files.isSymbolicLink(source) || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS))
+                throw new IOException("Pinned central baseline is unavailable");
+            byte[] bytes = readBounded(source);
+            if (!matchesHash(base.centralIndex.hashes.get(path), bytes))
+                throw new IOException("Pinned central baseline changed");
+            return bytes;
+        }
+
         byte[] read(String logicalPath) throws IOException {
             String path = normalizePath(logicalPath);
             if (changes.containsKey(path)) {
