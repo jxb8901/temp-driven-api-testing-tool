@@ -42,7 +42,7 @@ run_and_check() {
   log_file="$2"
   launcher="$3"
   shift 3
-  output="$(PATH="$path_dir" ATT_BUILD_TOOL_LOG="$log_file" \
+  output="$(PATH="$path_dir" ATT_HOME="$(dirname "$launcher")" ATT_BUILD_TOOL_LOG="$log_file" \
     ORDERS_DB_USERNAME=att-validation-placeholder ORDERS_DB_PASSWORD=att-validation-placeholder \
     PAYMENT_MQ_USERNAME=att-validation-placeholder PAYMENT_MQ_PASSWORD=att-validation-placeholder \
     /bin/sh "$launcher" "$@")" || {
@@ -107,7 +107,7 @@ run_debug() {
   log_file="$3"
   fixture_relative="$4"
   runtime_config="$root/config/${fixture_relative##*/}/config.yaml"
-  output="$(PATH="$path_dir" ATT_BUILD_TOOL_LOG="$log_file" ATT_PACKAGE_ROOT="$root/packages/default/$fixture_relative" \
+  output="$(PATH="$path_dir" ATT_HOME="$root" ATT_BUILD_TOOL_LOG="$log_file" ATT_PACKAGE_ROOT="$root/packages/default/$fixture_relative" \
     /bin/sh "$root/att.sh" debug template SIMPLE \
     --config "$runtime_config" \
     --input "templates/SIMPLE/debug.yaml" --format json --quiet)" || {
@@ -159,7 +159,7 @@ cp "$ROOT_DIR/att.sh" "$MISSING_ROOT/att.sh"
 for path_dir in "$MAVEN_PATH" "$NO_MAVEN_PATH"; do
   log_file="$TEMP_DIR/missing-$([ "$path_dir" = "$MAVEN_PATH" ] && echo maven || echo no-maven).log"
   set +e
-  output="$(PATH="$path_dir" ATT_BUILD_TOOL_LOG="$log_file" /bin/sh "$MISSING_ROOT/att.sh" version 2>&1)"
+  output="$(PATH="$path_dir" ATT_HOME="$MISSING_ROOT" ATT_BUILD_TOOL_LOG="$log_file" /bin/sh "$MISSING_ROOT/att.sh" version 2>&1)"
   status=$?
   set -e
   if [ "$status" -ne 2 ] ||
