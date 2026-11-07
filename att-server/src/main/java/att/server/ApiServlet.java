@@ -994,7 +994,10 @@ public final class ApiServlet extends HttpServlet {
                     throw new IllegalArgumentException("Change Set actions accept an empty object");
                 if("validate".equals(action))result=runtime.changeSetPublisher.validate(domain,scopeId,actor,systemSettingsWrite,id,requestId);
                 else if("review".equals(action))result=runtime.changeSetPublisher.review(domain,scopeId,actor,systemSettingsWrite,id,requestId);
-                else if("publish".equals(action))result=runtime.changeSetPublisher.publish(domain,scopeId,actor,systemSettingsWrite,id,requestId);
+                else if("publish".equals(action)) {
+                    result=runtime.changeSetPublisher.publish(domain,scopeId,actor,systemSettingsWrite,id,requestId);
+                    runtime.notifySourcePublished(domain,scopeId,result,requestId);
+                }
                 else if("discard".equals(action))result=runtime.changeSetPublisher.discard(domain,scopeId,actor,systemSettingsWrite,id,requestId);
                 else if("generate-snapshot".equals(action)) {
                     if(central)throw new IllegalArgumentException("Testcase snapshots are Package-scoped");
@@ -1117,7 +1120,11 @@ public final class ApiServlet extends HttpServlet {
                 result=switch(parts[6]) {
                     case "validate" -> runtime.manifestPublisher.validate(packageId,actor,id);
                     case "review" -> runtime.manifestPublisher.review(packageId,actor,id);
-                    case "publish" -> runtime.manifestPublisher.publish(packageId,actor,id,requestId);
+                    case "publish" -> {
+                        Map<String,Object> published=runtime.manifestPublisher.publish(packageId,actor,id,requestId);
+                        runtime.notifySourcePublished(ChangeSetPublisher.PACKAGE_SOURCE,packageId,published,requestId);
+                        yield published;
+                    }
                     case "discard" -> {runtime.manifestPublisher.discard(packageId,actor,id);yield new java.util.LinkedHashMap<>(Map.of("discarded",true));}
                     default -> throw new IllegalArgumentException("Unsupported Manifest action");
                 };
