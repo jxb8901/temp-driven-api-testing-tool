@@ -111,6 +111,7 @@ class SourceManagementContractsTest {
         assertEquals(DIGEST_1, current.businessSource.revision);
         assertNotEquals(current.packageSourceRevision.revision, current.executionRevisionDigest.revision);
         assertEquals(1L, current.present().stream().filter(value -> value.kind == RevisionKind.PACKAGE_SOURCE).count());
+        assertEquals(1L, current.present().stream().filter(value -> value.kind == RevisionKind.BUSINESS_SOURCE).count());
         assertThrows(IllegalArgumentException.class, () -> new RevisionSet(null, legacy, null, null, null,
                 null, null, null, null,
                 RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE, "pay", DIGEST_2), execution));

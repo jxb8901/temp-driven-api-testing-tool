@@ -116,7 +116,7 @@ public final class SourceManagementContracts {
 
         public List<RevisionIdentity> present() {
             List<RevisionIdentity> result = new ArrayList<RevisionIdentity>();
-            for (RevisionIdentity value : Arrays.asList(packageRegistration, packageSourceRevision, changeSet,
+            for (RevisionIdentity value : Arrays.asList(packageRegistration, packageSourceRevision, businessSource, changeSet,
                     manifest, configSource, effectiveConfig, environment, engineSchema, executionRevisionDigest,
                     scheduleSnapshot))
                 if (value != null) result.add(value);
