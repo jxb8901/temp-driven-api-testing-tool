@@ -2,6 +2,7 @@ package att.server.api.source;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import att.server.api.WorkerRequest;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -96,6 +97,43 @@ class SourceManagementContractsTest {
                 config, manifest, null, null, null, null));
     }
 
+    @Test void legacyBusinessSourceAndCanonicalPackageAndExecutionRevisionsRemainDistinct() {
+        RevisionIdentity legacy = RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE, "pay", DIGEST_1);
+        RevisionSet oldClient = new RevisionSet(null, legacy, null, null, null, null, null, null, null);
+        assertEquals(DIGEST_1, oldClient.packageSourceRevision.revision);
+        assertEquals(RevisionKind.PACKAGE_SOURCE, oldClient.packageSourceRevision.kind);
+        assertEquals(RevisionKind.BUSINESS_SOURCE, oldClient.businessSource.kind);
+
+        RevisionIdentity packageSource = RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE, "pay", DIGEST_1);
+        RevisionIdentity execution = RevisionIdentity.of(RevisionKind.EXECUTION_REVISION, "pay@SIT", DIGEST_2);
+        RevisionSet current = new RevisionSet(null, null, null, null, null, null, null, null, null,
+                packageSource, execution);
+        assertEquals(DIGEST_1, current.businessSource.revision);
+        assertNotEquals(current.packageSourceRevision.revision, current.executionRevisionDigest.revision);
+        assertEquals(1L, current.present().stream().filter(value -> value.kind == RevisionKind.PACKAGE_SOURCE).count());
+        assertThrows(IllegalArgumentException.class, () -> new RevisionSet(null, legacy, null, null, null,
+                null, null, null, null,
+                RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE, "pay", DIGEST_2), execution));
+    }
+
+    @Test void workerExecutionRevisionFieldAcceptsLegacyAliasAndRejectsAmbiguousRequests() throws Exception {
+        WorkerRequest legacy = JSON.readValue("{\"expectedRevisionDigest\":\"" + DIGEST_1 + "\"}", WorkerRequest.class);
+        legacy.normalizeExpectedExecutionRevisionDigest();
+        assertEquals(DIGEST_1, legacy.expectedExecutionRevisionDigest);
+        assertEquals(DIGEST_1, legacy.expectedRevisionDigest);
+
+        WorkerRequest current = new WorkerRequest();
+        current.expectedExecutionRevisionDigest = DIGEST_2;
+        current.normalizeExpectedExecutionRevisionDigest();
+        assertEquals(DIGEST_2, current.expectedRevisionDigest);
+        assertTrue(JSON.writeValueAsString(current).contains("expectedExecutionRevisionDigest"));
+
+        WorkerRequest ambiguous = new WorkerRequest();
+        ambiguous.expectedExecutionRevisionDigest = DIGEST_1;
+        ambiguous.expectedRevisionDigest = DIGEST_2;
+        assertThrows(IllegalArgumentException.class, ambiguous::normalizeExpectedExecutionRevisionDigest);
+    }
+
     @Test void publicationHooksAreScopedAndImpactProviderUnavailableNeverApproves() throws Exception {
         AtomicInteger commitCount = new AtomicInteger();
         Map<String, InvalidationScope> invalidations = new LinkedHashMap<String, InvalidationScope>();
@@ -178,13 +216,19 @@ class SourceManagementContractsTest {
         }
         com.networknt.schema.JsonSchema validator = com.networknt.schema.JsonSchemaFactory
                 .getInstance(com.networknt.schema.SpecVersion.VersionFlag.V202012).getSchema(schema);
+        RevisionSet revisions = new RevisionSet(null, null, null, null, null, null, null, null, null,
+                RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE, "pay", DIGEST_1),
+                RevisionIdentity.of(RevisionKind.EXECUTION_REVISION, "pay@SIT", DIGEST_2));
         ChangeSetView dto = new ChangeSetView("C123", Domain.PACKAGE_SOURCE, "pay", DraftState.DRAFT,
-                RevisionSet.empty(), null, true, Collections.<PackageCategory>emptyList(), false,
+                revisions, null, true, Collections.<PackageCategory>emptyList(), false,
                 Collections.<DependencyReference>emptyList(), Collections.<ValidationDiagnostic>emptyList());
         JsonNode serialized = JSON.valueToTree(dto);
         java.util.Set<com.networknt.schema.ValidationMessage> errors = validator.validate(serialized);
         assertTrue(errors.isEmpty(), errors.toString());
         assertEquals("draft", serialized.path("state").asText());
+        assertEquals("PACKAGE_SOURCE", serialized.path("revisions").path("packageSourceRevision").path("kind").asText());
+        assertEquals("EXECUTION_REVISION", serialized.path("revisions").path("executionRevisionDigest").path("kind").asText());
+        assertEquals(DIGEST_1, serialized.path("revisions").path("businessSource").path("revision").asText());
         assertTrue(serialized.path("revisions").path("packageRegistration").isNull(),
                 "absent revision identities serialize as JSON null and remain valid");
         assertTrue(serialized.path("noStore").asBoolean());

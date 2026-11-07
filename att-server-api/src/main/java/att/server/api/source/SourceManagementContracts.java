@@ -24,8 +24,8 @@ public final class SourceManagementContracts {
     public enum PackageCategory { TESTCASE, TEMPLATE, FLOW, LOAD, TESTDATA, FILE }
 
     public enum RevisionKind {
-        PACKAGE_REGISTRATION, BUSINESS_SOURCE, CHANGE_SET, PACKAGE_MANIFEST,
-        CONFIG_SOURCE, EFFECTIVE_CONFIG, ENVIRONMENT, ENGINE_SCHEMA, SCHEDULE_SNAPSHOT
+        PACKAGE_REGISTRATION, PACKAGE_SOURCE, BUSINESS_SOURCE, CHANGE_SET, PACKAGE_MANIFEST,
+        CONFIG_SOURCE, EFFECTIVE_CONFIG, ENVIRONMENT, ENGINE_SCHEMA, EXECUTION_REVISION, SCHEDULE_SNAPSHOT
     }
 
     /** A typed identity. The value is an opaque revision token or digest, never authored source. */
@@ -53,7 +53,13 @@ public final class SourceManagementContracts {
     public static final class RevisionSet {
         public final String schemaVersion = "att-source-revision-set/v1";
         public final RevisionIdentity packageRegistration;
+        /** Canonical Package-owned content identity. */
+        public final RevisionIdentity packageSourceRevision;
+        /** @deprecated Compatibility alias for packageSourceRevision. */
+        @Deprecated
         public final RevisionIdentity businessSource;
+        /** Execution-bound identity; never use it as the Package source edit revision. */
+        public final RevisionIdentity executionRevisionDigest;
         public final RevisionIdentity changeSet;
         public final RevisionIdentity manifest;
         public final RevisionIdentity configSource;
@@ -67,8 +73,34 @@ public final class SourceManagementContracts {
                            RevisionIdentity configSource, RevisionIdentity effectiveConfig,
                            RevisionIdentity environment, RevisionIdentity engineSchema,
                            RevisionIdentity scheduleSnapshot) {
+            this(packageRegistration, businessSource, changeSet, manifest, configSource, effectiveConfig,
+                    environment, engineSchema, scheduleSnapshot, null, null);
+        }
+
+        public RevisionSet(RevisionIdentity packageRegistration, RevisionIdentity businessSource,
+                           RevisionIdentity changeSet, RevisionIdentity manifest,
+                           RevisionIdentity configSource, RevisionIdentity effectiveConfig,
+                           RevisionIdentity environment, RevisionIdentity engineSchema,
+                           RevisionIdentity scheduleSnapshot, RevisionIdentity packageSourceRevision,
+                           RevisionIdentity executionRevisionDigest) {
             this.packageRegistration = requireKind(packageRegistration, RevisionKind.PACKAGE_REGISTRATION, "packageRegistration");
-            this.businessSource = requireKind(businessSource, RevisionKind.BUSINESS_SOURCE, "businessSource");
+            RevisionIdentity legacyBusiness = requireKind(businessSource, RevisionKind.BUSINESS_SOURCE, "businessSource");
+            RevisionIdentity packageSource = requireKind(packageSourceRevision, RevisionKind.PACKAGE_SOURCE, "packageSourceRevision");
+            if (packageSource == null && legacyBusiness != null)
+                packageSource = new RevisionIdentity(RevisionKind.PACKAGE_SOURCE, legacyBusiness.scopeId,
+                        legacyBusiness.qualifier, legacyBusiness.revision);
+            if (legacyBusiness == null && packageSource != null)
+                legacyBusiness = new RevisionIdentity(RevisionKind.BUSINESS_SOURCE, packageSource.scopeId,
+                        packageSource.qualifier, packageSource.revision);
+            if (legacyBusiness != null && packageSource != null
+                    && (!legacyBusiness.scopeId.equals(packageSource.scopeId)
+                    || !java.util.Objects.equals(legacyBusiness.qualifier, packageSource.qualifier)
+                    || !legacyBusiness.revision.equals(packageSource.revision)))
+                throw new IllegalArgumentException("businessSource must match packageSourceRevision");
+            this.packageSourceRevision = packageSource;
+            this.businessSource = legacyBusiness;
+            this.executionRevisionDigest = requireKind(executionRevisionDigest, RevisionKind.EXECUTION_REVISION,
+                    "executionRevisionDigest");
             this.changeSet = requireKind(changeSet, RevisionKind.CHANGE_SET, "changeSet");
             this.manifest = requireKind(manifest, RevisionKind.PACKAGE_MANIFEST, "manifest");
             this.configSource = requireKind(configSource, RevisionKind.CONFIG_SOURCE, "configSource");
@@ -84,8 +116,9 @@ public final class SourceManagementContracts {
 
         public List<RevisionIdentity> present() {
             List<RevisionIdentity> result = new ArrayList<RevisionIdentity>();
-            for (RevisionIdentity value : Arrays.asList(packageRegistration, businessSource, changeSet,
-                    manifest, configSource, effectiveConfig, environment, engineSchema, scheduleSnapshot))
+            for (RevisionIdentity value : Arrays.asList(packageRegistration, packageSourceRevision, changeSet,
+                    manifest, configSource, effectiveConfig, environment, engineSchema, executionRevisionDigest,
+                    scheduleSnapshot))
                 if (value != null) result.add(value);
             return Collections.unmodifiableList(result);
         }

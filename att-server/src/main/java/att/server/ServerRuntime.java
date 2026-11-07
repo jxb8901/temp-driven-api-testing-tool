@@ -2864,10 +2864,12 @@ final class ServerRuntime implements AutoCloseable {
         return request;
     }
     byte[] workerRequestBytes(WorkerRequest request) throws Exception {
+        request.normalizeExpectedExecutionRevisionDigest();
         return JSON.writeValueAsBytes(applyWorkerPolicy(request));
     }
     private byte[] workerRequestBytes(WorkerRequest request,boolean warm) throws Exception {
         if(!warm)return workerRequestBytes(request);
+        request.normalizeExpectedExecutionRevisionDigest();
         var value=JSON.valueToTree(applyWorkerPolicy(request));
         ((com.fasterxml.jackson.databind.node.ObjectNode)value).set("executionEnvironment",JSON.valueToTree(System.getenv()));
         return JSON.writeValueAsBytes(value);

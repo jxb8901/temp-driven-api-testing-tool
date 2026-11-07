@@ -139,7 +139,11 @@ public final class WorkerMain {
         if(input.hasNonNull("jobId")) jobId=input.get("jobId").asText();
         WorkerRequest request;
         emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
-        try { request=mapper.treeToValue(input,WorkerRequest.class); if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes; }
+        try {
+            request=mapper.treeToValue(input,WorkerRequest.class);
+            request.normalizeExpectedExecutionRevisionDigest();
+            if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes;
+        }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
         currentCommand=request.command;
         try { consoleOptions=att.console.ExecutionConsoleFormatter.Options.published(

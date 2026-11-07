@@ -19,7 +19,7 @@
     },
     "RevisionKind": {
       "type": "string",
-      "enum": ["PACKAGE_REGISTRATION", "BUSINESS_SOURCE", "CHANGE_SET", "PACKAGE_MANIFEST", "CONFIG_SOURCE", "EFFECTIVE_CONFIG", "ENVIRONMENT", "ENGINE_SCHEMA", "SCHEDULE_SNAPSHOT"]
+      "enum": ["PACKAGE_REGISTRATION", "PACKAGE_SOURCE", "BUSINESS_SOURCE", "CHANGE_SET", "PACKAGE_MANIFEST", "CONFIG_SOURCE", "EFFECTIVE_CONFIG", "ENVIRONMENT", "ENGINE_SCHEMA", "EXECUTION_REVISION", "SCHEDULE_SNAPSHOT"]
     },
     "RevisionIdentity": {
       "type": "object",
@@ -39,7 +39,9 @@
       "properties": {
         "schemaVersion": {"const": "att-source-revision-set/v1"},
         "packageRegistration": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
+        "packageSourceRevision": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
         "businessSource": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
+        "executionRevisionDigest": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
         "changeSet": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
         "manifest": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
         "configSource": {"anyOf": [{"$ref": "#/$defs/RevisionIdentity"}, {"type": "null"}]},
