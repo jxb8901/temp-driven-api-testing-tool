@@ -53,6 +53,8 @@ export interface PackageSummary {
   packageId: string;
   name?: string;
   canExecute?: boolean;
+  /** Server-authorized source capability; never inferred from role or Package labels. */
+  canEditPackageContent?: boolean;
 }
 
 export type JobStatus =

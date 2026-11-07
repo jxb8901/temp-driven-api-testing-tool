@@ -3,6 +3,7 @@ import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
 import type { ConfigurationEntry, ExplorerApi, JsonValue, ResourceReference, TestdataRecordsResponse } from './types';
 import { CodeEditor } from '../code/CodeEditor';
+import { SourceAuthoringWorkspace } from './SourceAuthoringWorkspace';
 import './package-testdata.css';
 
 function errorText(error: unknown, action: string): string {
@@ -73,9 +74,10 @@ interface KeyedRecordResponse {
   value: TestdataRecordsResponse;
 }
 
-export function TestdataCatalog({ api, packageId, environment, defaultEnvironment, descriptorId, refreshKey, onDescriptorChange, onOpenResource, onRefresh }: {
+export function TestdataCatalog({ api, packageId, environment, defaultEnvironment, descriptorId, refreshKey, onDescriptorChange, onOpenResource, onRefresh, registerUnsavedChanges }: {
   api: ExplorerApi; packageId: string; environment: string; defaultEnvironment?: string; descriptorId?: string; refreshKey: number;
   onDescriptorChange(descriptorId?: string): void; onOpenResource(resource: { type: string; resourceId: string }): void; onRefresh(): void;
+  registerUnsavedChanges?: (isDirty: boolean, description?: string) => () => void;
 }) {
   const inspectionRefresh = useInspectionRefresh();
   const [entries, setEntries] = useState<ConfigurationEntry[]>([]);
@@ -348,6 +350,9 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
           : <p className="att-config-empty">{loading ? 'Loading records…' : response ? 'This descriptor contains no records.' : 'No records are available for this descriptor.'}</p>)}
       {response?.nextOffset != null && <button type="button" onClick={() => updateRecordControls({ offset: response.nextOffset || 0, copiedRecord: null })} disabled={loading}>Load next 50 records</button>}
       <details className="att-testdata-source"><summary>Advanced descriptor metadata</summary><CodeEditor value={JSON.stringify(Object.fromEntries(Object.entries(selectedEntry.fields || {}).map(([key, field]) => [key, field.state === 'visible' ? field.value : field.state])), null, 2)} language="json" label="Advanced Testdata descriptor metadata" readOnly /></details>
+      {selectedEntry.source && <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
+        query: { kind: 'testdata', resourceId: selectedEntry.id, environment: environment || undefined },
+        label: `Testdata descriptor · ${selectedEntry.source}`, allowFileOperations: true }} registerUnsavedChanges={registerUnsavedChanges} />}
     </> : <p className="att-config-empty">{descriptorId ? `Testdata descriptor ${descriptorId} is unavailable for this Package or Environment.` : 'No Testdata descriptors were returned for the selected environment.'}</p>}
       </div>
     </div>
@@ -357,12 +362,13 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
 export type PackageRegistrationState = 'loading' | 'ready' | 'error';
 
 export function PackageTestdataWorkspace({ api, packageId, packageLabel, registrationState, registered, environment, descriptorId,
-  onEnvironmentChange, onDescriptorChange, onBackToResources, onOpenResource, onOpenPackageConfiguration }: {
+  onEnvironmentChange, onDescriptorChange, onBackToResources, onOpenResource, onOpenPackageConfiguration, registerUnsavedChanges }: {
   api: ExplorerApi; packageId: string; packageLabel: string; registrationState: PackageRegistrationState; registered: boolean;
   environment: string; descriptorId?: string; onEnvironmentChange(environment: string): void;
   onDescriptorChange(descriptorId?: string): void; onBackToResources(): void;
   onOpenResource(resource: { type: string; resourceId: string }): void;
   onOpenPackageConfiguration(): void;
+  registerUnsavedChanges?: (isDirty: boolean, description?: string) => () => void;
 }) {
   const [declared, setDeclared] = useState<Awaited<ReturnType<ExplorerApi['getDeclaredConfiguration']>> | null>(null);
   const [environmentError, setEnvironmentError] = useState('');
@@ -411,7 +417,7 @@ export function PackageTestdataWorkspace({ api, packageId, packageLabel, registr
     {environmentNotice && <p role="status">{environmentNotice}</p>}
     {environmentError && <p className="att-error" role="alert">{environmentError}<button type="button" onClick={refresh}>Retry Package environments</button></p>}
     <TestdataCatalog api={api} packageId={packageId} environment={environment} defaultEnvironment={defaultEnvironment} descriptorId={descriptorId} refreshKey={refreshKey}
-      onDescriptorChange={onDescriptorChange} onOpenResource={onOpenResource} onRefresh={refresh} />
+      onDescriptorChange={onDescriptorChange} onOpenResource={onOpenResource} onRefresh={refresh} registerUnsavedChanges={registerUnsavedChanges} />
     <button type="button" onClick={refresh}>Refresh Testdata</button>
   </main>;
 }

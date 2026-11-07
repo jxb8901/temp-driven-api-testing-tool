@@ -1,3 +1,8 @@
+import type {
+  ManagedAuthoringSource, PackageAuthoringSourceQuery, SourceChangeAction, SourceChangeSet,
+  SourceDomain, SourceImpactReport, SourceOperation, SourcePublishResult, SourceSnapshotRequest,
+} from './sourceManagement';
+
 export type ResourceType = 'case' | 'template' | 'flow' | 'tool';
 export type DebugResourceType = Exclude<ResourceType, 'case'>;
 export type JsonPrimitive = string | number | boolean | null;
@@ -263,6 +268,14 @@ export interface ExplorerApi {
   listResources(packageId: string, query: ResourceQuery, signal?: AbortSignal): Promise<ResourcePage>;
   getResource(identity: ResourceIdentity, signal?: AbortSignal): Promise<ResourceDetail>;
   getSafeSource(identity: ResourceIdentity, signal?: AbortSignal): Promise<SourceProjection>;
+  getManagedPackageAuthoringSource?(packageId: string, query: PackageAuthoringSourceQuery, signal?: AbortSignal): Promise<ManagedAuthoringSource>;
+  getCentralAuthoringSource?(path: string, signal?: AbortSignal): Promise<ManagedAuthoringSource>;
+  stageSourceChangeSet?(domain: SourceDomain, scopeId: string, baseSourceRevision: string, registryRevision: string | undefined,
+    operations: SourceOperation[], signal?: AbortSignal): Promise<SourceChangeSet>;
+  sourceChangeSetAction?(domain: SourceDomain, scopeId: string, changeSetId: string, action: SourceChangeAction,
+    signal?: AbortSignal): Promise<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }>;
+  generateTestcaseSnapshot?(packageId: string, changeSetId: string, input: SourceSnapshotRequest, signal?: AbortSignal): Promise<SourceChangeSet>;
+  getCentralConfigImpact?(changeSetId: string, cursor?: string, signal?: AbortSignal): Promise<SourceImpactReport>;
   getResourceSourceFile?(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection>;
   getDeclaredConfiguration(packageId: string, signal?: AbortSignal): Promise<ConfigurationResponse>;
   getEffectiveConfiguration(packageId: string, query: EffectiveConfigurationQuery, signal?: AbortSignal): Promise<ConfigurationResponse>;
@@ -295,4 +308,5 @@ export interface ExplorerPageProps {
   onScheduleDebug?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string; executionType: 'run' | 'load'; legacyDebug?: boolean; target: { type: DebugResourceType; id: string } }) => boolean | void;
   onOpenConfigurationFile?: (path: string, origin?: string, reference?: ResourceSourceReference) => void;
   onOpenTestdata?: () => void;
+  canManagePackageSource?: boolean;
 }

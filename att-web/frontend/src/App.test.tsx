@@ -270,6 +270,7 @@ describe('App Dashboard job refresh', () => {
     }));
     vi.spyOn(api, 'getJobs').mockResolvedValue({ items: [] });
 
+    await import('./features/load/QuickLoadPage');
     await act(async () => root.render(<App />));
     await settle();
     const durationInput = () => host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]');

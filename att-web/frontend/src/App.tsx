@@ -37,7 +37,7 @@ function asError(value: unknown): Error {
 
 const loadJobsApi: LoadJobsApi = api;
 
-function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSchedule, packageRegistrationState, registered, packageLabel }: {
+function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSchedule, packageRegistrationState, registered, packageLabel, canManagePackageSource }: {
   route: Extract<AppRoute, { kind: 'package' }>;
   inlineLoadEnabled: boolean;
   schedulingEnabled: boolean;
@@ -45,6 +45,7 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
   packageRegistrationState: 'loading' | 'ready' | 'error';
   registered: boolean;
   packageLabel: string;
+  canManagePackageSource: boolean;
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
@@ -95,13 +96,15 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
     <PackageTestdataWorkspace api={api} packageId={packageId} packageLabel={packageLabel} registrationState={packageRegistrationState} registered={registered}
       environment={environment} descriptorId={route.testdataDescriptorId} onEnvironmentChange={onTestdataEnvironmentChange}
       onDescriptorChange={onTestdataDescriptorChange} onBackToResources={() => navigation.navigate({ kind: 'package', packageId, environment })}
-      onOpenResource={onOpenTestdataResource} onOpenPackageConfiguration={onOpenPackageConfiguration} />
+      onOpenResource={onOpenTestdataResource} onOpenPackageConfiguration={onOpenPackageConfiguration}
+      registerUnsavedChanges={navigation.registerUnsavedChanges} />
   </>;
   if (route.view === 'source-file') return <>
     {contextNotice}
     <PackageSafeSourceFileViewer api={api} packageId={packageId} filePath={route.filePath} fileOrigin={route.fileOrigin}
       sourceReference={route.sourceReference} onBack={() => navigation.navigate(route.returnTo || formatRoute({ kind: 'package', packageId,
         ...(route.sourceReference ? { resource: { type: route.sourceReference.type, resourceId: route.sourceReference.resourceId, tab: 'source' as const } } : {}) }))}
+      registerUnsavedChanges={navigation.registerUnsavedChanges}
       onOpenFile={(path, origin, sourceReference) => navigation.navigate({ kind: 'package', packageId, view: 'source-file', environment,
         filePath: path, fileOrigin: origin, sourceReference, returnTo: formatRoute(route) })} />
   </>;
@@ -126,6 +129,7 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
       else navigation.navigate({ kind: 'configuration', packageId, environment, filePath: path, fileOrigin: origin, tab: 'source' });
     }}
     onOpenTestdata={onOpenTestdata}
+    canManagePackageSource={canManagePackageSource}
   /></>;
 }
 
@@ -233,6 +237,8 @@ function ConfigurationRouteView({ route }: {
     sourceReference={route.sourceReference}
     configurationReferenceId={route.configurationReferenceId}
     canRevealAdminFields={workspace.canRevealConfigurationFields}
+    canManageCentralConfiguration={workspace.accessCapabilities.systemSettingsWrite}
+    registerUnsavedChanges={navigation.registerUnsavedChanges}
     tab={route.tab || (route.filePath ? 'source' : 'declared')}
     onEnvironmentChange={onEnvironmentChange}
     onFileChange={onFileChange}
@@ -332,6 +338,7 @@ function LoadResourceRouteView({ route, inlineLoadEnabled }: {
     environment={selectedEnvironment} environments={environments} environmentState={environmentState}
     environmentNotice={environmentNotice} onRetryEnvironments={() => setEnvironmentReload(value => value + 1)} inlineLoadEnabled={inlineLoadEnabled}
     onEnvironmentChange={onEnvironmentChange}
+    registerUnsavedChanges={navigation.registerUnsavedChanges}
     onBack={() => navigation.navigate(route.returnTo || '#/advanced-load')}
     onQuickLoad={(packageId, detail) => navigation.navigate({ kind: 'quick-load', packageId,
       templateId: detail.resourceId, model: detail.model || 'virtualUsers', environment: selectedEnvironment })} /></Suspense>;
@@ -547,6 +554,7 @@ export default function App() {
         packageRegistrationState={state.packages.status}
         registered={Boolean(registeredPackage)}
         packageLabel={registeredPackage?.name || packageRoute.packageId}
+        canManagePackageSource={registeredPackage?.canEditPackageContent === true}
       />
     </Suspense>;
   } else {

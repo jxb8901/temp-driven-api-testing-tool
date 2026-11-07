@@ -4,6 +4,7 @@ import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
 import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
 import type { ExplorerApi, ResourceIdentity, ResourceSourceReference, SafeSourceFileReference, SourceProjection } from './types';
+import { SourceAuthoringWorkspace } from './SourceAuthoringWorkspace';
 import { sourceViewerLimits } from './SourceViewer';
 import './explorer.css';
 
@@ -18,9 +19,10 @@ function safeError(error: unknown): string {
   return 'Safe Package file could not be loaded. Check the connection and retry.';
 }
 
-export function PackageSafeSourceFileViewer({ api, packageId, filePath, fileOrigin, sourceReference, onBack, onOpenFile }: {
+export function PackageSafeSourceFileViewer({ api, packageId, filePath, fileOrigin, sourceReference, onBack, onOpenFile, registerUnsavedChanges }: {
   api: ExplorerApi; packageId: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReference;
-  onBack(): void; onOpenFile(path: string, origin: string | undefined, sourceReference: ResourceSourceReference): void;
+  onBack(): void; registerUnsavedChanges?: (isDirty: boolean, description?: string) => () => void;
+  onOpenFile(path: string, origin: string | undefined, sourceReference: ResourceSourceReference): void;
 }) {
   const [projection, setProjection] = useState<SourceProjection | null>(null);
   const [error, setError] = useState('');
@@ -98,5 +100,13 @@ export function PackageSafeSourceFileViewer({ api, packageId, filePath, fileOrig
       </li>)}</ul> : null}
       {projection.fileReferencesTruncated && <p role="status">Additional references were omitted by the Server safety limit.</p>}
     </section> : null}
+    {identity && sourceReference && <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
+      query: { kind: 'file', resourceType: sourceReference.type, resourceId: sourceReference.resourceId,
+        referenceId: sourceReference.referenceId, origin: fileOrigin },
+      label: `File authoring · ${projection?.logicalPath || filePath || 'referenced Package file'}`,
+      allowFileOperations: true, allowCreate: true }} registerUnsavedChanges={registerUnsavedChanges}
+      onOpenFileReference={(path, origin, reference) => {
+        if (reference) onOpenFile(path, origin, { type: reference.type, resourceId: reference.resourceId, referenceId: reference.referenceId });
+      }} />}
   </main>;
 }
