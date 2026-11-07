@@ -117,11 +117,17 @@ final class ChangeSetPublisher implements AutoCloseable {
         final boolean valid;
         final String revision;
         final String code;
-        private ValidationResult(boolean valid, String revision, String code) {
-            this.valid = valid; this.revision = revision; this.code = code;
+        final att.server.api.source.SourceManagementContracts.RevisionSet revisions;
+        private ValidationResult(boolean valid, String revision, String code,
+                                 att.server.api.source.SourceManagementContracts.RevisionSet revisions) {
+            this.valid = valid; this.revision = revision; this.code = code; this.revisions = revisions;
         }
-        static ValidationResult accepted(String revision) { return new ValidationResult(true, revision, null); }
-        static ValidationResult rejected(String code) { return new ValidationResult(false, null, safeCode(code)); }
+        static ValidationResult accepted(String revision) { return accepted(revision, null); }
+        static ValidationResult accepted(String revision,
+                att.server.api.source.SourceManagementContracts.RevisionSet revisions) {
+            return new ValidationResult(true, revision, null, revisions);
+        }
+        static ValidationResult rejected(String code) { return new ValidationResult(false, null, safeCode(code), null); }
     }
 
     static final class GateDecision {
@@ -173,6 +179,15 @@ final class ChangeSetPublisher implements AutoCloseable {
         String configRevision() { return configRevision; }
         String schemaRevision() { return schemaRevision; }
         String changeSetId() { return id; }
+        String packageSourceRevision() throws Exception {
+            if (!PACKAGE_SOURCE.equals(scope.domain)) return null;
+            Map<String, String> hashes = new LinkedHashMap<String, String>(base.packageIndex.hashes);
+            for (Map.Entry<String, byte[]> entry : changes.entrySet()) {
+                if (entry.getValue() == null) hashes.remove(entry.getKey());
+                else hashes.put(entry.getKey(), hash(entry.getValue()));
+            }
+            return digestHashes(hashes);
+        }
         List<Map<String, Object>> changedFiles() { return diffView(diff); }
         Set<String> paths() { return Collections.unmodifiableSet(new HashSet<String>(changes.keySet())); }
         String packageBaseHash(String logicalPath) { return base.packageIndex.hashes.get(logicalPath); }
@@ -301,6 +316,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         final List<Diff> diff;
         final Map<String, SnapshotAuthorization> generatedSnapshots = new LinkedHashMap<String, SnapshotAuthorization>();
         String validationRevision;
+        att.server.api.source.SourceManagementContracts.RevisionSet validationRevisions;
         boolean reviewed;
         boolean publishing;
         Draft(String id, String actor, Scope scope, RevisionState base, Instant expires, Map<String, byte[]> changes,
@@ -428,6 +444,7 @@ final class ChangeSetPublisher implements AutoCloseable {
             audit.record(actor, "SOURCE_CHANGE_SET_VALIDATE", domain, scopeId,
                     auditDetail(requestId, "changeSetId=" + id + " revision=" + revision + " outcome=VALIDATED paths=" + pathList(draft.diff)));
             draft.validationRevision = revision;
+            draft.validationRevisions = result.revisions;
             draft.reviewed = false;
             return view(draft, "validated");
         } catch (ValidationRejected rejected) {
@@ -496,6 +513,7 @@ final class ChangeSetPublisher implements AutoCloseable {
             draft.generatedSnapshots.put(target, new SnapshotAuthorization(workbook, hash(workbookBytes),
                     sidecar, hash(sidecarBytes), snapshotHash));
             draft.validationRevision = null;
+            draft.validationRevisions = null;
             draft.reviewed = false;
             audit.record(actor, "SOURCE_CHANGE_SET_SNAPSHOT_GENERATE", domain, scopeId,
                     auditDetail(requestId, "changeSetId=" + id + " workbook=" + workbook
@@ -534,6 +552,7 @@ final class ChangeSetPublisher implements AutoCloseable {
                 auditDetail(requestId, "changeSetId=" + id + " revision=" + draft.base.sourceRevision
                         + " outcome=REVIEWED paths=" + pathList(draft.diff)));
         draft.reviewed = true;
+        if (checked.revisions != null) draft.validationRevisions = checked.revisions;
         return view(draft, "reviewed");
         } finally { sourceReadLock.unlock(); }
     }
@@ -571,6 +590,7 @@ final class ChangeSetPublisher implements AutoCloseable {
                         ? "ATT-CHANGESET-VALIDATION-UNAVAILABLE" : validated.code);
                 String newValidationRevision = validated.revision == null ? validationRevision(candidate) : requireDigest(validated.revision);
                 if (!draft.validationRevision.equals(newValidationRevision)) throw new Conflict();
+                if (validated.revisions != null) draft.validationRevisions = validated.revisions;
 
                 if (CENTRAL_RUNTIME_CONFIG.equals(domain)) {
                     GateDecision decision;
@@ -1196,7 +1216,9 @@ final class ChangeSetPublisher implements AutoCloseable {
                         att.server.api.source.SourceManagementContracts.Domain.valueOf(draft.scope.domain),
                         draft.scope.scopeId,
                         att.server.api.source.SourceManagementContracts.DraftState.valueOf(currentState.toUpperCase(Locale.ROOT)),
-                        revisionSet(draft), draftEtag(draft, currentState), true, categories(draft),
+                        draft.validationRevision != null && draft.validationRevisions != null
+                                ? draft.validationRevisions : revisionSet(draft),
+                        draftEtag(draft, currentState), true, categories(draft),
                         manifestChanged(draft), Collections.emptyList(), Collections.emptyList(),
                         draft.base.sourceRevision, draft.base.registryRevision, draft.base.manifestRevision,
                         draft.base.configRevision, draft.base.schemaRevision, draft.expires.toString(),
@@ -1209,10 +1231,11 @@ final class ChangeSetPublisher implements AutoCloseable {
                 : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
                 att.server.api.source.SourceManagementContracts.RevisionKind.PACKAGE_REGISTRATION,
                 "package-registry", draft.base.registryRevision);
-        att.server.api.source.SourceManagementContracts.RevisionIdentity source =
-                att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
-                        att.server.api.source.SourceManagementContracts.RevisionKind.BUSINESS_SOURCE,
-                        draft.scope.scopeId, draft.base.sourceRevision);
+        att.server.api.source.SourceManagementContracts.RevisionIdentity packageSource =
+                draft.base.packageTreeRevision == null ? null
+                        : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                        att.server.api.source.SourceManagementContracts.RevisionKind.PACKAGE_SOURCE,
+                        draft.scope.scopeId, draft.base.packageTreeRevision);
         att.server.api.source.SourceManagementContracts.RevisionIdentity changeSet =
                 att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
                         att.server.api.source.SourceManagementContracts.RevisionKind.CHANGE_SET,
@@ -1229,8 +1252,8 @@ final class ChangeSetPublisher implements AutoCloseable {
                 : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
                 att.server.api.source.SourceManagementContracts.RevisionKind.ENGINE_SCHEMA,
                 "installed-engine", draft.base.schemaRevision);
-        return new att.server.api.source.SourceManagementContracts.RevisionSet(registration, source, changeSet,
-                manifest, config, null, null, schema, null);
+        return new att.server.api.source.SourceManagementContracts.RevisionSet(registration, null, changeSet,
+                manifest, config, null, null, schema, null, packageSource, null);
     }
 
     private static String draftEtag(Draft draft, String state) throws Exception {

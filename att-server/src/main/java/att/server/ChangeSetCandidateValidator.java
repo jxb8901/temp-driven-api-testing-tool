@@ -53,7 +53,7 @@ final class ChangeSetCandidateValidator implements ChangeSetPublisher.CandidateV
                 CandidateValidation result = (CandidateValidation)invokeEngine("validatePackage",
                         new Class<?>[]{Path.class,Path.class,Path.class,String.class,RevisionSet.class,String.class},
                         packageRoot,config,runtimeRoot,candidate.scopeId(),revisions,candidateFingerprint);
-                return result.executionEligible ? ChangeSetPublisher.ValidationResult.accepted(candidateFingerprint)
+                return result.executionEligible ? ChangeSetPublisher.ValidationResult.accepted(candidateFingerprint,result.revisions)
                         : ChangeSetPublisher.ValidationResult.rejected(validationCode(result));
             }
             if (ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(candidate.domain())) {
@@ -67,7 +67,7 @@ final class ChangeSetCandidateValidator implements ChangeSetPublisher.CandidateV
                 CandidateValidation result = (CandidateValidation)invokeEngine("validateCentralConfig",
                         new Class<?>[]{Path.class,Path.class,Path.class,RevisionSet.class,String.class},
                         runtimeRoot.resolve("config/config.yaml"),runtimeRoot,baseline,revisions,candidateFingerprint);
-                return result.executionEligible ? ChangeSetPublisher.ValidationResult.accepted(candidateFingerprint)
+                return result.executionEligible ? ChangeSetPublisher.ValidationResult.accepted(candidateFingerprint,result.revisions)
                         : ChangeSetPublisher.ValidationResult.rejected(validationCode(result));
             }
             return ChangeSetPublisher.ValidationResult.rejected("ATT-CHANGESET-DOMAIN-UNSUPPORTED");
@@ -133,16 +133,18 @@ final class ChangeSetCandidateValidator implements ChangeSetPublisher.CandidateV
                 ? "ATT-SOURCE-VALIDATION-INCOMPLETE" : "ATT-SOURCE-CANDIDATE-INVALID";
     }
 
-    private static RevisionSet revisions(ChangeSetPublisher.Candidate candidate, String fingerprint) {
+    private static RevisionSet revisions(ChangeSetPublisher.Candidate candidate, String fingerprint) throws Exception {
         RevisionIdentity registration = candidate.registryRevision() == null ? null
                 : RevisionIdentity.of(RevisionKind.PACKAGE_REGISTRATION, "package-registry", candidate.registryRevision());
-        RevisionIdentity business = RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE, candidate.scopeId(), candidate.sourceRevision());
         RevisionIdentity changeSet = RevisionIdentity.of(RevisionKind.CHANGE_SET, candidate.scopeId(), fingerprint);
         RevisionIdentity config = candidate.configRevision() == null ? null
                 : RevisionIdentity.of(RevisionKind.CONFIG_SOURCE, "central-runtime-config", candidate.configRevision());
         RevisionIdentity schema = candidate.schemaRevision() == null ? null
                 : RevisionIdentity.of(RevisionKind.ENGINE_SCHEMA, "installed-engine", candidate.schemaRevision());
-        return new RevisionSet(registration, business, changeSet, null, config, null, null, schema, null);
+        RevisionIdentity packageSource = candidate.packageSourceRevision() == null ? null
+                : RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE, candidate.scopeId(), candidate.packageSourceRevision());
+        return new RevisionSet(registration, null, changeSet, null, config, null, null, schema, null,
+                packageSource, null);
     }
 
     private static String fingerprint(ChangeSetPublisher.Candidate candidate) throws Exception {

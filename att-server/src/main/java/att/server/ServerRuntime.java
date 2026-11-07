@@ -792,6 +792,7 @@ final class ServerRuntime implements AutoCloseable {
         pinned.set("configurationProvenance",JSON.valueToTree(configuration));
         input=pinned;
         WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
+        request.normalizeExpectedExecutionRevisionDigest();
         request.configurationProvenance=configuration;request.registeredPackageId=packageId;
         request.protocolVersion="att-worker/v1";request.command=command;request.packageRoot=root.toString();
         request.outputDirectory=null;request.config=selectedConfiguration.workerConfigPath.toString();request.environment=safeText(request.environment,128,"environment");
@@ -824,14 +825,14 @@ final class ServerRuntime implements AutoCloseable {
         catch(Exception unavailable) {replayUnavailable="Exact rerun is unavailable: source validation or safe input retention failed. Configure a new run and supply missing inputs.";}
         if(rerunOfJobId!=null&&executionSpec==null)throw new IllegalArgumentException("Safe execution snapshot is no longer available");
         if(executionSpec!=null) {
-            JobExecutionSpec captured=JobExecutionSpec.parse(executionSpec);request.expectedRevisionDigest=captured.revision();
+            JobExecutionSpec captured=JobExecutionSpec.parse(executionSpec);request.setExpectedExecutionRevisionDigest(captured.revision());
             // Legacy direct submissions also need the policy used to compute the retained revision.
             ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,packageId);
             JSON.readerForUpdating(request).readValue(policy);
             JsonNode exact=captured.definition().path("selection").get("caseIds");
             if(exact!=null) {request.caseIds=JSON.convertValue(exact,List.class);request.tags=null;request.excludeTags=null;request.all=false;request.rerunFailed=false;}
         }
-        configuration=configurationRevision(configuration,request.expectedRevisionDigest);request.configurationProvenance=configuration;
+        configuration=configurationRevision(configuration,request.expectedExecutionRevisionDigest);request.configurationProvenance=configuration;
         if(executionSpec==null&&replayUnavailable==null)replayUnavailable="This job type or Server capability does not support safe replay. Configure a new run.";
         if(rerunOfJobId!=null&&prevalidatedSpec!=null) {
             JsonNode replay=prevalidatedSpec.value.path("replay");
@@ -948,7 +949,7 @@ final class ServerRuntime implements AutoCloseable {
                         } else {
                             long leaseStart=System.nanoTime();warm=executionWorkers.lease(job.packageId);
                             job.prewarmLeaseMs=(System.nanoTime()-leaseStart)/1_000_000.0;
-                            if(warm!=null)job.request.expectedRevisionDigest=warmRevision;
+                            if(warm!=null)job.request.setExpectedExecutionRevisionDigest(warmRevision);
                             else job.prewarmFallbackReason="no_ready_worker";
                         }
                     }
@@ -1082,7 +1083,7 @@ final class ServerRuntime implements AutoCloseable {
             if(!Boolean.TRUE.equals(eligibility.get("eligible"))) {job.prewarmFallbackReason="native_resource_environment";return null;}
             Object raw=eligibility.get("revisionDigest");
             if(!(raw instanceof String revision)||!revision.matches("[a-f0-9]{64}")) {job.prewarmFallbackReason="unverified_revision";return null;}
-            if(job.request.expectedRevisionDigest!=null&&!job.request.expectedRevisionDigest.equals(revision)) {
+            if(job.request.expectedExecutionRevisionDigest!=null&&!job.request.expectedExecutionRevisionDigest.equals(revision)) {
                 job.prewarmFallbackReason="revision_changed";return null;
             }
             return revision;
@@ -1903,7 +1904,7 @@ final class ServerRuntime implements AutoCloseable {
         request.inspectionAction=action;request.inspectionType=type;request.inspectionResourceId=resourceId;request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
         request.inspectionOrigin=sourceOriginPath;
         request.inspectionSort=normalizedSort;request.inspectionDirection=normalizedDirection;
-        request.expectedRevisionDigest=prior==null?null:prior.revision;
+        request.setExpectedExecutionRevisionDigest(prior==null?null:prior.revision);
         Map<String,Object> result=executeInspection(root,request);
         Object revision=result.remove("revisionDigest");
         if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision)));
@@ -1924,7 +1925,7 @@ final class ServerRuntime implements AutoCloseable {
         Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,"load",normalizedQuery,"name","asc",principal);
         WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="load-catalog";
         request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
-        request.expectedRevisionDigest=prior==null?null:prior.revision;
+        request.setExpectedExecutionRevisionDigest(prior==null?null:prior.revision);
         Map<String,Object> result=executeInspection(root,request);
         Object rawItems=result.get("items");
         if(rawItems instanceof List)for(Object rawItem:(List<?>)rawItems)if(rawItem instanceof Map) {
@@ -2663,7 +2664,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void verifyPackageRevision(String packageId,String environment,String revision) throws Exception {
         Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction="revision";request.expectedRevisionDigest=revision;
+        WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction="revision";request.setExpectedExecutionRevisionDigest(revision);
         executeInspection(root,request);
     }
     private void requireLiveDraft(DebugDraft draft) {
@@ -3080,7 +3081,7 @@ final class ServerRuntime implements AutoCloseable {
         String selection=requested==null||requested.isBlank()?null:inspectionEnvironment(requested,"environment");
         WorkerRequest request=inspectionRequest(packageId,root,selection,pinnedWorkerConfig);
         request.inspectionType="package-configuration";request.inspectionAction="resolve";request.registeredPackageId=packageId;
-        request.expectedRevisionDigest=expectedPackageRevision;
+        request.setExpectedExecutionRevisionDigest(expectedPackageRevision);
         Map<String,Object> effective=executeInspection(root,request);
         Map<String,Object> evidence=new LinkedHashMap<>(att.server.api.ConfigurationSnapshot.copy(effective));
         Object actualPackageRevision=evidence.remove("packageRevision");

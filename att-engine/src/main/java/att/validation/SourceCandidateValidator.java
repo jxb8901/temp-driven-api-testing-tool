@@ -141,10 +141,22 @@ public final class SourceCandidateValidator {
                     "One or more Package dependencies could not be resolved to an immutable source.",
                     "Correct the unavailable descriptor reference and validate the whole candidate again."));
         }
+        RevisionSet candidateRevisions = revisions;
+        try (PackageResourceInspector inspector = new PackageResourceInspector(pkg, config,
+                environments.isEmpty() ? null : environments.get(0), Collections.<String>emptyList(), 65536, 262144)) {
+            String packageSourceDigest = inspector.packageSourceRevisionDigest();
+            candidateRevisions = withPackageSourceRevision(revisions, packageId, packageSourceDigest);
+        } catch (Exception unavailable) {
+            complete = false;
+            diagnostics.add(diagnostic("ATT-PACKAGE-SOURCE-REVISION-UNAVAILABLE", Severity.ERROR,
+                    null, "packageSourceRevision", null,
+                    "The Package source identity could not be computed from the complete candidate.",
+                    "Correct unavailable Package files and validate the whole candidate again."));
+        }
         invalid |= hasErrors(diagnostics);
         ValidationState state = invalid ? ValidationState.INVALID : complete ? ValidationState.VALID : ValidationState.INCOMPLETE;
         return new CandidateValidation(Domain.PACKAGE_SOURCE, packageId, state, complete,
-                state == ValidationState.VALID, validationFingerprint, revisions,
+                state == ValidationState.VALID, validationFingerprint, candidateRevisions,
                 candidateDependencies, boundedDiagnostics(diagnostics));
     }
 
@@ -215,6 +227,18 @@ public final class SourceCandidateValidator {
         String envFingerprint = digest(selected + "\n" + effectiveDigest);
         RevisionSet resolvedRevisions = withResolvedRevisions(provenance, packageId, selected,
                 manifest.digest(), effectiveDigest, envFingerprint, schemaDigest, fileDigest(config));
+        Map<String, String> sourceDigests;
+        try (PackageResourceInspector inspector = new PackageResourceInspector(pkg, config, selected,
+                Collections.<String>emptyList(), 65536, 262144)) {
+            sourceDigests = inspector.sourceRevisionDigests(null);
+        }
+        RevisionIdentity packageSource = RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE,
+                packageId, sourceDigests.get("packageSourceRevision"));
+        RevisionIdentity businessSource = RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE,
+                packageId, sourceDigests.get("packageSourceRevision"));
+        RevisionIdentity executionRevision = RevisionIdentity.of(RevisionKind.EXECUTION_REVISION,
+                packageId + "@" + selected, sourceDigests.get("executionRevisionDigest"));
+        resolvedRevisions = withExecutionRevisions(resolvedRevisions, businessSource, packageSource, executionRevision);
         List<ValidationDiagnostic> diagnostics = new ArrayList<ValidationDiagnostic>();
         boolean complete = effective.helperDiscoveryFailures().isEmpty();
         List<DependencyReference> resolvedDependencies = deduplicate(bindings);
@@ -806,6 +830,8 @@ public final class SourceCandidateValidator {
                                                      String configDigest) {
         RevisionIdentity registration = source.packageRegistration;
         RevisionIdentity business = source.businessSource;
+        RevisionIdentity packageSource = source.packageSourceRevision;
+        RevisionIdentity execution = source.executionRevisionDigest;
         RevisionIdentity changeSet = source.changeSet;
         RevisionIdentity manifest = source.manifest != null ? source.manifest
                 : RevisionIdentity.of(RevisionKind.PACKAGE_MANIFEST, packageId, manifestDigest);
@@ -816,7 +842,22 @@ public final class SourceCandidateValidator {
         RevisionIdentity schema = source.engineSchema != null ? source.engineSchema
                 : RevisionIdentity.of(RevisionKind.ENGINE_SCHEMA, "installed-engine", schemaDigest);
         return new RevisionSet(registration, business, changeSet, manifest, config, resolved,
-                env, schema, source.scheduleSnapshot);
+                env, schema, source.scheduleSnapshot, packageSource, execution);
+    }
+
+    private static RevisionSet withExecutionRevisions(RevisionSet source, RevisionIdentity businessSource,
+                                                      RevisionIdentity packageSource, RevisionIdentity execution) {
+        return new RevisionSet(source.packageRegistration, businessSource, source.changeSet, source.manifest,
+                source.configSource, source.effectiveConfig, source.environment, source.engineSchema,
+                source.scheduleSnapshot, packageSource, execution);
+    }
+
+    private static RevisionSet withPackageSourceRevision(RevisionSet source, String packageId, String digest) {
+        RevisionIdentity packageSource = RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE, packageId, digest);
+        RevisionIdentity businessSource = RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE, packageId, digest);
+        return new RevisionSet(source.packageRegistration, businessSource, source.changeSet, source.manifest,
+                source.configSource, source.effectiveConfig, source.environment, source.engineSchema,
+                source.scheduleSnapshot, packageSource, source.executionRevisionDigest);
     }
 
     private static Map<?, ?> objectMap(Object value) {

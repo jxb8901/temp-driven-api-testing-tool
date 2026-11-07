@@ -127,6 +127,32 @@ class ChangeSetPublisherTest {
         } finally { publisher.close(); }
     }
 
+    @Test void changeSetRevisionSetKeepsPackageSourceAndCentralConfigSeparateFromAggregateFence() throws Exception {
+        ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
+        try {
+            Map<String,Object> packageDraft = stagePackage(publisher, List.of(
+                    ChangeSetPublisher.OperationInput.create("files/source.txt", bytes("package source\n"))));
+            @SuppressWarnings("unchecked") Map<String,Object> packageRevisions = (Map<String,Object>)packageDraft.get("revisions");
+            @SuppressWarnings("unchecked") Map<String,Object> packageSource = (Map<String,Object>)packageRevisions.get("packageSourceRevision");
+            @SuppressWarnings("unchecked") Map<String,Object> legacyBusiness = (Map<String,Object>)packageRevisions.get("businessSource");
+            assertEquals("PACKAGE_SOURCE", packageSource.get("kind"));
+            assertEquals(packageSource.get("revision"), legacyBusiness.get("revision"));
+            assertNotEquals(packageDraft.get("baseSourceRevision"), packageSource.get("revision"),
+                    "The aggregate source CAS fence is not the Package-owned source identity");
+            assertNull(packageRevisions.get("executionRevisionDigest"),
+                    "A source draft must not invent an execution-bound revision");
+
+            Map<String,Object> configDraft = stageCentral(publisher, List.of(
+                    ChangeSetPublisher.OperationInput.replace("config/config.yaml", bytes("schemaVersion: att-config/v2.13\ntimeoutMs: 2500\n"))));
+            @SuppressWarnings("unchecked") Map<String,Object> configRevisions = (Map<String,Object>)configDraft.get("revisions");
+            @SuppressWarnings("unchecked") Map<String,Object> configSource = (Map<String,Object>)configRevisions.get("configSource");
+            assertNull(configRevisions.get("packageSourceRevision"));
+            assertNull(configRevisions.get("businessSource"));
+            assertEquals("CONFIG_SOURCE", configSource.get("kind"));
+            assertNotEquals(configDraft.get("baseSourceRevision"), configSource.get("revision"));
+        } finally { publisher.close(); }
+    }
+
     @Test void invalidatesApprovalWhenPackageOrRegistryRevisionChanges() throws Exception {
         ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
         try {

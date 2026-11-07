@@ -64,6 +64,11 @@ class SourceCandidateValidatorTest {
         assertEquals(Domain.PACKAGE_SOURCE, first.domain);
         assertEquals(ValidationState.VALID, first.state, describe(first));
         assertEquals(ValidationState.VALID, second.state, describe(second));
+        assertEquals(RevisionKind.PACKAGE_SOURCE, first.revisions.packageSourceRevision.kind);
+        assertEquals("first", first.revisions.packageSourceRevision.scopeId);
+        assertNull(first.revisions.executionRevisionDigest,
+                "Package validation covers multiple environments and must not publish one execution digest as universal");
+        assertNotEquals(first.revisions.packageSourceRevision.revision, second.revisions.packageSourceRevision.revision);
         assertTrue(first.dependencies.stream().anyMatch(ref -> ref.kind == DependencyKind.TESTDATA
                 && "first".equals(ref.packageId) && "customers".equals(ref.logicalId)));
         assertTrue(second.dependencies.stream().anyMatch(ref -> ref.kind == DependencyKind.TESTDATA
@@ -72,6 +77,11 @@ class SourceCandidateValidatorTest {
         EffectiveResolution resolution = validator.resolveEffective("first", "SIT", firstPackage,
                 configFile, runtimeRoot, revisions("first"));
         assertTrue(resolution.complete, resolution.diagnostics.toString());
+        assertEquals(RevisionKind.PACKAGE_SOURCE, resolution.revisions.packageSourceRevision.kind);
+        assertEquals(RevisionKind.EXECUTION_REVISION, resolution.revisions.executionRevisionDigest.kind);
+        assertEquals("first@SIT", resolution.revisions.executionRevisionDigest.scopeId);
+        assertNotEquals(resolution.revisions.packageSourceRevision.revision,
+                resolution.revisions.executionRevisionDigest.revision);
         assertTrue(resolution.dependencies.stream().anyMatch(ref -> ref.kind == DependencyKind.MANIFEST
                 && "first".equals(ref.packageId) && "package.yaml".equals(ref.logicalId)));
         assertTrue(resolution.dependencies.stream().allMatch(ref -> ref.packageId == null || "first".equals(ref.packageId)));
