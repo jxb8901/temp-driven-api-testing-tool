@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -397,9 +398,39 @@ public final class FileExpressionResolver {
         }
         public Path projectRoot() { return projectRoot; }
         public int size() { return plans.size(); }
+        /** Returns value-free compiled dependency metadata without exposing authored file contents. */
+        public List<CompiledFileDependency> dependencies() throws Exception {
+            List<CompiledFileDependency> result = new ArrayList<CompiledFileDependency>();
+            Path root = projectRoot.toRealPath();
+            for (CompiledFilePlan plan : plans.values()) {
+                Path file = plan.file().toRealPath();
+                Path sourceDirectory = plan.sourceDirectory().toRealPath();
+                if (!file.startsWith(root) || !sourceDirectory.startsWith(root))
+                    throw new IllegalArgumentException("Compiled File-expression dependency escapes its Package");
+                byte[] hash = MessageDigest.getInstance("SHA-256").digest(plan.source().getBytes(StandardCharsets.UTF_8));
+                result.add(new CompiledFileDependency(plan.authoredPath(),
+                        root.relativize(sourceDirectory).toString().replace('\\', '/'),
+                        root.relativize(file).toString().replace('\\', '/'), hex(hash)));
+            }
+            return Collections.unmodifiableList(result);
+        }
         private CompiledFilePlan lookup(String authoredPath, Path sourceDirectory) {
             return plans.get(ReferenceKey.of(authoredPath, sourceDirectory));
         }
+    }
+
+    /** Value-free closure entry for dependency and freshness projections. */
+    public static final class CompiledFileDependency {
+        private final String authoredPath, sourceDirectory, logicalPath, sourceFingerprint;
+        private CompiledFileDependency(String authoredPath, String sourceDirectory,
+                                       String logicalPath, String sourceFingerprint) {
+            this.authoredPath = authoredPath; this.sourceDirectory = sourceDirectory;
+            this.logicalPath = logicalPath; this.sourceFingerprint = sourceFingerprint;
+        }
+        public String authoredPath() { return authoredPath; }
+        public String sourceDirectory() { return sourceDirectory; }
+        public String logicalPath() { return logicalPath; }
+        public String sourceFingerprint() { return sourceFingerprint; }
     }
 
     public static final class Stats {
@@ -415,6 +446,12 @@ public final class FileExpressionResolver {
         public long evaluations() { return evaluations; }
         public long sourceBytes() { return sourceBytes; }
         public long renderedChars() { return renderedChars; }
+    }
+
+    private static String hex(byte[] value) {
+        StringBuilder result = new StringBuilder(value.length * 2);
+        for (byte item : value) result.append(String.format("%02x", item & 255));
+        return result.toString();
     }
 
     private static final class ResolvedFile { private final Path canonical; private ResolvedFile(Path canonical) { this.canonical = canonical; } }

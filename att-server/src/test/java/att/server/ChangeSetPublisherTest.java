@@ -201,6 +201,53 @@ class ChangeSetPublisherTest {
         } finally { publisher.close(); }
     }
 
+    @Test void testcaseSnapshotRequiresSeparateOwnerActionAndIsBoundToWorkbookAndSidecarHashes() throws Exception {
+        Path testcase = Files.createDirectories(packageRoot.resolve("testcase"));
+        Path workbook = testcase.resolve("orders.xlsx");
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook xlsx = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
+            xlsx.createSheet("Orders");
+            try (java.io.OutputStream output = Files.newOutputStream(workbook)) { xlsx.write(output); }
+        }
+        byte[] sidecar = bytes("schemaVersion: att-sidecar/v2.2\nid: orders\n");
+        Files.write(testcase.resolve("orders.yaml"), sidecar);
+        Files.write(testcase.resolve("orders.xml"), bytes("<old-snapshot/>\n"));
+        ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate(),
+                (candidate, workbookPath) -> bytes("<testcases schemaVersion=\"att-testcase-snapshot/v2.4\"/>\n"));
+        try {
+            assertThrows(IllegalArgumentException.class, () -> stagePackage(publisher, Arrays.asList(
+                    ChangeSetPublisher.OperationInput.replace("testcase/orders.xml", bytes("<hand-edited/>\n")))));
+            Map<String, Object> draft = stagePackage(publisher, Arrays.asList(
+                    ChangeSetPublisher.OperationInput.create("templates/unrelated.yaml", bytes("id: unrelated\n"))));
+            String id = String.valueOf(draft.get("changeSetId"));
+            assertThrows(ChangeSetPublisher.Conflict.class, () -> publisher.generateSnapshot(ChangeSetPublisher.PACKAGE_SOURCE,
+                    "owner", "owner", false, id, String.valueOf(draft.get("baseSourceRevision")),
+                    "testcase/orders.xlsx", digest(Files.readAllBytes(workbook)), digest("stale-sidecar"), "snapshot-stale"));
+            Map<String, Object> generated = publisher.generateSnapshot(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false,
+                    id, String.valueOf(draft.get("baseSourceRevision")), "testcase/orders.xlsx",
+                    digest(Files.readAllBytes(workbook)), digest(sidecar), "snapshot-test");
+            assertEquals(Boolean.TRUE, generated.get("snapshotGenerated"));
+            assertEquals("testcase/orders.xml", generated.get("snapshotPath"));
+            assertFalse(Files.readString(testcase.resolve("orders.xml")).contains("testcases schemaVersion"),
+                    "generation stages the snapshot and leaves the published Package untouched");
+            Map<String, Object> validated = publisher.validate(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id);
+            assertEquals("validated", validated.get("state"));
+        } finally { publisher.close(); }
+    }
+
+    @Test void changeSetValidationUsesInstalledEngineSchemasForTheWholeCandidate() throws Exception {
+        ChangeSetPublisher publisher = publisher(new ChangeSetCandidateValidator(), allowingGate());
+        try {
+            Map<String, Object> draft = stagePackage(publisher, Arrays.asList(ChangeSetPublisher.OperationInput.create(
+                    "templates/invalid.yaml", bytes("schemaVersion: att-template/v999\nname: invalid\ndescription: invalid\nactions: {}\n"))));
+            ChangeSetPublisher.ValidationRejected rejected = assertThrows(ChangeSetPublisher.ValidationRejected.class,
+                    () -> publisher.validate(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false,
+                            String.valueOf(draft.get("changeSetId"))));
+            assertTrue(rejected.code.startsWith("ATT-"));
+            assertFalse(Files.exists(activePackageRoot().resolve("templates/invalid.yaml")),
+                    "static validation must not mutate the published Package");
+        } finally { publisher.close(); }
+    }
+
     @Test void movingReferencedFileRewritesEveryStaticLocatorAndDeletingReferencedFileFailsValidation() throws Exception {
         Files.createDirectories(packageRoot.resolve("templates/shared"));
         Files.createDirectories(packageRoot.resolve("flows"));
@@ -420,6 +467,12 @@ class ChangeSetPublisherTest {
 
     private ChangeSetPublisher publisher(ChangeSetPublisher.CandidateValidator validator,
                                          ChangeSetPublisher.ConfigPublishGate gate) throws Exception {
+        return publisher(validator, gate, null);
+    }
+
+    private ChangeSetPublisher publisher(ChangeSetPublisher.CandidateValidator validator,
+                                         ChangeSetPublisher.ConfigPublishGate gate,
+                                         ChangeSetPublisher.SnapshotGenerator snapshotGenerator) throws Exception {
         transaction = new SourceFileTransaction(dataRoot, new SourcePublicationBarrier());
         return new ChangeSetPublisher(Clock.systemUTC(), 128, 8, 900,
                 (domain, scope, actor, systemSettingsWrite) -> {
@@ -436,7 +489,7 @@ class ChangeSetPublisherTest {
                     return new ChangeSetPublisher.Scope(domain, scope, active, active, null, SCHEMA_REVISION);
                 }, validator, gate,
                 (actor, action, domain, scope, detail) -> audit.add(actor + " " + action + " " + domain + " " + scope + " " + detail),
-                transaction);
+                transaction, snapshotGenerator);
     }
 
     private String read(String path) throws Exception {

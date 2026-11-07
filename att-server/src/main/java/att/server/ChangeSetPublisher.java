@@ -61,6 +61,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         Scope resolve(String domain, String scopeId, String actor, boolean systemSettingsWrite) throws Exception;
     }
     interface CandidateValidator { ValidationResult validate(Candidate candidate) throws Exception; }
+    interface SnapshotGenerator { byte[] generate(Candidate candidate, String workbookPath) throws Exception; }
     interface ConfigPublishGate { GateDecision authorize(Candidate candidate, Map<String, Object> review) throws Exception; }
     interface Audit {
         void record(String actor, String action, String domain, String scopeId, String detail) throws Exception;
@@ -132,6 +133,7 @@ final class ChangeSetPublisher implements AutoCloseable {
     }
 
     static final class Candidate {
+        private final String id;
         final Scope scope;
         final String actor;
         private final Map<String, byte[]> changes;
@@ -145,6 +147,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         private final RevisionState base;
 
         private Candidate(Draft draft) {
+            this.id = draft.id;
             this.scope = draft.scope;
             this.actor = draft.actor;
             this.changes = cloneChanges(draft.changes);
@@ -166,8 +169,43 @@ final class ChangeSetPublisher implements AutoCloseable {
         String manifestRevision() { return manifestRevision; }
         String configRevision() { return configRevision; }
         String schemaRevision() { return schemaRevision; }
+        String changeSetId() { return id; }
         List<Map<String, Object>> changedFiles() { return diffView(diff); }
         Set<String> paths() { return Collections.unmodifiableSet(new HashSet<String>(changes.keySet())); }
+        String packageBaseHash(String logicalPath) { return base.packageIndex.hashes.get(logicalPath); }
+        long packageBaseSize(String logicalPath) {
+            Path path = base.packageIndex.files.get(logicalPath);
+            try { return path == null ? 0L : Files.size(path); }
+            catch (IOException failure) { return 0L; }
+        }
+
+        /** Effective logical paths in this candidate's own source tree, including unchanged files. */
+        Set<String> files() {
+            Map<String, Path> indexed = PACKAGE_SOURCE.equals(scope.domain) ? base.packageIndex.files : base.centralIndex.files;
+            Set<String> result = new java.util.TreeSet<String>(indexed.keySet());
+            for (Map.Entry<String, byte[]> entry : changes.entrySet()) {
+                if (entry.getValue() == null) result.remove(entry.getKey());
+                else result.add(entry.getKey());
+            }
+            return Collections.unmodifiableSet(result);
+        }
+
+        /** Central Config closure pinned with a Package draft's source fence. */
+        Set<String> centralFiles() {
+            return Collections.unmodifiableSet(new java.util.TreeSet<String>(base.centralIndex.files.keySet()));
+        }
+
+        byte[] readCentral(String logicalPath) throws IOException {
+            String path = normalizePath(logicalPath);
+            Path source = base.centralIndex.files.get(path);
+            if (source == null) return null;
+            if (Files.isSymbolicLink(source) || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS))
+                throw new IOException("Pinned central source is unavailable");
+            byte[] bytes = readBounded(source);
+            String expected = base.centralIndex.hashes.get(path);
+            if (!matchesHash(expected, bytes)) throw new IOException("Pinned central source changed");
+            return bytes;
+        }
 
         byte[] read(String logicalPath) throws IOException {
             String path = normalizePath(logicalPath);
@@ -179,7 +217,11 @@ final class ChangeSetPublisher implements AutoCloseable {
             if (!Files.exists(source, LinkOption.NOFOLLOW_LINKS)) return null;
             if (Files.isSymbolicLink(source) || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS))
                 throw new IOException("Candidate source is unavailable");
-            return readBounded(source);
+            byte[] bytes = readBounded(source);
+            ScanIndex index = PACKAGE_SOURCE.equals(scope.domain) ? base.packageIndex : base.centralIndex;
+            String expected = index.hashes.get(path);
+            if (!matchesHash(expected, bytes)) throw new IOException("Pinned candidate source changed");
+            return bytes;
         }
     }
 
@@ -241,6 +283,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         final Map<String, byte[]> changes;
         final Map<String, String> expectedHashes;
         final List<Diff> diff;
+        final Map<String, SnapshotAuthorization> generatedSnapshots = new LinkedHashMap<String, SnapshotAuthorization>();
         String validationRevision;
         boolean reviewed;
         boolean publishing;
@@ -248,7 +291,16 @@ final class ChangeSetPublisher implements AutoCloseable {
               Map<String, String> expectedHashes, List<Diff> diff) {
             this.id = id; this.actor = actor; this.scope = scope; this.base = base; this.expires = expires;
             this.changes = cloneChanges(changes); this.expectedHashes = new LinkedHashMap<String, String>(expectedHashes);
-            this.diff = immutableDiff(diff);
+            this.diff = new ArrayList<Diff>(immutableDiff(diff));
+        }
+    }
+
+    private static final class SnapshotAuthorization {
+        final String workbookPath, workbookHash, sidecarPath, sidecarHash, snapshotHash;
+        SnapshotAuthorization(String workbookPath, String workbookHash, String sidecarPath,
+                              String sidecarHash, String snapshotHash) {
+            this.workbookPath = workbookPath; this.workbookHash = workbookHash;
+            this.sidecarPath = sidecarPath; this.sidecarHash = sidecarHash; this.snapshotHash = snapshotHash;
         }
     }
 
@@ -257,6 +309,7 @@ final class ChangeSetPublisher implements AutoCloseable {
     private final Access access;
     private final CandidateValidator validator;
     private final ConfigPublishGate configGate;
+    private final SnapshotGenerator snapshotGenerator;
     private final Audit audit;
     private final SourceFileTransaction transaction;
     private final Lock sourceReadLock;
@@ -266,9 +319,16 @@ final class ChangeSetPublisher implements AutoCloseable {
     ChangeSetPublisher(Clock clock, int maxDrafts, int maxDraftsPerActor, int ttlSeconds, Access access,
                        CandidateValidator validator, ConfigPublishGate configGate, Audit audit,
                        SourceFileTransaction transaction) {
+        this(clock, maxDrafts, maxDraftsPerActor, ttlSeconds, access, validator, configGate, audit, transaction, null);
+    }
+
+    ChangeSetPublisher(Clock clock, int maxDrafts, int maxDraftsPerActor, int ttlSeconds, Access access,
+                       CandidateValidator validator, ConfigPublishGate configGate, Audit audit,
+                       SourceFileTransaction transaction, SnapshotGenerator snapshotGenerator) {
         this.clock = clock; this.maxDrafts = maxDrafts; this.maxDraftsPerActor = maxDraftsPerActor;
         this.ttlSeconds = ttlSeconds; this.access = access; this.validator = validator;
         this.configGate = configGate; this.audit = audit; this.transaction = transaction;
+        this.snapshotGenerator = snapshotGenerator;
         this.sourceReadLock = transaction.readLock();
     }
 
@@ -341,6 +401,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         Draft draft = draft(domain, scopeId, actor, systemSettingsWrite, id);
         requireCurrent(draft, systemSettingsWrite);
         Candidate candidate = new Candidate(draft);
+        requireAuthorizedSnapshots(draft, candidate);
         validateFileReferences(candidate, draft.diff);
         try {
             ValidationResult result;
@@ -365,6 +426,72 @@ final class ChangeSetPublisher implements AutoCloseable {
         } finally { sourceReadLock.unlock(); }
     }
 
+    synchronized Map<String, Object> generateSnapshot(String domain, String scopeId, String actor,
+                                                       boolean systemSettingsWrite, String id,
+                                                       String expectedSourceRevision, String workbookPath,
+                                                       String expectedWorkbookHash, String expectedSidecarHash,
+                                                       String requestId) throws Exception {
+        if (!PACKAGE_SOURCE.equals(domain)) throw new IllegalArgumentException("Testcase snapshots are Package-scoped");
+        sourceReadLock.lock();
+        try {
+            Draft draft = draft(domain, scopeId, actor, systemSettingsWrite, id);
+            requireCurrent(draft, systemSettingsWrite);
+            if (expectedSourceRevision == null || !draft.base.sourceRevision.equals(requireDigest(expectedSourceRevision)))
+                throw new Conflict();
+            String workbook = normalizePath(workbookPath);
+            requireAllowed(PACKAGE_SOURCE, workbook);
+            if (!workbook.toLowerCase(Locale.ROOT).endsWith(".xlsx"))
+                throw new IllegalArgumentException("Snapshot source must be an .xlsx workbook");
+            if (snapshotGenerator == null) throw new ValidationRejected("ATT-SNAPSHOT-GENERATOR-UNAVAILABLE");
+
+            Candidate candidate = new Candidate(draft);
+            byte[] workbookBytes = candidate.read(workbook);
+            if (workbookBytes == null || !hash(workbookBytes).equals(requireDigest(expectedWorkbookHash))) throw new Conflict();
+            String sidecar = workbook.substring(0, workbook.length() - 5) + ".yaml";
+            byte[] sidecarBytes = candidate.read(sidecar);
+            if (sidecarBytes == null) {
+                sidecar = workbook.substring(0, workbook.length() - 5) + ".yml";
+                sidecarBytes = candidate.read(sidecar);
+            }
+            if (sidecarBytes == null || !hash(sidecarBytes).equals(requireDigest(expectedSidecarHash))) throw new Conflict();
+
+            byte[] snapshot = snapshotGenerator.generate(candidate, workbook);
+            if (snapshot == null || snapshot.length == 0 || snapshot.length > MAX_FILE_BYTES)
+                throw new IllegalArgumentException("Generated Testcase snapshot exceeds its size limit");
+            String target = workbook.substring(0, workbook.length() - 5) + ".xml";
+            validateContentEncoding(target, snapshot);
+            String baseHash = draft.base.packageIndex.hashes.get(target);
+            byte[] prior = draft.changes.get(target);
+            long priorStaged = prior == null ? 0L : prior.length;
+            if (stagedBytes - priorStaged + snapshot.length > MAX_DRAFT_BYTES) throw new Capacity();
+            stagedBytes = stagedBytes - priorStaged + snapshot.length;
+            draft.changes.put(target, snapshot.clone());
+            draft.expectedHashes.put(target, baseHash);
+            Diff existing = null;
+            for (Diff diff : draft.diff) if (target.equals(diff.path)) { existing = diff; break; }
+            if (existing == null) {
+                draft.diff.add(new Diff(baseHash == null ? "create" : "replace", target, null, baseHash,
+                        hash(snapshot), candidate.packageBaseSize(target), snapshot.length, false));
+            } else {
+                existing.newHash = hash(snapshot);
+                existing.newBytes = snapshot.length;
+            }
+            String snapshotHash = hash(snapshot);
+            draft.generatedSnapshots.put(target, new SnapshotAuthorization(workbook, hash(workbookBytes),
+                    sidecar, hash(sidecarBytes), snapshotHash));
+            draft.validationRevision = null;
+            draft.reviewed = false;
+            audit.record(actor, "SOURCE_CHANGE_SET_SNAPSHOT_GENERATE", domain, scopeId,
+                    auditDetail(requestId, "changeSetId=" + id + " workbook=" + workbook
+                            + " snapshot=" + target + " outcome=GENERATED"));
+            Map<String, Object> result = view(draft, "draft");
+            result.put("snapshotGenerated", Boolean.TRUE);
+            result.put("snapshotPath", target);
+            result.put("snapshotSha256", snapshotHash);
+            return result;
+        } finally { sourceReadLock.unlock(); }
+    }
+
     synchronized Map<String, Object> review(String domain, String scopeId, String actor, boolean systemSettingsWrite,
                                              String id) throws Exception {
         return review(domain, scopeId, actor, systemSettingsWrite, id, null);
@@ -377,13 +504,15 @@ final class ChangeSetPublisher implements AutoCloseable {
         Draft draft = draft(domain, scopeId, actor, systemSettingsWrite, id);
         requireCurrent(draft, systemSettingsWrite);
         if (draft.validationRevision == null) throw new ValidationRejected("ATT-CHANGESET-VALIDATION-REQUIRED");
-        validateFileReferences(new Candidate(draft), draft.diff);
+        Candidate candidate = new Candidate(draft);
+        requireAuthorizedSnapshots(draft, candidate);
+        validateFileReferences(candidate, draft.diff);
         ValidationResult checked;
-        try { checked = validator.validate(new Candidate(draft)); }
+        try { checked = validator.validate(candidate); }
         catch (Exception rejected) { throw new ValidationRejected("ATT-CHANGESET-VALIDATION-FAILED"); }
         if (checked == null || !checked.valid) throw new ValidationRejected(checked == null
                 ? "ATT-CHANGESET-VALIDATION-UNAVAILABLE" : checked.code);
-        String checkedRevision = checked.revision == null ? validationRevision(new Candidate(draft)) : requireDigest(checked.revision);
+        String checkedRevision = checked.revision == null ? validationRevision(candidate) : requireDigest(checked.revision);
         if (!draft.validationRevision.equals(checkedRevision)) throw new Conflict();
         audit.record(actor, "SOURCE_CHANGE_SET_REVIEW", domain, scopeId,
                 auditDetail(requestId, "changeSetId=" + id + " revision=" + draft.base.sourceRevision
@@ -417,6 +546,7 @@ final class ChangeSetPublisher implements AutoCloseable {
             sourceReadLock.lock();
             try {
                 requireCurrent(draft, systemSettingsWrite);
+                requireAuthorizedSnapshots(draft, candidate);
                 validateFileReferences(candidate, draft.diff);
                 ValidationResult validated;
                 try { validated = validator.validate(candidate); }
@@ -518,6 +648,13 @@ final class ChangeSetPublisher implements AutoCloseable {
         Map<String, String> expected = new LinkedHashMap<String, String>();
         List<Diff> diffs = new ArrayList<Diff>();
         List<Move> moves = new ArrayList<Move>();
+        Set<String> stagedWorkbooks = new HashSet<String>();
+        if (PACKAGE_SOURCE.equals(scope.domain)) for (OperationInput input : inputs) if (input != null) {
+            if (input.path != null && input.path.toLowerCase(Locale.ROOT).endsWith(".xlsx"))
+                stagedWorkbooks.add(input.path.toLowerCase(Locale.ROOT));
+            if (input.targetPath != null && input.targetPath.toLowerCase(Locale.ROOT).endsWith(".xlsx"))
+                stagedWorkbooks.add(input.targetPath.toLowerCase(Locale.ROOT));
+        }
         Set<String> reserved = new HashSet<String>();
         long totalBytes = 0L;
         for (OperationInput input : inputs) {
@@ -526,6 +663,8 @@ final class ChangeSetPublisher implements AutoCloseable {
             String path = normalizePath(input.path);
             requireAllowed(scope.domain, path);
             String target = input.targetPath == null ? null : normalizePath(input.targetPath);
+            rejectDirectTestcaseSnapshot(scope, base, path, stagedWorkbooks);
+            if (target != null) rejectDirectTestcaseSnapshot(scope, base, target, stagedWorkbooks);
             if ("create".equals(operation) || "replace".equals(operation)) {
                 if (target != null || input.content == null) throw new IllegalArgumentException("A create or replace operation requires file content");
                 if (input.content.length > MAX_FILE_BYTES) throw new IllegalArgumentException("A source file exceeds its size limit");
@@ -791,6 +930,36 @@ final class ChangeSetPublisher implements AutoCloseable {
                 || path.startsWith("config/toolgroups/") || path.startsWith("config/tool-groups/")
                 || path.startsWith("config/dbhelpers/") || path.startsWith("config/mqhelpers/")
                 || path.startsWith("config/httphelpers/") || path.startsWith("config/sshhelpers/");
+    }
+
+    private static void rejectDirectTestcaseSnapshot(Scope scope, RevisionState base, String path,
+                                                     Set<String> stagedWorkbooks) {
+        if (!PACKAGE_SOURCE.equals(scope.domain) || !path.toLowerCase(Locale.ROOT).endsWith(".xml")) return;
+        String workbook = path.substring(0, path.length() - 4) + ".xlsx";
+        boolean exists = base.packageIndex.hashes.containsKey(workbook)
+                || base.packageIndex.hashes.containsKey(workbook.toLowerCase(Locale.ROOT))
+                || stagedWorkbooks.contains(workbook.toLowerCase(Locale.ROOT));
+        if (exists) throw new IllegalArgumentException("Testcase XML snapshots must be produced by the explicit Generate/Update Snapshot action");
+    }
+
+    private static void requireAuthorizedSnapshots(Draft draft, Candidate candidate) throws Exception {
+        if (!PACKAGE_SOURCE.equals(draft.scope.domain)) return;
+        Set<String> files = candidate.files();
+        for (String path : draft.changes.keySet()) {
+            if (!path.toLowerCase(Locale.ROOT).endsWith(".xml")) continue;
+            String workbookPath = path.substring(0, path.length() - 4) + ".xlsx";
+            boolean workbookExists = files.contains(workbookPath) || files.contains(workbookPath.toLowerCase(Locale.ROOT));
+            if (!workbookExists) continue;
+            SnapshotAuthorization authorization = draft.generatedSnapshots.get(path);
+            if (authorization == null) throw new ValidationRejected("ATT-SNAPSHOT-GENERATION-REQUIRED");
+            byte[] workbook = candidate.read(authorization.workbookPath);
+            byte[] sidecar = candidate.read(authorization.sidecarPath);
+            byte[] snapshot = candidate.read(path);
+            if (workbook == null || sidecar == null || snapshot == null
+                    || !hash(workbook).equals(authorization.workbookHash)
+                    || !hash(sidecar).equals(authorization.sidecarHash)
+                    || !hash(snapshot).equals(authorization.snapshotHash)) throw new Conflict();
+        }
     }
 
     private static void requireAllowed(String domain, String path) {
@@ -1209,6 +1378,11 @@ final class ChangeSetPublisher implements AutoCloseable {
     }
     private static String hash(String value) throws Exception { return hash(value.getBytes(StandardCharsets.UTF_8)); }
     private static String hash(byte[] value) throws Exception { return hex(MessageDigest.getInstance("SHA-256").digest(value)); }
+    private static boolean matchesHash(String expected, byte[] value) throws IOException {
+        if (expected == null) return false;
+        try { return expected.equals(hash(value)); }
+        catch (Exception failure) { throw new IOException("Candidate source fingerprint is unavailable"); }
+    }
     private static String hashFile(Path path) throws IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

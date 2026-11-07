@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "att-source-management/v1",
+  "title": "ATT Source Management API v1",
+  "type": "object",
+  "$defs": {
+    "PackageCategory": {
+      "type": "string",
+      "enum": ["TESTCASE", "TEMPLATE", "FLOW", "LOAD", "TESTDATA", "FILE"]
+    },
+    "RevisionKind": {
+      "type": "string",
+      "enum": ["PACKAGE_REGISTRATION", "BUSINESS_SOURCE", "CHANGE_SET", "PACKAGE_MANIFEST", "CONFIG_SOURCE", "EFFECTIVE_CONFIG", "ENVIRONMENT", "ENGINE_SCHEMA", "SCHEDULE_SNAPSHOT"]
+    },
+    "RevisionIdentity": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "scopeId", "revision"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-revision/v1"},
+        "kind": {"$ref": "#/$defs/RevisionKind"},
+        "scopeId": {"type": "string", "minLength": 1, "maxLength": 160},
+        "qualifier": {"type": ["string", "null"], "maxLength": 160},
+        "revision": {"type": "string", "minLength": 1, "maxLength": 160}
+      },
+      "additionalProperties": false
+    },
+    "RevisionSet": {
+      "type": "object",
+      "required": ["schemaVersion"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-revision-set/v1"},
+        "packageRegistration": {"$ref": "#/$defs/RevisionIdentity"},
+        "businessSource": {"$ref": "#/$defs/RevisionIdentity"},
+        "changeSet": {"$ref": "#/$defs/RevisionIdentity"},
+        "manifest": {"$ref": "#/$defs/RevisionIdentity"},
+        "configSource": {"$ref": "#/$defs/RevisionIdentity"},
+        "effectiveConfig": {"$ref": "#/$defs/RevisionIdentity"},
+        "environment": {"$ref": "#/$defs/RevisionIdentity"},
+        "engineSchema": {"$ref": "#/$defs/RevisionIdentity"},
+        "scheduleSnapshot": {"$ref": "#/$defs/RevisionIdentity"}
+      },
+      "additionalProperties": false
+    },
+    "ValidationDiagnostic": {
+      "type": "object",
+      "required": ["code", "severity"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+        "severity": {"enum": ["ERROR", "WARNING", "INFO"]},
+        "logicalPath": {"type": ["string", "null"], "maxLength": 1024},
+        "field": {"type": ["string", "null"], "maxLength": 512},
+        "line": {"type": ["integer", "null"], "minimum": 1},
+        "message": {"type": ["string", "null"], "maxLength": 512},
+        "remedy": {"type": ["string", "null"], "maxLength": 512}
+      },
+      "additionalProperties": false
+    },
+    "ApiFailureStatus": {
+      "type": "string",
+      "enum": ["FORBIDDEN_403", "CONFLICT_409", "TOO_LARGE_413", "INVALID_422"]
+    },
+    "ChangeSetView": {
+      "type": "object",
+      "required": ["schemaVersion", "changeSetId", "domain", "scopeId", "state", "revisions", "noStore", "categories", "manifestMetadataChanged"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-change-set/v1"},
+        "changeSetId": {"type": "string", "minLength": 1, "maxLength": 160},
+        "domain": {"enum": ["PACKAGE_SOURCE", "CENTRAL_RUNTIME_CONFIG"]},
+        "scopeId": {"type": "string", "minLength": 1, "maxLength": 160},
+        "state": {"enum": ["DRAFT", "VALIDATED", "REVIEWED", "PUBLISHED", "CONFLICTED", "REJECTED"]},
+        "revisions": {"$ref": "#/$defs/RevisionSet"},
+        "etag": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "noStore": {"type": "boolean"},
+        "categories": {"type": "array", "items": {"$ref": "#/$defs/PackageCategory"}, "uniqueItems": true},
+        "manifestMetadataChanged": {"type": "boolean"},
+        "inboundReferences": {"type": "array", "items": {"$ref": "#/$defs/DependencyReference"}},
+        "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/ValidationDiagnostic"}}
+      },
+      "additionalProperties": false
+    },
+    "DependencyReference": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "certainty"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-dependency/v1"},
+        "kind": {"enum": ["PACKAGE_RESOURCE", "MANIFEST", "LOAD_OVERLAY", "TESTDATA", "FILE", "TOOL", "HELPER", "ENVIRONMENT_BINDING", "ENGINE_SCHEMA", "SCHEDULE"]},
+        "packageId": {"type": ["string", "null"], "maxLength": 160},
+        "environment": {"type": ["string", "null"], "maxLength": 64},
+        "logicalId": {"type": ["string", "null"], "maxLength": 512},
+        "canonicalPath": {"type": ["string", "null"], "maxLength": 1024},
+        "sourceFingerprint": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "relationship": {"type": ["string", "null"], "maxLength": 160},
+        "callSite": {"type": ["string", "null"], "maxLength": 512},
+        "certainty": {"enum": ["KNOWN", "UNKNOWN"]}
+      },
+      "additionalProperties": false
+    },
+    "Page": {
+      "type": "object",
+      "required": ["schemaVersion", "items", "totalEstimate", "truncated"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-page/v1"},
+        "items": {"type": "array"},
+        "nextCursor": {"type": ["string", "null"], "maxLength": 512},
+        "totalEstimate": {"type": "integer", "minimum": 0},
+        "truncated": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "ApiFailure": {
+      "type": "object",
+      "required": ["schemaVersion", "status", "code", "message", "currentRevisions"],
+      "properties": {
+        "schemaVersion": {"const": "att-source-api-failure/v1"},
+        "status": {"$ref": "#/$defs/ApiFailureStatus"},
+        "code": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+        "requestId": {"type": ["string", "null"], "maxLength": 160},
+        "message": {"type": ["string", "null"], "maxLength": 512},
+        "currentRevisions": {"$ref": "#/$defs/RevisionSet"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

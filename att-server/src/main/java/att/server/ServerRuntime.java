@@ -222,6 +222,7 @@ final class ServerRuntime implements AutoCloseable {
                         store.persistSourcePublicationAudit(record);
                     }
                 },sourceFileTransaction);
+        ChangeSetCandidateValidator sourceCandidateValidator=new ChangeSetCandidateValidator();
         changeSetPublisher=new ChangeSetPublisher(clock,config.packageConfiguration.maxDrafts,
                 config.packageConfiguration.maxDraftsPerUser,config.packageConfiguration.draftTtlSeconds,
                 (domain,scopeId,actor,systemSettingsWrite)->{
@@ -238,7 +239,7 @@ final class ServerRuntime implements AutoCloseable {
                     Path activeCentralRoot=centralSourceRoot();
                     return new ChangeSetPublisher.Scope(domain,scopeId,activeCentralRoot,activeCentralRoot,null,workerSchemaRegistryDigest);
                 },
-                ChangeSetPublisher.unavailableValidator(),
+                sourceCandidateValidator,
                 ChangeSetPublisher.unavailableConfigGate(),
                 new ChangeSetPublisher.Audit() {
                     @Override public void record(String actor,String action,String domain,String scopeId,String detail) throws Exception {
@@ -249,7 +250,8 @@ final class ServerRuntime implements AutoCloseable {
                         store.persistSourcePublicationAudit(record);
                     }
                 },
-                sourceFileTransaction);
+                sourceFileTransaction,
+                sourceCandidateValidator);
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -1765,7 +1767,7 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> user=loginId==null?null:store.authUser(loginId);
         return user!=null&&Boolean.TRUE.equals(user.get("active"))&&"USER".equals(user.get("role"));
     }
-    private Path packageRoot(String id) {
+    Path packageRoot(String id) {
         PackageRegistry.Snapshot registry=packageRegistry.snapshot();
         return pinPackageRoot(registry,id);
     }

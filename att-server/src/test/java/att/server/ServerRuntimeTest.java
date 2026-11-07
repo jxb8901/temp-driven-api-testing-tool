@@ -122,7 +122,9 @@ class ServerRuntimeTest {
     @Test void launchesOneStructuredWorkerProcessForAnAcceptedJob() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("packages"));Path pkg=Files.createDirectory(allowed.resolve("broken-package"));
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
-        Path configFile=temp.resolve("server.yaml");Files.writeString(configFile,"server:\n  dataDir: "+temp.resolve("data")+"\n  javaExecutable: "+javaBin+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        Path runtimeRoot=Files.createDirectory(temp.resolve("runtime"));Path runtimeConfigDirectory=Files.createDirectory(runtimeRoot.resolve("config"));
+        Path runtimeConfig=runtimeConfigDirectory.resolve("config.yaml");Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.13\nenvironment: SIT\n");
+        Path configFile=temp.resolve("server.yaml");Files.writeString(configFile,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("data"))+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(allowed)+"\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(pkg)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("WEB-INF-lib"));
         ServerRuntimeTestSupport.addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));ServerRuntimeTestSupport.addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
         ServerRuntimeTestSupport.addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));ServerRuntimeTestSupport.addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
@@ -385,26 +387,33 @@ class ServerRuntimeTest {
     }
 
     @Test void publicResultsReplacePackageAndOutputRootsWithLogicalReferences() throws Exception {
-        Path allowed=Files.createDirectory(temp.resolve("redact-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));Path yaml=temp.resolve("redact-server.yaml");
-        Files.writeString(yaml,"server:\n  dataDir: "+temp.resolve("redact-data")+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
+        Path allowed=Files.createDirectory(temp.resolve("redact-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));
+        Path runtimeRoot=Files.createDirectory(temp.resolve("redact-runtime"));Path runtimeConfigDirectory=Files.createDirectory(runtimeRoot.resolve("config"));
+        Path runtimeConfig=runtimeConfigDirectory.resolve("config.yaml");Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.13\nenvironment: SIT\n");
+        Path yaml=temp.resolve("redact-server.yaml");
+        Files.writeString(yaml,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("redact-data"))+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  maxConcurrentLoad: 1\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(allowed)+"\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(pkg)+"\n");
         ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("redact-libs")).toString());
         try {
+            Path pinnedPackage=runtime.packageRoot("p");
             String id="JABCDEF0123456789";Path output=runtime.config.dataDir.resolve("jobs").resolve(id).resolve("output");Files.createDirectories(output);
             Job job=new Job(id,"run","p","test",new att.server.api.WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
+            job.request.packageRoot=pinnedPackage.toString();
             runtime.store.insert(job,"{}");runtime.jobs.put(id,job);
-            job.resultJson=ServerRuntime.JSON.writeValueAsString(Map.of("summary",pkg.toRealPath().resolve("case.json").toString(),"artifact",output.resolve("report.xlsx").toString()));
+            job.resultJson=ServerRuntime.JSON.writeValueAsString(Map.of("summary",pinnedPackage.resolve("case.json").toString(),"artifact",output.resolve("report.xlsx").toString()));
             job.diagnosticJson=ServerRuntime.JSON.writeValueAsString(Map.of("code","ATT-TEST","message","active worker diagnostic"));job.status="INVALID";
             var activeResponse=ServerRuntime.JSON.valueToTree(runtime.resultRecord(id));
             assertTrue(activeResponse.path("result").path("summary").asText().endsWith("case.json"),activeResponse.toString());
             assertEquals("active worker diagnostic",activeResponse.path("diagnostic").path("message").asText());
             runtime.finish(job,"PASS",0);var response=ServerRuntime.JSON.valueToTree(runtime.resultRecord(id));String encoded=response.toString();
-            assertFalse(encoded.contains(pkg.toString()));assertFalse(encoded.contains(output.toString()));assertTrue(encoded.contains("package:case.json"));assertTrue(encoded.contains("artifact:report.xlsx"));
-            String original="payload='&{./Pacs008.xml}' <a></a>\nfile="+pkg.resolve("flows/bad.yaml")+" line=7 column=3\nexternal=/private/host/hidden.txt\npassword=artifact-canary\n";
+            assertFalse(encoded.contains(pkg.toString()),encoded);assertFalse(encoded.contains(pinnedPackage.toString()),encoded);
+            assertFalse(encoded.contains(output.toString()),encoded);
+            assertTrue(encoded.contains("package:case.json"),encoded);assertTrue(encoded.contains("artifact:report.xlsx"),encoded);
+            String original="payload='&{./Pacs008.xml}' <a></a>\nfile="+pinnedPackage.resolve("flows/bad.yaml")+" line=7 column=3\nexternal=/private/host/hidden.txt\npassword=artifact-canary\n";
             Path artifact=Files.writeString(output.resolve("case.log"),original);
             String projected=new String(runtime.publicArtifact(id,artifact),java.nio.charset.StandardCharsets.UTF_8);
             assertTrue(projected.contains("payload='&{./Pacs008.xml}' <a></a>"),projected);
             assertTrue(projected.contains("flows/bad.yaml line=7 column=3"),projected);
-            assertFalse(projected.contains(pkg.toString()));assertFalse(projected.contains("/private/host"));
+            assertFalse(projected.contains(pkg.toString()));assertFalse(projected.contains(pinnedPackage.toString()));assertFalse(projected.contains("/private/host"));
             assertFalse(projected.contains("artifact-canary"));assertEquals(original,Files.readString(artifact));
             Object event=runtime.publicEventData(Map.of("message",original,"headers",Map.of("Authorization","Bearer event-canary","Content-Type","application/xml")),output,pkg);
             String publicEvent=ServerRuntime.JSON.writeValueAsString(event);

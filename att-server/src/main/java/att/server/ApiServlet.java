@@ -988,13 +988,24 @@ public final class ApiServlet extends HttpServlet {
                 result=runtime.changeSetPublisher.stage(domain,scopeId,actor,systemSettingsWrite,baseRevision,registryRevision,operations,requestId);
                 status=201;
             } else {
-                if(input.size()!=0)throw new IllegalArgumentException("Change Set actions accept an empty object");
                 String id=central?parts[3]:parts[4];
                 String action=central?parts[4]:parts[5];
+                if(!"generate-snapshot".equals(action)&&input.size()!=0)
+                    throw new IllegalArgumentException("Change Set actions accept an empty object");
                 if("validate".equals(action))result=runtime.changeSetPublisher.validate(domain,scopeId,actor,systemSettingsWrite,id,requestId);
                 else if("review".equals(action))result=runtime.changeSetPublisher.review(domain,scopeId,actor,systemSettingsWrite,id,requestId);
                 else if("publish".equals(action))result=runtime.changeSetPublisher.publish(domain,scopeId,actor,systemSettingsWrite,id,requestId);
                 else if("discard".equals(action))result=runtime.changeSetPublisher.discard(domain,scopeId,actor,systemSettingsWrite,id,requestId);
+                else if("generate-snapshot".equals(action)) {
+                    if(central)throw new IllegalArgumentException("Testcase snapshots are Package-scoped");
+                    Set<String> fields=new java.util.HashSet<>(java.util.Arrays.asList(
+                            "expectedSourceRevision","workbookPath","expectedWorkbookHash","expectedSidecarHash"));
+                    java.util.Iterator<String> names=input.fieldNames();
+                    while(names.hasNext())if(!fields.contains(names.next()))throw new IllegalArgumentException("Unsupported snapshot generation field");
+                    result=runtime.changeSetPublisher.generateSnapshot(domain,scopeId,actor,systemSettingsWrite,id,
+                            requiredChangeText(input,"expectedSourceRevision"),requiredChangeText(input,"workbookPath"),
+                            requiredChangeText(input,"expectedWorkbookHash"),requiredChangeText(input,"expectedSidecarHash"),requestId);
+                }
                 else throw new IllegalArgumentException("Unsupported Change Set action");
             }
             result.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,status,result);
@@ -1125,7 +1136,7 @@ public final class ApiServlet extends HttpServlet {
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-PACKAGE-SOURCE-FAILED","Manifest action could not be completed",requestId);getServletContext().log("ATT Manifest action failed id="+requestId,e);}
     }
-    private static boolean packageChangeSetPath(String path){return path.matches("/packages/[^/]+/change-sets(?:/[^/]+/(?:validate|review|publish|discard))?");}
+    private static boolean packageChangeSetPath(String path){return path.matches("/packages/[^/]+/change-sets(?:/[^/]+/(?:validate|review|publish|discard|generate-snapshot))?");}
     private static boolean centralChangeSetPath(String path){return path.matches("/configuration/change-sets(?:/[^/]+/(?:validate|review|publish|discard))?");}
     private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/package-configuration(?:/.*)?")||path.matches("/packages/[^/]+/configuration(?:/.*)?")||path.matches("/configuration(?:/.*)?");}
     private static boolean loadPolicyPath(String path){return path.matches("/packages/[^/]+/load-policy");}
