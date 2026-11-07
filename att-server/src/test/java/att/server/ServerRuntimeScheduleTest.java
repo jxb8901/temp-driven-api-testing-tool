@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
@@ -63,6 +64,72 @@ class ServerRuntimeScheduleTest {
             ServerRuntime.JobConflictException automatic=assertThrows(ServerRuntime.JobConflictException.class,
                     ()->restarted.prepareScheduledExecution(staleButEnabled,"alice"));
             assertEquals("ATT-SCHEDULE-CONFIG-REVIEW-REQUIRED",automatic.code);
+        }
+    }
+
+    @Test void automaticOccurrenceReloadsConfigReviewAfterClaimForOrdinaryAndChangedPackages() throws Exception {
+        for(boolean packageChanged:List.of(false,true)) {
+            ScheduleRaceFixture fixture=scheduleRaceFixture("claim-review-"+packageChanged);
+            try(ServerRuntime runtime=new ServerRuntime(fixture.config,fixture.libs)) {
+                runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+                LoadSchedule schedule=fixture.createSchedule(runtime,packageChanged);
+                if(packageChanged)Files.writeString(fixture.packageRoot.resolve("templates/RACE/template.yaml"),
+                        "\n# package revision changed after the occurrence was claimed\n",StandardOpenOption.APPEND);
+                String occurrence="Oclaim-"+System.nanoTime();
+                assertTrue(runtime.store.advanceAndClaim(schedule,occurrence,null));
+
+                runtime.invalidateEffectiveConfiguration("p","SIT");
+
+                ServerRuntime.JobConflictException rejected=assertThrows(ServerRuntime.JobConflictException.class,
+                        ()->runtime.submitScheduledJob(schedule,occurrence,"alice"));
+                assertEquals("ATT-SCHEDULE-CONFIG-REVIEW-REQUIRED",rejected.code);
+                assertTrue(runtime.jobs.values().stream().noneMatch(job->occurrence.equals(job.scheduleOccurrenceId)));
+            }
+        }
+    }
+
+    @Test void automaticAdmissionFencesConfigInvalidationAcrossPrepareAndSubmit() throws Exception {
+        for(boolean revalidated:List.of(false,true)) {
+            ScheduleRaceFixture fixture=scheduleRaceFixture("admission-review-"+revalidated);
+            try(ServerRuntime runtime=new ServerRuntime(fixture.config,fixture.libs)) {
+                runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+                LoadSchedule schedule=fixture.createSchedule(runtime,true);
+                String acceptedRevision=schedule.expectedRevisionDigest;
+                if(revalidated)Files.writeString(fixture.packageRoot.resolve("templates/RACE/template.yaml"),
+                        "\n# package revision changed before automatic revalidation\n",StandardOpenOption.APPEND);
+                String occurrence="Oadmit-"+System.nanoTime();
+                assertTrue(runtime.store.advanceAndClaim(schedule,occurrence,null));
+
+                CountDownLatch prepared=new CountDownLatch(1),continueAdmission=new CountDownLatch(1);
+                AtomicReference<String> preparedRevision=new AtomicReference<>();
+                runtime.scheduledAdmissionHook=execution->{
+                    preparedRevision.set(execution.expectedRevisionDigest);prepared.countDown();
+                    if(!continueAdmission.await(30,TimeUnit.SECONDS))throw new IllegalStateException("Test admission release timed out");
+                };
+                FutureTask<Map<String,Object>> submission=new FutureTask<>(()->runtime.submitScheduledJob(schedule,occurrence,"alice"));
+                Thread submitThread=new Thread(submission,"test-schedule-submit");submitThread.start();
+                assertTrue(prepared.await(30,TimeUnit.SECONDS),"Scheduled preparation did not reach admission");
+                if(revalidated)assertNotEquals(acceptedRevision,preparedRevision.get());
+                else assertEquals(acceptedRevision,preparedRevision.get());
+
+                CountDownLatch invalidationStarted=new CountDownLatch(1);
+                FutureTask<Void> invalidation=new FutureTask<>(()->{
+                    invalidationStarted.countDown();runtime.invalidateEffectiveConfiguration("p","SIT");return null;
+                });
+                Thread invalidationThread=new Thread(invalidation,"test-config-invalidation");invalidationThread.start();
+                assertTrue(invalidationStarted.await(30,TimeUnit.SECONDS));
+                long waitingDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+                while(invalidationThread.getState()!=Thread.State.WAITING&&!invalidation.isDone()
+                        &&System.nanoTime()<waitingDeadline)Thread.sleep(10L);
+                assertEquals(Thread.State.WAITING,invalidationThread.getState(),"Config invalidation must reach the shared write fence");
+                assertFalse(invalidation.isDone(),"Config invalidation must wait until Job admission has an ordering point");
+                continueAdmission.countDown();
+
+                Map<String,Object> accepted=submission.get(30,TimeUnit.SECONDS);
+                invalidation.get(30,TimeUnit.SECONDS);
+                assertNotNull(runtime.jobRecord(String.valueOf(accepted.get("jobId"))));
+                assertEquals("configuration-revision-changed",runtime.loadSchedule(schedule.id).configurationStatus);
+            }
         }
     }
 
@@ -579,5 +646,46 @@ class ServerRuntimeScheduleTest {
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.loadSchedule(unavailableId));
             assertEquals("failed-to-submit",runtime.loadScheduleExecutions(unavailableId,10).get(0).get("status"),"delete preserves the occurrence history");
         } finally {runtime.close();}
+    }
+
+    private ScheduleRaceFixture scheduleRaceFixture(String name) throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve(name+"-packages"));
+        Path packageRoot=Files.createDirectories(allowed.resolve("p"));
+        Files.createDirectories(packageRoot.resolve("config"));Files.createDirectories(packageRoot.resolve("testcase"));
+        Files.createDirectories(packageRoot.resolve("templates/RACE"));Files.createDirectories(packageRoot.resolve("load"));
+        Files.writeString(packageRoot.resolve("package.yaml"),"schemaVersion: att-package/v1\n");
+        Files.writeString(packageRoot.resolve("templates/RACE/template.yaml"),"schemaVersion: att-template/v3.6\nname: RACE\n"
+                +"description: Schedule race fixture\nactions:\n  ok: {type: log, message: accepted}\n");
+        Files.writeString(packageRoot.resolve("load/scenario.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n"
+                +"  - id: schedule-race\n    target: {type: template, id: RACE}\n    load: {users: 1, duration: 1s}\n");
+        Path runtimeConfig=temp.resolve(name+"-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path data=temp.resolve(name+"-data"),serverFile=temp.resolve(name+"-server.yaml");
+        Files.writeString(serverFile,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
+                +"\n  auth: {mode: local}\n  scheduling: {enabled: true, minimumIntervalMinutes: 1, pollIntervalSeconds: 300}\n"
+                +"  inlineLoad: {enabled: true, maxAggregateArrivalRatePerSecond: 200}\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\n  maxConcurrentLoad: 1\npackages:\n"
+                +"  allowedRoots: ["+ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"\n");
+        ServerConfig config=ServerConfig.load(serverFile);Path libs=Files.createDirectories(temp.resolve(name+"-lib"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+        return new ScheduleRaceFixture(config,libs.toString(),packageRoot);
+    }
+
+    private static final class ScheduleRaceFixture {
+        final ServerConfig config;final String libs;final Path packageRoot;
+        ScheduleRaceFixture(ServerConfig config,String libs,Path packageRoot){this.config=config;this.libs=libs;this.packageRoot=packageRoot;}
+        LoadSchedule createSchedule(ServerRuntime runtime,boolean ignorePackageChanges) throws Exception {
+            var input=ServerRuntime.JSON.createObjectNode();input.put("name","Schedule race");input.put("packageId","p");
+            input.put("scenario","load/scenario.yaml");input.put("environment","SIT");input.put("timezone","UTC");
+            input.put("runAt",Instant.now().plusSeconds(3600).toString());input.put("enabled",true);
+            if(ignorePackageChanges)input.put("packageChangePolicy","ignore");
+            return runtime.createLoadSchedule(input,"alice");
+        }
     }
 }

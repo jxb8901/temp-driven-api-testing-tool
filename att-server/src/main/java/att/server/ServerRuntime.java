@@ -147,6 +147,8 @@ final class ServerRuntime implements AutoCloseable {
     private String artifactRecoveryCursor="";
     private final ScheduledExecutorService inspectionWatchdogs;
     private LoadScheduleScheduler loadScheduleScheduler;
+    @FunctionalInterface interface ScheduledAdmissionHook { void beforeJobAdmission(LoadSchedule schedule) throws Exception; }
+    volatile ScheduledAdmissionHook scheduledAdmissionHook = schedule -> { };
     private final WorkerProcessLauncher processLauncher;
     private final Clock clock;
     private final long startedAtNanos=System.nanoTime();
@@ -4611,8 +4613,18 @@ final class ServerRuntime implements AutoCloseable {
         if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
     }
 
-    private Map<String,Object> submitScheduledJob(LoadSchedule schedule,String occurrenceId,String executionPrincipal) throws Exception {
+    Map<String,Object> submitScheduledJob(LoadSchedule schedule,String occurrenceId,String executionPrincipal) throws Exception {
+        sourcePublicationBarrier.readLock().lock();
+        try {
+        LoadSchedule persisted=store.schedule(schedule.id);
         Map<String,Object> occurrence=store.scheduleExecution(occurrenceId);
+        if(persisted==null||occurrence==null||!persisted.id.equals(occurrence.get("scheduleId"))
+                ||!"scheduled".equals(occurrence.get("status")))throw new ScheduleConflictException();
+        requireScheduleConfigurationReview(persisted);
+        if(persisted.definitionVersion!=schedule.definitionVersion)
+            throw new ScheduleConflictException();
+        if(!persisted.enabled)throw new ScheduleConflictException();
+        schedule=persisted;
         String triggeredBy=occurrence==null?null:(String)occurrence.get("triggeredBy");
         String actualExecutionPrincipal=executionPrincipal==null||executionPrincipal.isBlank()
                 ?(schedule.executionPrincipal==null||schedule.executionPrincipal.isBlank()?schedule.createdBy:schedule.executionPrincipal)
@@ -4629,6 +4641,7 @@ final class ServerRuntime implements AutoCloseable {
             }
         }
         try {
+            scheduledAdmissionHook.beforeJobAdmission(schedule);
             Map<String,Object> accepted="run".equals(schedule.effectiveJobType())
                     ?submitScheduledRun(schedule,occurrenceId,actualExecutionPrincipal,provenance)
                     :"debug".equals(schedule.effectiveJobType())
@@ -4642,6 +4655,7 @@ final class ServerRuntime implements AutoCloseable {
                 jobSourceClosures.releaseOwner(sourceOverride.owner);
             }
         }
+        } finally { sourcePublicationBarrier.readLock().unlock(); }
     }
 
     private ScheduleSourceOverride captureRevalidatedScheduleSource(LoadSchedule approved,LoadSchedule execution,

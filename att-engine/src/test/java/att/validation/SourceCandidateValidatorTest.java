@@ -98,6 +98,45 @@ class SourceCandidateValidatorTest {
                 || (item.logicalPath != null && item.logicalPath.contains("template.yaml"))), describe(result));
     }
 
+    @Test void effectiveResolutionRetainsEveryCallerForOneCanonicalFile() throws Exception {
+        Path shared=firstPackage.resolve("files/shared.txt");write(shared,"one immutable File value\n");
+        for(String templateId:Arrays.asList("one","two")) {
+            Path directory=Files.createDirectories(firstPackage.resolve("templates").resolve(templateId));
+            write(directory.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: "+templateId
+                    +"\ndescription: Shared File caller\nactions:\n  read: {type: log, message: '&{../../files/shared.txt}'}\n");
+        }
+        Path flowDirectory=Files.createDirectories(firstPackage.resolve("templates/flows/shared"));
+        write(flowDirectory.resolve("flow.yaml"),"schemaVersion: att-flow/v3.6\nid: common.shared.v1\nname: Shared\n"
+                +"description: Two Flow action callers\nactions:\n"
+                +"  first: {type: log, message: '&{../../../files/shared.txt}'}\n"
+                +"  second: {type: log, message: '&{../../../files/shared.txt}'}\n");
+        Path flowCaller=Files.createDirectories(firstPackage.resolve("templates/flow-caller"));
+        write(flowCaller.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FlowCaller\ndescription: Flow caller\n"
+                +"actions:\n  invoke: {type: flow, use: common.shared.v1}\n");
+        EffectiveResolution resolution=validator.resolveEffective("first","SIT",firstPackage,
+                configFile,runtimeRoot,revisions("first"));
+        assertTrue(resolution.complete,resolution.diagnostics.toString());
+        java.util.List<DependencyReference> callers=resolution.dependencies.stream().filter(ref->ref.kind==DependencyKind.FILE
+                &&"files/shared.txt".equals(ref.canonicalPath)).collect(java.util.stream.Collectors.toList());
+        assertEquals(5,callers.size(),callers.stream().map(ref->ref.canonicalPath+"|"+ref.callSite)
+                .collect(java.util.stream.Collectors.toList()).toString());
+        assertEquals(1,callers.stream().map(ref->ref.sourceFingerprint).distinct().count());
+        assertEquals(5,callers.stream().map(ref->ref.callSite).distinct().count());
+        assertTrue(callers.stream().anyMatch(ref->ref.callSite.contains("templates/one")));
+        assertTrue(callers.stream().anyMatch(ref->ref.callSite.contains("templates/two")));
+        assertTrue(callers.stream().anyMatch(ref->ref.callSite.contains("templates/flow-caller")));
+        assertTrue(callers.stream().anyMatch(ref->ref.callSite.contains("flow.yaml#action:first")));
+        assertTrue(callers.stream().anyMatch(ref->ref.callSite.contains("flow.yaml#action:second")));
+
+        byte[] compiled=validator.compileFileExpressionSnapshot(firstPackage,configFile,runtimeRoot,"SIT");
+        att.template.FileExpressionResolver.FileExpressionSnapshot restored=
+                att.template.FileExpressionResolver.FileExpressionSnapshot.restore(firstPackage,compiled);
+        java.util.List<att.template.FileExpressionResolver.CompiledFileDependency> plans=restored.dependencies();
+        assertEquals(3,plans.size(),plans.toString());
+        assertEquals(3,plans.stream().map(att.template.FileExpressionResolver.CompiledFileDependency::sourceDirectory)
+                .distinct().count());
+    }
+
     @Test void effectiveResolutionCapturesSelectedLoadTestdataOverlayAndDescriptorIdentity() throws Exception {
         Files.createDirectories(firstPackage.resolve("load"));
         write(firstPackage.resolve("testdata/scenario.yaml"),

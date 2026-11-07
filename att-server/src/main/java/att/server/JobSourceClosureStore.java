@@ -139,6 +139,8 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
         public String compiledFilePlansSha256;
         public String packageTreeDigest;
         public String configTreeDigest;
+        public String packageExecutableDigest;
+        public String configExecutableDigest;
         public Set<String> owners;
     }
 
@@ -416,6 +418,7 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
     private boolean snapshotAvailable(LeaseRecord record) {
         if (record.configPath == null || record.logicalPaths == null || record.logicalPaths.isEmpty()
                 || record.snapshotArchiveSha256 == null || record.packageTreeDigest == null || record.configTreeDigest == null
+                || record.packageExecutableDigest == null || record.configExecutableDigest == null
                 || record.compiledFilePlansSha256 == null || !record.compiledFilePlansSha256.matches("[a-f0-9]{64}"))
             return false;
         Path verified = null;
@@ -468,11 +471,13 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
             try (ZipFile archive = new ZipFile(verified.toFile())) {
                 JsonNode manifest = readSnapshotManifest(archive);
                 if (!snapshotManifestMatches(record, manifest)) throw new StaleSourceException();
-                extractSnapshotTree(archive, temporary, "package", manifest.path("packageSymlinks"));
-                extractSnapshotTree(archive, temporary, "config", manifest.path("configSymlinks"));
+                extractSnapshotTree(archive, temporary, "package", manifest.path("packageSymlinks"),manifest.path("packageExecutableFiles"));
+                extractSnapshotTree(archive, temporary, "config", manifest.path("configSymlinks"),manifest.path("configExecutableFiles"));
                 Path packageRoot = temporary.resolve("package"), configRoot = temporary.resolve("config");
                 if (!record.packageTreeDigest.equals(SourceRevisionStore.treeDigest(packageRoot))
-                        || !record.configTreeDigest.equals(SourceRevisionStore.treeDigest(configRoot))) throw new StaleSourceException();
+                        || !record.configTreeDigest.equals(SourceRevisionStore.treeDigest(configRoot))
+                        || !record.packageExecutableDigest.equals(executableDigestTree(packageRoot))
+                        || !record.configExecutableDigest.equals(executableDigestTree(configRoot))) throw new StaleSourceException();
                 Path config = configRoot.resolve(record.configPath).normalize();
                 if (!config.startsWith(configRoot) || !Files.isRegularFile(config, LinkOption.NOFOLLOW_LINKS)
                         || Files.isSymbolicLink(config)) throw new StaleSourceException();
@@ -498,6 +503,8 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
                     && Files.isDirectory(configRoot, LinkOption.NOFOLLOW_LINKS)
                     && record.packageTreeDigest.equals(SourceRevisionStore.treeDigest(packageRoot))
                     && record.configTreeDigest.equals(SourceRevisionStore.treeDigest(configRoot))
+                    && record.packageExecutableDigest.equals(executableDigestTree(packageRoot))
+                    && record.configExecutableDigest.equals(executableDigestTree(configRoot))
                     && config.startsWith(configRoot) && Files.isRegularFile(config, LinkOption.NOFOLLOW_LINKS)
                     && !Files.isSymbolicLink(config);
         } catch (Exception unavailable) { return false; }
@@ -523,11 +530,16 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
                 && java.util.Objects.equals(record.compiledFilePlansSha256,manifest.path("compiledFilePlansSha256").asText(null))
                 && record.packageTreeDigest.equals(manifest.path("packageTreeDigest").asText())
                 && record.configTreeDigest.equals(manifest.path("configTreeDigest").asText())
+                && java.util.Objects.equals(record.packageExecutableDigest,manifest.path("packageExecutableDigest").asText(null))
+                && java.util.Objects.equals(record.configExecutableDigest,manifest.path("configExecutableDigest").asText(null))
+                && java.util.Objects.equals(record.packageExecutableDigest,executableDigestManifest(manifest.path("packageExecutableFiles")))
+                && java.util.Objects.equals(record.configExecutableDigest,executableDigestManifest(manifest.path("configExecutableFiles")))
                 && revisions.businessSource.revision.equals(manifest.path("packageRevision").asText())
                 && revisions.configSource.revision.equals(manifest.path("configRevision").asText());
     }
 
-    private void extractSnapshotTree(ZipFile archive, Path destination, String tree, JsonNode symlinks) throws IOException {
+    private void extractSnapshotTree(ZipFile archive, Path destination, String tree, JsonNode symlinks,
+                                    JsonNode executableFiles) throws IOException {
         Path root = destination.resolve(tree);
         createPrivateDirectory(root);
         java.util.Enumeration<? extends ZipEntry> entries = archive.entries();
@@ -557,6 +569,7 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
                 if (entry.getSize() != copied) throw new StaleSourceException();
             }
         }
+        restoreExecutableFiles(root, executableFiles);
         if (symlinks != null && symlinks.isObject()) {
             var fields = symlinks.fields();
             while (fields.hasNext()) {
@@ -577,8 +590,9 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
         final String path;
         final String type;
         final String fingerprint;
-        CapturedEntry(String path, String type, String fingerprint) {
-            this.path=path;this.type=type;this.fingerprint=fingerprint;
+        final boolean executable;
+        CapturedEntry(String path, String type, String fingerprint,boolean executable) {
+            this.path=path;this.type=type;this.fingerprint=fingerprint;this.executable=executable;
         }
     }
 
@@ -617,6 +631,7 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
         Path packageRoot=Path.of(record.packageRoot),configRoot=Path.of(record.configRoot);
         try {
             String packageBefore=SourceRevisionStore.treeDigest(packageRoot),configBefore=SourceRevisionStore.treeDigest(configRoot);
+            String packageModesBefore=executableDigestTree(packageRoot),configModesBefore=executableDigestTree(configRoot);
             List<CapturedEntry> packageEntries=new ArrayList<>(),configEntries=new ArrayList<>();
             Map<String,String> packageLinks=new LinkedHashMap<>(),configLinks=new LinkedHashMap<>();
             long[] total={0};
@@ -629,9 +644,13 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
                     captureTree(zip,packageRoot,"package",packageEntries,packageLinks,total);
                     captureTree(zip,configRoot,"config",configEntries,configLinks,total);
                     String packageDigest=treeDigest(packageEntries),configDigest=treeDigest(configEntries);
+                    String packageModes=executableDigestEntries(packageEntries),configModes=executableDigestEntries(configEntries);
                     if(!packageBefore.equals(packageDigest)||!configBefore.equals(configDigest)
                             ||!packageBefore.equals(SourceRevisionStore.treeDigest(packageRoot))
-                            ||!configBefore.equals(SourceRevisionStore.treeDigest(configRoot)))
+                            ||!configBefore.equals(SourceRevisionStore.treeDigest(configRoot))
+                            ||!packageModesBefore.equals(packageModes)||!configModesBefore.equals(configModes)
+                            ||!packageModes.equals(executableDigestTree(packageRoot))
+                            ||!configModes.equals(executableDigestTree(configRoot)))
                         throw new StaleSourceException();
                     if(compiledFilePlans!=null)try {
                         att.template.FileExpressionResolver.FileExpressionSnapshot.restore(packageRoot,compiledFilePlans);
@@ -648,6 +667,9 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
                     manifest.put("packageRevision",revisions.businessSource.revision);manifest.put("configRevision",revisions.configSource.revision);
                     manifest.put("configurationPath",record.configPath);manifest.put("packageTreeDigest",packageDigest);
                     manifest.put("configTreeDigest",configDigest);manifest.put("logicalPaths",record.logicalPaths);
+                    manifest.put("packageExecutableFiles",executablePaths(packageEntries));
+                    manifest.put("configExecutableFiles",executablePaths(configEntries));
+                    manifest.put("packageExecutableDigest",packageModes);manifest.put("configExecutableDigest",configModes);
                     manifest.put("dependencies",record.dependencies==null?List.of():record.dependencies);
                     manifest.put("compiledFilePlansSha256",compiledFilePlans==null?null:digest(compiledFilePlans));
                     manifest.put("packageSymlinks",packageLinks);manifest.put("configSymlinks",configLinks);
@@ -655,6 +677,7 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
                     zip.write(ServerRuntime.JSON.writeValueAsBytes(manifest));zip.closeEntry();
                     zip.finish();
                     record.packageTreeDigest=packageDigest;record.configTreeDigest=configDigest;
+                    record.packageExecutableDigest=packageModes;record.configExecutableDigest=configModes;
                 }
                 if(Files.size(temporary)>MAX_SNAPSHOT_BYTES)throw new IOException("The immutable source snapshot exceeds the size limit");
                 try { Files.setPosixFilePermissions(temporary,EnumSet.of(PosixFilePermission.OWNER_READ,PosixFilePermission.OWNER_WRITE)); }
@@ -691,9 +714,10 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
                 Path target=Files.readSymbolicLink(file);
                 if(target.isAbsolute()||!file.getParent().resolve(target).normalize().startsWith(root))throw new StaleSourceException();
                 String targetText=target.toString().replace(java.io.File.separatorChar,'/');
-                symlinks.put(relative,targetText);captured.add(new CapturedEntry(relative,"L",targetText));
+                symlinks.put(relative,targetText);captured.add(new CapturedEntry(relative,"L",targetText,false));
                 continue;
             }
+            boolean executable=Files.isExecutable(file);
             long declared=Files.size(file);total[0]+=declared;
             if(declared>MAX_SNAPSHOT_BYTES||total[0]>MAX_SNAPSHOT_BYTES)throw new IOException("The immutable source snapshot exceeds the size limit");
             MessageDigest content=sha256();long copied=0;
@@ -706,9 +730,9 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
                 }
             }
             zip.closeEntry();
-            if(copied!=declared)throw new StaleSourceException();
+            if(copied!=declared||executable!=Files.isExecutable(file))throw new StaleSourceException();
             total[0]=total[0]-declared+copied;
-            captured.add(new CapturedEntry(relative,"F",java.util.HexFormat.of().formatHex(content.digest())));
+            captured.add(new CapturedEntry(relative,"F",java.util.HexFormat.of().formatHex(content.digest()),executable));
         }
     }
 
@@ -721,6 +745,68 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
             digest.update((byte)0xff);
         }
         return java.util.HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static List<String> executablePaths(List<CapturedEntry> entries) {
+        List<String> paths=new ArrayList<>();
+        for(CapturedEntry entry:entries)if("F".equals(entry.type)&&entry.executable)paths.add(entry.path);
+        Collections.sort(paths);return List.copyOf(paths);
+    }
+
+    private static String executableDigestEntries(List<CapturedEntry> entries) {
+        return executableDigestPaths(executablePaths(entries));
+    }
+
+    private static String executableDigestTree(Path root) throws IOException {
+        List<String> paths=new ArrayList<>();
+        Files.walkFileTree(root,new SimpleFileVisitor<>() {
+            @Override public FileVisitResult visitFile(Path file,BasicFileAttributes attributes)throws IOException {
+                if(attributes.isRegularFile()&&!attributes.isSymbolicLink()&&!Files.isSymbolicLink(file)&&Files.isExecutable(file))
+                    paths.add(root.relativize(file).toString().replace(java.io.File.separatorChar,'/'));
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        Collections.sort(paths);return executableDigestPaths(paths);
+    }
+
+    private static String executableDigestManifest(JsonNode files) {
+        if(files==null||!files.isArray())return null;
+        List<String> paths=new ArrayList<>();Set<String> seen=new LinkedHashSet<>();
+        for(JsonNode value:files) {
+            String path=value.isTextual()?value.asText():null;
+            if(path==null)return null;
+            try { path=safeLogicalPath(path); } catch(IOException invalid) { return null; }
+            if(!seen.add(path))return null;paths.add(path);
+        }
+        List<String> sorted=new ArrayList<>(paths);Collections.sort(sorted);
+        if(!sorted.equals(paths))return null;
+        return executableDigestPaths(paths);
+    }
+
+    private static String executableDigestPaths(List<String> paths) {
+        MessageDigest digest=sha256();
+        for(String path:paths){digest.update(path.getBytes(StandardCharsets.UTF_8));digest.update((byte)0);}
+        return java.util.HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static void restoreExecutableFiles(Path root,JsonNode files) throws IOException {
+        if(files==null||!files.isArray())throw new StaleSourceException();
+        Set<String> seen=new LinkedHashSet<>();
+        for(JsonNode value:files) {
+            String relative=value.isTextual()?safeLogicalPath(value.asText()):null;
+            if(relative==null||!seen.add(relative))throw new StaleSourceException();
+            Path target=root.resolve(relative).normalize();
+            if(!target.startsWith(root)||Files.isSymbolicLink(target)||!Files.isRegularFile(target,LinkOption.NOFOLLOW_LINKS))
+                throw new StaleSourceException();
+            try {
+                Set<PosixFilePermission> permissions=Files.getPosixFilePermissions(target,LinkOption.NOFOLLOW_LINKS);
+                permissions.add(PosixFilePermission.OWNER_EXECUTE);
+                Files.setPosixFilePermissions(target,permissions);
+            } catch(UnsupportedOperationException unsupported) {
+                if(!target.toFile().setExecutable(true,false))throw new StaleSourceException();
+            }
+            if(!Files.isExecutable(target))throw new StaleSourceException();
+        }
     }
 
     private static MessageDigest sha256() {

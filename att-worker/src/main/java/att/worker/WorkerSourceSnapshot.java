@@ -26,6 +26,7 @@ import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.Enumeration;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.zip.ZipEntry;
@@ -45,12 +46,15 @@ final class WorkerSourceSnapshot implements AutoCloseable {
     final Path configPath;
     final String packageId;
     final JsonNode manifest;
+    private final String executionTreeFingerprint;
     private final AutoCloseable planRegistration;
 
     private WorkerSourceSnapshot(Path directory, Path packageRoot, Path configRoot, Path configPath,
-                                 String packageId, JsonNode manifest,AutoCloseable planRegistration) {
+                                 String packageId, JsonNode manifest,String executionTreeFingerprint,
+                                 AutoCloseable planRegistration) {
         this.directory=directory;this.packageRoot=packageRoot;this.configRoot=configRoot;
-        this.configPath=configPath;this.packageId=packageId;this.manifest=manifest;this.planRegistration=planRegistration;
+        this.configPath=configPath;this.packageId=packageId;this.manifest=manifest;
+        this.executionTreeFingerprint=executionTreeFingerprint;this.planRegistration=planRegistration;
     }
 
     static WorkerSourceSnapshot stage(WorkerRequest request) throws IOException {
@@ -82,13 +86,15 @@ final class WorkerSourceSnapshot implements AutoCloseable {
                     throw new IOException("The accepted source snapshot belongs to a different Package");
                 if(!request.sourceSnapshotConfigPath.equals(manifest.path("configurationPath").asText(null)))
                     throw new IOException("The accepted source snapshot Config path does not match the request");
-                extract(zip,"package",packageRoot);
-                extract(zip,"config",configRoot);
+                extract(zip,"package",packageRoot,manifest.path("packageExecutableFiles"));
+                extract(zip,"config",configRoot,manifest.path("configExecutableFiles"));
             }
             createSymlinks(packageRoot,manifest.path("packageSymlinks"));
             createSymlinks(configRoot,manifest.path("configSymlinks"));
             if(!manifest.path("packageTreeDigest").asText("").equals(treeDigest(packageRoot))
-                    ||!manifest.path("configTreeDigest").asText("").equals(treeDigest(configRoot)))
+                    ||!manifest.path("configTreeDigest").asText("").equals(treeDigest(configRoot))
+                    ||!manifest.path("packageExecutableDigest").asText("").equals(executableDigestTree(packageRoot))
+                    ||!manifest.path("configExecutableDigest").asText("").equals(executableDigestTree(configRoot)))
                 throw new IOException("The accepted source snapshot tree failed its integrity check");
             String relative=safeLogicalPath(request.sourceSnapshotConfigPath);
             Path configPath=configRoot.resolve(relative).normalize();
@@ -102,9 +108,13 @@ final class WorkerSourceSnapshot implements AutoCloseable {
                     FileExpressionResolver.FileExpressionSnapshot.restore(packageRoot,compiledPlans);
             planRegistration=FileExpressionResolver.registerApprovedSnapshot(packageRoot,restoredPlans);
             Files.deleteIfExists(copy);
-            return new WorkerSourceSnapshot(directory,packageRoot,configRoot,configPath,packageId,manifest,planRegistration);
+            freezeTree(directory);
+            String executionTreeFingerprint=executionTreeFingerprint(directory);
+            return new WorkerSourceSnapshot(directory,packageRoot,configRoot,configPath,packageId,manifest,
+                    executionTreeFingerprint,planRegistration);
         } catch(Exception failure) {
             if(planRegistration!=null)try{planRegistration.close();}catch(Exception ignored){}
+            thawTree(directory);
             deleteTree(directory);
             if(failure instanceof IOException)throw (IOException)failure;
             throw new IOException("Unable to restore the accepted source snapshot",failure);
@@ -120,13 +130,17 @@ final class WorkerSourceSnapshot implements AutoCloseable {
             JsonNode manifest=JSON.readTree(bytes);
             if(manifest==null||!VERSION.equals(manifest.path("schemaVersion").asText())
                     ||!manifest.path("packageTreeDigest").asText("").matches("[a-f0-9]{64}")
-                    ||!manifest.path("configTreeDigest").asText("").matches("[a-f0-9]{64}"))
+                    ||!manifest.path("configTreeDigest").asText("").matches("[a-f0-9]{64}")
+                    ||!manifest.path("packageExecutableDigest").asText("").matches("[a-f0-9]{64}")
+                    ||!manifest.path("configExecutableDigest").asText("").matches("[a-f0-9]{64}")
+                    ||!manifest.path("packageExecutableDigest").asText().equals(executableDigestManifest(manifest.path("packageExecutableFiles")))
+                    ||!manifest.path("configExecutableDigest").asText().equals(executableDigestManifest(manifest.path("configExecutableFiles"))))
                 throw new IOException("The accepted source snapshot manifest is invalid");
             return manifest;
         }
     }
 
-    private static void extract(ZipFile zip,String tree,Path root) throws IOException {
+    private static void extract(ZipFile zip,String tree,Path root,JsonNode executableFiles) throws IOException {
         Enumeration<? extends ZipEntry> entries=zip.entries();
         Set<String> seen=new HashSet<String>();int count=0;long total=0;
         while(entries.hasMoreElements()) {
@@ -156,6 +170,7 @@ final class WorkerSourceSnapshot implements AutoCloseable {
                 if(copied!=entry.getSize())throw new IOException("The accepted source snapshot entry is truncated");
             }
         }
+        restoreExecutableFiles(root,executableFiles);
     }
 
     private static void createSymlinks(Path root,JsonNode links) throws IOException {
@@ -233,6 +248,143 @@ final class WorkerSourceSnapshot implements AutoCloseable {
         return hex(digest.digest());
     }
 
+    void verifyUnchanged() throws IOException {
+        if(!manifest.path("packageTreeDigest").asText().equals(treeDigest(packageRoot))
+                ||!manifest.path("configTreeDigest").asText().equals(treeDigest(configRoot))
+                ||!manifest.path("packageExecutableDigest").asText().equals(executableDigestTree(packageRoot))
+                ||!manifest.path("configExecutableDigest").asText().equals(executableDigestTree(configRoot))
+                ||!executionTreeFingerprint.equals(executionTreeFingerprint(directory)))
+            throw new IOException("The accepted source snapshot changed during Worker execution");
+    }
+
+    /** Detects transient same-identity writes even if the original content and mode are restored. */
+    private static String executionTreeFingerprint(Path root) throws IOException {
+        final List<String> entries=new ArrayList<String>();
+        Files.walkFileTree(root,new SimpleFileVisitor<Path>() {
+            @Override public FileVisitResult preVisitDirectory(Path directory,BasicFileAttributes attributes)throws IOException {
+                entries.add(executionEntry(root,directory,"D",attributes));return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult visitFile(Path file,BasicFileAttributes attributes)throws IOException {
+                String type=attributes.isSymbolicLink()?"L":attributes.isRegularFile()?"F":"O";
+                entries.add(executionEntry(root,file,type,attributes));return FileVisitResult.CONTINUE;
+            }
+        });
+        Collections.sort(entries);MessageDigest digest=sha256();
+        for(String entry:entries){digest.update(entry.getBytes(StandardCharsets.UTF_8));digest.update((byte)0);}
+        return hex(digest.digest());
+    }
+
+    private static String executionEntry(Path root,Path path,String type,BasicFileAttributes attributes) {
+        String relative=root.relativize(path).toString().replace(java.io.File.separatorChar,'/');
+        String changeTime="";
+        try { changeTime=String.valueOf(Files.getAttribute(path,"unix:ctime",LinkOption.NOFOLLOW_LINKS)); }
+        catch(UnsupportedOperationException|IllegalArgumentException|IOException unsupported) { }
+        String permissions="";
+        try { permissions=Files.getPosixFilePermissions(path,LinkOption.NOFOLLOW_LINKS).toString(); }
+        catch(UnsupportedOperationException|IOException unsupported) { }
+        return relative+"\u0000"+type+"\u0000"+String.valueOf(attributes.fileKey())+"\u0000"+attributes.size()
+                +"\u0000"+attributes.lastModifiedTime().toMillis()+"\u0000"+attributes.creationTime().toMillis()
+                +"\u0000"+changeTime+"\u0000"+permissions;
+    }
+
+    private static String executableDigestTree(Path root) throws IOException {
+        final java.util.List<String> paths=new ArrayList<String>();
+        Files.walkFileTree(root,new SimpleFileVisitor<Path>() {
+            @Override public FileVisitResult visitFile(Path file,BasicFileAttributes attributes)throws IOException {
+                if(attributes.isRegularFile()&&!attributes.isSymbolicLink()&&!Files.isSymbolicLink(file)&&Files.isExecutable(file))
+                    paths.add(root.relativize(file).toString().replace(java.io.File.separatorChar,'/'));
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        Collections.sort(paths);return executableDigest(paths);
+    }
+
+    private static String executableDigestManifest(JsonNode files) {
+        if(files==null||!files.isArray())return null;
+        java.util.List<String> paths=new ArrayList<String>();Set<String> seen=new HashSet<String>();
+        try {
+            for(JsonNode value:files) {
+                String path=value.isTextual()?safeLogicalPath(value.asText()):null;
+                if(path==null||!seen.add(path))return null;
+                paths.add(path);
+            }
+        } catch(IOException invalid) { return null; }
+        java.util.List<String> sorted=new ArrayList<String>(paths);Collections.sort(sorted);
+        return sorted.equals(paths)?executableDigest(paths):null;
+    }
+
+    private static String executableDigest(java.util.List<String> paths) {
+        MessageDigest digest=sha256();
+        for(String path:paths){digest.update(path.getBytes(StandardCharsets.UTF_8));digest.update((byte)0);}
+        return hex(digest.digest());
+    }
+
+    private static void restoreExecutableFiles(Path root,JsonNode files) throws IOException {
+        if(files==null||!files.isArray())throw new IOException("The source snapshot executable-mode list is invalid");
+        Set<String> seen=new HashSet<String>();
+        for(JsonNode value:files) {
+            String relative=value.isTextual()?safeLogicalPath(value.asText()):null;
+            if(relative==null||!seen.add(relative))throw new IOException("The source snapshot executable-mode list is invalid");
+            Path target=root.resolve(relative).normalize();
+            if(!target.startsWith(root)||Files.isSymbolicLink(target)||!Files.isRegularFile(target,LinkOption.NOFOLLOW_LINKS))
+                throw new IOException("The source snapshot executable file is unavailable");
+            try {
+                java.util.Set<PosixFilePermission> permissions=Files.getPosixFilePermissions(target,LinkOption.NOFOLLOW_LINKS);
+                permissions.add(PosixFilePermission.OWNER_EXECUTE);Files.setPosixFilePermissions(target,permissions);
+            } catch(UnsupportedOperationException unsupported) {
+                if(!target.toFile().setExecutable(true,false))throw new IOException("Unable to restore executable source permission");
+            }
+            if(!Files.isExecutable(target))throw new IOException("Unable to restore executable source permission");
+        }
+    }
+
+    private static void freezeTree(Path root) throws IOException {
+        Files.walkFileTree(root,new SimpleFileVisitor<Path>() {
+            @Override public FileVisitResult visitFile(Path file,BasicFileAttributes attributes)throws IOException {
+                if(!Files.isSymbolicLink(file)&&attributes.isRegularFile())freezePath(file,false,Files.isExecutable(file));
+                return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult postVisitDirectory(Path directory,IOException error)throws IOException {
+                if(error!=null)throw error;freezePath(directory,true,false);return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    private static void freezePath(Path path,boolean directory,boolean executable) throws IOException {
+        try {
+            EnumSet<PosixFilePermission> permissions=EnumSet.of(PosixFilePermission.OWNER_READ);
+            if(directory||executable)permissions.add(PosixFilePermission.OWNER_EXECUTE);
+            Files.setPosixFilePermissions(path,permissions);
+        } catch(UnsupportedOperationException unsupported) {
+            if(!path.toFile().setReadable(true,false)||!path.toFile().setWritable(false,false)
+                    ||((directory||executable)&&!path.toFile().setExecutable(true,false)))
+                throw new IOException("Unable to protect accepted Worker source bytes from writes");
+        }
+    }
+
+    private static void thawTree(Path root) {
+        if(root==null||!Files.exists(root,LinkOption.NOFOLLOW_LINKS))return;
+        try { Files.walkFileTree(root,new SimpleFileVisitor<Path>() {
+            @Override public FileVisitResult preVisitDirectory(Path directory,BasicFileAttributes attributes)throws IOException {
+                thawPath(directory,true);return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult visitFile(Path file,BasicFileAttributes attributes)throws IOException {
+                if(!Files.isSymbolicLink(file))thawPath(file,false);return FileVisitResult.CONTINUE;
+            }
+        }); } catch(IOException ignored) { }
+    }
+
+    private static void thawPath(Path path,boolean directory) throws IOException {
+        try {
+            EnumSet<PosixFilePermission> permissions=EnumSet.of(PosixFilePermission.OWNER_READ,PosixFilePermission.OWNER_WRITE);
+            if(directory)permissions.add(PosixFilePermission.OWNER_EXECUTE);
+            Files.setPosixFilePermissions(path,permissions);
+        } catch(UnsupportedOperationException unsupported) {
+            path.toFile().setWritable(true,false);path.toFile().setReadable(true,false);
+            if(directory)path.toFile().setExecutable(true,false);
+        }
+    }
+
     private static void createDirectories(Path root,Path directory) throws IOException {
         if(directory==null||directory.equals(root))return;
         Path relative=root.relativize(directory.normalize());Path current=root;
@@ -294,6 +446,7 @@ final class WorkerSourceSnapshot implements AutoCloseable {
 
     @Override public void close() {
         if(planRegistration!=null)try{planRegistration.close();}catch(Exception ignored){}
+        thawTree(directory);
         deleteTree(directory);
     }
 }

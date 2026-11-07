@@ -84,6 +84,32 @@ class LoadScheduleSchedulerTest {
         }
     }
 
+    @Test void configAutoPauseUpdatesDueIndexAndNextRunMetricsAcrossRestart() throws Exception {
+        Instant now=Instant.parse("2026-01-01T00:00:00Z");
+        ServerConfig config=config("schedule-config-index",1,"continue",1);
+        AtomicInteger submitted=new AtomicInteger();
+        try(JobStore store=new JobStore(config)) {
+            LoadSchedule due=schedule("SCONFIGINDEX",now);store.saveSchedule(due);
+            assertEquals(1,store.dueSchedules(now).size());
+            assertEquals(now.toString(),store.scheduleMetrics().get("nextDueAt"));
+
+            store.markScheduleConfigurationChanged("p",null,now.plusSeconds(1).toString());
+            assertFalse(store.schedule(due.id).enabled);
+            assertEquals(List.of(),store.dueSchedules(now.plusSeconds(60)));
+            assertNull(store.scheduleMetrics().get("nextDueAt"));
+        }
+        try(JobStore restarted=new JobStore(config);
+            LoadScheduleScheduler scheduler=new LoadScheduleScheduler(config.scheduling,restarted,(schedule,id)->{
+                submitted.incrementAndGet();return Map.of("jobId","J0000000000000001");
+            },new MutableClock(now.plusSeconds(60)))) {
+            assertEquals(List.of(),restarted.dueSchedules(now.plusSeconds(60)));
+            assertNull(restarted.scheduleMetrics().get("nextDueAt"));
+            scheduler.processDue();
+            assertEquals(0,submitted.get());
+            assertEquals(List.of(),restarted.scheduleExecutions("SCONFIGINDEX",10));
+        }
+    }
+
     @Test void oneTimeRunAndLoadOccurrencesAreClaimedOnceAndMissesAreNotReplayed() throws Exception {
         MutableClock clock=new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         ServerConfig config=config("one-time",1,"continue",2);

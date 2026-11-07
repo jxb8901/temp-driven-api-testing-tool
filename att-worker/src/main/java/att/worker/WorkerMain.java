@@ -216,6 +216,7 @@ public final class WorkerMain {
                     throw new PackageResourceInspector.StaleResourceCursorException();
             }
             OperationResult result=dispatch(request);
+            if(sourceSnapshot!=null)sourceSnapshot.verifyUnchanged();
             Map<String,Object> serialized=result instanceof att.api.LoadResult && "load".equals(request.command)
                     ? ((att.api.LoadResult)result).toWorkerMap() : result.toMap();
             if(configuration!=null) {

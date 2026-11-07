@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.attribute.PosixFilePermission;
 import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.util.*;
@@ -73,6 +74,97 @@ class PrewarmedWorkerTest {
         } finally {process.destroyForcibly();}
     }
 
+    @Test void packageLocalExecutableToolSurvivesColdAndWarmRunDebugAndLoadSnapshots() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"Package-local shell executable requires POSIX permissions");
+        for(String command:Arrays.asList("debug","run"))for(Boolean warm:Arrays.asList(Boolean.FALSE,Boolean.TRUE))
+            verifyPackageLocalExecutableTool(command,warm.booleanValue());
+        verifyPackageLocalExecutableTool("load",false);
+    }
+
+    @Test void workerRejectsAStagedSourceMutationBetweenReadsDuringExecution() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"The mutation fixture uses a POSIX package-local executable");
+        Path started=temp.resolve("mutation-tool-started.marker"),release=temp.resolve("mutation-tool-release.marker");
+        Path firstRead=temp.resolve("mutation-first-read.marker"),secondRead=temp.resolve("mutation-second-read.marker");
+        Path secondReadDone=temp.resolve("mutation-second-read-done.marker"),finish=temp.resolve("mutation-tool-finish.marker");
+        String script="#!/bin/sh\nset -e\ntool_dir=$(CDPATH= cd \"$(dirname \"$0\")\" && pwd)\n"
+                +"cat \"$tool_dir/../files/watched.txt\" > \"$3\"\ntouch \"$1\"\n"
+                +"while [ ! -e \"$2\" ]; do sleep 0.01; done\n"
+                +"cat \"$tool_dir/../files/watched.txt\" > \"$4\"\ntouch \"$5\"\n"
+                +"while [ ! -e \"$6\" ]; do sleep 0.01; done\nprintf 'race-tool-ok\\n'\n";
+        Path root=fixtureWithLocalTool(started,script,release.toString(),firstRead.toString(),secondRead.toString(),
+                secondReadDone.toString(),finish.toString());
+        Files.createDirectories(root.resolve("files"));Files.write(root.resolve("files/watched.txt"),"accepted-value\n".getBytes(StandardCharsets.UTF_8));
+        SourceArchive accepted=sourceArchive(root);Map<String,Object> request=request(root,"debug");attachSnapshot(request,accepted);
+        Process process=startCold(root);
+        try {
+            CompletableFuture<String> output=CompletableFuture.supplyAsync(()->{
+                try{return assign(process,mapper.writeValueAsString(request));}
+                catch(Exception failure){throw new CompletionException(failure);}
+            });
+            awaitFile(started,process,"Package-local Tool did not start");
+            Path stagedPackage=null;
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+            while(System.nanoTime()<deadline&&stagedPackage==null) {
+                try(java.util.stream.Stream<Path> directories=Files.list(temp)) {
+                    stagedPackage=directories.filter(path->path.getFileName().toString().startsWith("att-source-snapshot-"))
+                            .map(path->path.resolve("package/files/watched.txt"))
+                            .filter(path->Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)).findFirst().orElse(null);
+                }
+                if(stagedPackage==null)Thread.sleep(20L);
+            }
+            assertNotNull(stagedPackage,"the Worker must be executing from its private source snapshot");
+            Path protectedSource=stagedPackage;
+            assertEquals("accepted-value",new String(Files.readAllBytes(firstRead),StandardCharsets.UTF_8).trim());
+            assertFalse(Files.isWritable(protectedSource),"staged source files are frozen for the Worker lifetime");
+            assertThrows(java.io.IOException.class,()->Files.write(protectedSource,"direct-write".getBytes(StandardCharsets.UTF_8)));
+
+            java.util.Set<PosixFilePermission> permissions=Files.getPosixFilePermissions(protectedSource,LinkOption.NOFOLLOW_LINKS);
+            permissions.add(PosixFilePermission.OWNER_WRITE);Files.setPosixFilePermissions(protectedSource,permissions);
+            Files.write(protectedSource,"mutated-during-run\n".getBytes(StandardCharsets.UTF_8));
+            Files.createFile(release);
+            awaitFile(secondReadDone,process,"Package-local Tool did not complete its changed-byte read");
+            assertEquals("mutated-during-run",new String(Files.readAllBytes(secondRead),StandardCharsets.UTF_8).trim());
+            Files.write(protectedSource,"accepted-value\n".getBytes(StandardCharsets.UTF_8));
+            permissions.remove(PosixFilePermission.OWNER_WRITE);
+            Files.setPosixFilePermissions(protectedSource,permissions);
+            assertEquals("accepted-value",Files.readString(protectedSource).trim());
+            Files.createFile(finish);
+
+            String workerOutput=output.get(20,TimeUnit.SECONDS);
+            assertNotEquals(0,process.exitValue(),workerOutput);
+            assertTrue(workerOutput.contains("The accepted source snapshot changed during Worker execution"),workerOutput);
+            assertFalse(workerOutput.contains("\"status\":\"PASS\""),workerOutput);
+        } finally {
+            if(!Files.exists(release))Files.createFile(release);
+            process.destroyForcibly();
+        }
+    }
+
+    private void verifyPackageLocalExecutableTool(String command,boolean warm) throws Exception {
+        Path marker=temp.resolve("package-tool-"+command+"-"+(warm?"warm":"cold")+".marker");
+        Path root=fixtureWithLocalTool(marker,"#!/bin/sh\nprintf 'package-tool-ok\\n' > \"$1\"\n");
+        SourceArchive accepted=sourceArchive(root);
+        assertTrue(Files.isExecutable(accepted.packageRoot.resolve("tools/local-tool.sh")),"the archive input retains executable metadata");
+        Map<String,Object> request=request(root,command);
+        if("load".equals(command)) {
+            request.remove("target");request.put("scenario","load/scenario.yaml");request.put("runId","snapshot-load");
+        }
+        attachSnapshot(request,accepted);
+        Process process=warm?start(root):startCold(root);
+        try {
+            if(warm) {
+                ready(process);
+                Map<String,String> env=new HashMap<String,String>(System.getenv());env.put("LEASE_MARKER","assigned");
+                request.put("executionEnvironment",env);
+            }
+            String output=assign(process,mapper.writeValueAsString(request));
+            assertEquals(0,process.exitValue(),command+" "+output+" "+workerError(process));
+            assertTrue(output.contains("\"status\":\"PASS\""),command+" "+output);
+            assertTrue(Files.isRegularFile(marker),command+" must invoke the restored Package-local executable");
+            assertEquals("package-tool-ok",new String(Files.readAllBytes(marker),StandardCharsets.UTF_8).trim());
+        } finally {process.destroyForcibly();}
+    }
+
     @Test void rejectsMultipleRequestsLoadAndWrongPackageWithoutBusinessExecution() throws Exception {
         Path root=fixture();
         for(String variant:Arrays.asList("two","load","package","registry")) {
@@ -94,7 +186,10 @@ class PrewarmedWorkerTest {
     }
 
     private Path fixture() throws Exception {
-        Path root=Files.createDirectories(temp.resolve("package"));
+        return fixture(temp.resolve("package"));
+    }
+    private Path fixture(Path rootPath) throws Exception {
+        Path root=Files.createDirectories(rootPath);
         Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("templates/ENV"));
         String java=Paths.get(System.getProperty("java.home"),"bin","java").toString();
@@ -106,6 +201,29 @@ class PrewarmedWorkerTest {
         Files.write(root.resolve("templates/ENV/template.yaml"),("schemaVersion: att-template/v3.6\nname: ENV\ndescription: Environment fixture\nactions:\n"
                 +"  call:\n    type: tool\n    call: \"#{env()}\"\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/ENV/debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n".getBytes(StandardCharsets.UTF_8));
+        return root;
+    }
+    private Path fixtureWithLocalTool(Path marker,String script,String... additionalArguments) throws Exception {
+        Path root=fixture(temp.resolve("package-"+UUID.randomUUID()));Path tools=Files.createDirectories(root.resolve("tools"));
+        Path executable=tools.resolve("local-tool.sh");Files.write(executable,script.getBytes(StandardCharsets.UTF_8));
+        Files.setPosixFilePermissions(executable,java.util.EnumSet.of(PosixFilePermission.OWNER_READ,
+                PosixFilePermission.OWNER_WRITE,PosixFilePermission.OWNER_EXECUTE));
+        StringBuilder command=new StringBuilder("['./tools/local-tool.sh', ").append(quote(marker.toString()));
+        for(String argument:additionalArguments)command.append(", ").append(quote(argument));
+        command.append(']');
+        Path config=root.resolve("config/config.yaml");
+        String current=new String(Files.readAllBytes(config),StandardCharsets.UTF_8);
+        current+="  local:\n    name: Package-local executable\n    description: Snapshot mode regression\n"
+                +"    command: "+command+"\n    stdoutFormat: text\n    arguments: {}\n";
+        Files.write(config,current.getBytes(StandardCharsets.UTF_8));
+        Path template=root.resolve("templates/ENV/template.yaml");
+        String templateText=new String(Files.readAllBytes(template),StandardCharsets.UTF_8);
+        templateText+="  packageTool:\n    type: tool\n    call: \"#{local()}\"\n";
+        Files.write(template,templateText.getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(root.resolve("load"));
+        Files.write(root.resolve("load/scenario.yaml"),("schemaVersion: att-load/v1.6\nworkloads:\n"
+                +"- id: package-local-tool\n  target: {type: template, id: ENV}\n"
+                +"  load: {users: 1, duration: 300ms}\n").getBytes(StandardCharsets.UTF_8));
         return root;
     }
     private Process start(Path root) throws Exception {
@@ -155,14 +273,17 @@ class PrewarmedWorkerTest {
             for(Path source:(Iterable<Path>)entries::iterator)if(Files.isRegularFile(source,LinkOption.NOFOLLOW_LINKS)) {
                 Path relative=root.relativize(source);
                 if(relative.getNameCount()>0&&"config".equals(relative.getName(0).toString())) {
-                    Path target=configRoot.resolve(relative);Files.createDirectories(target.getParent());Files.copy(source,target);
-                } else {Path target=packageRoot.resolve(relative);Files.createDirectories(target.getParent());Files.copy(source,target);}
+                    Path target=configRoot.resolve(relative);Files.createDirectories(target.getParent());Files.copy(source,target,StandardCopyOption.COPY_ATTRIBUTES);
+                } else {Path target=packageRoot.resolve(relative);Files.createDirectories(target.getParent());Files.copy(source,target,StandardCopyOption.COPY_ATTRIBUTES);}
             }
         }
         Map<String,Object> manifest=new LinkedHashMap<String,Object>();manifest.put("schemaVersion",WorkerSourceSnapshot.VERSION);
         manifest.put("packageId","p");manifest.put("packageRevision","R00000000000000000000000000000001");
         manifest.put("configRevision","R00000000000000000000000000000002");manifest.put("configurationPath","config/config.yaml");
         manifest.put("packageTreeDigest",treeDigest(packageRoot));manifest.put("configTreeDigest",treeDigest(configRoot));
+        java.util.List<String> packageExecutables=executablePaths(packageRoot),configExecutables=executablePaths(configRoot);
+        manifest.put("packageExecutableFiles",packageExecutables);manifest.put("configExecutableFiles",configExecutables);
+        manifest.put("packageExecutableDigest",executableDigest(packageExecutables));manifest.put("configExecutableDigest",executableDigest(configExecutables));
         manifest.put("logicalPaths",Arrays.asList("templates/ENV/template.yaml","templates/ENV/debug.yaml","config/config.yaml"));
         manifest.put("dependencies",Collections.emptyList());manifest.put("packageSymlinks",Collections.emptyMap());manifest.put("configSymlinks",Collections.emptyMap());
         byte[] compiledPlans=att.template.FileExpressionResolver.FileExpressionSnapshot.empty(packageRoot).serialize();
@@ -195,6 +316,19 @@ class PrewarmedWorkerTest {
         try(java.util.stream.Stream<Path> paths=Files.walk(root)){paths.filter(path->Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)).forEach(files::add);}
         Collections.sort(files,Comparator.comparing(path->root.relativize(path).toString().replace('\\','/')));
         for(Path file:files) {String relative=root.relativize(file).toString().replace('\\','/');digest.update(relative.getBytes(StandardCharsets.UTF_8));digest.update((byte)0);digest.update((byte)'F');digest.update(hexBytes(digestFile(file)));digest.update((byte)0xff);}
+        return hex(digest.digest());
+    }
+    private static List<String> executablePaths(Path root)throws Exception {
+        List<Path> files=new ArrayList<Path>();try(java.util.stream.Stream<Path> paths=Files.walk(root)) {
+            paths.filter(path->Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)&&Files.isExecutable(path)).forEach(files::add);
+        }
+        Collections.sort(files,Comparator.comparing(path->root.relativize(path).toString().replace('\\','/')));
+        List<String> result=new ArrayList<String>();for(Path file:files)result.add(root.relativize(file).toString().replace('\\','/'));
+        return result;
+    }
+    private static String executableDigest(List<String> paths)throws Exception {
+        MessageDigest digest=MessageDigest.getInstance("SHA-256");
+        for(String path:paths){digest.update(path.getBytes(StandardCharsets.UTF_8));digest.update((byte)0);}
         return hex(digest.digest());
     }
     private static String digestFile(Path file)throws Exception {
@@ -239,6 +373,15 @@ class PrewarmedWorkerTest {
         });
         assertTrue(process.waitFor(15,TimeUnit.SECONDS));return output.get(5,TimeUnit.SECONDS);
     }
+    private void awaitFile(Path file,Process process,String message)throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+        while(System.nanoTime()<deadline&&!Files.exists(file)&&process.isAlive())Thread.sleep(20L);
+        assertTrue(Files.exists(file),message+"; stderr="+workerError(process));
+    }
+    private String workerError(Process process)throws Exception {
+        Path error=errors.get(process);return error==null?"":new String(Files.readAllBytes(error),StandardCharsets.UTF_8);
+    }
+    private static boolean isWindows(){return System.getProperty("os.name","").toLowerCase(Locale.ROOT).contains("win");}
     private int countResults(String output) throws Exception {
         int count=0;for(String line:output.split("\\R"))if("RESULT".equals(mapper.readTree(line).path("type").asText()))count++;
         return count;

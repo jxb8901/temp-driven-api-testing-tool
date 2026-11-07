@@ -116,6 +116,35 @@ class JobSourceClosureStoreTest {
         assertEquals("Accepted Config",Files.readString(restored.workerConfigPath));
     }
 
+    @Test void retainedSnapshotRestoresExecutablePackageFilesBeforeAndAfterRestart() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase(java.util.Locale.ROOT).contains("win"));
+        Path data=Files.createDirectories(temp.resolve("executable-data"));
+        Path packageRoot=sourceTree("R35000000000000000000000000000001","Accepted Package",true);
+        Path configRoot=sourceTree("R35000000000000000000000000000002","Accepted Config",false);
+        Path executable=packageRoot.resolve("tools/local-tool.sh");Files.createDirectories(executable.getParent());
+        Files.write(executable,"#!/bin/sh\nexit 0\n".getBytes(StandardCharsets.UTF_8));
+        Files.setPosixFilePermissions(executable,java.util.EnumSet.of(java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE));
+        RevisionSet revisions=revisions(packageRoot,configRoot);String owner="job:J0000000000000005";
+        JobSourceClosureStore store=new JobSourceClosureStore(data);
+        store.registerSnapshot(revisions.businessSource,ChangeSetPublisher.PACKAGE_SOURCE,packageRoot);
+        store.registerSnapshot(revisions.configSource,ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,configRoot);
+        var lease=store.acquire(new SourceManagementContracts.SourceLeaseRequest(PACKAGE_ID,"SIT",revisions,
+                List.of("templates/use.yaml","tools/local-tool.sh","config.yaml"),owner));
+        store.bindWorkerConfiguration(lease.leaseId(),configRoot.resolve("config.yaml"));
+
+        JobSourceClosureStore.SourceSnapshot captured=store.snapshotForOwner(owner);
+        Path restoredTool=captured.packageRoot.resolve("tools/local-tool.sh");
+        assertTrue(Files.isExecutable(restoredTool),"archive materialization retains the approved executable bit");
+        assertEquals("#!/bin/sh\nexit 0\n",Files.readString(restoredTool));
+
+        JobSourceClosureStore restarted=new JobSourceClosureStore(data);
+        JobSourceClosureStore.SourceSnapshot recovered=restarted.snapshotForOwner(owner);
+        Path recoveredTool=recovered.packageRoot.resolve("tools/local-tool.sh");
+        assertTrue(Files.isExecutable(recoveredTool),"restart materialization retains the approved executable bit");
+        assertEquals("#!/bin/sh\nexit 0\n",Files.readString(recoveredTool));
+    }
+
     @Test void missingOrCorruptSnapshotIsUnavailableAfterRestartAndCanBeRestored() throws Exception {
         Path data=Files.createDirectories(temp.resolve("data"));
         Path packageRoot=sourceTree("R40000000000000000000000000000001","Retained Package",true);

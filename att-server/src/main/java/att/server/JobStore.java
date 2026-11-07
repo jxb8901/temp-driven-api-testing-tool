@@ -579,8 +579,9 @@ final class JobStore implements AutoCloseable {
                         current.autoPausedAt=at;current.updatedAt=at;current.updatedBy="system:load-scheduler";
                         current.definitionVersion++;
                     }
-                    try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=? WHERE schedule_id=?")) {
-                        update.setString(1,ServerRuntime.JSON.writeValueAsString(current));update.setString(2,current.id);update.executeUpdate();
+                    try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=?,enabled=?,next_run_at=?,updated_at=? WHERE schedule_id=?")) {
+                        update.setString(1,ServerRuntime.JSON.writeValueAsString(current));update.setBoolean(2,current.enabled);
+                        update.setString(3,current.nextRunAt);update.setString(4,current.updatedAt);update.setString(5,current.id);update.executeUpdate();
                     }
                     try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,package_id,created_at,outcome) VALUES('system:load-scheduler','SCHEDULE_CONFIG_CHANGED',?,?,?)")) {
                         audit.setString(1,current.packageId);audit.setString(2,at);audit.setString(3,"schedule="+current.id+";environment="+current.environment);audit.executeUpdate();

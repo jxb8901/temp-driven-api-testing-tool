@@ -36,6 +36,7 @@ import att.snapshot.TestcaseSnapshotService;
 import att.template.FileExpressionResolver;
 import att.template.StageTemplate;
 import att.template.StageTemplateLoader;
+import att.template.TemplateAction;
 import att.testdata.TestdataDescriptor;
 import att.testdata.TestdataRegistry;
 import org.yaml.snakeyaml.LoaderOptions;
@@ -272,13 +273,15 @@ public final class SourceCandidateValidator {
                 "default".equalsIgnoreCase(selected) ? null : selected);
         StageTemplateLoader templates = new StageTemplateLoader(pkg, effective.templatesRoot(), false);
         FlowRegistry flows = new FlowRegistry(pkg, effective.templatesRoot(), false);
-        FileExpressionResolver resolver = new FileExpressionResolver(pkg);
         List<FileExpressionResolver.FileExpressionSnapshot> snapshots = new ArrayList<FileExpressionResolver.FileExpressionSnapshot>();
-        for (String reference : templates.paths()) snapshots.add(resolver.snapshotFor(templates.load(reference), flows));
+        for (String reference : templates.paths())
+            for (FileCallerSnapshot caller : fileCallerSnapshots(pkg, templates.load(reference), flows))
+                snapshots.add(caller.snapshot);
         for (FlowDefinition flow : flows.all()) {
             StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(),
                     flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
-            snapshots.add(resolver.snapshotFor(body, flows));
+            for (FileCallerSnapshot caller : fileCallerSnapshots(pkg, body, flows))
+                snapshots.add(caller.snapshot);
         }
         return FileExpressionResolver.FileExpressionSnapshot.merge(pkg, snapshots).serialize();
     }
@@ -510,31 +513,58 @@ public final class SourceCandidateValidator {
                                                List<DependencyReference> output) throws Exception {
         StageTemplateLoader templates = new StageTemplateLoader(packageRoot, config.templatesRoot(), false);
         FlowRegistry flows = new FlowRegistry(packageRoot, config.templatesRoot(), false);
-        FileExpressionResolver resolver = new FileExpressionResolver(packageRoot);
         Map<String, DependencyReference> found = new LinkedHashMap<String, DependencyReference>();
-        for (String reference : templates.paths()) collectFilePlans(packageRoot, packageId, environment,
-                resolver.snapshotFor(templates.load(reference), flows), found);
+        for (String reference : templates.paths())
+            for (FileCallerSnapshot caller : fileCallerSnapshots(packageRoot, templates.load(reference), flows))
+                collectFilePlans(packageRoot, packageId, environment, caller.snapshot, caller.callSite, found);
         for (FlowDefinition flow : flows.all()) {
             StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(),
                     flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
-            collectFilePlans(packageRoot, packageId, environment, resolver.snapshotFor(body, flows), found);
+            for (FileCallerSnapshot caller : fileCallerSnapshots(packageRoot, body, flows))
+                collectFilePlans(packageRoot, packageId, environment, caller.snapshot, caller.callSite, found);
         }
         output.addAll(found.values());
     }
 
+    private static List<FileCallerSnapshot> fileCallerSnapshots(Path packageRoot, StageTemplate source,
+                                                                 FlowRegistry flows) throws Exception {
+        List<FileCallerSnapshot> snapshots = new ArrayList<FileCallerSnapshot>();
+        String sourcePath = logicalPath(packageRoot, source.sourceFile());
+        for (TemplateAction action : source.actions()) {
+            StageTemplate actionSource = new StageTemplate(source.name(), source.directory(),
+                    Collections.singletonList(action), source.schemaVersion(), source.sourceFile());
+            FileExpressionResolver.FileExpressionSnapshot snapshot =
+                    new FileExpressionResolver(packageRoot).snapshotFor(actionSource, flows);
+            snapshots.add(new FileCallerSnapshot(sourcePath + "#action:" + action.key(), snapshot));
+        }
+        return snapshots;
+    }
+
     private static void collectFilePlans(Path packageRoot, String packageId, String environment,
                                          FileExpressionResolver.FileExpressionSnapshot snapshot,
+                                         String caller,
                                          Map<String, DependencyReference> output) throws Exception {
         if (snapshot == null || snapshot.projectRoot() == null || !snapshot.projectRoot().equals(packageRoot))
             throw new IllegalArgumentException("Compiled File-expression snapshot does not belong to this Package");
         for (FileExpressionResolver.CompiledFileDependency plan : snapshot.dependencies()) {
             String logical = plan.logicalPath();
-            String callSite = plan.sourceDirectory() + ":&{" + plan.authoredPath() + "}";
+            String callSite = caller + " -> " + plan.sourceDirectory() + ":&{" + plan.authoredPath() + "}";
             String fingerprint = fileDigest(packageRoot.resolve(logical));
-            String key = logical + "\n" + fingerprint;
+            // Keep the canonical File identity stable while retaining every distinct inbound
+            // authored reference for scoped impact and review consumers.
+            String key = logical + "\n" + fingerprint + "\n" + callSite;
             output.putIfAbsent(key, new DependencyReference(DependencyKind.FILE, packageId, environment,
                     plan.authoredPath(), logical, fingerprint, "canonical-file-expression-plan", callSite,
                     ReferenceCertainty.KNOWN));
+        }
+    }
+
+    private static final class FileCallerSnapshot {
+        final String callSite;
+        final FileExpressionResolver.FileExpressionSnapshot snapshot;
+        FileCallerSnapshot(String callSite, FileExpressionResolver.FileExpressionSnapshot snapshot) {
+            this.callSite = callSite;
+            this.snapshot = snapshot;
         }
     }
 
