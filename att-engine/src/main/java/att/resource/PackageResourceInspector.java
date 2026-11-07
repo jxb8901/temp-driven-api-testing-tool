@@ -84,6 +84,7 @@ public final class PackageResourceInspector implements AutoCloseable {
     private static final int MAX_CONFIG_BYTES = 1024 * 1024;
     private static final long MAX_WORKBOOK_BYTES = 32L * 1024L * 1024L;
     private static final long MAX_REVISION_BYTES = 256L * 1024L * 1024L;
+    private static final int MAX_PACKAGE_SOURCE_FILES = 20000;
     private static final int MAX_YAML_CANDIDATES = 20000;
     private static final int MAX_CONFIG_TREE_ENTRIES = 5000;
     private static final long MAX_CONFIG_TREE_BYTES = 256L * 1024L * 1024L;
@@ -836,6 +837,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         resolveReferences(index, config);
         resolveReadiness(index, config);
         index.revisionDigest = digestFiles(index.files, index.debugSidecars, index.quickLoadPolicies);
+        index.packageSourceRevisionDigest = digestPackageFiles(index.debugSidecars, index.quickLoadPolicies);
         Collections.sort(index.ordered, new Comparator<Resource>() {
             @Override public int compare(Resource left, Resource right) {
                 return left.resourceId.compareTo(right.resourceId);
@@ -1447,6 +1449,19 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     /** Revision used to bind a validated functional selection to package content. */
     public String executionRevisionDigest() throws Exception { return refreshedIndexForVerification().revisionDigest; }
+
+    /** Revision of the indexed content rooted in this Package, without Engine or shared configuration identity. */
+    public String packageSourceRevisionDigest() throws Exception { return refreshedIndexForVerification().packageSourceRevisionDigest; }
+
+    /** Returns both authoring and execution revisions from one fresh inspection snapshot. */
+    public Map<String, String> sourceRevisionDigests(String expectedExecutionRevisionDigest) throws Exception {
+        Index index = refreshedIndexForVerification();
+        requireExpectedRevision(index, expectedExecutionRevisionDigest);
+        Map<String, String> result = new LinkedHashMap<String, String>();
+        result.put("executionRevisionDigest", index.revisionDigest);
+        result.put("packageSourceRevision", index.packageSourceRevisionDigest);
+        return result;
+    }
 
     /** Internal capability uses the same fresh revision boundary as draft admission. */
     public Map<String,Object> prewarmEligibility() throws Exception {
@@ -2658,6 +2673,61 @@ public final class PackageResourceInspector implements AutoCloseable {
         return hex(digest.digest());
     }
 
+    private String digestPackageFiles(Map<String, Path> debugSidecars,
+                                      Map<String, Path> quickLoadPolicies) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        List<Path> ordered = new ArrayList<Path>();
+        try (java.util.stream.Stream<Path> paths = Files.walk(packageRoot, 64)) {
+            java.util.Iterator<Path> candidates = paths.iterator();
+            while (candidates.hasNext()) {
+                Path candidate = candidates.next();
+                if (candidate.equals(packageRoot) || Files.isSymbolicLink(candidate)
+                        || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
+                if (ordered.size() >= MAX_PACKAGE_SOURCE_FILES)
+                    throw new ResourceLimitException("resourceInspector.maxPackageSourceFiles", MAX_PACKAGE_SOURCE_FILES, ordered.size() + 1L);
+                ordered.add(resources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE).canonicalPath());
+            }
+        }
+        Collections.sort(ordered);
+        long total = 0;
+        byte[] buffer = new byte[8192];
+        for (Path file : ordered) {
+            PackageResourceResolver.PackageResource resource = resources.fromInternalPath(file, PackageResourceResolver.Kind.FILE);
+            digest.update(utf8(resource.logicalName()));
+            digest.update((byte) 0);
+            try (InputStream input = Files.newInputStream(resource.canonicalPath())) {
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    InspectionMetrics.JVM.add(READ_BYTES, read);
+                    total += read;
+                    if (total > MAX_REVISION_BYTES) throw new ResourceLimitException("resourceInspector.maxRevisionBytes", MAX_REVISION_BYTES, total);
+                    digest.update(buffer, 0, read);
+                }
+            }
+            digest.update((byte) 0xff);
+        }
+        att.config.PackageConfig manifest = att.config.PackageConfig.load(packageRoot);
+        digest.update(utf8("ATT_PACKAGE_MANIFEST=" + manifest.present() + ":" + manifest.digest()));
+        digest.update((byte) 0);
+        for (Map.Entry<String, Path> sidecar : debugSidecars.entrySet()) {
+            digest.update(utf8("debug-sidecar"));
+            digest.update((byte) 0);
+            digest.update(utf8(sidecar.getKey()));
+            digest.update((byte) 0);
+            digest.update((byte) (sidecar.getValue() == null ? 0 : 1));
+            digest.update((byte) 0xff);
+        }
+        for (Map.Entry<String, Path> policy : quickLoadPolicies.entrySet()) {
+            digest.update(utf8("quick-load-policy"));
+            digest.update((byte) 0);
+            digest.update(utf8(policy.getKey()));
+            digest.update((byte) 0);
+            digest.update((byte) (policy.getValue() == null ? 0 : 1));
+            digest.update((byte) 0xff);
+        }
+        return hex(digest.digest());
+    }
+
     private void indexQuickLoadPolicies(Index index) {
         try {
             Path loadRoot=optionalPackageDirectory(packageRoot.resolve("load").normalize(), "load");
@@ -2963,6 +3033,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         final Map<String, Path> debugSidecars = new TreeMap<String, Path>();
         final Map<String, Path> quickLoadPolicies = new TreeMap<String, Path>();
         String revisionDigest;
+        String packageSourceRevisionDigest;
         boolean prewarmCompatible;
 
         void add(Resource resource) {

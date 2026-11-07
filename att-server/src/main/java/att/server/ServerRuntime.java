@@ -1638,7 +1638,8 @@ final class ServerRuntime implements AutoCloseable {
         try {
             WorkerRequest sourceRequest=inspectionRequest(packageId,root,null);sourceRequest.inspectionAction="revision";
             Map<String,Object> source=executeInspection(root,sourceRequest);
-            String packageSourceRevision=requiredDigest(source.get("revisionDigest"),"Package source revision");
+            String packageSourceRevision=requiredDigest(source.get("packageSourceRevision"),"Package source revision");
+            String executionRevision=requiredDigest(source.get("executionRevisionDigest"),"Package execution revision");
             Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,null);
             PackageRegistry.Snapshot current=packageRegistry.snapshot();
             if(!registry.revision.equals(current.revision)||!root.equals(current.packages.get(packageId)))throw new StaleDraftException();
@@ -1650,7 +1651,8 @@ final class ServerRuntime implements AutoCloseable {
             Map<String,Object> result=new LinkedHashMap<>();result.put("schemaVersion",PackageRegistry.SCOPE_CONTRACT);
             result.put("scopeId","package:"+packageId);result.put("packageId",packageId);result.put("status","Ready");
             result.put("registryRevision",registry.revision);result.put("registryGeneration",registry.generation);
-            result.put("packageSourceRevision",packageSourceRevision);result.put("packageManifestRevision",manifestRevision);
+            result.put("packageSourceRevision",packageSourceRevision);result.put("executionRevisionDigest",executionRevision);
+            result.put("packageManifestRevision",manifestRevision);
             result.put("centralConfigSourceRevision",centralConfigRevision);result.put("activeEffectiveConfigRevision",effectiveConfigRevision);
             result.put("embeddedEngineSchemaRevision",schemaRevision);
             result.put("engineVersion",configuration.get("engineVersion"));result.put("engineRevision",configuration.get("engineRevision"));
@@ -3320,11 +3322,15 @@ final class ServerRuntime implements AutoCloseable {
                 for(int i=slot;i<keys.size();i+=config.inspection.warmup.workers())assigned.add(keys.get(i));
                 if(assigned.isEmpty()&&!packageRoots().isEmpty())assigned.add(new ServerConfig.WarmupKey(packageRoots().keySet().iterator().next(),null));
                 for(ServerConfig.WarmupKey key:assigned) {
-                    int attempts=worker.warmAttempts.getOrDefault(key,0);
-                    if(worker.warmed.contains(key)||attempts>=3||System.nanoTime()<worker.warmRetryAt)continue;
-                    worker.warmAttempts.put(key,attempts+1);
-                    worker.warming=true;
                     PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+                    InspectionWorker.WarmupStateKey stateKey=new InspectionWorker.WarmupStateKey(key,registry.revision);
+                    worker.warmAttempts.keySet().removeIf(previous->previous.key.equals(key)&&!previous.registryRevision.equals(registry.revision));
+                    worker.warmed.removeIf(previous->previous.key.equals(key)&&!previous.registryRevision.equals(registry.revision));
+                    int attempts=worker.warmAttempts.getOrDefault(stateKey,0);
+                    if(worker.warmed.contains(stateKey)||System.nanoTime()<worker.warmRetryAt)continue;
+                    if(attempts>=3){attempts=0;worker.warmAttempts.put(stateKey,0);}
+                    worker.warmAttempts.put(stateKey,attempts+1);
+                    worker.warming=true;
                     packageRegistry.markWarming(key.packageId(),registry.revision);
                     boolean ready=false;
                     try {
@@ -3333,7 +3339,7 @@ final class ServerRuntime implements AutoCloseable {
                         WorkerRequest request=inspectionRequest(key.packageId(),root,key.environment());
                         request.inspectionAction="list";request.inspectionType="template";request.inspectionLimit=1;request.inspectionOffset=0;
                         Map<String,Object> response=worker.request(root,request);
-                        if(!response.containsKey("errorCode")){worker.warmed.add(key);ready=true;}
+                        if(!response.containsKey("errorCode")){worker.warmed.add(stateKey);ready=true;}
                     } catch(Exception ignored) { /* No package contents or paths in background failure logs. */ }
                     finally {
                         worker.warming=false;worker.warmRetryAt=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(250L<<attempts);
@@ -3371,8 +3377,8 @@ final class ServerRuntime implements AutoCloseable {
     private final class InspectionWorker implements AutoCloseable {
         final ReentrantLock lock=new ReentrantLock();
         private volatile boolean warming;
-        private final Map<ServerConfig.WarmupKey,Integer> warmAttempts=new LinkedHashMap<>();
-        private final java.util.Set<ServerConfig.WarmupKey> warmed=new java.util.HashSet<>();
+        private final Map<WarmupStateKey,Integer> warmAttempts=new LinkedHashMap<>();
+        private final java.util.Set<WarmupStateKey> warmed=new java.util.HashSet<>();
         private long warmRetryAt;
         private final java.util.LinkedHashSet<String> retained=new java.util.LinkedHashSet<>();
         boolean holds(String key){synchronized(retained){return retained.contains(key);}}
@@ -3388,6 +3394,8 @@ final class ServerRuntime implements AutoCloseable {
         private volatile Process process;
         private volatile InspectionProtocolReader reader;
         private volatile OutputStream writer;
+
+        private record WarmupStateKey(ServerConfig.WarmupKey key,String registryRevision) { }
 
         Map<String,Object> request(Path root,WorkerRequest request) throws Exception {
             request.expectedSchemaRegistryDigest=workerSchemaRegistryDigest;
