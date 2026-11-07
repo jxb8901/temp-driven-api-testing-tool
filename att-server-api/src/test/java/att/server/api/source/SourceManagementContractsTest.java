@@ -161,7 +161,7 @@ class SourceManagementContractsTest {
         try (java.io.InputStream stream = getClass().getResourceAsStream("/schemas/att-source-management-v1.schema.json")) {
             assertNotNull(stream, "versioned #255 API JSON Schema is packaged");
             JsonNode schema = JSON.readTree(stream);
-            assertEquals("urn:att:source-management:v1", schema.path("$id").asText());
+            assertEquals("https://att.example/schemas/att-source-management/v1", schema.path("$id").asText());
             JsonNode categories = schema.path("$defs").path("PackageCategory").path("enum");
             assertEquals(Arrays.asList("TESTCASE", "TEMPLATE", "FLOW", "LOAD", "TESTDATA", "FILE"),
                     JSON.convertValue(categories, JSON.getTypeFactory().constructCollectionType(java.util.List.class, String.class)));

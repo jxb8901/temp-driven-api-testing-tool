@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:att:source-management:v1",
+  "$id": "https://att.example/schemas/att-source-management/v1",
   "title": "ATT Source Management API v1",
   "type": "object",
   "oneOf": [
