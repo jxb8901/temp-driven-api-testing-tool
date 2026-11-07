@@ -149,6 +149,8 @@ final class ServerRuntime implements AutoCloseable {
     final MonitoringRequestMetrics monitoringRequests=new MonitoringRequestMetrics();
     final PackageManifestPublisher manifestPublisher;
     final ChangeSetPublisher changeSetPublisher;
+    private ConfigImpactAnalyzer configImpactAnalyzer;
+    private ConfigActivationCoordinator configActivationCoordinator;
     private volatile Map<String,Object> jobStorageReport;
     private final ConcurrentHashMap<Process,Boolean> inspectionProcesses=new ConcurrentHashMap<>();
     private final Object draftLock=new Object();
@@ -223,6 +225,20 @@ final class ServerRuntime implements AutoCloseable {
                     }
                 },sourceFileTransaction);
         ChangeSetCandidateValidator sourceCandidateValidator=new ChangeSetCandidateValidator();
+        configActivationCoordinator=ConfigActivationCoordinator.unavailable();
+        configImpactAnalyzer=new ConfigImpactAnalyzer(new ConfigImpactAnalyzer.Inventory() {
+            @Override public PackageRegistry.Snapshot registry() { return packageRegistry.snapshot(); }
+            @Override public List<LoadSchedule> schedules() throws Exception { return store.schedules(); }
+        },config.packageConfiguration,config.scheduling.packageChangePolicy,
+                new att.validation.SourceCandidateValidator(),configActivationCoordinator);
+        ChangeSetPublisher.ConfigPublishGate configImpactGate=(candidate,review)->{
+            att.server.api.source.SourceManagementContracts.ApprovalDecision decision=
+                    configImpactAnalyzer.authorizeCandidate(candidate,review);
+            if(decision.state==att.server.api.source.SourceManagementContracts.ApprovalState.APPROVED)
+                return ChangeSetPublisher.GateDecision.allow(decision.approvalRevision);
+            return ChangeSetPublisher.GateDecision.block(decision.code==null
+                    ?"ATT-CONFIG-IMPACT-BLOCKED":decision.code);
+        };
         changeSetPublisher=new ChangeSetPublisher(clock,config.packageConfiguration.maxDrafts,
                 config.packageConfiguration.maxDraftsPerUser,config.packageConfiguration.draftTtlSeconds,
                 (domain,scopeId,actor,systemSettingsWrite)->{
@@ -240,18 +256,48 @@ final class ServerRuntime implements AutoCloseable {
                     return new ChangeSetPublisher.Scope(domain,scopeId,activeCentralRoot,activeCentralRoot,null,workerSchemaRegistryDigest);
                 },
                 sourceCandidateValidator,
-                ChangeSetPublisher.unavailableConfigGate(),
+                configImpactGate,
                 new ChangeSetPublisher.Audit() {
                     @Override public void record(String actor,String action,String domain,String scopeId,String detail) throws Exception {
                         store.audit(actor,action,null,ChangeSetPublisher.PACKAGE_SOURCE.equals(domain)?scopeId:null,
                                 domain+" "+scopeId+" "+detail);
                     }
                     @Override public void recordCommitted(SourceFileTransaction.AuditRecord record) throws Exception {
+                        if(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(record.domain)) {
+                            att.server.api.source.SourceManagementContracts.RevisionIdentity before=
+                                    att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                                            att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE,
+                                            record.scopeId,record.beforeRevision);
+                            att.server.api.source.SourceManagementContracts.RevisionIdentity after=
+                                    att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                                            att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE,
+                                            record.scopeId,record.afterRevision);
+                            att.server.api.source.SourceManagementContracts.PublicationEvent event=
+                                    new att.server.api.source.SourceManagementContracts.PublicationEvent(
+                                            att.server.api.source.SourceManagementContracts.Domain.CENTRAL_RUNTIME_CONFIG,
+                                            record.scopeId,record.requestId,
+                                            new att.server.api.source.SourceManagementContracts.RevisionSet(null,null,null,null,
+                                                    before,null,null,null,null),
+                                            new att.server.api.source.SourceManagementContracts.RevisionSet(null,null,null,null,
+                                                    after,null,null,null,null),record.resources);
+                            configActivationCoordinator.committed(event);
+                        }
                         store.persistSourcePublicationAudit(record);
                     }
                 },
                 sourceFileTransaction,
-                sourceCandidateValidator);
+                sourceCandidateValidator,
+                configImpactAnalyzer);
+        try {
+            Path activeConfigRoot=centralSourceRoot();
+            String initialRevision=changeSetPublisher.centralSourceRevision(activeConfigRoot,workerSchemaRegistryDigest);
+            configActivationCoordinator.seed(ChangeSetPublisher.CENTRAL_SCOPE_ID,
+                    att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                            att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE,
+                            ChangeSetPublisher.CENTRAL_SCOPE_ID,initialRevision));
+        } catch(Exception unavailable) {
+            // Config publication remains blocked when the current immutable source revision is unavailable.
+        }
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -1796,6 +1842,9 @@ final class ServerRuntime implements AutoCloseable {
         try { return sourceFileTransaction.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
                 ChangeSetPublisher.CENTRAL_SCOPE_ID,configured.toRealPath()); }
         catch(Exception unavailable) { throw new IllegalStateException("Central source revision is unavailable",unavailable); }
+    }
+    att.server.api.source.SourceManagementContracts.ActivationStatus configurationActivationStatus() {
+        return configActivationCoordinator.activationStatus(ChangeSetPublisher.CENTRAL_SCOPE_ID);
     }
     private Path workerConfigPath() throws Exception {
         Path sourceRoot=centralSourceRoot();

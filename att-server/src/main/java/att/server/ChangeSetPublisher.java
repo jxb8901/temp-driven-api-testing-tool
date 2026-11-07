@@ -34,6 +34,8 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import att.server.api.source.SourceManagementContracts.ImpactAcknowledgement;
+import att.server.api.source.SourceManagementContracts.ImpactReport;
 
 /** Shared, domain-separated Draft -> Validate -> Review -> Publish workflow for source files. */
 final class ChangeSetPublisher implements AutoCloseable {
@@ -310,6 +312,7 @@ final class ChangeSetPublisher implements AutoCloseable {
     private final CandidateValidator validator;
     private final ConfigPublishGate configGate;
     private final SnapshotGenerator snapshotGenerator;
+    private final ConfigImpactAnalyzer impactAnalyzer;
     private final Audit audit;
     private final SourceFileTransaction transaction;
     private final Lock sourceReadLock;
@@ -325,10 +328,19 @@ final class ChangeSetPublisher implements AutoCloseable {
     ChangeSetPublisher(Clock clock, int maxDrafts, int maxDraftsPerActor, int ttlSeconds, Access access,
                        CandidateValidator validator, ConfigPublishGate configGate, Audit audit,
                        SourceFileTransaction transaction, SnapshotGenerator snapshotGenerator) {
+        this(clock, maxDrafts, maxDraftsPerActor, ttlSeconds, access, validator, configGate, audit,
+                transaction, snapshotGenerator, null);
+    }
+
+    ChangeSetPublisher(Clock clock, int maxDrafts, int maxDraftsPerActor, int ttlSeconds, Access access,
+                       CandidateValidator validator, ConfigPublishGate configGate, Audit audit,
+                       SourceFileTransaction transaction, SnapshotGenerator snapshotGenerator,
+                       ConfigImpactAnalyzer impactAnalyzer) {
         this.clock = clock; this.maxDrafts = maxDrafts; this.maxDraftsPerActor = maxDraftsPerActor;
         this.ttlSeconds = ttlSeconds; this.access = access; this.validator = validator;
         this.configGate = configGate; this.audit = audit; this.transaction = transaction;
         this.snapshotGenerator = snapshotGenerator;
+        this.impactAnalyzer = impactAnalyzer;
         this.sourceReadLock = transaction.readLock();
     }
 
@@ -522,6 +534,29 @@ final class ChangeSetPublisher implements AutoCloseable {
         } finally { sourceReadLock.unlock(); }
     }
 
+    synchronized ImpactReport impactReport(String domain, String scopeId, String actor,
+                                           boolean systemSettingsWrite, String id,
+                                           String pageCursor) throws Exception {
+        if (!CENTRAL_RUNTIME_CONFIG.equals(domain)) return ImpactReport.unavailable("ATT-CONFIG-IMPACT-DOMAIN-UNSUPPORTED");
+        if (impactAnalyzer == null) return ImpactReport.unavailable("ATT-CONFIG-IMPACT-UNAVAILABLE");
+        sourceReadLock.lock();
+        try {
+            Draft draft = draft(domain, scopeId, actor, systemSettingsWrite, id);
+            requireCurrent(draft, systemSettingsWrite);
+            if (draft.validationRevision == null) throw new ValidationRejected("ATT-CHANGESET-VALIDATION-REQUIRED");
+            Candidate candidate = new Candidate(draft);
+            ValidationResult validated;
+            try { validated = validator.validate(candidate); }
+            catch (Exception unavailable) { return ImpactReport.unavailable("ATT-CONFIG-IMPACT-VALIDATION-UNAVAILABLE"); }
+            if (validated == null || !validated.valid) return ImpactReport.unavailable(
+                    validated == null ? "ATT-CONFIG-IMPACT-VALIDATION-UNAVAILABLE" : validated.code);
+            String currentValidation = validated.revision == null
+                    ? validationRevision(candidate) : requireDigest(validated.revision);
+            if (!draft.validationRevision.equals(currentValidation)) throw new Conflict();
+            return impactAnalyzer.report(candidate, pageCursor);
+        } finally { sourceReadLock.unlock(); }
+    }
+
     Map<String, Object> publish(String domain, String scopeId, String actor, boolean systemSettingsWrite,
                                 String id) throws Exception {
         return publish(domain, scopeId, actor, systemSettingsWrite, id, null);
@@ -529,6 +564,11 @@ final class ChangeSetPublisher implements AutoCloseable {
 
     Map<String, Object> publish(String domain, String scopeId, String actor, boolean systemSettingsWrite,
                                 String id, String requestId) throws Exception {
+        return publish(domain, scopeId, actor, systemSettingsWrite, id, requestId, null);
+    }
+
+    Map<String, Object> publish(String domain, String scopeId, String actor, boolean systemSettingsWrite,
+                                String id, String requestId, ImpactAcknowledgement acknowledgement) throws Exception {
         final Draft draft;
         synchronized (this) {
             draft = draft(domain, scopeId, actor, systemSettingsWrite, id);
@@ -558,7 +598,7 @@ final class ChangeSetPublisher implements AutoCloseable {
 
                 if (CENTRAL_RUNTIME_CONFIG.equals(domain)) {
                     GateDecision decision;
-                    try { decision = configGate.authorize(candidate, view(draft, "reviewed")); }
+                    try { decision = configGate.authorize(candidate, gateView(draft, acknowledgement)); }
                     catch (Exception failure) { throw new ValidationRejected("ATT-CONFIG-PRECOMMIT-BLOCKED"); }
                     if (decision == null || !decision.allowed)
                         throw new ValidationRejected(decision == null ? "ATT-CONFIG-PRECOMMIT-UNAVAILABLE" : decision.code);
@@ -584,7 +624,7 @@ final class ChangeSetPublisher implements AutoCloseable {
                     if (!draft.base.same(state(currentScope))) throw new Conflict();
                     if (CENTRAL_RUNTIME_CONFIG.equals(domain)) {
                         GateDecision fresh;
-                        try { fresh=configGate.authorize(candidate,view(draft,"reviewed")); }
+                        try { fresh=configGate.authorize(candidate,gateView(draft, acknowledgement)); }
                         catch(Exception failure) { throw new ValidationRejected("ATT-CONFIG-PRECOMMIT-BLOCKED"); }
                         if(fresh==null||!fresh.allowed)
                             throw new ValidationRejected(fresh==null?"ATT-CONFIG-PRECOMMIT-UNAVAILABLE":fresh.code);
@@ -620,6 +660,18 @@ final class ChangeSetPublisher implements AutoCloseable {
         } finally {
             if (!committed) synchronized (this) { draft.publishing = false; }
         }
+    }
+
+    private Map<String, Object> gateView(Draft draft, ImpactAcknowledgement acknowledgement) throws Exception {
+        Map<String, Object> result = view(draft, "reviewed");
+        if (acknowledgement != null) {
+            Map<String, Object> binding = new LinkedHashMap<>();
+            binding.put("freshnessFingerprint", acknowledgement.freshnessFingerprint);
+            binding.put("actor", acknowledgement.actor);
+            binding.put("acknowledgementDigest", acknowledgement.acknowledgementDigest);
+            result.put("impactAcknowledgement", binding);
+        }
+        return result;
     }
 
     synchronized Map<String, Object> discard(String domain, String scopeId, String actor, boolean systemSettingsWrite,
@@ -847,6 +899,12 @@ final class ChangeSetPublisher implements AutoCloseable {
         String source = hash(join(scope.domain, scope.scopeId, packageTree, centralTree, registry, manifest, config, schema));
         return new RevisionState(source, registry, manifest, config, schema, packageTree, centralTree,
                 PACKAGE_SOURCE.equals(scope.domain) ? primary : null, centralIndex);
+    }
+
+    String centralSourceRevision(Path root, String schemaRevision) throws Exception {
+        Path canonical = canonicalRoot(root);
+        return state(new Scope(CENTRAL_RUNTIME_CONFIG, CENTRAL_SCOPE_ID, canonical, canonical,
+                null, schemaRevision)).sourceRevision;
     }
 
     private static ScanIndex scan(Path root, String domain) throws Exception {
@@ -1289,7 +1347,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         return hash(join(values.toArray(new String[values.size()])));
     }
 
-    private String publishedRevision(Candidate candidate) throws Exception {
+    static String publishedRevision(Candidate candidate) throws Exception {
         Map<String, String> packageHashes = PACKAGE_SOURCE.equals(candidate.domain())
                 ? new LinkedHashMap<String, String>(candidate.base.packageIndex.hashes) : null;
         Map<String, String> centralHashes = new LinkedHashMap<String, String>(candidate.base.centralIndex.hashes);

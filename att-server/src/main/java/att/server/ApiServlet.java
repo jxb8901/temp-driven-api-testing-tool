@@ -8,6 +8,7 @@ import att.server.api.LoadPolicyForm;
 import att.server.api.QuickLoadForm;
 import att.server.api.ResourceInspection;
 import att.server.api.ServerApi;
+import att.server.api.source.SourceManagementContracts.ImpactAcknowledgement;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.servlet.AsyncContext;
@@ -85,6 +86,32 @@ public final class ApiServlet extends HttpServlet {
                 res.setHeader("Cache-Control","no-store");json(res,200,runtime.monitoringJobJournal(id));return;
             }
             if("/metrics".equals(path)){if(!requireSystemAdmin(req,res,requestId))return;Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
+            if(centralImpactPath(path)) {
+                if(!requireSystemSettingsWrite(req,res,requestId))return;
+                try {
+                    var report=runtime.changeSetPublisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                            ChangeSetPublisher.CENTRAL_SCOPE_ID,principalExact(req),true,segment(path,3),
+                            req.getParameter("cursor"));
+                    res.setHeader("Cache-Control","private, no-store");json(res,200,report);return;
+                } catch(ChangeSetPublisher.Denied denied) {
+                    error(res,403,"ATT-SERVER-FORBIDDEN","SYSTEM_SETTINGS_WRITE is required",requestId);return;
+                } catch(ChangeSetPublisher.Missing missing) {
+                    error(res,404,"ATT-SERVER-NOT-FOUND","Change Set was not found",requestId);return;
+                } catch(ChangeSetPublisher.Conflict stale) {
+                    error(res,409,"ATT-CHANGESET-CONFLICT","Source or validation revisions changed; validate and request a fresh impact report",requestId);return;
+                } catch(ChangeSetPublisher.ValidationRejected invalid) {
+                    error(res,422,invalid.code,"Validate the central Config draft before requesting its impact report",requestId);return;
+                } catch(IllegalArgumentException invalid) {
+                    error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);return;
+                } catch(Exception failure) {
+                    error(res,500,"ATT-CONFIG-IMPACT-FAILED","The Config impact report could not be completed",requestId);return;
+                }
+            }
+            if("/configuration/activation-status".equals(path)) {
+                if(!requireSystemSettingsWrite(req,res,requestId))return;
+                res.setHeader("Cache-Control","private, no-store");
+                json(res,200,runtime.configurationActivationStatus());return;
+            }
             if("/configuration/authoring-source".equals(path)) {centralAuthoringSourceGet(req,res,requestId);return;}
             if(path.startsWith("/configuration/")||"/configuration".equals(path)) {
                 if(!requireSharedConfigurationRead(req,res,requestId))return;
@@ -990,11 +1017,24 @@ public final class ApiServlet extends HttpServlet {
             } else {
                 String id=central?parts[3]:parts[4];
                 String action=central?parts[4]:parts[5];
-                if(!"generate-snapshot".equals(action)&&input.size()!=0)
+                ImpactAcknowledgement impactAcknowledgement=null;
+                if("publish".equals(action)) {
+                    java.util.Iterator<String> names=input.fieldNames();
+                    while(names.hasNext())if(!"impactAcknowledgement".equals(names.next()))
+                        throw new IllegalArgumentException("Unsupported Publish field");
+                    if(!central&&input.has("impactAcknowledgement"))
+                        throw new IllegalArgumentException("Impact acknowledgement is only valid for central Config publication");
+                    impactAcknowledgement=parseImpactAcknowledgement(input.get("impactAcknowledgement"));
+                } else if(!"generate-snapshot".equals(action)&&input.size()!=0) {
                     throw new IllegalArgumentException("Change Set actions accept an empty object");
+                }
                 if("validate".equals(action))result=runtime.changeSetPublisher.validate(domain,scopeId,actor,systemSettingsWrite,id,requestId);
                 else if("review".equals(action))result=runtime.changeSetPublisher.review(domain,scopeId,actor,systemSettingsWrite,id,requestId);
-                else if("publish".equals(action))result=runtime.changeSetPublisher.publish(domain,scopeId,actor,systemSettingsWrite,id,requestId);
+                else if("publish".equals(action)) {
+                    result=runtime.changeSetPublisher.publish(domain,scopeId,actor,systemSettingsWrite,id,requestId,impactAcknowledgement);
+                    if(central&&Boolean.TRUE.equals(result.get("published")))
+                        result.put("activationStatus",runtime.configurationActivationStatus());
+                }
                 else if("discard".equals(action))result=runtime.changeSetPublisher.discard(domain,scopeId,actor,systemSettingsWrite,id,requestId);
                 else if("generate-snapshot".equals(action)) {
                     if(central)throw new IllegalArgumentException("Testcase snapshots are Package-scoped");
@@ -1053,6 +1093,17 @@ public final class ApiServlet extends HttpServlet {
         if(item==null||item.isNull())return null;
         if(!item.isTextual()||item.asText().isEmpty())throw new IllegalArgumentException(field+" must be a non-empty string");
         return item.asText();
+    }
+
+    private static ImpactAcknowledgement parseImpactAcknowledgement(JsonNode input) {
+        if(input==null||input.isNull())return null;
+        if(!input.isObject())throw new IllegalArgumentException("impactAcknowledgement must be an object");
+        Set<String> allowed=Set.of("freshnessFingerprint","actor","acknowledgementDigest");
+        java.util.Iterator<String> fields=input.fieldNames();
+        while(fields.hasNext())if(!allowed.contains(fields.next()))
+            throw new IllegalArgumentException("Unsupported impact acknowledgement field");
+        return new ImpactAcknowledgement(requiredChangeText(input,"freshnessFingerprint"),
+                requiredChangeText(input,"actor"),requiredChangeText(input,"acknowledgementDigest"));
     }
 
     private static byte[] readBoundedBody(java.io.InputStream input,int limit) throws IOException {
@@ -1138,6 +1189,7 @@ public final class ApiServlet extends HttpServlet {
     }
     private static boolean packageChangeSetPath(String path){return path.matches("/packages/[^/]+/change-sets(?:/[^/]+/(?:validate|review|publish|discard|generate-snapshot))?");}
     private static boolean centralChangeSetPath(String path){return path.matches("/configuration/change-sets(?:/[^/]+/(?:validate|review|publish|discard))?");}
+    private static boolean centralImpactPath(String path){return path.matches("/configuration/change-sets/[^/]+/impact");}
     private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/package-configuration(?:/.*)?")||path.matches("/packages/[^/]+/configuration(?:/.*)?")||path.matches("/configuration(?:/.*)?");}
     private static boolean loadPolicyPath(String path){return path.matches("/packages/[^/]+/load-policy");}
     private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}
