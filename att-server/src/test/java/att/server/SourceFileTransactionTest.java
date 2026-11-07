@@ -49,6 +49,78 @@ class SourceFileTransactionTest {
         assertEquals(AFTER_REVISION, recovered.get().afterRevision);
     }
 
+    @Test void startupRecoveryWaitsForLivePublisherBeforePreJournalCleanupAndCandidateReconciliation() throws Exception {
+        for (String pauseAt : List.of("pre-journal", "candidate-delete")) {
+            Path scenario = Files.createDirectories(temp.resolve("recovery-race-" + pauseAt));
+            Path root = initialTree(scenario.resolve("package"));
+            Path data = Files.createDirectories(scenario.resolve("data"));
+            new SourceFileTransaction(data, new SourcePublicationBarrier()).pin(PACKAGE, SCOPE, root);
+
+            Path recoveryStarted = scenario.resolve("recovery.started");
+            Path allowRecovery = scenario.resolve("recovery.go");
+            Path recoveryResult = scenario.resolve("recovery.result");
+            Process recovery = startProbe("--recover", data.toString(), root.toString(), recoveryStarted.toString(),
+                    allowRecovery.toString(), recoveryResult.toString());
+            awaitFile(recoveryStarted, "recovery process did not register its source root");
+
+            Path publisherReady = scenario.resolve("publisher.ready");
+            Path allowPublisher = scenario.resolve("publisher.go");
+            Path publisherResult = scenario.resolve("publisher.result");
+            Process publisher = startProbe("--publish-paused", data.toString(), root.toString(), publisherReady.toString(),
+                    allowPublisher.toString(), publisherResult.toString(), pauseAt);
+            awaitFile(publisherReady, "publisher did not reach " + pauseAt + " window");
+            Files.writeString(allowRecovery, "go", StandardCharsets.UTF_8);
+            Thread.sleep(300);
+            assertTrue(recovery.isAlive(), "recovery must wait for the live publisher at " + pauseAt);
+            assertFalse(Files.exists(recoveryResult), "recovery must not reconcile an in-flight transaction");
+
+            Files.writeString(allowPublisher, "go", StandardCharsets.UTF_8);
+            assertProcessSuccess(publisher, "publisher failed at " + pauseAt);
+            assertProcessSuccess(recovery, "recovery failed at " + pauseAt);
+            assertEquals("published", Files.readString(publisherResult, StandardCharsets.UTF_8));
+            assertTrue(Files.readString(recoveryResult, StandardCharsets.UTF_8).startsWith("recovered:"));
+            assertPair(new SourceFileTransaction(data, new SourcePublicationBarrier()).pin(PACKAGE, SCOPE, root), "new-a", "new-b");
+        }
+    }
+
+    @Test void configuredSourceImportsExternalEditsAfterRestartAndExportsPublishedRevisions() throws Exception {
+        Path root = initialTree();
+        Path data = Files.createDirectories(temp.resolve("data"));
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
+        Path active = transaction.pin(PACKAGE, SCOPE, root);
+        transaction.commit(PACKAGE, SCOPE, active, "owner", BEFORE_REVISION, AFTER_REVISION,
+                writes("old-a", "old-b", "published-a", "published-b"), () -> { });
+        assertPair(root, "published-a", "published-b");
+
+        Files.writeString(root.resolve("templates/a.yaml"), "deployment-a", StandardCharsets.UTF_8);
+        Files.writeString(root.resolve("templates/b.yaml"), "deployment-b", StandardCharsets.UTF_8);
+        SourceFileTransaction restarted = new SourceFileTransaction(data, new SourcePublicationBarrier());
+        Path imported = restarted.pin(PACKAGE, SCOPE, root);
+        assertPair(imported, "deployment-a", "deployment-b");
+        assertPair(root, "deployment-a", "deployment-b");
+    }
+
+    @Test void pinnedRevisionsAreReadOnlyAndDelayedReadersKeepTheirOriginalTree() throws Exception {
+        Path root = initialTree();
+        Path data = Files.createDirectories(temp.resolve("data"));
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
+        Path delayedPin = transaction.pin(PACKAGE, SCOPE, root);
+        Path pinnedFile = delayedPin.resolve("templates/a.yaml");
+        if (Files.getFileStore(pinnedFile).supportsFileAttributeView("posix")) {
+            Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(pinnedFile);
+            assertFalse(permissions.contains(PosixFilePermission.OWNER_WRITE));
+            assertFalse(permissions.contains(PosixFilePermission.GROUP_WRITE));
+            assertFalse(permissions.contains(PosixFilePermission.OTHERS_WRITE));
+            assertThrows(java.io.IOException.class, () -> Files.writeString(pinnedFile, "tampered", StandardCharsets.UTF_8));
+        }
+        assertPair(delayedPin, "old-a", "old-b");
+
+        transaction.commit(PACKAGE, SCOPE, delayedPin, "owner", BEFORE_REVISION, AFTER_REVISION,
+                writes("old-a", "old-b", "new-a", "new-b"), () -> { });
+        assertPair(delayedPin, "old-a", "old-b");
+        assertPair(transaction.pin(PACKAGE, SCOPE, root), "new-a", "new-b");
+    }
+
     @Test void atomicSwitchKeepsDelayedWorkerPinnedAndSeparateProcessReadersCoherent() throws Exception {
         Path root = initialTree();
         Path data = Files.createDirectories(temp.resolve("data"));
@@ -132,7 +204,7 @@ class SourceFileTransactionTest {
         assertPair(transaction.pin(PACKAGE, SCOPE, root), "old-a", "old-b");
     }
 
-    @Test void replacementPreservesExistingPosixPermissionsAndCreatesUseOwnerOnlyPermissions() throws Exception {
+    @Test void publishedRevisionFilesKeepReaderModesWithoutWritePermissions() throws Exception {
         Path root=initialTree();
         if(!Files.getFileStore(root).supportsFileAttributeView("posix"))return;
         Path source=root.resolve("templates/a.yaml");
@@ -146,8 +218,9 @@ class SourceFileTransactionTest {
         writes.put("templates/new.yaml",new SourceFileTransaction.Write("templates/new.yaml",bytes("new"),null));
         transaction.commit(PACKAGE,SCOPE,active,"owner",BEFORE_REVISION,AFTER_REVISION,writes,()->{});
         Path published=transaction.pin(PACKAGE,SCOPE,root);
-        assertEquals(readable,Files.getPosixFilePermissions(published.resolve("templates/a.yaml")));
-        assertEquals(EnumSet.of(PosixFilePermission.OWNER_READ,PosixFilePermission.OWNER_WRITE),
+        assertEquals(EnumSet.of(PosixFilePermission.OWNER_READ,PosixFilePermission.GROUP_READ),
+                Files.getPosixFilePermissions(published.resolve("templates/a.yaml")));
+        assertEquals(EnumSet.of(PosixFilePermission.OWNER_READ),
                 Files.getPosixFilePermissions(published.resolve("templates/new.yaml")));
     }
 
@@ -203,11 +276,36 @@ class SourceFileTransactionTest {
     }
 
     private Path initialTree() throws Exception {
-        Path root = Files.createDirectories(temp.resolve("package")).toRealPath();
+        return initialTree(temp.resolve("package"));
+    }
+
+    private Path initialTree(Path directory) throws Exception {
+        Path root = Files.createDirectories(directory).toRealPath();
         Files.createDirectories(root.resolve("templates"));
         Files.write(root.resolve("templates/a.yaml"), bytes("old-a"));
         Files.write(root.resolve("templates/b.yaml"), bytes("old-b"));
         return root;
+    }
+
+    private Process startProbe(String... args) throws Exception {
+        String classpath = System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
+        Path javaExecutable = Path.of(System.getProperty("java.home"), "bin", "java");
+        List<String> command = new java.util.ArrayList<>();
+        command.add(javaExecutable.toString()); command.add("-cp"); command.add(classpath);
+        command.add("att.server.SourceRevisionProbe"); command.addAll(List.of(args));
+        return new ProcessBuilder(command).redirectErrorStream(true).start();
+    }
+
+    private static void awaitFile(Path file, String message) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!Files.exists(file) && System.nanoTime() < deadline) Thread.sleep(10);
+        assertTrue(Files.exists(file), message);
+    }
+
+    private static void assertProcessSuccess(Process process, String message) throws Exception {
+        assertTrue(process.waitFor(20, TimeUnit.SECONDS), message + ": timed out");
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, process.exitValue(), message + ": " + output);
     }
 
     private static Map<String, SourceFileTransaction.Write> writes(String oldA, String oldB, String newA, String newB) throws Exception {

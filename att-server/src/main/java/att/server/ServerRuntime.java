@@ -773,20 +773,22 @@ final class ServerRuntime implements AutoCloseable {
         validatePackageRoot(root);
         ObjectNode pinned=((ObjectNode)input).deepCopy();
         String requestedEnvironment=optionalText(input,"environment");
-        Map<String,Object> configuration;
+        Map<String,Object> retainedConfiguration=null;
         if(serverIssuedDraft&&input.path("configurationProvenance").isObject()) {
-            configuration=att.server.api.ConfigurationSnapshot.copy(JSON.convertValue(input.get("configurationProvenance"),Map.class));
-            if(!packageId.equals(configuration.get("packageId"))||!java.util.Objects.equals(requestedEnvironment,configuration.get("environment")))
+            retainedConfiguration=att.server.api.ConfigurationSnapshot.copy(JSON.convertValue(input.get("configurationProvenance"),Map.class));
+            if(!packageId.equals(retainedConfiguration.get("packageId"))||!java.util.Objects.equals(requestedEnvironment,retainedConfiguration.get("environment")))
                 throw new IllegalArgumentException("Configuration evidence differs from the approved execution");
-            authorizeConfiguration(configuration);
-        } else configuration=resolveExecutionConfiguration(packageId,root,requestedEnvironment);
+        }
+        PinnedExecutionConfiguration selectedConfiguration=resolvePinnedExecutionConfiguration(
+                packageId,root,requestedEnvironment,retainedConfiguration);
+        Map<String,Object> configuration=selectedConfiguration.evidence;
         pinned.put("environment",(String)configuration.get("environment"));
         pinned.set("configurationProvenance",JSON.valueToTree(configuration));
         input=pinned;
         WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
         request.configurationProvenance=configuration;request.registeredPackageId=packageId;
         request.protocolVersion="att-worker/v1";request.command=command;request.packageRoot=root.toString();
-        request.outputDirectory=null;request.config=workerConfigPath().toString();request.environment=safeText(request.environment,128,"environment");
+        request.outputDirectory=null;request.config=selectedConfiguration.workerConfigPath.toString();request.environment=safeText(request.environment,128,"environment");
         request.expectedSchemaRegistryDigest=workerSchemaRegistryDigest;
         request.runId=safeText(request.runId,128,"runId");request.debugId=safeText(request.debugId,128,"debugId");request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");
         request.scenario=safeRelative(request.scenario,"scenario");request.debugInput=safeRelative(request.debugInput,"debugInput");
@@ -1770,6 +1772,13 @@ final class ServerRuntime implements AutoCloseable {
     private Path pinPackageRoot(PackageRegistry.Snapshot registry,String id) {
         Path configured=registry.packages.get(id);
         if(configured==null)return null;
+        try {
+            if(Files.isSymbolicLink(configured)||!Files.isDirectory(configured,java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                    ||!configured.equals(configured.toRealPath()))
+                throw new IllegalArgumentException("Configured Package root is no longer registered under the original allowed root, canonical, and accessible");
+        } catch(java.io.IOException unavailable) {
+            throw new IllegalArgumentException("Configured Package root is no longer registered under the original allowed root, canonical, and accessible",unavailable);
+        }
         try { return sourceFileTransaction.pin(ChangeSetPublisher.PACKAGE_SOURCE,id,configured); }
         catch(Exception unavailable) { throw new IllegalStateException("Package source revision is unavailable",unavailable); }
     }
@@ -1788,6 +1797,9 @@ final class ServerRuntime implements AutoCloseable {
     }
     private Path workerConfigPath() throws Exception {
         Path sourceRoot=centralSourceRoot();
+        return workerConfigPath(sourceRoot);
+    }
+    private Path workerConfigPath(Path sourceRoot) throws Exception {
         Path configured=config.runtimeConfigPath.toAbsolutePath().normalize();
         Path configuredRoot=ServerConfig.runtimeConfigRoot(configured).toAbsolutePath().normalize();
         Path relative=configuredRoot.relativize(configured);
@@ -1795,6 +1807,14 @@ final class ServerRuntime implements AutoCloseable {
         if(!pinned.startsWith(sourceRoot)||!Files.isRegularFile(pinned,java.nio.file.LinkOption.NOFOLLOW_LINKS)
                 ||Files.isSymbolicLink(pinned))throw new IOException("Pinned Worker configuration is unavailable");
         return pinned;
+    }
+    static final class PinnedExecutionConfiguration {
+        final Map<String,Object> evidence;
+        final Path workerConfigPath;
+        PinnedExecutionConfiguration(Map<String,Object> evidence,Path workerConfigPath) {
+            this.evidence=att.server.api.ConfigurationSnapshot.copy(evidence);
+            this.workerConfigPath=workerConfigPath;
+        }
     }
     Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String principal) throws Exception {
         return inspectResource(packageId,action,type,resourceId,query,requestedLimit,cursor,"name","asc",null,principal);
@@ -2603,8 +2623,11 @@ final class ServerRuntime implements AutoCloseable {
         if(!expiresAt.isAfter(clock.instant()))throw new StaleDraftException();
     }
     WorkerRequest inspectionRequest(String packageId,Path root,String environment) throws Exception {
+        return inspectionRequest(packageId,root,environment,workerConfigPath());
+    }
+    private WorkerRequest inspectionRequest(String packageId,Path root,String environment,Path pinnedWorkerConfig) throws Exception {
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";
-        request.packageRoot=root.toString();request.config=workerConfigPath().toString();request.environment=environment;request.registeredPackageId=packageId;
+        request.packageRoot=root.toString();request.config=pinnedWorkerConfig.toString();request.environment=environment;request.registeredPackageId=packageId;
         if(packageId!=null&&!packageId.isBlank())request.packageRegistryRevision=packageRegistry.snapshot().revision;
         request.maxResponseBytes=config.inspection.maxResponseBytes;request.maxSourceBytes=config.inspection.maxSourceBytes;
         request.safeTextSources=config.inspection.safeTextSources(packageId);
@@ -2994,8 +3017,12 @@ final class ServerRuntime implements AutoCloseable {
     }
     /** Resolve through the Engine before policy checks and persist the canonical selected profile. */
     private Map<String,Object> resolveExecutionConfiguration(String packageId,Path root,String requested) throws Exception {
+        Path centralRoot=centralSourceRoot();
+        return resolveExecutionConfiguration(packageId,root,requested,workerConfigPath(centralRoot));
+    }
+    private Map<String,Object> resolveExecutionConfiguration(String packageId,Path root,String requested,Path pinnedWorkerConfig) throws Exception {
         String selection=requested==null||requested.isBlank()?null:inspectionEnvironment(requested,"environment");
-        WorkerRequest request=inspectionRequest(packageId,root,selection);
+        WorkerRequest request=inspectionRequest(packageId,root,selection,pinnedWorkerConfig);
         request.inspectionType="package-configuration";request.inspectionAction="resolve";request.registeredPackageId=packageId;
         Map<String,Object> effective=executeInspection(root,request);
         Map<String,Object> evidence=new LinkedHashMap<>(att.server.api.ConfigurationSnapshot.copy(effective));
@@ -3003,6 +3030,25 @@ final class ServerRuntime implements AutoCloseable {
         config.packageConfiguration.authorizeEnvironment(canonical,selection!=null);
         evidence.put("packageId",packageId);
         return deepMap(evidence);
+    }
+    PinnedExecutionConfiguration resolvePinnedExecutionConfiguration(String packageId,Path root,String requested,
+                                                                      Map<String,Object> retainedEvidence) throws Exception {
+        Path pinnedCentralRoot=centralSourceRoot();
+        Path pinnedWorkerConfig=workerConfigPath(pinnedCentralRoot);
+        String selection=requested;
+        if(retainedEvidence!=null) {
+            String origin=String.valueOf(retainedEvidence.get("environmentOrigin"));
+            if("global".equals(origin)||"package".equals(origin))selection=null;
+            else if(!"request".equals(origin)&&!"context".equals(origin))throw new StaleDraftException();
+        }
+        Map<String,Object> resolved=resolveExecutionConfiguration(packageId,root,selection,pinnedWorkerConfig);
+        if(retainedEvidence!=null&&!sameConfigurationEvidence(retainedEvidence,resolved))throw new StaleDraftException();
+        return new PinnedExecutionConfiguration(resolved,pinnedWorkerConfig);
+    }
+    private static boolean sameConfigurationEvidence(Map<String,Object> retained,Map<String,Object> resolved) {
+        for(String key:List.of("packageId","environment","environmentOrigin","manifestDigest","globalDigest","configurationIdentity"))
+            if(!retained.containsKey(key)||!java.util.Objects.equals(retained.get(key),resolved.get(key)))return false;
+        return true;
     }
     private void authorizeConfiguration(Map<String,Object> configuration) {
         String origin=(String)configuration.get("environmentOrigin");

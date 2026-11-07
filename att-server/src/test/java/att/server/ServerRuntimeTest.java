@@ -155,6 +155,118 @@ class ServerRuntimeTest {
         } finally {runtime.close();}
     }
 
+    @Test void centralConfigPublicationDuringResolutionKeepsEvidenceAndWorkerOnOnePinnedTree() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("config-fence-packages"));
+        Path packageRoot=Files.createDirectory(allowed.resolve("p"));
+        Path runtimeRoot=Files.createDirectory(temp.resolve("config-fence-runtime"));
+        Path configDirectory=Files.createDirectory(runtimeRoot.resolve("config"));
+        Path runtimeConfig=configDirectory.resolve("config.yaml");
+        String oldConfig="schemaVersion: att-config/v2.13\nenvironment: SIT\n";
+        String newConfig="schemaVersion: att-config/v2.13\nenvironment: SIT\nname: published\n";
+        Files.writeString(runtimeConfig,oldConfig);
+        Path data=Files.createDirectory(temp.resolve("config-fence-data"));
+        Path javaExecutable=Path.of(System.getProperty("java.home"),"bin","java");
+        Path serverYaml=temp.resolve("config-fence-server.yaml");
+        Files.writeString(serverYaml,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)
+                +"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaExecutable)
+                +"\n  centralConfigurationEditingEnabled: true\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 15000\n    heapMaxMb: 256\n    warmup: {enabled: false}\nworkers: {maxConcurrent: 1, queuedLimit: 2, maxConcurrentLoad: 1}\npackages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
+
+        Path ready=temp.resolve("config-fence-inspector.ready");
+        Path release=temp.resolve("config-fence-inspector.go");
+        CountDownLatch executionLaunchEntered=new CountDownLatch(1),allowExecutionLaunch=new CountDownLatch(1);
+        String classpath=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverYaml),Files.createDirectory(temp.resolve("config-fence-libs")).toString(),builder->{
+            if(builder.command().contains("--inspection-daemon")) {
+                ProcessBuilder fixture=new ProcessBuilder(javaExecutable.toString(),"-cp",classpath,FencedConfigurationProcess.class.getName(),ready.toString(),release.toString());
+                fixture.directory(builder.directory());
+                return fixture.start();
+            }
+            executionLaunchEntered.countDown();
+            try {if(!allowExecutionLaunch.await(15,TimeUnit.SECONDS))throw new java.io.IOException("execution launch fence timed out");}
+            catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new java.io.IOException("execution launch fence interrupted",interrupted);}
+            throw new java.io.IOException("captured execution request after configuration resolution");
+        });
+        FutureTask<Map<String,Object>> submission=new FutureTask<>(()->runtime.submit("validate",
+                ServerRuntime.JSON.readTree("{\"packageId\":\"p\"}"),"config-fence-test"));
+        try {
+            new Thread(submission,"config-fence-submit").start();
+            long inspectorDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+            while(!Files.exists(ready)&&System.nanoTime()<inspectorDeadline)Thread.sleep(10);
+            assertTrue(Files.exists(ready),"configuration resolver did not reach its inspection fence");
+            String resolvedAgainst=Files.readString(ready);
+            SourceFileTransaction otherServer=new SourceFileTransaction(data,new SourcePublicationBarrier());
+            Path active=otherServer.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,runtimeRoot.toRealPath());
+            Map<String,SourceFileTransaction.Write> writes=Map.of("config/config.yaml",
+                    new SourceFileTransaction.Write("config/config.yaml",newConfig.getBytes(java.nio.charset.StandardCharsets.UTF_8),digest(oldConfig)));
+            otherServer.commit(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,active,"other-server",
+                    digest(oldConfig),digest(newConfig),writes,()->{});
+            Path current=otherServer.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,runtimeRoot.toRealPath())
+                    .resolve("config/config.yaml");
+            assertNotEquals(current.toString(),resolvedAgainst,"central publication should advance the active pointer during resolution");
+
+            Files.writeString(release,"go");
+            Map<String,Object> accepted=submission.get(15,TimeUnit.SECONDS);
+            String jobId=String.valueOf(accepted.get("jobId"));
+            assertTrue(executionLaunchEntered.await(10,TimeUnit.SECONDS),"Worker launch did not reach the capture fence");
+            Job job=runtime.jobs.get(jobId);
+            assertNotNull(job);
+            assertEquals(resolvedAgainst,job.request.config,"Worker config must use the resolver's pinned central tree");
+            assertEquals(oldConfig,Files.readString(Path.of(job.request.config)));
+            assertEquals(digest(oldConfig),job.request.configurationProvenance.get("globalDigest"));
+
+            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.resolvePinnedExecutionConfiguration(
+                    "p",job.request.packageRoot==null?packageRoot:Path.of(job.request.packageRoot),null,
+                    job.request.configurationProvenance),"retained evidence must be rejected after central publication");
+        } finally {
+            Files.writeString(release,"go");allowExecutionLaunch.countDown();
+            if(!submission.isDone())submission.cancel(true);
+            runtime.close();
+        }
+    }
+
+    public static class FencedConfigurationProcess {
+        public static void main(String[] args)throws Exception {
+            Path ready=Path.of(args[0]),release=Path.of(args[1]);
+            try(var reader=new java.io.BufferedReader(new java.io.InputStreamReader(System.in,java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                while((line=reader.readLine())!=null) {
+                    JsonNode request=ServerRuntime.JSON.readTree(line);
+                    if(!"package-configuration".equals(request.path("inspectionType").asText())
+                            ||!"resolve".equals(request.path("inspectionAction").asText()))
+                        throw new IllegalArgumentException("Unexpected inspection request");
+                    Path config=Path.of(request.path("config").asText());
+                    Files.writeString(ready,config.toString());
+                    long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+                    while(!Files.exists(release)&&System.nanoTime()<deadline)Thread.sleep(10);
+                    if(!Files.exists(release))throw new java.io.IOException("configuration resolver fence timed out");
+                    String contents=Files.readString(config);
+                    String globalDigest=digest(contents);
+                    Map<String,Object> evidence=new java.util.LinkedHashMap<>();
+                    evidence.put("environment",request.path("environment").asText("SIT"));
+                    evidence.put("environmentOrigin",request.hasNonNull("environment")?"request":"global");
+                    evidence.put("configurationIdentity",globalDigest);evidence.put("manifestDigest",digest("manifest:"+request.path("registeredPackageId").asText()));
+                    evidence.put("globalDigest",globalDigest);evidence.put("schemaRegistryDigest","c".repeat(64));
+                    evidence.put("engineVersion","fence-test");evidence.put("engineRevision","fence-test");
+                    evidence.put("origins",Map.of("environment",evidence.get("environmentOrigin")));
+                    evidence.put("authoredPaths",Map.of("environment","config/config.yaml"));
+                    System.out.println(ServerRuntime.JSON.writeValueAsString(Map.of("type","RESULT","status","PASS","exitCode",0,
+                            "result",Map.of("summary",Map.of("inspection",evidence)))));
+                    System.out.flush();
+                }
+            }
+        }
+        private static String digest(String text)throws Exception {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        }
+    }
+
+    private static String digest(String text)throws Exception {
+        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    }
+
     @Test void skipsEligibilityInspectionWhenWarmPoolHasNoReadyCapacity() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("prewarm-saturated-packages"));Path pkg=Files.createDirectory(allowed.resolve("package"));
         Path libs=Files.createDirectory(temp.resolve("prewarm-saturated-libs"));Path yaml=temp.resolve("prewarm-saturated-server.yaml");

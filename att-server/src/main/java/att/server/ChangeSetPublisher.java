@@ -1030,12 +1030,15 @@ final class ChangeSetPublisher implements AutoCloseable {
     }
 
     private void addReviewContent(Draft draft,Diff diff,Map<String,Object> item) throws Exception {
-        if("move".equals(diff.operation)) {
+        boolean move="move".equals(diff.operation);
+        byte[] before=diff.oldHash==null?new byte[0]:readBounded(checkedPath(draft.scope.root,diff.path));
+        byte[] after=move?candidateBytes(draft.scope.root,draft.changes,diff.targetPath)
+                :draft.changes.get(diff.path);
+        if(move&&java.util.Arrays.equals(before,after)) {
             item.put("contentSummary","Moved without changing file content");
             return;
         }
-        byte[] before=diff.oldHash==null?new byte[0]:readBounded(checkedPath(draft.scope.root,diff.path));
-        byte[] after=draft.changes.get(diff.path);
+        if(after==null)after=new byte[0];
         if((long)before.length+(after==null?0:after.length)>MAX_REVIEW_DIFF_BYTES) {
             item.put("contentSummary","Content change exceeds the inline review limit; replace-only summary");
             return;
@@ -1046,7 +1049,8 @@ final class ChangeSetPublisher implements AutoCloseable {
             item.put("contentSummary","Binary content changed; replace-only summary");
             return;
         }
-        if(hasProtectedReviewContent(diff.path,oldText)||hasProtectedReviewContent(diff.path,newText)) {
+        if(hasProtectedReviewContent(diff.path,oldText)
+                ||hasProtectedReviewContent(diff.targetPath==null?diff.path:diff.targetPath,newText)) {
             item.put("contentSummary","Protected or unparseable content changed; replace-only summary");
             return;
         }

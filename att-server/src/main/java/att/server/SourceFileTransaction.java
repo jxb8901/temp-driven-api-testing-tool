@@ -32,6 +32,7 @@ final class SourceFileTransaction {
     interface CommitAudit { void record(AuditRecord record) throws Exception; }
     interface FaultInjector {
         void afterApply(int appliedCount) throws IOException;
+        default void beforeJournal() throws IOException { }
         default void afterPointerSwitch() throws IOException { }
     }
 
@@ -130,8 +131,11 @@ final class SourceFileTransaction {
         String beforeId = null;
         String afterId = null;
         try (SourceRevisionStore.WriterLock ignored = revisions.lock(domain, scopeId, sourceRoot)) {
+            revisions.refreshConfiguredSource(domain, scopeId, sourceRoot, true);
             SourceRevisionStore.Revision active = revisions.readActive(domain, scopeId, sourceRoot);
             ensurePriorSwitchRecoverable(active);
+            if (active.transactionId != null)
+                revisions.exportActiveToConfiguredRoot(domain, scopeId, sourceRoot, active.id);
             beforeId = active.id;
             List<PreparedWrite> prepared = prepare(active.root, writes);
             privateDirectory(transaction);
@@ -139,6 +143,7 @@ final class SourceFileTransaction {
             AuditRecord record = new AuditRecord(transactionId, actor, domain, scopeId,
                     action == null ? auditAction(domain) : action, "COMMITTED", beforeRevision, afterRevision, requestId,
                     resources == null ? Collections.emptyList() : resources);
+            if (faultInjector != null) faultInjector.beforeJournal();
             writeRevisionJournal(transaction, sourceRoot, beforeId, afterId, null, record);
             journalReady = true;
             if (revisionCheck != null) revisionCheck.verify();
@@ -153,6 +158,7 @@ final class SourceFileTransaction {
             pointerSwitched = true;
             if (faultInjector != null) faultInjector.afterPointerSwitch();
             writeForcedAtomically(transaction.resolve("COMMITTED"), (transactionId + "\n" + afterRevision + "\n").getBytes(StandardCharsets.UTF_8));
+            revisions.exportActiveToConfiguredRoot(domain, scopeId, sourceRoot, afterId);
             boolean auditConfirmed = true;
             if (audit != null) {
                 try { audit.record(record); }
@@ -160,6 +166,7 @@ final class SourceFileTransaction {
             }
             if (auditConfirmed) {
                 writeForcedAtomically(transaction.resolve("AUDITED"), (transactionId + "\n").getBytes(StandardCharsets.UTF_8));
+                revisions.clearTransactionId(domain, scopeId, sourceRoot, afterId, transactionId);
                 cleanupRevisionTransaction(transaction);
             }
             return new CommitResult(afterRevision, auditConfirmed);
@@ -185,7 +192,9 @@ final class SourceFileTransaction {
     int recover(Map<String, Path> trustedRoots, RecoveryAudit audit) throws Exception {
         Lock writeLock = barrier.writeLock();
         writeLock.lock();
+        List<SourceRevisionStore.WriterLock> rootLocks = new ArrayList<>();
         try {
+            acquireTrustedRootLocks(trustedRoots, rootLocks);
             if (!Files.isDirectory(transactionRoot, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(transactionRoot))
                 throw new IOException("Source recovery storage is unavailable");
             List<Path> entries = new ArrayList<Path>();
@@ -211,9 +220,32 @@ final class SourceFileTransaction {
                 }
                 recovered++;
             }
+            for (Map.Entry<String, Path> trusted : trustedRoots.entrySet()) {
+                int separator = trusted.getKey().indexOf(':');
+                if (separator <= 0 || separator == trusted.getKey().length() - 1)
+                    throw new IOException("Source recovery root registration is invalid");
+                revisions.refreshConfiguredSource(trusted.getKey().substring(0, separator),
+                        trusted.getKey().substring(separator + 1), trusted.getValue(), true);
+            }
             return recovered;
         } finally {
+            for (int index = rootLocks.size() - 1; index >= 0; index--) {
+                try { rootLocks.get(index).close(); } catch (Exception ignored) { }
+            }
             writeLock.unlock();
+        }
+    }
+
+    private void acquireTrustedRootLocks(Map<String, Path> trustedRoots,
+                                         List<SourceRevisionStore.WriterLock> held) throws Exception {
+        if (trustedRoots == null) throw new IOException("Trusted source roots are unavailable for recovery");
+        List<Map.Entry<String, Path>> ordered = new ArrayList<>(trustedRoots.entrySet());
+        ordered.sort(Map.Entry.comparingByKey());
+        for (Map.Entry<String, Path> root : ordered) {
+            int separator = root.getKey().indexOf(':');
+            if (separator <= 0 || separator == root.getKey().length() - 1)
+                throw new IOException("Source recovery root registration is invalid");
+            held.add(revisions.lock(root.getKey().substring(0, separator), root.getKey().substring(separator + 1), root.getValue()));
         }
     }
 
@@ -231,9 +263,11 @@ final class SourceFileTransaction {
             if (parsed.afterTreeDigest == null || !revisions.revisionTreeMatches(parsed.domain, parsed.scopeId,
                     parsed.sourceRoot, parsed.afterId, parsed.afterTreeDigest))
                 throw new IOException("Committed source revision failed its integrity check");
+            revisions.exportActiveToConfiguredRoot(parsed.domain, parsed.scopeId, parsed.sourceRoot, parsed.afterId);
             AuditRecord record = parsed.record("COMMITTED");
             if (audit != null) audit.record(record);
             writeForcedAtomically(transaction.resolve("AUDITED"), (parsed.transactionId + "\n").getBytes(StandardCharsets.UTF_8));
+            revisions.clearTransactionId(parsed.domain, parsed.scopeId, parsed.sourceRoot, parsed.afterId, parsed.transactionId);
             cleanupRevisionTransaction(transaction);
             return;
         }

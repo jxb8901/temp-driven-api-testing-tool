@@ -243,6 +243,24 @@ class ChangeSetPublisherTest {
         } finally { publisher.close(); }
     }
 
+    @Test void reviewShowsAutomaticReferenceRewriteInsideAMovedDescriptor() throws Exception {
+        Files.createDirectories(packageRoot.resolve("templates/shared"));
+        Files.write(packageRoot.resolve("templates/shared/payload.txt"), bytes("request-body\n"));
+        Files.write(packageRoot.resolve("templates/old.yaml"), bytes("request: '&{./shared/payload.txt}'\n"));
+        ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
+        try {
+            Map<String, Object> draft = stagePackage(publisher, Arrays.asList(
+                    ChangeSetPublisher.OperationInput.move("templates/old.yaml", "templates/new.yaml"),
+                    ChangeSetPublisher.OperationInput.move("templates/shared/payload.txt", "templates/shared/moved.txt")));
+            Map<?, ?> movedDescriptor = ((List<?>) draft.get("changedFiles")).stream().map(Map.class::cast)
+                    .filter(row -> "templates/old.yaml".equals(row.get("path"))).findFirst().orElseThrow();
+            assertEquals(1, movedDescriptor.get("updatedFileReferences"));
+            assertNotEquals("Moved without changing file content", movedDescriptor.get("contentSummary"));
+            assertTrue(movedDescriptor.get("contentDiff").toString().contains("&{./shared/payload.txt}"));
+            assertTrue(movedDescriptor.get("contentDiff").toString().contains("&{templates/shared/moved.txt}"));
+        } finally { publisher.close(); }
+    }
+
     @Test void reviewAuditAndErrorsNeverReturnAuthoredSecretValues() throws Exception {
         Files.createDirectories(packageRoot.resolve("templates"));
         Files.write(packageRoot.resolve("templates/secret.yaml"), bytes("id: secret\n"));

@@ -103,7 +103,11 @@ final class SourceRevisionStore {
 
     Revision pin(String domain, String scopeId, Path root) throws Exception {
         Registration registration = lookup(domain, scopeId, root);
-        return readActive(registration);
+        ReentrantLock local = localWriterLock(registration);
+        if (local.isHeldByCurrentThread()) return readActive(registration);
+        try (WriterLock ignored = acquire(registration)) {
+            return refreshConfiguredSource(registration, false);
+        }
     }
 
     Revision current(String domain, String scopeId, Path root) throws Exception {
@@ -115,6 +119,19 @@ final class SourceRevisionStore {
         return acquire(registration);
     }
 
+    Revision refreshConfiguredSource(String domain, String scopeId, Path root, boolean verifyContent) throws Exception {
+        return refreshConfiguredSource(lookup(domain, scopeId, root), verifyContent);
+    }
+
+    void exportActiveToConfiguredRoot(String domain, String scopeId, Path root, String id) throws Exception {
+        Registration registration = lookup(domain, scopeId, root);
+        Revision active = readActive(registration);
+        if (!active.id.equals(id)) throw new IOException("Active source revision changed during configured-source export");
+        exportTree(active.root, registration.sourceRoot);
+        if (!treeDigest(active.root).equals(treeDigest(registration.sourceRoot)))
+            throw new IOException("Configured source export failed its integrity check");
+    }
+
     Revision readActive(String domain, String scopeId, Path root) throws Exception {
         return readActive(lookup(domain, scopeId, root));
     }
@@ -124,6 +141,17 @@ final class SourceRevisionStore {
         Path target = checkedRevision(registration, id);
         if (!Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) throw new IOException("Source revision is unavailable");
         writeSharedAtomic(registration.active,pointer(id,sourceRevision,transactionId),registration.sourceRoot);
+    }
+
+    void clearTransactionId(String domain, String scopeId, Path root, String id, String transactionId) throws Exception {
+        Registration registration = lookup(domain, scopeId, root);
+        Revision active = readActive(registration);
+        if (!active.id.equals(id))
+            throw new IOException("Active source transaction changed before its journal was cleared");
+        if (active.transactionId == null) return;
+        if (!active.transactionId.equals(transactionId))
+            throw new IOException("Active source transaction changed before its journal was cleared");
+        writeSharedAtomic(registration.active, pointer(active.id, active.sourceRevision, null), registration.sourceRoot);
     }
 
     Path createCandidate(String domain, String scopeId, Path root, Revision from, String id,
@@ -235,8 +263,7 @@ final class SourceRevisionStore {
     }
 
     private WriterLock acquire(Registration registration) throws IOException {
-        Path key=registration.lockFile.toAbsolutePath().normalize();
-        ReentrantLock local=JVM_WRITER_LOCKS.computeIfAbsent(key,ignored->new ReentrantLock(true));
+        ReentrantLock local=localWriterLock(registration);
         local.lock();
         FileChannel channel=null;
         try {
@@ -245,6 +272,11 @@ final class SourceRevisionStore {
         } catch (IOException | RuntimeException failure) {
             if(channel!=null)channel.close();local.unlock();throw failure;
         }
+    }
+
+    private static ReentrantLock localWriterLock(Registration registration) {
+        Path key=registration.lockFile.toAbsolutePath().normalize();
+        return JVM_WRITER_LOCKS.computeIfAbsent(key,ignored->new ReentrantLock(true));
     }
 
     private Revision readActive(Registration registration) throws Exception {
@@ -263,6 +295,193 @@ final class SourceRevisionStore {
         if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(root))
             throw new IOException("Active source revision tree is unavailable");
         return new Revision(fields[1], revision, transactionId, root);
+    }
+
+    /**
+     * The configured source tree is the deployment import/export mirror. Server readers use
+     * immutable revisions; a changed mirror is copied and verified before the active pointer moves.
+     */
+    private Revision refreshConfiguredSource(Registration registration, boolean verifyContent) throws Exception {
+        Revision active = readActive(registration);
+        if (active.transactionId != null) return active;
+        if (!verifyContent && metadataFingerprint(registration.sourceRoot).equals(metadataFingerprint(active.root)))
+            return active;
+
+        String sourceDigest = treeDigest(registration.sourceRoot);
+        if (sourceDigest.equals(treeDigest(active.root))) return active;
+
+        String id = nextId();
+        Path imported = checkedRevision(registration, id);
+        try {
+            copyTree(registration.sourceRoot, imported);
+            String copiedDigest = treeDigest(imported);
+            String sourceDigestAfterCopy = treeDigest(registration.sourceRoot);
+            if (!sourceDigest.equals(copiedDigest) || !sourceDigest.equals(sourceDigestAfterCopy))
+                throw new IOException("Configured source changed while its revision was being imported");
+            restoreTreePermissions(imported, registration.sourceRoot);
+            writeSharedAtomic(registration.active, pointer(id, null, null), registration.sourceRoot);
+            return new Revision(id, null, null, imported);
+        } catch (Exception failure) {
+            try { deleteTree(imported); } catch (Exception cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+            throw failure;
+        }
+    }
+
+    private static String metadataFingerprint(Path root) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        List<Path> entries = new ArrayList<>();
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
+                if (attributes.isSymbolicLink() || Files.isSymbolicLink(file) || attributes.isRegularFile()) {
+                    entries.add(file);
+                    return FileVisitResult.CONTINUE;
+                }
+                throw new IOException("Source tree contains an unsupported file");
+            }
+        });
+        entries.sort(Comparator.comparing(path -> root.relativize(path).toString().replace(java.io.File.separatorChar, '/')));
+        for (Path entry : entries) {
+            String relative = root.relativize(entry).toString().replace(java.io.File.separatorChar, '/');
+            digest.update(relative.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            digest.update((byte) 0);
+            if (Files.isSymbolicLink(entry)) {
+                Path target = Files.readSymbolicLink(entry);
+                if (target.isAbsolute() || !entry.getParent().resolve(target).normalize().startsWith(root))
+                    throw new IOException("Source tree contains an external symbolic link");
+                digest.update((byte) 'L');
+                digest.update(target.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            } else {
+                BasicFileAttributes attributes = Files.readAttributes(entry, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                digest.update((byte) 'F');
+                digest.update(Long.toString(attributes.size()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                digest.update((byte) 0);
+                digest.update(attributes.lastModifiedTime().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            digest.update((byte) 0xff);
+        }
+        return java.util.HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static void exportTree(Path source, Path destination) throws Exception {
+        List<Path> sourceEntries = treeEntries(source);
+        Map<String, Path> desired = new LinkedHashMap<>();
+        List<Path> desiredDirectories = new ArrayList<>();
+        for (Path entry : sourceEntries) {
+            String relative = relativePath(source, entry);
+            desired.put(relative, entry);
+            if (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) desiredDirectories.add(entry);
+        }
+
+        Map<Path, Set<PosixFilePermission>> originalDirectoryPermissions = new LinkedHashMap<>();
+        List<Path> destinationEntries = treeEntries(destination);
+        destinationEntries.add(destination);
+        try {
+            for (Path directory : destinationEntries) {
+                if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(directory)) continue;
+                Set<PosixFilePermission> permissions = exactPermissions(directory);
+                originalDirectoryPermissions.put(directory, permissions);
+                if (permissions != null) {
+                    EnumSet<PosixFilePermission> writable = permissions.isEmpty()
+                            ? EnumSet.noneOf(PosixFilePermission.class) : EnumSet.copyOf(permissions);
+                    writable.add(PosixFilePermission.OWNER_WRITE);
+                    writable.add(PosixFilePermission.OWNER_EXECUTE);
+                    Files.setPosixFilePermissions(directory, writable);
+                } else if (!directory.toFile().setWritable(true, false) || !directory.toFile().setExecutable(true, false)) {
+                    throw new IOException("Configured source directory cannot be updated");
+                }
+            }
+
+            desiredDirectories.sort(Comparator.comparingInt(Path::getNameCount));
+            for (Path sourceDirectory : desiredDirectories) {
+                Path target = destination.resolve(source.relativize(sourceDirectory));
+                if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)
+                        && (Files.isSymbolicLink(target) || !Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)))
+                    deleteExisting(target);
+                if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                    Files.createDirectory(target);
+                    setPermissions(target, safeCreateDirectoryPermissions());
+                }
+            }
+
+            for (Path sourceEntry : sourceEntries) {
+                if (Files.isDirectory(sourceEntry, LinkOption.NOFOLLOW_LINKS)) continue;
+                Path target = destination.resolve(source.relativize(sourceEntry));
+                Path parent = target.getParent();
+                if (!Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(parent))
+                    throw new IOException("Configured source export parent is unsafe");
+                if (Files.isSymbolicLink(sourceEntry)) exportSymbolicLink(sourceEntry, target);
+                else exportRegularFile(sourceEntry, target);
+            }
+
+            List<Path> existingEntries = treeEntries(destination);
+            existingEntries.sort(Comparator.comparingInt(Path::getNameCount).reversed());
+            for (Path existing : existingEntries) {
+                String relative = relativePath(destination, existing);
+                if (!desired.containsKey(relative)) deleteExisting(existing);
+            }
+        } finally {
+            List<Path> directories = new ArrayList<>(originalDirectoryPermissions.keySet());
+            directories.sort(Comparator.comparingInt(Path::getNameCount).reversed());
+            for (Path directory : directories) {
+                if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(directory)) continue;
+                Set<PosixFilePermission> permissions = originalDirectoryPermissions.get(directory);
+                if (permissions != null) Files.setPosixFilePermissions(directory, permissions);
+            }
+        }
+    }
+
+    private static void exportRegularFile(Path source, Path target) throws IOException {
+        boolean existingRegular = Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(target);
+        Set<PosixFilePermission> permissions = existingRegular ? exactPermissions(target) : safeCreatePermissions();
+        if (existingRegular && Files.mismatch(source, target) == -1L) {
+            Files.setLastModifiedTime(target, Files.getLastModifiedTime(source, LinkOption.NOFOLLOW_LINKS));
+            return;
+        }
+        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) deleteExisting(target);
+        Path temporary = Files.createTempFile(target.getParent(), ".att-source-export-", ".tmp");
+        try {
+            Files.copy(source, temporary, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+            if (permissions != null) Files.setPosixFilePermissions(temporary, permissions);
+            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally { Files.deleteIfExists(temporary); }
+    }
+
+    private static void exportSymbolicLink(Path source, Path target) throws IOException {
+        Path wanted = Files.readSymbolicLink(source);
+        if (Files.isSymbolicLink(target) && wanted.equals(Files.readSymbolicLink(target))) return;
+        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) deleteExisting(target);
+        Path temporary = target.resolveSibling(".att-source-export-" + UUID.randomUUID());
+        try {
+            Files.createSymbolicLink(temporary, wanted);
+            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally { Files.deleteIfExists(temporary); }
+    }
+
+    private static void deleteExisting(Path path) throws IOException {
+        if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(path)) deleteTree(path);
+        else Files.deleteIfExists(path);
+    }
+
+    private static List<Path> treeEntries(Path root) throws IOException {
+        List<Path> entries = new ArrayList<>();
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
+                if (!directory.equals(root)) entries.add(directory);
+                return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
+                if (attributes.isSymbolicLink() || Files.isSymbolicLink(file) || attributes.isRegularFile()) {
+                    entries.add(file);
+                    return FileVisitResult.CONTINUE;
+                }
+                throw new IOException("Source tree contains an unsupported file");
+            }
+        });
+        return entries;
+    }
+
+    private static String relativePath(Path root, Path entry) {
+        return root.relativize(entry).toString().replace(java.io.File.separatorChar, '/');
     }
 
     private static byte[] pointer(String id, String sourceRevision, String transactionId) {
@@ -382,13 +601,37 @@ final class SourceRevisionStore {
         });
         for (Path path : paths) {
             Path original = originalRoot.resolve(root.relativize(path));
-            if (Files.exists(original, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(original))
-                setPermissions(path, exactPermissions(original));
-            else if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
-                setPermissions(path, safeCreateDirectoryPermissions());
-            else if (!Files.isSymbolicLink(path))
-                setPermissions(path, safeCreatePermissions());
+            if (Files.isSymbolicLink(path)) continue;
+            boolean directory = Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS);
+            Set<PosixFilePermission> originalPermissions = Files.exists(original, LinkOption.NOFOLLOW_LINKS)
+                    && !Files.isSymbolicLink(original) ? exactPermissions(original) : null;
+            setImmutablePermissions(path, immutablePermissions(originalPermissions, directory), directory);
         }
+    }
+
+    private static Set<PosixFilePermission> immutablePermissions(Set<PosixFilePermission> source, boolean directory) {
+        EnumSet<PosixFilePermission> result = source == null || source.isEmpty()
+                ? EnumSet.noneOf(PosixFilePermission.class) : EnumSet.copyOf(source);
+        result.remove(PosixFilePermission.OWNER_WRITE);
+        result.remove(PosixFilePermission.GROUP_WRITE);
+        result.remove(PosixFilePermission.OTHERS_WRITE);
+        result.add(PosixFilePermission.OWNER_READ);
+        if (directory) result.add(PosixFilePermission.OWNER_EXECUTE);
+        return result;
+    }
+
+    private static void setImmutablePermissions(Path path, Set<PosixFilePermission> permissions, boolean directory) throws IOException {
+        if (permissions != null) {
+            try { Files.setPosixFilePermissions(path, permissions); }
+            catch (UnsupportedOperationException unsupported) {
+                throw new IOException("Source revision storage cannot enforce read-only revision permissions", unsupported);
+            }
+            return;
+        }
+        if (!path.toFile().setWritable(false, false) || path.toFile().canWrite())
+            throw new IOException("Source revision storage cannot enforce read-only revision permissions");
+        if (directory && !path.toFile().setExecutable(true, false))
+            throw new IOException("Source revision storage cannot preserve revision reader access");
     }
 
     static String treeDigest(Path root) throws Exception {
@@ -467,31 +710,22 @@ final class SourceRevisionStore {
         }
     }
 
-    private static void setStorePermissions(Path path, Path sourceRoot, boolean directory) {
-        try {
-            Set<PosixFilePermission> source = Files.getPosixFilePermissions(sourceRoot, LinkOption.NOFOLLOW_LINKS);
-            EnumSet<PosixFilePermission> result = EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
-            if (directory) result.add(PosixFilePermission.OWNER_EXECUTE);
-            if (source.contains(PosixFilePermission.GROUP_READ)) result.add(PosixFilePermission.GROUP_READ);
-            if (source.contains(PosixFilePermission.GROUP_WRITE)) result.add(PosixFilePermission.GROUP_WRITE);
-            if (directory && source.contains(PosixFilePermission.GROUP_EXECUTE)) result.add(PosixFilePermission.GROUP_EXECUTE);
-            if (source.contains(PosixFilePermission.OTHERS_READ)) result.add(PosixFilePermission.OTHERS_READ);
-            if (source.contains(PosixFilePermission.OTHERS_WRITE)) result.add(PosixFilePermission.OTHERS_WRITE);
-            if (directory && source.contains(PosixFilePermission.OTHERS_EXECUTE)) result.add(PosixFilePermission.OTHERS_EXECUTE);
-            Files.setPosixFilePermissions(path, result);
-        } catch (Exception ignored) { }
+    private static void setStorePermissions(Path path, Path sourceRoot, boolean directory) throws IOException {
+        EnumSet<PosixFilePermission> result = EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+        if (directory) result.add(PosixFilePermission.OWNER_EXECUTE);
+        try { Files.setPosixFilePermissions(path, result); }
+        catch (UnsupportedOperationException unsupported) {
+            boolean safe = path.toFile().setReadable(false, false) && path.toFile().setWritable(false, false)
+                    && (!directory || path.toFile().setExecutable(false, false))
+                    && path.toFile().setReadable(true, true) && path.toFile().setWritable(true, true)
+                    && (!directory || path.toFile().setExecutable(true, true));
+            if (!safe) throw new IOException("Source revision storage cannot be protected from other principals", unsupported);
+        }
     }
 
     private static void setSharedFilePermissions(Path path, Path sourceRoot, boolean writable) {
-        try {
-            Set<PosixFilePermission> source = Files.getPosixFilePermissions(sourceRoot, LinkOption.NOFOLLOW_LINKS);
-            EnumSet<PosixFilePermission> result = EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
-            if (source.contains(PosixFilePermission.GROUP_READ)) result.add(PosixFilePermission.GROUP_READ);
-            if (writable && source.contains(PosixFilePermission.GROUP_WRITE)) result.add(PosixFilePermission.GROUP_WRITE);
-            if (source.contains(PosixFilePermission.OTHERS_READ)) result.add(PosixFilePermission.OTHERS_READ);
-            if (writable && source.contains(PosixFilePermission.OTHERS_WRITE)) result.add(PosixFilePermission.OTHERS_WRITE);
-            Files.setPosixFilePermissions(path, result);
-        } catch (Exception ignored) { }
+        try { Files.setPosixFilePermissions(path, EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)); }
+        catch (Exception ignored) { }
     }
 
     private static void setPermissions(Path path, Set<PosixFilePermission> permissions) {
@@ -550,15 +784,19 @@ final class SourceRevisionStore {
         if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)) return;
         if (Files.isSymbolicLink(root)) throw new IOException("Unsafe source revision entry");
         Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) throws IOException {
+                try { Files.setPosixFilePermissions(directory, EnumSet.of(PosixFilePermission.OWNER_READ,
+                        PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE)); }
+                catch (UnsupportedOperationException ignored) { directory.toFile().setWritable(true, false); }
+                return FileVisitResult.CONTINUE;
+            }
             @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
                 try { Files.setPosixFilePermissions(file, EnumSet.of(PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_READ)); }
-                catch (Exception ignored) { }
+                catch (UnsupportedOperationException ignored) { file.toFile().setWritable(true, false); }
                 Files.delete(file); return FileVisitResult.CONTINUE;
             }
             @Override public FileVisitResult postVisitDirectory(Path directory, IOException failure) throws IOException {
                 if (failure != null) throw failure;
-                try { Files.setPosixFilePermissions(directory, EnumSet.of(PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE)); }
-                catch (Exception ignored) { }
                 Files.delete(directory); return FileVisitResult.CONTINUE;
             }
         });
