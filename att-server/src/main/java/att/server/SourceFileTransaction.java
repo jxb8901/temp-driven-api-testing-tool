@@ -151,7 +151,7 @@ final class SourceFileTransaction {
             String actualId = candidate.getFileName().toString();
             if (!afterId.equals(actualId)) throw new IOException("Prepared source revision identity changed");
             revisions.freezeCandidate(candidate, candidate);
-            String afterTreeDigest = SourceRevisionStore.treeDigest(candidate);
+            String afterTreeDigest = SourceRevisionStore.treeDigest(domain, candidate);
             writeRevisionJournal(transaction, sourceRoot, beforeId, afterId, afterTreeDigest, record);
             if (revisionCheck != null) revisionCheck.verify(); // Last source, authorization, and gate freshness fence before the pointer swap.
             revisions.switchTo(domain, scopeId, sourceRoot, afterId, afterRevision, transactionId);

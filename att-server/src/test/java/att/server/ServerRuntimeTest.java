@@ -247,6 +247,7 @@ class ServerRuntimeTest {
                     Map<String,Object> evidence=new java.util.LinkedHashMap<>();
                     evidence.put("environment",request.path("environment").asText("SIT"));
                     evidence.put("environmentOrigin",request.hasNonNull("environment")?"request":"global");
+                    evidence.put("packageRevision",request.path("expectedRevisionDigest").asText("b".repeat(64)));
                     evidence.put("configurationIdentity",globalDigest);evidence.put("manifestDigest",digest("manifest:"+request.path("registeredPackageId").asText()));
                     evidence.put("globalDigest",globalDigest);evidence.put("schemaRegistryDigest","c".repeat(64));
                     evidence.put("engineVersion","fence-test");evidence.put("engineRevision","fence-test");
