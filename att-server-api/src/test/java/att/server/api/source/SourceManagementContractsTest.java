@@ -161,13 +161,54 @@ class SourceManagementContractsTest {
         try (java.io.InputStream stream = getClass().getResourceAsStream("/schemas/att-source-management-v1.schema.json")) {
             assertNotNull(stream, "versioned #255 API JSON Schema is packaged");
             JsonNode schema = JSON.readTree(stream);
-            assertEquals("att-source-management/v1", schema.path("$id").asText());
+            assertEquals("urn:att:source-management:v1", schema.path("$id").asText());
             JsonNode categories = schema.path("$defs").path("PackageCategory").path("enum");
             assertEquals(Arrays.asList("TESTCASE", "TEMPLATE", "FLOW", "LOAD", "TESTDATA", "FILE"),
                     JSON.convertValue(categories, JSON.getTypeFactory().constructCollectionType(java.util.List.class, String.class)));
             assertTrue(schema.path("$defs").path("ChangeSetView").path("properties").has("manifestMetadataChanged"));
             assertTrue(schema.path("$defs").path("ApiFailureStatus").path("enum").toString().contains("CONFLICT_409"));
         }
+    }
+
+    @Test void serializedChangeSetDtoAndNullRevisionSetValidateAgainstThePublishedWireSchema() throws Exception {
+        JsonNode schema;
+        try (java.io.InputStream stream = getClass().getResourceAsStream("/schemas/att-source-management-v1.schema.json")) {
+            assertNotNull(stream);
+            schema = JSON.readTree(stream);
+        }
+        com.networknt.schema.JsonSchema validator = com.networknt.schema.JsonSchemaFactory
+                .getInstance(com.networknt.schema.SpecVersion.VersionFlag.V202012).getSchema(schema);
+        ChangeSetView dto = new ChangeSetView("C123", Domain.PACKAGE_SOURCE, "pay", DraftState.DRAFT,
+                RevisionSet.empty(), null, true, Collections.<PackageCategory>emptyList(), false,
+                Collections.<DependencyReference>emptyList(), Collections.<ValidationDiagnostic>emptyList());
+        JsonNode serialized = JSON.valueToTree(dto);
+        java.util.Set<com.networknt.schema.ValidationMessage> errors = validator.validate(serialized);
+        assertTrue(errors.isEmpty(), errors.toString());
+        assertEquals("draft", serialized.path("state").asText());
+        assertTrue(serialized.path("revisions").path("packageRegistration").isNull(),
+                "absent revision identities serialize as JSON null and remain valid");
+        assertTrue(serialized.path("noStore").asBoolean());
+    }
+
+    @Test void candidateValidationAndEffectiveResolutionAreTopLevelVersionedSchemaContracts() throws Exception {
+        JsonNode schemaNode;
+        try(java.io.InputStream stream=getClass().getResourceAsStream("/schemas/att-source-management-v1.schema.json")) {
+            assertNotNull(stream);
+            schemaNode=JSON.readTree(stream);
+        }
+        com.networknt.schema.JsonSchema validator=com.networknt.schema.JsonSchemaFactory
+                .getInstance(com.networknt.schema.SpecVersion.VersionFlag.V202012).getSchema(schemaNode);
+        CandidateValidation candidate=validConfigCandidate();
+        assertTrue(validator.validate(JSON.valueToTree(candidate)).isEmpty());
+
+        EffectiveResolution resolution=new EffectiveResolution("pay","SIT",DIGEST_1,true,RevisionSet.empty(),
+                Collections.singletonMap("timeoutMs",ResolutionOrigin.GLOBAL_CONFIG),
+                Collections.singletonMap("timeoutMs",DIGEST_2),Collections.<DependencyReference>emptyList(),
+                Collections.<DependencyReference>emptyList(),Collections.<ValidationDiagnostic>emptyList());
+        JsonNode serialized=JSON.valueToTree(resolution);
+        assertTrue(validator.validate(serialized).isEmpty());
+        assertEquals(DIGEST_2,serialized.path("semanticFingerprints").path("timeoutMs").asText());
+        assertTrue(serialized.path("revisions").path("packageRegistration").isNull());
     }
 
     private static CandidateValidation validConfigCandidate() {

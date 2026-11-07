@@ -248,6 +248,55 @@ class ChangeSetPublisherTest {
         } finally { publisher.close(); }
     }
 
+    @Test void publisherRejectsTruncatedLoadInventoryAsNonExecutable() throws Exception {
+        Path scenarios=Files.createDirectories(packageRoot.resolve("load/scenarios"));
+        for(int index=0;index<=att.validation.SourceCandidateValidator.MAX_LOAD_DESCRIPTORS;index++)
+            Files.writeString(scenarios.resolve(String.format("scenario-%04d.yaml",index)),"schemaVersion: att-load/v1\n");
+        ChangeSetPublisher publisher=publisher(new ChangeSetCandidateValidator(),allowingGate());
+        try {
+            Map<String,Object> draft=stagePackage(publisher,List.of(ChangeSetPublisher.OperationInput.create(
+                    "files/staged.txt",bytes("candidate must be rejected when LOAD coverage is truncated\n"))));
+            ChangeSetPublisher.ValidationRejected rejected=assertThrows(ChangeSetPublisher.ValidationRejected.class,
+                    ()->publisher.validate(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,
+                            String.valueOf(draft.get("changeSetId"))));
+            assertTrue(rejected.code.contains("LOAD")||rejected.code.contains("CANDIDATE"),rejected.code);
+            assertFalse(Files.exists(activePackageRoot().resolve("files/staged.txt")),
+                    "An incomplete whole-candidate LOAD inventory cannot be published");
+        } finally { publisher.close(); }
+    }
+
+    @Test void publisherEndpointResponsesConformToTheVersionedJsonSchema() throws Exception {
+        com.fasterxml.jackson.databind.JsonNode schemaNode;
+        try (java.io.InputStream input = getClass().getResourceAsStream("/schemas/att-source-management-v1.schema.json")) {
+            assertNotNull(input, "the API schema is packaged with the Server");
+            schemaNode = ServerRuntime.JSON.readTree(input);
+        }
+        com.networknt.schema.JsonSchema schema = com.networknt.schema.JsonSchemaFactory
+                .getInstance(com.networknt.schema.SpecVersion.VersionFlag.V202012).getSchema(schemaNode);
+        ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
+        try {
+            Map<String, Object> draft = stagePackage(publisher, List.of(ChangeSetPublisher.OperationInput.create(
+                    "templates/wire.yaml", bytes("schemaVersion: att-template/v3.6\nname: Wire\ndescription: Wire\nactions: {}\n"))));
+            assertWireResponse(schema, draft);
+            String id = String.valueOf(draft.get("changeSetId"));
+            Map<String, Object> validated = publisher.validate(ChangeSetPublisher.PACKAGE_SOURCE,
+                    "owner", "owner", false, id, "api-request");
+            assertWireResponse(schema, validated);
+            Map<String, Object> reviewed = publisher.review(ChangeSetPublisher.PACKAGE_SOURCE,
+                    "owner", "owner", false, id, "api-request");
+            assertWireResponse(schema, reviewed);
+            Map<String, Object> published = publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,
+                    "owner", "owner", false, id, "api-request");
+            assertWireResponse(schema, published);
+
+            Map<String, Object> discardDraft = stagePackage(publisher, List.of(ChangeSetPublisher.OperationInput.create(
+                    "templates/discard.yaml", bytes("schemaVersion: att-template/v3.6\nname: Discard\ndescription: Discard\nactions: {}\n"))));
+            Map<String, Object> discarded = publisher.discard(ChangeSetPublisher.PACKAGE_SOURCE,
+                    "owner", "owner", false, String.valueOf(discardDraft.get("changeSetId")), "api-request");
+            assertWireResponse(schema, discarded);
+        } finally { publisher.close(); }
+    }
+
     @Test void movingReferencedFileRewritesEveryStaticLocatorAndDeletingReferencedFileFailsValidation() throws Exception {
         Files.createDirectories(packageRoot.resolve("templates/shared"));
         Files.createDirectories(packageRoot.resolve("flows"));
@@ -509,6 +558,12 @@ class ChangeSetPublisherTest {
     }
 
     private static byte[] bytes(String value) { return value.getBytes(StandardCharsets.UTF_8); }
+    private static void assertWireResponse(com.networknt.schema.JsonSchema schema, Map<String, Object> source) {
+        Map<String, Object> endpoint = new LinkedHashMap<>(source);
+        endpoint.put("requestId", "api-request");
+        java.util.Set<com.networknt.schema.ValidationMessage> errors = schema.validate(ServerRuntime.JSON.valueToTree(endpoint));
+        assertTrue(errors.isEmpty(), errors.toString());
+    }
     private static String digest(String value) throws Exception { return digest(bytes(value)); }
     private static String digest(byte[] value) throws Exception {
         byte[] hashed = MessageDigest.getInstance("SHA-256").digest(value);

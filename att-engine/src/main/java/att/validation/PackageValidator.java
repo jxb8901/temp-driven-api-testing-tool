@@ -166,7 +166,7 @@ public final class PackageValidator {
         try { flows = new att.flow.FlowRegistry(projectRoot, global.templatesRoot(), "package".equals(options.validationScope())); }
         catch (Exception e) { return invalid(options.validationScope(), Collections.singletonList(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, global.templatesRoot().resolve("flows")))); }
         if ("package".equals(options.validationScope())) {
-            validatePackageLayout(diagnostics);
+            validatePackageLayout(options, diagnostics);
             for (String reference : loader.paths()) try {
                 templates.add(reference);
                 StageTemplate template = loader.load(reference);
@@ -739,13 +739,15 @@ public final class PackageValidator {
     private static final class NotStaticallyEvaluable extends RuntimeException { }
 
     @SuppressWarnings("unchecked")
-    private void validatePackageLayout(List<Diagnostic> diagnostics) {
+    private void validatePackageLayout(ExecutionOptions options, List<Diagnostic> diagnostics) {
         // Launchers live at ATT_HOME; package roots may be external or mounted independently.
         // Package roots contain business resources only. Config and schemas are ATT runtime resources.
         try { att.validation.SchemaFiles.validateCatalog(projectRoot); }
         catch (Exception error) { diagnostics.add(diagnostic(DiagnosticCodes.PACKAGE_INVALID, error, null)); }
         try {
-            Path output = projectRoot.resolve(global.outputDirectory()).normalize();
+            Path output = options.outputDirectory() == null
+                    ? projectRoot.resolve(global.outputDirectory()).normalize()
+                    : options.outputDirectory().toAbsolutePath().normalize();
             Path ancestor = output; while (ancestor != null && !Files.exists(ancestor)) ancestor = ancestor.getParent();
             if (ancestor == null || !Files.isDirectory(ancestor) || !Files.isWritable(ancestor)) throw new IllegalArgumentException("Output directory has no writable ancestor: " + global.outputDirectory());
         } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.PATH_INVALID, e, null)); }

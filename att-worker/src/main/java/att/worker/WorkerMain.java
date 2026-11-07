@@ -374,7 +374,9 @@ public final class WorkerMain {
             } finally { checkpoints.close(); }
             loadSummaryLine=loadSampler.finish(loadResult.status());
             return loadResult; }
-        if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),r.validationScope));
+        if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,
+                output,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),
+                bool(r.all),r.validationScope));
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
             if("cli-validation".equals(r.inspectionAction)) return validateVNext(r,root,config);
@@ -418,6 +420,8 @@ public final class WorkerMain {
                         ? manifest.validateCandidate(r.packageManifestSource, r.environment)
                         : "source".equals(r.inspectionAction) ? resourceInspector(root, config, r).inspectPackageFileSource("package.yaml", null)
                         : manifest.inspect(r.inspectionAction, r.environment);
+                if("resolve".equals(r.inspectionAction))
+                    inspected.put("packageRevision",resourceInspector(root,config,r).executionRevisionDigest());
                 if("source".equals(r.inspectionAction)) {
                     Map<String,Object> metadata=manifest.inspect("declared",r.environment);
                     inspected.put("manifestDigest",metadata.get("manifestDigest"));inspected.put("present",metadata.get("present"));

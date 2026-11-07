@@ -159,6 +159,8 @@ public final class SourceManagementContracts {
         public final Domain domain;
         public final String scopeId;
         public final ValidationState state;
+        /** False when bounds or unresolved dependencies prevented whole-candidate coverage. */
+        public final boolean coverageComplete;
         public final boolean executionEligible;
         public final String validationFingerprint;
         public final RevisionSet revisions;
@@ -169,11 +171,21 @@ public final class SourceManagementContracts {
                                    boolean executionEligible, String validationFingerprint,
                                    RevisionSet revisions, List<DependencyReference> dependencies,
                                    List<ValidationDiagnostic> diagnostics) {
+            this(domain, scopeId, state, state != ValidationState.INCOMPLETE, executionEligible,
+                    validationFingerprint, revisions, dependencies, diagnostics);
+        }
+
+        public CandidateValidation(Domain domain, String scopeId, ValidationState state,
+                                   boolean coverageComplete, boolean executionEligible,
+                                   String validationFingerprint, RevisionSet revisions,
+                                   List<DependencyReference> dependencies,
+                                   List<ValidationDiagnostic> diagnostics) {
             if (domain == null || state == null || revisions == null)
                 throw new IllegalArgumentException("candidate validation domain, state, and revisions are required");
             this.domain = domain;
             this.scopeId = requiredToken(scopeId, "scopeId", 160);
             this.state = state;
+            this.coverageComplete = coverageComplete;
             this.executionEligible = executionEligible && state == ValidationState.VALID;
             this.validationFingerprint = optionalDigest(validationFingerprint, "validationFingerprint");
             this.revisions = revisions;
@@ -193,6 +205,8 @@ public final class SourceManagementContracts {
         public final boolean complete;
         public final RevisionSet revisions;
         public final Map<String, ResolutionOrigin> origins;
+        /** Hashes of normalized effective fields and descriptor semantics; never contains resolved values. */
+        public final Map<String, String> semanticFingerprints;
         public final List<DependencyReference> bindings;
         public final List<DependencyReference> dependencies;
         public final List<ValidationDiagnostic> diagnostics;
@@ -203,12 +217,24 @@ public final class SourceManagementContracts {
                                    List<DependencyReference> bindings,
                                    List<DependencyReference> dependencies,
                                    List<ValidationDiagnostic> diagnostics) {
+            this(packageId, environment, effectiveFingerprint, complete, revisions, origins,
+                    Collections.<String, String>emptyMap(), bindings, dependencies, diagnostics);
+        }
+
+        public EffectiveResolution(String packageId, String environment, String effectiveFingerprint,
+                                   boolean complete, RevisionSet revisions,
+                                   Map<String, ResolutionOrigin> origins,
+                                   Map<String, String> semanticFingerprints,
+                                   List<DependencyReference> bindings,
+                                   List<DependencyReference> dependencies,
+                                   List<ValidationDiagnostic> diagnostics) {
             this.packageId = requiredToken(packageId, "packageId", 160);
             this.environment = requiredToken(environment, "environment", 64);
             this.effectiveFingerprint = optionalDigest(effectiveFingerprint, "effectiveFingerprint");
             this.complete = complete;
             this.revisions = revisions == null ? RevisionSet.empty() : revisions;
             this.origins = immutableMap(origins);
+            this.semanticFingerprints = immutableStringMap(semanticFingerprints);
             this.bindings = immutable(bindings);
             this.dependencies = immutable(dependencies);
             this.diagnostics = immutable(diagnostics);
@@ -414,7 +440,11 @@ public final class SourceManagementContracts {
         }
     }
 
-    public enum DraftState { DRAFT, VALIDATED, REVIEWED, PUBLISHED, CONFLICTED, REJECTED }
+    public enum DraftState {
+        DRAFT, VALIDATED, REVIEWED, PUBLISHED, CONFLICTED, REJECTED;
+        @com.fasterxml.jackson.annotation.JsonValue
+        public String wireValue() { return name().toLowerCase(java.util.Locale.ROOT); }
+    }
 
     /** Wire DTO for Package and central source drafts; source values are represented only by ETags. */
     public static final class ChangeSetView {
@@ -430,12 +460,39 @@ public final class SourceManagementContracts {
         public final boolean manifestMetadataChanged;
         public final List<DependencyReference> inboundReferences;
         public final List<ValidationDiagnostic> diagnostics;
+        public final String baseSourceRevision;
+        public final String registryRevision;
+        public final String manifestRevision;
+        public final String configRevision;
+        public final String schemaRevision;
+        public final String expiresAt;
+        public final List<Map<String, Object>> changedFiles;
+        public final String validationRevision;
+        public final String requestId;
+        public final Boolean snapshotGenerated;
+        public final String snapshotPath;
+        public final String snapshotSha256;
 
         public ChangeSetView(String changeSetId, Domain domain, String scopeId, DraftState state,
                              RevisionSet revisions, String etag, boolean noStore,
                              List<PackageCategory> categories, boolean manifestMetadataChanged,
                              List<DependencyReference> inboundReferences,
                              List<ValidationDiagnostic> diagnostics) {
+            this(changeSetId, domain, scopeId, state, revisions, etag, noStore, categories,
+                    manifestMetadataChanged, inboundReferences, diagnostics, null, null, null, null,
+                    null, null, Collections.<Map<String, Object>>emptyList(), null, null, null, null, null);
+        }
+
+        public ChangeSetView(String changeSetId, Domain domain, String scopeId, DraftState state,
+                             RevisionSet revisions, String etag, boolean noStore,
+                             List<PackageCategory> categories, boolean manifestMetadataChanged,
+                             List<DependencyReference> inboundReferences,
+                             List<ValidationDiagnostic> diagnostics,
+                             String baseSourceRevision, String registryRevision, String manifestRevision,
+                             String configRevision, String schemaRevision, String expiresAt,
+                             List<Map<String, Object>> changedFiles, String validationRevision,
+                             String requestId, Boolean snapshotGenerated, String snapshotPath,
+                             String snapshotSha256) {
             this.changeSetId = requiredToken(changeSetId, "changeSetId", 160);
             if (domain == null || state == null) throw new IllegalArgumentException("change set domain and state are required");
             this.domain = domain;
@@ -448,6 +505,18 @@ public final class SourceManagementContracts {
             this.manifestMetadataChanged = manifestMetadataChanged;
             this.inboundReferences = immutable(inboundReferences);
             this.diagnostics = immutable(diagnostics);
+            this.baseSourceRevision = optionalToken(baseSourceRevision, "baseSourceRevision", 160);
+            this.registryRevision = optionalToken(registryRevision, "registryRevision", 160);
+            this.manifestRevision = optionalToken(manifestRevision, "manifestRevision", 160);
+            this.configRevision = optionalToken(configRevision, "configRevision", 160);
+            this.schemaRevision = optionalToken(schemaRevision, "schemaRevision", 160);
+            this.expiresAt = optionalToken(expiresAt, "expiresAt", 64);
+            this.changedFiles = immutableObjectMaps(changedFiles);
+            this.validationRevision = optionalToken(validationRevision, "validationRevision", 160);
+            this.requestId = optionalToken(requestId, "requestId", 160);
+            this.snapshotGenerated = snapshotGenerated;
+            this.snapshotPath = safeLogicalPath(snapshotPath);
+            this.snapshotSha256 = optionalDigest(snapshotSha256, "snapshotSha256");
         }
     }
 
@@ -663,6 +732,25 @@ public final class SourceManagementContracts {
             copy.put(key, entry.getValue());
         }
         return Collections.unmodifiableMap(copy);
+    }
+
+    private static Map<String, String> immutableStringMap(Map<String, String> values) {
+        if (values == null || values.isEmpty()) return Collections.emptyMap();
+        Map<String, String> copy = new LinkedHashMap<String, String>();
+        for (Map.Entry<String, String> entry : values.entrySet())
+            copy.put(requiredToken(entry.getKey(), "semantic field", 512),
+                    requiredDigest(entry.getValue(), "semantic fingerprint"));
+        return Collections.unmodifiableMap(copy);
+    }
+
+    private static List<Map<String, Object>> immutableObjectMaps(List<Map<String, Object>> values) {
+        if (values == null || values.isEmpty()) return Collections.emptyList();
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> value : values) {
+            if (value == null) throw new IllegalArgumentException("changed file metadata is required");
+            result.add(Collections.unmodifiableMap(new LinkedHashMap<String, Object>(value)));
+        }
+        return Collections.unmodifiableList(result);
     }
 
     private static List<String> safeTokens(List<String> values, int max) {

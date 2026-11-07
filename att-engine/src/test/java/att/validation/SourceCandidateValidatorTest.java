@@ -98,6 +98,106 @@ class SourceCandidateValidatorTest {
                 || (item.logicalPath != null && item.logicalPath.contains("template.yaml"))), describe(result));
     }
 
+    @Test void effectiveResolutionUsesResolvedManifestAndGlobalDefaultsAndExplicitSelection() throws Exception {
+        write(configFile, "schemaVersion: att-config/v2.13\nenvironment: UAT\nenvironments:\n  SIT: {}\n  UAT: {}\n");
+        write(firstPackage.resolve("package.yaml"), "schemaVersion: att-package/v1\ndefaultEnvironment: SIT\n"
+                + "testdata: {descriptors: [testdata/customers.yaml]}\n");
+        EffectiveResolution manifestDefault = validator.resolveEffective("first", null, firstPackage,
+                configFile, runtimeRoot, revisions("first"));
+        EffectiveResolution explicit = validator.resolveEffective("first", "UAT", firstPackage,
+                configFile, runtimeRoot, revisions("first"));
+        assertEquals("SIT", manifestDefault.environment);
+        assertEquals("SIT", manifestDefault.revisions.environment.scopeId);
+        assertTrue(manifestDefault.bindings.stream().allMatch(binding -> binding.environment == null
+                || "SIT".equals(binding.environment)));
+        assertEquals("UAT", explicit.environment);
+        assertEquals("UAT", explicit.revisions.environment.scopeId);
+
+        write(firstPackage.resolve("package.yaml"), "schemaVersion: att-package/v1\n"
+                + "testdata: {descriptors: [testdata/customers.yaml]}\n");
+        EffectiveResolution globalDefault = validator.resolveEffective("first", null, firstPackage,
+                configFile, runtimeRoot, revisions("first"));
+        assertEquals("UAT", globalDefault.environment);
+        assertEquals("UAT", globalDefault.revisions.environment.scopeId);
+    }
+
+    @Test void semanticEffectiveFingerprintsIgnoreCommentsAndOverriddenChangesAcrossPackageRoots() throws Exception {
+        write(configFile, "schemaVersion: att-config/v2.13\nenvironment: SIT\ntimeoutMs: 2000\nenvironments:\n  SIT: {}\n");
+        write(firstPackage.resolve("package.yaml"), "schemaVersion: att-package/v1\ndefaultEnvironment: SIT\n"
+                + "testdata: {descriptors: [testdata/customers.yaml]}\ndefaults: {timeoutMs: 9000}\n");
+        EffectiveResolution original = validator.resolveEffective("first", null, firstPackage,
+                configFile, runtimeRoot, revisions("first"));
+
+        write(configFile, "schemaVersion: att-config/v2.13\nenvironment: SIT\ntimeoutMs: 2500\n"
+                + "environments:\n  SIT: {}\n# comment only\n");
+        EffectiveResolution overridden = validator.resolveEffective("first", null, firstPackage,
+                configFile, runtimeRoot, revisions("first"));
+        assertEquals(original.effectiveFingerprint, overridden.effectiveFingerprint);
+        assertEquals(original.semanticFingerprints.get("timeoutMs"), overridden.semanticFingerprints.get("timeoutMs"));
+
+        Path secondPackage = temp.resolve("packages/copied-package");
+        copyTree(firstPackage, secondPackage);
+        EffectiveResolution otherRoot = validator.resolveEffective("first", null, secondPackage,
+                configFile, runtimeRoot, revisions("first"));
+        assertEquals(original.effectiveFingerprint, otherRoot.effectiveFingerprint,
+                "temporary candidate roots do not become effective semantics");
+
+        write(secondPackage.resolve("package.yaml"), "schemaVersion: att-package/v1\ndefaultEnvironment: SIT\n"
+                + "testdata: {descriptors: [testdata/customers.yaml]}\ndefaults: {timeoutMs: 9001}\n");
+        EffectiveResolution changed = validator.resolveEffective("first", null, secondPackage,
+                configFile, runtimeRoot, revisions("first"));
+        assertNotEquals(otherRoot.semanticFingerprints.get("timeoutMs"), changed.semanticFingerprints.get("timeoutMs"));
+        assertNotEquals(otherRoot.effectiveFingerprint, changed.effectiveFingerprint);
+    }
+
+    @Test void sharedFileDependenciesKeepEveryFlowClosureCallSite() throws Exception {
+        Path shared = Files.createDirectories(firstPackage.resolve("templates/shared"));
+        write(shared.resolve("request.xml"), "<request>${CASE.caseId}</request>\n");
+        Path template = Files.createDirectories(firstPackage.resolve("templates/payment"));
+        write(template.resolve("template.yaml"), "schemaVersion: att-template/v3.6\nname: Payment\ndescription: Payment\nactions:\n"
+                + "  first: {type: flow, use: payment.first.v1}\n  second: {type: flow, use: payment.second.v1}\n");
+        Path firstFlow = Files.createDirectories(firstPackage.resolve("templates/flows/first"));
+        Path secondFlow = Files.createDirectories(firstPackage.resolve("templates/flows/second"));
+        write(firstFlow.resolve("flow.yaml"), "schemaVersion: att-flow/v3.6\nid: payment.first.v1\nname: First\ndescription: First\nactions:\n"
+                + "  read: {type: log, message: '&{../../shared/request.xml}'}\n");
+        write(secondFlow.resolve("flow.yaml"), "schemaVersion: att-flow/v3.6\nid: payment.second.v1\nname: Second\ndescription: Second\nactions:\n"
+                + "  read: {type: log, message: '&{../../shared/request.xml}'}\n");
+
+        EffectiveResolution result = validator.resolveEffective("first", "SIT", firstPackage,
+                configFile, runtimeRoot, revisions("first"));
+        java.util.List<DependencyReference> fileRefs = result.dependencies.stream()
+                .filter(item -> item.kind == DependencyKind.FILE && "templates/shared/request.xml".equals(item.canonicalPath))
+                .collect(java.util.stream.Collectors.toList());
+        assertTrue(fileRefs.size() >= 2, fileRefs.stream().map(item -> item.callSite + " -> " + item.canonicalPath)
+                .collect(java.util.stream.Collectors.toList()).toString());
+        assertTrue(fileRefs.stream().anyMatch(item -> item.callSite != null && item.callSite.contains("flows/first")));
+        assertTrue(fileRefs.stream().anyMatch(item -> item.callSite != null && item.callSite.contains("flows/second")));
+    }
+
+    @Test void loadInventoryLimitsAreInvalidAndMarkCoverageIncomplete() throws Exception {
+        Path scenarios = Files.createDirectories(firstPackage.resolve("load/scenarios"));
+        for (int index = 0; index <= SourceCandidateValidator.MAX_LOAD_DESCRIPTORS; index++)
+            write(scenarios.resolve(String.format("scenario-%04d.yaml", index)), "schemaVersion: att-load/v1\n");
+        CandidateValidation loadLimited = validator.validatePackage(firstPackage, configFile, runtimeRoot,
+                "first", revisions("first"), FINGERPRINT);
+        assertEquals(ValidationState.INVALID, loadLimited.state, describe(loadLimited));
+        assertFalse(loadLimited.executionEligible);
+        assertFalse(loadLimited.coverageComplete);
+        assertTrue(loadLimited.diagnostics.stream().anyMatch(item -> "ATT-LOAD-CANDIDATE-LIMIT".equals(item.code)));
+
+        for (Path path : Files.walk(scenarios).sorted(java.util.Comparator.reverseOrder()).collect(java.util.stream.Collectors.toList()))
+            Files.deleteIfExists(path);
+        Path templates = Files.createDirectories(firstPackage.resolve("load/templates"));
+        for (int index = 0; index <= SourceCandidateValidator.MAX_LOAD_TEMPLATE_DESCRIPTORS; index++)
+            write(templates.resolve(String.format("template-%04d.yaml", index)), "schemaVersion: att-load-template/v1\n");
+        CandidateValidation templateLimited = validator.validatePackage(firstPackage, configFile, runtimeRoot,
+                "first", revisions("first"), FINGERPRINT);
+        assertEquals(ValidationState.INVALID, templateLimited.state, describe(templateLimited));
+        assertFalse(templateLimited.executionEligible);
+        assertFalse(templateLimited.coverageComplete);
+        assertTrue(templateLimited.diagnostics.stream().anyMatch(item -> "ATT-LOAD-TEMPLATE-LIMIT".equals(item.code)));
+    }
+
     private static RevisionSet revisions(String packageId) {
         return new RevisionSet(RevisionIdentity.of(RevisionKind.PACKAGE_REGISTRATION, "registry", repeat('b')),
                 RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE, packageId, repeat('c')),
@@ -109,6 +209,16 @@ class SourceCandidateValidatorTest {
     private static void write(Path path, String source) throws Exception {
         Files.createDirectories(path.getParent());
         Files.write(path, source.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void copyTree(Path source, Path destination) throws Exception {
+        try (java.util.stream.Stream<Path> paths = Files.walk(source)) {
+            for (Path path : (Iterable<Path>) paths::iterator) {
+                Path target = destination.resolve(source.relativize(path));
+                if (Files.isDirectory(path)) Files.createDirectories(target);
+                else Files.copy(path, target);
+            }
+        }
     }
 
     private static String describe(CandidateValidation result) {

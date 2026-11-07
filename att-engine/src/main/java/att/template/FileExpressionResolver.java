@@ -85,7 +85,9 @@ public final class FileExpressionResolver {
         }
 
         ResolvedFile resolved = resolveFile(path, base);
-        PlanKey key = PlanKey.of(resolved.canonical);
+        // The same bytes can be reached from multiple authored locations. Preserve each
+        // caller's locator context so dependency projections do not collapse inbound refs.
+        PlanKey key = PlanKey.of(resolved.canonical, path, base);
         synchronized (plans) {
             CompiledFilePlan cached = plans.get(key);
             if (cached != null) { hits.incrementAndGet(); return cached; }
@@ -468,9 +470,24 @@ public final class FileExpressionResolver {
     }
     private static final class PlanKey {
         private final Path path; private final long size; private final long modified;
-        private PlanKey(Path path, long size, long modified) { this.path = path; this.size = size; this.modified = modified; }
-        private static PlanKey of(Path path) throws Exception { return new PlanKey(path, Files.size(path), Files.getLastModifiedTime(path).toMillis()); }
-        @Override public boolean equals(Object value) { if (!(value instanceof PlanKey)) return false; PlanKey other = (PlanKey) value; return size == other.size && modified == other.modified && path.equals(other.path); }
-        @Override public int hashCode() { int result = path.hashCode(); result = 31 * result + Long.valueOf(size).hashCode(); return 31 * result + Long.valueOf(modified).hashCode(); }
+        private final String authoredPath; private final Path sourceDirectory;
+        private PlanKey(Path path, long size, long modified, String authoredPath, Path sourceDirectory) {
+            this.path = path; this.size = size; this.modified = modified;
+            this.authoredPath = authoredPath; this.sourceDirectory = sourceDirectory;
+        }
+        private static PlanKey of(Path path, String authoredPath, Path sourceDirectory) throws Exception {
+            return new PlanKey(path, Files.size(path), Files.getLastModifiedTime(path).toMillis(), authoredPath, sourceDirectory);
+        }
+        @Override public boolean equals(Object value) {
+            if (!(value instanceof PlanKey)) return false;
+            PlanKey other = (PlanKey) value;
+            return size == other.size && modified == other.modified && path.equals(other.path)
+                    && authoredPath.equals(other.authoredPath) && sourceDirectory.equals(other.sourceDirectory);
+        }
+        @Override public int hashCode() {
+            int result = path.hashCode(); result = 31 * result + Long.valueOf(size).hashCode();
+            result = 31 * result + Long.valueOf(modified).hashCode(); result = 31 * result + authoredPath.hashCode();
+            return 31 * result + sourceDirectory.hashCode();
+        }
     }
 }

@@ -5,15 +5,11 @@ import att.server.api.source.SourceManagementContracts.CandidateValidation;
 import att.server.api.source.SourceManagementContracts.RevisionIdentity;
 import att.server.api.source.SourceManagementContracts.RevisionKind;
 import att.server.api.source.SourceManagementContracts.RevisionSet;
-import att.config.FrameworkConfig;
-import att.config.FrameworkConfigLoader;
-import att.config.SuiteConfigResolver;
-import att.core.TestCase;
-import att.excel.ExcelTestSuiteLoader;
-import att.snapshot.TestcaseSnapshotService;
-import att.validation.SourceCandidateValidator;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -23,13 +19,23 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.security.MessageDigest;
 import java.util.EnumSet;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
 /** Materializes a bounded, private whole-candidate tree for the production Engine validators. */
 final class ChangeSetCandidateValidator implements ChangeSetPublisher.CandidateValidator, ChangeSetPublisher.SnapshotGenerator {
     private static final long MAX_MATERIALIZED_BYTES = 512L * 1024L * 1024L;
-    private final SourceCandidateValidator engine = new SourceCandidateValidator();
+    private final Path runtimeLibs;
+    private final List<Path> additionalLibraries;
+
+    ChangeSetCandidateValidator() { this(null, Collections.emptyList()); }
+    ChangeSetCandidateValidator(Path runtimeLibs, List<Path> additionalLibraries) {
+        this.runtimeLibs=runtimeLibs;
+        this.additionalLibraries=additionalLibraries==null?Collections.emptyList():List.copyOf(additionalLibraries);
+    }
 
     @Override public ChangeSetPublisher.ValidationResult validate(ChangeSetPublisher.Candidate candidate) throws Exception {
         if (candidate == null) return ChangeSetPublisher.ValidationResult.rejected("ATT-CHANGESET-VALIDATION-UNAVAILABLE");
@@ -40,19 +46,22 @@ final class ChangeSetCandidateValidator implements ChangeSetPublisher.CandidateV
             if (ChangeSetPublisher.PACKAGE_SOURCE.equals(candidate.domain())) {
                 Path packageRoot = Files.createDirectory(workspace.resolve("package"));
                 Path runtimeRoot = Files.createDirectory(workspace.resolve("runtime"));
+                materializeDirectories(candidate.root(), packageRoot);
                 materialize(candidate.files(), candidate::read, packageRoot);
                 materialize(candidate.centralFiles(), candidate::readCentral, runtimeRoot);
                 Path config = runtimeRoot.resolve("config/config.yaml");
-                CandidateValidation result = engine.validatePackage(packageRoot, config, runtimeRoot,
-                        candidate.scopeId(), revisions, candidateFingerprint);
+                CandidateValidation result = (CandidateValidation)invokeEngine("validatePackage",
+                        new Class<?>[]{Path.class,Path.class,Path.class,String.class,RevisionSet.class,String.class},
+                        packageRoot,config,runtimeRoot,candidate.scopeId(),revisions,candidateFingerprint);
                 return result.executionEligible ? ChangeSetPublisher.ValidationResult.accepted(candidateFingerprint)
                         : ChangeSetPublisher.ValidationResult.rejected(validationCode(result));
             }
             if (ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(candidate.domain())) {
                 Path runtimeRoot = Files.createDirectory(workspace.resolve("runtime"));
                 materialize(candidate.files(), candidate::read, runtimeRoot);
-                CandidateValidation result = engine.validateCentralConfig(runtimeRoot.resolve("config/config.yaml"),
-                        runtimeRoot, revisions, candidateFingerprint);
+                CandidateValidation result = (CandidateValidation)invokeEngine("validateCentralConfig",
+                        new Class<?>[]{Path.class,Path.class,RevisionSet.class,String.class},
+                        runtimeRoot.resolve("config/config.yaml"),runtimeRoot,revisions,candidateFingerprint);
                 return result.executionEligible ? ChangeSetPublisher.ValidationResult.accepted(candidateFingerprint)
                         : ChangeSetPublisher.ValidationResult.rejected(validationCode(result));
             }
@@ -69,18 +78,46 @@ final class ChangeSetCandidateValidator implements ChangeSetPublisher.CandidateV
         try {
             Path packageRoot = Files.createDirectory(workspace.resolve("package"));
             Path runtimeRoot = Files.createDirectory(workspace.resolve("runtime"));
+            materializeDirectories(candidate.root(), packageRoot);
             materialize(candidate.files(), candidate::read, packageRoot);
             materialize(candidate.centralFiles(), candidate::readCentral, runtimeRoot);
             Path config = runtimeRoot.resolve("config/config.yaml");
             Path workbook = packageRoot.resolve(Path.of(workbookPath)).normalize();
             if (!workbook.startsWith(packageRoot)) throw new IOException("Workbook path escapes the candidate Package");
-            FrameworkConfig effective = new FrameworkConfigLoader().loadDiscovery(config, runtimeRoot, packageRoot, null);
-            FrameworkConfig suite = new SuiteConfigResolver(packageRoot, effective).resolve(workbook);
-            java.util.List<TestCase> cases = new ExcelTestSuiteLoader(suite).load(workbook);
-            TestcaseSnapshotService snapshots = new TestcaseSnapshotService();
-            return snapshots.serialize(snapshots.build(suite, cases)).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            return (byte[])invokeEngine("generateSnapshot",new Class<?>[]{Path.class,Path.class,Path.class,String.class},
+                    packageRoot,config,runtimeRoot,workbookPath);
         } finally {
             deleteTree(workspace);
+        }
+    }
+
+    private Object invokeEngine(String methodName,Class<?>[] parameterTypes,Object... arguments) throws Exception {
+        List<URL> urls=new ArrayList<URL>();
+        if(runtimeLibs!=null&&Files.isDirectory(runtimeLibs)) {
+            Path bundled=runtimeLibs.resolve("att-local-"+ServerBuildInfo.PRODUCT+".jar");
+            if(Files.isRegularFile(bundled))urls.add(bundled.toUri().toURL());
+            try(var entries=Files.list(runtimeLibs)) {
+                for(Path entry:entries.filter(path->path.getFileName().toString().endsWith(".jar"))
+                        .filter(path->!path.equals(bundled)).sorted().toList())urls.add(entry.toUri().toURL());
+            }
+        }
+        for(Path directory:additionalLibraries)if(directory!=null&&Files.isDirectory(directory)) {
+            try(var entries=Files.list(directory)) {
+                for(Path entry:entries.filter(path->path.getFileName().toString().endsWith(".jar")).sorted().toList())
+                    urls.add(entry.toUri().toURL());
+            }
+        }
+        ClassLoader parent=ChangeSetCandidateValidator.class.getClassLoader();
+        try(URLClassLoader loader=new URLClassLoader(urls.toArray(URL[]::new),parent)) {
+            Class<?> validatorType=Class.forName("att.validation.SourceCandidateValidator",true,loader);
+            Object validator=validatorType.getConstructor().newInstance();
+            try { return validatorType.getMethod(methodName,parameterTypes).invoke(validator,arguments); }
+            catch(InvocationTargetException wrapped) {
+                Throwable cause=wrapped.getCause();
+                if(cause instanceof Exception exception)throw exception;
+                if(cause instanceof Error error)throw error;
+                throw new IllegalStateException("Installed Engine validation failed",cause);
+            }
         }
     }
 
@@ -147,6 +184,30 @@ final class ChangeSetCandidateValidator implements ChangeSetPublisher.CandidateV
             Files.createDirectories(target.getParent());
             Files.write(target, bytes);
         }
+    }
+
+    /** Preserve empty Package directories: the immutable candidate overlays files, not directory entries. */
+    private static void materializeDirectories(Path source, Path destination) throws IOException {
+        Path canonical=source.toRealPath();
+        final int[] entries={0};
+        Files.walkFileTree(canonical,new SimpleFileVisitor<Path>() {
+            @Override public FileVisitResult preVisitDirectory(Path directory,BasicFileAttributes attributes) throws IOException {
+                if(attributes.isSymbolicLink()||Files.isSymbolicLink(directory))
+                    throw new IOException("Candidate Package contains an unsafe directory link");
+                if(++entries[0]>ChangeSetPublisher.MAX_REVISION_FILES*3)
+                    throw new IOException("Candidate Package exceeds the validation directory limit");
+                Path target=destination.resolve(canonical.relativize(directory)).normalize();
+                if(!target.startsWith(destination))throw new IOException("Candidate Package directory escapes its validation root");
+                Files.createDirectories(target);
+                return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult visitFile(Path file,BasicFileAttributes attributes) throws IOException {
+                if(attributes.isSymbolicLink()||Files.isSymbolicLink(file))
+                    throw new IOException("Candidate Package contains an unsafe file link");
+                return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult visitFileFailed(Path file,IOException failure) throws IOException {throw failure;}
+        });
     }
 
     private static Path privateDirectory() throws IOException {
