@@ -193,6 +193,60 @@ class PackageResourceInspectorTest {
                 "Revision identity includes the bundled registry fingerprint");
     }
 
+    @Test void packageSourceRevisionIgnoresSharedConfigAndEngineOnlyChanges() throws Exception {
+        Path root=packageWithTemplate("package-source-revision", "PAYMENT", "description: revision context");
+        Path sharedConfig=Files.createDirectories(temp.resolve("source-revision-shared/config")).resolve("config.yaml");
+        writeUtf8(sharedConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
+        Map<String,String> initial;
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.<String>emptyList(),65536,262144)) {
+            initial=inspector.sourceRevisionDigests(null);
+        }
+
+        Files.writeString(sharedConfig,Files.readString(sharedConfig)+"# shared configuration only\n");
+        Map<String,String> configChanged;
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.<String>emptyList(),65536,262144)) {
+            configChanged=inspector.sourceRevisionDigests(null);
+        }
+        assertEquals(initial.get("packageSourceRevision"),configChanged.get("packageSourceRevision"));
+        assertNotEquals(initial.get("executionRevisionDigest"),configChanged.get("executionRevisionDigest"),
+                "The execution revision remains bound to shared Runtime Config bytes");
+
+        Map<String,String> engineA=revisionProbe(root,sharedConfig,"engine-build-a");
+        Map<String,String> engineB=revisionProbe(root,sharedConfig,"engine-build-b");
+        assertEquals(configChanged.get("packageSourceRevision"),engineA.get("packageSourceRevision"));
+        assertEquals(engineA.get("packageSourceRevision"),engineB.get("packageSourceRevision"));
+        assertNotEquals(engineA.get("executionRevisionDigest"),engineB.get("executionRevisionDigest"),
+                "Engine build identity remains bound to the composite execution revision");
+    }
+
+    private Map<String,String> revisionProbe(Path root,Path config,String engineCommit) throws Exception {
+        String javaExecutable=Paths.get(System.getProperty("java.home"),"bin","java").toString();
+        Path buildInfo=Files.createDirectories(temp.resolve("build-info-"+engineCommit));
+        writeUtf8(buildInfo.resolve("att-build.properties"),"att.version=4.3.0\natt.gitCommit="+engineCommit+"\natt.buildTime=test\n");
+        String classpath=buildInfo.toString()+java.io.File.pathSeparator
+                +System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        Process process=new ProcessBuilder(javaExecutable,"-cp",classpath,
+                RevisionProbe.class.getName(),root.toString(),config.toString()).redirectErrorStream(true).start();
+        byte[] output;
+        try(java.io.InputStream input=process.getInputStream()) { output=input.readAllBytes(); }
+        int exit=process.waitFor();
+        assertEquals(0,exit,"Revision probe failed: "+new String(output,StandardCharsets.UTF_8));
+        String[] values=new String(output,StandardCharsets.UTF_8).trim().split(" ");
+        assertEquals(2,values.length);
+        return Map.of("executionRevisionDigest",values[0],"packageSourceRevision",values[1]);
+    }
+
+    public static class RevisionProbe {
+        public static void main(String[] args) throws Exception {
+            try(PackageResourceInspector inspector=new PackageResourceInspector(Paths.get(args[0]),Paths.get(args[1]),"SIT",
+                    Collections.<String>emptyList(),65536,262144)) {
+                Map<String,String> revisions=inspector.sourceRevisionDigests(null);
+                System.out.print(revisions.get("executionRevisionDigest")+" "+revisions.get("packageSourceRevision"));
+            }
+        }
+    }
+
     @Test void loadCatalogDistinguishesPolicyTemplatesAndInvalidYamlAndRestrictsSourcePaths() throws Exception {
         Path root=packageWithTemplate("load-catalog", "PAYMENT", "description: catalog test");
         Path load=Files.createDirectories(root.resolve("load/nested"));
