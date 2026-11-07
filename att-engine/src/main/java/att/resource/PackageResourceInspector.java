@@ -294,6 +294,29 @@ public final class PackageResourceInspector implements AutoCloseable {
         return result;
     }
 
+    /** Returns the YAML sidecar of a ready indexed Case; callers cannot choose a package path. */
+    public Map<String,Object> inspectAuthoringTestcaseSource(String resourceId,String selector) throws Exception {
+        if(!"sidecar".equals(selector)||resourceId==null||resourceId.length()>512)
+            throw new ResourceNotFoundException();
+        Index index=refreshedIndexForVerification();
+        Resource resource=index.byId.get(resourceId);
+        if(resource==null||!"case".equals(resource.type)||!"ready".equals(resource.state)||resource.workbookSource==null)
+            throw new ResourceNotFoundException();
+        PackageResourceResolver.PackageResource workbook=resources.fromInternalPath(resource.workbookSource,PackageResourceResolver.Kind.FILE);
+        String workbookLogical=workbook.logicalName();
+        if(!workbookLogical.toLowerCase(Locale.ROOT).endsWith(".xlsx")
+                ||!workbook.canonicalPath().equals(resource.workbookSource))throw new ResourceNotFoundException();
+        Path authored=sidecar(workbook.canonicalPath());
+        PackageResourceResolver.PackageResource resolved=resources.fromInternalPath(authored,PackageResourceResolver.Kind.FILE);
+        String logical=resolved.logicalName();
+        if(!authoringYamlPath(logical)||!authoringTextPath(logical))throw new ResourceNotFoundException();
+        Map<String,Object> result=AuthoringSourceSupport.read(packageRoot,authored,logical,maxSourceBytes,
+                sensitivePaths,sensitiveFieldPatterns);
+        result.put("resourceId",resource.resourceId);result.put("sourceType","testcase-sidecar");
+        result.put("revisionDigest",index.revisionDigest);
+        return result;
+    }
+
     /** Returns a complete allowed UTF-8 file only when it is statically referenced by the selected Template/Flow. */
     public Map<String,Object> inspectAuthoringSourceFile(String type,String resourceId,String referenceId,
                                                           String sourceOriginPath) throws Exception {
@@ -724,7 +747,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         return discoverSourceFileReferences(parent, projectedYaml).references;
     }
 
-    /** Authoring source grants only direct scalar references in authored Template/Flow Action fields. */
+    /** Authoring source grants only executable Action values and evidence collector calls. */
     private Map<String,SourceFileReference> resolveAuthoringActionFileReferences(Resource parent,Path descriptorPath) throws Exception {
         if(parent==null||descriptorPath==null||!sourceAllowed(parent))return Collections.emptyMap();
         Map<?,?> descriptor=yamlMapping(loadYaml(descriptorPath,maxSourceBytes));
@@ -736,12 +759,44 @@ public final class PackageResourceInspector implements AutoCloseable {
             if(!(actionValue instanceof Map<?,?>))continue;
             for(Map.Entry<?,?> field:((Map<?,?>)actionValue).entrySet()) {
                 Object key=field.getKey();Object fieldValue=field.getValue();
-                if(key instanceof String&&AUTHORING_ACTION_REFERENCE_FIELDS.contains(((String)key).toLowerCase(Locale.ROOT))
-                        &&fieldValue instanceof String)
+                if(!(key instanceof String))continue;
+                String fieldName=((String)key).toLowerCase(Locale.ROOT);
+                if("value".equals(fieldName)) {
+                    collectAuthoringTypedValueReferences(parent,fieldValue,descriptorPath.getParent(),resolver,discovery,0);
+                } else if(AUTHORING_ACTION_REFERENCE_FIELDS.contains(fieldName)&&fieldValue instanceof String) {
                     collectSourceFileReferences(parent,(String)fieldValue,descriptorPath.getParent(),resolver,discovery);
+                } else if("evidence".equals(fieldName)&&fieldValue instanceof Map<?,?>) {
+                    collectAuthoringEvidenceCalls(parent,(Map<?,?>)fieldValue,descriptorPath.getParent(),resolver,discovery);
+                }
             }
         }
         return discovery.references;
+    }
+
+    private void collectAuthoringTypedValueReferences(Resource parent,Object value,Path originDirectory,
+                                                     FileExpressionResolver resolver,SourceReferenceDiscovery discovery,int depth) {
+        if(depth>MAX_NESTED_SOURCE_DEPTH){discovery.unavailable=true;return;}
+        if(value instanceof Map<?,?>) {
+            for(Object child:((Map<?,?>)value).values())
+                collectAuthoringTypedValueReferences(parent,child,originDirectory,resolver,discovery,depth+1);
+        } else if(value instanceof Iterable<?>) {
+            for(Object child:(Iterable<?>)value)
+                collectAuthoringTypedValueReferences(parent,child,originDirectory,resolver,discovery,depth+1);
+        } else if(value instanceof String) {
+            collectSourceFileReferences(parent,(String)value,originDirectory,resolver,discovery);
+        }
+    }
+
+    private void collectAuthoringEvidenceCalls(Resource parent,Map<?,?> evidence,Path originDirectory,
+                                               FileExpressionResolver resolver,SourceReferenceDiscovery discovery) {
+        for(Map.Entry<?,?> entry:evidence.entrySet()) {
+            if(entry.getKey() instanceof String&&((String)entry.getKey()).startsWith("x-"))continue;
+            Object collectorValue=entry.getValue();
+            if(!(collectorValue instanceof Map<?,?>))continue;
+            Object call=((Map<?,?>)collectorValue).get("call");
+            if(call instanceof String)
+                collectSourceFileReferences(parent,(String)call,originDirectory,resolver,discovery);
+        }
     }
 
     private SourceReferenceDiscovery discoverSourceFileReferences(Resource parent, Object projectedYaml) {
@@ -1897,6 +1952,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                     if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException("resourceInspector.maxResources", MAX_RESOURCES, index.ordered.size() + 1L);
                     Resource resource = new Resource("case",
                             resourceId("case", suite + "\n" + testCase.caseId()), testCase.caseId());
+                    resource.workbookSource = canonical;
                     resource.name = testCase.caseName();
                     resource.state = "ready";
                     for (String tag : testCase.tags()) resource.tags.add(scrub(tag));
@@ -3122,6 +3178,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         String textSourceCandidateReason;
         boolean textSourceExternal;
         boolean textSourceCandidateExternal;
+        Path workbookSource;
         Map<String, Object> definition = new LinkedHashMap<String, Object>();
         final Map<String, Object> provenance = new LinkedHashMap<String, Object>();
         final List<String> tags = new ArrayList<String>();

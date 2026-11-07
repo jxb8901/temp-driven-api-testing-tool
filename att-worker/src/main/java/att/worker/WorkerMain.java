@@ -401,6 +401,10 @@ public final class WorkerMain {
                                 !Boolean.FALSE.equals(r.redactionEnabled),r.sensitivePaths,r.sensitiveFieldPatterns)
                                 .forPackageTestdata().inspectAuthoringTestdataSource(r.inspectionResourceId,r.inspectionEnvironment,maxSourceBytes);
                         break;
+                    case "testcase":
+                        source=resourceInspector(root,config,r).inspectAuthoringTestcaseSource(
+                                r.inspectionResourceId,r.authoringSourceSelector);
+                        break;
                     case "central":
                         source=new PackageConfigurationInspector(root,config,maxResponseBytes,
                                 !Boolean.FALSE.equals(r.redactionEnabled),r.sensitivePaths,r.sensitiveFieldPatterns)

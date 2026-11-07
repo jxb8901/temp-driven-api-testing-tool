@@ -2976,7 +2976,8 @@ final class ServerRuntime implements AutoCloseable {
     private record PackageSourceAuthority(String loginId,PackageSourceActiveUserCheck activeUserCheck) { }
 
     Map<String,Object> inspectAuthoringPackageSource(String packageId,String kind,String resourceType,String resourceId,
-                                                      String path,String origin,String referenceId,String environment,String principal) throws Exception {
+                                                      String path,String origin,String referenceId,String environment,String principal,
+                                                      String sourceSelector) throws Exception {
         if(!canEditPackageContent(packageId,principal))throw new AuthoringSourceDeniedException();
         admissionLifecycle.readLock().lock();
         try {
@@ -2984,6 +2985,7 @@ final class ServerRuntime implements AutoCloseable {
             if(root==null)throw new NotFoundException();validatePackageRoot(root);root=root.toRealPath();
             WorkerRequest request=inspectionRequest(packageId,root,null);request.inspectionAction="authoring-source";
             request.authoringSourceKind=kind;request.authoringResourceType=resourceType;
+            request.authoringSourceSelector=sourceSelector;
             request.inspectionResourceId=resourceId;request.inspectionPath=path;request.inspectionOrigin=origin;
             request.inspectionReferenceId=referenceId;
             if("testdata".equals(kind)&&environment!=null&&!environment.isBlank())
