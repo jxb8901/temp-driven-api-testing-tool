@@ -148,6 +148,38 @@ class FileExpressionResolverTest {
         assertEquals(1, snapshot.size());
     }
 
+    @Test void portableApprovedPlanRestoresCompiledAstAndNeverRereadsWorkerFile() throws Exception {
+        Path templateDirectory = project.resolve("templates/T");
+        Files.createDirectories(templateDirectory);
+        Path source = write("templates/T/request.txt", "id=${EXEC.INPUT.id}|name=#{upper(value=${EXEC.INPUT.name})}");
+        StageTemplate template = new StageTemplate("T", templateDirectory, Collections.singletonList(
+                new TemplateAction("request", values("type", "assign", "name", "request",
+                        "expression", "&{./request.txt}"), Version.TEMPLATE_SCHEMA)), Version.TEMPLATE_SCHEMA,
+                templateDirectory.resolve("template.yaml"));
+        FileExpressionResolver.FileExpressionSnapshot accepted = new FileExpressionResolver(project)
+                .snapshotFor(template, null);
+        byte[] encoded = accepted.serialize();
+
+        Path workerRoot = Files.createDirectories(project.resolveSibling("worker-plan-root" + System.nanoTime()));
+        Path workerDirectory = Files.createDirectories(workerRoot.resolve("templates/T"));
+        Files.copy(source, workerDirectory.resolve("request.txt"));
+        Files.write(source, "owner mutation B".getBytes(StandardCharsets.UTF_8));
+        FileExpressionResolver.FileExpressionSnapshot restored = FileExpressionResolver.FileExpressionSnapshot.restore(workerRoot, encoded);
+        Files.write(workerDirectory.resolve("request.txt"), "worker filesystem mutation C".getBytes(StandardCharsets.UTF_8));
+
+        Map<String,Object> values = new LinkedHashMap<String,Object>();
+        values.put("EXEC.INPUT.id", "accepted-A");values.put("EXEC.INPUT.name", "alice");
+        try (AutoCloseable ignored = FileExpressionResolver.registerApprovedSnapshot(workerRoot, restored)) {
+            FileExpressionResolver workerResolver = new FileExpressionResolver(workerRoot);
+            assertEquals("id=accepted-A|name=ALICE", workerResolver.evaluate("./request.txt", workerDirectory, runtime(values)));
+            assertEquals(1, restored.size());
+        } finally {
+            try (java.util.stream.Stream<Path> paths = Files.walk(workerRoot)) {
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> { try { Files.deleteIfExists(path); } catch (Exception ignored) { } });
+            }
+        }
+    }
+
     @Test void directFlowLoadSnapshotTraversesTheActualFlowBehindItsSyntheticWrapper() throws Exception {
         att.TestSchemas.install(project);
         Path flowDirectory = project.resolve("templates/flows/mqtest");

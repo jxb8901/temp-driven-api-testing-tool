@@ -104,6 +104,10 @@ final class SourceFileTransaction {
 
     Path pin(String domain, String scopeId, Path root) throws Exception { return revisions.pin(domain, scopeId, root).root; }
 
+    Path revisionRoot(String domain,String scopeId,Path root,String revisionId) throws Exception {
+        return revisions.revisionRoot(domain,scopeId,root,revisionId);
+    }
+
     Path registeredRoot(String domain, String scopeId) { return revisions.registeredRoot(domain, scopeId); }
 
     boolean ownsRevision(String domain, String scopeId, Path configuredRoot, Path candidate) {

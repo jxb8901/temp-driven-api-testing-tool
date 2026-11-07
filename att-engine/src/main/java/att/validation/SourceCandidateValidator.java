@@ -175,6 +175,14 @@ public final class SourceCandidateValidator {
     public EffectiveResolution resolveEffective(String packageId, String environment,
                                                 Path packageRoot, Path configFile, Path runtimeRoot,
                                                 RevisionSet provenance) throws Exception {
+        return resolveEffective(packageId,environment,packageRoot,configFile,runtimeRoot,provenance,null,null);
+    }
+
+    /** Resolves the approved effective Package plus an optional accepted Load scenario source. */
+    public EffectiveResolution resolveEffective(String packageId, String environment,
+                                                Path packageRoot, Path configFile, Path runtimeRoot,
+                                                RevisionSet provenance, String loadScenarioPath,
+                                                Map<String,Object> inlineLoadScenario) throws Exception {
         Path pkg = canonicalDirectory(packageRoot, "Package source");
         Path config = canonicalFile(configFile, "Runtime Config source");
         Path runtime = canonicalDirectory(runtimeRoot, "Runtime Config root");
@@ -191,6 +199,17 @@ public final class SourceCandidateValidator {
         collectManifestDependencies(pkg, packageId, bindings);
         collectFileDependencies(pkg, packageId, selected, effective, bindings);
         collectPackageResourceDependencies(pkg, config, effective, packageId, selected, bindings);
+        if(loadScenarioPath!=null&&!loadScenarioPath.isBlank()) {
+            PackageResourceResolver.PackageResource source=new PackageResourceResolver(pkg)
+                    .resolvePackageRelative(loadScenarioPath,PackageResourceResolver.Kind.FILE);
+            collectLoadScenarioDependencies(pkg,packageId,selected,effective,
+                    new att.load.LoadScenarioLoader(pkg).load(source.canonicalPath()),bindings);
+        }
+        if(inlineLoadScenario!=null) {
+            Map<String,Object> copy=att.load.LoadIsolation.deepCopyMap(inlineLoadScenario);
+            collectLoadScenarioDependencies(pkg,packageId,selected,effective,
+                    new att.load.LoadScenarioLoader(pkg).loadInline(copy),bindings);
+        }
         PackageConfig manifest = PackageConfig.load(pkg);
         String schemaDigest = SchemaFiles.registryDigest();
         String envFingerprint = digest(selected + "\n" + fileDigest(config) + "\n"
@@ -208,6 +227,60 @@ public final class SourceCandidateValidator {
                 "Review the helper descriptor diagnostics before relying on a complete impact result."));
         return new EffectiveResolution(packageId, selected, effectiveDigest, complete, resolvedRevisions,
                 origins, bindings, resolvedDependencies, diagnostics);
+    }
+
+    private static void collectLoadScenarioDependencies(Path packageRoot,String packageId,String environment,
+                                                        FrameworkConfig effective,att.load.LoadScenario scenario,
+                                                        List<DependencyReference> output) throws Exception {
+        PackageResourceResolver resources=new PackageResourceResolver(packageRoot);
+        String source=scenario.source()==null?null:logicalPath(packageRoot,scenario.source());
+        for(Path overlay:scenario.testdataDescriptors()) {
+            PackageResourceResolver.PackageResource resolved=resources.fromInternalPath(overlay,PackageResourceResolver.Kind.FILE);
+            output.add(new DependencyReference(DependencyKind.LOAD_OVERLAY,packageId,environment,null,
+                    resolved.logicalName(),fileDigest(resolved.canonicalPath()),"load-testdata-overlay",source,
+                    ReferenceCertainty.KNOWN));
+        }
+        att.testdata.TestdataRegistry registry=new att.testdata.TestdataRegistry(packageRoot,
+                effective.testdataDescriptors(),scenario.testdataDescriptors());
+        for(att.load.LoadWorkload workload:scenario.workloads()) {
+            Set<String> ids=new LinkedHashSet<String>(att.testdata.TestdataSyntax.references(workload.inputs()));
+            ids.addAll(workload.testdata().keySet());
+            String callSite=(source==null?"inline-load":source)+"#"+workload.id();
+            for(String id:ids) {
+                try {
+                    att.testdata.TestdataDescriptor descriptor=registry.resolve(id);
+                    String path=descriptor.source()==null?null:logicalPath(packageRoot,descriptor.source());
+                    output.add(new DependencyReference(DependencyKind.TESTDATA,packageId,environment,id,path,
+                            descriptor.source()==null?null:fileDigest(descriptor.source()),"load-input",callSite,
+                            descriptor.source()==null?ReferenceCertainty.UNKNOWN:ReferenceCertainty.KNOWN));
+                } catch(Exception unavailable) {
+                    output.add(new DependencyReference(DependencyKind.TESTDATA,packageId,environment,id,null,null,
+                            "load-input-unresolved",callSite,ReferenceCertainty.UNKNOWN));
+                }
+            }
+        }
+    }
+
+    /** Captures the exact compiled File-expression plans for the selected effective Package view. */
+    public byte[] compileFileExpressionSnapshot(Path packageRoot, Path configFile, Path runtimeRoot,
+                                                String environment) throws Exception {
+        Path pkg = canonicalDirectory(packageRoot, "Package source");
+        Path config = canonicalFile(configFile, "Runtime Config source");
+        Path runtime = canonicalDirectory(runtimeRoot, "Runtime Config root");
+        String selected = environment == null || environment.trim().isEmpty() ? "default" : environment.trim();
+        FrameworkConfig effective = new FrameworkConfigLoader().loadDiscovery(config, runtime, pkg,
+                "default".equalsIgnoreCase(selected) ? null : selected);
+        StageTemplateLoader templates = new StageTemplateLoader(pkg, effective.templatesRoot(), false);
+        FlowRegistry flows = new FlowRegistry(pkg, effective.templatesRoot(), false);
+        FileExpressionResolver resolver = new FileExpressionResolver(pkg);
+        List<FileExpressionResolver.FileExpressionSnapshot> snapshots = new ArrayList<FileExpressionResolver.FileExpressionSnapshot>();
+        for (String reference : templates.paths()) snapshots.add(resolver.snapshotFor(templates.load(reference), flows));
+        for (FlowDefinition flow : flows.all()) {
+            StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(),
+                    flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
+            snapshots.add(resolver.snapshotFor(body, flows));
+        }
+        return FileExpressionResolver.FileExpressionSnapshot.merge(pkg, snapshots).serialize();
     }
 
     private static PackageValidator.ValidationSummary packageSummary(Path pkg, Path configFile,

@@ -98,6 +98,28 @@ class SourceCandidateValidatorTest {
                 || (item.logicalPath != null && item.logicalPath.contains("template.yaml"))), describe(result));
     }
 
+    @Test void effectiveResolutionCapturesSelectedLoadTestdataOverlayAndDescriptorIdentity() throws Exception {
+        Files.createDirectories(firstPackage.resolve("load"));
+        write(firstPackage.resolve("testdata/scenario.yaml"),
+                "schemaVersion: att-testdata/v1.0\nid: scenarioAccounts\nrecords: [{id: selected-overlay}]\n");
+        write(firstPackage.resolve("load/scenario.yaml"),
+                "schemaVersion: att-load/v1.9\ntestdata: [testdata/scenario.yaml]\nworkloads:\n"
+                + "  - id: selected-overlay\n    target: {type: template, id: Lookup}\n"
+                + "    inputs: {accountId: '@{scenarioAccounts.id}'}\n    load: {users: 1, duration: 1s}\n");
+
+        EffectiveResolution resolution=validator.resolveEffective("first","SIT",firstPackage,
+                configFile,runtimeRoot,revisions("first"),"load/scenario.yaml",null);
+
+        assertTrue(resolution.complete,resolution.diagnostics.toString());
+        assertTrue(resolution.dependencies.stream().anyMatch(ref->ref.kind==DependencyKind.LOAD_OVERLAY
+                &&"testdata/scenario.yaml".equals(ref.canonicalPath)
+                &&ref.sourceFingerprint!=null&&ref.sourceFingerprint.matches("[a-f0-9]{64}")));
+        assertTrue(resolution.dependencies.stream().anyMatch(ref->ref.kind==DependencyKind.TESTDATA
+                &&"scenarioAccounts".equals(ref.logicalId)
+                &&"testdata/scenario.yaml".equals(ref.canonicalPath)
+                &&ref.sourceFingerprint!=null&&ref.sourceFingerprint.matches("[a-f0-9]{64}")));
+    }
+
     private static RevisionSet revisions(String packageId) {
         return new RevisionSet(RevisionIdentity.of(RevisionKind.PACKAGE_REGISTRATION, "registry", repeat('b')),
                 RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE, packageId, repeat('c')),

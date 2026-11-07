@@ -40,6 +40,50 @@ class LoadScheduleSchedulerTest {
         }
     }
 
+    @Test void explicitPackageChangePolicyOverridesTheServerDefaultDuringPublication() throws Exception {
+        Instant now=Instant.parse("2026-01-01T00:00:00Z");ServerConfig config=config("schedule-policy-override",1,"continue",1);
+        try(JobStore store=new JobStore(config)) {
+            LoadSchedule strict=schedule("SPOLICYSTRICT",now);strict.packageChangePolicy="strict";store.saveSchedule(strict);
+            LoadSchedule ignore=schedule("SPOLICYIGNORE",now);ignore.packageChangePolicy="ignore";store.saveSchedule(ignore);
+            LoadSchedule pause=schedule("SPOLICYPAUSE",now);pause.packageChangePolicy="pause";store.saveSchedule(pause);
+            LoadSchedule serverDefault=schedule("SPOLICYDEFAULT",now);store.saveSchedule(serverDefault);
+            LoadSchedule alreadyPaused=schedule("SPOLICYPAUSED",now);alreadyPaused.enabled=false;alreadyPaused.packageChangePolicy="strict";store.saveSchedule(alreadyPaused);
+
+            store.markPackageSchedulesSourceChanged("p","R-package-B","pause",now.plusSeconds(60).toString());
+            assertTrue(store.schedule(strict.id).enabled,"Explicit strict must beat the server pause default");
+            assertTrue(store.schedule(ignore.id).enabled,"Explicit ignore must beat the server pause default");
+            assertFalse(store.schedule(pause.id).enabled);
+            assertFalse(store.schedule(serverDefault.id).enabled,"Null Schedule policy inherits the server default");
+            assertFalse(store.schedule(alreadyPaused.id).enabled);
+            assertNull(store.schedule(alreadyPaused.id).autoPauseReason,"Publication must not rewrite an already paused Schedule");
+
+            LoadSchedule pauseAgainstStrict=schedule("SPOLICYPAUSESTRICTDEFAULT",now);pauseAgainstStrict.packageChangePolicy="pause";store.saveSchedule(pauseAgainstStrict);
+            store.markPackageSchedulesSourceChanged("p","R-package-C","strict",now.plusSeconds(120).toString());
+            assertFalse(store.schedule(pauseAgainstStrict.id).enabled,"Explicit pause must beat a non-pause server default");
+        }
+    }
+
+    @Test void configInvalidationPausesOnlyAffectedSchedulesAndPersistsReviewState() throws Exception {
+        Instant now=Instant.parse("2026-01-01T00:00:00Z");ServerConfig config=config("schedule-config-invalidation",1,"continue",1);
+        try(JobStore store=new JobStore(config)) {
+            LoadSchedule affected=schedule("SCONFIGAFFECTED",now);affected.packageId="p";affected.environment="SIT";store.saveSchedule(affected);
+            LoadSchedule otherEnvironment=schedule("SCONFIGENVOTHER",now);otherEnvironment.packageId="p";otherEnvironment.environment="UAT";store.saveSchedule(otherEnvironment);
+            LoadSchedule otherPackage=schedule("SCONFIGPKGOTHER",now);otherPackage.packageId="q";otherPackage.environment="SIT";store.saveSchedule(otherPackage);
+
+            store.markScheduleConfigurationChanged("p","SIT",now.plusSeconds(60).toString());
+            LoadSchedule changed=store.schedule(affected.id);
+            assertEquals("configuration-revision-changed",changed.configurationStatus);
+            assertFalse(changed.enabled);assertEquals("configuration-revision-changed",changed.autoPauseReason);
+            assertTrue(store.schedule(otherEnvironment.id).enabled);assertNull(store.schedule(otherEnvironment.id).configurationStatus);
+            assertTrue(store.schedule(otherPackage.id).enabled);assertNull(store.schedule(otherPackage.id).configurationStatus);
+        }
+        try(JobStore restarted=new JobStore(config)) {
+            LoadSchedule changed=restarted.schedule("SCONFIGAFFECTED");
+            assertEquals("configuration-revision-changed",changed.configurationStatus);
+            assertFalse(changed.enabled);
+        }
+    }
+
     @Test void oneTimeRunAndLoadOccurrencesAreClaimedOnceAndMissesAreNotReplayed() throws Exception {
         MutableClock clock=new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
         ServerConfig config=config("one-time",1,"continue",2);

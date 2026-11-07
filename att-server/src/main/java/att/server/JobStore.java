@@ -523,8 +523,10 @@ final class JobStore implements AutoCloseable {
 
     synchronized void markPackageSchedulesSourceChanged(String packageId,String sourceRevision,String serverPolicy,String at) throws Exception {
         if(packageId==null||packageId.isBlank())return;
-        for(LoadSchedule schedule:schedules())if(packageId.equals(schedule.packageId))
-            markScheduleSourceChanged(schedule.id,sourceRevision,"pause".equals(serverPolicy)||"pause".equals(schedule.packageChangePolicy),at);
+        for(LoadSchedule schedule:schedules())if(packageId.equals(schedule.packageId)) {
+            String effectivePolicy=schedule.packageChangePolicy==null?serverPolicy:schedule.packageChangePolicy;
+            markScheduleSourceChanged(schedule.id,sourceRevision,"pause".equals(effectivePolicy),at);
+        }
     }
 
     private void markScheduleSourceChanged(String id,String sourceRevision,boolean pause,String at) throws Exception {
@@ -571,11 +573,20 @@ final class JobStore implements AutoCloseable {
                     LoadSchedule current=ServerRuntime.JSON.readValue(rows.getString(1),LoadSchedule.class);
                     if("configuration-revision-changed".equals(current.configurationStatus)){c.rollback();continue;}
                     current.configurationStatus="configuration-revision-changed";
+                    boolean autoPause=current.enabled;
+                    if(autoPause) {
+                        current.enabled=false;current.autoPauseReason="configuration-revision-changed";
+                        current.autoPausedAt=at;current.updatedAt=at;current.updatedBy="system:load-scheduler";
+                        current.definitionVersion++;
+                    }
                     try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=? WHERE schedule_id=?")) {
                         update.setString(1,ServerRuntime.JSON.writeValueAsString(current));update.setString(2,current.id);update.executeUpdate();
                     }
                     try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,package_id,created_at,outcome) VALUES('system:load-scheduler','SCHEDULE_CONFIG_CHANGED',?,?,?)")) {
                         audit.setString(1,current.packageId);audit.setString(2,at);audit.setString(3,"schedule="+current.id+";environment="+current.environment);audit.executeUpdate();
+                    }
+                    if(autoPause)try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,package_id,created_at,outcome) VALUES('system:load-scheduler','SCHEDULE_AUTO_PAUSE',?,?,?)")) {
+                        audit.setString(1,current.packageId);audit.setString(2,at);audit.setString(3,"configuration-revision-changed;schedule="+current.id);audit.executeUpdate();
                     }
                     c.commit();
                 }

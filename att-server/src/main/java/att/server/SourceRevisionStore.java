@@ -188,6 +188,14 @@ final class SourceRevisionStore {
         forceDirectory(registration.revisions);
     }
 
+    Path revisionRoot(String domain,String scopeId,Path root,String id) throws Exception {
+        Registration registration=lookup(domain,scopeId,root);
+        Path revision=checkedRevision(registration,id);
+        if(!Files.isDirectory(revision,LinkOption.NOFOLLOW_LINKS)||Files.isSymbolicLink(revision))
+            throw new IOException("Source revision is unavailable");
+        return revision;
+    }
+
     Path registeredRoot(String domain, String scopeId) { return rootsByScope.get(scopeKey(domain, scopeId)); }
 
     boolean ownsRevision(String domain, String scopeId, Path configuredRoot, Path candidate) {
@@ -791,8 +799,10 @@ final class SourceRevisionStore {
                 return FileVisitResult.CONTINUE;
             }
             @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
-                try { Files.setPosixFilePermissions(file, EnumSet.of(PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_READ)); }
-                catch (UnsupportedOperationException ignored) { file.toFile().setWritable(true, false); }
+                if(!attributes.isSymbolicLink()&&!Files.isSymbolicLink(file)) {
+                    try { Files.setPosixFilePermissions(file, EnumSet.of(PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_READ)); }
+                    catch (UnsupportedOperationException ignored) { file.toFile().setWritable(true, false); }
+                }
                 Files.delete(file); return FileVisitResult.CONTINUE;
             }
             @Override public FileVisitResult postVisitDirectory(Path directory, IOException failure) throws IOException {

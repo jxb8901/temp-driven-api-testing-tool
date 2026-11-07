@@ -47,6 +47,7 @@ public final class WorkerMain {
     private att.load.LoadConsoleSampler loadSampler;
     private String loadSummaryLine;
     private volatile boolean shutdownCancellationRequested;
+    private WorkerSourceSnapshot sourceSnapshot;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
         // Trusted evidence retains original diagnostics. Protocol secrets are protected
@@ -104,7 +105,8 @@ public final class WorkerMain {
                 return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
             }
         }
-        return executeRequest(input);
+        try { return executeRequest(input); }
+        finally { closeSourceSnapshot(); }
     }
 
     private void executeInspectionDaemon() throws Exception {
@@ -124,7 +126,8 @@ public final class WorkerMain {
                     fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
                     continue;
                 }
-                executeRequest(input);
+                try { executeRequest(input); }
+                finally { closeSourceSnapshot(); }
             }
         } finally {
             closeResourceInspectors();
@@ -141,6 +144,15 @@ public final class WorkerMain {
         emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
         try { request=mapper.treeToValue(input,WorkerRequest.class); if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes; }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
+        try {
+            sourceSnapshot=WorkerSourceSnapshot.stage(request);
+            if(sourceSnapshot!=null) {
+                request.packageRoot=sourceSnapshot.packageRoot.toAbsolutePath().normalize().toString();
+                request.config=sourceSnapshot.configPath.toAbsolutePath().normalize().toString();
+            }
+        } catch(Exception invalidSnapshot) {
+            return fail("WORKER_SOURCE_SNAPSHOT_INVALID","The accepted source snapshot is unavailable or failed integrity verification");
+        }
         currentCommand=request.command;
         try { consoleOptions=att.console.ExecutionConsoleFormatter.Options.published(
                 request.liveOutputMaxEntryChars==null?4000:request.liveOutputMaxEntryChars,
@@ -152,7 +164,10 @@ public final class WorkerMain {
         if(prewarmed) {
             if(!("run".equals(request.command)||"debug".equals(request.command)))
                 return fail("WORKER_REQUEST_INVALID","Prewarmed Workers accept only one RUN/DEBUG Job");
-            if(request.packageRoot==null||!Paths.get(request.packageRoot).toRealPath().equals(Paths.get("").toRealPath()))
+            if(sourceSnapshot!=null) {
+                if(!java.util.Objects.equals(request.registeredPackageId,sourceSnapshot.packageId))
+                    return fail("WORKER_REQUEST_INVALID","Prewarmed Worker Package affinity mismatch");
+            } else if(request.packageRoot==null||!Paths.get(request.packageRoot).toRealPath().equals(Paths.get("").toRealPath()))
                 return fail("WORKER_REQUEST_INVALID","Prewarmed Worker package affinity mismatch");
             if(request.expectedRevisionDigest==null)
                 return fail("WORKER_REQUEST_INVALID","Prewarmed execution requires an immutable package revision");
@@ -194,7 +209,10 @@ public final class WorkerMain {
                 Path root=Paths.get(request.packageRoot).toAbsolutePath().normalize();
                 Path config=att.config.RuntimeConfigPath.resolve(path(request.config),root);
                 att.config.FrameworkConfig current=new att.config.FrameworkConfigLoader().load(config,att.config.RuntimeConfigPath.root(config),root,request.environment);
-                if(!current.effectiveConfiguration().identity().equals(configuration.get("configurationIdentity")))
+                boolean matches=sourceSnapshot==null
+                        ?current.effectiveConfiguration().identity().equals(configuration.get("configurationIdentity"))
+                        :matchesRelocatedSnapshotConfiguration(current,configuration,request.environment);
+                if(!matches)
                     throw new PackageResourceInspector.StaleResourceCursorException();
             }
             OperationResult result=dispatch(request);
@@ -307,6 +325,22 @@ public final class WorkerMain {
         }
     }
 
+    /**
+     * The effective identity includes the original absolute Package root. A verified accepted
+     * snapshot is staged under a Worker-private path, so compare every portable input to that
+     * identity and rely on the archive/tree digests for the captured source bytes.
+     */
+    private static boolean matchesRelocatedSnapshotConfiguration(att.config.FrameworkConfig current,
+                                                                  Map<String,Object> accepted,
+                                                                  String environment) {
+        if(current==null||current.effectiveConfiguration()==null||accepted==null)return false;
+        Map<String,Object> actual=current.effectiveConfiguration().metadata(environment);
+        for(String field:new String[]{"manifestDigest","globalDigest","environment","environmentOrigin",
+                "engineVersion","engineRevision","schemaRegistryDigest","origins","authoredPaths"})
+            if(!java.util.Objects.equals(actual.get(field),accepted.get(field)))return false;
+        return true;
+    }
+
     private void listenForLoadCancellation(JsonParser input, Thread executionThread) {
         if(input==null)return;
         try {
@@ -320,20 +354,24 @@ public final class WorkerMain {
             }
         } catch(Exception ignored) { /* Closing stdin ends the optional control channel. */ }
     }
+    private void closeSourceSnapshot() {
+        WorkerSourceSnapshot snapshot=sourceSnapshot;sourceSnapshot=null;
+        if(snapshot!=null)snapshot.close();
+    }
     private OperationResult dispatch(WorkerRequest r) throws Exception {
         if(r.packageRoot==null||r.packageRoot.trim().isEmpty()) throw new IllegalArgumentException("packageRoot is required");
         Path root=Paths.get(r.packageRoot).toAbsolutePath().normalize();
         Path config=path(r.config); Path output=path(r.outputDirectory);
         executionOutput=output==null?null:(output.isAbsolute()?output:root.resolve(output)).normalize();
         AttService service=new DefaultAttService();
-        if("run".equals(r.command)&&r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
+        if(sourceSnapshot==null&&"run".equals(r.command)&&r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
         if("run".equals(r.command)&&r.target!=null) {
             Map<String,Object> t=requiredTarget(r);
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),false,event -> emitRunExecution(event,r.diagnosticMode),r.debugId,r.overrides,false,null,r.inlineDebugInput));
         }
         if("run".equals(r.command)) return service.run(new RunRequest(root,config,r.environment,output,r.runId,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),bool(r.rerunFailed),bool(r.dryRun),bool(r.failFast),null,"reject",false,event -> emitRunExecution(event,r.diagnosticMode)));
         if("debug".equals(r.command)) { Map<String,Object> t=requiredTarget(r);
-            if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
+            if(sourceSnapshot==null&&r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides,false,null,r.inlineDebugInput)); }
         if("load".equals(r.command)) { Map<String,Object> t=r.target==null?Collections.<String,Object>emptyMap():r.target; Map<String,String> l=r.load==null?Collections.<String,String>emptyMap():r.load;
             final CheckpointProjection checkpoints = new CheckpointProjection(executionOutput, r.runId);
@@ -366,7 +404,7 @@ public final class WorkerMain {
             att.api.OperationResult loadResult;
             try {
             if(r.inlineLoadScenario!=null) {
-                if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
+                if(sourceSnapshot==null&&r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
                 att.load.LoadScenario parsed=new att.load.LoadScenarioLoader(root).loadInline(r.inlineLoadScenario);
                 loadResult=service.load(new LoadRequest(root,config,r.environment,output,r.runId,null,null,null,
                         null,null,null,null,null,null,null,null,null,r.overrides,observer,parsed,false));

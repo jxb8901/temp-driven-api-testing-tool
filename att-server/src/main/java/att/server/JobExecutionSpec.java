@@ -98,12 +98,42 @@ final class JobExecutionSpec {
                 || !Set.of("RETAINED", "UNAVAILABLE").contains(provenance.path("snapshotState").asText()))
             throw new IllegalArgumentException("Invalid source provenance");
         provenance.fieldNames().forEachRemaining(field -> {
-            if (!Set.of("schemaVersion", "revisions", "validationFingerprint", "snapshotState").contains(field))
+            if (!Set.of("schemaVersion", "revisions", "validationFingerprint", "dependencyClosure", "snapshotState", "requiredAction").contains(field))
                 throw new IllegalArgumentException("Unknown source provenance field");
         });
         String fingerprint = provenance.path("validationFingerprint").asText(null);
         if (fingerprint != null && !fingerprint.matches("[a-f0-9]{64}"))
             throw new IllegalArgumentException("Invalid source validation fingerprint");
+        JsonNode dependencies = provenance.path("dependencyClosure");
+        if (!dependencies.isArray()) throw new IllegalArgumentException("Invalid source dependency closure");
+        dependencies.forEach(dependency -> {
+            if (!dependency.isObject() || !"att-source-dependency/v1".equals(dependency.path("schemaVersion").asText())
+                    || !dependency.path("kind").isTextual() || !dependency.path("certainty").isTextual()
+                    || (!dependency.path("canonicalPath").isTextual()&&!dependency.path("canonicalPath").isNull()))
+                throw new IllegalArgumentException("Invalid source dependency");
+            dependency.fieldNames().forEachRemaining(field -> {
+                if (!Set.of("schemaVersion", "kind", "packageId", "environment", "logicalId", "canonicalPath",
+                        "sourceFingerprint", "relationship", "callSite", "certainty").contains(field))
+                    throw new IllegalArgumentException("Unknown source dependency field");
+            });
+            try {
+                att.server.api.source.SourceManagementContracts.DependencyKind.valueOf(dependency.path("kind").asText());
+                att.server.api.source.SourceManagementContracts.ReferenceCertainty.valueOf(dependency.path("certainty").asText());
+            } catch (RuntimeException invalid) { throw new IllegalArgumentException("Invalid source dependency kind or certainty"); }
+            String path=dependency.path("canonicalPath").asText(null);
+            if(path!=null&&(path.isBlank()||path.length()>1024||path.startsWith("/")||path.contains("\\")||path.contains(":")
+                    ||path.indexOf('\0')>=0||java.util.Arrays.asList(path.split("/")).contains("..")))
+                throw new IllegalArgumentException("Invalid source dependency path");
+            String logicalId=dependency.path("logicalId").asText(null);
+            if(path==null&&(logicalId==null||logicalId.isBlank()))throw new IllegalArgumentException("Source dependency has no canonical locator");
+            String sourceFingerprint=dependency.path("sourceFingerprint").asText(null);
+            if(sourceFingerprint!=null&&!sourceFingerprint.matches("[a-f0-9]{64}"))
+                throw new IllegalArgumentException("Invalid source dependency fingerprint");
+        });
+        String requiredAction=provenance.path("requiredAction").asText(null);
+        if(requiredAction!=null&&(requiredAction.isBlank()||requiredAction.length()>512
+                ||requiredAction.chars().anyMatch(Character::isISOControl)))
+            throw new IllegalArgumentException("Invalid source snapshot action");
         JsonNode revisions = provenance.path("revisions");
         if (!"att-source-revision-set/v1".equals(revisions.path("schemaVersion").asText()))
             throw new IllegalArgumentException("Invalid source revision set");

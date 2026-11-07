@@ -7,8 +7,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.*;
 import java.nio.charset.StandardCharsets;
+import java.io.OutputStream;
+import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PrewarmedWorkerTest {
@@ -33,6 +37,38 @@ class PrewarmedWorkerTest {
             assertEquals(0,process.exitValue(),output);
             assertEquals(1,countResults(output));
             assertTrue(output.contains("\"status\":\"PASS\""),output);
+            assertTrue(Files.exists(root.resolve("business-started")),output);
+            assertEquals("env-ok",new String(Files.readAllBytes(root.resolve("business-started")),StandardCharsets.UTF_8));
+        } finally {process.destroyForcibly();}
+    }
+
+    @Test void coldWorkerUsesTheAcceptedSnapshotAfterTheOwnerMutatesItsSourceTree() throws Exception {
+        Path root=fixture();SourceArchive accepted=sourceArchive(root);
+        Map<String,Object> request=request(root,"debug");attachSnapshot(request,accepted);
+        Files.write(root.resolve("templates/ENV/debug.yaml"),"not: [valid\n".getBytes(StandardCharsets.UTF_8));
+        Process process=startCold(root);
+        try {
+            String output=assign(process,mapper.writeValueAsString(request));
+            assertEquals(0,process.exitValue(),output);
+            assertTrue(output.contains("\"status\":\"PASS\""),output);
+            assertTrue(Files.exists(root.resolve("business-started")),output);
+            assertEquals("env-ok",new String(Files.readAllBytes(root.resolve("business-started")),StandardCharsets.UTF_8));
+        } finally {process.destroyForcibly();}
+    }
+
+    @Test void prewarmedWorkerUsesTheAcceptedSnapshotAfterItsOwnerMutatesPackageAndConfig() throws Exception {
+        Path root=fixture();SourceArchive accepted=sourceArchive(root);
+        Process process=start(root);
+        try {
+            ready(process);Map<String,Object> request=request(root,"debug");attachSnapshot(request,accepted);
+            Map<String,String> env=new HashMap<String,String>(System.getenv());env.put("LEASE_MARKER","assigned");
+            request.put("executionEnvironment",env);
+            Files.write(root.resolve("templates/ENV/debug.yaml"),"not: [valid\n".getBytes(StandardCharsets.UTF_8));
+            Files.write(root.resolve("config/config.yaml"),"schemaVersion: invalid\n".getBytes(StandardCharsets.UTF_8));
+            String output=assign(process,mapper.writeValueAsString(request));
+            assertEquals(0,process.exitValue(),output);
+            assertTrue(output.contains("\"status\":\"PASS\""),output);
+            assertTrue(Files.exists(root.resolve("business-started")),output);
             assertEquals("env-ok",new String(Files.readAllBytes(root.resolve("business-started")),StandardCharsets.UTF_8));
         } finally {process.destroyForcibly();}
     }
@@ -79,6 +115,13 @@ class PrewarmedWorkerTest {
         Path error=temp.resolve(UUID.randomUUID()+".stderr");builder.redirectError(error.toFile());
         Process process=builder.start();errors.put(process,error);return process;
     }
+    private Process startCold(Path root) throws Exception {
+        ProcessBuilder builder=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),
+                "-Djava.io.tmpdir="+temp.toAbsolutePath(),"-cp",System.getProperty("java.class.path"),WorkerMain.class.getName());
+        builder.directory(root.toFile());builder.environment().put("LEASE_MARKER","assigned");
+        Path error=temp.resolve(UUID.randomUUID()+".stderr");builder.redirectError(error.toFile());
+        Process process=builder.start();errors.put(process,error);return process;
+    }
     private JsonNode ready(Process process) throws Exception {
         CompletableFuture<String> frame=CompletableFuture.supplyAsync(()->{
             try {WorkerProtocol.Frame value=WorkerProtocol.read(process.getInputStream(),8192);return value==null?"{}":value.text();}
@@ -96,9 +139,70 @@ class PrewarmedWorkerTest {
             result.put("expectedRevisionDigest",inspector.executionRevisionDigest());
         }
         result.put("outputDirectory",root.resolve("output").toString());
+        result.put("registeredPackageId","p");
         Map<String,String> target=new LinkedHashMap<String,String>();target.put("type","template");target.put("id","ENV");
         result.put("target",target);return result;
     }
+
+    private static final class SourceArchive {
+        final Path archive;final String sha256;final Path packageRoot;final Path configRoot;
+        SourceArchive(Path archive,String sha256,Path packageRoot,Path configRoot){this.archive=archive;this.sha256=sha256;this.packageRoot=packageRoot;this.configRoot=configRoot;}
+    }
+    private SourceArchive sourceArchive(Path root) throws Exception {
+        Path packageRoot=Files.createDirectories(temp.resolve("snapshot-package-"+UUID.randomUUID()));
+        Path configRoot=Files.createDirectories(temp.resolve("snapshot-config-"+UUID.randomUUID()));
+        try(java.util.stream.Stream<Path> entries=Files.walk(root)) {
+            for(Path source:(Iterable<Path>)entries::iterator)if(Files.isRegularFile(source,LinkOption.NOFOLLOW_LINKS)) {
+                Path relative=root.relativize(source);
+                if(relative.getNameCount()>0&&"config".equals(relative.getName(0).toString())) {
+                    Path target=configRoot.resolve(relative);Files.createDirectories(target.getParent());Files.copy(source,target);
+                } else {Path target=packageRoot.resolve(relative);Files.createDirectories(target.getParent());Files.copy(source,target);}
+            }
+        }
+        Map<String,Object> manifest=new LinkedHashMap<String,Object>();manifest.put("schemaVersion",WorkerSourceSnapshot.VERSION);
+        manifest.put("packageId","p");manifest.put("packageRevision","R00000000000000000000000000000001");
+        manifest.put("configRevision","R00000000000000000000000000000002");manifest.put("configurationPath","config/config.yaml");
+        manifest.put("packageTreeDigest",treeDigest(packageRoot));manifest.put("configTreeDigest",treeDigest(configRoot));
+        manifest.put("logicalPaths",Arrays.asList("templates/ENV/template.yaml","templates/ENV/debug.yaml","config/config.yaml"));
+        manifest.put("dependencies",Collections.emptyList());manifest.put("packageSymlinks",Collections.emptyMap());manifest.put("configSymlinks",Collections.emptyMap());
+        byte[] compiledPlans=att.template.FileExpressionResolver.FileExpressionSnapshot.empty(packageRoot).serialize();
+        manifest.put("compiledFilePlansSha256",digest(compiledPlans));
+        Path archive=temp.resolve("accepted-"+UUID.randomUUID()+".zip");
+        try(OutputStream file=Files.newOutputStream(archive);ZipOutputStream zip=new ZipOutputStream(file,StandardCharsets.UTF_8)) {
+            writeTree(zip,packageRoot,"package");writeTree(zip,configRoot,"config");
+            zip.putNextEntry(new ZipEntry("file-plans.bin"));zip.write(compiledPlans);zip.closeEntry();
+            zip.putNextEntry(new ZipEntry("manifest.json"));zip.write(mapper.writeValueAsBytes(manifest));zip.closeEntry();
+        }
+        return new SourceArchive(archive,digestFile(archive),packageRoot,configRoot);
+    }
+    private void attachSnapshot(Map<String,Object> request,SourceArchive archive) throws Exception {
+        request.put("sourceSnapshotArchivePath",archive.archive.toAbsolutePath().toString());
+        request.put("sourceSnapshotArchiveSha256",archive.sha256);request.put("sourceSnapshotConfigPath","config/config.yaml");
+        try(att.resource.PackageResourceInspector inspector=new att.resource.PackageResourceInspector(archive.packageRoot,
+                archive.configRoot.resolve("config/config.yaml"),null,Collections.<String>emptyList(),65536,262144)) {
+            request.put("expectedRevisionDigest",inspector.executionRevisionDigest());
+        }
+    }
+    private static void writeTree(ZipOutputStream zip,Path root,String prefix)throws Exception {
+        List<Path> files=new ArrayList<Path>();try(java.util.stream.Stream<Path> paths=Files.walk(root)) {
+            paths.filter(path->Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)).forEach(files::add);
+        }
+        Collections.sort(files,Comparator.comparing(path->root.relativize(path).toString().replace('\\','/')));
+        for(Path path:files) {String relative=root.relativize(path).toString().replace('\\','/');zip.putNextEntry(new ZipEntry(prefix+"/"+relative));Files.copy(path,zip);zip.closeEntry();}
+    }
+    private static String treeDigest(Path root)throws Exception {
+        MessageDigest digest=MessageDigest.getInstance("SHA-256");List<Path> files=new ArrayList<Path>();
+        try(java.util.stream.Stream<Path> paths=Files.walk(root)){paths.filter(path->Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)).forEach(files::add);}
+        Collections.sort(files,Comparator.comparing(path->root.relativize(path).toString().replace('\\','/')));
+        for(Path file:files) {String relative=root.relativize(file).toString().replace('\\','/');digest.update(relative.getBytes(StandardCharsets.UTF_8));digest.update((byte)0);digest.update((byte)'F');digest.update(hexBytes(digestFile(file)));digest.update((byte)0xff);}
+        return hex(digest.digest());
+    }
+    private static String digestFile(Path file)throws Exception {
+        MessageDigest digest=MessageDigest.getInstance("SHA-256");try(java.io.InputStream input=Files.newInputStream(file)){byte[] buffer=new byte[8192];int read;while((read=input.read(buffer))>=0)digest.update(buffer,0,read);}return hex(digest.digest());
+    }
+    private static String digest(byte[] bytes)throws Exception { return hex(MessageDigest.getInstance("SHA-256").digest(bytes)); }
+    private static byte[] hexBytes(String value) {byte[] result=new byte[value.length()/2];for(int i=0;i<result.length;i++)result[i]=(byte)Integer.parseInt(value.substring(i*2,i*2+2),16);return result;}
+    private static String hex(byte[] bytes) {StringBuilder result=new StringBuilder(bytes.length*2);for(byte value:bytes)result.append(String.format("%02x",value&255));return result.toString();}
 
     @Test void resourceClientOrChangedRevisionCannotExecuteInsideWarmJvm() throws Exception {
         Path root=fixture();

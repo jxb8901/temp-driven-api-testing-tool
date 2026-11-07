@@ -31,21 +31,21 @@ class JobSourceClosureStoreTest {
         first.registerSnapshot(revisions.businessSource,ChangeSetPublisher.PACKAGE_SOURCE,packageA);
         first.registerSnapshot(revisions.configSource,ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,configA);
         SourceManagementContracts.SourceLease lease=first.acquire(new SourceManagementContracts.SourceLeaseRequest(
-                PACKAGE_ID,"SIT",revisions,List.of(),"job:J0000000000000001"));
+                PACKAGE_ID,"SIT",revisions,List.of("templates/use.yaml","testdata/cases.yaml","files/query.sql","config.yaml"),"job:J0000000000000001"));
         Path approvedConfig=configA.resolve("config.yaml");
         first.bindWorkerConfiguration(lease.leaseId(),approvedConfig);
+        JobSourceClosureStore.SourceSnapshot accepted=first.snapshotForOwner("job:J0000000000000001");
 
         assertEquals("Package A",new String(lease.read("templates/use.yaml").bytes(),StandardCharsets.UTF_8));
         assertEquals("Package A",new String(lease.read("testdata/cases.yaml").bytes(),StandardCharsets.UTF_8));
         assertEquals("Package A",new String(lease.read("files/query.sql").bytes(),StandardCharsets.UTF_8));
-        assertTrue(first.verifyDispatch(lease.leaseId(),"job:J0000000000000001",packageA,approvedConfig));
-        assertFalse(first.verifyDispatch(lease.leaseId(),"job:J0000000000000001",packageB,approvedConfig));
-        assertFalse(first.verifyDispatch(lease.leaseId(),"job:J0000000000000001",packageA,configB.resolve("config.yaml")));
+        assertTrue(first.verifyDispatch(lease.leaseId(),"job:J0000000000000001",accepted.archivePath.toString(),accepted.archiveSha256,accepted.configRelativePath));
+        assertFalse(first.verifyDispatch(lease.leaseId(),"job:J0000000000000001",accepted.archivePath.toString(),"0".repeat(64),accepted.configRelativePath));
 
         JobSourceClosureStore restarted=new JobSourceClosureStore(data);
         JobSourceClosureStore.SourceSnapshot recovered=restarted.snapshotForOwner("job:J0000000000000001");
         assertEquals(lease.leaseId(),recovered.leaseId);
-        assertTrue(restarted.verifyDispatch(recovered.leaseId,"job:J0000000000000001",packageA,approvedConfig));
+        assertTrue(restarted.verifyDispatch(recovered.leaseId,"job:J0000000000000001",recovered.archivePath.toString(),recovered.archiveSha256,recovered.configRelativePath));
         assertEquals("Config A",new String(Files.readAllBytes(recovered.workerConfigPath),StandardCharsets.UTF_8));
         assertEquals("Package B",Files.readString(packageB.resolve("templates/use.yaml")));
         assertEquals("Config B",Files.readString(configB.resolve("config.yaml")));
@@ -59,7 +59,7 @@ class JobSourceClosureStoreTest {
         JobSourceClosureStore store=new JobSourceClosureStore(data);
         store.registerSnapshot(revisions.businessSource,ChangeSetPublisher.PACKAGE_SOURCE,packageRoot);
         store.registerSnapshot(revisions.configSource,ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,configRoot);
-        var lease=store.acquire(new SourceManagementContracts.SourceLeaseRequest(PACKAGE_ID,"SIT",revisions,List.of(),"schedule:S00000000000000000000000000000001:1"));
+        var lease=store.acquire(new SourceManagementContracts.SourceLeaseRequest(PACKAGE_ID,"SIT",revisions,List.of("templates/use.yaml","config.yaml"),"schedule:S00000000000000000000000000000001:1"));
         store.bindWorkerConfiguration(lease.leaseId(),configRoot.resolve("config.yaml"));
 
         store.retire(revisions.businessSource);
@@ -85,6 +85,72 @@ class JobSourceClosureStoreTest {
 
         assertEquals("Pinned Package",new String(lease.read("templates/use.yaml").bytes(),StandardCharsets.UTF_8));
         assertThrows(java.io.IOException.class,()->lease.read("files/query.sql"));
+    }
+
+    @Test void retainedArchiveKeepsAcceptedBytesAfterOwnerMutatesOrRemovesSourceTrees() throws Exception {
+        Path data=Files.createDirectories(temp.resolve("data"));
+        Path packageRoot=sourceTree("R30000000000000000000000000000001","Accepted Package",true);
+        Path configRoot=sourceTree("R30000000000000000000000000000002","Accepted Config",false);
+        RevisionSet revisions=revisions(packageRoot,configRoot);String owner="job:J0000000000000004";
+        JobSourceClosureStore store=new JobSourceClosureStore(data);
+        store.registerSnapshot(revisions.businessSource,ChangeSetPublisher.PACKAGE_SOURCE,packageRoot);
+        store.registerSnapshot(revisions.configSource,ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,configRoot);
+        var lease=store.acquire(new SourceManagementContracts.SourceLeaseRequest(PACKAGE_ID,"SIT",revisions,
+                List.of("templates/use.yaml","testdata/cases.yaml","files/query.sql","config.yaml"),owner));
+        store.bindWorkerConfiguration(lease.leaseId(),configRoot.resolve("config.yaml"));
+
+        Files.writeString(packageRoot.resolve("templates/use.yaml"),"Owner mutation B");
+        Files.writeString(configRoot.resolve("config.yaml"),"Owner mutation B");
+        Files.delete(packageRoot.resolve("testdata/cases.yaml"));
+        assertEquals("Accepted Package",new String(lease.read("templates/use.yaml").bytes(),StandardCharsets.UTF_8));
+        assertEquals("Accepted Config",new String(lease.read("config.yaml").bytes(),StandardCharsets.UTF_8));
+
+        JobSourceClosureStore.SourceSnapshot accepted=store.snapshotForOwner(owner);
+        assertEquals("Accepted Package",Files.readString(accepted.packageRoot.resolve("templates/use.yaml")));
+        assertEquals("Accepted Config",Files.readString(accepted.workerConfigPath));
+        Files.delete(packageRoot.resolve("files/query.sql"));
+        JobSourceClosureStore restarted=new JobSourceClosureStore(data);
+        assertTrue(restarted.hasOwner(owner));
+        JobSourceClosureStore.SourceSnapshot restored=restarted.snapshotForOwner(owner);
+        assertEquals("Accepted Package",Files.readString(restored.packageRoot.resolve("templates/use.yaml")));
+        assertEquals("Accepted Config",Files.readString(restored.workerConfigPath));
+    }
+
+    @Test void missingOrCorruptSnapshotIsUnavailableAfterRestartAndCanBeRestored() throws Exception {
+        Path data=Files.createDirectories(temp.resolve("data"));
+        Path packageRoot=sourceTree("R40000000000000000000000000000001","Retained Package",true);
+        Path configRoot=sourceTree("R40000000000000000000000000000002","Retained Config",false);
+        RevisionSet revisions=revisions(packageRoot,configRoot);String owner="schedule:S00000000000000000000000000000004:1";
+        JobSourceClosureStore store=new JobSourceClosureStore(data);
+        store.registerSnapshot(revisions.businessSource,ChangeSetPublisher.PACKAGE_SOURCE,packageRoot);
+        store.registerSnapshot(revisions.configSource,ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,configRoot);
+        var lease=store.acquire(new SourceManagementContracts.SourceLeaseRequest(PACKAGE_ID,"SIT",revisions,
+                List.of("templates/use.yaml","config.yaml"),owner));
+        store.bindWorkerConfiguration(lease.leaseId(),configRoot.resolve("config.yaml"));
+        JobSourceClosureStore.SourceSnapshot snapshot=store.snapshotForOwner(owner);
+        Path backup=temp.resolve("snapshot.zip.bak");Files.copy(snapshot.archivePath,backup);
+
+        Files.delete(snapshot.archivePath);
+        JobSourceClosureStore missing=new JobSourceClosureStore(data);
+        assertFalse(missing.hasOwner(owner));
+        assertThrows(SourceManagementContracts.StaleSourceException.class,()->missing.snapshotForOwner(owner));
+        assertFalse(missing.verifyDispatch(lease.leaseId(),owner,snapshot.archivePath.toString(),snapshot.archiveSha256,snapshot.configRelativePath));
+
+        Files.copy(backup,snapshot.archivePath,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        JobSourceClosureStore restoredMissing=new JobSourceClosureStore(data);
+        assertTrue(restoredMissing.hasOwner(owner));
+        assertEquals("Retained Package",Files.readString(restoredMissing.snapshotForOwner(owner).packageRoot.resolve("templates/use.yaml")));
+
+        Files.write(snapshot.archivePath,new byte[]{1,2,3});
+        JobSourceClosureStore corrupted=new JobSourceClosureStore(data);
+        assertFalse(corrupted.hasOwner(owner));
+        assertThrows(SourceManagementContracts.StaleSourceException.class,()->corrupted.snapshotForOwner(owner));
+        assertFalse(corrupted.verifyDispatch(lease.leaseId(),owner,snapshot.archivePath.toString(),snapshot.archiveSha256,snapshot.configRelativePath));
+
+        Files.copy(backup,snapshot.archivePath,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        JobSourceClosureStore restored=new JobSourceClosureStore(data);
+        assertTrue(restored.hasOwner(owner));
+        assertEquals("Retained Package",Files.readString(restored.snapshotForOwner(owner).packageRoot.resolve("templates/use.yaml")));
     }
 
     @Test void publicationRefreshesOnlyItsPackageAndConfigActivationWaitsForTheCoordinator() {

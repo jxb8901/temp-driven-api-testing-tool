@@ -22,6 +22,50 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerRuntimeScheduleTest {
     @TempDir Path temp;
 
+    @Test void staleConfigReviewBlocksAutomaticManualTriggerAndResumeAfterRestart() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("config-review-packages"));Path packageRoot=Files.createDirectories(allowed.resolve("p"));
+        Path runtimeConfig=temp.resolve("config-review-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}, UAT: {}}\ntemplates: {root: templates}\ntestcase: {root: testcase}\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name"," ").toLowerCase().contains("win")?"java.exe":"java");
+        Path data=temp.resolve("config-review-data"),serverFile=temp.resolve("config-review-server.yaml");
+        Files.writeString(serverFile,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)
+                +"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)+"\n  auth: {mode: local}\n  scheduling: {enabled: true}\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"\n");
+        ServerConfig config=ServerConfig.load(serverFile);Path libs=Files.createDirectories(temp.resolve("config-review-lib"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-server-api",Path.of("att-server-api/target/classes"));
+        ServerRuntimeTestSupport.addModuleJar(libs,"att-security",Path.of("att-security/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+        String affectedId="S"+"A".repeat(32),unaffectedId="S"+"B".repeat(32);
+        try(ServerRuntime runtime=new ServerRuntime(config,libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            LoadSchedule affected=new LoadSchedule();affected.id=affectedId;affected.name="Affected SIT";affected.packageId="p";affected.environment="SIT";
+            affected.timezone="UTC";affected.cron="0 2 * * *";affected.enabled=true;affected.createdBy="alice";affected.executionPrincipal="alice";
+            affected.updatedAt=Instant.now().toString();affected.createdAt=affected.updatedAt;runtime.store.saveSchedule(affected);
+            LoadSchedule unaffected=affected.copy();unaffected.id=unaffectedId;unaffected.name="Unaffected UAT";unaffected.environment="UAT";runtime.store.saveSchedule(unaffected);
+
+            runtime.store.markScheduleConfigurationChanged("p","SIT",Instant.now().toString());
+            assertFalse(runtime.loadSchedule(affectedId).enabled);assertEquals("configuration-revision-changed",runtime.loadSchedule(affectedId).configurationStatus);
+            assertTrue(runtime.loadSchedule(unaffectedId).enabled);assertNull(runtime.loadSchedule(unaffectedId).configurationStatus);
+            assertThrows(ServerRuntime.JobConflictException.class,()->runtime.setLoadScheduleEnabled(affectedId,true,"alice"));
+            assertThrows(ServerRuntime.JobConflictException.class,()->runtime.triggerLoadSchedule(affectedId,"alice"));
+            LoadSchedule staleButEnabled=runtime.loadSchedule(affectedId);staleButEnabled.enabled=true;
+            ServerRuntime.JobConflictException automatic=assertThrows(ServerRuntime.JobConflictException.class,
+                    ()->runtime.prepareScheduledExecution(staleButEnabled,"alice"));
+            assertEquals("ATT-SCHEDULE-CONFIG-REVIEW-REQUIRED",automatic.code);
+        }
+        try(ServerRuntime restarted=new ServerRuntime(config,libs.toString())) {
+            LoadSchedule affected=restarted.loadSchedule(affectedId);
+            assertFalse(affected.enabled);assertEquals("configuration-revision-changed",affected.configurationStatus);
+            assertThrows(ServerRuntime.JobConflictException.class,()->restarted.setLoadScheduleEnabled(affectedId,true,"alice"));
+            assertThrows(ServerRuntime.JobConflictException.class,()->restarted.triggerLoadSchedule(affectedId,"alice"));
+            LoadSchedule staleButEnabled=affected.copy();staleButEnabled.enabled=true;
+            ServerRuntime.JobConflictException automatic=assertThrows(ServerRuntime.JobConflictException.class,
+                    ()->restarted.prepareScheduledExecution(staleButEnabled,"alice"));
+            assertEquals("ATT-SCHEDULE-CONFIG-REVIEW-REQUIRED",automatic.code);
+        }
+    }
+
     @Test void persistedScheduleSubmitsAStandardLoadJobAfterRestartAndRejectsInvalidOrUnavailablePackages() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("scheduled-load-packages"));Path packageRoot=Files.createDirectory(allowed.resolve("p"));
         Path templates=Files.createDirectories(packageRoot.resolve("templates/SCHEDULED"));Path loads=Files.createDirectories(packageRoot.resolve("load"));
@@ -32,10 +76,13 @@ class ServerRuntimeScheduleTest {
                 +"testcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         Files.writeString(packageRoot.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata: {environments: {SIT: [testdata/edda.yaml]}}\n");
         Files.writeString(packageRoot.resolve("testdata/edda.yaml"),"schemaVersion: att-testdata/v1.0\nid: edda\nrecords: [{currency: HKD}]\n");
+        Files.writeString(packageRoot.resolve("testdata/scenario-overlay.yaml"),"schemaVersion: att-testdata/v1.0\nid: scenarioAccounts\nrecords: [{currency: USD}]\n");
         Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: SCHEDULED\ndescription: scheduled Load smoke target\nactions:\n"
                 +"  message:\n    type: log\n    message: scheduled Load passed\n");
         Files.writeString(templates.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ntestdata: [testdata/edda.yaml]\ninputs:\n  currency: '@{edda.currency}'\n  password: package-sidecar-secret\n");
-        Files.writeString(loads.resolve("scenario.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n  - id: scheduled-smoke\n    target:\n      type: template\n      id: SCHEDULED\n    load:\n      users: 1\n      duration: 1s\n");
+        Files.writeString(loads.resolve("scenario.yaml"),"schemaVersion: att-load/v1.6\ntestdata: [testdata/scenario-overlay.yaml]\nworkloads:\n"
+                +"  - id: scheduled-smoke\n    target:\n      type: template\n      id: SCHEDULED\n    inputs:\n      currency: '@{scenarioAccounts.currency}'\n"
+                +"    load:\n      users: 1\n      duration: 1s\n");
         Files.writeString(loads.resolve("bad.yaml"),"schemaVersion: att-load/invalid\nworkloads: []\n");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path data=temp.resolve("scheduled-load-data");Path configFile=temp.resolve("scheduled-load-server.yaml");
@@ -461,6 +508,8 @@ class ServerRuntimeScheduleTest {
             JsonNode localEdit=ServerRuntime.JSON.readTree("{\"expectedDefinitionVersion\":"+localSchedule.definitionVersion+",\"packageEdit\":{\"load\":{\"duration\":\"2s\"}}}");
             assertThrows(ServerRuntime.NotFoundException.class,()->localRuntime.createScheduleExecutionDraft(localSchedule.id,localEdit,"admin"));
             Map<String,Object> localReview=localRuntime.createScheduleExecutionDraft(localSchedule.id,localEdit,"bob");
+            assertEquals(localSchedule.expectedRevisionDigest,localReview.get("revisionDigest"),
+                    "Revalidating the retained Package snapshot must preserve the Schedule's accepted revision across storage paths");
             JsonNode localApply=ServerRuntime.JSON.readTree("{\"draftId\":\""+localReview.get("draftId")+"\",\"expectedDefinitionVersion\":"+localSchedule.definitionVersion+",\"confirm\":true}");
             localRuntime.store.setAuthActive("bob",false);
             assertThrows(ServerRuntime.NotFoundException.class,()->localRuntime.replaceScheduleExecution(localSchedule.id,localApply,"bob"));
@@ -483,6 +532,15 @@ class ServerRuntimeScheduleTest {
             Map<String,Object> occurrence=runtime.triggerLoadSchedule(scheduleId,"operator");
             assertEquals("submitted",occurrence.get("status"));String jobId=String.valueOf(occurrence.get("jobId"));
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);Map<String,Object> record=runtime.jobRecord(jobId);
+            Map<?,?> acceptedSource=(Map<?,?>)record.get("sourceProvenance");
+            assertNotNull(acceptedSource);List<?> acceptedDependencies=(List<?>)acceptedSource.get("dependencyClosure");
+            assertTrue(acceptedDependencies.stream().filter(Map.class::isInstance).map(value->(Map<?,?>)value)
+                    .anyMatch(value->"LOAD_OVERLAY".equals(String.valueOf(value.get("kind")))
+                            &&"testdata/scenario-overlay.yaml".equals(value.get("canonicalPath"))));
+            assertTrue(acceptedDependencies.stream().filter(Map.class::isInstance).map(value->(Map<?,?>)value)
+                    .anyMatch(value->"TESTDATA".equals(String.valueOf(value.get("kind")))
+                            &&"scenarioAccounts".equals(value.get("logicalId"))
+                            &&"testdata/scenario-overlay.yaml".equals(value.get("canonicalPath"))));
             while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(record.get("status"))&&System.nanoTime()<deadline) {
                 Thread.sleep(20);record=runtime.jobRecord(jobId);
             }
