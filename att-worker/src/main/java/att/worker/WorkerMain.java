@@ -403,6 +403,10 @@ public final class WorkerMain {
                                 !Boolean.FALSE.equals(r.redactionEnabled),r.sensitivePaths,r.sensitiveFieldPatterns)
                                 .forPackageTestdata().inspectAuthoringTestdataSource(r.inspectionResourceId,r.inspectionEnvironment,maxSourceBytes);
                         break;
+                    case "testcase":
+                        source=resourceInspector(root,config,r).inspectAuthoringTestcaseSource(
+                                r.inspectionResourceId,r.authoringSourceSelector);
+                        break;
                     case "central":
                         source=new PackageConfigurationInspector(root,config,maxResponseBytes,
                                 !Boolean.FALSE.equals(r.redactionEnabled),r.sensitivePaths,r.sensitiveFieldPatterns)
@@ -487,9 +491,12 @@ public final class WorkerMain {
                 return new OperationResult(null,"PASS",0,0,validated.diagnostics(),Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
             if("revision".equals(r.inspectionAction)) {
-                inspector.verifyRevision(r.expectedRevisionDigest);
+                Map<String,String> revisions=inspector.sourceRevisionDigests(r.expectedRevisionDigest);
+                Map<String,Object> result=new LinkedHashMap<String,Object>();
+                result.put("revisionDigest",revisions.get("executionRevisionDigest"));
+                result.putAll(revisions);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
-                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",Collections.<String,Object>singletonMap("revisionDigest",inspector.executionRevisionDigest())));
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",result));
             }
             if("prewarm-eligibility".equals(r.inspectionAction)) {
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),

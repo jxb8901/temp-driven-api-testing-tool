@@ -75,6 +75,25 @@ class PackageRegistryTest {
         } finally { registry.close(); }
     }
 
+    @Test void aReloadedEmptyRegistryCanBeLoadedAgainAtRestart() throws Exception {
+        Fixture fixture=fixture();
+        try(PackageRegistry registry=new PackageRegistry(fixture.config,Clock.systemUTC(),Duration.ofMillis(15),Duration.ofMillis(300),
+                Runnable::run,(before,after)->{})) {
+            writeYaml(fixture,registryYaml(fixture,Map.of()));
+            settle(registry);
+            assertTrue(registry.snapshot().packages.isEmpty());
+            assertEquals("Ready",registry.snapshot().status);
+        }
+
+        ServerConfig restarted=ServerConfig.load(fixture.configFile);
+        assertTrue(restarted.packages.isEmpty());
+        try(PackageRegistry registry=new PackageRegistry(restarted,Clock.systemUTC(),Duration.ofMillis(15),Duration.ofMillis(300),
+                Runnable::run,(before,after)->{})) {
+            assertTrue(registry.snapshot().packages.isEmpty());
+            assertEquals("Ready",registry.snapshot().status);
+        }
+    }
+
     @Test void observesAtomicReplacementBetweenConfigLoadAndRegistryConstruction() throws Exception {
         Fixture fixture=fixture();
         String replacement=registryYaml(fixture,Map.of("alpha",fixture.beta));
@@ -213,9 +232,12 @@ class PackageRegistryTest {
 
     private String registryYaml(Fixture fixture,Map<String,Path> entries) {
         StringBuilder yaml=new StringBuilder("server:\n  dataDir: '").append(temp.resolve("data")).append("'\n  runtimeConfigPath: '")
-                .append(fixture.runtimeConfig).append("'\nworkers: {}\npackages:\n  allowedRoots: ['").append(fixture.packageRoot).append("']\n  entries:\n");
-        if(entries.isEmpty())yaml.append("    {}\n");
-        else entries.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry->yaml.append("    ").append(entry.getKey()).append(": '").append(entry.getValue()).append("'\n"));
+                .append(fixture.runtimeConfig).append("'\nworkers: {}\npackages:\n  allowedRoots: ['").append(fixture.packageRoot).append("']\n");
+        if(entries.isEmpty())yaml.append("  entries: {}\n");
+        else {
+            yaml.append("  entries:\n");
+            entries.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry->yaml.append("    ").append(entry.getKey()).append(": '").append(entry.getValue()).append("'\n"));
+        }
         return yaml.toString();
     }
 

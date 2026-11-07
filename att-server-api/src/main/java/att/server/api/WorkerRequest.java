@@ -74,6 +74,8 @@ public class WorkerRequest {
     /** Internal Server-authorized lossless source read; never populated from an untrusted public body. */
     public String authoringSourceKind;
     public String authoringResourceType;
+    /** Closed selector for an indexed Testcase-authored source, such as its workbook sidecar. */
+    public String authoringSourceSelector;
     public Integer inspectionOffset;
     public Integer inspectionLimit;
     public String expectedRevisionDigest;
