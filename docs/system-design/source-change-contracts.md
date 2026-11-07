@@ -2,7 +2,7 @@
 
 This page maps the versioned source contracts to the modules that own their implementation. It is intended for the #254 runtime, #255 client, and #335 impact branches.
 
-The shared Java contract is `att-source-management/v1` in `att-server-api`. It defines independent revision identities, validated candidates, effective Config projections, immutable source leases, publication hooks, client DTOs, and impact reports. The packaged JSON Schema is `schemas/att-source-management-v1.schema.json`.
+The shared Java contract is `att-source-management/v1` in `att-server-api`. It defines independent revision identities, validated candidates, effective Config projections, immutable source leases, publication hooks, client DTOs, and impact reports. The packaged [JSON Schema](../../att-server-api/src/main/resources/schemas/att-source-management-v1.schema.json) defines the stable `#255` wire shape.
 
 ## Ownership by branch
 
