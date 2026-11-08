@@ -7,6 +7,7 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
+import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -203,7 +204,7 @@ class PackageResourceInspectorTest {
             initial=inspector.sourceRevisionDigests(null);
         }
 
-        Files.writeString(sharedConfig,Files.readString(sharedConfig)+"# shared configuration only\n");
+        writeUtf8(sharedConfig,new String(Files.readAllBytes(sharedConfig),StandardCharsets.UTF_8)+"# shared configuration only\n");
         Map<String,String> configChanged;
         try(PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.<String>emptyList(),65536,262144)) {
             configChanged=inspector.sourceRevisionDigests(null);
@@ -229,12 +230,19 @@ class PackageResourceInspectorTest {
         Process process=new ProcessBuilder(javaExecutable,"-cp",classpath,
                 RevisionProbe.class.getName(),root.toString(),config.toString()).redirectErrorStream(true).start();
         byte[] output;
-        try(java.io.InputStream input=process.getInputStream()) { output=input.readAllBytes(); }
+        try(java.io.InputStream input=process.getInputStream();ByteArrayOutputStream captured=new ByteArrayOutputStream()) {
+            byte[] buffer=new byte[4096];int count;
+            while((count=input.read(buffer))!=-1)captured.write(buffer,0,count);
+            output=captured.toByteArray();
+        }
         int exit=process.waitFor();
         assertEquals(0,exit,"Revision probe failed: "+new String(output,StandardCharsets.UTF_8));
         String[] values=new String(output,StandardCharsets.UTF_8).trim().split(" ");
         assertEquals(2,values.length);
-        return Map.of("executionRevisionDigest",values[0],"packageSourceRevision",values[1]);
+        Map<String,String> revisions=new LinkedHashMap<>();
+        revisions.put("executionRevisionDigest",values[0]);
+        revisions.put("packageSourceRevision",values[1]);
+        return revisions;
     }
 
     public static class RevisionProbe {
