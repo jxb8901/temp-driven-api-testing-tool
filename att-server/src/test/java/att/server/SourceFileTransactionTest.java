@@ -100,6 +100,128 @@ class SourceFileTransactionTest {
         assertPair(root, "deployment-a", "deployment-b");
     }
 
+    @Test void centralRevisionCapturesOnlyApprovedConfigSourcesAndPreservesUnrelatedInstallationFiles() throws Exception {
+        String domain = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG;
+        Path root = Files.createDirectories(temp.resolve("att-home-central")).toRealPath();
+        Path config = Files.createDirectories(root.resolve("config"));
+        Files.writeString(config.resolve("config.yaml"), "schemaVersion: att-config/v2.12\nenvironment: SIT\n"
+                + "dbhelpers: [config/custom/dependencies/db-discovery.yaml]\n");
+        Files.writeString(config.resolve("source-references.yaml"), "payload: '&{config/tools/echo.sh}'\n");
+        Path nestedHelper = Files.createDirectories(config.resolve("custom/dependencies")).resolve("db-discovery.yaml");
+        Files.writeString(nestedHelper, "schemaVersion: att-dbhelper/v2.6\nid: orders\nconnection: {url: 'jdbc:unused'}\n");
+        Files.writeString(config.resolve("not-referenced.yaml"), "not part of the current Config dependency closure\n");
+        Path tools = Files.createDirectories(config.resolve("tools"));
+        Files.writeString(tools.resolve("echo.yaml"), "schemaVersion: att-tool/v1\ncommand: [echo]\n");
+        Files.writeString(tools.resolve("echo.sh"), "#!/bin/sh\necho helper\n");
+        Path unrelatedNodeModules = Files.createDirectories(root.resolve("node_modules/.bin"));
+        Files.writeString(unrelatedNodeModules.resolve("yaml"), "mutable build output");
+        Path unrelatedOutput = Files.createDirectories(root.resolve("output"));
+        Path outputMarker = Files.writeString(unrelatedOutput.resolve("server.log"), "before");
+        Path unrelatedConfig = Files.createDirectories(config.resolve("schemas"));
+        Files.writeString(unrelatedConfig.resolve("private.json"), "not an authorable central descriptor");
+
+        Path data = Files.createDirectories(temp.resolve("central-revision-data"));
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
+        Path firstPin = transaction.pin(domain, "central", root);
+        assertTrue(Files.exists(firstPin.resolve("config/config.yaml")));
+        assertTrue(Files.exists(firstPin.resolve("config/source-references.yaml")),
+                "The source-link index is part of the bounded inspection closure, not an editable Config category");
+        assertTrue(Files.exists(firstPin.resolve("config/tools/echo.yaml")));
+        assertTrue(Files.exists(firstPin.resolve("config/tools/echo.sh")));
+        assertTrue(Files.exists(firstPin.resolve("config/custom/dependencies/db-discovery.yaml")),
+                "Direct Helper paths named by Config are part of the immutable candidate closure");
+        assertFalse(Files.exists(firstPin.resolve("config/not-referenced.yaml")),
+                "Unreferenced Config-root files are not captured");
+        assertFalse(ChangeSetPublisher.centralPath("config/source-references.yaml"),
+                "Inspection metadata is retained without making it a central authoring path");
+        assertFalse(Files.exists(firstPin.resolve("node_modules")));
+        assertFalse(Files.exists(firstPin.resolve("output")));
+        assertFalse(Files.exists(firstPin.resolve("config/schemas")));
+
+        Files.writeString(unrelatedNodeModules.resolve("yaml"), "changed unrelated build output");
+        Files.writeString(outputMarker, "changed unrelated runtime output");
+        AtomicBoolean mutate = new AtomicBoolean(true);
+        Thread outputWriter = new Thread(() -> {
+            int sequence = 0;
+            while (mutate.get()) {
+                try { Files.writeString(outputMarker, "concurrent runtime output " + sequence++); }
+                catch (Exception unavailable) { return; }
+            }
+        }, "central-unrelated-output-writer-test");
+        outputWriter.start();
+        Path afterUnrelatedChanges;
+        try { afterUnrelatedChanges = transaction.pin(domain, "central", root); }
+        finally { mutate.set(false); outputWriter.join(5000); }
+        assertFalse(outputWriter.isAlive());
+        assertEquals(firstPin, afterUnrelatedChanges, "unrelated ATT_HOME writes must not create Config revisions");
+
+        byte[] replacement = bytes("schemaVersion: att-config/v2.12\nenvironment: UAT\n");
+        Map<String, SourceFileTransaction.Write> writes = new LinkedHashMap<>();
+        writes.put("config/config.yaml", new SourceFileTransaction.Write("config/config.yaml", replacement,
+                digest(bytes("schemaVersion: att-config/v2.12\nenvironment: SIT\ndbhelpers: [config/custom/dependencies/db-discovery.yaml]\n"))));
+        transaction.commit(domain, "central", afterUnrelatedChanges, "admin", BEFORE_REVISION,
+                AFTER_REVISION, writes, () -> { });
+
+        assertEquals("changed unrelated build output", Files.readString(unrelatedNodeModules.resolve("yaml")));
+        assertTrue(Files.readString(outputMarker).startsWith("concurrent runtime output "));
+        assertEquals("not an authorable central descriptor", Files.readString(unrelatedConfig.resolve("private.json")));
+        assertEquals(replacement.length, Files.size(config.resolve("config.yaml")));
+        assertEquals("schemaVersion: att-config/v2.12\nenvironment: UAT\n", Files.readString(config.resolve("config.yaml")));
+        assertFalse(Files.exists(transaction.pin(domain, "central", root).resolve("config/custom/dependencies/db-discovery.yaml")),
+                "Removed Helper references are retired from the next immutable central revision");
+    }
+
+    @Test void customRuntimeConfigPathIsCapturedAtTheStableWorkerPathAndExportedBack() throws Exception {
+        String domain = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG;
+        Path root = Files.createDirectories(temp.resolve("custom-runtime-root")).toRealPath();
+        Path configured = Files.writeString(root.resolve("runtime.yaml"),
+                "schemaVersion: att-config/v2.12\nenvironment: SIT\n");
+        Files.writeString(Files.createDirectories(root.resolve("config/tools")).resolve("ping.yaml"),
+                "schemaVersion: att-tool/v1\ncommand: [echo]\n");
+        Files.writeString(Files.createDirectories(root.resolve("node_modules/.bin")).resolve("yaml"), "unrelated");
+        Path data = Files.createDirectories(temp.resolve("custom-runtime-data"));
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
+        transaction.registerRoot(domain, "central-custom", root, configured);
+        Path active = transaction.pin(domain, "central-custom", root);
+        assertEquals(Files.readString(configured), Files.readString(active.resolve("config/config.yaml")));
+        assertTrue(Files.exists(active.resolve("config/tools/ping.yaml")));
+        assertFalse(Files.exists(active.resolve("runtime.yaml")));
+        assertFalse(Files.exists(active.resolve("node_modules")));
+
+        byte[] replacement = bytes("schemaVersion: att-config/v2.12\nenvironment: UAT\n");
+        Map<String, SourceFileTransaction.Write> writes = new LinkedHashMap<>();
+        writes.put("config/config.yaml", new SourceFileTransaction.Write("config/config.yaml", replacement,
+                digest(bytes("schemaVersion: att-config/v2.12\nenvironment: SIT\n"))));
+        transaction.commit(domain, "central-custom", active, "admin", BEFORE_REVISION, AFTER_REVISION, writes, () -> { });
+        assertEquals(new String(replacement, StandardCharsets.UTF_8), Files.readString(configured));
+        assertFalse(Files.exists(root.resolve("config/config.yaml")), "The stable revision path must map back to the configured filename");
+        assertEquals("unrelated", Files.readString(root.resolve("node_modules/.bin/yaml")));
+    }
+
+    @Test void executionSnapshotKeepsBothReadsOnTheAcceptedBytesWhenSameOwnerMutatesPinnedRevision() throws Exception {
+        Path root = initialTree();
+        Path data = Files.createDirectories(temp.resolve("execution-snapshot-data"));
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
+        Path revision = transaction.pin(PACKAGE, SCOPE, root);
+        Path execution = transaction.executionPin(PACKAGE, SCOPE, root);
+        assertNotEquals(revision, execution);
+        String expectedExecutionDigest = SourceRevisionStore.treeDigest(PACKAGE, execution);
+
+        String firstRead = Files.readString(execution.resolve("templates/a.yaml"), StandardCharsets.UTF_8);
+        Path changed = revision.resolve("templates/b.yaml");
+        if (!Files.getFileStore(changed).supportsFileAttributeView("posix")) return;
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(changed);
+        permissions.add(PosixFilePermission.OWNER_WRITE);
+        Files.setPosixFilePermissions(changed, permissions);
+        Files.writeString(changed, "tampered between Worker reads", StandardCharsets.UTF_8);
+        String secondRead = Files.readString(execution.resolve("templates/b.yaml"), StandardCharsets.UTF_8);
+        assertEquals("old-a", firstRead);
+        assertEquals("old-b", secondRead);
+        assertEquals(expectedExecutionDigest, SourceRevisionStore.treeDigest(PACKAGE, execution));
+        assertThrows(java.io.IOException.class, () -> transaction.executionPin(PACKAGE, SCOPE, root),
+                "A corrupted published revision must fail closed for new execution snapshots");
+    }
+
     @Test void pinnedRevisionsAreReadOnlyAndDelayedReadersKeepTheirOriginalTree() throws Exception {
         Path root = initialTree();
         Path data = Files.createDirectories(temp.resolve("data"));
@@ -119,6 +241,43 @@ class SourceFileTransactionTest {
                 writes("old-a", "old-b", "new-a", "new-b"), () -> { });
         assertPair(delayedPin, "old-a", "old-b");
         assertPair(transaction.pin(PACKAGE, SCOPE, root), "new-a", "new-b");
+    }
+
+    @Test void sameOwnerRevisionMutationIsDetectedByTheNextContentVerifiedPin() throws Exception {
+        Path root = initialTree();
+        Path data = Files.createDirectories(temp.resolve("same-owner-tamper-data"));
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
+        Path revision = transaction.pin(PACKAGE, SCOPE, root);
+        Path file = revision.resolve("templates/a.yaml");
+        if (!Files.getFileStore(file).supportsFileAttributeView("posix")) return;
+
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(file);
+        permissions.add(PosixFilePermission.OWNER_WRITE);
+        Files.setPosixFilePermissions(file, permissions);
+        Files.writeString(file, "tampered by the owning Server identity", StandardCharsets.UTF_8);
+        java.io.IOException rejected = assertThrows(java.io.IOException.class, () -> transaction.pin(PACKAGE, SCOPE, root));
+        assertTrue(rejected.getMessage().contains("integrity check"), rejected.getMessage());
+    }
+
+    @Test void sameOwnerCentralRevisionMutationIsRejectedAtDelayedUse() throws Exception {
+        String domain = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG;
+        Path root = Files.createDirectories(temp.resolve("same-owner-central-tamper-home")).toRealPath();
+        Path config = Files.createDirectories(root.resolve("config"));
+        Files.writeString(config.resolve("config.yaml"), "schemaVersion: att-config/v2.12\nenvironment: SIT\n");
+        Path data = Files.createDirectories(temp.resolve("same-owner-central-tamper-data"));
+        Path revision = new SourceFileTransaction(data, new SourcePublicationBarrier()).pin(domain, "central", root);
+        String expectedDigest = SourceRevisionStore.treeDigest(domain, revision);
+        Path pinnedConfig = revision.resolve("config/config.yaml");
+        if (!Files.getFileStore(pinnedConfig).supportsFileAttributeView("posix")) return;
+
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(pinnedConfig);
+        permissions.add(PosixFilePermission.OWNER_WRITE);
+        Files.setPosixFilePermissions(pinnedConfig, permissions);
+        Files.writeString(pinnedConfig, "tampered central config", StandardCharsets.UTF_8);
+
+        java.io.IOException rejected = assertThrows(java.io.IOException.class,
+                () -> ServerRuntime.verifyAcceptedCentralSource(revision, expectedDigest));
+        assertTrue(rejected.getMessage().contains("integrity check"), rejected.getMessage());
     }
 
     @Test void atomicSwitchKeepsDelayedWorkerPinnedAndSeparateProcessReadersCoherent() throws Exception {
@@ -222,6 +381,38 @@ class SourceFileTransactionTest {
                 Files.getPosixFilePermissions(published.resolve("templates/a.yaml")));
         assertEquals(EnumSet.of(PosixFilePermission.OWNER_READ),
                 Files.getPosixFilePermissions(published.resolve("templates/new.yaml")));
+    }
+
+    @Test void ownerChmodMutationIsDetectedBeforeTheRevisionCanBePinnedAgain() throws Exception {
+        Path root = initialTree();
+        if (!Files.getFileStore(root).supportsFileAttributeView("posix")) return;
+        SourceFileTransaction transaction = new SourceFileTransaction(Files.createDirectories(temp.resolve("data")),
+                new SourcePublicationBarrier());
+        Path pinned = transaction.pin(PACKAGE, SCOPE, root);
+        Path file = pinned.resolve("templates/a.yaml");
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(file);
+        permissions.add(PosixFilePermission.OWNER_WRITE);
+        Files.setPosixFilePermissions(file, permissions);
+        Files.writeString(file, "tamper", StandardCharsets.UTF_8);
+
+        java.io.IOException rejected = assertThrows(java.io.IOException.class,
+                () -> transaction.pin(PACKAGE, SCOPE, root));
+        assertTrue(rejected.getMessage().contains("integrity check"), rejected.getMessage());
+    }
+
+    @Test void sameSizeConfiguredReplacementWithRestoredMtimeCreatesANewRevision() throws Exception {
+        Path root = initialTree();
+        SourceFileTransaction transaction = new SourceFileTransaction(Files.createDirectories(temp.resolve("data")),
+                new SourcePublicationBarrier());
+        Path pinnedBefore = transaction.pin(PACKAGE, SCOPE, root);
+        Path configuredFile = root.resolve("templates/a.yaml");
+        java.nio.file.attribute.FileTime originalTime = Files.getLastModifiedTime(configuredFile);
+        Files.writeString(configuredFile, "new-a", StandardCharsets.UTF_8);
+        Files.setLastModifiedTime(configuredFile, originalTime);
+
+        Path pinnedAfter = transaction.pin(PACKAGE, SCOPE, root);
+        assertNotEquals(pinnedBefore, pinnedAfter);
+        assertEquals("new-a", Files.readString(pinnedAfter.resolve("templates/a.yaml"), StandardCharsets.UTF_8));
     }
 
     @Test void auditFailureKeepsCommittedJournalForIdempotentRecoveryReplay() throws Exception {

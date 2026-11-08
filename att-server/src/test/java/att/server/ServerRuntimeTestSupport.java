@@ -41,6 +41,7 @@ final class ServerRuntimeTestSupport {
                 Map<String,Object> evidence=new java.util.LinkedHashMap<>();evidence.put("environment",environment);
                 evidence.put("environmentOrigin",request.hasNonNull("environment")?"request":"global");
                 for(String key:List.of("configurationIdentity","manifestDigest","globalDigest","schemaRegistryDigest"))evidence.put(key,"a".repeat(64));
+                evidence.put("packageRevision",request.path("expectedRevisionDigest").asText("b".repeat(64)));
                 evidence.put("engineVersion","fixture");evidence.put("engineRevision","fixture");
                 evidence.put("origins",Map.of("environment",evidence.get("environmentOrigin")));
                 evidence.put("authoredPaths",Map.of("environment",request.hasNonNull("environment")?"request.environment":"config/config.yaml"));

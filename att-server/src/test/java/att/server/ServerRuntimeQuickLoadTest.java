@@ -24,10 +24,11 @@ class ServerRuntimeQuickLoadTest {
     @Test void quickLoadDraftOmitsDebugImportsAndRunsOnlyExplicitLoadTestdata() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("quick-load-packages"));Path packageRoot=Files.createDirectory(allowed.resolve("p"));
         Path templates=Files.createDirectories(packageRoot.resolve("templates/FORM"));Files.createDirectories(packageRoot.resolve("testcase"));
-        Path toolInvocations=packageRoot.resolve("tools/invocations.log");
+        Path toolInvocations=temp.resolve("tool-invocations.log");
         Path runtimeConfig=temp.resolve("quick-load-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
         Path toolScript=Files.createDirectories(packageRoot.resolve("tools")).resolve("check-load-inputs.sh");
-        Files.writeString(toolScript,"#!/bin/sh\nprintf 'called\\n' >> \"$ATT_ROOT_DIR/tools/invocations.log\"\n[ \"$1\" = CORR-176 ] && [ \"$2\" = ARG-176 ]\n");
+        String invocationLog=toolInvocations.toString().replace("'","'\\''");
+        Files.writeString(toolScript,"#!/bin/sh\nprintf 'called\\n' >> '"+invocationLog+"'\n[ \"$1\" = CORR-176 ] && [ \"$2\" = ARG-176 ]\n");
         toolScript.toFile().setExecutable(true);
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n"
@@ -159,9 +160,11 @@ class ServerRuntimeQuickLoadTest {
             long advancedReleaseDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
             while(((Number)runtime.counts().get("activeWorkers")).intValue()>0&&System.nanoTime()<advancedReleaseDeadline)Thread.sleep(10);
             assertEquals(0,((Number)runtime.counts().get("activeWorkers")).intValue(),"The Advanced Load Worker must exit before the test temp directory is removed");
-            assertTrue(Files.readString(toolInvocations).contains("called\n"),"Advanced Load submission should invoke the configured Tool");
+            assertTrue(Files.exists(toolInvocations),"Advanced Load submission should invoke the configured Tool; result="
+                    +runtime.resultRecord(advancedJobId));
+            assertTrue(Files.readString(toolInvocations).contains("called\n"));
             assertArrayEquals(originalToolSidecar,Files.readAllBytes(toolSidecar));
-            Files.delete(toolInvocations);
+            Files.deleteIfExists(toolInvocations);
             // Catalog discovery has no Environment; composition must still pin the selected executable revision.
             Map<String,Object> catalogPage=runtime.inspectLoadTemplates("p",null,0,100,"alice");
             assertEquals(6,((List<?>)catalogPage.get("items")).size());
@@ -190,4 +193,5 @@ class ServerRuntimeQuickLoadTest {
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getQuickLoadDraft(String.valueOf(expired.get("draftId")),"alice"));
         } finally {runtime.close();}
     }
+
 }

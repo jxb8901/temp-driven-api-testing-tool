@@ -26,8 +26,8 @@ class ExecutionWorkerRuntimeLifecycleTest {
         Path tools=Files.createDirectories(pkg.resolve("tools"));
         Path holdScript=tools.resolve("hold.sh");
         Files.writeString(holdScript,"#!/bin/sh\n"
-                +"printf '%s' \"$$\" > \"$ATT_ROOT_DIR/tools/child.pid\"\n"
-                +"touch \"$ATT_ROOT_DIR/tools/started\"\n"
+                +"printf '%s' \"$$\" > \"$ATT_CASE_OUTPUT_DIR/child.pid\"\n"
+                +"touch \"$ATT_CASE_OUTPUT_DIR/started\"\n"
                 +"exec sleep 60\n");
         holdScript.toFile().setExecutable(true);
         Files.writeString(Files.createDirectories(templates.resolve("HOLD")).resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: HOLD\ndescription: Long child Tool for Worker lifecycle tests\n"
@@ -56,12 +56,13 @@ class ExecutionWorkerRuntimeLifecycleTest {
             runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
             awaitReadyWorkers(runtime,1,15);
             Job cancelled=submit(runtime,"HOLD");
-            await(()->cancelled.terminal()||Files.exists(tools.resolve("started")),20);
-            assertTrue(Files.exists(tools.resolve("started")),"HOLD Tool did not start; Job="+runtime.jobRecord(cancelled.id)
+            Path cancelledOutput=runtime.outputDirectoryForJob(cancelled.id);
+            await(()->cancelled.terminal()||outputHas(cancelledOutput,"started"),20);
+            assertTrue(outputHas(cancelledOutput,"started"),"HOLD Tool did not start; Job="+runtime.jobRecord(cancelled.id)
                     +", events="+runtime.events(cancelled.id).after(0));
             assertEquals("warm",cancelled.workerDispatch,"The cancellation path must use a leased prewarm Worker");
             long cancelledWorker=cancelled.workerPid.longValue();
-            long cancelledChild=Long.parseLong(Files.readString(tools.resolve("child.pid")));
+            long cancelledChild=Long.parseLong(Files.readString(outputFile(cancelledOutput,"child.pid")));
             assertEquals("CANCELLED",runtime.cancel(cancelled.id,"alice"));
             await(()->cancelled.terminal()&&!ProcessHandle.of(cancelledWorker).map(ProcessHandle::isAlive).orElse(false)
                     &&!ProcessHandle.of(cancelledChild).map(ProcessHandle::isAlive).orElse(false),15);
@@ -70,12 +71,12 @@ class ExecutionWorkerRuntimeLifecycleTest {
             awaitArchive(runtime,cancelled.id);
 
             awaitReadyWorkers(runtime,1,15);
-            Files.deleteIfExists(tools.resolve("started"));
             Job timedOut=submit(runtime,"TIMEOUT");
-            await(()->Files.exists(tools.resolve("started"))&&timedOut.workerPid!=null,20);
+            Path timeoutOutput=runtime.outputDirectoryForJob(timedOut.id);
+            await(()->outputHas(timeoutOutput,"started")&&timedOut.workerPid!=null,20);
             assertEquals("warm",timedOut.workerDispatch,"The action-timeout path must also use a one-shot prewarm Worker");
             long timeoutWorker=timedOut.workerPid.longValue();
-            long timeoutChild=Long.parseLong(Files.readString(tools.resolve("child.pid")));
+            long timeoutChild=Long.parseLong(Files.readString(outputFile(timeoutOutput,"child.pid")));
             await(()->timedOut.terminal(),20);
             assertNotEquals("PASS",timedOut.status,"The timed Tool must not be reported as a successful Job");
             await(()->!ProcessHandle.of(timeoutWorker).map(ProcessHandle::isAlive).orElse(false)
@@ -84,12 +85,12 @@ class ExecutionWorkerRuntimeLifecycleTest {
             assertNotEquals(cancelledWorker,timeoutWorker,"A one-shot Worker PID cannot serve two Jobs");
 
             awaitReadyWorkers(runtime,1,15);
-            Files.deleteIfExists(tools.resolve("started"));
             Job uncertain=submit(runtime,"HOLD");
-            await(()->Files.exists(tools.resolve("started"))&&uncertain.workerPid!=null,20);
+            Path uncertainOutput=runtime.outputDirectoryForJob(uncertain.id);
+            await(()->outputHas(uncertainOutput,"started")&&uncertain.workerPid!=null,20);
             assertEquals("warm",uncertain.workerDispatch);
             long uncertainWorker=uncertain.workerPid.longValue();
-            long uncertainChild=Long.parseLong(Files.readString(tools.resolve("child.pid")));
+            long uncertainChild=Long.parseLong(Files.readString(outputFile(uncertainOutput,"child.pid")));
             assertNotNull(uncertain.processFence);
             uncertain.processFence.unverified();
             assertEquals("CANCELLED",runtime.cancel(uncertain.id,"alice"));
@@ -160,5 +161,16 @@ class ExecutionWorkerRuntimeLifecycleTest {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(seconds);
         while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(20);
         assertTrue(condition.getAsBoolean(),"Lifecycle condition did not complete within "+seconds+" seconds");
+    }
+
+    private static boolean outputHas(Path root,String name) {
+        return outputFile(root,name)!=null;
+    }
+
+    private static Path outputFile(Path root,String name) {
+        if(root==null||!Files.isDirectory(root))return null;
+        try(var files=Files.walk(root)) {
+            return files.filter(path->path.getFileName()!=null&&name.equals(path.getFileName().toString())).findFirst().orElse(null);
+        } catch(Exception unavailable) { return null; }
     }
 }

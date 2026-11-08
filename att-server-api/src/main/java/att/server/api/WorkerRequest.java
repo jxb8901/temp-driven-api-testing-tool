@@ -74,8 +74,14 @@ public class WorkerRequest {
     /** Internal Server-authorized lossless source read; never populated from an untrusted public body. */
     public String authoringSourceKind;
     public String authoringResourceType;
+    /** Closed selector for an indexed Testcase-authored source, such as its workbook sidecar. */
+    public String authoringSourceSelector;
     public Integer inspectionOffset;
     public Integer inspectionLimit;
+    /** Canonical execution-bound revision identity. */
+    public String expectedExecutionRevisionDigest;
+    /** @deprecated Legacy alias for expectedExecutionRevisionDigest. */
+    @Deprecated
     public String expectedRevisionDigest;
     /** Server-computed identity for the matching Local Runtime's embedded schemas. */
     public String expectedSchemaRegistryDigest;
@@ -92,4 +98,23 @@ public class WorkerRequest {
     public Boolean redactionEnabled;
     public List<String> sensitivePaths;
     public List<String> sensitiveFieldPatterns;
+
+    /**
+     * Resolves old and new wire fields to one execution identity. Keeping the legacy field populated
+     * lets this request remain readable by older Worker binaries during rolling upgrades.
+     */
+    public void normalizeExpectedExecutionRevisionDigest() {
+        if (expectedExecutionRevisionDigest != null && expectedRevisionDigest != null
+                && !expectedExecutionRevisionDigest.equals(expectedRevisionDigest))
+            throw new IllegalArgumentException("Worker execution revision fields disagree");
+        String revision = expectedExecutionRevisionDigest != null
+                ? expectedExecutionRevisionDigest : expectedRevisionDigest;
+        expectedExecutionRevisionDigest = revision;
+        expectedRevisionDigest = revision;
+    }
+
+    public void setExpectedExecutionRevisionDigest(String revision) {
+        expectedExecutionRevisionDigest = revision;
+        expectedRevisionDigest = revision;
+    }
 }

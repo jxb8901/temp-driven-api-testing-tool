@@ -10,7 +10,12 @@ import att.api.LoadRequest;
 import att.api.LoadResult;
 import att.api.RunRequest;
 import att.api.RunResult;
+import att.resource.PackageResourceInspector;
 import org.junit.jupiter.api.Test;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.BufferedReader;
@@ -34,6 +39,63 @@ import static org.junit.jupiter.api.Assertions.*;
 class WorkerMainTest {
     @TempDir Path temp;
     private final ObjectMapper mapper=new ObjectMapper();
+
+    @Test void authoringSourceWorkerDispatchesOnlyTheTypedTestcaseSidecarSelector() throws Exception {
+        Path root=temp.resolve("authoring-testcase-worker");
+        Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("templates/TARGET"));
+        Path testcaseRoot=Files.createDirectories(root.resolve("testcase"));
+        copyTree(Paths.get("schemas"),root.resolve("schemas"));
+        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/TARGET/template.yaml"),("schemaVersion: att-template/v3.6\nname: TARGET\n"
+                +"description: worker sidecar fixture\nactions: {note: {type: log, message: safe}}\n").getBytes(StandardCharsets.UTF_8));
+        String sidecar="schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n  sheet: Cases\n  caseId: Case ID\n  tags: Tags\n  dataColumns: payload=Payload\n"
+                +"stages:\n  - key: invoke\n    template: Template\n    dataColumns: request=Request\n";
+        Files.write(testcaseRoot.resolve("cases.yaml"),sidecar.getBytes(StandardCharsets.UTF_8));
+        try(Workbook workbook=new XSSFWorkbook();java.io.OutputStream output=Files.newOutputStream(testcaseRoot.resolve("cases.xlsx"))) {
+            Sheet sheet=workbook.createSheet("Cases");Row header=sheet.createRow(0);
+            String[] columns={"Case ID","Tags","Payload","Template","Request"};
+            for(int index=0;index<columns.length;index++)header.createCell(index).setCellValue(columns[index]);
+            Row row=sheet.createRow(1);row.createCell(0).setCellValue("T_1");row.createCell(1).setCellValue("smoke");
+            row.createCell(2).setCellValue("safe");row.createCell(3).setCellValue("TARGET");row.createCell(4).setCellValue("safe");
+            workbook.write(output);
+        }
+        String resourceId;
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,root.resolve("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),Collections.<String>emptyList(),Collections.<String>emptyList(),
+                65536,262144,false,true,"safe-package-files",Collections.<String>emptyList(),false,
+                Collections.<String>emptyList(),Collections.<String>emptyList())) {
+            JsonNode page=mapper.valueToTree(inspector.inspect("list","case",null,null,0,100));
+            resourceId=null;
+            for(JsonNode item:page.path("items"))if("ready".equals(item.path("state").asText())) {
+                resourceId=item.path("resourceId").asText();break;
+            }
+            assertNotNull(resourceId,page.toString());
+        }
+        Map<String,Object> request=fields("protocolVersion","att-worker/v1","jobId","testcase-sidecar-job",
+                "command","inspect","packageRoot",root.toString(),"config",root.resolve("config/config.yaml").toString(),
+                "environment","SIT","inspectionAction","authoring-source","authoringSourceKind","testcase",
+                "inspectionResourceId",resourceId,"authoringSourceSelector","sidecar","maxSourceBytes",65536,
+                "maxResponseBytes",262144,"sourceBrowsingEnabled",true,"sourceBrowsingPolicy","safe-package-files",
+                "sourceDenyGlobs",Collections.emptyList(),"sensitivePaths",Collections.emptyList(),
+                "sensitiveFieldPatterns",Collections.emptyList(),"redactionEnabled",false);
+        String java=Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString();
+        Path errorFile=temp.resolve("authoring-testcase-worker.stderr");
+        Process process=new ProcessBuilder(java,"-cp",System.getProperty("java.class.path"),WorkerMain.class.getName())
+                .redirectError(errorFile.toFile()).start();
+        process.getOutputStream().write(mapper.writeValueAsBytes(request));process.getOutputStream().close();
+        String output=read(process.getInputStream());String error=Files.exists(errorFile)
+                ?new String(Files.readAllBytes(errorFile),StandardCharsets.UTF_8):"";
+        assertEquals(0,process.waitFor(),error+"\n"+output);
+        JsonNode terminal=null;
+        for(String line:output.trim().split("\\R")) {
+            JsonNode event=mapper.readTree(line);
+            if("RESULT".equals(event.path("type").asText()))terminal=event;
+        }
+        assertNotNull(terminal,output);
+        assertEquals("testcase/cases.yaml",terminal.path("result").path("summary").path("inspection").path("logicalPath").asText());
+        assertEquals(sidecar,terminal.path("result").path("summary").path("inspection").path("text").asText());
+    }
 
     @Test void missingCheckpointIsMarkedDegradedAfterExpectedInterval() throws Exception {
         try(WorkerMain.CheckpointProjection projection=new WorkerMain.CheckpointProjection(temp,"missing")) {

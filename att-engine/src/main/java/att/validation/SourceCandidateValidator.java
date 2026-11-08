@@ -59,6 +59,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Stream;
 
@@ -116,7 +117,7 @@ public final class SourceCandidateValidator {
                     break;
                 }
                 collectEffectiveBindings(packageId, environment, runtime, effective, dependencies);
-                validateLoadCandidates(pkg, packageId, environment, effective, dependencies, diagnostics);
+                complete &= validateLoadCandidates(pkg, packageId, environment, effective, dependencies, diagnostics);
                 collectFileDependencies(pkg, packageId, environment, effective, dependencies);
                 collectPackageResourceDependencies(pkg, config, effective, packageId, environment, dependencies);
                 if (diagnostics.size() >= MAX_DIAGNOSTICS) {
@@ -140,21 +141,45 @@ public final class SourceCandidateValidator {
                     "One or more Package dependencies could not be resolved to an immutable source.",
                     "Correct the unavailable descriptor reference and validate the whole candidate again."));
         }
+        RevisionSet candidateRevisions = revisions;
+        try (PackageResourceInspector inspector = new PackageResourceInspector(pkg, config,
+                environments.isEmpty() ? null : environments.get(0), Collections.<String>emptyList(), 65536, 262144)) {
+            String packageSourceDigest = inspector.packageSourceRevisionDigest();
+            candidateRevisions = withPackageSourceRevision(revisions, packageId, packageSourceDigest);
+        } catch (Exception unavailable) {
+            complete = false;
+            diagnostics.add(diagnostic("ATT-PACKAGE-SOURCE-REVISION-UNAVAILABLE", Severity.ERROR,
+                    null, "packageSourceRevision", null,
+                    "The Package source identity could not be computed from the complete candidate.",
+                    "Correct unavailable Package files and validate the whole candidate again."));
+        }
+        invalid |= hasErrors(diagnostics);
         ValidationState state = invalid ? ValidationState.INVALID : complete ? ValidationState.VALID : ValidationState.INCOMPLETE;
-        return new CandidateValidation(Domain.PACKAGE_SOURCE, packageId, state,
-                state == ValidationState.VALID, validationFingerprint, revisions,
+        return new CandidateValidation(Domain.PACKAGE_SOURCE, packageId, state, complete,
+                state == ValidationState.VALID, validationFingerprint, candidateRevisions,
                 candidateDependencies, boundedDiagnostics(diagnostics));
     }
 
     public CandidateValidation validateCentralConfig(Path configFile, Path runtimeRoot,
                                                      RevisionSet revisions,
                                                      String validationFingerprint) throws Exception {
+        return validateCentralConfig(configFile, runtimeRoot, null, revisions, validationFingerprint);
+    }
+
+    /**
+     * Validates an online Config candidate against its trusted, revision-bound base. The
+     * baseline is used only for deployment-controlled fields that must remain unchanged.
+     */
+    public CandidateValidation validateCentralConfig(Path configFile, Path runtimeRoot,
+                                                     Path baselineConfigFile, RevisionSet revisions,
+                                                     String validationFingerprint) throws Exception {
         Path config = canonicalFile(configFile, "Runtime Config candidate");
         Path runtime = canonicalDirectory(runtimeRoot, "Runtime Config root");
         if (!config.startsWith(runtime)) throw new IllegalArgumentException("Runtime Config path is outside its source root");
         List<ValidationDiagnostic> diagnostics = new ArrayList<ValidationDiagnostic>();
         List<DependencyReference> dependencies = new ArrayList<DependencyReference>();
-        validateOnlineEligibility(config, diagnostics);
+        Path baseline = baselineConfigFile == null ? null : canonicalFile(baselineConfigFile, "Runtime Config baseline");
+        validateOnlineEligibility(config, baseline, diagnostics);
         AttValidationReport report = RuntimeConfigurationValidator.validate(config, runtime, null,
                 null, "SOURCE-CANDIDATE", true, true, null);
         report.limitOutputBytes(MAX_VALIDATION_REPORT_BYTES);
@@ -166,8 +191,9 @@ public final class SourceCandidateValidator {
         boolean invalid = hasErrors(diagnostics) || report.hasFailures();
         ValidationState state = invalid ? ValidationState.INVALID
                 : report.isComplete() && !hasUnknown(dependencies) ? ValidationState.VALID : ValidationState.INCOMPLETE;
+        boolean coverageComplete = report.isComplete() && !hasUnknown(dependencies);
         return new CandidateValidation(Domain.CENTRAL_RUNTIME_CONFIG, "central-runtime-config", state,
-                state == ValidationState.VALID, validationFingerprint, revisions,
+                coverageComplete, state == ValidationState.VALID, validationFingerprint, revisions,
                 deduplicate(dependencies), boundedDiagnostics(diagnostics));
     }
 
@@ -178,9 +204,12 @@ public final class SourceCandidateValidator {
         Path pkg = canonicalDirectory(packageRoot, "Package source");
         Path config = canonicalFile(configFile, "Runtime Config source");
         Path runtime = canonicalDirectory(runtimeRoot, "Runtime Config root");
-        String selected = environment == null || environment.trim().isEmpty() ? "default" : environment.trim();
+        String requested = environment == null || environment.trim().isEmpty() || "default".equalsIgnoreCase(environment.trim())
+                ? null : environment.trim();
         FrameworkConfig effective = new FrameworkConfigLoader().loadDiscovery(config, runtime, pkg,
-                "default".equalsIgnoreCase(selected) ? null : selected);
+                requested);
+        String selected = effective.environment() == null || effective.environment().trim().isEmpty()
+                ? "default" : effective.environment().trim();
         Map<String, ResolutionOrigin> origins = new LinkedHashMap<String, ResolutionOrigin>();
         if (effective.effectiveConfiguration() != null) {
             for (Map.Entry<String, String> entry : effective.effectiveConfiguration().origins().entrySet())
@@ -193,12 +222,23 @@ public final class SourceCandidateValidator {
         collectPackageResourceDependencies(pkg, config, effective, packageId, selected, bindings);
         PackageConfig manifest = PackageConfig.load(pkg);
         String schemaDigest = SchemaFiles.registryDigest();
-        String envFingerprint = digest(selected + "\n" + fileDigest(config) + "\n"
-                + (effective.effectiveConfiguration() == null ? "" : effective.effectiveConfiguration().identity()));
-        String effectiveDigest = effective.effectiveConfiguration() == null
-                ? digest(config.toString() + "\n" + selected) : effective.effectiveConfiguration().identity();
+        Map<String, String> semanticFingerprints = semanticFingerprints(pkg, runtime, effective, origins, bindings);
+        String effectiveDigest = digestFingerprints(selected, semanticFingerprints);
+        String envFingerprint = digest(selected + "\n" + effectiveDigest);
         RevisionSet resolvedRevisions = withResolvedRevisions(provenance, packageId, selected,
                 manifest.digest(), effectiveDigest, envFingerprint, schemaDigest, fileDigest(config));
+        Map<String, String> sourceDigests;
+        try (PackageResourceInspector inspector = new PackageResourceInspector(pkg, config, selected,
+                Collections.<String>emptyList(), 65536, 262144)) {
+            sourceDigests = inspector.sourceRevisionDigests(null);
+        }
+        RevisionIdentity packageSource = RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE,
+                packageId, sourceDigests.get("packageSourceRevision"));
+        RevisionIdentity businessSource = RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE,
+                packageId, sourceDigests.get("packageSourceRevision"));
+        RevisionIdentity executionRevision = RevisionIdentity.of(RevisionKind.EXECUTION_REVISION,
+                packageId + "@" + selected, sourceDigests.get("executionRevisionDigest"));
+        resolvedRevisions = withExecutionRevisions(resolvedRevisions, businessSource, packageSource, executionRevision);
         List<ValidationDiagnostic> diagnostics = new ArrayList<ValidationDiagnostic>();
         boolean complete = effective.helperDiscoveryFailures().isEmpty();
         List<DependencyReference> resolvedDependencies = deduplicate(bindings);
@@ -207,7 +247,25 @@ public final class SourceCandidateValidator {
                 null, "helpers", null, "One or more optional shared dependencies could not be inspected.",
                 "Review the helper descriptor diagnostics before relying on a complete impact result."));
         return new EffectiveResolution(packageId, selected, effectiveDigest, complete, resolvedRevisions,
-                origins, bindings, resolvedDependencies, diagnostics);
+                origins, semanticFingerprints, bindings, resolvedDependencies, diagnostics);
+    }
+
+    /** Builds an explicitly requested Testcase XML snapshot from the candidate's native authoring unit. */
+    public byte[] generateSnapshot(Path packageRoot, Path configFile, Path runtimeRoot,
+                                   String workbookPath) throws Exception {
+        Path pkg = canonicalDirectory(packageRoot, "Package candidate");
+        Path config = canonicalFile(configFile, "Runtime Config candidate");
+        Path runtime = canonicalDirectory(runtimeRoot, "Runtime Config root");
+        if (!config.startsWith(runtime)) throw new IllegalArgumentException("Runtime Config path is outside its source root");
+        if (workbookPath == null || workbookPath.trim().isEmpty()) throw new IllegalArgumentException("Workbook path is required");
+        Path workbook = pkg.resolve(workbookPath).normalize();
+        if (!workbook.startsWith(pkg) || !Files.isRegularFile(workbook, LinkOption.NOFOLLOW_LINKS)
+                || Files.isSymbolicLink(workbook)) throw new IllegalArgumentException("Workbook is unavailable inside the Package candidate");
+        FrameworkConfig effective = new FrameworkConfigLoader().loadDiscovery(config, runtime, pkg, null);
+        FrameworkConfig suite = new SuiteConfigResolver(pkg, effective).resolve(workbook);
+        List<TestCase> cases = new ExcelTestSuiteLoader(suite).load(workbook);
+        TestcaseSnapshotService snapshots = new TestcaseSnapshotService();
+        return snapshots.serialize(snapshots.build(suite, cases)).getBytes(StandardCharsets.UTF_8);
     }
 
     private static PackageValidator.ValidationSummary packageSummary(Path pkg, Path configFile,
@@ -221,7 +279,8 @@ public final class SourceCandidateValidator {
         return new PackageValidator(pkg, effective, configFile).validate(options);
     }
 
-    private static void validateOnlineEligibility(Path config, List<ValidationDiagnostic> diagnostics) throws Exception {
+    private static void validateOnlineEligibility(Path config, Path baseline,
+                                                 List<ValidationDiagnostic> diagnostics) throws Exception {
         Object rootValue = YamlSupport.load(config);
         if (!(rootValue instanceof Map)) {
             diagnostics.add(diagnostic("ATT-CONFIG-ONLINE-UNSUPPORTED", Severity.ERROR, "config/config.yaml",
@@ -230,14 +289,28 @@ public final class SourceCandidateValidator {
             return;
         }
         Map<?, ?> root = (Map<?, ?>) rootValue;
+        Map<?, ?> baselineRoot = Collections.emptyMap();
+        if (baseline != null && Files.isRegularFile(baseline, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isSymbolicLink(baseline)) {
+            Object baselineValue = YamlSupport.load(baseline);
+            if (baselineValue instanceof Map) baselineRoot = (Map<?, ?>) baselineValue;
+        }
+        boolean outputDirectoryChanged = baseline == null
+                ? root.containsKey("outputDirectory")
+                : root.containsKey("outputDirectory") != baselineRoot.containsKey("outputDirectory")
+                    || root.containsKey("outputDirectory")
+                        && !java.util.Objects.equals(canonical(root.get("outputDirectory")),
+                                canonical(baselineRoot.get("outputDirectory")));
         for (Object keyValue : root.keySet()) {
-            if (!(keyValue instanceof String) || !ONLINE_CONFIG_FIELDS.contains(keyValue)) {
+            boolean unchangedDeploymentOutput = "outputDirectory".equals(keyValue) && !outputDirectoryChanged;
+            if (!(keyValue instanceof String)
+                    || !ONLINE_CONFIG_FIELDS.contains(keyValue) && !unchangedDeploymentOutput) {
                 diagnostics.add(diagnostic("ATT-CONFIG-ONLINE-UNSUPPORTED", Severity.ERROR, "config/config.yaml",
                         String.valueOf(keyValue), null, "The candidate contains a field that cannot be hot-activated online.",
                         "Remove the unsupported field and apply deployment-controlled changes offline."));
             }
         }
-        if (root.containsKey("outputDirectory")) {
+        if (outputDirectoryChanged) {
             diagnostics.add(diagnostic("ATT-CONFIG-ONLINE-UNSUPPORTED", Severity.ERROR, "config/config.yaml",
                     "outputDirectory", null, "Changing the Worker output root is not supported by online Config publication.",
                     "Keep the configured output root and manage output changes through deployment configuration."));
@@ -268,12 +341,12 @@ public final class SourceCandidateValidator {
         return result;
     }
 
-    private static void validateLoadCandidates(Path packageRoot, String packageId, String environment,
-                                               FrameworkConfig effective,
-                                               List<DependencyReference> dependencies,
-                                               List<ValidationDiagnostic> diagnostics) throws Exception {
+    private static boolean validateLoadCandidates(Path packageRoot, String packageId, String environment,
+                                                  FrameworkConfig effective,
+                                                  List<DependencyReference> dependencies,
+                                                  List<ValidationDiagnostic> diagnostics) throws Exception {
         Path loadRoot = packageRoot.resolve("load").normalize();
-        if (!Files.exists(loadRoot, LinkOption.NOFOLLOW_LINKS)) return;
+        if (!Files.exists(loadRoot, LinkOption.NOFOLLOW_LINKS)) return true;
         if (Files.isSymbolicLink(loadRoot) || !Files.isDirectory(loadRoot, LinkOption.NOFOLLOW_LINKS))
             throw new IllegalArgumentException("Package load root is not a safe directory");
         List<Path> yamlFiles = new ArrayList<Path>();
@@ -285,7 +358,7 @@ public final class SourceCandidateValidator {
             diagnostics.add(diagnostic("ATT-LOAD-CANDIDATE-LIMIT", Severity.ERROR, "load/", null,
                     null, "LOAD candidate exceeds the descriptor validation limit.",
                     "Split or reduce the LOAD descriptor set."));
-            return;
+            return false;
         }
         LoadScenarioLoader loader = new LoadScenarioLoader(packageRoot);
         List<Path> templates = new ArrayList<Path>();
@@ -318,7 +391,7 @@ public final class SourceCandidateValidator {
             diagnostics.add(diagnostic("ATT-LOAD-TEMPLATE-LIMIT", Severity.ERROR, "load/templates/", null,
                     null, "Quick LOAD Template candidate exceeds the validation limit.",
                     "Reduce the Quick LOAD Template catalog."));
-            return;
+            return false;
         }
         att.load.LoadTemplateCatalog catalog = new att.load.LoadTemplateCatalog(packageRoot);
         for (Path template : templates) {
@@ -331,6 +404,7 @@ public final class SourceCandidateValidator {
         // This validates both model policy branches without creating a Run-capable target.
         loader.loadQuickLoadPolicy("virtualUsers");
         loader.loadQuickLoadPolicy("arrivalRate");
+        return true;
     }
 
     private static void collectEffectiveBindings(String packageId, String environment, Path runtimeRoot,
@@ -441,7 +515,9 @@ public final class SourceCandidateValidator {
         Map<String, DependencyReference> found = new LinkedHashMap<String, DependencyReference>();
         for (String reference : templates.paths()) collectFilePlans(packageRoot, packageId, environment,
                 resolver.snapshotFor(templates.load(reference), flows), found);
-        for (FlowDefinition flow : flows.all()) {
+        for (String flowId : flows.ids()) {
+            FlowDefinition flow = flows.get(flowId);
+            if (flow == null) continue;
             StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(),
                     flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
             collectFilePlans(packageRoot, packageId, environment, resolver.snapshotFor(body, flows), found);
@@ -454,15 +530,20 @@ public final class SourceCandidateValidator {
                                          Map<String, DependencyReference> output) throws Exception {
         if (snapshot == null || snapshot.projectRoot() == null || !snapshot.projectRoot().equals(packageRoot))
             throw new IllegalArgumentException("Compiled File-expression snapshot does not belong to this Package");
-        for (FileExpressionResolver.CompiledFileDependency plan : snapshot.dependencies()) {
-            String logical = plan.logicalPath();
-            String callSite = plan.sourceDirectory() + ":&{" + plan.authoredPath() + "}";
+        for (FileExpressionResolver.CompiledFileReference reference : snapshot.references()) {
+            String logical = reference.logicalPath();
+            String callSite = boundedCallSite(reference.callSite() + " -> &{" + reference.authoredPath() + "}");
             String fingerprint = fileDigest(packageRoot.resolve(logical));
-            String key = logical + "\n" + fingerprint;
+            String key = logical + "\n" + fingerprint + "\n" + callSite;
             output.putIfAbsent(key, new DependencyReference(DependencyKind.FILE, packageId, environment,
-                    plan.authoredPath(), logical, fingerprint, "canonical-file-expression-plan", callSite,
+                    reference.authoredPath(), logical, fingerprint, "canonical-file-expression-plan", callSite,
                     ReferenceCertainty.KNOWN));
         }
+    }
+
+    private static String boundedCallSite(String value) throws Exception {
+        if (value.length() <= 512) return value;
+        return value.substring(0, 440) + "#" + digest(value).substring(0, 64);
     }
 
     private static void collectPackageResourceDependencies(Path packageRoot, Path configFile,
@@ -618,6 +699,122 @@ public final class SourceCandidateValidator {
         return Collections.unmodifiableList(new ArrayList<DependencyReference>(unique.values()));
     }
 
+    /** Value-free, root-independent semantic projection for #335 and replay identity comparisons. */
+    private static Map<String, String> semanticFingerprints(Path packageRoot, Path runtimeRoot,
+                                                              FrameworkConfig effective,
+                                                              Map<String, ResolutionOrigin> origins,
+                                                              List<DependencyReference> dependencies) throws Exception {
+        Map<String, String> result = new TreeMap<String, String>();
+        putSemantic(result, "environment", effective.environment());
+        putSemantic(result, "timeoutMs", Integer.valueOf(effective.timeoutMs()));
+        putSemantic(result, "resources.templatesRoot", portablePath(packageRoot, effective.templatesRoot()));
+        putSemantic(result, "resources.testcaseRoot", portablePath(packageRoot, effective.testcasesRoot()));
+        putSemantic(result, "report.mode", effective.report().mode());
+        putSemantic(result, "report.fileNamePattern", effective.report().fileNamePattern());
+        putSemantic(result, "report.columns", effective.report().columns());
+        putSemantic(result, "report.junit.caseLogEmbedThresholdBytes", effective.report().junitCaseLogEmbedThresholdBytes());
+        putSemantic(result, "report.html.caseLogInlineLimitBytes", effective.report().htmlCaseLogInlineLimitBytes());
+        putSemantic(result, "run.defaultMode", effective.run().defaultMode());
+        putSemantic(result, "run.timestampFormat", effective.run().timestampFormat());
+        putSemantic(result, "run.runIdFormat", effective.run().runIdFormat());
+        putSemantic(result, "run.debugIdFormat", effective.run().debugIdFormat());
+        putSemantic(result, "caseIdColumn", effective.caseIdColumn());
+        putSemantic(result, "tagsColumn", effective.tagsColumn());
+        putSemantic(result, "headerRows", Integer.valueOf(effective.headerRows()));
+        putSemantic(result, "xml.namespaceMode", effective.xmlNamespaceMode());
+        putSemantic(result, "caseLog.yamlAnchors", Boolean.valueOf(effective.caseLogYamlAnchors()));
+        putSemantic(result, "processOutput.memoryLimitBytes", effective.processOutput().memoryLimitBytes());
+        putSemantic(result, "processOutput.artifactLimitBytes", effective.processOutput().artifactLimitBytes());
+        List<String> testdataPaths = new ArrayList<String>();
+        for (Path descriptor : effective.testdataDescriptors()) testdataPaths.add(portablePath(packageRoot, descriptor));
+        Collections.sort(testdataPaths);
+        putSemantic(result, "testdata.layers", testdataPaths);
+        putSemantic(result, "tools.ids", new TreeSet<String>(effective.tools().keySet()));
+        putSemantic(result, "dbhelpers.ids", new TreeSet<String>(effective.dbHelpers().keySet()));
+        putSemantic(result, "mqhelpers.ids", new TreeSet<String>(effective.mqHelpers().keySet()));
+        putSemantic(result, "sshhelpers.ids", new TreeSet<String>(effective.sshHelpers().keySet()));
+        putSemantic(result, "httphelpers.ids", new TreeSet<String>(effective.httpHelpers().keySet()));
+        for (Map.Entry<String, ResolutionOrigin> entry : origins.entrySet())
+            putSemantic(result, "origin:" + entry.getKey(), entry.getValue().name());
+
+        for (DependencyReference dependency : dependencies) {
+            if (dependency.canonicalPath == null) continue;
+            if (dependency.kind != DependencyKind.TOOL && dependency.kind != DependencyKind.HELPER
+                    && dependency.kind != DependencyKind.TESTDATA && dependency.kind != DependencyKind.LOAD_OVERLAY
+                    && dependency.kind != DependencyKind.FILE) continue;
+            Path sourceRoot = dependency.kind == DependencyKind.TOOL || dependency.kind == DependencyKind.HELPER
+                    ? runtimeRoot : packageRoot;
+            Path source = sourceRoot.resolve(dependency.canonicalPath).normalize();
+            if (!source.startsWith(sourceRoot)) throw new IOException("Candidate semantic dependency escapes its source root");
+            String sourceSemantic = dependency.kind == DependencyKind.FILE ? fileDigest(source)
+                    : isYaml(source) ? canonicalYaml(YamlSupport.load(source)) : fileDigest(source);
+            String key = "descriptor:" + dependency.kind.name() + ":" + safeKey(dependency.logicalId)
+                    + ":" + safeKey(dependency.relationship) + ":" + safeKey(dependency.callSite);
+            putSemantic(result, key, sourceSemantic);
+        }
+        return Collections.unmodifiableMap(result);
+    }
+
+    private static String digestFingerprints(String environment, Map<String, String> fingerprints) throws Exception {
+        StringBuilder canonical = new StringBuilder("environment=").append(environment).append('\n');
+        for (Map.Entry<String, String> entry : new TreeMap<String, String>(fingerprints).entrySet())
+            canonical.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
+        return digest(canonical.toString());
+    }
+
+    private static void putSemantic(Map<String, String> target, String key, Object value) throws Exception {
+        target.put(key, digest(canonical(value)));
+    }
+
+    private static String canonicalYaml(Object value) throws Exception {
+        return canonical(value);
+    }
+
+    private static String canonical(Object value) throws Exception {
+        if (value == null) return "null";
+        if (value instanceof Map) {
+            Map<String, Object> sorted = new TreeMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                if (secretKey(key)) sorted.put(key, entry.getValue() == null ? null
+                        : "<protected:" + digest(canonical(entry.getValue())) + ">");
+                else if (!"description".equalsIgnoreCase(key)) sorted.put(key, entry.getValue());
+            }
+            StringBuilder result = new StringBuilder("{");
+            for (Map.Entry<String, Object> entry : sorted.entrySet())
+                result.append(canonical(entry.getKey())).append(':').append(canonical(entry.getValue())).append(';');
+            return result.append('}').toString();
+        }
+        if (value instanceof Iterable) {
+            StringBuilder result = new StringBuilder("[");
+            for (Object item : (Iterable<?>) value) result.append(canonical(item)).append(';');
+            return result.append(']').toString();
+        }
+        if (value instanceof Path) return ((Path) value).normalize().toString().replace('\\', '/');
+        if (value instanceof Number) return new java.math.BigDecimal(value.toString()).stripTrailingZeros().toPlainString();
+        String text = String.valueOf(value);
+        return text.length() + ":" + text;
+    }
+
+    private static boolean secretKey(String key) {
+        String normalized = key.toLowerCase(Locale.ROOT).replaceAll("[^a-z]", "");
+        return normalized.contains("password") || normalized.contains("secret") || normalized.contains("token")
+                || normalized.contains("credential") || normalized.contains("privatekey")
+                || normalized.contains("apikey") || normalized.contains("authorization");
+    }
+
+    private static String portablePath(Path root, Path path) {
+        Path normalized = path.normalize();
+        Path boundary = root.toAbsolutePath().normalize();
+        if (normalized.isAbsolute() && normalized.startsWith(boundary))
+            return boundary.relativize(normalized).toString().replace('\\', '/');
+        return normalized.toString().replace('\\', '/');
+    }
+
+    private static String safeKey(String value) {
+        return value == null ? "" : value.replace('\\', '/').replace('\n', '_').replace('\r', '_');
+    }
+
     private static ResolutionOrigin origin(String value) {
         if ("package".equalsIgnoreCase(value)) return ResolutionOrigin.PACKAGE_MANIFEST;
         if ("request".equalsIgnoreCase(value) || "context".equalsIgnoreCase(value)) return ResolutionOrigin.REQUEST;
@@ -633,6 +830,8 @@ public final class SourceCandidateValidator {
                                                      String configDigest) {
         RevisionIdentity registration = source.packageRegistration;
         RevisionIdentity business = source.businessSource;
+        RevisionIdentity packageSource = source.packageSourceRevision;
+        RevisionIdentity execution = source.executionRevisionDigest;
         RevisionIdentity changeSet = source.changeSet;
         RevisionIdentity manifest = source.manifest != null ? source.manifest
                 : RevisionIdentity.of(RevisionKind.PACKAGE_MANIFEST, packageId, manifestDigest);
@@ -643,7 +842,22 @@ public final class SourceCandidateValidator {
         RevisionIdentity schema = source.engineSchema != null ? source.engineSchema
                 : RevisionIdentity.of(RevisionKind.ENGINE_SCHEMA, "installed-engine", schemaDigest);
         return new RevisionSet(registration, business, changeSet, manifest, config, resolved,
-                env, schema, source.scheduleSnapshot);
+                env, schema, source.scheduleSnapshot, packageSource, execution);
+    }
+
+    private static RevisionSet withExecutionRevisions(RevisionSet source, RevisionIdentity businessSource,
+                                                      RevisionIdentity packageSource, RevisionIdentity execution) {
+        return new RevisionSet(source.packageRegistration, businessSource, source.changeSet, source.manifest,
+                source.configSource, source.effectiveConfig, source.environment, source.engineSchema,
+                source.scheduleSnapshot, packageSource, execution);
+    }
+
+    private static RevisionSet withPackageSourceRevision(RevisionSet source, String packageId, String digest) {
+        RevisionIdentity packageSource = RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE, packageId, digest);
+        RevisionIdentity businessSource = RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE, packageId, digest);
+        return new RevisionSet(source.packageRegistration, businessSource, source.changeSet, source.manifest,
+                source.configSource, source.effectiveConfig, source.environment, source.engineSchema,
+                source.scheduleSnapshot, packageSource, source.executionRevisionDigest);
     }
 
     private static Map<?, ?> objectMap(Object value) {

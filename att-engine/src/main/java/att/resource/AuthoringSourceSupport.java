@@ -46,6 +46,12 @@ final class AuthoringSourceSupport {
     private static final Pattern YAML_MAPPING = Pattern.compile(
             "(?im)(?<![A-Za-z0-9_.-])[\"']?[A-Za-z_][A-Za-z0-9_.-]*(?:\\[[0-9]+\\])?[\"']?\\s*:");
     private static final Pattern XML_REFERENCE = Pattern.compile("&\\{[^{}\\r\\n]{1,1024}\\}");
+    private static final Pattern HTML_TAG = Pattern.compile("(?is)<\\s*([A-Za-z][A-Za-z0-9:._-]*)\\b([^>]*)>");
+    private static final Pattern HTML_ATTRIBUTE = Pattern.compile(
+            "(?is)([A-Za-z_:][A-Za-z0-9_.:-]*)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))");
+    private static final Pattern HTML_DECLARATION = Pattern.compile("(?is)<!--.*?-->|<!doctype\\s+html[^>]*>");
+    private static final Pattern HTML_CLASSIFICATION_ELEMENT = Pattern.compile(
+            "(?is)<\\s*classification\\b[^>]*>(.*?)</\\s*classification\\s*>");
     private static final ObjectMapper JSON = new ObjectMapper(jsonFactory())
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
@@ -143,6 +149,7 @@ final class AuthoringSourceSupport {
             }
             if(lower.endsWith(".xml"))return protectedXml(text,sensitivePaths,sensitiveFieldPatterns,0);
             if(lower.endsWith(".csv"))return protectedCsv(text,sensitivePaths,sensitiveFieldPatterns,0);
+            if(lower.endsWith(".html"))return protectedHtml(text,sensitivePaths,sensitiveFieldPatterns);
             return protectedText(text,sensitivePaths,sensitiveFieldPatterns);
         } catch(Exception malformedOrUnknown) {
             return true;
@@ -351,6 +358,42 @@ final class AuthoringSourceSupport {
 
     private static boolean protectedText(String text,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) {
         return protectedScalar(text,sensitivePaths,sensitiveFieldPatterns,0);
+    }
+
+    private static boolean protectedHtml(String text,List<String> sensitivePaths,List<String> sensitiveFieldPatterns) {
+        if(protectedAssignments(text,sensitivePaths,sensitiveFieldPatterns))return true;
+        Matcher tags=HTML_TAG.matcher(text);
+        while(tags.find()) {
+            String tag=tags.group(1).toLowerCase(Locale.ROOT);
+            if(SecretProtection.sensitiveName(tag)||matchesConfiguredField(tag,sensitiveFieldPatterns)
+                    ||matchesConfiguredPath(tag,sensitivePaths))return true;
+            Map<String,String> attributes=new LinkedHashMap<String,String>();
+            Matcher values=HTML_ATTRIBUTE.matcher(tags.group(2));
+            while(values.find()) {
+                String key=values.group(1).toLowerCase(Locale.ROOT);
+                String value=values.group(2)!=null?values.group(2):values.group(3)!=null?values.group(3):values.group(4);
+                attributes.put(key,value);
+                if("classification".equalsIgnoreCase(key)&&protectedClassification(value))return true;
+                if("secret".equalsIgnoreCase(key)&&"true".equalsIgnoreCase(value.trim()))return true;
+                if((SecretProtection.sensitiveName(key)||matchesConfiguredField(key,sensitiveFieldPatterns)
+                        ||matchesConfiguredPath(key,sensitivePaths))&&hasText(value))return true;
+                if(protectedScalar(value,sensitivePaths,sensitiveFieldPatterns,1))return true;
+            }
+            String field=attributes.containsKey("name")?attributes.get("name"):attributes.get("id");
+            String value=attributes.containsKey("value")?attributes.get("value"):attributes.get("content");
+            String inputType=attributes.get("type");
+            if(field!=null&&value!=null&&(SecretProtection.sensitiveName(field)
+                    ||matchesConfiguredField(field,sensitiveFieldPatterns)||matchesConfiguredPath(field,sensitivePaths))
+                    &&hasText(value))return true;
+            if(inputType!=null&&"password".equalsIgnoreCase(inputType)&&hasText(value))return true;
+        }
+        Matcher classifications=HTML_CLASSIFICATION_ELEMENT.matcher(text);
+        while(classifications.find()) {
+            String value=HTML_TAG.matcher(classifications.group(1)).replaceAll(" ");
+            if(protectedClassification(value))return true;
+        }
+        String visibleText=HTML_TAG.matcher(HTML_DECLARATION.matcher(text).replaceAll(" ")).replaceAll(" ");
+        return protectedScalar(visibleText,sensitivePaths,sensitiveFieldPatterns,0);
     }
 
     private static boolean protectedClassification(Object value) {

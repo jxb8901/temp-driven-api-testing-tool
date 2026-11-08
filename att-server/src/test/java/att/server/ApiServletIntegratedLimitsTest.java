@@ -311,6 +311,86 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void realChangeSetServletResponsesMatchVersionedSchemaAndNoStoreContract() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("change-set-schema-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        Path libs=workerLibraries("change-set-schema-libs");
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"change-set-schema-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,libs)) {
+            addAuthoringUsers(runtime);
+            ApiServlet servlet=servlet(runtime);
+            com.fasterxml.jackson.databind.JsonNode schemaNode;
+            try(java.io.InputStream stream=getClass().getResourceAsStream("/schemas/att-source-management-v1.schema.json")) {
+                assertNotNull(stream);
+                schemaNode=ServerRuntime.JSON.readTree(stream);
+            }
+            com.networknt.schema.JsonSchema schema=com.networknt.schema.JsonSchemaFactory
+                    .getInstance(com.networknt.schema.SpecVersion.VersionFlag.V202012).getSchema(schemaNode);
+
+            Captured packageSource=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Collections.singletonMap("type","manifest"),new byte[0]);
+            JsonNode packageRevisions=ServerRuntime.JSON.readTree(packageSource.body());
+            assertEquals(200,packageSource.status);
+            Map<String,Object> packageOperation=Map.of("operation","create","path","files/wire.txt","content","safe static file\n");
+            Map<String,Object> packageStage=Map.of("baseSourceRevision",packageRevisions.path("baseSourceRevision").asText(),
+                    "registryRevision",packageRevisions.path("registryRevision").asText(),"operations",List.of(packageOperation));
+            Captured staged=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(packageStage));
+            JsonNode stageBody=assertChangeSetSchema(schema,staged,201);
+            assertEquals("draft",stageBody.path("state").asText());
+            assertTrue(stageBody.path("revisions").path("packageRegistration").isObject());
+            String changeId=stageBody.path("changeSetId").asText();
+
+            for(String action:List.of("validate","review")) {
+                Captured response=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+changeId+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+                assertChangeSetSchema(schema,response,200);
+            }
+            Captured published=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+changeId+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+            assertChangeSetSchema(schema,published,200);
+
+            Captured currentPackage=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Collections.singletonMap("type","manifest"),new byte[0]);
+            JsonNode currentPackageRevisions=ServerRuntime.JSON.readTree(currentPackage.body());
+            Captured discardStage=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("baseSourceRevision",currentPackageRevisions.path("baseSourceRevision").asText(),
+                            "registryRevision",currentPackageRevisions.path("registryRevision").asText(),"operations",
+                            List.of(Map.of("operation","create","path","files/discard.txt","content","discard me\n")))));
+            JsonNode discardDraft=assertChangeSetSchema(schema,discardStage,201);
+            Captured discarded=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"
+                            +discardDraft.path("changeSetId").asText()+"/discard",Collections.emptyMap(),
+                    "{}".getBytes(StandardCharsets.UTF_8));
+            assertChangeSetSchema(schema,discarded,200);
+
+            Captured centralSource=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                    Collections.singletonMap("path","config/config.yaml"),new byte[0]);
+            JsonNode centralRevisions=ServerRuntime.JSON.readTree(centralSource.body());
+            Captured centralStage=invokeAs(servlet,"admin","POST","/configuration/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("baseSourceRevision",centralRevisions.path("baseSourceRevision").asText(),
+                            "operations",List.of(Map.of("operation","replace","path","config/config.yaml",
+                                    "content",Files.readString(runtimeConfig))))));
+            JsonNode centralDraft=assertChangeSetSchema(schema,centralStage,201);
+            assertTrue(centralDraft.path("revisions").path("packageRegistration").isNull(),
+                    "central Config responses preserve absent Package registration identities as null");
+            Captured centralDiscard=invokeAs(servlet,"admin","POST","/configuration/change-sets/"
+                            +centralDraft.path("changeSetId").asText()+"/discard",Collections.emptyMap(),
+                    "{}".getBytes(StandardCharsets.UTF_8));
+            assertChangeSetSchema(schema,centralDiscard,200);
+        }
+    }
+
+    private static JsonNode assertChangeSetSchema(com.networknt.schema.JsonSchema schema,Captured response,int status) throws Exception {
+        assertEquals(status,response.status,new String(response.body(),StandardCharsets.UTF_8));
+        assertEquals("private, no-store",response.headers.get("Cache-Control"));
+        JsonNode body=ServerRuntime.JSON.readTree(response.body());
+        assertEquals("limits-test",body.path("requestId").asText());
+        java.util.Set<com.networknt.schema.ValidationMessage> errors=schema.validate(body);
+        assertTrue(errors.isEmpty(),errors.toString()+" response="+body);
+        return body;
+    }
+
     @Test void packageAuthoringSourceTimeoutIs504() throws Exception {
         assertAuthoringSourceTimeout(false,"package-authoring-timeout");
     }
