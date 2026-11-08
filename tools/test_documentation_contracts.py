@@ -48,7 +48,7 @@ class DocumentationContractsTest(unittest.TestCase):
 
     def test_server_api_schema_contracts_are_included_in_documentation_gate(self):
         corpus = schema_contract_corpus()
-        self.assertIn('"$id": "att-source-management/v1"', corpus)
+        self.assertIn('"$id": "https://att.example/schemas/att-source-management/v1"', corpus)
 
     def test_load_time_series_retention_contract_matches_current_metrics(self):
         root = Path(__file__).resolve().parents[1]

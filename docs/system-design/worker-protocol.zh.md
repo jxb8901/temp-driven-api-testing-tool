@@ -4,7 +4,7 @@
 
 ## Request
 
-Request 是 JSON object。`protocolVersion` 必須為 `att-worker/v1`；不支援的版本會先回傳 `DIAGNOSTIC`，再回傳 `INVALID` `RESULT`。空白、格式錯誤、截斷或多份 JSON 文件都使用相同的終端 event 順序拒絕。`jobId` 是 Worker orchestration event 的識別碼，與 operation result 中 ATT 的 `executionId` 分開。`command` 可為 `run`、`debug`、`load`、`validate` 或 `snapshot`。`packageRoot` 必填，並會獨立於 process working directory 傳入 Engine。
+Request 是 JSON object。`protocolVersion` 必須為 `att-worker/v1`；不支援的版本會先回傳 `DIAGNOSTIC`，再回傳 `INVALID` `RESULT`。空白、格式錯誤、截斷或多份 JSON 文件都使用相同的終端 event 順序拒絕。`jobId` 是 Worker orchestration event 的識別碼，與 operation result 中 ATT 的 `executionId` 分開。`command` 可為 `run`、`debug`、`load`、`validate` 或 `snapshot`。`packageRoot` 必填，並會獨立於 process working directory 傳入 Engine。`expectedExecutionRevisionDigest` 是 canonical execution-bound Package identity；`expectedRevisionDigest` 保留為相容 alias，供 rolling upgrade 使用。兩者同時出現時必須相同。
 
 常用選填欄位包括 `config`、`environment`、`outputDirectory` 和 `runId`。相對 config、suite、scenario 及 output 路徑均以指定的 package root 為基準。`target` 為 Debug 或不含 scenario 的 Load 提供 `type` 和 `id`。`suites`、`suiteDirectory`、`caseIds`、`tags`、`excludeTags` 及 `all` 用於選取 Run、Validate 或 Snapshot 的輸入。`load` 可包含 `users`、`arrivalRate`、`duration` 和 `maxConcurrent` 等 policy override；`overrides` 使用 ATT 接受的安全 value syntax 傳遞 typed input、argument 及 variable 指派。
 

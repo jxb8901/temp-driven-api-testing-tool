@@ -181,4 +181,26 @@ class AuthoringSourceSupportTest {
         assertEquals("SELECT * FROM payments WHERE sequence = 7;\n",
                 AuthoringSourceSupport.read(root,sql,"safe-query.sql",4096).get("text"));
     }
+
+    @Test void allowsBenignDoctypeHtmlAndRejectsSecretFieldsInHtml() throws Exception {
+        Path root=Files.createDirectories(temp.resolve("html-sources"));
+        Path benign=root.resolve("readme.html");
+        String html="<!DOCTYPE html>\n<html><head><title>Package guide</title></head>"
+                +"<body><h1>Safe authoring notes</h1><p>Use the documented test inputs.</p></body></html>\n";
+        Files.write(benign,html.getBytes(StandardCharsets.UTF_8));
+        assertEquals(html,AuthoringSourceSupport.read(root,benign,"readme.html",4096).get("text"));
+
+        Path secret=root.resolve("credentials.html");
+        Files.write(secret,("<!DOCTYPE html><html><body>"
+                +"<form><input type=\"password\" name=\"servicePassword\" value=\"html-password-canary\"></form>"
+                +"</body></html>").getBytes(StandardCharsets.UTF_8));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,secret,"credentials.html",4096));
+
+        Path token=root.resolve("token.html");
+        Files.write(token,"<!DOCTYPE html><p>apiKey: html-token-canary</p>".getBytes(StandardCharsets.UTF_8));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,token,"token.html",4096),
+                "The independent SecretProtection.text gate still rejects credential assignments in HTML");
+    }
 }

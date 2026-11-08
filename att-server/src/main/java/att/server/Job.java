@@ -14,6 +14,9 @@ final class Job {
     String scheduleOccurrenceId, originatingScheduleId;
     String submissionSource="manual",scheduleOwner,executionPrincipal,submittedBy,triggeredBy;
     String executionSpec, replayUnavailable, rerunOfJobId, replayIntent, replayOwner;
+    volatile String acceptedPackageTreeDigest;
+    volatile java.nio.file.Path acceptedCentralSourceRoot;
+    volatile String acceptedCentralTreeDigest;
     final Instant createdAt=Instant.now();
     volatile long requestReceivedNanos=System.nanoTime();
     volatile long admittedNanos,workerStartedNanos,workerSpawnStartedNanos,workerSpawnedNanos;

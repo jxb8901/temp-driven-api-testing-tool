@@ -56,6 +56,9 @@ final class ChangeSetPublisher implements AutoCloseable {
     private static final Pattern FILE_EXPRESSION = Pattern.compile("&\\{([^{}\\r\\n]{1,512})\\}");
     private static final Set<String> TEXT_EXTENSIONS = set("yaml", "yml", "xml", "json", "csv", "tsv", "txt", "sql", "properties", "md", "xlsx", "xls");
     private static final Set<String> BINARY_EXTENSIONS = set("xlsx", "xls");
+    private static final Set<String> CENTRAL_REFERENCE_EXTENSIONS = set("yaml", "yml", "xml", "json", "csv", "tsv", "txt", "sql",
+            "properties", "md", "sh", "bash", "py", "js", "ts", "groovy", "rb", "pl", "ps1", "bat", "cmd", "xsd", "wsdl", "html",
+            "graphql", "gql");
 
     interface Access {
         Scope resolve(String domain, String scopeId, String actor, boolean systemSettingsWrite) throws Exception;
@@ -114,11 +117,17 @@ final class ChangeSetPublisher implements AutoCloseable {
         final boolean valid;
         final String revision;
         final String code;
-        private ValidationResult(boolean valid, String revision, String code) {
-            this.valid = valid; this.revision = revision; this.code = code;
+        final att.server.api.source.SourceManagementContracts.RevisionSet revisions;
+        private ValidationResult(boolean valid, String revision, String code,
+                                 att.server.api.source.SourceManagementContracts.RevisionSet revisions) {
+            this.valid = valid; this.revision = revision; this.code = code; this.revisions = revisions;
         }
-        static ValidationResult accepted(String revision) { return new ValidationResult(true, revision, null); }
-        static ValidationResult rejected(String code) { return new ValidationResult(false, null, safeCode(code)); }
+        static ValidationResult accepted(String revision) { return accepted(revision, null); }
+        static ValidationResult accepted(String revision,
+                att.server.api.source.SourceManagementContracts.RevisionSet revisions) {
+            return new ValidationResult(true, revision, null, revisions);
+        }
+        static ValidationResult rejected(String code) { return new ValidationResult(false, null, safeCode(code), null); }
     }
 
     static final class GateDecision {
@@ -170,6 +179,15 @@ final class ChangeSetPublisher implements AutoCloseable {
         String configRevision() { return configRevision; }
         String schemaRevision() { return schemaRevision; }
         String changeSetId() { return id; }
+        String packageSourceRevision() throws Exception {
+            if (!PACKAGE_SOURCE.equals(scope.domain)) return null;
+            Map<String, String> hashes = new LinkedHashMap<String, String>(base.packageIndex.hashes);
+            for (Map.Entry<String, byte[]> entry : changes.entrySet()) {
+                if (entry.getValue() == null) hashes.remove(entry.getKey());
+                else hashes.put(entry.getKey(), hash(entry.getValue()));
+            }
+            return digestHashes(hashes);
+        }
         List<Map<String, Object>> changedFiles() { return diffView(diff); }
         Set<String> paths() { return Collections.unmodifiableSet(new HashSet<String>(changes.keySet())); }
         String packageBaseHash(String logicalPath) { return base.packageIndex.hashes.get(logicalPath); }
@@ -204,6 +222,19 @@ final class ChangeSetPublisher implements AutoCloseable {
             byte[] bytes = readBounded(source);
             String expected = base.centralIndex.hashes.get(path);
             if (!matchesHash(expected, bytes)) throw new IOException("Pinned central source changed");
+            return bytes;
+        }
+
+        /** Trusted base Config bytes bound to this candidate's source fence. */
+        byte[] readBaseCentral(String logicalPath) throws IOException {
+            String path = normalizePath(logicalPath);
+            Path source = base.centralIndex.files.get(path);
+            if (source == null) return null;
+            if (Files.isSymbolicLink(source) || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS))
+                throw new IOException("Pinned central baseline is unavailable");
+            byte[] bytes = readBounded(source);
+            if (!matchesHash(base.centralIndex.hashes.get(path), bytes))
+                throw new IOException("Pinned central baseline changed");
             return bytes;
         }
 
@@ -285,6 +316,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         final List<Diff> diff;
         final Map<String, SnapshotAuthorization> generatedSnapshots = new LinkedHashMap<String, SnapshotAuthorization>();
         String validationRevision;
+        att.server.api.source.SourceManagementContracts.RevisionSet validationRevisions;
         boolean reviewed;
         boolean publishing;
         Draft(String id, String actor, Scope scope, RevisionState base, Instant expires, Map<String, byte[]> changes,
@@ -412,6 +444,7 @@ final class ChangeSetPublisher implements AutoCloseable {
             audit.record(actor, "SOURCE_CHANGE_SET_VALIDATE", domain, scopeId,
                     auditDetail(requestId, "changeSetId=" + id + " revision=" + revision + " outcome=VALIDATED paths=" + pathList(draft.diff)));
             draft.validationRevision = revision;
+            draft.validationRevisions = result.revisions;
             draft.reviewed = false;
             return view(draft, "validated");
         } catch (ValidationRejected rejected) {
@@ -480,6 +513,7 @@ final class ChangeSetPublisher implements AutoCloseable {
             draft.generatedSnapshots.put(target, new SnapshotAuthorization(workbook, hash(workbookBytes),
                     sidecar, hash(sidecarBytes), snapshotHash));
             draft.validationRevision = null;
+            draft.validationRevisions = null;
             draft.reviewed = false;
             audit.record(actor, "SOURCE_CHANGE_SET_SNAPSHOT_GENERATE", domain, scopeId,
                     auditDetail(requestId, "changeSetId=" + id + " workbook=" + workbook
@@ -518,6 +552,7 @@ final class ChangeSetPublisher implements AutoCloseable {
                 auditDetail(requestId, "changeSetId=" + id + " revision=" + draft.base.sourceRevision
                         + " outcome=REVIEWED paths=" + pathList(draft.diff)));
         draft.reviewed = true;
+        if (checked.revisions != null) draft.validationRevisions = checked.revisions;
         return view(draft, "reviewed");
         } finally { sourceReadLock.unlock(); }
     }
@@ -555,6 +590,7 @@ final class ChangeSetPublisher implements AutoCloseable {
                         ? "ATT-CHANGESET-VALIDATION-UNAVAILABLE" : validated.code);
                 String newValidationRevision = validated.revision == null ? validationRevision(candidate) : requireDigest(validated.revision);
                 if (!draft.validationRevision.equals(newValidationRevision)) throw new Conflict();
+                if (validated.revisions != null) draft.validationRevisions = validated.revisions;
 
                 if (CENTRAL_RUNTIME_CONFIG.equals(domain)) {
                     GateDecision decision;
@@ -602,10 +638,11 @@ final class ChangeSetPublisher implements AutoCloseable {
             }
             synchronized (this) { removeDraft(draft); }
             Map<String, Object> result = new LinkedHashMap<String, Object>();
+            result.put("schemaVersion", "att-source-change-set-publication/v1");
             result.put("published", Boolean.TRUE); result.put("domain", domain); result.put("scopeId", scopeId);
             result.put("changeSetId", id); result.put("beforeRevision", draft.base.sourceRevision);
             result.put("revision", afterRevision); result.put("validationRevision", draft.validationRevision);
-            result.put("auditConfirmed", Boolean.valueOf(auditConfirmed));
+            result.put("auditConfirmed", Boolean.valueOf(auditConfirmed)); result.put("noStore", Boolean.TRUE);
             if (approvalRevision != null) result.put("configGateRevision", approvalRevision);
             result.put("changedFiles", draftDiffView(draft));
             return result;
@@ -636,7 +673,8 @@ final class ChangeSetPublisher implements AutoCloseable {
                         + " outcome=DISCARDED paths=" + pathList(draft.diff)));
         removeDraft(draft);
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("discarded", Boolean.TRUE); result.put("changeSetId", id);
+        result.put("schemaVersion", "att-source-change-set-discard/v1");
+        result.put("discarded", Boolean.TRUE); result.put("changeSetId", id); result.put("noStore", Boolean.TRUE);
         return result;
     }
 
@@ -906,7 +944,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         if (CENTRAL_RUNTIME_CONFIG.equals(domain) && !lower.equals("config") && !lower.startsWith("config/")) return true;
         for (String part : lower.split("/")) {
             if (set("secrets", "credentials", "private", "auth", "roles", "security", "bootstrap",
-                    "schemas", "output", "jobs", "cache", ".git", ".att", "target", "logs", "reports",
+                    "schemas", "output", "jobs", "cache", "node_modules", ".npm", ".yarn", ".git", ".att", "target", "logs", "reports",
                     "results", "artifacts", "work", "server").contains(part)) return true;
             if (!CENTRAL_RUNTIME_CONFIG.equals(domain) && "config".equals(part)) return true;
         }
@@ -924,12 +962,50 @@ final class ChangeSetPublisher implements AutoCloseable {
         return true;
     }
 
-    private static boolean centralPath(String path) {
+    static boolean centralPath(String path) {
         if ("config/config.yaml".equals(path)) return true;
         return path.startsWith("config/environments/") || path.startsWith("config/tools/")
                 || path.startsWith("config/toolgroups/") || path.startsWith("config/tool-groups/")
                 || path.startsWith("config/dbhelpers/") || path.startsWith("config/mqhelpers/")
                 || path.startsWith("config/httphelpers/") || path.startsWith("config/sshhelpers/");
+    }
+
+    /** The bounded, value-free source closure retained for central Config revisions. */
+    static boolean centralSnapshotFile(String path) {
+        String normalized = path.replace('\\', '/').toLowerCase(Locale.ROOT);
+        // This bounded reference index is consumed by safe source inspection to link a
+        // config/config.yaml reference to its helper file. Keep it in pinned revisions,
+        // but do not add it to centralPath(): it is metadata, not an authorable category.
+        return "config/source-references.yaml".equals(normalized)
+                || centralPath(normalized) && centralReferencedTextExtension(normalized)
+                || !excludedDirectory(CENTRAL_RUNTIME_CONFIG, normalized)
+                && authorableExtension(normalized, CENTRAL_RUNTIME_CONFIG);
+    }
+
+    static boolean centralSnapshotReferenceFile(String path) {
+        String normalized = path.replace('\\', '/').toLowerCase(Locale.ROOT);
+        return normalized.startsWith("config/") && !excludedDirectory(CENTRAL_RUNTIME_CONFIG, normalized)
+                && centralReferencedTextExtension(normalized);
+    }
+
+    static boolean centralReferencedTextExtension(String path) {
+        String value = path.toLowerCase(Locale.ROOT);
+        int dot = value.lastIndexOf('.');
+        return dot >= 0 && CENTRAL_REFERENCE_EXTENSIONS.contains(value.substring(dot + 1));
+    }
+
+    /** Directory traversal predicate paired with centralSnapshotFile; unrelated ATT_HOME trees are skipped. */
+    static boolean centralSnapshotDirectory(String path) {
+        String normalized = path.replace('\\', '/').toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty()) return true;
+        if (excludedDirectory(CENTRAL_RUNTIME_CONFIG, normalized)) return false;
+        if ("config".equals(normalized)) return true;
+        for (String prefix : List.of("config/environments", "config/tools", "config/toolgroups",
+                "config/tool-groups", "config/dbhelpers", "config/mqhelpers", "config/httphelpers",
+                "config/sshhelpers")) {
+            if (normalized.equals(prefix) || normalized.startsWith(prefix + "/")) return true;
+        }
+        return false;
     }
 
     private static void rejectDirectTestcaseSnapshot(Scope scope, RevisionState base, String path,
@@ -1133,16 +1209,91 @@ final class ChangeSetPublisher implements AutoCloseable {
     }
 
     private Map<String, Object> view(Draft draft, String state) throws Exception {
-        Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("changeSetId", draft.id); result.put("domain", draft.scope.domain); result.put("scopeId", draft.scope.scopeId);
-        result.put("state", draft.reviewed ? "reviewed" : draft.validationRevision == null ? state : "validated");
-        result.put("baseSourceRevision", draft.base.sourceRevision);
-        if (draft.base.registryRevision != null) result.put("registryRevision", draft.base.registryRevision);
-        if (draft.base.manifestRevision != null) result.put("manifestRevision", draft.base.manifestRevision);
-        result.put("configRevision", draft.base.configRevision); result.put("schemaRevision", draft.base.schemaRevision);
-        result.put("expiresAt", draft.expires.toString()); result.put("changedFiles", draftDiffView(draft));
-        if (draft.validationRevision != null) result.put("validationRevision", draft.validationRevision);
-        return result;
+        String currentState = draft.reviewed ? "reviewed" : draft.validationRevision == null ? state : "validated";
+        List<Map<String, Object>> changedFiles = draftDiffView(draft);
+        att.server.api.source.SourceManagementContracts.ChangeSetView dto =
+                new att.server.api.source.SourceManagementContracts.ChangeSetView(draft.id,
+                        att.server.api.source.SourceManagementContracts.Domain.valueOf(draft.scope.domain),
+                        draft.scope.scopeId,
+                        att.server.api.source.SourceManagementContracts.DraftState.valueOf(currentState.toUpperCase(Locale.ROOT)),
+                        draft.validationRevision != null && draft.validationRevisions != null
+                                ? draft.validationRevisions : revisionSet(draft),
+                        draftEtag(draft, currentState), true, categories(draft),
+                        manifestChanged(draft), Collections.emptyList(), Collections.emptyList(),
+                        draft.base.sourceRevision, draft.base.registryRevision, draft.base.manifestRevision,
+                        draft.base.configRevision, draft.base.schemaRevision, draft.expires.toString(),
+                        changedFiles, draft.validationRevision, null, null, null, null);
+        return ServerRuntime.JSON.convertValue(dto, LinkedHashMap.class);
+    }
+
+    private static att.server.api.source.SourceManagementContracts.RevisionSet revisionSet(Draft draft) {
+        att.server.api.source.SourceManagementContracts.RevisionIdentity registration = draft.base.registryRevision == null ? null
+                : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                att.server.api.source.SourceManagementContracts.RevisionKind.PACKAGE_REGISTRATION,
+                "package-registry", draft.base.registryRevision);
+        att.server.api.source.SourceManagementContracts.RevisionIdentity packageSource =
+                draft.base.packageTreeRevision == null ? null
+                        : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                        att.server.api.source.SourceManagementContracts.RevisionKind.PACKAGE_SOURCE,
+                        draft.scope.scopeId, draft.base.packageTreeRevision);
+        att.server.api.source.SourceManagementContracts.RevisionIdentity changeSet =
+                att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                        att.server.api.source.SourceManagementContracts.RevisionKind.CHANGE_SET,
+                        draft.id, draft.validationRevision == null ? draft.id : draft.validationRevision);
+        att.server.api.source.SourceManagementContracts.RevisionIdentity manifest = draft.base.manifestRevision == null ? null
+                : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                att.server.api.source.SourceManagementContracts.RevisionKind.PACKAGE_MANIFEST,
+                draft.scope.scopeId, draft.base.manifestRevision);
+        att.server.api.source.SourceManagementContracts.RevisionIdentity config = draft.base.configRevision == null ? null
+                : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE,
+                "central-runtime-config", draft.base.configRevision);
+        att.server.api.source.SourceManagementContracts.RevisionIdentity schema = draft.base.schemaRevision == null ? null
+                : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                att.server.api.source.SourceManagementContracts.RevisionKind.ENGINE_SCHEMA,
+                "installed-engine", draft.base.schemaRevision);
+        return new att.server.api.source.SourceManagementContracts.RevisionSet(registration, null, changeSet,
+                manifest, config, null, null, schema, null, packageSource, null);
+    }
+
+    private static String draftEtag(Draft draft, String state) throws Exception {
+        List<String> values = new ArrayList<String>();
+        values.add(draft.id); values.add(state); values.add(draft.base.sourceRevision);
+        values.add(String.valueOf(draft.validationRevision));
+        for (Diff diff : draft.diff) {
+            values.add(diff.operation); values.add(diff.path); values.add(String.valueOf(diff.targetPath));
+            values.add(String.valueOf(diff.oldHash)); values.add(String.valueOf(diff.newHash));
+        }
+        return hash(join(values.toArray(new String[values.size()])));
+    }
+
+    private static List<att.server.api.source.SourceManagementContracts.PackageCategory> categories(Draft draft) {
+        java.util.EnumSet<att.server.api.source.SourceManagementContracts.PackageCategory> result =
+                java.util.EnumSet.noneOf(att.server.api.source.SourceManagementContracts.PackageCategory.class);
+        if (!PACKAGE_SOURCE.equals(draft.scope.domain)) return Collections.emptyList();
+        for (Diff diff : draft.diff) {
+            addCategory(result, diff.path);
+            if (diff.targetPath != null) addCategory(result, diff.targetPath);
+        }
+        return new ArrayList<att.server.api.source.SourceManagementContracts.PackageCategory>(result);
+    }
+
+    private static void addCategory(Set<att.server.api.source.SourceManagementContracts.PackageCategory> result, String path) {
+        if (path == null || "package.yaml".equals(path)) return;
+        if (path.startsWith("testcase/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.TESTCASE);
+        else if (path.startsWith("load/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.LOAD);
+        else if (path.startsWith("testdata/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.TESTDATA);
+        else if (path.startsWith("flows/") || path.startsWith("templates/flows/"))
+            result.add(att.server.api.source.SourceManagementContracts.PackageCategory.FLOW);
+        else if (path.startsWith("templates/") && (path.endsWith("template.yaml") || path.endsWith("template.yml")))
+            result.add(att.server.api.source.SourceManagementContracts.PackageCategory.TEMPLATE);
+        else result.add(att.server.api.source.SourceManagementContracts.PackageCategory.FILE);
+    }
+
+    private static boolean manifestChanged(Draft draft) {
+        if (!PACKAGE_SOURCE.equals(draft.scope.domain)) return false;
+        for (Diff diff : draft.diff) if ("package.yaml".equals(diff.path) || "package.yaml".equals(diff.targetPath)) return true;
+        return false;
     }
 
     private static List<Map<String, Object>> diffView(List<Diff> diffs) {
