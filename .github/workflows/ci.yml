@@ -131,6 +131,12 @@ jobs:
           cache: npm
           cache-dependency-path: att-web/frontend/package-lock.json
 
+      - name: Prepare isolated ATT_HOME for Server tests
+        run: |
+          mkdir -p "$RUNNER_TEMP/att-server-test-home/config"
+          cp -R config/. "$RUNNER_TEMP/att-server-test-home/config/"
+          echo "ATT_HOME=$RUNNER_TEMP/att-server-test-home" >> "$GITHUB_ENV"
+
       - name: Verify all Server unit tests with isolated parallel JVMs
         # Each test class gets a separate JVM, isolating Tomcat, global properties,
         # authentication state and temporary database files. Tests within a class
@@ -174,6 +180,12 @@ jobs:
           cache: npm
           cache-dependency-path: att-web/frontend/package-lock.json
 
+      - name: Prepare isolated ATT_HOME for Server tests
+        run: |
+          mkdir -p "$RUNNER_TEMP/att-server-test-home/config"
+          cp -R config/. "$RUNNER_TEMP/att-server-test-home/config/"
+          echo "ATT_HOME=$RUNNER_TEMP/att-server-test-home" >> "$GITHUB_ENV"
+
       - name: Verify long-running Server process and publication tests
         run: mvn -B -ntp -U -T 1C -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -DforkCount=4 -DreuseForks=false -DargLine=-Xmx2g '-Dtest=ServerRuntimeJobReplayTest,ArtifactPublicationFaultTest,AuthenticationIntegrationTest,ExecutionWorkerSemanticParityTest' -Dsurefire.failIfNoSpecifiedTests=false test
 
@@ -201,6 +213,12 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: maven
+
+      - name: Prepare isolated ATT_HOME for Server and WAR tests
+        run: |
+          mkdir -p "$RUNNER_TEMP/att-server-test-home/config"
+          cp -R config/. "$RUNNER_TEMP/att-server-test-home/config/"
+          echo "ATT_HOME=$RUNNER_TEMP/att-server-test-home" >> "$GITHUB_ENV"
 
       - name: Set up pinned Node.js for build-time UI tooling
         uses: actions/setup-node@v4

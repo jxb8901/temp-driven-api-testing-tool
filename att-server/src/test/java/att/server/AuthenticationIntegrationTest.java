@@ -9,6 +9,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.Files;
@@ -90,8 +94,21 @@ class AuthenticationIntegrationTest {
         previousAttHome=System.getProperty("att.home");Path home=createLocalRuntime();System.setProperty("att.home",home.toString());
         Path packages=Files.createDirectories(temp.resolve("manifest-packages"));Path pkg=Files.createDirectories(packages.resolve("business-folder"));
         Path adminPackage=Files.createDirectories(packages.resolve("admin-business"));
-        Files.createDirectories(pkg.resolve("templates"));Files.createDirectories(pkg.resolve("testcase"));
+        Files.createDirectories(pkg.resolve("templates/TARGET"));Files.createDirectories(pkg.resolve("testcase"));
         Files.createDirectories(adminPackage.resolve("templates"));Files.createDirectories(adminPackage.resolve("testcase"));
+        Files.writeString(pkg.resolve("templates/TARGET/template.yaml"),"schemaVersion: att-template/v3.6\nname: TARGET\n"
+                +"description: owner Testcase source fixture\nactions: {note: {type: log, message: safe}}\n");
+        String sidecar="schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n  sheet: Cases\n  caseId: Case ID\n  tags: Tags\n  dataColumns: payload=Payload\n"
+                +"stages:\n  - key: invoke\n    template: Template\n    dataColumns: request=Request\n";
+        Files.writeString(pkg.resolve("testcase/cases.yaml"),sidecar);
+        try(Workbook workbook=new XSSFWorkbook();OutputStream output=Files.newOutputStream(pkg.resolve("testcase/cases.xlsx"))) {
+            Sheet sheet=workbook.createSheet("Cases");Row header=sheet.createRow(0);
+            String[] columns={"Case ID","Tags","Payload","Template","Request"};
+            for(int index=0;index<columns.length;index++)header.createCell(index).setCellValue(columns[index]);
+            Row row=sheet.createRow(1);row.createCell(0).setCellValue("CASE_1");row.createCell(1).setCellValue("smoke");
+            row.createCell(2).setCellValue("safe");row.createCell(3).setCellValue("TARGET");row.createCell(4).setCellValue("safe");
+            workbook.write(output);
+        }
         String original="# keep this comment and authored ordering\nschemaVersion: att-package/v1\ndefaultEnvironment: SIT\n";
         Files.writeString(pkg.resolve("package.yaml"),original);
         Files.writeString(adminPackage.resolve("package.yaml"),original);
@@ -123,6 +140,20 @@ class AuthenticationIntegrationTest {
             assertEquals(200,raw.statusCode(),raw.body());assertEquals(original,ServerRuntime.JSON.readTree(raw.body()).path("text").asText());
             assertEquals(ServerRuntime.JSON.readTree(raw.body()).path("sourceEtag").asText(),raw.headers().firstValue("ETag").orElseThrow());
             assertEquals("private, no-store",raw.headers().firstValue("Cache-Control").orElseThrow());
+            HttpResponse<String> caseList=sendWithCookie(client,port,"GET","/att/api/v1/packages/owner/resources?type=case",owner.cookie,null,null,null);
+            assertEquals(200,caseList.statusCode(),caseList.body());
+            JsonNode caseItems=ServerRuntime.JSON.readTree(caseList.body()).path("items");String caseResourceId=null;
+            for(JsonNode item:caseItems)if("ready".equals(item.path("state").asText()))caseResourceId=item.path("resourceId").asText();
+            assertNotNull(caseResourceId,caseList.body());
+            String testcaseSourcePath="/att/api/v1/packages/owner/authoring-source?type=testcase&resourceId="
+                    +caseResourceId+"&selector=sidecar";
+            HttpResponse<String> testcaseSource=sendWithCookie(client,port,"GET",testcaseSourcePath,owner.cookie,null,null,null);
+            assertEquals(200,testcaseSource.statusCode(),testcaseSource.body());
+            assertEquals(sidecar,ServerRuntime.JSON.readTree(testcaseSource.body()).path("text").asText());
+            assertEquals(ServerRuntime.JSON.readTree(testcaseSource.body()).path("sourceEtag").asText(),
+                    testcaseSource.headers().firstValue("ETag").orElseThrow());
+            assertEquals(404,sendWithCookie(client,port,"GET",testcaseSourcePath+"&path=testcase%2Fother.yaml",
+                    owner.cookie,null,null,null).statusCode(),"The Testcase selector does not accept caller-supplied paths");
             assertEquals(403,sendWithCookie(client,port,"GET",rawPath,other.cookie,null,null,null).statusCode());
             assertEquals(403,sendWithCookie(client,port,"GET",rawPath,admin.cookie,null,null,null).statusCode(),"ADMIN does not receive Package USER or owner access");
             assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/packages/admin/authoring-source?type=manifest",admin.cookie,null,null,null).statusCode(),

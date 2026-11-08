@@ -10,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -148,6 +149,26 @@ class FileExpressionResolverTest {
         assertEquals(1, snapshot.size());
     }
 
+    @Test void mergedSnapshotsRetainEveryAuthoredCallerForSharedFilePlans() throws Exception {
+        write("templates/shared/request.txt", "accepted");
+        FileExpressionResolver resolver = new FileExpressionResolver(project);
+        StageTemplate first = template("one", "templates/one", "../shared/request.txt");
+        StageTemplate second = template("two", "templates/two", "../shared/request.txt");
+
+        FileExpressionResolver.FileExpressionSnapshot merged = FileExpressionResolver.FileExpressionSnapshot.merge(
+                project, Arrays.asList(resolver.snapshotFor(first, null), resolver.snapshotFor(second, null)));
+
+        assertEquals(2, merged.size(), "Each authored source directory keeps its own compiled plan");
+        assertEquals(2, merged.references().size(), "Both authored inbound edges remain available");
+        assertEquals("templates/shared/request.txt", merged.references().get(0).logicalPath());
+        assertEquals(merged.references().get(0).logicalPath(), merged.references().get(1).logicalPath());
+        assertEquals(merged.references().get(0).sourceFingerprint(), merged.references().get(1).sourceFingerprint());
+        assertTrue(merged.references().stream().anyMatch(reference -> reference.callSite().contains("templates/one")),
+                merged.references().get(0).callSite() + " | " + merged.references().get(1).callSite());
+        assertTrue(merged.references().stream().anyMatch(reference -> reference.callSite().contains("templates/two")),
+                merged.references().get(0).callSite() + " | " + merged.references().get(1).callSite());
+    }
+
     @Test void portableApprovedPlanRestoresCompiledAstAndNeverRereadsWorkerFile() throws Exception {
         Path templateDirectory = project.resolve("templates/T");
         Files.createDirectories(templateDirectory);
@@ -274,6 +295,15 @@ class FileExpressionResolverTest {
         Files.createDirectories(file.getParent());
         Files.write(file, value.getBytes(StandardCharsets.UTF_8));
         return file;
+    }
+
+    private StageTemplate template(String name, String directory, String file) throws Exception {
+        Path sourceDirectory = Files.createDirectories(project.resolve(directory));
+        Path sourceFile = sourceDirectory.resolve("template.yaml");
+        Files.write(sourceFile, Collections.<String>emptyList());
+        return new StageTemplate(name, sourceDirectory, Collections.singletonList(new TemplateAction("read",
+                values("type", "log", "message", "&{" + file + "}"), Version.TEMPLATE_SCHEMA)),
+                Version.TEMPLATE_SCHEMA, sourceFile.toRealPath());
     }
 
     private RuntimeStub runtime(final Map<String, Object> values) {

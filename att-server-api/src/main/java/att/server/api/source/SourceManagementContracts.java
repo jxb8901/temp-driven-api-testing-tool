@@ -24,8 +24,8 @@ public final class SourceManagementContracts {
     public enum PackageCategory { TESTCASE, TEMPLATE, FLOW, LOAD, TESTDATA, FILE }
 
     public enum RevisionKind {
-        PACKAGE_REGISTRATION, BUSINESS_SOURCE, CHANGE_SET, PACKAGE_MANIFEST,
-        CONFIG_SOURCE, EFFECTIVE_CONFIG, ENVIRONMENT, ENGINE_SCHEMA, SCHEDULE_SNAPSHOT
+        PACKAGE_REGISTRATION, PACKAGE_SOURCE, BUSINESS_SOURCE, CHANGE_SET, PACKAGE_MANIFEST,
+        CONFIG_SOURCE, EFFECTIVE_CONFIG, ENVIRONMENT, ENGINE_SCHEMA, EXECUTION_REVISION, SCHEDULE_SNAPSHOT
     }
 
     /** A typed identity. The value is an opaque revision token or digest, never authored source. */
@@ -53,7 +53,13 @@ public final class SourceManagementContracts {
     public static final class RevisionSet {
         public final String schemaVersion = "att-source-revision-set/v1";
         public final RevisionIdentity packageRegistration;
+        /** Canonical Package-owned content identity. */
+        public final RevisionIdentity packageSourceRevision;
+        /** @deprecated Compatibility alias for packageSourceRevision. */
+        @Deprecated
         public final RevisionIdentity businessSource;
+        /** Execution-bound identity; never use it as the Package source edit revision. */
+        public final RevisionIdentity executionRevisionDigest;
         public final RevisionIdentity changeSet;
         public final RevisionIdentity manifest;
         public final RevisionIdentity configSource;
@@ -67,8 +73,34 @@ public final class SourceManagementContracts {
                            RevisionIdentity configSource, RevisionIdentity effectiveConfig,
                            RevisionIdentity environment, RevisionIdentity engineSchema,
                            RevisionIdentity scheduleSnapshot) {
+            this(packageRegistration, businessSource, changeSet, manifest, configSource, effectiveConfig,
+                    environment, engineSchema, scheduleSnapshot, null, null);
+        }
+
+        public RevisionSet(RevisionIdentity packageRegistration, RevisionIdentity businessSource,
+                           RevisionIdentity changeSet, RevisionIdentity manifest,
+                           RevisionIdentity configSource, RevisionIdentity effectiveConfig,
+                           RevisionIdentity environment, RevisionIdentity engineSchema,
+                           RevisionIdentity scheduleSnapshot, RevisionIdentity packageSourceRevision,
+                           RevisionIdentity executionRevisionDigest) {
             this.packageRegistration = requireKind(packageRegistration, RevisionKind.PACKAGE_REGISTRATION, "packageRegistration");
-            this.businessSource = requireKind(businessSource, RevisionKind.BUSINESS_SOURCE, "businessSource");
+            RevisionIdentity legacyBusiness = requireKind(businessSource, RevisionKind.BUSINESS_SOURCE, "businessSource");
+            RevisionIdentity packageSource = requireKind(packageSourceRevision, RevisionKind.PACKAGE_SOURCE, "packageSourceRevision");
+            if (packageSource == null && legacyBusiness != null)
+                packageSource = new RevisionIdentity(RevisionKind.PACKAGE_SOURCE, legacyBusiness.scopeId,
+                        legacyBusiness.qualifier, legacyBusiness.revision);
+            if (legacyBusiness == null && packageSource != null)
+                legacyBusiness = new RevisionIdentity(RevisionKind.BUSINESS_SOURCE, packageSource.scopeId,
+                        packageSource.qualifier, packageSource.revision);
+            if (legacyBusiness != null && packageSource != null
+                    && (!legacyBusiness.scopeId.equals(packageSource.scopeId)
+                    || !java.util.Objects.equals(legacyBusiness.qualifier, packageSource.qualifier)
+                    || !legacyBusiness.revision.equals(packageSource.revision)))
+                throw new IllegalArgumentException("businessSource must match packageSourceRevision");
+            this.packageSourceRevision = packageSource;
+            this.businessSource = legacyBusiness;
+            this.executionRevisionDigest = requireKind(executionRevisionDigest, RevisionKind.EXECUTION_REVISION,
+                    "executionRevisionDigest");
             this.changeSet = requireKind(changeSet, RevisionKind.CHANGE_SET, "changeSet");
             this.manifest = requireKind(manifest, RevisionKind.PACKAGE_MANIFEST, "manifest");
             this.configSource = requireKind(configSource, RevisionKind.CONFIG_SOURCE, "configSource");
@@ -84,8 +116,9 @@ public final class SourceManagementContracts {
 
         public List<RevisionIdentity> present() {
             List<RevisionIdentity> result = new ArrayList<RevisionIdentity>();
-            for (RevisionIdentity value : Arrays.asList(packageRegistration, businessSource, changeSet,
-                    manifest, configSource, effectiveConfig, environment, engineSchema, scheduleSnapshot))
+            for (RevisionIdentity value : Arrays.asList(packageRegistration, packageSourceRevision, businessSource, changeSet,
+                    manifest, configSource, effectiveConfig, environment, engineSchema, executionRevisionDigest,
+                    scheduleSnapshot))
                 if (value != null) result.add(value);
             return Collections.unmodifiableList(result);
         }
@@ -159,6 +192,8 @@ public final class SourceManagementContracts {
         public final Domain domain;
         public final String scopeId;
         public final ValidationState state;
+        /** False when bounds or unresolved dependencies prevented whole-candidate coverage. */
+        public final boolean coverageComplete;
         public final boolean executionEligible;
         public final String validationFingerprint;
         public final RevisionSet revisions;
@@ -169,11 +204,21 @@ public final class SourceManagementContracts {
                                    boolean executionEligible, String validationFingerprint,
                                    RevisionSet revisions, List<DependencyReference> dependencies,
                                    List<ValidationDiagnostic> diagnostics) {
+            this(domain, scopeId, state, state != ValidationState.INCOMPLETE, executionEligible,
+                    validationFingerprint, revisions, dependencies, diagnostics);
+        }
+
+        public CandidateValidation(Domain domain, String scopeId, ValidationState state,
+                                   boolean coverageComplete, boolean executionEligible,
+                                   String validationFingerprint, RevisionSet revisions,
+                                   List<DependencyReference> dependencies,
+                                   List<ValidationDiagnostic> diagnostics) {
             if (domain == null || state == null || revisions == null)
                 throw new IllegalArgumentException("candidate validation domain, state, and revisions are required");
             this.domain = domain;
             this.scopeId = requiredToken(scopeId, "scopeId", 160);
             this.state = state;
+            this.coverageComplete = coverageComplete;
             this.executionEligible = executionEligible && state == ValidationState.VALID;
             this.validationFingerprint = optionalDigest(validationFingerprint, "validationFingerprint");
             this.revisions = revisions;
@@ -193,6 +238,8 @@ public final class SourceManagementContracts {
         public final boolean complete;
         public final RevisionSet revisions;
         public final Map<String, ResolutionOrigin> origins;
+        /** Hashes of normalized effective fields and descriptor semantics; never contains resolved values. */
+        public final Map<String, String> semanticFingerprints;
         public final List<DependencyReference> bindings;
         public final List<DependencyReference> dependencies;
         public final List<ValidationDiagnostic> diagnostics;
@@ -203,12 +250,24 @@ public final class SourceManagementContracts {
                                    List<DependencyReference> bindings,
                                    List<DependencyReference> dependencies,
                                    List<ValidationDiagnostic> diagnostics) {
+            this(packageId, environment, effectiveFingerprint, complete, revisions, origins,
+                    Collections.<String, String>emptyMap(), bindings, dependencies, diagnostics);
+        }
+
+        public EffectiveResolution(String packageId, String environment, String effectiveFingerprint,
+                                   boolean complete, RevisionSet revisions,
+                                   Map<String, ResolutionOrigin> origins,
+                                   Map<String, String> semanticFingerprints,
+                                   List<DependencyReference> bindings,
+                                   List<DependencyReference> dependencies,
+                                   List<ValidationDiagnostic> diagnostics) {
             this.packageId = requiredToken(packageId, "packageId", 160);
             this.environment = requiredToken(environment, "environment", 64);
             this.effectiveFingerprint = optionalDigest(effectiveFingerprint, "effectiveFingerprint");
             this.complete = complete;
             this.revisions = revisions == null ? RevisionSet.empty() : revisions;
             this.origins = immutableMap(origins);
+            this.semanticFingerprints = immutableStringMap(semanticFingerprints);
             this.bindings = immutable(bindings);
             this.dependencies = immutable(dependencies);
             this.diagnostics = immutable(diagnostics);
@@ -414,7 +473,11 @@ public final class SourceManagementContracts {
         }
     }
 
-    public enum DraftState { DRAFT, VALIDATED, REVIEWED, PUBLISHED, CONFLICTED, REJECTED }
+    public enum DraftState {
+        DRAFT, VALIDATED, REVIEWED, PUBLISHED, CONFLICTED, REJECTED;
+        @com.fasterxml.jackson.annotation.JsonValue
+        public String wireValue() { return name().toLowerCase(java.util.Locale.ROOT); }
+    }
 
     /** Wire DTO for Package and central source drafts; source values are represented only by ETags. */
     public static final class ChangeSetView {
@@ -430,12 +493,39 @@ public final class SourceManagementContracts {
         public final boolean manifestMetadataChanged;
         public final List<DependencyReference> inboundReferences;
         public final List<ValidationDiagnostic> diagnostics;
+        public final String baseSourceRevision;
+        public final String registryRevision;
+        public final String manifestRevision;
+        public final String configRevision;
+        public final String schemaRevision;
+        public final String expiresAt;
+        public final List<Map<String, Object>> changedFiles;
+        public final String validationRevision;
+        public final String requestId;
+        public final Boolean snapshotGenerated;
+        public final String snapshotPath;
+        public final String snapshotSha256;
 
         public ChangeSetView(String changeSetId, Domain domain, String scopeId, DraftState state,
                              RevisionSet revisions, String etag, boolean noStore,
                              List<PackageCategory> categories, boolean manifestMetadataChanged,
                              List<DependencyReference> inboundReferences,
                              List<ValidationDiagnostic> diagnostics) {
+            this(changeSetId, domain, scopeId, state, revisions, etag, noStore, categories,
+                    manifestMetadataChanged, inboundReferences, diagnostics, null, null, null, null,
+                    null, null, Collections.<Map<String, Object>>emptyList(), null, null, null, null, null);
+        }
+
+        public ChangeSetView(String changeSetId, Domain domain, String scopeId, DraftState state,
+                             RevisionSet revisions, String etag, boolean noStore,
+                             List<PackageCategory> categories, boolean manifestMetadataChanged,
+                             List<DependencyReference> inboundReferences,
+                             List<ValidationDiagnostic> diagnostics,
+                             String baseSourceRevision, String registryRevision, String manifestRevision,
+                             String configRevision, String schemaRevision, String expiresAt,
+                             List<Map<String, Object>> changedFiles, String validationRevision,
+                             String requestId, Boolean snapshotGenerated, String snapshotPath,
+                             String snapshotSha256) {
             this.changeSetId = requiredToken(changeSetId, "changeSetId", 160);
             if (domain == null || state == null) throw new IllegalArgumentException("change set domain and state are required");
             this.domain = domain;
@@ -448,6 +538,18 @@ public final class SourceManagementContracts {
             this.manifestMetadataChanged = manifestMetadataChanged;
             this.inboundReferences = immutable(inboundReferences);
             this.diagnostics = immutable(diagnostics);
+            this.baseSourceRevision = optionalToken(baseSourceRevision, "baseSourceRevision", 160);
+            this.registryRevision = optionalToken(registryRevision, "registryRevision", 160);
+            this.manifestRevision = optionalToken(manifestRevision, "manifestRevision", 160);
+            this.configRevision = optionalToken(configRevision, "configRevision", 160);
+            this.schemaRevision = optionalToken(schemaRevision, "schemaRevision", 160);
+            this.expiresAt = optionalToken(expiresAt, "expiresAt", 64);
+            this.changedFiles = immutableObjectMaps(changedFiles);
+            this.validationRevision = optionalToken(validationRevision, "validationRevision", 160);
+            this.requestId = optionalToken(requestId, "requestId", 160);
+            this.snapshotGenerated = snapshotGenerated;
+            this.snapshotPath = safeLogicalPath(snapshotPath);
+            this.snapshotSha256 = optionalDigest(snapshotSha256, "snapshotSha256");
         }
     }
 
@@ -663,6 +765,25 @@ public final class SourceManagementContracts {
             copy.put(key, entry.getValue());
         }
         return Collections.unmodifiableMap(copy);
+    }
+
+    private static Map<String, String> immutableStringMap(Map<String, String> values) {
+        if (values == null || values.isEmpty()) return Collections.emptyMap();
+        Map<String, String> copy = new LinkedHashMap<String, String>();
+        for (Map.Entry<String, String> entry : values.entrySet())
+            copy.put(requiredToken(entry.getKey(), "semantic field", 512),
+                    requiredDigest(entry.getValue(), "semantic fingerprint"));
+        return Collections.unmodifiableMap(copy);
+    }
+
+    private static List<Map<String, Object>> immutableObjectMaps(List<Map<String, Object>> values) {
+        if (values == null || values.isEmpty()) return Collections.emptyList();
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> value : values) {
+            if (value == null) throw new IllegalArgumentException("changed file metadata is required");
+            result.add(Collections.unmodifiableMap(new LinkedHashMap<String, Object>(value)));
+        }
+        return Collections.unmodifiableList(result);
     }
 
     private static List<String> safeTokens(List<String> values, int max) {

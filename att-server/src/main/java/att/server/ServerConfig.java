@@ -120,7 +120,7 @@ public final class ServerConfig {
         java=java.toAbsolutePath().normalize();
         if (!Files.isRegularFile(java) || !Files.isExecutable(java)) throw new IllegalArgumentException("server.javaExecutable must be an executable Java runtime");
         List<?> libraryDirs=workers.get("libraryDirs")==null?List.of():list(workers.get("libraryDirs"),"workers.libraryDirs");
-        PackageRoots packageRoots=validatePackageRoots(packagesNode,data,runtimeConfig,false);
+        PackageRoots packageRoots=validatePackageRoots(packagesNode,data,runtimeConfig,true);
         List<Path> allowed=packageRoots.allowedRoots();
         Map<String,Path> resolved=packageRoots.packages();
         java.util.ArrayList<Path> workerLibraries=new java.util.ArrayList<>();

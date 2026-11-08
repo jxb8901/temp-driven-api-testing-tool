@@ -138,12 +138,14 @@ final class JobExecutionSpec {
         if (!"att-source-revision-set/v1".equals(revisions.path("schemaVersion").asText()))
             throw new IllegalArgumentException("Invalid source revision set");
         revisions.fieldNames().forEachRemaining(field -> {
-            if (!Set.of("schemaVersion", "packageRegistration", "businessSource", "changeSet", "manifest", "configSource",
-                    "effectiveConfig", "environment", "engineSchema", "scheduleSnapshot").contains(field))
+            if (!Set.of("schemaVersion", "packageRegistration", "packageSourceRevision", "businessSource",
+                    "executionRevisionDigest", "changeSet", "manifest", "configSource", "effectiveConfig",
+                    "environment", "engineSchema", "scheduleSnapshot").contains(field))
                 throw new IllegalArgumentException("Unknown source revision kind");
         });
-        for (String field : Set.of("packageRegistration", "businessSource", "changeSet", "manifest", "configSource",
-                "effectiveConfig", "environment", "engineSchema", "scheduleSnapshot")) {
+        for (String field : Set.of("packageRegistration", "packageSourceRevision", "businessSource",
+                "executionRevisionDigest", "changeSet", "manifest", "configSource", "effectiveConfig",
+                "environment", "engineSchema", "scheduleSnapshot")) {
             JsonNode identity = revisions.get(field);
             if (identity == null || identity.isNull()) continue;
             if (!identity.isObject() || !"att-source-revision/v1".equals(identity.path("schemaVersion").asText())

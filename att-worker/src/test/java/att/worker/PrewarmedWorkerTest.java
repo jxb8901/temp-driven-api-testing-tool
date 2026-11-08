@@ -74,6 +74,23 @@ class PrewarmedWorkerTest {
         } finally {process.destroyForcibly();}
     }
 
+    @Test void acceptsLegacyExecutionRevisionAliasDuringWorkerUpgrade() throws Exception {
+        Path root=fixture();
+        Process process=start(root);
+        try {
+            ready(process);
+            Map<String,Object> request=request(root,"debug");
+            String revision=String.valueOf(request.remove("expectedExecutionRevisionDigest"));
+            request.put("expectedRevisionDigest",revision);
+            Map<String,String> env=new HashMap<String,String>(System.getenv());env.put("LEASE_MARKER","assigned");
+            request.put("executionEnvironment",env);
+            String output=assign(process,mapper.writeValueAsString(request));
+            assertEquals(0,process.exitValue(),output);
+            assertTrue(output.contains("\"status\":\"PASS\""),output);
+            assertEquals("env-ok",new String(Files.readAllBytes(root.resolve("business-started")),StandardCharsets.UTF_8));
+        } finally {process.destroyForcibly();}
+    }
+
     @Test void packageLocalExecutableToolSurvivesColdAndWarmRunDebugAndLoadSnapshots() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"Package-local shell executable requires POSIX permissions");
         for(String command:Arrays.asList("debug","run"))for(Boolean warm:Arrays.asList(Boolean.FALSE,Boolean.TRUE))
@@ -254,7 +271,7 @@ class PrewarmedWorkerTest {
         result.put("packageRoot",root.toString());result.put("runId","test");
         try(att.resource.PackageResourceInspector inspector=new att.resource.PackageResourceInspector(root,root.resolve("config/config.yaml"),null,
                 Collections.<String>emptyList(),65536,262144)) {
-            result.put("expectedRevisionDigest",inspector.executionRevisionDigest());
+            result.put("expectedExecutionRevisionDigest",inspector.executionRevisionDigest());
         }
         result.put("outputDirectory",root.resolve("output").toString());
         result.put("registeredPackageId","p");
@@ -352,7 +369,7 @@ class PrewarmedWorkerTest {
                     request=request(root,"debug");request.put("executionEnvironment",Collections.emptyMap());
                 } else if("stale".equals(variant)) {
                     Files.write(root.resolve("templates/ENV/template.yaml"),"\n# revision changed after eligibility\n".getBytes(StandardCharsets.UTF_8),StandardOpenOption.APPEND);
-                } else request.remove("expectedRevisionDigest");
+                } else request.remove("expectedExecutionRevisionDigest");
                 String output=assign(process,mapper.writeValueAsString(request));
                 assertNotEquals(0,process.exitValue(),variant+" "+output);
                 assertEquals(1,countResults(output));assertFalse(Files.exists(root.resolve("business-started")));

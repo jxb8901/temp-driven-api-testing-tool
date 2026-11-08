@@ -667,6 +667,12 @@ class ServerRuntimeLoadTerminalResultTest {
     private Job createJob(ServerRuntime runtime, String id) throws Exception {
         Path events = runtime.config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl");
         Job job = new Job(id, "load", "p", "benchmark", new WorkerRequest(), new JobEvents(events, 100));
+        Path packageSnapshot = runtime.executionPackageRoot("p");
+        Path centralSnapshot = runtime.executionCentralSourceRoot();
+        job.request.packageRoot = packageSnapshot.toString();
+        job.acceptedPackageTreeDigest = SourceRevisionStore.treeDigest(ChangeSetPublisher.PACKAGE_SOURCE, packageSnapshot);
+        job.acceptedCentralSourceRoot = centralSnapshot;
+        job.acceptedCentralTreeDigest = SourceRevisionStore.treeDigest(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG, centralSnapshot);
         runtime.store.insert(job, "{}");
         return job;
     }

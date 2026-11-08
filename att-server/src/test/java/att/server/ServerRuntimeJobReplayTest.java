@@ -76,6 +76,18 @@ class ServerRuntimeJobReplayTest {
         assertEquals(Boolean.TRUE,job.get("sourceSnapshotAvailable"));
         Map<?,?> provenance=(Map<?,?>)job.get("sourceProvenance");
         assertNotNull(provenance);
+        Map<?,?> revisions=(Map<?,?>)provenance.get("revisions");
+        assertNotNull(revisions);
+        Map<?,?> packageSource=(Map<?,?>)revisions.get("packageSourceRevision");
+        Map<?,?> legacyBusinessSource=(Map<?,?>)revisions.get("businessSource");
+        Map<?,?> executionRevision=(Map<?,?>)revisions.get("executionRevisionDigest");
+        assertNotNull(packageSource);assertEquals("PACKAGE_SOURCE",packageSource.get("kind"));
+        assertNotNull(legacyBusinessSource);assertEquals(packageSource.get("revision"),legacyBusinessSource.get("revision"),
+                "The persisted businessSource alias remains consistent with Package source identity");
+        assertNotNull(executionRevision);assertEquals("EXECUTION_REVISION",executionRevision.get("kind"));
+        assertTrue(String.valueOf(executionRevision.get("revision")).matches("[a-f0-9]{64}"));
+        assertNotEquals(packageSource.get("revision"),executionRevision.get("revision"),
+                "Package source provenance must not substitute for the execution identity");
         List<?> dependencies=(List<?>)provenance.get("dependencyClosure");assertNotNull(dependencies);
         List<? extends Map<?,?>> plans=dependencies.stream().filter(Map.class::isInstance).map(value->(Map<?,?>)value)
                 .filter(value->"FILE".equals(String.valueOf(value.get("kind")))).toList();
@@ -255,7 +267,9 @@ class ServerRuntimeJobReplayTest {
             assertTrue(runtime.store.auditOutcomes("SCHEDULE_SOURCE_REVALIDATED").get(0).contains("stored="+stored));
             Files.writeString(unrelated,originalUnrelated);
             clock.advance(Duration.ofMinutes(16));
-            Map<String,Object> restored=runtime.triggerLoadSchedule(strictId,"alice");assertEquals("submitted",restored.get("status"),restored.toString());
+            Map<String,Object> restored=runtime.triggerLoadSchedule(strictId,"alice");
+            LoadSchedule afterRestore=runtime.loadSchedule(strictId);
+            assertEquals("submitted",restored.get("status"),restored+" expected="+stored+" current="+afterRestore.currentRevisionDigest+" sourceStatus="+afterRestore.sourceStatus);
             await(runtime,String.valueOf(restored.get("jobId")));
             assertEquals("PASS",runtime.jobRecord(String.valueOf(restored.get("jobId"))).get("status"),runtime.resultRecord(String.valueOf(restored.get("jobId"))).toString());
             assertNull(runtime.loadSchedule(strictId).sourceStatus,"A successful execution after restoring the pinned package must clear current stale status");
@@ -375,14 +389,15 @@ class ServerRuntimeJobReplayTest {
                 Map<String,Object> review=runtime.createJobReplayDraft(original,"alice");
                 assertThrows(ServerRuntime.JobConflictException.class,()->runtime.submitRunDraft(submit(String.valueOf(review.get("draftId"))),"alice","alice"),
                         "Replay editor drafts must use the source Job confirmation intent to preserve lineage and idempotency");
-                var confirmation=ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId")));
-                assertThrows(IllegalArgumentException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",false,"intentId",review.get("intentId"))),"alice"));
+                assertNotNull(review.get("intentId"),"Runnable replay reviews include a confirmation intent");
+                var confirmation=replayConfirmation(review,true,null);
+                assertThrows(IllegalArgumentException.class,()->runtime.rerunJob(original,replayConfirmation(review,false,null),"alice"));
                 assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,confirmation,"bob"));
                 String rerun=String.valueOf(runtime.rerunJob(original,confirmation,"alice").get("jobId"));
                 assertNotEquals(original,rerun);assertEquals(rerun,runtime.rerunJob(original,confirmation,"alice").get("jobId"));await(runtime,rerun);
                 assertEquals(original,runtime.jobRecord(rerun).get("rerunOfJobId"));assertEquals(before.get("finishedAt"),runtime.jobRecord(original).get("finishedAt"));assertEquals(originalResult,runtime.store.get(original).get("resultJson"));
                 Map<String,Object> peerReview=runtime.createJobReplayDraft(original,"bob");
-                var peerConfirmation=ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",peerReview.get("intentId")));
+                var peerConfirmation=replayConfirmation(peerReview,true,null);
                 assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,peerConfirmation,"alice"));
                 String peerRerun=String.valueOf(runtime.rerunJob(original,peerConfirmation,"bob").get("jobId"));
                 await(runtime,peerRerun);
@@ -426,7 +441,7 @@ class ServerRuntimeJobReplayTest {
                 Map<String,Object> review=runtime.createJobReplayDraft(source,"bob");
                 assertNotNull(runtime.getJobReplayEditorDraft(source,String.valueOf(review.get("draftRef")),"bob"));
                 assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getJobReplayEditorDraft(source,String.valueOf(review.get("draftRef")),"alice"));
-                String id=String.valueOf(runtime.rerunJob(source,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"))),"bob").get("jobId"));await(runtime,id);
+            String id=String.valueOf(runtime.rerunJob(source,replayConfirmation(review,true,null),"bob").get("jobId"));await(runtime,id);
                 assertEquals("bob",runtime.jobRecord(id).get("executionPrincipal"));assertEquals(source,runtime.jobRecord(id).get("rerunOfJobId"));
                 assertEquals("load",runtime.jobRecord(id).get("executionType"));
                 Map<String,Object> scheduleReview=runtime.createJobReplayDraft(source,"alice");
@@ -440,12 +455,12 @@ class ServerRuntimeJobReplayTest {
             }
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice");
             runtime.store.setAuthActive("alice",false);
-            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"))),"alice"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,replayConfirmation(review,true,null),"alice"));
             runtime.store.setAuthActive("alice",true);
             Files.writeString(fixture.root.resolve("templates/SIMPLE/template.yaml"),"# changed\n",java.nio.file.StandardOpenOption.APPEND);
             ServerRuntime.JobConflictException mismatch=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.createJobReplayDraft(original,"alice"));
             assertEquals("ATT-SERVER-REPLAY-REVISION-CONFLICT",mismatch.code);
-            ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"))),"alice"));
+            ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.rerunJob(original,replayConfirmation(review,true,null),"alice"));
             assertEquals("ATT-SERVER-REPLAY-REVISION-CONFLICT",stale.code);
         }
     }
@@ -485,13 +500,16 @@ class ServerRuntimeJobReplayTest {
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getJobReplayEditorDraft(original,draftRef,"bob"));
             assertApiError(apiRequest(runtime,"GET","/jobs/"+original+"/replay-draft/"+draftRef,"bob",Map.of()),404,"ATT-SERVER-NOT-FOUND");
             long jobsBeforeCrossOwnerSubmit=jobCount(runtime,"alice");
-            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),"bob"));
-            assertApiError(apiRequest(runtime,"POST","/jobs/"+original+"/rerun","bob",Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),404,"ATT-SERVER-NOT-FOUND");
+            assertNotNull(review.get("intentId"),"Runnable replay reviews include a confirmation intent");
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,replayConfirmation(review,true,"current"),"bob"));
+            assertApiError(apiRequest(runtime,"POST","/jobs/"+original+"/rerun","bob",
+                    ServerRuntime.JSON.convertValue(replayConfirmation(review,true,"current"),
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>() {})),404,"ATT-SERVER-NOT-FOUND");
             assertEquals(jobsBeforeCrossOwnerSubmit,jobCount(runtime,"alice"));
             assertThrows(IllegalArgumentException.class,()->runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current","overrides",Map.of("workloads",List.of(Map.of("id","smoke-a","load",Map.of("arrivalRate","2/s"))))))));
-            Map<String,Object> rerun=runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),"alice");
+            Map<String,Object> rerun=runtime.rerunJob(original,replayConfirmation(review,true,"current"),"alice");
             String rerunId=String.valueOf(rerun.get("jobId"));assertEquals(original,runtime.jobRecord(rerunId).get("rerunOfJobId"));
-            assertEquals(rerunId,runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),"alice").get("jobId"));
+            assertEquals(rerunId,runtime.rerunJob(original,replayConfirmation(review,true,"current"),"alice").get("jobId"));
             JobExecutionSpec rerunSpec=JobExecutionSpec.parse(runtime.store.executionSpec(rerunId).get("spec"));
             assertEquals("current",rerunSpec.value.path("replay").path("sourcePolicy").asText());
             assertEquals(originalRevision,rerunSpec.value.path("replay").path("originalRevision").asText());
@@ -503,7 +521,8 @@ class ServerRuntimeJobReplayTest {
             Map<String,Object> staleReview=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
             long jobsBeforeStaleSubmit=jobCount(runtime,"alice");
             Files.writeString(fixture.root.resolve("templates/SIMPLE/template.yaml"),"# changed after validation\n",java.nio.file.StandardOpenOption.APPEND);
-            ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",staleReview.get("intentId"),"sourcePolicy","current")),"alice"));
+            assertNotNull(staleReview.get("intentId"),"Runnable replay reviews include a confirmation intent");
+            ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.rerunJob(original,replayConfirmation(staleReview,true,"current"),"alice"));
             assertEquals("ATT-SERVER-REPLAY-DRAFT-STALE",stale.code);
             assertEquals(jobsBeforeStaleSubmit,jobCount(runtime,"alice"),"A stale validated replay must not create a Job");
             assertEquals(originalResult,runtime.store.get(original).get("resultJson"));
@@ -840,7 +859,7 @@ class ServerRuntimeJobReplayTest {
         Files.writeString(fixture.server,Files.readString(fixture.server).replace("inlineLoad: {enabled: true}","inlineLoad: {enabled: false}"));
         try(ServerRuntime runtime=fixture.open()) {
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice");
-            JsonNode confirmation=ServerRuntime.JSON.valueToTree(Map.of("intentId",review.get("intentId"),"confirm",true));
+            JsonNode confirmation=replayConfirmation(review,true,null);
             String accepted=String.valueOf(runtime.rerunJob(original,confirmation,"alice").get("jobId"));await(runtime,accepted);
             runtime.store.deleteJob(accepted);
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,confirmation,"alice"));
@@ -861,7 +880,8 @@ class ServerRuntimeJobReplayTest {
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice");
             assertEquals("run",ServerRuntime.JSON.valueToTree(review.get("definition")).path("executionType").asText());
             assertEquals(true,ServerRuntime.JSON.valueToTree(review.get("definition")).path("options").path("debug").asBoolean());
-            String id=String.valueOf(runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("intentId",review.get("intentId"),"confirm",true)),"alice").get("jobId"));await(runtime,id);
+            assertNotNull(review.get("intentId"),"Runnable replay reviews include a confirmation intent");
+            String id=String.valueOf(runtime.rerunJob(original,replayConfirmation(review,true,null),"alice").get("jobId"));await(runtime,id);
             assertEquals("run",runtime.jobRecord(id).get("command"));assertFalse(runtime.jobReplay(id,"alice").containsKey("originatingScheduleId"));
         }
     }
@@ -910,6 +930,13 @@ class ServerRuntimeJobReplayTest {
         });
         if("POST".equals(method))servlet.doPost(request,responseProxy);else servlet.doGet(request,responseProxy);
         response.put("body",ServerRuntime.JSON.readTree(responseBytes.toByteArray()));return response;
+    }
+
+    private static JsonNode replayConfirmation(Map<String,Object> review,boolean confirm,String sourcePolicy) {
+        var body=ServerRuntime.JSON.createObjectNode();body.put("confirm",confirm);
+        Object intent=review.get("intentId");if(intent!=null)body.put("intentId",String.valueOf(intent));
+        if(sourcePolicy!=null)body.put("sourcePolicy",sourcePolicy);
+        return body;
     }
 
     private static <T>T servletProxy(Class<T> type,InvocationHandler handler) {

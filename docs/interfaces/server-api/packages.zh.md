@@ -11,7 +11,7 @@ GET /api/v1/registry
 GET /api/v1/packages/payments/scope
 ```
 
-`GET /registry` 回傳 `att-package-registry/v1`：content-addressable `revision`、單調遞增的 `generation`、reload 時間、`Ready` 或 `Invalid` 狀態、安全診斷，以及明確註冊的邏輯 Package ID 和 `Registered`、`Warming` 或 `Ready` 狀態。回應不會公開檔案系統路徑。`GET /packages/{packageId}/scope` 回傳 `att-source-scope/v1`，並區分 registry、Package source、Package Manifest、Central Runtime Config source、active effective Config 及 embedded Engine schema 的 revision identity，以及安全的 environment/version metadata。此 API 僅供讀取；client 不能指定 source root。registry 變更後，以舊 registry revision 建立的 draft 和 approval 會被拒絕。已接受的 Job 會保留其已核准的 Package root 與輸入。
+`GET /registry` 回傳 `att-package-registry/v1`：content-addressable `revision`、單調遞增的 `generation`、reload 時間、`Ready` 或 `Invalid` 狀態、安全診斷，以及明確註冊的邏輯 Package ID 和 `Registered`、`Warming` 或 `Ready` 狀態。回應不會公開檔案系統路徑。`GET /packages/{packageId}/scope` 回傳 `att-source-scope/v1`，並區分 registry、Package source、Package Manifest、Central Runtime Config source、active effective Config、execution 及 embedded Engine schema 的 revision identity，以及安全的 environment/version metadata。`packageSourceRevision` 追蹤 Package 擁有的內容；`executionRevisionDigest` 綁定所選 Engine/schema、effective Config 與 Environment 的 execution 比對。Change Set 的 `baseSourceRevision` 是獨立的 aggregate optimistic-concurrency fence，不可代替上述兩種 identity。Versioned Source Management `RevisionSet` 會提供 typed `packageSourceRevision` 和 `executionRevisionDigest`；`businessSource` 保留為 Package source 的相容別名。此 API 僅供讀取；client 不能指定 source root。registry 變更後，以舊 registry revision 建立的 draft 和 approval 會被拒絕。已接受的 Job 會保留其已核准的 Package root 與輸入。
 
 ## 套件資源探索
 
@@ -66,10 +66,11 @@ GET /api/v1/packages/{packageId}/authoring-source?type=resource&resourceType=tem
 GET /api/v1/packages/{packageId}/authoring-source?type=file&resourceType=template&resourceId={resourceId}&referenceId={opaque}
 GET /api/v1/packages/{packageId}/authoring-source?type=load&path=load%2Fscenario.yaml
 GET /api/v1/packages/{packageId}/authoring-source?type=testdata&resourceId={descriptorId}&environment=SIT
+GET /api/v1/packages/{packageId}/authoring-source?type=testcase&resourceId={readyCaseResourceId}&selector=sidecar
 GET /api/v1/configuration/authoring-source?path=config%2Fconfig.yaml
 ```
 
-Package source 僅限固定 `package.yaml`、ready Template/Flow YAML、允許的 `load/*.yaml` 與 `load/*.yml`、已設定的 Package Testdata descriptor，以及由授權 Template/Flow 的靜態 `&{path}` reference 到達的合資格 UTF-8 文字檔。`file` request 必須重用安全 source inspection 簽發的不透明 reference 與 origin。Central source 僅限所選的 `config/config.yaml` Runtime Config 及其宣告的 YAML Helper/Tool descriptor；不允許 `att-server.yaml` 或敏感憑證／金鑰路徑。必須具有 active `SYSTEM_SETTINGS_WRITE` (ADMIN)，並啟用獨立部署 switch `server.centralConfigurationEditingEnabled: true`，預設為 `false`。
+Package source 僅限固定 `package.yaml`、ready Template/Flow YAML、允許的 `load/*.yaml` 與 `load/*.yml`、已設定的 Package Testdata descriptor、由授權 Template/Flow 的靜態 `&{path}` reference 到達的合資格 UTF-8 文字檔，以及 ready indexed Testcase 的 YAML sidecar。Testcase request 必須提供已檢查 Case 的 `resourceId` 及固定 `selector=sidecar`；不接受 Package path。`file` request 必須重用安全 source inspection 簽發的不透明 reference 與 origin。Central source 僅限所選的 `config/config.yaml` Runtime Config 及其宣告的 YAML Helper/Tool descriptor；不允許 `att-server.yaml` 或敏感憑證／金鑰路徑。必須具有 active `SYSTEM_SETTINGS_WRITE` (ADMIN)，並啟用獨立部署 switch `server.centralConfigurationEditingEnabled: true`，預設為 `false`。
 
 成功回應包含完整 UTF-8 `text`、`logicalPath`、`present`、SHA-256 `revision` 及 quoted `sourceEtag`；HTTP `ETag` header 使用相同的內容 ETag。回應使用 `Cache-Control: private, no-store`。每次讀取都會重新檢查身份／角色、canonical root、registry、path allowlist、symlink、大小、UTF-8 及受保護秘密。即使關閉一般 masking，憑證與金鑰仍會 fail closed。不可使用 `redacted` query parameter。未驗證或無權限回傳 `401`／`403`；不可用或不允許的路徑回傳 `404`；來源／root 競態回傳 `409`；超出大小上限回傳 `413`。
 

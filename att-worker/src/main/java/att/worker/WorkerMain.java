@@ -142,7 +142,11 @@ public final class WorkerMain {
         if(input.hasNonNull("jobId")) jobId=input.get("jobId").asText();
         WorkerRequest request;
         emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
-        try { request=mapper.treeToValue(input,WorkerRequest.class); if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes; }
+        try {
+            request=mapper.treeToValue(input,WorkerRequest.class);
+            request.normalizeExpectedExecutionRevisionDigest();
+            if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes;
+        }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
         try {
             sourceSnapshot=WorkerSourceSnapshot.stage(request);
@@ -169,7 +173,7 @@ public final class WorkerMain {
                     return fail("WORKER_REQUEST_INVALID","Prewarmed Worker Package affinity mismatch");
             } else if(request.packageRoot==null||!Paths.get(request.packageRoot).toRealPath().equals(Paths.get("").toRealPath()))
                 return fail("WORKER_REQUEST_INVALID","Prewarmed Worker package affinity mismatch");
-            if(request.expectedRevisionDigest==null)
+            if(request.expectedExecutionRevisionDigest==null)
                 return fail("WORKER_REQUEST_INVALID","Prewarmed execution requires an immutable package revision");
             try { att.security.ExecutionEnvironment.assign(request.executionEnvironment); }
             catch(IllegalArgumentException|IllegalStateException invalid) {
@@ -209,10 +213,7 @@ public final class WorkerMain {
                 Path root=Paths.get(request.packageRoot).toAbsolutePath().normalize();
                 Path config=att.config.RuntimeConfigPath.resolve(path(request.config),root);
                 att.config.FrameworkConfig current=new att.config.FrameworkConfigLoader().load(config,att.config.RuntimeConfigPath.root(config),root,request.environment);
-                boolean matches=sourceSnapshot==null
-                        ?current.effectiveConfiguration().identity().equals(configuration.get("configurationIdentity"))
-                        :matchesRelocatedSnapshotConfiguration(current,configuration,request.environment);
-                if(!matches)
+                if(!current.effectiveConfiguration().identity().equals(configuration.get("configurationIdentity")))
                     throw new PackageResourceInspector.StaleResourceCursorException();
             }
             OperationResult result=dispatch(request);
@@ -254,7 +255,7 @@ public final class WorkerMain {
             else if(error instanceof PackageResourceInspector.InvalidResourceRootException) { code="ATT-RESOURCE-ROOT-INVALID"; message="A configured Package resource root is invalid or unavailable"; exit=2; status="INVALID"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException
                     &&("run".equals(request.command)||"debug".equals(request.command)||"load".equals(request.command))
-                    &&request.expectedRevisionDigest!=null) { code="ATT-SERVER-DRAFT-STALE"; message="Package content changed after preview; rebuild the draft"; exit=2; status="INVALID"; }
+                    &&request.expectedExecutionRevisionDigest!=null) { code="ATT-SERVER-DRAFT-STALE"; message="Package content changed after preview; rebuild the draft"; exit=2; status="INVALID"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException) { code="ATT-RESOURCE-CURSOR-STALE"; message="The package resources changed; refresh the Explorer"; }
             else if(error instanceof PackageConfigurationInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package configuration response exceeded the configured limit"; }
             else if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package configuration inspection exceeded a configured limit"; }
@@ -326,22 +327,6 @@ public final class WorkerMain {
         }
     }
 
-    /**
-     * The effective identity includes the original absolute Package root. A verified accepted
-     * snapshot is staged under a Worker-private path, so compare every portable input to that
-     * identity and rely on the archive/tree digests for the captured source bytes.
-     */
-    private static boolean matchesRelocatedSnapshotConfiguration(att.config.FrameworkConfig current,
-                                                                  Map<String,Object> accepted,
-                                                                  String environment) {
-        if(current==null||current.effectiveConfiguration()==null||accepted==null)return false;
-        Map<String,Object> actual=current.effectiveConfiguration().metadata(environment);
-        for(String field:new String[]{"manifestDigest","globalDigest","environment","environmentOrigin",
-                "engineVersion","engineRevision","schemaRegistryDigest","origins","authoredPaths"})
-            if(!java.util.Objects.equals(actual.get(field),accepted.get(field)))return false;
-        return true;
-    }
-
     private void listenForLoadCancellation(JsonParser input, Thread executionThread) {
         if(input==null)return;
         try {
@@ -365,14 +350,14 @@ public final class WorkerMain {
         Path config=path(r.config); Path output=path(r.outputDirectory);
         executionOutput=output==null?null:(output.isAbsolute()?output:root.resolve(output)).normalize();
         AttService service=new DefaultAttService();
-        if(sourceSnapshot==null&&"run".equals(r.command)&&r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
+        if("run".equals(r.command)&&r.expectedExecutionRevisionDigest!=null) verifyRevision(root,config,r);
         if("run".equals(r.command)&&r.target!=null) {
             Map<String,Object> t=requiredTarget(r);
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),false,event -> emitRunExecution(event,r.diagnosticMode),r.debugId,r.overrides,false,null,r.inlineDebugInput));
         }
         if("run".equals(r.command)) return service.run(new RunRequest(root,config,r.environment,output,r.runId,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),bool(r.rerunFailed),bool(r.dryRun),bool(r.failFast),null,"reject",false,event -> emitRunExecution(event,r.diagnosticMode)));
         if("debug".equals(r.command)) { Map<String,Object> t=requiredTarget(r);
-            if(sourceSnapshot==null&&r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
+            if(r.expectedExecutionRevisionDigest!=null) verifyRevision(root,config,r);
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides,false,null,r.inlineDebugInput)); }
         if("load".equals(r.command)) { Map<String,Object> t=r.target==null?Collections.<String,Object>emptyMap():r.target; Map<String,String> l=r.load==null?Collections.<String,String>emptyMap():r.load;
             final CheckpointProjection checkpoints = new CheckpointProjection(executionOutput, r.runId);
@@ -405,7 +390,7 @@ public final class WorkerMain {
             att.api.OperationResult loadResult;
             try {
             if(r.inlineLoadScenario!=null) {
-                if(sourceSnapshot==null&&r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
+                if(r.expectedExecutionRevisionDigest!=null) verifyRevision(root,config,r);
                 att.load.LoadScenario parsed=new att.load.LoadScenarioLoader(root).loadInline(r.inlineLoadScenario);
                 loadResult=service.load(new LoadRequest(root,config,r.environment,output,r.runId,null,null,null,
                         null,null,null,null,null,null,null,null,null,r.overrides,observer,parsed,false));
@@ -413,7 +398,9 @@ public final class WorkerMain {
             } finally { checkpoints.close(); }
             loadSummaryLine=loadSampler.finish(loadResult.status());
             return loadResult; }
-        if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),r.validationScope));
+        if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,
+                output,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),
+                bool(r.all),r.validationScope));
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
             if("cli-validation".equals(r.inspectionAction)) return validateVNext(r,root,config);
@@ -440,6 +427,10 @@ public final class WorkerMain {
                                 !Boolean.FALSE.equals(r.redactionEnabled),r.sensitivePaths,r.sensitiveFieldPatterns)
                                 .forPackageTestdata().inspectAuthoringTestdataSource(r.inspectionResourceId,r.inspectionEnvironment,maxSourceBytes);
                         break;
+                    case "testcase":
+                        source=resourceInspector(root,config,r).inspectAuthoringTestcaseSource(
+                                r.inspectionResourceId,r.authoringSourceSelector);
+                        break;
                     case "central":
                         source=new PackageConfigurationInspector(root,config,maxResponseBytes,
                                 !Boolean.FALSE.equals(r.redactionEnabled),r.sensitivePaths,r.sensitiveFieldPatterns)
@@ -457,6 +448,8 @@ public final class WorkerMain {
                         ? manifest.validateCandidate(r.packageManifestSource, r.environment)
                         : "source".equals(r.inspectionAction) ? resourceInspector(root, config, r).inspectPackageFileSource("package.yaml", null)
                         : manifest.inspect(r.inspectionAction, r.environment);
+                if("resolve".equals(r.inspectionAction))
+                    inspected.put("packageRevision",resourceInspector(root,config,r).executionRevisionDigest());
                 if("source".equals(r.inspectionAction)) {
                     Map<String,Object> metadata=manifest.inspect("declared",r.environment);
                     inspected.put("manifestDigest",metadata.get("manifestDigest"));inspected.put("present",metadata.get("present"));
@@ -522,16 +515,19 @@ public final class WorkerMain {
                 return new OperationResult(null,"PASS",0,0,validated.diagnostics(),Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
             if("revision".equals(r.inspectionAction)) {
-                inspector.verifyRevision(r.expectedRevisionDigest);
+                Map<String,String> revisions=inspector.sourceRevisionDigests(r.expectedExecutionRevisionDigest);
+                Map<String,Object> result=new LinkedHashMap<String,Object>();
+                result.put("revisionDigest",revisions.get("executionRevisionDigest"));
+                result.putAll(revisions);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
-                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",Collections.<String,Object>singletonMap("revisionDigest",inspector.executionRevisionDigest())));
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",result));
             }
             if("prewarm-eligibility".equals(r.inspectionAction)) {
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspector.prewarmEligibility()));
             }
             if("debug-form".equals(r.inspectionAction)) {
-                Map<String,Object> inspected=inspector.inspectDebugForm(r.inspectionType,r.inspectionResourceId,r.expectedRevisionDigest);
+                Map<String,Object> inspected=inspector.inspectDebugForm(r.inspectionType,r.inspectionResourceId,r.expectedExecutionRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
@@ -542,7 +538,7 @@ public final class WorkerMain {
             }
             if("quick-load-form".equals(r.inspectionAction)) {
                 Map<String,Object> inspected=inspector.inspectQuickLoadForm(r.inspectionType,r.inspectionResourceId,
-                        r.loadModel,r.expectedRevisionDigest);
+                        r.loadModel,r.expectedExecutionRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
@@ -574,12 +570,12 @@ public final class WorkerMain {
             }
             if("load-catalog".equals(r.inspectionAction)) {
                 Map<String,Object> inspected=inspector.inspectLoadCatalog(r.inspectionQuery,
-                        r.inspectionOffset==null?0:r.inspectionOffset,r.inspectionLimit==null?50:r.inspectionLimit,r.expectedRevisionDigest);
+                        r.inspectionOffset==null?0:r.inspectionOffset,r.inspectionLimit==null?50:r.inspectionLimit,r.expectedExecutionRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
             if("load-detail".equals(r.inspectionAction)) {
-                Map<String,Object> inspected=inspector.inspectLoadCatalogDetail(r.inspectionPath,r.expectedRevisionDigest);
+                Map<String,Object> inspected=inspector.inspectLoadCatalogDetail(r.inspectionPath,r.expectedExecutionRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
@@ -592,7 +588,7 @@ public final class WorkerMain {
                     r.inspectionResourceId, r.inspectionQuery,
                     r.inspectionOffset == null ? 0 : r.inspectionOffset,
                     r.inspectionLimit == null ? 50 : r.inspectionLimit,
-                    r.expectedRevisionDigest,r.inspectionOrigin,
+                    r.expectedExecutionRevisionDigest,r.inspectionOrigin,
                     r.inspectionSort == null ? "name" : r.inspectionSort,
                     r.inspectionDirection == null ? "asc" : r.inspectionDirection);
             return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
@@ -721,8 +717,8 @@ public final class WorkerMain {
                 request.maxResponseBytes==null?262144:request.maxResponseBytes,true,
                 sourceBrowsingEnabled,policy,request.sourceDenyGlobs,redactionEnabled,
                 request.sensitivePaths,request.sensitiveFieldPatterns)) {
-            if(prewarmed)inspector.verifyPrewarmRevision(request.expectedRevisionDigest);
-            else inspector.verifyRevision(request.expectedRevisionDigest);
+            if(prewarmed)inspector.verifyPrewarmRevision(request.expectedExecutionRevisionDigest);
+            else inspector.verifyRevision(request.expectedExecutionRevisionDigest);
         }
     }
 

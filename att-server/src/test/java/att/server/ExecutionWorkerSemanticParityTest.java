@@ -10,6 +10,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -83,6 +85,72 @@ class ExecutionWorkerSemanticParityTest {
         assertEquals("cold",load.dispatch,"LOAD must keep the existing isolated cold one-shot path");
     }
 
+    @Test void revisionPublicationFallsBackSafelyForWarmRunAndDebugRequests() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("published-allowed"));
+        Path pkg=Files.createDirectories(allowed.resolve("p"));
+        Path template=Files.createDirectories(pkg.resolve("templates/SIMPLE"));
+        Files.createDirectories(pkg.resolve("testcase"));
+        Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: SIMPLE\ndescription: Revision-pinned prewarm test\n"
+                +"actions:\n  message: {type: log, message: published-prewarm}\n");
+        Files.writeString(template.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        Path runtimeConfig=temp.resolve("published-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
+        try(XSSFWorkbook book=new XSSFWorkbook();var out=Files.newOutputStream(pkg.resolve("testcase/cases.xlsx"))) {
+            Sheet sheet=book.createSheet("Cases");Row header=sheet.createRow(0);
+            header.createCell(0).setCellValue("ID");header.createCell(1).setCellValue("Tags");header.createCell(2).setCellValue("Template");
+            Row row=sheet.createRow(1);row.createCell(0).setCellValue("C1");row.createCell(1).setCellValue("smoke");row.createCell(2).setCellValue("name: SIMPLE");
+            book.write(out);
+        }
+        Files.writeString(pkg.resolve("testcase/cases.yaml"),"schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n"
+                +"  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
+        new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(pkg,runtimeConfig,"SIT",
+                List.of(Path.of("testcase/cases.xlsx")),null,java.util.Set.of(),false));
+
+        Path libs=Files.createDirectories(temp.resolve("published-libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
+            ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+        Path data=temp.resolve("published-data"),serverConfig=temp.resolve("published-server.yaml");
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
+                +"  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  auth: {mode: local}\n"
+                +"  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  heapMaxMb: 128\n"
+                +"  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [p]}\n"
+                +"packages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(pkg)+"}\n");
+
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            awaitReady(runtime,15);
+            publishTemplateRevision(runtime,pkg,"# published before RUN\n");
+            awaitReadyRoot(runtime,runtime.executionPackageRoot("p"),15);
+            var runDefinition=ServerRuntime.JSON.createObjectNode();
+            runDefinition.put("schemaVersion",RunDefinition.VERSION);runDefinition.put("executionType","run");runDefinition.put("packageId","p");
+            runDefinition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","case","id","cases.default.C1")));
+            runDefinition.set("options",ServerRuntime.JSON.valueToTree(Map.of("debug",false)));
+            Map<String,Object> runDraft=runtime.createRunDraft(runDefinition,"alice");
+            Map<String,Object> runAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",runDraft.get("draftId"))),"alice","alice");
+            String runId=String.valueOf(runAccepted.get("jobId"));
+            Map<String,Object> runResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,runId);
+            assertEquals("PASS",((Map<?,?>)runResult.get("job")).get("status"),runResult.toString());
+            assertEquals("warm",workerDispatch(runResult),"A replacement idle Worker must use the exact published Package revision");
+
+            publishTemplateRevision(runtime,pkg,"# published before DEBUG\n");
+            awaitReadyRoot(runtime,runtime.executionPackageRoot("p"),15);
+            var debugDefinition=ServerRuntime.JSON.createObjectNode();debugDefinition.put("packageId","p");
+            debugDefinition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id","SIMPLE")));
+            debugDefinition.set("input",ServerRuntime.JSON.createObjectNode());
+            Map<String,Object> debugDraft=runtime.createDebugDraft(debugDefinition,"alice");
+            Map<String,Object> debugAccepted=runtime.submitDebugDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",debugDraft.get("draftId"))),"alice");
+            String debugId=String.valueOf(debugAccepted.get("jobId"));
+            Map<String,Object> debugResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,debugId);
+            assertEquals("PASS",((Map<?,?>)debugResult.get("job")).get("status"),debugResult.toString());
+            assertEquals("warm",workerDispatch(debugResult),"A replacement idle Worker must use the exact published Package revision for DEBUG");
+        }
+    }
+
     @Test void warmAndColdRunAndDebugCancellationAndToolTimeoutHaveEquivalentTerminalEvidence() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),
                 "Uses a POSIX child Tool fixture");
@@ -93,8 +161,8 @@ class ExecutionWorkerSemanticParityTest {
         Path tools=Files.createDirectories(pkg.resolve("tools"));
         Path holdScript=tools.resolve("hold.sh");
         Files.writeString(holdScript,"#!/bin/sh\n"
-                +"printf '%s' \"$$\" > \"$ATT_ROOT_DIR/tools/child.pid\"\n"
-                +"touch \"$ATT_ROOT_DIR/tools/started\"\n"
+                +"printf '%s' \"$$\" > \"$ATT_CASE_OUTPUT_DIR/child.pid\"\n"
+                +"touch \"$ATT_CASE_OUTPUT_DIR/started\"\n"
                 +"exec sleep 60\n");
         holdScript.toFile().setExecutable(true);
         Files.writeString(Files.createDirectories(templates.resolve("HOLD")).resolve("template.yaml"),
@@ -288,8 +356,6 @@ class ExecutionWorkerSemanticParityTest {
 
     private TerminalCapture executeInterrupted(boolean enabled,Path allowed,Path pkg,Path runtimeConfig,Path libs,
                                                String template,boolean cancel,boolean debug,String name) throws Exception {
-        Path started=pkg.resolve("tools/started"),childPid=pkg.resolve("tools/child.pid");
-        Files.deleteIfExists(started);Files.deleteIfExists(childPid);
         Path data=temp.resolve(name+"-data"),serverConfig=temp.resolve(name+"-server.yaml");
         String pool=enabled?"  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [p]}\n":"";
         Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
@@ -318,9 +384,10 @@ class ExecutionWorkerSemanticParityTest {
             }
             String id=String.valueOf(accepted.get("jobId"));
             Job job=runtime.jobs.get(id);
-            await(()->Files.exists(started)&&Files.exists(childPid)&&job.workerPid!=null,20);
+            Path output=data.resolve("jobs").resolve(id).resolve("output");
+            await(()->outputContains(output,"started")&&outputContains(output,"child.pid")&&job.workerPid!=null,20);
             long workerPid=job.workerPid;
-            long toolPid=Long.parseLong(Files.readString(childPid));
+            long toolPid=Long.parseLong(Files.readString(outputFile(output,"child.pid")));
             if(cancel)assertEquals("CANCELLED",runtime.cancel(id,"alice"));
             Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,id);
             await(()->!ProcessHandle.of(workerPid).map(ProcessHandle::isAlive).orElse(false)
@@ -364,6 +431,50 @@ class ExecutionWorkerSemanticParityTest {
         fail("The prewarm Worker did not become READY");
     }
 
+    private static void awaitReadyRoot(ServerRuntime runtime,Path expectedRoot,int seconds) throws Exception {
+        Path canonical=expectedRoot.toRealPath();
+        Field poolField=ServerRuntime.class.getDeclaredField("executionWorkers");poolField.setAccessible(true);
+        Object pool=poolField.get(runtime);Field ownedField=pool.getClass().getDeclaredField("owned");ownedField.setAccessible(true);
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(seconds);
+        while(System.nanoTime()<deadline) {
+            synchronized(pool) {
+                for(Object idle:(List<?>)ownedField.get(pool)) {
+                    Field rootField=idle.getClass().getDeclaredField("root");rootField.setAccessible(true);
+                    Field readyField=idle.getClass().getDeclaredField("readyNanos");readyField.setAccessible(true);
+                    Field retiredField=idle.getClass().getDeclaredField("retired");retiredField.setAccessible(true);
+                    Field processField=idle.getClass().getDeclaredField("process");processField.setAccessible(true);
+                    Process process=(Process)processField.get(idle);
+                    if(!retiredField.getBoolean(idle)&&readyField.getLong(idle)>0&&canonical.equals(rootField.get(idle))
+                            &&process!=null&&process.isAlive())return;
+                }
+            }
+            Thread.sleep(25);
+        }
+        fail("The prewarm Worker did not become READY for the current Package revision");
+    }
+
+    private static void publishTemplateRevision(ServerRuntime runtime,Path configuredRoot,String marker) throws Exception {
+        Field transactionField=ServerRuntime.class.getDeclaredField("sourceFileTransaction");transactionField.setAccessible(true);
+        SourceFileTransaction transaction=(SourceFileTransaction)transactionField.get(runtime);
+        Path active=runtime.packageRoot("p");
+        Path source=active.resolve("templates/SIMPLE/template.yaml");
+        byte[] before=Files.readAllBytes(source);
+        byte[] after=(new String(before,java.nio.charset.StandardCharsets.UTF_8)+marker).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Map<String,SourceFileTransaction.Write> writes=Map.of("templates/SIMPLE/template.yaml",
+                new SourceFileTransaction.Write("templates/SIMPLE/template.yaml",after,sha256(before)));
+        transaction.commit(ChangeSetPublisher.PACKAGE_SOURCE,"p",configuredRoot,"test-publisher",sha256(before),sha256(after),writes,()->{ });
+    }
+
+    private static String workerDispatch(Map<String,Object> result) {
+        Map<?,?> job=(Map<?,?>)result.get("job");
+        Map<?,?> performance=(Map<?,?>)job.get("performance");
+        return String.valueOf(performance.get("workerDispatch"));
+    }
+
+    private static String sha256(byte[] bytes) throws Exception {
+        return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
     private static void awaitArchive(ServerRuntime runtime,String id,int seconds) throws Exception {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(seconds);
         while(System.nanoTime()<deadline&& !"READY".equals(runtime.artifactIndex(id).get("archiveStatus")))Thread.sleep(20);
@@ -374,6 +485,16 @@ class ExecutionWorkerSemanticParityTest {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(seconds);
         while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(20);
         assertTrue(condition.getAsBoolean(),"Lifecycle condition did not complete within "+seconds+" seconds");
+    }
+
+    private static boolean outputContains(Path root,String fileName) {
+        if(!Files.isDirectory(root))return false;
+        try(var paths=Files.walk(root)) { return paths.anyMatch(path->path.getFileName().toString().equals(fileName)); }
+        catch(Exception unavailable) { return false; }
+    }
+
+    private static Path outputFile(Path root,String fileName) throws Exception {
+        try(var paths=Files.walk(root)) { return paths.filter(path->path.getFileName().toString().equals(fileName)).findFirst().orElseThrow(); }
     }
 
     private static JsonNode stableResult(Object raw) {

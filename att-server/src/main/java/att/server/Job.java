@@ -16,6 +16,9 @@ final class Job {
     String executionSpec, replayUnavailable, rerunOfJobId, replayIntent, replayOwner;
     String sourceLeaseId;
     Map<String,Object> sourceProvenance;
+    volatile String acceptedPackageTreeDigest;
+    volatile java.nio.file.Path acceptedCentralSourceRoot;
+    volatile String acceptedCentralTreeDigest;
     final Instant createdAt=Instant.now();
     volatile long requestReceivedNanos=System.nanoTime();
     volatile long admittedNanos,workerStartedNanos,workerSpawnStartedNanos,workerSpawnedNanos;

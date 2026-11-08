@@ -850,6 +850,11 @@ public final class ApiServlet extends HttpServlet {
         if(req.getParameter("redacted")!=null){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}
         String packageId=segment(path,2),kind=req.getParameter("type"),resourceType=req.getParameter("resourceType");
         String resourceId=req.getParameter("resourceId"),sourcePath=req.getParameter("path"),origin=req.getParameter("origin"),referenceId=req.getParameter("referenceId");
+        String sourceSelector=req.getParameter("selector");
+        if("testcase".equals(kind)&&(resourceType!=null||sourcePath!=null||origin!=null||referenceId!=null
+                ||req.getParameter("environment")!=null)) {
+            error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;
+        }
         try {
             // Resolve registration first so unknown ids stay 404; content access itself remains owner-only.
             runtime.packageView(packageId,principal(req));
@@ -858,11 +863,12 @@ public final class ApiServlet extends HttpServlet {
             }
             Map<String,Object> result=runtime.withPackageSourceAuthority(login,
                     id -> id.equals(principalExact(req))&&operatorCapability(req,id),() -> switch(kind==null?"":kind) {
-                        case "manifest" -> runtime.inspectAuthoringPackageSource(packageId,"manifest",null,null,null,null,null,null,login);
-                        case "resource" -> runtime.inspectAuthoringPackageSource(packageId,"resource",resourceType,resourceId,null,null,null,null,login);
-                        case "file" -> runtime.inspectAuthoringPackageSource(packageId,"file",resourceType,resourceId,null,origin,referenceId,null,login);
-                        case "load" -> runtime.inspectAuthoringPackageSource(packageId,"load",null,null,sourcePath,null,null,null,login);
-                        case "testdata" -> runtime.inspectAuthoringPackageSource(packageId,"testdata",null,resourceId,null,null,null,req.getParameter("environment"),login);
+                        case "manifest" -> runtime.inspectAuthoringPackageSource(packageId,"manifest",null,null,null,null,null,null,login,null);
+                        case "resource" -> runtime.inspectAuthoringPackageSource(packageId,"resource",resourceType,resourceId,null,null,null,null,login,null);
+                        case "file" -> runtime.inspectAuthoringPackageSource(packageId,"file",resourceType,resourceId,null,origin,referenceId,null,login,null);
+                        case "load" -> runtime.inspectAuthoringPackageSource(packageId,"load",null,null,sourcePath,null,null,null,login,null);
+                        case "testdata" -> runtime.inspectAuthoringPackageSource(packageId,"testdata",null,resourceId,null,null,null,req.getParameter("environment"),login,null);
+                        case "testcase" -> runtime.inspectAuthoringPackageSource(packageId,"testcase",null,resourceId,null,null,null,null,login,sourceSelector);
                         default -> throw new ServerRuntime.NotFoundException();
                     });
             // A trusted container role may change while the Worker reads. Recheck USER and exact owner at return.

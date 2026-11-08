@@ -84,6 +84,27 @@ class PackageResourceInspectorTest {
         }
     }
 
+    @Test void authoringTestcaseSidecarRequiresAReadyIndexedCaseAndFixedSelector() throws Exception {
+        Path root=packageWithCaseWorkbook("authoring-testcase-sidecar",1);
+        String expected=new String(Files.readAllBytes(root.resolve("testcase/cases.yaml")),StandardCharsets.UTF_8);
+        PackageResourceInspector inspector=new PackageResourceInspector(root,root.resolve("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") Map<String,Object> page=inspector.inspect("list","case",null,null,0,100);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> cases=(List<Map<String,Object>>)page.get("items");
+        Map<String,Object> testCase=cases.stream().filter(item->"ready".equals(item.get("state"))).findFirst()
+                .orElseThrow(()->new AssertionError(page.toString()));
+        String resourceId=String.valueOf(testCase.get("resourceId"));
+        Map<String,Object> source=inspector.inspectAuthoringTestcaseSource(resourceId,"sidecar");
+        assertEquals("testcase/cases.yaml",source.get("logicalPath"));
+        assertEquals("testcase-sidecar",source.get("sourceType"));
+        assertEquals(expected,source.get("text"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspectAuthoringTestcaseSource(resourceId,"workbook"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspectAuthoringTestcaseSource("case.not-indexed","sidecar"));
+    }
+
     @Test void returnsSafeTemplateProjectionAndEnforcesRevisionBoundPagination() throws Exception {
         Path root=packageWithTemplate("safe-source", "TEST", "description: harmless");
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
@@ -170,6 +191,60 @@ class PackageResourceInspectorTest {
         assertNotEquals(sit,uat,"An effective environment change must invalidate validated revisions");
         assertTrue(att.validation.SchemaFiles.registryDigest().matches("[a-f0-9]{64}"),
                 "Revision identity includes the bundled registry fingerprint");
+    }
+
+    @Test void packageSourceRevisionIgnoresSharedConfigAndEngineOnlyChanges() throws Exception {
+        Path root=packageWithTemplate("package-source-revision", "PAYMENT", "description: revision context");
+        Path sharedConfig=Files.createDirectories(temp.resolve("source-revision-shared/config")).resolve("config.yaml");
+        writeUtf8(sharedConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
+        Map<String,String> initial;
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.<String>emptyList(),65536,262144)) {
+            initial=inspector.sourceRevisionDigests(null);
+        }
+
+        Files.writeString(sharedConfig,Files.readString(sharedConfig)+"# shared configuration only\n");
+        Map<String,String> configChanged;
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.<String>emptyList(),65536,262144)) {
+            configChanged=inspector.sourceRevisionDigests(null);
+        }
+        assertEquals(initial.get("packageSourceRevision"),configChanged.get("packageSourceRevision"));
+        assertNotEquals(initial.get("executionRevisionDigest"),configChanged.get("executionRevisionDigest"),
+                "The execution revision remains bound to shared Runtime Config bytes");
+
+        Map<String,String> engineA=revisionProbe(root,sharedConfig,"engine-build-a");
+        Map<String,String> engineB=revisionProbe(root,sharedConfig,"engine-build-b");
+        assertEquals(configChanged.get("packageSourceRevision"),engineA.get("packageSourceRevision"));
+        assertEquals(engineA.get("packageSourceRevision"),engineB.get("packageSourceRevision"));
+        assertNotEquals(engineA.get("executionRevisionDigest"),engineB.get("executionRevisionDigest"),
+                "Engine build identity remains bound to the composite execution revision");
+    }
+
+    private Map<String,String> revisionProbe(Path root,Path config,String engineCommit) throws Exception {
+        String javaExecutable=Paths.get(System.getProperty("java.home"),"bin","java").toString();
+        Path buildInfo=Files.createDirectories(temp.resolve("build-info-"+engineCommit));
+        writeUtf8(buildInfo.resolve("att-build.properties"),"att.version=4.3.0\natt.gitCommit="+engineCommit+"\natt.buildTime=test\n");
+        String classpath=buildInfo.toString()+java.io.File.pathSeparator
+                +System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        Process process=new ProcessBuilder(javaExecutable,"-cp",classpath,
+                RevisionProbe.class.getName(),root.toString(),config.toString()).redirectErrorStream(true).start();
+        byte[] output;
+        try(java.io.InputStream input=process.getInputStream()) { output=input.readAllBytes(); }
+        int exit=process.waitFor();
+        assertEquals(0,exit,"Revision probe failed: "+new String(output,StandardCharsets.UTF_8));
+        String[] values=new String(output,StandardCharsets.UTF_8).trim().split(" ");
+        assertEquals(2,values.length);
+        return Map.of("executionRevisionDigest",values[0],"packageSourceRevision",values[1]);
+    }
+
+    public static class RevisionProbe {
+        public static void main(String[] args) throws Exception {
+            try(PackageResourceInspector inspector=new PackageResourceInspector(Paths.get(args[0]),Paths.get(args[1]),"SIT",
+                    Collections.<String>emptyList(),65536,262144)) {
+                Map<String,String> revisions=inspector.sourceRevisionDigests(null);
+                System.out.print(revisions.get("executionRevisionDigest")+" "+revisions.get("packageSourceRevision"));
+            }
+        }
     }
 
     @Test void loadCatalogDistinguishesPolicyTemplatesAndInvalidYamlAndRestrictsSourcePaths() throws Exception {
@@ -380,18 +455,28 @@ class PackageResourceInspectorTest {
         assertEquals("<request>&{./nested.sql}</request>\n",rawFile.get("text"),"Owner source must preserve exact referenced-file bytes");
     }
 
-    @Test void authoringFileSourcesRequireDirectScalarActionReferencesFromTheDescriptorOrigin() throws Exception {
+    @Test void authoringFileSourcesFollowTypedValuesAndEvidenceCallsButNotMetadataOrLinkedFiles() throws Exception {
         Path root=packageWithTemplate("authoring-action-reference-origin","FORM","description: source origin test");
         Path shared=Files.createDirectories(root.resolve("templates/shared"));
         writeUtf8(shared.resolve("allowed.txt"),"direct Action source");
         writeUtf8(shared.resolve("description-only.txt"),"description source\n");
-        writeUtf8(shared.resolve("nested-only.txt"),"nested Action value source\n");
+        writeUtf8(shared.resolve("nested-map.txt"),"nested Action map value source\n");
+        writeUtf8(shared.resolve("nested-list.txt"),"nested Action list value source\n");
+        writeUtf8(shared.resolve("collector-call.txt"),"evidence collector call source\n");
+        writeUtf8(shared.resolve("unrelated-metadata.txt"),"unrelated metadata source\n");
+        writeUtf8(shared.resolve("collector-metadata.txt"),"collector metadata source\n");
+        writeUtf8(shared.resolve("collector-extension-metadata.txt"),"collector extension metadata source\n");
         writeUtf8(shared.resolve("linked-only.txt"),"nested linked-file source\n");
         Path template=root.resolve("templates/FORM/template.yaml");
         writeUtf8(template,"schemaVersion: att-template/v3.6\nname: FORM\n"
                 +"description: '&{../shared/description-only.txt}'\n"
                 +"actions:\n  direct:\n    type: log\n    message: '&{../shared/allowed.txt}'\n"
-                +"    value:\n      nested: '&{../shared/nested-only.txt}'\n"
+                +"    value:\n      nested: '&{../shared/nested-map.txt}'\n"
+                +"      list:\n        - '&{../shared/nested-list.txt}'\n"
+                +"    x-note:\n      nested: '&{../shared/unrelated-metadata.txt}'\n"
+                +"  callPayment:\n    type: tool\n    call: '#{echo()}'\n    evidence:\n      appLog:\n"
+                +"        call: '&{../shared/collector-call.txt}'\n        x-note: '&{../shared/collector-metadata.txt}'\n"
+                +"      x-audit:\n        call: '&{../shared/collector-extension-metadata.txt}'\n"
                 +"  linked:\n    type: assign\n    name: linked\n    expression: '&{../shared/linked.txt}'\n");
         writeUtf8(shared.resolve("linked.txt"),"&{./linked-only.txt}\n");
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
@@ -406,7 +491,15 @@ class PackageResourceInspectorTest {
                 .findFirst().orElseThrow(()->new AssertionError(source.toString()));
         assertEquals("direct Action source",inspector.inspectAuthoringSourceFile("template",resourceId,
                 String.valueOf(allowed.get("referenceId")),null).get("text"));
-        for(String deniedPath:Arrays.asList("templates/shared/description-only.txt","templates/shared/nested-only.txt")) {
+        for(String allowedPath:Arrays.asList("templates/shared/nested-map.txt","templates/shared/nested-list.txt",
+                "templates/shared/collector-call.txt")) {
+            Map<String,Object> nestedAllowed=references.stream().filter(item->allowedPath.equals(item.get("logicalPath")))
+                    .findFirst().orElseThrow(()->new AssertionError(source.toString()));
+            assertTrue(String.valueOf(inspector.inspectAuthoringSourceFile("template",resourceId,
+                    String.valueOf(nestedAllowed.get("referenceId")),null).get("text")).contains("source"),allowedPath);
+        }
+        for(String deniedPath:Arrays.asList("templates/shared/description-only.txt","templates/shared/unrelated-metadata.txt",
+                "templates/shared/collector-metadata.txt","templates/shared/collector-extension-metadata.txt")) {
             Map<String,Object> denied=references.stream().filter(item->deniedPath.equals(item.get("logicalPath")))
                     .findFirst().orElseThrow(()->new AssertionError(source.toString()));
             assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
