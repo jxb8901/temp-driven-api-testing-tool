@@ -27,6 +27,7 @@ export interface ManagedAuthoringSource {
   registryRevision?: string;
   configRevision?: string;
   schemaRevision?: string;
+  revisions?: SourceRevisionSet;
 }
 
 export interface SourceOperation {
@@ -70,6 +71,7 @@ export interface SourceChangeSet {
   domain: SourceDomain;
   scopeId: string;
   state: 'draft' | 'validated' | 'reviewed' | 'published' | string;
+  revisions?: SourceRevisionSet;
   baseSourceRevision: string;
   registryRevision?: string;
   manifestRevision?: string;
@@ -110,7 +112,11 @@ export interface SourceRevisionIdentity {
 export interface SourceRevisionSet {
   schemaVersion?: 'att-source-revision-set/v1' | string;
   packageRegistration?: SourceRevisionIdentity;
+  packageSourceRevision?: SourceRevisionIdentity;
+  /** Compatibility alias for packageSourceRevision. */
   businessSource?: SourceRevisionIdentity;
+  /** Execution-bound identity; it is not a Package source edit revision. */
+  executionRevisionDigest?: SourceRevisionIdentity;
   changeSet?: SourceRevisionIdentity;
   manifest?: SourceRevisionIdentity;
   configSource?: SourceRevisionIdentity;
@@ -118,6 +124,39 @@ export interface SourceRevisionSet {
   environment?: SourceRevisionIdentity;
   engineSchema?: SourceRevisionIdentity;
   scheduleSnapshot?: SourceRevisionIdentity;
+}
+
+function hasRevisionKind(value: unknown, kind: string): value is SourceRevisionIdentity {
+  if (typeof value !== 'object' || value === null) return false;
+  const identity = value as Partial<SourceRevisionIdentity>;
+  return identity.kind === kind
+    && (identity.schemaVersion === undefined || identity.schemaVersion === 'att-source-revision/v1')
+    && typeof identity.scopeId === 'string' && identity.scopeId.length > 0
+    && typeof identity.revision === 'string' && identity.revision.length > 0
+    && (identity.qualifier === undefined || identity.qualifier === null || typeof identity.qualifier === 'string');
+}
+
+export function isPackageSourceRevisionIdentity(value: unknown): value is SourceRevisionIdentity {
+  return hasRevisionKind(value, 'PACKAGE_SOURCE') || hasRevisionKind(value, 'BUSINESS_SOURCE');
+}
+
+export function resolvePackageSourceRevisionIdentity(revisions?: SourceRevisionSet | null): SourceRevisionIdentity | null {
+  const canonical = revisions?.packageSourceRevision;
+  const legacy = revisions?.businessSource;
+  if (canonical != null && !hasRevisionKind(canonical, 'PACKAGE_SOURCE')) return null;
+  if (legacy != null && !hasRevisionKind(legacy, 'BUSINESS_SOURCE')) return null;
+  if (canonical && legacy && (canonical.scopeId !== legacy.scopeId
+    || canonical.qualifier !== legacy.qualifier || canonical.revision !== legacy.revision)) return null;
+  return canonical || legacy || null;
+}
+
+export function resolveExecutionRevisionIdentity(revisions?: SourceRevisionSet | null): SourceRevisionIdentity | null {
+  const execution = revisions?.executionRevisionDigest;
+  return execution == null ? null : hasRevisionKind(execution, 'EXECUTION_REVISION') ? execution : null;
+}
+
+export function isSourceRevisionIdentity(value: unknown, kind: string): value is SourceRevisionIdentity {
+  return hasRevisionKind(value, kind);
 }
 
 export interface SourceValidationDiagnostic {

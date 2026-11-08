@@ -9,6 +9,10 @@ import type {
   SourceAffectedSchedule, SourceChangeSet, SourceImpactReport, SourceOperation,
   SourcePublishResult, SourceValidationDiagnostic,
 } from './sourceManagement';
+import {
+  isPackageSourceRevisionIdentity, isSourceRevisionIdentity,
+  resolveExecutionRevisionIdentity, resolvePackageSourceRevisionIdentity,
+} from './sourceManagement';
 import './source-authoring.css';
 
 type PackageSourceTarget = {
@@ -96,12 +100,13 @@ function impactFreshnessMatches(report: SourceImpactReport | null, changeSetId: 
   const freshness = report?.freshness;
   return Boolean(freshness?.schemaVersion === 'att-config-impact-freshness/v1'
     && freshness.draftId === changeSetId && /^[a-f0-9]{64}$/.test(freshness.draftFingerprint || '')
-    && freshness.baseConfig?.kind === 'CONFIG_SOURCE' && freshness.baseConfig.revision === expectedConfigRevision
-    && freshness.candidateConfig?.kind === 'CONFIG_SOURCE' && freshness.candidateConfig.revision
-    && freshness.packageRegistry?.kind === 'PACKAGE_REGISTRATION' && freshness.packageRegistry.revision
-    && freshness.engineSchema?.kind === 'ENGINE_SCHEMA' && freshness.engineSchema.revision
-    && Array.isArray(freshness.packageSources) && Array.isArray(freshness.manifests)
-    && Array.isArray(freshness.scheduleSnapshots));
+    && isSourceRevisionIdentity(freshness.baseConfig, 'CONFIG_SOURCE') && freshness.baseConfig.revision === expectedConfigRevision
+    && isSourceRevisionIdentity(freshness.candidateConfig, 'CONFIG_SOURCE')
+    && isSourceRevisionIdentity(freshness.packageRegistry, 'PACKAGE_REGISTRATION')
+    && isSourceRevisionIdentity(freshness.engineSchema, 'ENGINE_SCHEMA')
+    && Array.isArray(freshness.packageSources) && freshness.packageSources.every(isPackageSourceRevisionIdentity)
+    && Array.isArray(freshness.manifests) && freshness.manifests.every(item => isSourceRevisionIdentity(item, 'PACKAGE_MANIFEST'))
+    && Array.isArray(freshness.scheduleSnapshots) && freshness.scheduleSnapshots.every(item => isSourceRevisionIdentity(item, 'SCHEDULE_SNAPSHOT')));
 }
 function summarizeReferences(file: ChangedSourceFile): string[] {
   return (file.inboundReferences || []).map(reference => {
@@ -174,6 +179,9 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       && !pendingOperations.some(operation => operation.path === createPath.trim() && operation.content === content));
   const displayedPath = pathLabel(target, source);
   const expectedCentralRevision = source?.configRevision || source?.baseSourceRevision || source?.revision;
+  const revisionSet = draft?.revisions || source?.revisions;
+  const packageSourceIdentity = resolvePackageSourceRevisionIdentity(revisionSet);
+  const executionRevisionIdentity = resolveExecutionRevisionIdentity(revisionSet);
   const impactMatchesCurrentDraft = Boolean(draft && impactFreshnessMatches(impact, draft.changeSetId, expectedCentralRevision));
   const centralReportReady = Boolean(!draftStale && impact?.providerState === 'AVAILABLE'
     && impactMatchesCurrentDraft
@@ -644,6 +652,8 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
         <span><strong>{draft ? 'Draft' : published ? 'Published' : 'Published source'}</strong></span>
         <span>Source ETag <code>{source.sourceEtag}</code></span>
         <span>Base revision <code>{source.baseSourceRevision}</code></span>
+        {packageSourceIdentity && <span>Package source revision <code>{packageSourceIdentity.revision}</code></span>}
+        {executionRevisionIdentity && <span>Execution revision <code>{executionRevisionIdentity.revision}</code></span>}
         {source.registryRevision && <span>Package registration revision <code>{source.registryRevision}</code></span>}
         {draft && <span>Draft revision <code>{draft.validationRevision || draft.baseSourceRevision}</code></span>}
         {published && <span>Published revision <code>{published.revision}</code></span>}
