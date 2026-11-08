@@ -392,7 +392,7 @@ class ChangeSetPublisherTest {
                     "config/config.yaml",bytes("schemaVersion: att-config/v2.13\nname: revised\n"))));
             String id=String.valueOf(draft.get("changeSetId"));
             validateReview(publisher,id,ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"admin",true);
-            ChangeSetPublisher.ValidationRejected stale=assertThrows(ChangeSetPublisher.ValidationRejected.class,
+            ChangeSetPublisher.Conflict stale=assertThrows(ChangeSetPublisher.Conflict.class,
                     ()->publisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"admin",true,id));
             assertEquals("ATT-CONFIG-IMPACT-STALE",stale.code);
             assertTrue(approvals.get()>=2);

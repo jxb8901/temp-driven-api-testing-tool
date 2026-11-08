@@ -60,8 +60,8 @@ class ConfigImpactAnalyzerIntegrationTest {
                 """;
         Files.writeString(configFile, original);
 
-        PackageRegistry.Snapshot registry = registrySnapshot(Map.of("default", packageRoot,
-                "global-default", globalDefaultPackageRoot));
+        AtomicReference<PackageRegistry.Snapshot> registry = new AtomicReference<>(registrySnapshot(
+                Map.of("default", packageRoot, "global-default", globalDefaultPackageRoot), "c".repeat(64)));
         LoadSchedule defaultSchedule = schedule("schedule-default", "default", null, true, "pause");
         LoadSchedule uatPausedSchedule = schedule("schedule-uat-paused", "default", "UAT", false, "strict");
         LoadSchedule uatIgnoreSchedule = schedule("schedule-uat-ignore", "default", "UAT", true, "ignore");
@@ -84,10 +84,10 @@ class ConfigImpactAnalyzerIntegrationTest {
         SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
         String schemaRevision = SchemaFiles.registryDigest();
         ConfigImpactAnalyzer analyzer = new ConfigImpactAnalyzer(new ConfigImpactAnalyzer.Inventory() {
-            @Override public PackageRegistry.Snapshot registry() { return registry; }
+            @Override public PackageRegistry.Snapshot registry() { return registry.get(); }
             @Override public List<LoadSchedule> schedules() { return schedules.get(); }
         }, PackageConfigurationPolicy.load(null), "strict", new att.validation.SourceCandidateValidator(), coordinator);
-        ChangeSetPublisher publisher = new ChangeSetPublisher(Clock.systemUTC(), 16, 4, 900,
+        ChangeSetPublisher publisher = new ChangeSetPublisher(Clock.systemUTC(), 16, 16, 900,
                 (domain, scopeId, actor, systemSettingsWrite) -> {
                     if (!ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(domain)
                             || !ChangeSetPublisher.CENTRAL_SCOPE_ID.equals(scopeId)
@@ -98,6 +98,9 @@ class ConfigImpactAnalyzerIntegrationTest {
                     var approval = analyzer.authorizeCandidate(candidate, review);
                     if (approval.state == att.server.api.source.SourceManagementContracts.ApprovalState.APPROVED)
                         return ChangeSetPublisher.GateDecision.allow(approval.approvalRevision);
+                    if (approval.state == att.server.api.source.SourceManagementContracts.ApprovalState.STALE)
+                        return ChangeSetPublisher.GateDecision.stale(approval.code == null
+                                ? "ATT-CONFIG-IMPACT-STALE" : approval.code);
                     return ChangeSetPublisher.GateDecision.block(approval.code == null
                             ? "ATT-CONFIG-IMPACT-BLOCKED" : approval.code);
                 }, new ChangeSetPublisher.Audit() {
@@ -195,7 +198,7 @@ class ConfigImpactAnalyzerIntegrationTest {
                     ConfigImpactAnalyzer.acknowledgementDigest(freshness, "admin"));
             LoadSchedule changedSchedule = schedule("schedule-default", "default", null, false, "pause");
             schedules.set(List.of(changedSchedule, uatPausedSchedule, uatIgnoreSchedule, globalDefaultSchedule));
-            ChangeSetPublisher.ValidationRejected stale = assertThrows(ChangeSetPublisher.ValidationRejected.class,
+            ChangeSetPublisher.Conflict stale = assertThrows(ChangeSetPublisher.Conflict.class,
                     () -> publisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
                             ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, impactId,
                             "stale-impact-integration-test", acknowledgement));
@@ -236,13 +239,91 @@ class ConfigImpactAnalyzerIntegrationTest {
                     "the Package Manifest's SIT default shields it from the global default migration");
             assertTrue(defaultImpact.schedules.items.stream().anyMatch(item -> "schedule-global-default".equals(item.scheduleId)
                     && item.action == ScheduleAction.REVALIDATE));
+
+            String compatibleSource = Files.readString(configFile) + "\n# fresh compatible report binding\n";
+            Map<String, Object> noReportDraft = publisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, afterPublish.get("baseSourceRevision"), null,
+                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml", bytes(compatibleSource))));
+            String noReportId = String.valueOf(noReportDraft.get("changeSetId"));
+            publisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG, ChangeSetPublisher.CENTRAL_SCOPE_ID,
+                    "admin", true, noReportId);
+            publisher.review(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG, ChangeSetPublisher.CENTRAL_SCOPE_ID,
+                    "admin", true, noReportId);
+            ChangeSetPublisher.Conflict missingReport = assertThrows(ChangeSetPublisher.Conflict.class,
+                    () -> publisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                            ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, noReportId,
+                            "compatible-without-report", null));
+            assertEquals("ATT-CONFIG-IMPACT-STALE", missingReport.code);
+
+            Map<String, Object> boundDraft = publisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, afterPublish.get("baseSourceRevision"), null,
+                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml", bytes(compatibleSource))));
+            String boundId = String.valueOf(boundDraft.get("changeSetId"));
+            publisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG, ChangeSetPublisher.CENTRAL_SCOPE_ID,
+                    "admin", true, boundId);
+            publisher.review(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG, ChangeSetPublisher.CENTRAL_SCOPE_ID,
+                    "admin", true, boundId);
+
+            ImpactAcknowledgement compatibleAck = compatibleAcknowledgement(publisher, boundId);
+            assertFalse(publisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, boundId, null).acknowledgementRequired,
+                    "a Compatible report binds freshness without requiring acknowledgement of effects");
+            List<LoadSchedule> schedulesBeforeMutation = schedules.get();
+            schedules.set(List.of(schedule("schedule-default", "default", null, false, "pause"),
+                    uatPausedSchedule, uatIgnoreSchedule, globalDefaultSchedule));
+            assertStalePublish(publisher, boundId, compatibleAck, "schedule inventory");
+            schedules.set(schedulesBeforeMutation);
+
+            compatibleAck = compatibleAcknowledgement(publisher, boundId);
+            PackageRegistry.Snapshot registryBeforeMutation = registry.get();
+            registry.set(registrySnapshot(registryBeforeMutation.packages, "d".repeat(64)));
+            assertStalePublish(publisher, boundId, compatibleAck, "Package Registry");
+            registry.set(registryBeforeMutation);
+
+            compatibleAck = compatibleAcknowledgement(publisher, boundId);
+            byte[] originalProbe = Files.readAllBytes(packageRoot.resolve("tools/probe.sh"));
+            Files.writeString(packageRoot.resolve("tools/probe.sh"), new String(originalProbe, StandardCharsets.UTF_8)
+                    + "# Package source revision changed\n");
+            assertStalePublish(publisher, boundId, compatibleAck, "Package source");
+            Files.write(packageRoot.resolve("tools/probe.sh"), originalProbe);
+
+            compatibleAck = compatibleAcknowledgement(publisher, boundId);
+            Path packageManifest = packageRoot.resolve("package.yaml");
+            byte[] originalManifest = Files.readAllBytes(packageManifest);
+            Files.writeString(packageManifest, new String(originalManifest, StandardCharsets.UTF_8)
+                    + "# Manifest revision changed\n");
+            assertStalePublish(publisher, boundId, compatibleAck, "Package Manifest");
+            Files.write(packageManifest, originalManifest);
+
+            compatibleAck = compatibleAcknowledgement(publisher, boundId);
+            Map<String, Object> compatiblePublished = publisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, boundId,
+                    "compatible-with-current-report", compatibleAck);
+            assertEquals(Boolean.TRUE, compatiblePublished.get("published"));
         }
     }
 
-    private static PackageRegistry.Snapshot registrySnapshot(Map<String, Path> packages) throws Exception {
+    private static ImpactAcknowledgement compatibleAcknowledgement(ChangeSetPublisher publisher, String id) throws Exception {
+        var report = publisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, id, null);
+        assertEquals(ImpactDecision.COMPATIBLE, report.decision);
+        String freshness = ConfigImpactAnalyzer.freshnessFingerprint(report.freshness);
+        return new ImpactAcknowledgement(freshness, "admin", ConfigImpactAnalyzer.acknowledgementDigest(freshness, "admin"));
+    }
+
+    private static void assertStalePublish(ChangeSetPublisher publisher, String id,
+                                           ImpactAcknowledgement acknowledgement, String dependency) {
+        ChangeSetPublisher.Conflict stale = assertThrows(ChangeSetPublisher.Conflict.class,
+                () -> publisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                        ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, id,
+                        "stale-compatible-" + dependency.replace(' ', '-'), acknowledgement), dependency);
+        assertEquals("ATT-CONFIG-IMPACT-STALE", stale.code, dependency);
+    }
+
+    private static PackageRegistry.Snapshot registrySnapshot(Map<String, Path> packages, String revision) throws Exception {
         Constructor<?> constructor = PackageRegistry.Snapshot.class.getDeclaredConstructors()[0];
         constructor.setAccessible(true);
-        return (PackageRegistry.Snapshot) constructor.newInstance(1L, "c".repeat(64), "READY",
+        return (PackageRegistry.Snapshot) constructor.newInstance(1L, revision, "READY",
                 Instant.now(), null, null, null, packages, List.copyOf(packages.values()),
                 packages.keySet().stream().collect(java.util.stream.Collectors.toMap(id -> id, id -> "READY")));
     }

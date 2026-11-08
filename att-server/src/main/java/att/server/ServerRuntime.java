@@ -86,6 +86,7 @@ final class ServerRuntime implements AutoCloseable {
     private final SourcePublicationBarrier sourcePublicationBarrier;
     private final SourceFileTransaction sourceFileTransaction;
     final JobStore store;
+    private volatile List<LoadSchedule> impactScheduleSnapshot;
     private final LoadProgressPersistence loadProgressPersistence;
     final AuthService auth;
     final ThreadPoolExecutor workers,streams,inspectors;
@@ -225,10 +226,14 @@ final class ServerRuntime implements AutoCloseable {
                     }
                 },sourceFileTransaction);
         ChangeSetCandidateValidator sourceCandidateValidator=new ChangeSetCandidateValidator();
-        configActivationCoordinator=ConfigActivationCoordinator.unavailable();
+        configActivationCoordinator=ConfigActivationCoordinator.fileBackedUnavailable(
+                config.dataDir.resolve("config-activation-status.json"));
         configImpactAnalyzer=new ConfigImpactAnalyzer(new ConfigImpactAnalyzer.Inventory() {
             @Override public PackageRegistry.Snapshot registry() { return packageRegistry.snapshot(); }
-            @Override public List<LoadSchedule> schedules() throws Exception { return store.schedules(); }
+            @Override public List<LoadSchedule> schedules() throws Exception {
+                List<LoadSchedule> snapshot=impactScheduleSnapshot;
+                return snapshot==null?store.schedules():snapshot;
+            }
         },config.packageConfiguration,config.scheduling.packageChangePolicy,
                 new att.validation.SourceCandidateValidator(),configActivationCoordinator);
         ChangeSetPublisher.ConfigPublishGate configImpactGate=(candidate,review)->{
@@ -236,6 +241,9 @@ final class ServerRuntime implements AutoCloseable {
                     configImpactAnalyzer.authorizeCandidate(candidate,review);
             if(decision.state==att.server.api.source.SourceManagementContracts.ApprovalState.APPROVED)
                 return ChangeSetPublisher.GateDecision.allow(decision.approvalRevision);
+            if(decision.state==att.server.api.source.SourceManagementContracts.ApprovalState.STALE)
+                return ChangeSetPublisher.GateDecision.stale(decision.code==null
+                        ?"ATT-CONFIG-IMPACT-STALE":decision.code);
             return ChangeSetPublisher.GateDecision.block(decision.code==null
                     ?"ATT-CONFIG-IMPACT-BLOCKED":decision.code);
         };
@@ -1845,6 +1853,25 @@ final class ServerRuntime implements AutoCloseable {
     }
     att.server.api.source.SourceManagementContracts.ActivationStatus configurationActivationStatus() {
         return configActivationCoordinator.activationStatus(ChangeSetPublisher.CENTRAL_SCOPE_ID);
+    }
+    att.server.api.source.SourceManagementContracts.ImpactReport configurationImpactReport(
+            String actor,String changeSetId,String cursor) throws Exception {
+        return ConfigImpactPublicationFence.runInventory(admissionLifecycle.readLock(),store,()->
+                withImpactScheduleSnapshot(()->changeSetPublisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                        ChangeSetPublisher.CENTRAL_SCOPE_ID,actor,true,changeSetId,cursor)));
+    }
+    Map<String,Object> publishConfigurationChangeSet(String actor,String changeSetId,String requestId,
+            att.server.api.source.SourceManagementContracts.ImpactAcknowledgement acknowledgement) throws Exception {
+        return ConfigImpactPublicationFence.runPublication(admissionLifecycle.readLock(),
+                ()->packageRegistry.snapshot().packages,sourceFileTransaction,store,()->
+                withImpactScheduleSnapshot(()->changeSetPublisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                        ChangeSetPublisher.CENTRAL_SCOPE_ID,actor,true,changeSetId,requestId,acknowledgement)));
+    }
+    private <T> T withImpactScheduleSnapshot(java.util.concurrent.Callable<T> operation) throws Exception {
+        List<LoadSchedule> previous=impactScheduleSnapshot;
+        impactScheduleSnapshot=List.copyOf(store.schedules());
+        try { return operation.call(); }
+        finally { impactScheduleSnapshot=previous; }
     }
     private Path workerConfigPath() throws Exception {
         Path sourceRoot=centralSourceRoot();

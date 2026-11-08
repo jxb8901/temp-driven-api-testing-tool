@@ -125,13 +125,15 @@ final class ChangeSetPublisher implements AutoCloseable {
 
     static final class GateDecision {
         final boolean allowed;
+        final boolean stale;
         final String approvalRevision;
         final String code;
-        private GateDecision(boolean allowed, String approvalRevision, String code) {
-            this.allowed = allowed; this.approvalRevision = approvalRevision; this.code = code;
+        private GateDecision(boolean allowed, boolean stale, String approvalRevision, String code) {
+            this.allowed = allowed; this.stale = stale; this.approvalRevision = approvalRevision; this.code = code;
         }
-        static GateDecision allow(String approvalRevision) { return new GateDecision(true, approvalRevision, null); }
-        static GateDecision block(String code) { return new GateDecision(false, null, safeCode(code)); }
+        static GateDecision allow(String approvalRevision) { return new GateDecision(true, false, approvalRevision, null); }
+        static GateDecision block(String code) { return new GateDecision(false, false, null, safeCode(code)); }
+        static GateDecision stale(String code) { return new GateDecision(false, true, null, safeCode(code)); }
     }
 
     static final class Candidate {
@@ -229,7 +231,12 @@ final class ChangeSetPublisher implements AutoCloseable {
 
     static final class Denied extends RuntimeException { Denied() { super("Source editing is not authorized"); } }
     static final class Missing extends RuntimeException { Missing() { super("Change Set was not found"); } }
-    static final class Conflict extends RuntimeException { Conflict() { super("Source revision changed"); } }
+    static final class Conflict extends RuntimeException {
+        final String code;
+        Conflict() { this("ATT-CHANGESET-CONFLICT", "Source revision changed"); }
+        Conflict(String code) { this(code, "Impact inputs changed; request a fresh report and review before publishing"); }
+        private Conflict(String code, String message) { super(message); this.code = safeCode(code); }
+    }
     static final class Capacity extends RuntimeException { Capacity() { super("Change Set capacity is full"); } }
     static final class Busy extends RuntimeException { Busy() { super("Source readers are still using the published revision"); } }
     static final class ValidationRejected extends RuntimeException {
@@ -600,6 +607,7 @@ final class ChangeSetPublisher implements AutoCloseable {
                     GateDecision decision;
                     try { decision = configGate.authorize(candidate, gateView(draft, acknowledgement)); }
                     catch (Exception failure) { throw new ValidationRejected("ATT-CONFIG-PRECOMMIT-BLOCKED"); }
+                    if (decision != null && decision.stale) throw new Conflict("ATT-CONFIG-IMPACT-STALE");
                     if (decision == null || !decision.allowed)
                         throw new ValidationRejected(decision == null ? "ATT-CONFIG-PRECOMMIT-UNAVAILABLE" : decision.code);
                     approvalRevision = decision.approvalRevision == null ? null : requireDigest(decision.approvalRevision);
@@ -626,11 +634,12 @@ final class ChangeSetPublisher implements AutoCloseable {
                         GateDecision fresh;
                         try { fresh=configGate.authorize(candidate,gateView(draft, acknowledgement)); }
                         catch(Exception failure) { throw new ValidationRejected("ATT-CONFIG-PRECOMMIT-BLOCKED"); }
+                        if(fresh!=null&&fresh.stale)throw new Conflict("ATT-CONFIG-IMPACT-STALE");
                         if(fresh==null||!fresh.allowed)
                             throw new ValidationRejected(fresh==null?"ATT-CONFIG-PRECOMMIT-UNAVAILABLE":fresh.code);
                         String freshRevision=fresh.approvalRevision==null?null:requireDigest(fresh.approvalRevision);
                         if(!java.util.Objects.equals(approvedRevision,freshRevision))
-                            throw new ValidationRejected("ATT-CONFIG-IMPACT-STALE");
+                            throw new Conflict("ATT-CONFIG-IMPACT-STALE");
                     }
                 },requestId,new ArrayList<>(draft.changes.keySet()),"SOURCE_CHANGE_SET_PUBLISH",audit::recordCommitted);
                 committed = true;

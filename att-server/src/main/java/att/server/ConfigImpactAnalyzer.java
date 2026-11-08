@@ -15,6 +15,7 @@ import att.server.api.source.SourceManagementContracts.Certainty;
 import att.server.api.source.SourceManagementContracts.Coverage;
 import att.server.api.source.SourceManagementContracts.DependencyKind;
 import att.server.api.source.SourceManagementContracts.Domain;
+import att.server.api.source.SourceManagementContracts.EffectiveResolution;
 import att.server.api.source.SourceManagementContracts.ImpactAcknowledgement;
 import att.server.api.source.SourceManagementContracts.ImpactDecision;
 import att.server.api.source.SourceManagementContracts.ImpactFreshnessToken;
@@ -45,6 +46,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.security.MessageDigest;
@@ -65,7 +67,17 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** Bounded, value-free impact analysis for central Runtime Config Change Sets. */
 final class ConfigImpactAnalyzer implements ImpactReportProvider {
@@ -75,25 +87,47 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
     static final int MAX_SCHEDULES = 2000;
     static final int MAX_AFFECTED_PACKAGES = 256;
     static final int SCHEDULE_PAGE_SIZE = 100;
-    static final long MAX_ANALYSIS_MILLIS = 30000L;
+    static final long MAX_ANALYSIS_MILLIS = 5000L;
     static final long MAX_TREE_BYTES = 512L * 1024L * 1024L;
     static final int MAX_TREE_FILES = 20000;
     private static final String CENTRAL_SCOPE = ChangeSetPublisher.CENTRAL_SCOPE_ID;
     private static final String UNAVAILABLE = "ATT-CONFIG-IMPACT-UNAVAILABLE";
+    private static final String ANALYSIS_LIMIT = "ATT-CONFIG-IMPACT-ANALYSIS-LIMIT";
+    private static final String IMPACT_STALE = "ATT-CONFIG-IMPACT-STALE";
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final ThreadPoolExecutor ANALYSIS_EXECUTOR = new ThreadPoolExecutor(0, 2, 30,
+            TimeUnit.SECONDS, new SynchronousQueue<>(), new ThreadFactory() {
+        private final java.util.concurrent.atomic.AtomicInteger next = new java.util.concurrent.atomic.AtomicInteger();
+        @Override public Thread newThread(Runnable task) {
+            Thread thread = new Thread(task, "att-config-impact-" + next.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        }
+    }, new ThreadPoolExecutor.AbortPolicy());
 
     interface Inventory {
         PackageRegistry.Snapshot registry() throws Exception;
         List<LoadSchedule> schedules() throws Exception;
     }
 
+    interface ImpactEngine {
+        CandidateValidation validateCentralConfig(Path configFile, Path runtimeRoot,
+                                                  RevisionSet revisions, String validationFingerprint) throws Exception;
+        CandidateValidation validatePackage(Path packageRoot, Path configFile, Path runtimeRoot, String packageId,
+                                            RevisionSet revisions, String validationFingerprint) throws Exception;
+        EffectiveResolution resolveEffective(String packageId, String environment, Path packageRoot,
+                                            Path configFile, Path runtimeRoot, RevisionSet provenance) throws Exception;
+    }
+
     private final Inventory inventory;
     private final PackageConfigurationPolicy packagePolicy;
     private final String defaultSchedulePolicy;
-    private final SourceCandidateValidator engine;
+    private final ImpactEngine engine;
     private final ConfigActivationCoordinator activation;
+    private final long maxAnalysisMillis;
     private final Map<String, ChangeSetPublisher.Candidate> candidates = new ConcurrentHashMap<>();
     private final Map<String, ChangeSetPublisher.Candidate> candidatesByFingerprint = new ConcurrentHashMap<>();
+    private final Map<String, String> issuedReports = new ConcurrentHashMap<>();
 
     ConfigImpactAnalyzer(Inventory inventory, PackageConfigurationPolicy packagePolicy,
                          SourceCandidateValidator engine, ConfigActivationCoordinator activation) {
@@ -103,6 +137,12 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
     ConfigImpactAnalyzer(Inventory inventory, PackageConfigurationPolicy packagePolicy,
                          String defaultSchedulePolicy, SourceCandidateValidator engine,
                          ConfigActivationCoordinator activation) {
+        this(inventory, packagePolicy, defaultSchedulePolicy, adapt(engine), activation, MAX_ANALYSIS_MILLIS);
+    }
+
+    ConfigImpactAnalyzer(Inventory inventory, PackageConfigurationPolicy packagePolicy,
+                         String defaultSchedulePolicy, ImpactEngine engine,
+                         ConfigActivationCoordinator activation, long maxAnalysisMillis) {
         this.inventory = java.util.Objects.requireNonNull(inventory);
         this.packagePolicy = java.util.Objects.requireNonNull(packagePolicy);
         if (!Set.of("strict", "pause", "ignore").contains(defaultSchedulePolicy))
@@ -110,6 +150,30 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
         this.defaultSchedulePolicy = defaultSchedulePolicy;
         this.engine = java.util.Objects.requireNonNull(engine);
         this.activation = java.util.Objects.requireNonNull(activation);
+        if (maxAnalysisMillis < 1L || maxAnalysisMillis > MAX_ANALYSIS_MILLIS)
+            throw new IllegalArgumentException("Impact analysis time limit is invalid");
+        this.maxAnalysisMillis = maxAnalysisMillis;
+    }
+
+    private static ImpactEngine adapt(SourceCandidateValidator validator) {
+        java.util.Objects.requireNonNull(validator);
+        return new ImpactEngine() {
+            @Override public CandidateValidation validateCentralConfig(Path configFile, Path runtimeRoot,
+                                                                       RevisionSet revisions, String validationFingerprint) throws Exception {
+                return validator.validateCentralConfig(configFile, runtimeRoot, revisions, validationFingerprint);
+            }
+            @Override public CandidateValidation validatePackage(Path packageRoot, Path configFile, Path runtimeRoot,
+                                                                 String packageId, RevisionSet revisions,
+                                                                 String validationFingerprint) throws Exception {
+                return validator.validatePackage(packageRoot, configFile, runtimeRoot, packageId,
+                        revisions, validationFingerprint);
+            }
+            @Override public EffectiveResolution resolveEffective(String packageId, String environment,
+                                                                  Path packageRoot, Path configFile, Path runtimeRoot,
+                                                                  RevisionSet provenance) throws Exception {
+                return validator.resolveEffective(packageId, environment, packageRoot, configFile, runtimeRoot, provenance);
+            }
+        };
     }
 
     /** The publisher calls this only after it has re-authorized and revision-fenced the draft. */
@@ -119,10 +183,18 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
         cursorOffset(pageCursor);
         candidates.put(candidate.changeSetId(), candidate);
         try {
-            ImpactReport report = analyze(candidate, pageCursor);
-            if (report.freshness != null) candidatesByFingerprint.put(report.freshness.draftFingerprint, candidate);
+            ImpactReport report = bounded(() -> analyze(candidate, pageCursor));
+            if (report.freshness != null) {
+                candidatesByFingerprint.put(report.freshness.draftFingerprint, candidate);
+                if (report.providerState == ProviderState.AVAILABLE)
+                    issuedReports.put(candidate.changeSetId(), freshnessFingerprint(report.freshness));
+            }
             boundCaches();
             return report;
+        } catch (AnalysisLimitException limited) {
+            return ImpactReport.unavailable(ANALYSIS_LIMIT);
+        } catch (StaleInputException stale) {
+            return staleReport();
         } catch (Exception unavailable) {
             return ImpactReport.unavailable(UNAVAILABLE);
         }
@@ -137,29 +209,70 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
     /** Recomputes at each publisher fence, then routes the decision through the shared provider contract. */
     ApprovalDecision authorizeCandidate(ChangeSetPublisher.Candidate candidate,
                                         Map<String, Object> review) {
-        ImpactAcknowledgement acknowledgement = acknowledgement(review);
         try {
-            String fingerprint = candidateFingerprint(candidate,
-                    System.nanoTime() + Duration.ofMillis(MAX_ANALYSIS_MILLIS).toNanos());
-            candidates.put(candidate.changeSetId(), candidate);
-            candidatesByFingerprint.put(fingerprint, candidate);
-            CandidateValidation validation = candidateValidation(candidate, fingerprint);
-            ApprovalRequest request = new ApprovalRequest(validation, candidate.actor, true,
-                    ApprovalPhase.COMMIT_FENCE, acknowledgement == null ? null : acknowledgement.freshnessFingerprint);
-            return authorize(request, acknowledgement);
+            return bounded(() -> authorizeCandidateBounded(candidate, review));
+        } catch (AnalysisLimitException limited) {
+            return new ApprovalDecision(SourceManagementContracts.ApprovalState.UNAVAILABLE, null, ANALYSIS_LIMIT);
+        } catch (StaleInputException stale) {
+            return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null, IMPACT_STALE);
         } catch (Exception unavailable) {
             return new ApprovalDecision(SourceManagementContracts.ApprovalState.UNAVAILABLE, null, UNAVAILABLE);
         }
     }
 
+    private ApprovalDecision authorizeCandidateBounded(ChangeSetPublisher.Candidate candidate,
+                                                       Map<String, Object> review) throws Exception {
+        ImpactAcknowledgement acknowledgement = acknowledgement(review);
+        String fingerprint = candidateFingerprint(candidate,
+                System.nanoTime() + Duration.ofMillis(maxAnalysisMillis).toNanos());
+        candidates.put(candidate.changeSetId(), candidate);
+        candidatesByFingerprint.put(fingerprint, candidate);
+        CandidateValidation validation = candidateValidation(candidate, fingerprint);
+        ApprovalRequest request = new ApprovalRequest(validation, candidate.actor, true,
+                ApprovalPhase.COMMIT_FENCE, acknowledgement == null ? null : acknowledgement.freshnessFingerprint);
+        return authorizeBounded(request, acknowledgement);
+    }
+
     @Override public ApprovalDecision authorize(ApprovalRequest request, ImpactAcknowledgement acknowledgement) {
+        try {
+            return bounded(() -> authorizeBounded(request, acknowledgement));
+        } catch (AnalysisLimitException limited) {
+            return new ApprovalDecision(SourceManagementContracts.ApprovalState.UNAVAILABLE, null, ANALYSIS_LIMIT);
+        } catch (StaleInputException stale) {
+            return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null, IMPACT_STALE);
+        } catch (Exception unavailable) {
+            return new ApprovalDecision(SourceManagementContracts.ApprovalState.UNAVAILABLE, null, UNAVAILABLE);
+        }
+    }
+
+    private ApprovalDecision authorizeBounded(ApprovalRequest request,
+                                               ImpactAcknowledgement acknowledgement) throws Exception {
         if (request == null || request.candidate == null)
             return new ApprovalDecision(SourceManagementContracts.ApprovalState.UNAVAILABLE, null, UNAVAILABLE);
         CandidateValidation candidate = request.candidate;
         ChangeSetPublisher.Candidate sourceCandidate = candidatesByFingerprint.get(candidate.validationFingerprint);
         if (sourceCandidate == null)
             return new ApprovalDecision(SourceManagementContracts.ApprovalState.UNAVAILABLE, null, UNAVAILABLE);
-        ImpactReport report = report(sourceCandidate, null);
+        String issuedFingerprint = issuedReports.get(sourceCandidate.changeSetId());
+        if (issuedFingerprint == null)
+            return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null, IMPACT_STALE);
+        if (acknowledgement == null
+                || !java.util.Objects.equals(request.acknowledgementBinding, acknowledgement.freshnessFingerprint)
+                || !issuedFingerprint.equals(acknowledgement.freshnessFingerprint)
+                || !request.actor.equals(acknowledgement.actor)
+                || !acknowledgementDigest(issuedFingerprint, request.actor)
+                .equals(acknowledgement.acknowledgementDigest))
+            return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null, IMPACT_STALE);
+        long preflightDeadline = System.nanoTime() + Duration.ofMillis(maxAnalysisMillis).toNanos();
+        InventorySnapshot current = snapshot(sourceCandidate, candidate.validationFingerprint, preflightDeadline, null);
+        if (!issuedFingerprint.equals(freshnessFingerprint(current.freshness)))
+            return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null, IMPACT_STALE);
+        ImpactReport report;
+        try {
+            report = analyze(sourceCandidate, null);
+        } catch (StaleInputException stale) {
+            return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null, IMPACT_STALE);
+        }
         if (report == null || report.freshness == null || report.providerState != ProviderState.AVAILABLE)
             return new ApprovalDecision(SourceManagementContracts.ApprovalState.UNAVAILABLE, null, UNAVAILABLE);
         if (!candidate.validationFingerprint.equals(report.freshness.draftFingerprint))
@@ -171,36 +284,25 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
                 || !candidate.executionEligible)
             return new ApprovalDecision(SourceManagementContracts.ApprovalState.REJECTED, null,
                     "ATT-CONFIG-IMPACT-CANDIDATE-INVALID");
+        String freshnessFingerprint = freshnessFingerprint(report.freshness);
+        if (!freshnessFingerprint.equals(issuedReports.get(sourceCandidate.changeSetId()))
+                || acknowledgement == null
+                || !java.util.Objects.equals(request.acknowledgementBinding, acknowledgement.freshnessFingerprint))
+            return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null,
+                    "ATT-CONFIG-IMPACT-STALE");
+        if (!request.actor.equals(acknowledgement.actor)
+                || !freshnessFingerprint.equals(acknowledgement.freshnessFingerprint)
+                || !acknowledgementDigest(freshnessFingerprint, request.actor)
+                .equals(acknowledgement.acknowledgementDigest)) {
+            return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null,
+                    "ATT-CONFIG-IMPACT-STALE");
+        }
         if (!activation.canActivateOnline())
             return new ApprovalDecision(SourceManagementContracts.ApprovalState.REJECTED, null,
                     "ATT-CONFIG-RUNTIME-GUARD-UNAVAILABLE");
         if (report.decision == ImpactDecision.BLOCKED)
             return new ApprovalDecision(SourceManagementContracts.ApprovalState.REJECTED, null,
                     report.unavailableCode == null ? "ATT-CONFIG-IMPACT-BLOCKED" : report.unavailableCode);
-
-        String freshnessFingerprint = freshnessFingerprint(report.freshness);
-        if (!java.util.Objects.equals(request.acknowledgementBinding,
-                acknowledgement == null ? null : acknowledgement.freshnessFingerprint))
-            return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null,
-                    "ATT-CONFIG-IMPACT-STALE");
-        if (report.decision == ImpactDecision.REQUIRES_REVIEW) {
-            if (acknowledgement == null)
-                return new ApprovalDecision(SourceManagementContracts.ApprovalState.REJECTED, null,
-                        "ATT-CONFIG-IMPACT-ACK-REQUIRED");
-            if (!request.actor.equals(acknowledgement.actor)
-                    || !freshnessFingerprint.equals(acknowledgement.freshnessFingerprint)
-                    || !acknowledgementDigest(freshnessFingerprint, request.actor)
-                    .equals(acknowledgement.acknowledgementDigest))
-                return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null,
-                        "ATT-CONFIG-IMPACT-STALE");
-        } else if (acknowledgement != null
-                && (!request.actor.equals(acknowledgement.actor)
-                || !freshnessFingerprint.equals(acknowledgement.freshnessFingerprint)
-                || !acknowledgementDigest(freshnessFingerprint, request.actor)
-                .equals(acknowledgement.acknowledgementDigest))) {
-            return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null,
-                    "ATT-CONFIG-IMPACT-STALE");
-        }
         return new ApprovalDecision(SourceManagementContracts.ApprovalState.APPROVED,
                 digest(freshnessFingerprint + "\n" + request.actor + "\n" + report.decision), null);
     }
@@ -220,17 +322,52 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
         return digest("att-config-impact-acknowledgement/v1\n" + freshnessFingerprint + "\n" + actor);
     }
 
+    private <T> T bounded(Callable<T> operation) throws Exception {
+        Future<T> future;
+        try {
+            FutureTask<T> task = new FutureTask<>(operation);
+            ANALYSIS_EXECUTOR.execute(task);
+            future = task;
+        } catch (RejectedExecutionException saturated) {
+            throw new AnalysisLimitException();
+        }
+        try {
+            return future.get(maxAnalysisMillis, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException timeout) {
+            future.cancel(true);
+            throw new AnalysisLimitException();
+        } catch (InterruptedException interrupted) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new AnalysisLimitException();
+        } catch (ExecutionException failed) {
+            Throwable cause = failed.getCause();
+            if (cause instanceof AnalysisLimitException limited) throw limited;
+            if (cause instanceof StaleInputException stale) throw stale;
+            if (cause instanceof Exception exception) throw exception;
+            if (cause instanceof Error error) throw error;
+            throw new IOException("Config impact analysis failed");
+        }
+    }
+
+    private static ImpactReport staleReport() {
+        return new ImpactReport(ProviderState.STALE, null, null, null, Collections.emptyList(), null,
+                IMPACT_STALE, false);
+    }
+
     private ImpactReport analyze(ChangeSetPublisher.Candidate candidate, String pageCursor) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofMillis(MAX_ANALYSIS_MILLIS).toNanos();
+        long deadline = System.nanoTime() + Duration.ofMillis(maxAnalysisMillis).toNanos();
         Path workspace = privateDirectory();
         try {
             Path baseRoot = Files.createDirectory(workspace.resolve("base"));
             Path candidateRoot = Files.createDirectory(workspace.resolve("candidate"));
+            Path packageSnapshots = Files.createDirectory(workspace.resolve("packages"));
             materialize(candidate.centralFiles(), candidate::readCentral, baseRoot, deadline);
             materialize(candidate.files(), candidate::read, candidateRoot, deadline);
             String draftFingerprint = candidateFingerprint(candidate, deadline);
-            InventorySnapshot snapshot = snapshot(candidate, draftFingerprint, deadline);
+            InventorySnapshot snapshot = snapshot(candidate, draftFingerprint, deadline, packageSnapshots);
             ImpactFreshnessToken freshness = snapshot.freshness;
+            try {
 
             CandidateValidation central = engine.validateCentralConfig(candidateRoot.resolve("config/config.yaml"),
                     candidateRoot, revisions(freshness), draftFingerprint);
@@ -403,6 +540,11 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
             return report(freshness, partial ? Coverage.PARTIAL : Coverage.COMPLETE, decision,
                     affected, affectedSchedules, blockedCode, decision == ImpactDecision.REQUIRES_REVIEW,
                     pageCursor, snapshot.scheduleTruncated);
+            } finally {
+                InventorySnapshot current = snapshot(candidate, draftFingerprint, deadline, null);
+                if (!freshnessFingerprint(freshness).equals(freshnessFingerprint(current.freshness)))
+                    throw new StaleInputException();
+            }
         } finally {
             deleteTree(workspace);
         }
@@ -427,7 +569,7 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
     }
 
     private InventorySnapshot snapshot(ChangeSetPublisher.Candidate candidate, String draftFingerprint,
-                                       long deadline) throws Exception {
+                                       long deadline, Path packageSnapshots) throws Exception {
         PackageRegistry.Snapshot registry = inventory.registry();
         if (registry == null || registry.revision == null || registry.packages == null)
             throw new IOException("Package registry is unavailable");
@@ -438,14 +580,26 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
         List<RevisionIdentity> sources = new ArrayList<>();
         List<RevisionIdentity> manifests = new ArrayList<>();
         TreeBudget packageBudget = new TreeBudget(deadline);
+        TreeBudget copyBudget = new TreeBudget(deadline);
+        TreeBudget liveVerifyBudget = new TreeBudget(deadline);
         int count = 0;
         for (Map.Entry<String, Path> entry : new TreeMap<>(registry.packages).entrySet()) {
             if (count++ >= MAX_PACKAGES) break;
             checkTime(deadline);
             Path root = safePackageRoot(entry.getValue());
-            String sourceDigest = boundedTreeDigest(root, packageBudget);
-            String manifestDigest = fileDigestOrEmpty(root.resolve(PackageConfig.FILE_NAME));
-            packages.add(new PackageEntry(entry.getKey(), root));
+            Path analysisRoot = root;
+            String sourceDigest;
+            if (packageSnapshots != null) {
+                analysisRoot = packageSnapshots.resolve(String.format(Locale.ROOT, "%03d", count - 1));
+                copyPackageSnapshot(root, analysisRoot, copyBudget);
+                String liveDigest = boundedTreeDigest(root, liveVerifyBudget);
+                sourceDigest = boundedTreeDigest(analysisRoot, packageBudget);
+                if (!liveDigest.equals(sourceDigest)) throw new StaleInputException();
+            } else {
+                sourceDigest = boundedTreeDigest(analysisRoot, packageBudget);
+            }
+            String manifestDigest = fileDigestOrEmpty(analysisRoot.resolve(PackageConfig.FILE_NAME));
+            packages.add(new PackageEntry(entry.getKey(), analysisRoot));
             sources.add(RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE, entry.getKey(), sourceDigest));
             manifests.add(RevisionIdentity.of(RevisionKind.PACKAGE_MANIFEST, entry.getKey(), manifestDigest));
         }
@@ -880,23 +1034,78 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
         if (Files.isSymbolicLink(canonical) || !Files.isDirectory(canonical, LinkOption.NOFOLLOW_LINKS))
             throw new IOException("Package source root is unavailable");
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        List<String> directories = new ArrayList<>();
+        List<Path> files = new ArrayList<>();
         Files.walkFileTree(canonical, new SimpleFileVisitor<>() {
             @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                 if (attrs.isSymbolicLink() || Files.isSymbolicLink(dir)) throw new IOException("Package source contains an unsafe directory");
+                if (!dir.equals(canonical)) directories.add(canonical.relativize(dir).toString().replace('\\', '/'));
                 return FileVisitResult.CONTINUE;
             }
+            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                if (attrs.isSymbolicLink() || Files.isSymbolicLink(file) || !attrs.isRegularFile())
+                    throw new IOException("Package source contains an unsafe file");
+                files.add(file);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        directories.sort(String::compareTo);
+        for (String logical : directories) update(digest, "directory/" + logical);
+        files.sort(Comparator.comparing(file -> canonical.relativize(file).toString().replace('\\', '/')));
+        for (Path file : files) {
+            checkTime(budget.deadline);
+            BasicFileAttributes before = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            if (before.isSymbolicLink() || !before.isRegularFile() || Files.isSymbolicLink(file))
+                throw new IOException("Package source contains an unsafe file");
+            budget.add(before.size());
+            byte[] bytes = Files.readAllBytes(file);
+            BasicFileAttributes after = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            if (!sameFileObservation(before, after) || bytes.length != before.size()) throw new StaleInputException();
+            String logical = canonical.relativize(file).toString().replace('\\', '/');
+            update(digest, "file/" + logical); digest.update(bytes); digest.update((byte) 0);
+        }
+        return hex(digest.digest());
+    }
+
+    private static void copyPackageSnapshot(Path source, Path destination, TreeBudget budget) throws Exception {
+        Path canonical = safePackageRoot(source);
+        Files.createDirectories(destination);
+        Files.walkFileTree(canonical, new SimpleFileVisitor<>() {
+            @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                checkTime(budget.deadline);
+                if (attrs.isSymbolicLink() || Files.isSymbolicLink(dir))
+                    throw new IOException("Package source contains an unsafe directory");
+                Path target = destination.resolve(canonical.relativize(dir)).normalize();
+                if (!target.startsWith(destination)) throw new IOException("Package source path escapes its snapshot root");
+                Files.createDirectories(target);
+                return FileVisitResult.CONTINUE;
+            }
+
             @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 checkTime(budget.deadline);
                 if (attrs.isSymbolicLink() || Files.isSymbolicLink(file) || !attrs.isRegularFile())
                     throw new IOException("Package source contains an unsafe file");
                 budget.add(attrs.size());
                 byte[] bytes = Files.readAllBytes(file);
-                String logical = canonical.relativize(file).toString().replace('\\', '/');
-                synchronized (digest) { update(digest, logical); digest.update(bytes); digest.update((byte) 0); }
+                BasicFileAttributes after = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                if (!sameFileObservation(attrs, after) || bytes.length != attrs.size()) throw new StaleInputException();
+                Path target = destination.resolve(canonical.relativize(file)).normalize();
+                if (!target.startsWith(destination)) throw new IOException("Package source path escapes its snapshot root");
+                Files.createDirectories(target.getParent());
+                Files.write(target, bytes);
+                try {
+                    Files.setPosixFilePermissions(target,
+                            Files.getPosixFilePermissions(file, LinkOption.NOFOLLOW_LINKS));
+                } catch (UnsupportedOperationException ignored) { }
                 return FileVisitResult.CONTINUE;
             }
         });
-        return hex(digest.digest());
+    }
+
+    private static boolean sameFileObservation(BasicFileAttributes before, BasicFileAttributes after) {
+        return after.isRegularFile() && !after.isSymbolicLink() && before.size() == after.size()
+                && before.lastModifiedTime().equals(after.lastModifiedTime())
+                && java.util.Objects.equals(before.fileKey(), after.fileKey());
     }
 
     private static Path safePackageRoot(Path root) throws IOException {
@@ -962,7 +1171,15 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
     }
 
     private static void checkTime(long deadline) throws IOException {
-        if (System.nanoTime() > deadline) throw new IOException("Config impact analysis exceeded its time limit");
+        if (Thread.currentThread().isInterrupted() || System.nanoTime() > deadline)
+            throw new AnalysisLimitException();
+    }
+
+    private static final class AnalysisLimitException extends IOException {
+        AnalysisLimitException() { super("Config impact analysis exceeded its time limit"); }
+    }
+    private static final class StaleInputException extends IOException {
+        StaleInputException() { super("Config impact inputs changed during analysis"); }
     }
 
     private static Path privateDirectory() throws IOException {
@@ -1007,6 +1224,7 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
     private void boundCaches() {
         if (candidates.size() > 128) trim(candidates);
         if (candidatesByFingerprint.size() > 128) trim(candidatesByFingerprint);
+        if (issuedReports.size() > 128) trim(issuedReports);
     }
     private static <T> void trim(Map<String, T> values) {
         synchronized (values) {

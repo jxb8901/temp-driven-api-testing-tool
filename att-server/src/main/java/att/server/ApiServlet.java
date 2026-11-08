@@ -89,8 +89,7 @@ public final class ApiServlet extends HttpServlet {
             if(centralImpactPath(path)) {
                 if(!requireSystemSettingsWrite(req,res,requestId))return;
                 try {
-                    var report=runtime.changeSetPublisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
-                            ChangeSetPublisher.CENTRAL_SCOPE_ID,principalExact(req),true,segment(path,3),
+                    var report=runtime.configurationImpactReport(principalExact(req),segment(path,3),
                             req.getParameter("cursor"));
                     res.setHeader("Cache-Control","private, no-store");json(res,200,report);return;
                 } catch(ChangeSetPublisher.Denied denied) {
@@ -98,7 +97,7 @@ public final class ApiServlet extends HttpServlet {
                 } catch(ChangeSetPublisher.Missing missing) {
                     error(res,404,"ATT-SERVER-NOT-FOUND","Change Set was not found",requestId);return;
                 } catch(ChangeSetPublisher.Conflict stale) {
-                    error(res,409,"ATT-CHANGESET-CONFLICT","Source or validation revisions changed; validate and request a fresh impact report",requestId);return;
+                    error(res,409,stale.code,"Source or impact revisions changed; validate and request a fresh impact report",requestId);return;
                 } catch(ChangeSetPublisher.ValidationRejected invalid) {
                     error(res,422,invalid.code,"Validate the central Config draft before requesting its impact report",requestId);return;
                 } catch(IllegalArgumentException invalid) {
@@ -1031,7 +1030,9 @@ public final class ApiServlet extends HttpServlet {
                 if("validate".equals(action))result=runtime.changeSetPublisher.validate(domain,scopeId,actor,systemSettingsWrite,id,requestId);
                 else if("review".equals(action))result=runtime.changeSetPublisher.review(domain,scopeId,actor,systemSettingsWrite,id,requestId);
                 else if("publish".equals(action)) {
-                    result=runtime.changeSetPublisher.publish(domain,scopeId,actor,systemSettingsWrite,id,requestId,impactAcknowledgement);
+                    result=central
+                            ?runtime.publishConfigurationChangeSet(actor,id,requestId,impactAcknowledgement)
+                            :runtime.changeSetPublisher.publish(domain,scopeId,actor,systemSettingsWrite,id,requestId,impactAcknowledgement);
                     if(central&&Boolean.TRUE.equals(result.get("published")))
                         result.put("activationStatus",runtime.configurationActivationStatus());
                 }
@@ -1052,7 +1053,7 @@ public final class ApiServlet extends HttpServlet {
         } catch(ChangeSetPublisher.Denied e){error(res,403,centralChangeSetPath(path)?"ATT-SERVER-FORBIDDEN":"ATT-PACKAGE-SOURCE-DENIED",
                 centralChangeSetPath(path)?"SYSTEM_SETTINGS_WRITE is required":"Package source editing is not authorized",requestId);}
           catch(ChangeSetPublisher.Missing e){error(res,404,"ATT-SERVER-NOT-FOUND","Change Set was not found",requestId);}
-          catch(ChangeSetPublisher.Conflict e){error(res,409,"ATT-CHANGESET-CONFLICT","Source, registry or validation revisions changed; refresh and revalidate",requestId);}
+          catch(ChangeSetPublisher.Conflict e){error(res,409,e.code,"Source, registry or impact revisions changed; refresh, revalidate and request a fresh impact report",requestId);}
           catch(ChangeSetPublisher.Capacity e){error(res,429,"ATT-CHANGESET-CAPACITY","Change Set capacity is full",requestId);}
           catch(ChangeSetPublisher.Busy e){res.setHeader("Retry-After","2");error(res,503,"ATT-CHANGESET-PUBLISH-BUSY","A Worker is using the published source; retry after it releases the revision",requestId);}
           catch(ChangeSetPublisher.ValidationRejected e){error(res,422,e.code,"Candidate source validation or publication gate rejected the Change Set",requestId);}
