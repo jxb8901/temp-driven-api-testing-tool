@@ -58,18 +58,33 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
   const [sidecarOperation, setSidecarOperation] = useState<'create' | 'replace'>(() => sourcePath ? 'replace' : 'create');
   const [newXmlPath, setNewXmlPath] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
-  const controllerRef = useRef<AbortController | null>(null);
+  const revisionControllerRef = useRef<AbortController | null>(null);
+  const actionControllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousPackageRef = useRef(packageId);
+  const [suspended, setSuspended] = useState(false);
+  const [recoveryPending, setRecoveryPending] = useState(false);
+  const recoveryRequiredRef = useRef(false);
+  const suspendedRef = useRef(false);
   const isDirty = Boolean(busy || draft || !sourcePath && newXmlPath);
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
   const targetXmlPath = sourcePath && /\.xml$/i.test(sourcePath) && safePath(sourcePath)
     ? sourcePath : !sourcePath && /\.xml$/i.test(newXmlPath) && safePath(newXmlPath) ? newXmlPath : '';
+  const draftStale = Boolean(draft && revision && (draft.baseSourceRevision !== revision.baseSourceRevision
+    || draft.registryRevision !== revision.registryRevision));
 
   useEffect(() => {
-    controllerRef.current?.abort();
-    const controller = new AbortController(); controllerRef.current = controller;
-    if (previousPackageRef.current !== packageId) { setPublished(null); previousPackageRef.current = packageId; }
-    setRevision(null); setDraft(null); setSnapshotRequest(null); setError(''); setStatus('');
+    revisionControllerRef.current?.abort();
+    const controller = new AbortController(); revisionControllerRef.current = controller;
+    const targetChanged = previousPackageRef.current !== packageId;
+    if (targetChanged) {
+      actionControllerRef.current?.abort(); actionControllerRef.current = null;
+      setPublished(null); previousPackageRef.current = packageId;
+      setDraft(null); setSnapshotRequest(null); setNewXmlPath(''); recoveryRequiredRef.current = false; suspendedRef.current = false;
+      setBusy(false);
+    }
+    setRevision(null); setError(''); setStatus('');
     setAccess('loading');
     const request = api.getManagedPackageAuthoringSource?.(packageId, { kind: 'manifest' }, controller.signal);
     if (!request) { setAccess('unavailable'); setError('This Server does not expose the source revision contract needed for Testcase uploads.'); return () => controller.abort(); }
@@ -81,13 +96,22 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
       // Keep revision metadata only; the complete Manifest bytes returned by this endpoint are not retained or rendered here.
       setRevision({ sourceEtag: value.sourceEtag, baseSourceRevision: value.baseSourceRevision, registryRevision: value.registryRevision });
       setAccess('ready');
+      if (recoveryRequiredRef.current) setRecoveryPending(true);
+      else if (!suspendedRef.current || document.visibilityState !== 'hidden') {
+        suspendedRef.current = false; setSuspended(false);
+      }
     }).catch(reason => {
       if (controller.signal.aborted) return;
       const status = reason instanceof ApiError ? reason.status : typeof reason === 'object' && reason !== null && 'status' in reason ? Number((reason as { status?: unknown }).status) : 0;
       setAccess(status === 403 ? 'denied' : 'unavailable');
+      if (status === 403) {
+        actionControllerRef.current?.abort();
+        setDraft(null); setSnapshotRequest(null); setNewXmlPath(''); setRecoveryPending(false); setSuspended(false);
+        recoveryRequiredRef.current = false; suspendedRef.current = false;
+      }
       if (status !== 403) setError(failureText(reason, 'load Package source revisions'));
     });
-    return () => { controller.abort(); if (controllerRef.current === controller) controllerRef.current = null; };
+    return () => { controller.abort(); if (revisionControllerRef.current === controller) revisionControllerRef.current = null; };
   }, [api, packageId, refreshKey]);
 
   useEffect(() => {
@@ -100,32 +124,39 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
   }, [workspace?.setWorkspaceEditorLock, access, draft, busy]);
 
   useEffect(() => {
-    const clearPrivilegedState = () => {
-      controllerRef.current?.abort(); setRevision(null); setDraft(null); setSnapshotRequest(null); setBusy(false);
-      setAccess('loading'); setStatus('Privileged source revision metadata was cleared while the page was hidden. Reload before continuing.');
+    const suspendPrivilegedDisplay = () => {
+      recoveryRequiredRef.current = isDirtyRef.current;
+      setRecoveryPending(false); setSuspended(true);
+      suspendedRef.current = true;
+      revisionControllerRef.current?.abort(); setRevision(null);
+      if (!recoveryRequiredRef.current) { setDraft(null); setSnapshotRequest(null); setNewXmlPath(''); }
+      setAccess('loading'); setStatus('Testcase workspace is hidden while the page is in the background. Reauthorize before resuming.');
     };
     const onVisible = () => {
-      if (document.visibilityState === 'hidden') clearPrivilegedState();
+      if (document.visibilityState === 'hidden') suspendPrivilegedDisplay();
       else setRefreshKey(value => value + 1);
     };
-    window.addEventListener('pagehide', clearPrivilegedState);
+    window.addEventListener('pagehide', suspendPrivilegedDisplay);
     window.addEventListener('pageshow', onVisible);
     document.addEventListener('visibilitychange', onVisible);
-    return () => { window.removeEventListener('pagehide', clearPrivilegedState); window.removeEventListener('pageshow', onVisible); document.removeEventListener('visibilitychange', onVisible); };
+    return () => { window.removeEventListener('pagehide', suspendPrivilegedDisplay); window.removeEventListener('pageshow', onVisible); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
-  useEffect(() => () => { controllerRef.current?.abort(); }, []);
+  useEffect(() => () => { revisionControllerRef.current?.abort(); actionControllerRef.current?.abort(); }, []);
 
   async function withBusy(action: string, run: (signal: AbortSignal) => Promise<void>) {
-    const controller = new AbortController(); controllerRef.current?.abort(); controllerRef.current = controller;
+    const controller = new AbortController(); actionControllerRef.current?.abort(); actionControllerRef.current = controller;
     setBusy(true); setError(''); setStatus('');
     try { await run(controller.signal); }
     catch (reason) {
       if (controller.signal.aborted) return;
       setError(failureText(reason, action));
-      if (reason instanceof ApiError && reason.status === 403) { setRevision(null); setDraft(null); setSnapshotRequest(null); setAccess('denied'); }
+      if (reason instanceof ApiError && reason.status === 403) {
+        setRevision(null); setDraft(null); setSnapshotRequest(null); setNewXmlPath(''); setAccess('denied');
+        setRecoveryPending(false); setSuspended(false); recoveryRequiredRef.current = false; suspendedRef.current = false;
+      }
       if (reason instanceof ApiError && reason.status === 422) setDiagnostics(errorDiagnostics(reason));
-    } finally { if (!controller.signal.aborted) setBusy(false); }
+    } finally { if (actionControllerRef.current === controller) { actionControllerRef.current = null; setBusy(false); } }
   }
 
   const [diagnostics, setDiagnostics] = useState<ReturnType<typeof errorDiagnostics>>([]);
@@ -158,7 +189,7 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
     const sidecarPath = directory + sidecar.name;
     if (!safePath(workbookPath) || !safePath(sidecarPath)) { setError('The uploaded filenames do not form valid Package-relative paths.'); return; }
     const uploadController = new AbortController();
-    controllerRef.current?.abort(); controllerRef.current = uploadController;
+    actionControllerRef.current?.abort(); actionControllerRef.current = uploadController;
     setBusy(true); setError(''); setStatus('Reading and hashing the paired Testcase upload…');
     try {
       const workbookBytes = new Uint8Array(await workbook.arrayBuffer());
@@ -181,12 +212,13 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
     } catch (reason) {
       if (!uploadController.signal.aborted) setError(reason instanceof Error ? reason.message : 'The Testcase upload could not be read as a workbook and UTF-8 sidecar.');
     } finally {
-      if (controllerRef.current === uploadController) setBusy(false);
+      if (actionControllerRef.current === uploadController) { actionControllerRef.current = null; setBusy(false); }
     }
   }
 
   async function generateSnapshot() {
     if (!draft || !revision || !snapshotRequest || !api.generateTestcaseSnapshot) { setError('Upload the workbook and matching sidecar together before generating the snapshot.'); return; }
+    if (draftStale) { setError('The Testcase draft uses an older Package or registration revision. Discard it and upload against the current revision.'); return; }
     if (!window.confirm(`Generate the Testcase snapshot from ${snapshotRequest.workbookPath}? It remains a draft until validated, reviewed, and published.`)) return;
     await withBusy('generate the Testcase snapshot', async signal => {
       const result = await api.generateTestcaseSnapshot!(packageId, draft.changeSetId, snapshotRequest, signal);
@@ -198,6 +230,7 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
 
   async function act(action: 'validate' | 'review' | 'publish' | 'discard') {
     if (!draft || !api.sourceChangeSetAction) { setError('The Change Set action API is unavailable.'); return; }
+    if (draftStale && action !== 'discard') { setError('The Testcase draft uses an older Package or registration revision. Discard it and upload against the current revision.'); return; }
     if (action === 'validate' && snapshotRequest) { setError('Generate the Testcase snapshot before validating this workbook change.'); return; }
     if (action === 'publish' && !window.confirm(`Publish the reviewed Testcase source draft for ${targetXmlPath}?`)) return;
     if (action === 'discard' && !window.confirm(`Discard draft ${draft.changeSetId}? Its staged files and snapshot will be removed.`)) return;
@@ -207,15 +240,32 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
       if (action === 'publish' && 'published' in result) {
         const publication = result as SourcePublishResult;
         setPublished(publication); setDraft(null); setSnapshotRequest(null);
+        recoveryRequiredRef.current = false; setRecoveryPending(false);
         setStatus(`Published Testcase source revision ${publication.revision}.`);
         setRefreshKey(value => value + 1);
       } else if (action === 'discard') {
-        setDraft(null); setSnapshotRequest(null); setStatus('Draft discarded. Published Testcase source is unchanged.');
+        setDraft(null); setSnapshotRequest(null); recoveryRequiredRef.current = false; setRecoveryPending(false); setSuspended(false); suspendedRef.current = false;
+        setStatus('Draft discarded. Published Testcase source is unchanged.');
       } else setDraft(result as SourceChangeSet);
     });
   }
 
   const locked = access !== 'ready' || !targetXmlPath;
+  if (suspended) return <section className="att-source-authoring att-testcase-authoring" aria-label="Testcase reauthorization">
+    <h2>Testcase workspace hidden while away</h2>
+    {access === 'loading' && <p role="status" aria-busy="true">Rechecking Package source permission before showing draft details.</p>}
+    {access === 'unavailable' && <><p role="alert">{error || 'Testcase source reauthorization failed. Retry before resuming.'}</p>
+      <button type="button" onClick={() => setRefreshKey(value => value + 1)}>Retry permission check</button></>}
+    {access === 'ready' && recoveryPending && revision && <>
+      <p role="status">Permission was rechecked. Resume the in-memory upload and draft, or discard recovered work.</p>
+      <button type="button" onClick={() => { recoveryRequiredRef.current = false; suspendedRef.current = false; setRecoveryPending(false); setSuspended(false); }} disabled={busy}>Resume work</button>
+      <button type="button" onClick={() => {
+        if (draft) { void act('discard'); return; }
+        if (!window.confirm('Discard the recovered Testcase upload path?')) return;
+        setNewXmlPath(''); recoveryRequiredRef.current = false; suspendedRef.current = false; setRecoveryPending(false); setSuspended(false);
+      }} disabled={busy}>Discard recovered work</button>
+    </>}
+  </section>;
   return <section className="att-source-authoring att-testcase-authoring" aria-label="Testcase workbook authoring">
     <header className="att-source-authoring-heading"><div><p className="eyebrow">PACKAGE_SOURCE · {packageId} · TESTCASE</p>
       <h2>Testcase workbook and snapshot</h2>
@@ -239,6 +289,7 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
         <span>Package registration revision <code>{revision.registryRevision}</code></span>
         {targetXmlPath && <span>Testcase path <code>{targetXmlPath}</code></span>}
       </div>
+      {draftStale && <p className="att-error" role="alert">This draft uses an older Package source or registration revision. It can be discarded, but cannot be generated, validated, reviewed or published.</p>}
       {!sourcePath && <label>New Testcase XML path<input aria-label="New Testcase XML path" value={newXmlPath}
         onChange={event => setNewXmlPath(event.currentTarget.value)} placeholder="cases/new-case.xml" disabled={busy || Boolean(draft)} /></label>}
       {!targetXmlPath && <p className="att-source-authoring-note">{sourcePath ? 'The Server did not return a safe logical .xml Testcase path.' : 'Enter a Package-relative .xml path to create a new Testcase.'} Upload is disabled until the path is valid.</p>}
@@ -261,11 +312,11 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
         <h3>Draft {draft.changeSetId}</h3><p>{draft.state} · expires {draft.expiresAt || 'per Server policy'} · published source is unchanged</p>
         <ChangedFiles files={draft.changedFiles || []} />
         {draft.snapshotGenerated && <p role="status">Snapshot generated: {draft.snapshotPath || targetXmlPath}</p>}
-        {snapshotRequest && <button type="button" onClick={() => void generateSnapshot()} disabled={busy || !api.generateTestcaseSnapshot}>Generate Testcase snapshot</button>}
+        {snapshotRequest && <button type="button" onClick={() => void generateSnapshot()} disabled={busy || draftStale || !api.generateTestcaseSnapshot}>Generate Testcase snapshot</button>}
         <div className="att-source-authoring-toolbar">
-          <button type="button" onClick={() => void act('validate')} disabled={busy || Boolean(snapshotRequest) || draft.state === 'reviewed'}>Validate</button>
-          <button type="button" onClick={() => void act('review')} disabled={busy || draft.state !== 'validated'}>Review changed files</button>
-          <button type="button" className="button button-primary" onClick={() => void act('publish')} disabled={busy || draft.state !== 'reviewed'}>Publish</button>
+          <button type="button" onClick={() => void act('validate')} disabled={busy || draftStale || Boolean(snapshotRequest) || draft.state === 'reviewed'}>Validate</button>
+          <button type="button" onClick={() => void act('review')} disabled={busy || draftStale || draft.state !== 'validated'}>Review changed files</button>
+          <button type="button" className="button button-primary" onClick={() => void act('publish')} disabled={busy || draftStale || draft.state !== 'reviewed'}>Publish</button>
           <button type="button" onClick={() => void act('discard')} disabled={busy}>Discard Draft</button>
         </div>
       </section>}

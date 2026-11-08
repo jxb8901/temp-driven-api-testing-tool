@@ -5,9 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PackageTestdataWorkspace } from './PackageTestdataCatalog';
 import type { ConfigurationResponse, ExplorerApi, TestdataRecordsResponse } from './types';
 import { inspectionCache } from '../../inspectionCache';
+import { api as sharedApi } from '../../api';
 
 vi.mock('../code/CodeEditor', () => ({
-  CodeEditor: ({ value, label }: { value: string; label: string }) => <pre aria-label={label}>{value}</pre>,
+  CodeEditor: ({ value, label, readOnly = true, onChange, maxCharacters = 200_000 }: {
+    value: string; label: string; readOnly?: boolean; onChange?: (value: string) => void; maxCharacters?: number;
+  }) => {
+    const displayed = value.length > maxCharacters ? value.slice(0, maxCharacters) : value;
+    return readOnly ? <pre aria-label={label}>{displayed}</pre>
+      : <textarea aria-label={label} value={displayed} onChange={event => onChange?.(event.currentTarget.value)} />;
+  },
+  detectCodeLanguage: () => 'yaml',
 }));
 
 let host: HTMLDivElement;
@@ -20,6 +28,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove();
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+  vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 async function flush() { await act(async () => { await Promise.resolve(); await Promise.resolve(); }); }
 
@@ -60,6 +69,12 @@ function setSearchValue(value: string) {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
+function setInputValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
+  act(() => {
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value')?.set?.call(element, value);
+    element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+  });
+}
 
 function Harness({ api, initialEnvironment = '', descriptorId, registered = true, onOpenPackageConfiguration }: {
   api: ExplorerApi; initialEnvironment?: string; descriptorId?: string; registered?: boolean; onOpenPackageConfiguration?: () => void;
@@ -72,6 +87,67 @@ function Harness({ api, initialEnvironment = '', descriptorId, registered = true
 }
 
 describe('PackageTestdataWorkspace', () => {
+  it('creates and publishes a Testdata descriptor with its Manifest registration and overlay in one candidate', async () => {
+    let published = false;
+    const draft = { changeSetId: 'cs-testdata', domain: 'PACKAGE_SOURCE' as const, scopeId: 'payments', state: 'draft',
+      baseSourceRevision: 'base-1', registryRevision: 'registry-1', changedFiles: [] };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof Request ? input.url : String(input));
+      const action = url.pathname.split('/').at(-1);
+      let result: unknown;
+      if (action === 'validate') result = { ...draft, state: 'validated' };
+      else if (action === 'review') result = { ...draft, state: 'reviewed' };
+      else {
+        published = true;
+        result = { published: true, domain: 'PACKAGE_SOURCE', scopeId: 'payments', changeSetId: draft.changeSetId,
+          beforeRevision: 'base-1', revision: 'published-testdata-2' };
+      }
+      return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const actions = vi.spyOn(sharedApi, 'sourceChangeSetAction');
+    const stage = vi.fn(async (_domain: unknown, _scope: unknown, _base: unknown, _registry: unknown, _operations: unknown[]) => draft);
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getEffectiveConfiguration: vi.fn(async () => ({ sections: [{ id: 'testdata', entries: published
+        ? [{ id: 'new-shipments', source: 'testdata/new-shipments.yaml' }] : [] }] })),
+      getTestdataRecords: vi.fn(async (_packageId: string, descriptorId: string) => ({ descriptorId, offset: 0, limit: 50, total: 0, records: [] })),
+      getManagedPackageAuthoringSource: vi.fn(async () => ({ available: true, present: true, logicalPath: 'package.yaml', format: 'yaml',
+        text: 'testdata: []\n', sourceEtag: 'etag-1', revision: 'revision-1', baseSourceRevision: 'base-1', registryRevision: 'registry-1' })),
+      stageSourceChangeSet: stage,
+      sourceChangeSetAction: sharedApi.sourceChangeSetAction,
+    } as unknown as ExplorerApi;
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await act(async () => root.render(<Harness api={api} />)); await flush();
+    expect(host.textContent).toContain('Create Testdata descriptor');
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Create Testdata descriptor')?.click()); await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Edit')?.click());
+    const manifestEditor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]');
+    if (!manifestEditor) throw new Error('Authorized Package Manifest editor was not rendered.');
+    setInputValue(manifestEditor, 'testdata:\n  - id: new-shipments\n    source: testdata/new-shipments.yaml\n');
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Add current file to candidate')?.click());
+
+    setInputValue(host.querySelector<HTMLInputElement>('input[aria-label="Related file path"]')!, 'testdata/new-shipments.yaml');
+    setInputValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Related file content"]')!, 'selection: { strategy: random }\n');
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Add related file')?.click());
+    setInputValue(host.querySelector<HTMLSelectElement>('select[aria-label="Related file operation"]')!, 'replace');
+    setInputValue(host.querySelector<HTMLInputElement>('input[aria-label="Related file path"]')!, 'testdata/overlays/UAT.yaml');
+    setInputValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Related file content"]')!, 'records: []\n');
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Add related file')?.click());
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Stage candidate (3 files)')?.click()); await flush();
+    expect(stage).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', 'base-1', 'registry-1', [
+      { operation: 'replace', path: 'package.yaml', content: 'testdata:\n  - id: new-shipments\n    source: testdata/new-shipments.yaml\n' },
+      { operation: 'create', path: 'testdata/new-shipments.yaml', content: 'selection: { strategy: random }\n' },
+      { operation: 'replace', path: 'testdata/overlays/UAT.yaml', content: 'records: []\n' },
+    ], expect.any(AbortSignal));
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Validate')?.click()); await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Review changed files')?.click()); await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Publish')?.click()); await flush(); await flush();
+    expect(actions.mock.calls.map(call => call[3])).toEqual(['validate', 'review', 'publish']);
+    expect(vi.mocked(api.getEffectiveConfiguration).mock.calls.length).toBeGreaterThan(1);
+    expect(host.textContent).toContain('new-shipments');
+  });
+
   it('loads the linked Package descriptor and shows safe metadata when record preview is unavailable', async () => {
     const api = {
       getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'dev', state: 'active', default: true }] })),

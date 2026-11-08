@@ -46,7 +46,21 @@ export interface ChangedSourceFile {
   oldBytes?: number;
   newBytes?: number;
   automatic?: boolean;
-  inboundReferences?: Array<{ descriptorPath?: string; referenceCount?: number }>;
+  inboundReferences?: Array<{
+    schemaVersion?: string;
+    kind?: string;
+    packageId?: string | null;
+    environment?: string | null;
+    logicalId?: string | null;
+    canonicalPath?: string | null;
+    sourceFingerprint?: string | null;
+    relationship?: string | null;
+    callSite?: string | null;
+    certainty?: 'KNOWN' | 'UNKNOWN' | string;
+    /** Legacy projection accepted while older servers are in service. */
+    descriptorPath?: string;
+    referenceCount?: number;
+  }>;
   contentDiff?: string[];
   contentSummary?: string;
 }

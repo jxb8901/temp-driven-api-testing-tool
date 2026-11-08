@@ -99,6 +99,8 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   const [catalogNextOffset, setCatalogNextOffset] = useState<number | null>(null);
   const [catalogTotal, setCatalogTotal] = useState<number | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [creatingDescriptor, setCreatingDescriptor] = useState(false);
+  const [creatorDirty, setCreatorDirty] = useState(false);
   const catalogQuery = routeLookupQuery || catalogSearch.trim();
   const catalogQueryKey = JSON.stringify([packageId, environment, catalogQuery, inspectionRefresh, refreshKey]);
   const catalogQueryKeyRef = useRef(catalogQueryKey);
@@ -302,6 +304,7 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   if (error && !selectedId) return <section className="att-testdata-workspace"><h2>Testdata</h2><p className="att-error" role="alert">{error}<button type="button" onClick={onRefresh}>Retry</button></p></section>;
   return <section className="att-testdata-workspace" aria-label="Structured Testdata catalog">
     <header><div><h2>Descriptors</h2><p>Resolved metadata and bounded records for {environment || defaultEnvironment || 'the Package default environment'}.</p></div>
+      <button type="button" onClick={() => setCreatingDescriptor(true)}>Create Testdata descriptor</button>
       {(catalogTotal !== 0 || entries.length > 0 || catalogSearch) && <label>Search descriptors<input type="search" aria-label="Search Testdata descriptors" value={catalogSearch} onChange={event => {
         setCatalogSearch(event.currentTarget.value); setSelectedIdState(''); updateRecordControls({ offset: 0, previewGenerated: false, copiedRecord: null });
         setRecordResponseState(null); onDescriptorChange(undefined);
@@ -319,6 +322,14 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
         {entries.length > 0 && !visibleEntries.length && <p>No descriptors match this search.</p>}
       </nav>
       <div className="att-testdata-detail">
+    {creatingDescriptor && <section className="att-testdata-create" aria-label="Create Testdata descriptor">
+      <header><div><h3>New Testdata descriptor</h3><p>Update the Package Manifest and create the descriptor file in one candidate before staging.</p></div>
+        <button type="button" onClick={() => setCreatingDescriptor(false)} disabled={creatorDirty}
+          title={creatorDirty ? 'Stage or discard the local editor work and draft before closing.' : undefined}>Close creator</button></header>
+      <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
+        query: { kind: 'manifest' }, label: 'Testdata descriptor and Package registration', allowFileOperations: true }}
+        registerUnsavedChanges={registerUnsavedChanges} onDirtyChange={setCreatorDirty} onPublished={() => setCreatingDescriptor(false)} />
+    </section>}
     {selectedEntry ? <>
       <dl className="att-testdata-meta"><div><dt>Descriptor</dt><dd>{selectedEntry.id}</dd></div><div><dt>Source</dt><dd>{selectedEntry.source ? <span title="Package-local descriptor, not a shared Configuration source">{packageId}: {selectedEntry.source}</span> : 'Not provided'}</dd></div>
         <div><dt>Generated</dt><dd>{isGenerated ? 'Yes' : 'No'}</dd></div><div><dt>Records</dt><dd>{response?.recordCount?.toLocaleString() || displayField(selectedEntry, 'recordCount')}</dd></div>
@@ -374,7 +385,7 @@ export function PackageTestdataWorkspace({ api, packageId, packageLabel, registr
   const [environmentError, setEnvironmentError] = useState('');
   const [environmentNotice, setEnvironmentNotice] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
-  const inspectionRefresh = useInspectionRefresh(true);
+  const inspectionRefresh = useInspectionRefresh();
   const profiles = useMemo(() => (declared?.environments || []).filter(item => item.name && item.state === 'active'), [declared]);
   const defaultEnvironment = profiles.find(item => item.default)?.name;
   const refresh = useCallback(() => {

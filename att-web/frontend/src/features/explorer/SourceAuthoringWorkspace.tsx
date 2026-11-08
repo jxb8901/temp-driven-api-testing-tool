@@ -36,6 +36,7 @@ interface SourceAuthoringWorkspaceProps {
   target: SourceAuthoringTarget;
   canManageCentral?: boolean;
   registerUnsavedChanges?: (isDirty: boolean, description?: string) => () => void;
+  onDirtyChange?: (isDirty: boolean) => void;
   onOpenFileReference?: (path: string, origin?: string, reference?: ResourceSourceReference) => void;
   onPublished?: (result: SourcePublishResult) => void;
 }
@@ -91,12 +92,33 @@ function pathLabel(target: SourceAuthoringTarget, source?: ManagedAuthoringSourc
   if (target.domain === 'CENTRAL_RUNTIME_CONFIG') return target.path;
   return target.query.path || target.query.resourceId || target.label || 'Package source';
 }
+function impactFreshnessMatches(report: SourceImpactReport | null, changeSetId: string, expectedConfigRevision?: string): boolean {
+  const freshness = report?.freshness;
+  return Boolean(freshness?.schemaVersion === 'att-config-impact-freshness/v1'
+    && freshness.draftId === changeSetId && /^[a-f0-9]{64}$/.test(freshness.draftFingerprint || '')
+    && freshness.baseConfig?.kind === 'CONFIG_SOURCE' && freshness.baseConfig.revision === expectedConfigRevision
+    && freshness.candidateConfig?.kind === 'CONFIG_SOURCE' && freshness.candidateConfig.revision
+    && freshness.packageRegistry?.kind === 'PACKAGE_REGISTRATION' && freshness.packageRegistry.revision
+    && freshness.engineSchema?.kind === 'ENGINE_SCHEMA' && freshness.engineSchema.revision
+    && Array.isArray(freshness.packageSources) && Array.isArray(freshness.manifests)
+    && Array.isArray(freshness.scheduleSnapshots));
+}
 function summarizeReferences(file: ChangedSourceFile): string[] {
-  return (file.inboundReferences || []).map(reference =>
-    `${reference.descriptorPath || 'Unknown descriptor'}${reference.referenceCount ? ` · ${reference.referenceCount} reference${reference.referenceCount === 1 ? '' : 's'}` : ''}`);
+  return (file.inboundReferences || []).map(reference => {
+    const location = reference.canonicalPath || reference.descriptorPath || reference.logicalId
+      || [reference.packageId, reference.environment].filter(Boolean).join(' / ') || 'Location unavailable';
+    const details = [
+      reference.kind,
+      reference.relationship,
+      reference.callSite ? `Action: ${reference.callSite}` : undefined,
+      reference.certainty === 'UNKNOWN' ? 'location uncertain' : reference.certainty === 'KNOWN' ? 'known location' : undefined,
+      reference.referenceCount ? `${reference.referenceCount} reference${reference.referenceCount === 1 ? '' : 's'}` : undefined,
+    ].filter(Boolean);
+    return `${location}${details.length ? ` · ${details.join(' · ')}` : ''}`;
+  });
 }
 
-export function SourceAuthoringWorkspace({ api, target, canManageCentral = false, registerUnsavedChanges, onOpenFileReference, onPublished }: SourceAuthoringWorkspaceProps) {
+export function SourceAuthoringWorkspace({ api, target, canManageCentral = false, registerUnsavedChanges, onDirtyChange, onOpenFileReference, onPublished }: SourceAuthoringWorkspaceProps) {
   const workspace = useContext(AppShellContext);
   const [source, setSource] = useState<ManagedAuthoringSource | null>(null);
   const [access, setAccess] = useState<AccessState>(target.domain === 'CENTRAL_RUNTIME_CONFIG' && !canManageCentral ? 'denied' : 'checking');
@@ -106,6 +128,14 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   const [content, setContent] = useState('');
   const [createPath, setCreatePath] = useState('');
   const [movePath, setMovePath] = useState('');
+  const [pendingOperations, setPendingOperations] = useState<SourceOperation[]>([]);
+  const [pendingBaseSourceRevision, setPendingBaseSourceRevision] = useState('');
+  const [pendingRegistryRevision, setPendingRegistryRevision] = useState<string | undefined>();
+  const [relatedPath, setRelatedPath] = useState('');
+  const [relatedOperation, setRelatedOperation] = useState<'create' | 'replace'>('create');
+  const [relatedContent, setRelatedContent] = useState('');
+  const [suspended, setSuspended] = useState(false);
+  const [recoveryPending, setRecoveryPending] = useState(false);
   const [draft, setDraft] = useState<SourceChangeSet | null>(null);
   const [published, setPublished] = useState<SourcePublishResult | null>(null);
   const [impact, setImpact] = useState<SourceImpactReport | null>(null);
@@ -118,24 +148,36 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   const [refreshKey, setRefreshKey] = useState(0);
   const targetKey = useMemo(() => JSON.stringify(target), [target]);
   const controllerRef = useRef<AbortController | null>(null);
+  const actionControllerRef = useRef<AbortController | null>(null);
   const impactControllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousTargetKeyRef = useRef(targetKey);
+  const recoveryRequiredRef = useRef(false);
+  const suspendedRef = useRef(false);
   const packageTarget = target.domain === 'PACKAGE_SOURCE' ? target : null;
   const centralTarget = target.domain === 'CENTRAL_RUNTIME_CONFIG' ? target : null;
-  const isDirty = Boolean(busy || (mode === 'edit' && source && content !== source.text) || mode === 'create' && content.length > 0 || draft);
+  const isDirty = Boolean(busy || (mode === 'edit' && source && content !== source.text)
+    || mode === 'create' && (content.length > 0 || createPath.trim()) || pendingOperations.length || draft
+    || recoveryPending || suspended && recoveryRequiredRef.current);
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
   const draftStale = Boolean(draft && source && (draft.baseSourceRevision !== source.baseSourceRevision
     || packageTarget && draft.registryRevision !== source.registryRevision));
   const editorStale = Boolean(source && mode !== 'view' && editorBaseSourceRevision
     && editorBaseSourceRevision !== source.baseSourceRevision);
+  const candidateStale = Boolean(pendingOperations.length && source && (pendingBaseSourceRevision !== source.baseSourceRevision
+    || packageTarget && pendingRegistryRevision !== source.registryRevision));
+  const queuedCurrentOperation = pendingOperations.find(operation => operation.path === source?.logicalPath);
+  const currentEditorHasUnqueuedChanges = Boolean(mode === 'edit' && source && content !== source.text
+    && (!queuedCurrentOperation || queuedCurrentOperation.content !== content)
+    || mode === 'create' && content
+      && !pendingOperations.some(operation => operation.path === createPath.trim() && operation.content === content));
   const displayedPath = pathLabel(target, source);
   const expectedCentralRevision = source?.configRevision || source?.baseSourceRevision || source?.revision;
-  const impactMatchesCurrentDraft = Boolean(draft && impact?.freshness?.draftId === draft.changeSetId
-    && impact.freshness.draftFingerprint && impact.freshness.baseConfig?.revision
-    && impact.freshness.baseConfig.revision === expectedCentralRevision
-    && impact.freshness.candidateConfig?.revision);
+  const impactMatchesCurrentDraft = Boolean(draft && impactFreshnessMatches(impact, draft.changeSetId, expectedCentralRevision));
   const centralReportReady = Boolean(!draftStale && impact?.providerState === 'AVAILABLE'
     && impactMatchesCurrentDraft
+    && impact.coverage === 'COMPLETE'
     && impact.decision && impact.decision !== 'BLOCKED'
     && !(impact.acknowledgementRequired && impact.decision === 'REQUIRES_REVIEW'));
 
@@ -143,9 +185,13 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     if (previousTargetKeyRef.current === targetKey) return;
     previousTargetKeyRef.current = targetKey;
     controllerRef.current?.abort();
+    actionControllerRef.current?.abort();
     impactControllerRef.current?.abort(); impactControllerRef.current = null;
     setSource(null); setDraft(null); setPublished(null); setImpact(null); setDiagnostics([]);
     setContent(''); setMode('view'); setCreatePath(''); setMovePath(''); setEditorBaseSourceRevision(''); setImpactLoading(false);
+    setPendingOperations([]); setRelatedPath(''); setRelatedContent(''); setRelatedOperation('create');
+    setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
+    setSuspended(false); setRecoveryPending(false); recoveryRequiredRef.current = false; suspendedRef.current = false;
     setError(''); setStatus(''); setBusy(false); setLoading(false);
     setAccess(centralTarget && !canManageCentral ? 'denied' : 'checking');
   }, [targetKey, centralTarget, canManageCentral]);
@@ -154,6 +200,10 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     if (!registerUnsavedChanges) return;
     return registerUnsavedChanges(isDirty, centralTarget ? 'Central Configuration source draft' : 'Package source draft');
   }, [registerUnsavedChanges, isDirty, centralTarget]);
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+    return () => onDirtyChange?.(false);
+  }, [onDirtyChange, isDirty]);
 
   useEffect(() => {
     const lockWorkspace = centralTarget ? canManageCentral : access === 'authorized';
@@ -172,7 +222,10 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     }
     setSource(null); setImpact(null); setImpactLoading(false); setDiagnostics([]); setError(''); setStatus('');
     if (centralTarget && !canManageCentral) {
-      setDraft(null); setContent(''); setMode('view'); setAccess('denied'); setLoading(false);
+      actionControllerRef.current?.abort();
+      setDraft(null); setPublished(null); setContent(''); setMode('view'); setPendingOperations([]);
+      setRecoveryPending(false); setSuspended(false); recoveryRequiredRef.current = false; suspendedRef.current = false;
+      setAccess('denied'); setLoading(false);
       return () => controller.abort();
     }
     setAccess('checking'); setLoading(true);
@@ -193,13 +246,25 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       }
       const hasLocalEditorChanges = !targetChanged && mode !== 'view' && (mode === 'create' ? content.length > 0 : Boolean(source && content !== source.text));
       setSource(value);
-      if (targetChanged || !hasLocalEditorChanges) setContent(value.text);
+      if (targetChanged || (!recoveryRequiredRef.current && !hasLocalEditorChanges)) setContent(value.text);
       setAccess('authorized'); setError('');
+      if (recoveryRequiredRef.current) setRecoveryPending(true);
+      else if (!suspendedRef.current || document.visibilityState !== 'hidden') {
+        suspendedRef.current = false; setSuspended(false);
+      }
     }).catch(reason => {
       if (controller.signal.aborted) return;
       const status = statusOf(reason);
-      setSource(null); setContent(''); setAccess(status === 403 ? 'denied' : 'unavailable');
-      if (status === 403) { setDraft(null); setImpact(null); }
+      setSource(null);
+      if (!recoveryRequiredRef.current || status === 403) setContent('');
+      setAccess(status === 403 ? 'denied' : 'unavailable');
+      if (status === 403) {
+        actionControllerRef.current?.abort();
+        setDraft(null); setImpact(null); setPublished(null); setPendingOperations([]); setCreatePath(''); setMovePath('');
+        setRelatedPath(''); setRelatedContent(''); setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
+        setRecoveryPending(false); setSuspended(false);
+        recoveryRequiredRef.current = false; suspendedRef.current = false;
+      }
       if (status !== 403) setError(failureText(reason, 'load complete source'));
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => {
@@ -210,25 +275,32 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   }, [api, targetKey, refreshKey, canManageCentral, packageTarget?.packageId, centralTarget?.path]);
 
   useEffect(() => {
-    const clearPrivilegedState = () => {
+    const suspendPrivilegedDisplay = () => {
+      recoveryRequiredRef.current = isDirtyRef.current;
+      setRecoveryPending(false);
+      suspendedRef.current = true;
+      setSuspended(true);
       controllerRef.current?.abort();
       impactControllerRef.current?.abort(); impactControllerRef.current = null;
-      setSource(null); setDraft(null); setPublished(null); setImpact(null); setContent(''); setMode('view');
-      setCreatePath(''); setMovePath(''); setEditorBaseSourceRevision(''); setBusy(false); setLoading(false);
+      setSource(null); setImpact(null); setLoading(false);
+      if (!recoveryRequiredRef.current) {
+        setDraft(null); setPublished(null); setContent(''); setMode('view'); setCreatePath(''); setMovePath('');
+        setEditorBaseSourceRevision(''); setPendingOperations([]); setRelatedPath(''); setRelatedContent('');
+      }
       setImpactLoading(false);
-      setStatus('Privileged source was cleared when the page was hidden. Reload it before continuing.');
+      setStatus('Source is hidden while the page is in the background. Reauthorize before resuming.');
       setAccess('checking'); setLoading(false);
     };
     const onPageShow = () => setRefreshKey(value => value + 1);
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') clearPrivilegedState();
+      if (document.visibilityState === 'hidden') suspendPrivilegedDisplay();
       else setRefreshKey(value => value + 1);
     };
-    window.addEventListener('pagehide', clearPrivilegedState);
+    window.addEventListener('pagehide', suspendPrivilegedDisplay);
     window.addEventListener('pageshow', onPageShow);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      window.removeEventListener('pagehide', clearPrivilegedState);
+      window.removeEventListener('pagehide', suspendPrivilegedDisplay);
       window.removeEventListener('pageshow', onPageShow);
       document.removeEventListener('visibilitychange', onVisibility);
     };
@@ -236,18 +308,24 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
 
   useEffect(() => () => {
     controllerRef.current?.abort();
+    actionControllerRef.current?.abort();
     impactControllerRef.current?.abort(); impactControllerRef.current = null;
   }, []);
 
   const clearAfterRevocation = () => {
     controllerRef.current?.abort();
+    actionControllerRef.current?.abort();
     impactControllerRef.current?.abort(); impactControllerRef.current = null;
-    setSource(null); setDraft(null); setImpact(null); setImpactLoading(false); setContent(''); setMode('view'); setAccess('denied');
+    setSource(null); setDraft(null); setPublished(null); setImpact(null); setImpactLoading(false);
+    setContent(''); setMode('view'); setCreatePath(''); setMovePath(''); setEditorBaseSourceRevision(''); setAccess('denied');
+    setPendingOperations([]); setRelatedPath(''); setRelatedContent(''); setRecoveryPending(false); setSuspended(false);
+    setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
+    recoveryRequiredRef.current = false; suspendedRef.current = false;
   };
 
   async function withBusy(action: string, run: (signal: AbortSignal) => Promise<void>) {
     const controller = new AbortController();
-    controllerRef.current?.abort(); controllerRef.current = controller;
+    actionControllerRef.current?.abort(); actionControllerRef.current = controller;
     setBusy(true); setError(''); setStatus(''); setDiagnostics([]);
     try { await run(controller.signal); }
     catch (reason) {
@@ -256,8 +334,8 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       if (statusOf(reason) === 422) setDiagnostics(diagnosticsOf(reason));
       if (statusOf(reason) === 403) clearAfterRevocation();
     } finally {
-      if (controllerRef.current === controller) {
-        controllerRef.current = null;
+      if (actionControllerRef.current === controller) {
+        actionControllerRef.current = null;
         setBusy(false);
       }
     }
@@ -280,6 +358,8 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
         target.domain === 'PACKAGE_SOURCE' ? source.registryRevision : undefined, operations, signal);
       if (signal.aborted) return;
       setDraft(result); setImpact(null); setPublished(null); setMode('view');
+      setPendingOperations([]); setRelatedPath(''); setRelatedContent(''); setRelatedOperation('create');
+      setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
       setStatus(`Draft ${result.changeSetId} saved. Published source is unchanged.`);
     });
   }
@@ -302,11 +382,16 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       if (action === 'publish' && 'published' in result) {
         const publication = result as SourcePublishResult;
         setPublished(publication); setDraft(null); setImpact(null); setSource(null); setContent(''); setMode('view');
+        setPendingOperations([]); recoveryRequiredRef.current = false; setRecoveryPending(false);
+        setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
         setStatus(`Published revision ${publication.revision}.${publication.auditConfirmed === false ? ' The Server reports the durable audit record is pending confirmation.' : ''}`);
         onPublished?.(publication);
         setRefreshKey(value => value + 1);
       } else if (action === 'discard') {
-        setDraft(null); setImpact(null); setContent(source?.text || ''); setStatus('Draft discarded. Published source is unchanged.');
+        setDraft(null); setImpact(null); setContent(source?.text || ''); setPendingOperations([]);
+        setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
+        recoveryRequiredRef.current = false; setRecoveryPending(false); setSuspended(false); suspendedRef.current = false;
+        setStatus('Draft discarded. Published source is unchanged.');
       } else {
         setDraft(result as SourceChangeSet);
         setStatus(action === 'validate' ? 'Draft validation completed.' : 'Changed-file review completed.');
@@ -341,12 +426,13 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
         return;
       }
       const expectedRevision = source?.configRevision || source?.baseSourceRevision || source?.revision;
-      if (report.freshness?.draftId !== changeSetId || !report.freshness.draftFingerprint
-        || !report.freshness.candidateConfig?.revision || !report.freshness.baseConfig?.revision
-        || report.freshness.baseConfig.revision !== expectedRevision) {
+      if (!impactFreshnessMatches(report, changeSetId, expectedRevision)) {
         setImpact({ ...report, providerState: 'STALE', decision: null });
         setError('The Impact Report is missing or does not match the current draft and source revision. Refresh the source, validate, and review again. Central publication is disabled.');
         return;
+      }
+      if (report.coverage !== 'COMPLETE') {
+        setError('The Impact Report does not cover every required dependency. Central publication is disabled until the Server returns complete coverage.'); return;
       }
       if (report.decision === 'BLOCKED') {
         setError('The Server blocked this central Config candidate. Review the impact result and diagnostics; publication is disabled.'); return;
@@ -381,8 +467,8 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     if (file.size > 4 * 1024 * 1024) { setError('Files larger than 4 MiB cannot be uploaded in one source change.'); return; }
     if (!isTextExtension(path)) { setError('Only UTF-8 text files can be uploaded here. Testcase workbooks use the paired upload flow.'); return; }
     const uploadController = new AbortController();
-    controllerRef.current?.abort();
-    controllerRef.current = uploadController;
+    actionControllerRef.current?.abort();
+    actionControllerRef.current = uploadController;
     setBusy(true); setError(''); setStatus('Reading and validating the UTF-8 source upload…');
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
@@ -391,12 +477,48 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       if (uploadController.signal.aborted) return;
       setContent(text);
       const operation: SourceOperation = { operation: source?.present && mode !== 'create' ? 'replace' : 'create', path, content: text };
-      await stage([operation]);
+      if (packageTarget?.allowFileOperations) {
+        if (addPendingOperation(operation) && source) { setMode('view'); setContent(source.text); setCreatePath(''); setEditorBaseSourceRevision(''); }
+      }
+      else await stage([operation]);
     } catch {
       if (!uploadController.signal.aborted) setError('The selected source file is not valid UTF-8 text. Testcase workbooks must use the paired upload flow.');
     } finally {
-      if (controllerRef.current === uploadController) setBusy(false);
+      if (actionControllerRef.current === uploadController) { actionControllerRef.current = null; setBusy(false); }
     }
+  }
+
+  function addPendingOperation(operation: SourceOperation): boolean {
+    if (!safeLogicalPath(operation.path) || (operation.targetPath && !safeLogicalPath(operation.targetPath))) {
+      setError('Use an in-package relative path without empty, dot, parent, or absolute path segments.'); return false;
+    }
+    if (pendingOperations.length >= 32) { setError('A candidate can contain at most 32 file changes.'); return false; }
+    const paths = new Set(pendingOperations.flatMap(item => [item.path, item.targetPath].filter(Boolean)));
+    if (paths.has(operation.path) || operation.targetPath && paths.has(operation.targetPath)) {
+      setError('Each candidate path can be changed only once. Remove the earlier operation before adding this path.'); return false;
+    }
+    if (!pendingOperations.length && source) {
+      setPendingBaseSourceRevision(source.baseSourceRevision);
+      setPendingRegistryRevision(source.registryRevision);
+    }
+    setPendingOperations(current => [...current, operation]);
+    setStatus(`Added ${operation.operation} ${operation.path} to the local candidate. Stage the complete candidate when related files are ready.`);
+    setError('');
+    return true;
+  }
+
+  function addRelatedFile() {
+    if (!relatedContent.trim()) { setError('Add file content before adding it to the candidate.'); return; }
+    if (addPendingOperation({ operation: relatedOperation, path: relatedPath.trim(), content: relatedContent })) {
+      setRelatedPath(''); setRelatedContent(''); setRelatedOperation('create');
+    }
+  }
+
+  function stageCandidate() {
+    if (!pendingOperations.length) { setError('Add at least one file change to the candidate.'); return; }
+    if (candidateStale) { setError('The Package source or registration changed while these candidate files were being edited. Discard and re-add them against the current revision.'); return; }
+    if (currentEditorHasUnqueuedChanges) { setError('Add or discard the current editor changes before staging this candidate.'); return; }
+    void stage(pendingOperations);
   }
 
   function saveTextDraft() {
@@ -405,37 +527,50 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       const path = createPath.trim();
       if (!safeLogicalPath(path)) { setError('Enter a valid relative path, such as templates/new-template/template.yaml.'); return; }
       if (!content.trim()) { setError('Add source content before creating a draft.'); return; }
-      void stage([{ operation: 'create', path, content }]);
+      const operation: SourceOperation = { operation: 'create', path, content };
+      if (packageTarget?.allowFileOperations) {
+        if (addPendingOperation(operation) && source) { setMode('view'); setContent(source.text); setCreatePath(''); setEditorBaseSourceRevision(''); }
+      }
+      else void stage([operation]);
       return;
     }
     if (!source || content === source.text) { setStatus('There are no source changes to save.'); return; }
     const operation = source.present ? 'replace' : 'create';
-    if (!window.confirm(`${operation === 'create' ? 'Create' : 'Save a draft for'} ${source.logicalPath}? Published source will not change until you publish.`)) return;
-    void stage([{ operation, path: source.logicalPath, content }]);
+    if (!window.confirm(packageTarget?.allowFileOperations
+      ? `Add ${source.logicalPath} to the local candidate? Related Package files can be added before staging.`
+      : `Save a draft for ${source.logicalPath}? Published source will not change until you publish.`)) return;
+    if (packageTarget?.allowFileOperations) {
+      if (addPendingOperation({ operation, path: source.logicalPath, content })) {
+        setMode('view'); setContent(source.text); setEditorBaseSourceRevision('');
+      }
+    }
+    else void stage([{ operation, path: source.logicalPath, content }]);
   }
 
   function beginDelete() {
     if (!source || !source.present) return;
-    if (!window.confirm(`Stage deletion of ${source.logicalPath}? The review will list known references before publication.`)) return;
-    void stage([{ operation: 'delete', path: source.logicalPath }]);
+    if (mode === 'edit' && content !== source.text) { setError('Add or discard the local editor changes before deleting this source.'); return; }
+    if (!window.confirm(`Add deletion of ${source.logicalPath} to the candidate? The review will list known references before publication.`)) return;
+    if (addPendingOperation({ operation: 'delete', path: source.logicalPath })) { setMode('view'); setContent(source.text); setEditorBaseSourceRevision(''); }
   }
   function beginMove() {
     if (!source || !source.present) return;
+    if (mode === 'edit' && content !== source.text) { setError('Add or discard the local editor changes before moving this source.'); return; }
     if (!safeLogicalPath(movePath)) { setError('Enter a valid new relative path.'); return; }
-    if (!window.confirm(`Stage move of ${source.logicalPath} to ${movePath}? Known inbound references will be reviewed.`)) return;
-    void stage([{ operation: 'move', path: source.logicalPath, targetPath: movePath }]);
+    if (!window.confirm(`Add move of ${source.logicalPath} to ${movePath} to the candidate? Known inbound references will be reviewed.`)) return;
+    if (addPendingOperation({ operation: 'move', path: source.logicalPath, targetPath: movePath })) { setMode('view'); setContent(source.text); setEditorBaseSourceRevision(''); }
   }
 
   const sourceEditor = source && !draft && (mode === 'edit' || mode === 'view')
     ? <CodeEditor value={content} language={detectCodeLanguage(source.logicalPath || source.format)}
         label={`${mode === 'edit' ? 'Edit' : 'View'} authorized source ${source.logicalPath}`}
-        readOnly={mode !== 'edit' || busy} onChange={setContent} maxCharacters={200_000} /> : null;
+        readOnly={mode !== 'edit' || busy} onChange={setContent} maxCharacters={Math.max(200_000, source.text.length, content.length)} /> : null;
 
   function reloadSource() {
     if (draft) { setRefreshKey(value => value + 1); return; }
-    const hasLocalChanges = Boolean(mode === 'edit' && source && content !== source.text || mode === 'create' && content.length);
+    const hasLocalChanges = Boolean(mode === 'edit' && source && content !== source.text || mode === 'create' && (content.length || createPath.trim()) || pendingOperations.length);
     if (hasLocalChanges && !window.confirm('Reloading will discard these unsaved local editor changes. Continue?')) return;
-    if (hasLocalChanges) { setMode('view'); setContent(''); setCreatePath(''); setEditorBaseSourceRevision(''); }
+    if (hasLocalChanges) { setMode('view'); setContent(''); setCreatePath(''); setEditorBaseSourceRevision(''); setPendingOperations([]); setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined); setRelatedPath(''); setRelatedContent(''); }
     setRefreshKey(value => value + 1);
   }
 
@@ -447,6 +582,25 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   }
 
   if (centralTarget && !canManageCentral) return null;
+
+  if (suspended) return <section className="att-source-authoring" aria-label="Source authoring reauthorization">
+    <h2>Source hidden while away</h2>
+    {access === 'checking' && <p role="status" aria-busy="true">Rechecking source permission before showing any source or draft.</p>}
+    {access === 'unavailable' && <><p role="alert">{error || 'Source reauthorization failed. Retry before resuming this work.'}</p>
+      <button type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading}>Retry source permission check</button></>}
+    {access === 'authorized' && recoveryPending && source && <>
+      <p role="status">Permission was rechecked. Resume the in-memory editor and draft, or discard the recovered work.</p>
+      <button type="button" onClick={() => { recoveryRequiredRef.current = false; suspendedRef.current = false; setRecoveryPending(false); setSuspended(false); }} disabled={busy}>Resume work</button>
+      <button type="button" onClick={() => {
+        if (draft) { void act('discard'); return; }
+        if (!window.confirm('Discard the recovered local changes? Published source is unchanged.')) return;
+        setContent(source.text); setMode('view'); setCreatePath(''); setMovePath(''); setPendingOperations([]);
+        setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
+        setRelatedPath(''); setRelatedContent(''); setEditorBaseSourceRevision('');
+        recoveryRequiredRef.current = false; suspendedRef.current = false; setRecoveryPending(false); setSuspended(false);
+      }} disabled={busy}>Discard recovered work</button>
+    </>}
+  </section>;
 
   return <section className={`att-source-authoring ${target.domain === 'CENTRAL_RUNTIME_CONFIG' ? 'is-central' : ''}`} aria-label={target.label || 'Source authoring'}>
     <header className="att-source-authoring-heading">
@@ -514,34 +668,66 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
             </>}
             {packageTarget.allowCreate && <button type="button" onClick={() => { setMode('create'); setCreatePath(''); setContent(''); setEditorBaseSourceRevision(source.baseSourceRevision); setError(''); }} disabled={busy}>New source</button>}
           </>}
-          {mode === 'edit' && <button type="button" className="button button-primary" onClick={saveTextDraft} disabled={busy || content === source.text || editorStale}>Save Draft</button>}
+          {mode === 'edit' && <button type="button" className="button button-primary" onClick={saveTextDraft} disabled={busy || content === source.text || editorStale}>
+            {packageTarget?.allowFileOperations ? 'Add current file to candidate' : 'Save Draft'}
+          </button>}
           <input ref={fileInputRef} type="file" className="att-source-file-input" aria-label="Upload source file"
             accept=".yaml,.yml,.xml,.json,.csv,.tsv,.txt,.sql,.properties,.md" onChange={event => void handleUpload(event)} />
         </div>
         {mode === 'edit' && <p className="att-source-authoring-note">The editor contains the exact authorized source shown in View. Source bytes remain in memory only and are never placed in inspection cache or browser storage.</p>}
         {mode === 'edit' && editorStale && <details className="att-source-current-copy"><summary>Latest authorized source</summary>
-          <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || source.format)} label={`Latest authorized source ${source.logicalPath}`} readOnly maxCharacters={200_000} />
+          <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || source.format)} label={`Latest authorized source ${source.logicalPath}`} readOnly maxCharacters={Math.max(200_000, source.text.length)} />
           <button type="button" onClick={rebaseLocalEditor} disabled={busy}>Rebase local changes on current revision</button>
         </details>}
         {sourceEditor}
         {mode === 'create' && <div className="att-source-create-form">
           <label>New logical path <input value={createPath} onChange={event => setCreatePath(event.currentTarget.value)} placeholder="templates/new-template/template.yaml" disabled={busy} /></label>
-          <CodeEditor value={content} language={detectCodeLanguage(createPath)} label="New source content" readOnly={busy} onChange={setContent} maxCharacters={200_000} />
+          <CodeEditor value={content} language={detectCodeLanguage(createPath)} label="New source content" readOnly={busy} onChange={setContent} maxCharacters={Math.max(200_000, content.length)} />
           {editorStale && <details className="att-source-current-copy"><summary>Latest authorized source</summary>
-            <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || source.format)} label={`Latest authorized source ${source.logicalPath}`} readOnly maxCharacters={200_000} />
+            <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || source.format)} label={`Latest authorized source ${source.logicalPath}`} readOnly maxCharacters={Math.max(200_000, source.text.length)} />
             <button type="button" onClick={rebaseLocalEditor} disabled={busy}>Rebase local changes on current revision</button>
           </details>}
           <div><button type="button" onClick={() => { setMode('view'); setContent(source.text); setCreatePath(''); setEditorBaseSourceRevision(''); }} disabled={busy}>Cancel</button>
-            <button type="button" className="button button-primary" onClick={saveTextDraft} disabled={busy || editorStale || !createPath || !content.trim()}>Save Draft</button>
+            <button type="button" className="button button-primary" onClick={saveTextDraft} disabled={busy || editorStale || !createPath || !content.trim()}>
+              {packageTarget?.allowFileOperations ? 'Add current file to candidate' : 'Save Draft'}
+            </button>
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={busy}>Upload new source</button></div>
         </div>}
       </>}
+
+      {!draft && packageTarget?.allowFileOperations && <section className="att-source-candidate" aria-label="Package file change candidate">
+        <h3>Candidate file changes</h3>
+        <p>Add the current file and related Package files here, then stage them together for one validation and review.</p>
+        {candidateStale && <p role="alert">These candidate files use an older Package source or registration revision. Discard and add them again against the current source.</p>}
+        {pendingOperations.length > 0 && <ol aria-label="Queued candidate files">{pendingOperations.map((operation, index) => <li key={`${operation.path}:${index}`}>
+          <strong>{operation.operation.toUpperCase()}</strong> <code>{operation.path}</code>{operation.targetPath && <> → <code>{operation.targetPath}</code></>}
+          <button type="button" onClick={() => {
+            const remaining = pendingOperations.filter((_, itemIndex) => itemIndex !== index);
+            setPendingOperations(remaining);
+            if (!remaining.length) { setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined); }
+          }} disabled={busy}>Remove</button>
+        </li>)}</ol>}
+        {currentEditorHasUnqueuedChanges && <p role="alert">Add or discard the current editor changes before staging this candidate.</p>}
+        <fieldset disabled={busy}>
+          <legend>Add a related file</legend>
+          <label>Operation<select aria-label="Related file operation" value={relatedOperation} onChange={event => setRelatedOperation(event.currentTarget.value as 'create' | 'replace')}>
+            <option value="create">Create</option><option value="replace">Replace</option>
+          </select></label>
+          <label>Package-relative path<input aria-label="Related file path" value={relatedPath} onChange={event => setRelatedPath(event.currentTarget.value)} placeholder="templates/checkout/payload.yaml" /></label>
+          <label>File content<textarea aria-label="Related file content" value={relatedContent} onChange={event => setRelatedContent(event.currentTarget.value)} rows={8} /></label>
+          <button type="button" onClick={addRelatedFile}>Add related file</button>
+        </fieldset>
+        <button type="button" className="button button-primary" onClick={stageCandidate}
+          disabled={busy || !pendingOperations.length || candidateStale || currentEditorHasUnqueuedChanges}>
+          Stage candidate{pendingOperations.length ? ` (${pendingOperations.length} files)` : ''}
+        </button>
+      </section>}
 
       {draft && <section className="att-source-review" aria-label="Changed source review">
         <div className="att-source-review-heading"><div><h3>Draft {draft.changeSetId}</h3><p>{draft.state} · expires {draft.expiresAt || 'per Server policy'} · published source remains unchanged</p></div></div>
         <ChangedFiles files={draft.changedFiles || []} />
         {draftStale && <details className="att-source-current-copy"><summary>Latest authorized source</summary>
-          <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || source.format)} label={`Latest authorized source ${source.logicalPath}`} readOnly maxCharacters={200_000} />
+          <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || source.format)} label={`Latest authorized source ${source.logicalPath}`} readOnly maxCharacters={Math.max(200_000, source.text.length)} />
         </details>}
         <div className="att-source-authoring-toolbar">
           <button type="button" onClick={() => void act('validate')} disabled={busy || loading || draftStale || draft.state === 'reviewed'}>Validate</button>
@@ -573,7 +759,7 @@ export function ChangedFiles({ files }: { files: ChangedSourceFile[] }) {
         <span>{file.oldBytes ?? 0} B → {file.newBytes ?? 0} B</span></div>
       {file.automatic && <p>Generated by the Server as part of this Change Set.</p>}
       {file.inboundReferences?.length ? <div className="att-source-inbound-references"><strong>Referenced by</strong><ul>{summarizeReferences(file).map(reference => <li key={reference}>{reference}</li>)}</ul>
-        <p>Review every known reference before publishing this delete or move.</p></div> : null}
+        <p>Review each returned call site and its certainty before publishing this delete or move. The reference list may be incomplete.</p></div> : null}
       {file.contentSummary && <p>{file.contentSummary}</p>}
       {file.contentDiff && <pre aria-label={`Review diff for ${file.path}`}>{file.contentDiff.join('\n')}</pre>}
     </li>)}</ul>}
