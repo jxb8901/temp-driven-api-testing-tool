@@ -117,6 +117,29 @@ class SourceManagementContractsTest {
                 RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE, "pay", DIGEST_2), execution));
     }
 
+    @Test void impactFreshnessAcceptsCanonicalPackageSourceAndLegacyBusinessSourceOnly() {
+        RevisionIdentity base = RevisionIdentity.of(RevisionKind.CONFIG_SOURCE, "central-runtime-config", DIGEST_1);
+        RevisionIdentity candidate = RevisionIdentity.of(RevisionKind.CONFIG_SOURCE, "central-runtime-config", DIGEST_2);
+        RevisionIdentity registry = RevisionIdentity.of(RevisionKind.PACKAGE_REGISTRATION, "package-registry", DIGEST_1);
+        RevisionIdentity packageSource = RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE, "pay", DIGEST_1);
+        RevisionIdentity legacyBusiness = RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE, "legacy-pay", DIGEST_2);
+        RevisionIdentity manifest = RevisionIdentity.of(RevisionKind.PACKAGE_MANIFEST, "pay", DIGEST_2);
+        RevisionIdentity schema = RevisionIdentity.of(RevisionKind.ENGINE_SCHEMA, "installed-engine", DIGEST_1);
+
+        ImpactFreshnessToken canonical = new ImpactFreshnessToken("draft", DIGEST_1, base, candidate,
+                registry, Arrays.asList(packageSource), Arrays.asList(manifest), schema,
+                Collections.<RevisionIdentity>emptyList());
+        ImpactFreshnessToken legacy = new ImpactFreshnessToken("draft", DIGEST_1, base, candidate,
+                registry, Arrays.asList(legacyBusiness), Arrays.asList(manifest), schema,
+                Collections.<RevisionIdentity>emptyList());
+        assertEquals(RevisionKind.PACKAGE_SOURCE, canonical.packageSources.get(0).kind);
+        assertEquals(RevisionKind.BUSINESS_SOURCE, legacy.packageSources.get(0).kind);
+        assertThrows(IllegalArgumentException.class, () -> new ImpactFreshnessToken("draft", DIGEST_1,
+                base, candidate, registry,
+                Arrays.asList(RevisionIdentity.of(RevisionKind.EXECUTION_REVISION, "pay@SIT", DIGEST_1)),
+                Arrays.asList(manifest), schema, Collections.<RevisionIdentity>emptyList()));
+    }
+
     @Test void workerExecutionRevisionFieldAcceptsLegacyAliasAndRejectsAmbiguousRequests() throws Exception {
         WorkerRequest legacy = JSON.readValue("{\"expectedRevisionDigest\":\"" + DIGEST_1 + "\"}", WorkerRequest.class);
         legacy.normalizeExpectedExecutionRevisionDigest();
