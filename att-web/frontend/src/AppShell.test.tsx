@@ -42,6 +42,51 @@ describe('AppShell', () => {
     </div>;
   }
 
+  it('keeps the single Workspace Package/Environment and identity header outside scrolling content', async () => {
+    vi.spyOn(api, 'getCurrentUser').mockResolvedValue({ loginId: 'jane', displayName: 'Jane Tester', role: 'USER' });
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    const packageChanged = vi.fn();
+    const environmentChanged = vi.fn();
+    const navigation: RouteState = { route: { kind: 'package', packageId: 'payments' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
+      navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn() };
+    await act(async () => { root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{ status: 'ready', data: { apiVersion: '1', authMode: 'local', inlineLoadEnabled: true } }}
+      selectedPackage="payments" selectedEnvironment="UAT" workspacePackages={['payments', 'ledger']} workspaceEnvironments={['UAT', 'SIT']}
+      onPackageChange={packageChanged} onEnvironmentChange={environmentChanged} onJobAccepted={vi.fn()}>
+      <div style={{ minHeight: '3000px' }}>Scrollable Explorer Source</div>
+    </AppShell>); await Promise.resolve(); });
+    const header = host.querySelector('.app-frame > header.topbar');
+    expect(header).not.toBeNull();
+    expect(header?.querySelector('.context-toolbar')).not.toBeNull();
+    expect(host.querySelectorAll('.context-toolbar')).toHaveLength(1);
+    expect(host.querySelector('.page-chrome .context-toolbar')).toBeNull();
+    expect(header?.querySelector('.context-identity')?.textContent).toContain('Jane Tester');
+    expect(header?.querySelector('select[aria-label="Workspace Package"]')).not.toBeNull();
+    expect(header?.querySelector('select[aria-label="Workspace Environment"]')).not.toBeNull();
+    expect(host.querySelector('#main-content')?.textContent).toContain('Scrollable Explorer Source');
+
+    const packageSelect = header?.querySelector('select[aria-label="Workspace Package"]') as HTMLSelectElement;
+    await act(async () => { packageSelect.value = 'ledger'; packageSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(packageChanged).toHaveBeenCalledExactlyOnceWith('ledger');
+    expect(environmentChanged).not.toHaveBeenCalled();
+  });
+
+  it('keeps Workspace selectors locked on Job detail in the persistent header', async () => {
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    const navigation: RouteState = { route: { kind: 'jobs', jobId: 'JOB123' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
+      navigate: vi.fn(), registerUnsavedChanges: vi.fn(() => () => {}), confirmNavigation: vi.fn(), cancelNavigation: vi.fn() };
+    await act(async () => { root?.render(<AppShell route={navigation.route} navigation={navigation}
+      serverVersion={{ status: 'ready', data: { apiVersion: '1', inlineLoadEnabled: true } }}
+      selectedPackage="payments" selectedEnvironment="UAT" onPackageChange={vi.fn()}
+      onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}>
+      <p>Historical Job detail</p>
+    </AppShell>); await Promise.resolve(); });
+    const header = host.querySelector('header.topbar');
+    expect((header?.querySelector('[aria-label="Workspace Package"]') as HTMLSelectElement).disabled).toBe(true);
+    expect((header?.querySelector('[aria-label="Workspace Environment"]') as HTMLSelectElement).disabled).toBe(true);
+    expect(header?.querySelector('#workspace-lock-reason')?.textContent).toContain('Workspace is locked');
+  });
+
   it('renders standalone consoles without global navigation or a floating console host', async () => {
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
     const navigation: RouteState = { route: { kind: 'job-console', jobId: 'J1', view: 'live' }, pendingNavigation: null, pendingDescription: '', isDirty: false,
