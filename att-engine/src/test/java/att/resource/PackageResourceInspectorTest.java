@@ -158,7 +158,7 @@ class PackageResourceInspectorTest {
         String authored="schemaVersion: att-template/v3.6\n"
                 +"# Safe public documentation note.\n"
                 +"# Private mapping: internal-lane-kappa-velvet (not a recognizable secret pattern).\n"
-                +"name: MASKED\nactions:\n"
+                +"name: MASKED\ndescription: harmless\nactions:\n"
                 +"  send:\n    type: tool\n    call: '&{./request.xml}'\n"
                 +"    evidence:\n      capture:\n        payload: '&{./request.xml}'\n";
         writeUtf8(descriptor, authored);
@@ -248,7 +248,8 @@ class PackageResourceInspectorTest {
         assertTrue(dependencies.stream().anyMatch(value->"size-limit".equals(value.get("reason"))));
         assertTrue(dependencies.stream().anyMatch(value->"invalid".equals(value.get("resolution"))));
         assertFalse(detail.toString().contains(outside.toString()));
-        assertFalse(detail.toString().contains("outside.xml"));
+        assertFalse(dependencies.toString().contains("outside.xml"),
+                "The file-dependency projection must not reveal an out-of-Package candidate.");
         assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
                 ()->inspector.inspect("source-file","template",resourceId,String.valueOf(blockedRef.get("referenceId")),0,1,null,
                         String.valueOf(blockedRef.get("originPath"))));
