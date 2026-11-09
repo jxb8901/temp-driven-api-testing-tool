@@ -17,7 +17,10 @@ export interface LoadCatalogRouteState {
 }
 
 export type ConfigurationTab = 'source' | 'declared' | 'effective' | 'compare';
-export interface ResourceSourceReferenceRoute { type: 'case' | 'template' | 'flow' | 'tool'; resourceId: string; referenceId: string }
+export interface ResourceSourceReferenceRoute {
+  type: 'case' | 'template' | 'flow' | 'tool'; resourceId: string; referenceId: string;
+  returnTab?: 'definition' | 'source' | 'relations';
+}
 
 export type AppRoute =
   | { kind: 'dashboard' }
@@ -87,9 +90,12 @@ export function parseRoute(hash: string): AppRoute {
       const sourceType = query.get('sourceType');
       const sourceResourceId = safeRouteValue(query.get('sourceResourceId'), 512);
       const referenceId = query.get('sourceReferenceId');
+      const sourceReturnTab = query.get('sourceReturnTab');
       const sourceReference = sourceType && ['template', 'flow'].includes(sourceType) && sourceResourceId
         && referenceId && /^[0-9a-f]{64}$/.test(referenceId)
-        ? { type: sourceType as ResourceSourceReferenceRoute['type'], resourceId: sourceResourceId, referenceId } : undefined;
+        ? { type: sourceType as ResourceSourceReferenceRoute['type'], resourceId: sourceResourceId, referenceId,
+          ...(sourceReturnTab === 'definition' || sourceReturnTab === 'source' || sourceReturnTab === 'relations'
+            ? { returnTab: sourceReturnTab as ResourceSourceReferenceRoute['returnTab'] } : {}) } : undefined;
       const filePath = safePackageLogicalPath(query.get('file'));
       const fileOrigin = safePackageLogicalPath(query.get('origin'));
       const returnTo = safePackageReturnTo(query.get('returnTo'), parts[1]);
@@ -130,7 +136,9 @@ export function parseRoute(hash: string): AppRoute {
     const sourceReference = sourceType && ['case', 'template', 'flow', 'tool'].includes(sourceType)
       && sourceResourceId && sourceResourceId.length <= 512
       && sourceReferenceId && /^[0-9a-f]{64}$/.test(sourceReferenceId)
-      ? { type: sourceType as ResourceSourceReferenceRoute['type'], resourceId: sourceResourceId, referenceId: sourceReferenceId } : undefined;
+      ? { type: sourceType as ResourceSourceReferenceRoute['type'], resourceId: sourceResourceId, referenceId: sourceReferenceId,
+        ...(query.get('sourceReturnTab') === 'definition' || query.get('sourceReturnTab') === 'source' || query.get('sourceReturnTab') === 'relations'
+          ? { returnTab: query.get('sourceReturnTab') as ResourceSourceReferenceRoute['returnTab'] } : {}) } : undefined;
     const configurationReferenceId=query.get('configurationReferenceId');
     return {
       kind: 'configuration',
@@ -236,6 +244,7 @@ export function formatRoute(route: AppRoute): string {
           query.set('sourceType', route.sourceReference.type);
           query.set('sourceResourceId', route.sourceReference.resourceId);
           query.set('sourceReferenceId', route.sourceReference.referenceId);
+          if (route.sourceReference.returnTab) query.set('sourceReturnTab', route.sourceReference.returnTab);
         }
         if (route.returnTo) query.set('returnTo', route.returnTo);
         return root + '/source-file' + (query.size ? '?' + query.toString() : '');

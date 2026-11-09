@@ -228,6 +228,68 @@ describe('Explorer source viewer', () => {
     expect(clipboardWrite.mock.calls[0][0]).toBe(`${source}\nrefreshed`);
   });
 
+  it('labels original versus sanitized source and preserves CRLF in both display and Copy', async () => {
+    const source = '# authored comment\r\n\r\ncall: >-\r\n  #{upper(value="x")}\r\nliteral: \'\\\\n\'\r\n';
+    const clipboardWrite = vi.fn<(text: string) => Promise<void>>(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboardWrite } });
+    const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, text: source, format: 'yaml', projectionKind: 'original' })) });
+    const identity: ResourceIdentity = { packageId: 'payments', type: 'template', resourceId: 'checkout' };
+    await render(<SourceViewer api={api} identity={identity} available active />);
+
+    expect(container.querySelector('.att-source-toolbar')?.textContent).toContain('Original source');
+    expect(container.querySelector('.att-code-editor pre')?.textContent).toBe(source);
+    click(button('Copy displayed source'));
+    expect(clipboardWrite).toHaveBeenLastCalledWith(source);
+
+    const sanitizedApi = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, text: 'name: [REDACTED]\n', format: 'yaml', projectionKind: 'sanitized', redacted: true })) });
+    await render(<SourceViewer api={sanitizedApi} identity={identity} available active />);
+    expect(container.querySelector('.att-source-toolbar')?.textContent).toContain('Sanitized projection');
+    expect(container.textContent).toContain('Sanitized projection');
+  });
+
+  it('explains Tool source provenance and distinguishes no standalone source from policy denial', async () => {
+    const identity: ResourceIdentity = { packageId: 'payments', type: 'tool', resourceId: 'lookup' };
+    const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: false, reason: 'no-standalone-source' })) });
+    await render(<SourceViewer api={api} identity={identity} available={false} active resource={{
+      ...resource('tool', 'lookup', { sourceAvailable: false, sourceReason: 'no-standalone-source', sourceKind: 'call-backed',
+        provenance: { toolGroupId: 'billing', toolName: 'Lookup' } }),
+    }} />);
+    expect(container.textContent).toContain('No standalone source file');
+    expect(container.textContent).toContain('Tool Group: billing');
+    expect(container.textContent).toContain('Tool: Lookup');
+    expect(container.textContent).toContain('Call-backed Tools use their configured provider');
+    expect(container.textContent).not.toContain('Source is not available for this resource');
+
+    await render(<SourceViewer api={api} identity={identity} available={false} active resource={{
+      ...resource('tool', 'lookup', { sourceAvailable: false, sourceReason: 'not-allowlisted', sourceKind: 'script-backed' }),
+    }} />);
+    expect(container.textContent).toContain('Source exists but access is denied');
+  });
+
+  it('opens Action file dependencies through the safe Package viewer from Visual and Dependencies', async () => {
+    const referenceId = 'd'.repeat(64);
+    const fileReference = { type: 'file' as const, targetKind: 'package-file', logicalId: 'templates/checkout/CT001_Confirm.xml',
+      originPath: 'templates/checkout/template.yaml', referenceId, resolution: 'resolved', available: true,
+      callSites: [{ kind: 'action', actionId: 'sendCT001Confirm' }] };
+    const selected = resource('template', 'checkout', { references: [fileReference] });
+    const api = apiWith({ getResource: vi.fn(async () => ({ resource: selected,
+      definition: { actions: { sendCT001Confirm: { type: 'tool', call: "#{send(payload='&{./CT001_Confirm.xml}')}" } } } })) });
+    const onOpenConfigurationFile = vi.fn();
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={{ type: 'template', resourceId: 'checkout', tab: 'definition' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onOpenConfigurationFile={onOpenConfigurationFile} onJobAccepted={() => {}} />);
+    await settle();
+
+    click(button('View file'));
+    expect(onOpenConfigurationFile).toHaveBeenLastCalledWith('templates/checkout/CT001_Confirm.xml', 'templates/checkout/template.yaml', {
+      type: 'template', resourceId: 'checkout', referenceId, returnTab: 'definition',
+    });
+    click(button('Dependencies'));
+    click(button('templates/checkout/CT001_Confirm.xml'));
+    expect(onOpenConfigurationFile).toHaveBeenLastCalledWith('templates/checkout/CT001_Confirm.xml', 'templates/checkout/template.yaml', {
+      type: 'template', resourceId: 'checkout', referenceId, returnTab: 'relations',
+    });
+  });
+
   it('shows an explicit empty state and reports expired authentication without leaking API detail', async () => {
     const identity: ResourceIdentity = { packageId: 'payments', type: 'flow', resourceId: 'empty' };
     const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, text: '', format: 'yaml' })) });
@@ -253,7 +315,7 @@ describe('Explorer source viewer', () => {
 
     click(button('Open safe referenced file'));
     expect(openReference).toHaveBeenCalledWith('templates/checkout/payloads/request.xml', 'templates/checkout/flow.yaml', {
-      type: 'flow', resourceId: 'checkout-flow', referenceId,
+      type: 'flow', resourceId: 'checkout-flow', referenceId, returnTab: 'source',
     });
   });
 
@@ -273,7 +335,7 @@ describe('Explorer source viewer', () => {
     expect(container.textContent).toContain('Unavailable under the Server safe-source policy');
     click(button('View referenced file'));
     expect(openReference).toHaveBeenCalledWith('flows/checkout/request.xml', 'flows/checkout/flow.yaml', {
-      type: 'flow', resourceId: 'checkout', referenceId,
+      type: 'flow', resourceId: 'checkout', referenceId, returnTab: 'source',
     });
   });
 

@@ -2,6 +2,10 @@
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('../code/CodeEditor', () => ({
+  CodeEditor: ({ value, label, language, className = '' }: { value: string; label: string; language: string; className?: string }) =>
+    <pre className={`att-code-editor ${className}`} aria-label={label} data-language={language}>{value}</pre>,
+}));
 import { ActionInspector } from './ActionInspector';
 
 declare global { var IS_REACT_ACT_ENVIRONMENT: boolean; }
@@ -79,7 +83,7 @@ describe('ActionInspector', () => {
     expect(host.textContent).toContain('timeoutMs');
     click(actionButton('report'));
     expect(host.querySelector('.att-action-properties')?.textContent).toContain('done');
-    expect(host.querySelector('.att-action-properties')?.textContent).toContain('"ok": true');
+    expect(host.querySelector('.att-action-properties')?.textContent).toContain('ok: true');
     click(actionButton('publish'));
     expect(host.querySelector('.att-action-properties')?.textContent).toContain("concat(${EXEC.INPUT.id}, '-done')");
   });
@@ -131,6 +135,59 @@ describe('ActionInspector', () => {
 
     await render(<ActionInspector definition={definition} resourceType="flow" resourceId="flow-2" references={references} onOpenFlow={onOpenFlow} />);
     expect(host.textContent).toContain('Recursive Flow navigation is disabled');
+  });
+
+  it('shows server-authorized file links on every referring Action and keeps blocked references inert', async () => {
+    const onOpenFile = vi.fn();
+    const referenceId = 'c'.repeat(64);
+    const references = [
+      { type: 'file' as const, targetKind: 'package-file', logicalId: 'templates/payments/CT001_Confirm.xml',
+        originPath: 'templates/payments/template.yaml', referenceId, resolution: 'resolved', available: true,
+        callSites: [{ kind: 'action', actionId: 'sendCT001Confirm' }, { kind: 'action', actionId: 'retryConfirm' }] },
+      { type: 'file' as const, targetKind: 'package-file', reason: 'forbidden', resolution: 'blocked', available: false,
+        callSites: [{ kind: 'action', actionId: 'blockedAction' }] },
+    ];
+    await render(<ActionInspector definition={{ actions: {
+      sendCT001Confirm: { type: 'tool', call: "#{send(payload='&{./CT001_Confirm.xml}')}" },
+      retryConfirm: { type: 'log', message: '&{./CT001_Confirm.xml}' },
+      blockedAction: { type: 'log', message: '&{./forbidden.xml}' },
+    } }} resourceType="template" resourceId="template-1" references={references} onOpenFlow={vi.fn()} onOpenFile={onOpenFile} />);
+
+    expect(host.querySelector('[aria-label="Referenced files for action sendCT001Confirm"]')?.textContent).toContain('templates/payments/CT001_Confirm.xml');
+    click([...host.querySelectorAll<HTMLButtonElement>('.att-action-file-links button')][0]);
+    expect(onOpenFile).toHaveBeenLastCalledWith('templates/payments/CT001_Confirm.xml', 'templates/payments/template.yaml', {
+      type: 'template', resourceId: 'template-1', referenceId, returnTab: 'definition',
+    });
+    click(actionButton('retryConfirm'));
+    expect(host.querySelector('[aria-label="Referenced files for action retryConfirm"] button')?.textContent).toBe('View file');
+    click(host.querySelector('[aria-label="Referenced files for action retryConfirm"] button')!);
+    expect(onOpenFile).toHaveBeenCalledTimes(2);
+    click(actionButton('blockedAction'));
+    expect(host.querySelector('[aria-label="Referenced files for action blockedAction"]')?.textContent).toContain('blocked by the Server source policy');
+    expect(host.querySelector('[aria-label="Referenced files for action blockedAction"] button')).toBeNull();
+  });
+
+  it('renders structured properties and advanced views as read-only YAML without escaping expression newlines', async () => {
+    const definition = { actions: { inspect: {
+      type: 'tool', call: "#{db.query(sql='select id: value from 中文')}",
+      retry: { attempts: 3, delays: [10, 20], when: null, empty: [] },
+      evidence: { collectors: ['response', '中文'], details: { 'header: quoted': 'Authorization: "Bearer sample"',
+        expression: "#{mq.request(queue='Q1', payload=${EXEC.INPUT.body})}", multiline: 'line one\nline two' } },
+      advanced: { values: [null, false, 7], label: '中文: 保留順序' },
+    } } };
+    await render(<ActionInspector definition={definition} resourceType="template" resourceId="template-1" onOpenFlow={vi.fn()} />);
+
+    const yamlViews = [...host.querySelectorAll<HTMLElement>('.att-action-yaml[data-language="yaml"]')];
+    expect(yamlViews.length).toBeGreaterThanOrEqual(4);
+    expect(host.querySelector('[aria-label="evidence as read-only YAML"]')?.textContent).toContain('line one');
+    expect(host.querySelector('[aria-label="evidence as read-only YAML"]')?.textContent).toContain('line two');
+    expect(host.querySelector('[aria-label="evidence as read-only YAML"]')?.textContent).toContain('|-');
+    expect(host.querySelector('[aria-label="retry as read-only YAML"]')?.textContent).toContain('empty: []');
+    expect(host.querySelector('[aria-label="retry as read-only YAML"]')?.textContent).toContain('when: null');
+    expect(host.textContent).toContain("#{mq.request(queue='Q1', payload=${EXEC.INPUT.body})}");
+    expect(host.textContent).toContain('中文: 保留順序');
+    expect(host.textContent).not.toContain('line one\\nline two');
+    expect(host.textContent).toContain('expressions are not evaluated');
   });
 
   it('handles malformed, empty, long, and large action data within bounded views', async () => {

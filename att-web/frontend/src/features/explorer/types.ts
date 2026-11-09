@@ -26,6 +26,7 @@ export interface ResourceSummary {
   };
   sourceAvailable?: boolean;
   sourceReason?: string | null;
+  sourceKind?: 'script-backed' | 'call-backed' | 'built-in-virtual' | 'configured-command' | string;
   redactionEnabled?: boolean;
   sourcePath?: string;
   diagnostics?: Diagnostic[];
@@ -33,16 +34,23 @@ export interface ResourceSummary {
   tags?: string[];
   references?: ResourceReference[];
   referencedBy?: ResourceReference[];
+  fileDependenciesTruncated?: boolean;
 }
 
 export interface ResourceReference {
-  type?: ResourceType;
+  /** `file` is a dependency/source category, never a runnable ResourceType. */
+  type?: ResourceType | 'file';
   resourceId?: string;
   logicalId?: string;
   name?: string;
   resolution?: string;
   targetKind?: string;
   callSite?: Record<string, unknown>;
+  callSites?: Array<Record<string, unknown>>;
+  available?: boolean;
+  reason?: string;
+  referenceId?: string;
+  originPath?: string;
 }
 
 export interface Diagnostic {
@@ -76,6 +84,8 @@ export interface SourceProjection {
   format?: string;
   logicalPath?: string;
   reason?: string;
+  projectionKind?: 'original' | 'sanitized' | string;
+  redacted?: boolean;
   fileReferences?: SafeSourceFileReference[];
   fileReferencesTruncated?: boolean;
   fileReferencesUnavailable?: boolean;
@@ -91,6 +101,7 @@ export interface ResourceSourceReference {
   type: ResourceIdentity['type'];
   resourceId: string;
   referenceId: string;
+  returnTab?: 'definition' | 'source' | 'relations';
 }
 
 export interface EnvironmentProfile {

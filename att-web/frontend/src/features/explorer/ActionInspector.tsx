@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { stringify as stringifyYaml } from 'yaml';
+import { CodeEditor } from '../code/CodeEditor';
 import type { ResourceReference } from './types';
 
 const VALUE_PREVIEW_CHARACTERS = 800;
@@ -29,6 +31,7 @@ interface ActionInspectorProps {
   resourceId: string;
   references?: ResourceReference[];
   onOpenFlow: (resourceId: string) => void;
+  onOpenFile?: (path: string, origin: string, reference: { type: 'template' | 'flow'; resourceId: string; referenceId: string; returnTab: 'definition' }) => void;
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -49,6 +52,17 @@ function safeStringify(value: unknown): string {
   try { rendered = JSON.stringify(value, null, 2) ?? String(value); }
   catch { return '[This value cannot be displayed as structured data.]'; }
   return boundedText(rendered);
+}
+
+function safeYaml(value: unknown): string {
+  let rendered = '';
+  try { rendered = stringifyYaml(value, { lineWidth: 0, defaultStringType: 'PLAIN' }); }
+  catch { return '[This value cannot be displayed as YAML.]'; }
+  return boundedText(rendered);
+}
+
+function structured(value: unknown): boolean {
+  return Array.isArray(value) || (typeof value === 'object' && value !== null);
 }
 
 function displayValue(value: unknown): string {
@@ -143,13 +157,69 @@ function actionEntries(definition: unknown, actionOrder?: string[]): ActionEntry
 }
 
 function ValueView({ value, label }: { value: unknown; label: string }) {
-  const rendered = displayValue(value);
-  if (rendered.length <= VALUE_PREVIEW_CHARACTERS) return <pre className="att-action-value">{rendered}</pre>;
+  const asYaml = structured(value);
+  const rendered = asYaml ? safeYaml(value) : displayValue(value);
+  const view = asYaml
+    ? <CodeEditor value={rendered} language="yaml" label={`${label} as read-only YAML`} readOnly maxCharacters={MAX_STRUCTURED_CHARACTERS} className="att-action-yaml" />
+    : <pre className="att-action-value">{rendered}</pre>;
+  if (rendered.length <= VALUE_PREVIEW_CHARACTERS) return view;
   const truncated = rendered.includes('[Value truncated at ');
   return <details className="att-action-value-details">
     <summary>{truncated ? 'Expand safe preview' : 'Show full value'} ({rendered.length.toLocaleString()} characters)</summary>
-    <pre className="att-action-value" aria-label={`${label} ${truncated ? 'safe preview' : 'full value'}`}>{rendered}</pre>
+    {asYaml
+      ? <CodeEditor value={rendered} language="yaml" label={`${label} ${truncated ? 'safe preview' : 'full value'} as YAML`} readOnly maxCharacters={MAX_STRUCTURED_CHARACTERS} className="att-action-yaml" />
+      : <pre className="att-action-value" aria-label={`${label} ${truncated ? 'safe preview' : 'full value'}`}>{rendered}</pre>}
   </details>;
+}
+
+function referringActions(reference: ResourceReference): string[] {
+  const sites = reference.callSites || (reference.callSite ? [reference.callSite] : []);
+  return sites.map(site => typeof site.actionId === 'string' ? site.actionId : '').filter(Boolean);
+}
+
+function unavailableFileMessage(reference: ResourceReference): string {
+  switch (reference.reason || reference.resolution) {
+    case 'missing': return 'File is missing.';
+    case 'invalid':
+    case 'invalid-reference': return 'Reference is invalid or outside this Package.';
+    case 'truncated': return 'Additional references were omitted by the Server safety limit.';
+    case 'binary-file': return 'File is binary and cannot be shown as source.';
+    case 'size-limit': return 'File exceeds the safe source size limit.';
+    case 'unsupported-file-type': return 'File type is not available in the safe source viewer.';
+    case 'not-allowlisted':
+    case 'source-disabled':
+    case 'sensitive-path':
+    case 'forbidden':
+    case 'visibility-policy': return 'File is blocked by the Server source policy.';
+    default: return 'File is unavailable under the Server safe-source policy.';
+  }
+}
+
+function ActionFileLinks({ actionId, references, resourceType, resourceId, onOpenFile }: {
+  actionId: string;
+  references?: ResourceReference[];
+  resourceType: 'template' | 'flow';
+  resourceId: string;
+  onOpenFile?: ActionInspectorProps['onOpenFile'];
+}) {
+  const files = (references || []).filter(reference => reference.type === 'file' && referringActions(reference).includes(actionId));
+  if (!files.length) return null;
+  return <section className="att-action-file-links" aria-label={`Referenced files for action ${actionId}`}>
+    <h4>Referenced files</h4>
+    <ul>{files.map((reference, index) => {
+      const path = typeof reference.logicalId === 'string' ? reference.logicalId : '';
+      const origin = typeof reference.originPath === 'string' ? reference.originPath : '';
+      const referenceId = typeof reference.referenceId === 'string' ? reference.referenceId : '';
+      const canOpen = reference.available === true && Boolean(path && origin && /^[0-9a-f]{64}$/.test(referenceId) && onOpenFile);
+      return <li key={`${path}:${referenceId}:${index}`}>
+        {path ? <code>{path}</code> : <span>Package file reference</span>}
+        {canOpen
+          ? <button type="button" className="button button-quiet" onClick={() => onOpenFile!(path, origin,
+            { type: resourceType, resourceId, referenceId, returnTab: 'definition' })}>View file</button>
+          : <span role="status">{unavailableFileMessage(reference)}</span>}
+      </li>;
+    })}</ul>
+  </section>;
 }
 
 function flowReference(entry: ActionEntry, use: unknown, references: ResourceReference[] | undefined) {
@@ -164,7 +234,7 @@ function flowReference(entry: ActionEntry, use: unknown, references: ResourceRef
   return { state: 'resolved' as const, resourceId: reference.resourceId, logicalId: reference.logicalId || use };
 }
 
-export function ActionInspector({ definition, actionOrder, resourceType, resourceId, references, onOpenFlow }: ActionInspectorProps) {
+export function ActionInspector({ definition, actionOrder, resourceType, resourceId, references, onOpenFlow, onOpenFile }: ActionInspectorProps) {
   const entries = useMemo(() => actionEntries(definition, actionOrder), [definition, actionOrder]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [visibleCount, setVisibleCount] = useState(INITIAL_ACTIONS);
@@ -173,12 +243,12 @@ export function ActionInspector({ definition, actionOrder, resourceType, resourc
 
   if (!entries) return <section className="att-action-inspector" aria-label="Visual action inspector">
     <p role="status">Actions are unavailable because the safe definition does not contain an action map.</p>
-    <details><summary>Advanced structured definition</summary><pre className="att-action-value">{safeStringify(definition)}</pre></details>
+    <details><summary>Advanced structured definition</summary><CodeEditor value={safeYaml(definition)} language="yaml" label="Advanced definition as read-only YAML" readOnly maxCharacters={MAX_STRUCTURED_CHARACTERS} className="att-action-yaml" /></details>
   </section>;
 
   if (!entries.length) return <section className="att-action-inspector" aria-label="Visual action inspector">
     <p>No actions are present in this {resourceType === 'flow' ? 'Flow' : 'Template'} definition.</p>
-    <details><summary>Advanced structured definition</summary><pre className="att-action-value">{safeStringify(definition)}</pre></details>
+    <details><summary>Advanced structured definition</summary><CodeEditor value={safeYaml(definition)} language="yaml" label="Advanced definition as read-only YAML" readOnly maxCharacters={MAX_STRUCTURED_CHARACTERS} className="att-action-yaml" /></details>
   </section>;
 
   const selected = entries[Math.min(selectedIndex, entries.length - 1)];
@@ -194,6 +264,7 @@ export function ActionInspector({ definition, actionOrder, resourceType, resourc
   const target = type === 'flow' ? flowReference(selected, action?.use, references) : null;
   const selfTarget = target?.state === 'resolved' && target.resourceId === resourceId;
 
+  const advancedAction = structured(selected.value) ? safeYaml(selected.value) : safeStringify(selected.value);
   return <section className="att-action-inspector" aria-label="Visual action inspector">
     <div className="att-action-inspector-heading">
       <div><h3>Actions</h3><p>Read-only authored order · expressions are not evaluated · no inferred branches · {entries.length.toLocaleString()} {entries.length === 1 ? 'action' : 'actions'}</p></div>
@@ -238,6 +309,7 @@ export function ActionInspector({ definition, actionOrder, resourceType, resourc
           <span className="att-action-type-badge">{type}</span>
           {selected.disabled && <span className="att-action-disabled">Disabled extension entry</span>}
         </header>
+        <ActionFileLinks actionId={selected.id} references={references} resourceType={resourceType} resourceId={resourceId} onOpenFile={onOpenFile} />
         {!action && <p role="status">This action entry is not an object. Its authored value remains available below.</p>}
         <PropertyGroup title="Common" properties={commonProperties} />
         <PropertyGroup title="Type-specific" properties={typeProperties} />
@@ -259,13 +331,13 @@ export function ActionInspector({ definition, actionOrder, resourceType, resourc
         </section>}
         <details className="att-action-advanced">
           <summary>Advanced structured action</summary>
-          <pre className="att-action-value">{safeStringify(selected.value)}</pre>
+          <CodeEditor value={advancedAction} language="yaml" label="Advanced action as read-only YAML" readOnly maxCharacters={MAX_STRUCTURED_CHARACTERS} className="att-action-yaml" />
         </details>
       </article>
     </div>
     <details className="att-action-advanced att-action-definition-advanced">
       <summary>Advanced structured definition</summary>
-      <pre className="att-action-value">{safeStringify(definition)}</pre>
+      <CodeEditor value={safeYaml(definition)} language="yaml" label="Advanced definition as read-only YAML" readOnly maxCharacters={MAX_STRUCTURED_CHARACTERS} className="att-action-yaml" />
     </details>
   </section>;
 }

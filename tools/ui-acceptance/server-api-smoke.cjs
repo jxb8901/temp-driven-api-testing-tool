@@ -94,6 +94,35 @@ async function main() {
       `Flow Visual nodes must be visible under the production CSP in the light theme: ${JSON.stringify(visualLight)}`);
     assert.ok((await page.locator('.att-action-properties').innerText()).includes('&{../../SCHEDULED/payload/request.xml}'),
       'the selected Flow action should show its authored property value');
+    const visualFileLinks = page.getByRole('region', { name: 'Referenced files for action inspectPayload' });
+    await visualFileLinks.getByRole('button', { name: 'View file', exact: true }).waitFor();
+    assert.ok((await visualFileLinks.innerText()).includes('templates/SCHEDULED/payload/request.xml'),
+      'Visual should show the server-canonical file dependency for the selected Action');
+    const visualFileResponsePromise = page.waitForResponse(response =>
+      response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
+    await visualFileLinks.getByRole('button', { name: 'View file', exact: true }).click();
+    await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
+    const visualFileResponse = await visualFileResponsePromise;
+    assert.equal(visualFileResponse.status(), 200, 'the Action file link must use the authorized Package viewer');
+    assert.equal(new URL(visualFileResponse.url()).searchParams.get('origin'), 'templates/flows/reference/flow.yaml');
+    await page.goBack();
+    await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+
+    await page.getByRole('tab', { name: 'Dependencies' }).click();
+    await page.getByRole('button', { name: 'templates/SCHEDULED/payload/request.xml', exact: true }).waitFor();
+    assert.ok((await page.locator('.att-relation-columns').innerText()).includes('Actions: inspectPayload'),
+      'Dependencies should retain the Action call site for each canonical file');
+    assert.ok((await page.locator('.att-relation-columns').innerText()).includes('Blocked or unavailable (forbidden)'),
+      'policy-blocked file dependencies should remain visible with a reason');
+    const dependencyFileResponsePromise = page.waitForResponse(response =>
+      response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
+    await page.getByRole('button', { name: 'templates/SCHEDULED/payload/request.xml', exact: true }).click();
+    await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
+    const dependencyFileResponse = await dependencyFileResponsePromise;
+    assert.equal(dependencyFileResponse.status(), 200, 'the Dependencies file link must use the same authorized Package viewer');
+    await page.goBack();
+    await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+
     await page.getByRole('button', { name: 'Switch to dark theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
     const visualDark = await inspectVisualNode();
@@ -179,6 +208,13 @@ async function main() {
 
     await page.goBack();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+    if (process.env.ATT_UI_EXPLORER_ONLY === '1') {
+      assert.deepEqual(pageErrors, [], 'the packaged Explorer source flow must not throw browser errors');
+      assert.deepEqual(consoleErrors.filter(message => /content security policy|refused to apply inline style/i.test(message)), [],
+        'the packaged Explorer source flow must not violate CSP');
+      process.stdout.write('Packaged-WAR Explorer source and dependency browser checks passed under /tools/att.\n');
+      return;
+    }
     for (const packageId of ['', 'default', 'jeffreyjiang']) {
       await page.goto(`${origin}/tools/att/ui/index.html#/configuration${packageId ? '/' + packageId : ''}?tab=source`);
       await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();

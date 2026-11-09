@@ -87,6 +87,7 @@
 .att-explorer-total,
 .att-debug-status,
 .att-source-status { color: var(--att-color-muted, #526171); font-size: .875rem; }
+.att-source-sanitized-note { padding: .5rem .75rem; border-inline-start: 3px solid var(--att-color-warning, #b54708); background: var(--att-color-warning-soft, #fff7ed); }
 .att-source-file-references { margin-block-start:var(--att-space-3,.75rem); padding:.75rem; border:1px solid var(--att-color-border,#cbd5e1); border-radius:.5rem; }
 .att-source-file-references h3 { margin:.1rem 0 .5rem; font-size:.95rem; }
 .att-source-file-references ul { display:grid; gap:.45rem; margin:.4rem 0; padding-inline-start:1.2rem; }
@@ -172,6 +173,15 @@
 .att-action-property-list > div { display: grid; grid-template-columns: minmax(6rem, .32fr) minmax(0, 1fr); gap: .25rem .75rem; padding-block: .45rem; border-top: 1px solid var(--att-color-border, #cbd5e1); }
 .att-action-property-list dt { color: var(--att-color-muted, #526171); font-size: .85rem; font-weight: 650; overflow-wrap: anywhere; }
 .att-action-property-list dd { min-width: 0; margin: 0; }
+.att-action-yaml { min-width: 0; max-width: 100%; }
+.att-action-file-links { display: grid; gap: .35rem; padding: .65rem; border: 1px solid var(--att-color-border, #cbd5e1); border-radius: var(--att-radius-control, .35rem); background: var(--att-color-canvas, #f6f8fa); }
+.att-action-file-links h4 { margin: 0; color: var(--att-color-muted, #526171); font-size: .85rem; }
+.att-action-file-links ul { display: grid; gap: .4rem; margin: 0; padding-inline-start: 1.2rem; }
+.att-action-file-links li { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .65rem; min-width: 0; }
+.att-action-file-links code { overflow-wrap: anywhere; }
+.att-action-file-links [role="status"] { color: var(--att-color-muted, #526171); font-size: .82rem; }
+.att-tool-source-provenance { display: grid; gap: .15rem; padding: .75rem; border: 1px solid var(--att-color-border, #cbd5e1); border-radius: .5rem; background: var(--att-color-canvas, #f6f8fa); }
+.att-tool-source-provenance p { margin: 0; overflow-wrap: anywhere; }
 .att-action-value { max-height: 22rem; overflow: auto; margin: 0; padding: .55rem .7rem; border: 1px solid var(--att-color-border, #cbd5e1); border-radius: var(--att-radius-control, .35rem); background: var(--att-color-canvas, #f6f8fa); color: var(--att-color-text, #17212b); white-space: pre-wrap; overflow-wrap: anywhere; font: .84rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .att-action-value-details summary,
 .att-action-advanced summary { cursor: pointer; min-height: 40px; padding: .45rem .2rem; color: var(--att-color-primary, #0866c6); font-size: .875rem; }

@@ -49,9 +49,9 @@ describe('ATT hash route contract', () => {
   });
 
   it('round-trips safe Package source-file navigation and rejects forged route data', () => {
-    const caller = formatRoute({ kind: 'package', packageId: 'payments', resource: { type: 'flow', resourceId: 'checkout', tab: 'source' } });
     const route = { kind: 'package', packageId: 'payments', view: 'source-file', filePath: 'templates/payment/request.xml',
-      fileOrigin: 'templates/payment/flow.yaml', sourceReference: { type: 'flow', resourceId: 'checkout', referenceId: 'a'.repeat(64) }, returnTo: caller } as const;
+      fileOrigin: 'templates/payment/flow.yaml', sourceReference: { type: 'flow', resourceId: 'checkout', referenceId: 'a'.repeat(64), returnTab: 'definition' as const },
+      returnTo: formatRoute({ kind: 'package', packageId: 'payments', resource: { type: 'flow', resourceId: 'checkout', tab: 'definition' } }) } as const;
     expect(parseRoute(formatRoute(route))).toEqual(route);
     const nested = { ...route, filePath: 'templates/payment/headers.json', fileOrigin: route.filePath,
       sourceReference: { ...route.sourceReference, referenceId: 'b'.repeat(64) }, returnTo: formatRoute(route) } as const;
