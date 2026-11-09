@@ -68,11 +68,21 @@ class ConfigImpactAnalyzerConcurrencyTest {
                     Path candidate, Path root, RevisionSet provenance) throws Exception {
                 assertNotEquals(packageRoot.toRealPath(), pkg.toRealPath(),
                         "impact resolution must use the captured Package tree, not the live root");
+                assertNotNull(provenance.packageSourceRevision);
+                assertEquals(att.server.api.source.SourceManagementContracts.RevisionKind.PACKAGE_SOURCE,
+                        provenance.packageSourceRevision.kind);
                 if (firstResolution.compareAndSet(true, false)) {
                     resolverEntered.countDown();
                     assertTrue(releaseResolver.await(2, TimeUnit.SECONDS), "test must release the stalled resolver");
                 }
-                return validator.resolveEffective(packageId, environment, pkg, candidate, root, provenance);
+                EffectiveResolution resolution = validator.resolveEffective(packageId, environment, pkg,
+                        candidate, root, provenance);
+                assertNotNull(resolution.revisions.executionRevisionDigest);
+                assertEquals(att.server.api.source.SourceManagementContracts.RevisionKind.EXECUTION_REVISION,
+                        resolution.revisions.executionRevisionDigest.kind);
+                assertEquals(packageId + "@" + resolution.environment,
+                        resolution.revisions.executionRevisionDigest.scopeId);
+                return resolution;
             }
         };
         ConfigActivationCoordinator guard = new ConfigActivationCoordinator(new ConfigActivationCoordinator.RuntimeGuard() {

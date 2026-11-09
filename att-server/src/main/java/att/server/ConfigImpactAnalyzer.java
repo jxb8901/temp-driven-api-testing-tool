@@ -486,15 +486,21 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
                     Certainty certainty;
                     List<String> changedIds = new ArrayList<>();
                     String reason;
-                    if (delta.changedCore) {
+                    if (delta.unclassifiedEffectiveChange) {
+                        partial = true;
+                        blocked = true;
+                        blockedCode = "ATT-CONFIG-IMPACT-SEMANTIC-UNKNOWN";
+                        certainty = Certainty.POTENTIALLY_AFFECTED;
+                        reason = "Effective execution changed in a Config binding this analyzer cannot classify.";
+                    } else if (delta.executionRevisionChanged && delta.changedCore) {
                         certainty = Certainty.CONFIRMED_AFFECTED;
                         changedIds.addAll(delta.coreReasons);
                         reason = safeReason(delta.coreReasons, environment);
-                    } else if (!referencedChangedTools.isEmpty()) {
+                    } else if (delta.executionRevisionChanged && !referencedChangedTools.isEmpty()) {
                         certainty = Certainty.CONFIRMED_AFFECTED;
                         for (String id : referencedChangedTools) changedIds.add("tool/" + id);
                         reason = "TOOL_CONTRACT_CHANGED: a statically referenced Tool changed.";
-                    } else if (!referencedChangedHelpers.isEmpty()) {
+                    } else if (delta.executionRevisionChanged && !referencedChangedHelpers.isEmpty()) {
                         certainty = Certainty.CONFIRMED_AFFECTED;
                         changedIds.addAll(referencedChangedHelpers);
                         reason = helperReason(referencedChangedHelpers, delta);
@@ -600,7 +606,7 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
             }
             String manifestDigest = fileDigestOrEmpty(analysisRoot.resolve(PackageConfig.FILE_NAME));
             packages.add(new PackageEntry(entry.getKey(), analysisRoot));
-            sources.add(RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE, entry.getKey(), sourceDigest));
+            sources.add(RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE, entry.getKey(), sourceDigest));
             manifests.add(RevisionIdentity.of(RevisionKind.PACKAGE_MANIFEST, entry.getKey(), manifestDigest));
         }
         List<ScheduleEntry> schedules = new ArrayList<>();
@@ -636,37 +642,72 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
         Path configPath = runtimeRoot.resolve("config/config.yaml");
         String selected = "default".equalsIgnoreCase(environment) ? null : environment;
         FrameworkConfig config = new FrameworkConfigLoader().loadDiscovery(configPath, runtimeRoot, packageRoot, selected);
-        RevisionSet provenance = new RevisionSet(null,
-                RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE, packageId, freshness.packageSources.stream()
-                        .filter(item -> item.scopeId.equals(packageId)).findFirst().orElseThrow().revision),
+        RevisionIdentity source = freshness.packageSources.stream()
+                .filter(item -> item.scopeId.equals(packageId)).findFirst().orElseThrow();
+        RevisionIdentity packageSource = source.kind == RevisionKind.PACKAGE_SOURCE ? source
+                : new RevisionIdentity(RevisionKind.PACKAGE_SOURCE, source.scopeId, source.qualifier, source.revision);
+        RevisionSet provenance = new RevisionSet(null, null,
                 RevisionIdentity.of(RevisionKind.CHANGE_SET, packageId, freshness.draftFingerprint),
                 RevisionIdentity.of(RevisionKind.PACKAGE_MANIFEST, packageId, freshness.manifests.stream()
                         .filter(item -> item.scopeId.equals(packageId)).findFirst().orElseThrow().revision),
                 freshness.candidateConfig, null,
                 RevisionIdentity.of(RevisionKind.ENVIRONMENT, packageId + ":" + environment,
                         digest(environment + "\n" + freshness.candidateConfig.revision)),
-                freshness.engineSchema, null);
+                freshness.engineSchema, null, packageSource, null);
         SourceManagementContracts.EffectiveResolution resolution = engine.resolveEffective(packageId, environment,
                 packageRoot, configPath, runtimeRoot, provenance);
+        executionRevision(resolution, packageId);
         return new EffectiveModel(config, resolution);
     }
 
     private SemanticDelta compare(EffectiveModel before, EffectiveModel after) throws Exception {
+        RevisionIdentity beforeExecution = executionRevision(before.resolution, before.resolution.packageId);
+        RevisionIdentity afterExecution = executionRevision(after.resolution, after.resolution.packageId);
+        boolean executionRevisionChanged = !beforeExecution.scopeId.equals(afterExecution.scopeId)
+                || !beforeExecution.revision.equals(afterExecution.revision);
         Map<String, String> beforeTools = fingerprints(before.config.tools());
         Map<String, String> afterTools = fingerprints(after.config.tools());
         Map<String, String> beforeHelpers = helperFingerprints(before.config);
         Map<String, String> afterHelpers = helperFingerprints(after.config);
         Map<String, String> changedTools = changed(beforeTools, afterTools);
         Map<String, String> changedHelpers = changed(beforeHelpers, afterHelpers);
+        Map<String, String> changedEngineSemantics = changed(before.resolution.semanticFingerprints,
+                after.resolution.semanticFingerprints);
+        for (Map.Entry<String, String> entry : changedEngineSemantics.entrySet()) {
+            String prefix = "descriptor:TOOL:";
+            if (!entry.getKey().startsWith(prefix)) continue;
+            int idEnd = entry.getKey().indexOf(':', prefix.length());
+            if (idEnd > prefix.length()) changedTools.put(entry.getKey().substring(prefix.length(), idEnd), entry.getValue());
+        }
         String beforeCore = fingerprintConfigCore(before.config);
         String afterCore = fingerprintConfigCore(after.config);
         boolean changedCore = !beforeCore.equals(afterCore);
+        boolean changedProjection = changedCore || !changedTools.isEmpty() || !changedHelpers.isEmpty();
+        if (changedProjection && !executionRevisionChanged) throw new StaleInputException();
+        boolean unclassifiedEffectiveChange = executionRevisionChanged
+                && before.resolution.effectiveFingerprint != null
+                && after.resolution.effectiveFingerprint != null
+                && !before.resolution.effectiveFingerprint.equals(after.resolution.effectiveFingerprint)
+                && !changedProjection;
         List<String> coreReasons = new ArrayList<>();
         if (before.config.timeoutMs() != after.config.timeoutMs()) coreReasons.add("DEFAULT_TIMEOUT_CHANGED");
         if (!fingerprint(before.config.report()).equals(fingerprint(after.config.report())))
             coreReasons.add("REPORT_PRESENTATION_CHANGED");
         if (changedCore && coreReasons.isEmpty()) coreReasons.add("ENV_PROFILE_CHANGED");
-        return new SemanticDelta(changedCore, coreReasons, changedTools, changedHelpers);
+        return new SemanticDelta(executionRevisionChanged, unclassifiedEffectiveChange,
+                changedCore, coreReasons, changedTools, changedHelpers);
+    }
+
+    private static RevisionIdentity executionRevision(EffectiveResolution resolution, String packageId)
+            throws IOException {
+        if (resolution == null || resolution.revisions == null
+                || !packageId.equals(resolution.packageId)
+                || resolution.revisions.executionRevisionDigest == null
+                || resolution.revisions.executionRevisionDigest.kind != RevisionKind.EXECUTION_REVISION
+                || !resolution.revisions.executionRevisionDigest.scopeId
+                .equals(resolution.packageId + "@" + resolution.environment))
+            throw new IOException("Effective execution revision is unavailable or inconsistent");
+        return resolution.revisions.executionRevisionDigest;
     }
 
     private Set<String> referencedHelpers(SemanticDelta delta, FrameworkConfig before,
@@ -1267,7 +1308,8 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
     }
     private record EffectiveModel(FrameworkConfig config, SourceManagementContracts.EffectiveResolution resolution) { }
     private record ReferenceInventory(Set<String> tools, Set<String> helpers) { }
-    private record SemanticDelta(boolean changedCore, List<String> coreReasons,
+    private record SemanticDelta(boolean executionRevisionChanged, boolean unclassifiedEffectiveChange,
+                                 boolean changedCore, List<String> coreReasons,
                                  Map<String, String> changedTools, Map<String, String> changedHelpers) {
         boolean hasAnyChange() { return changedCore || !changedTools.isEmpty() || !changedHelpers.isEmpty(); }
         List<String> safeChangedIds() {

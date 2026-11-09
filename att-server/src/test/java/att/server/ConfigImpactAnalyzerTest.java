@@ -63,7 +63,7 @@ class ConfigImpactAnalyzerTest {
         RevisionIdentity base = RevisionIdentity.of(RevisionKind.CONFIG_SOURCE, "central-runtime-config", "base");
         RevisionIdentity candidate = RevisionIdentity.of(RevisionKind.CONFIG_SOURCE, "central-runtime-config", "candidate");
         RevisionIdentity registry = RevisionIdentity.of(RevisionKind.PACKAGE_REGISTRATION, "package-registry", "registry");
-        RevisionIdentity pkg = RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE, "payments", packageRevision);
+        RevisionIdentity pkg = RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE, "payments", packageRevision);
         RevisionIdentity manifest = RevisionIdentity.of(RevisionKind.PACKAGE_MANIFEST, "payments", "manifest");
         RevisionIdentity schema = RevisionIdentity.of(RevisionKind.ENGINE_SCHEMA, "installed-engine", "schema");
         RevisionIdentity schedule = RevisionIdentity.of(RevisionKind.SCHEDULE_SNAPSHOT, "schedule-1", scheduleRevision);

@@ -137,6 +137,8 @@ class ConfigImpactAnalyzerIntegrationTest {
             var commentImpact = publisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
                     ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, commentId, null);
             assertEquals(ImpactDecision.COMPATIBLE, commentImpact.decision);
+            assertTrue(commentImpact.freshness.packageSources.stream()
+                    .allMatch(source -> source.kind == RevisionKind.PACKAGE_SOURCE));
             assertTrue(commentImpact.affectedPackages.isEmpty());
             assertFalse(commentImpact.acknowledgementRequired);
 
@@ -230,7 +232,9 @@ class ConfigImpactAnalyzerIntegrationTest {
                     "admin", true, defaultDraftId);
             var defaultImpact = publisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
                     ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, defaultDraftId, null);
-            assertEquals(ImpactDecision.REQUIRES_REVIEW, defaultImpact.decision);
+            assertEquals(ImpactDecision.REQUIRES_REVIEW, defaultImpact.decision,
+                    "provider=" + defaultImpact.providerState + " coverage=" + defaultImpact.coverage
+                            + " code=" + defaultImpact.unavailableCode);
             assertTrue(defaultImpact.affectedPackages.stream().anyMatch(item -> "global-default".equals(item.packageId)
                     && "UAT".equalsIgnoreCase(item.environment)
                     && item.certainty == att.server.api.source.SourceManagementContracts.Certainty.CONFIRMED_AFFECTED));
