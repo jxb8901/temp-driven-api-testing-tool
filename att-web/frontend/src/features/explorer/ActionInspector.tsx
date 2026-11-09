@@ -30,8 +30,10 @@ interface ActionInspectorProps {
   resourceType: 'template' | 'flow';
   resourceId: string;
   references?: ResourceReference[];
+  selectedActionId?: string;
+  onSelectAction?: (actionId: string) => void;
   onOpenFlow: (resourceId: string) => void;
-  onOpenFile?: (path: string, origin: string, reference: { type: 'template' | 'flow'; resourceId: string; referenceId: string; returnTab: 'definition' }) => void;
+  onOpenFile?: (path: string, origin: string, reference: { type: 'template' | 'flow'; resourceId: string; referenceId: string; returnTab: 'definition'; actionId: string }) => void;
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -215,7 +217,7 @@ function ActionFileLinks({ actionId, references, resourceType, resourceId, onOpe
         {path ? <code>{path}</code> : <span>Package file reference</span>}
         {canOpen
           ? <button type="button" className="button button-quiet" onClick={() => onOpenFile!(path, origin,
-            { type: resourceType, resourceId, referenceId, returnTab: 'definition' })}>View file</button>
+            { type: resourceType, resourceId, referenceId, returnTab: 'definition', actionId })}>View file</button>
           : <span role="status">{unavailableFileMessage(reference)}</span>}
       </li>;
     })}</ul>
@@ -234,12 +236,16 @@ function flowReference(entry: ActionEntry, use: unknown, references: ResourceRef
   return { state: 'resolved' as const, resourceId: reference.resourceId, logicalId: reference.logicalId || use };
 }
 
-export function ActionInspector({ definition, actionOrder, resourceType, resourceId, references, onOpenFlow, onOpenFile }: ActionInspectorProps) {
+export function ActionInspector({ definition, actionOrder, resourceType, resourceId, references, selectedActionId, onSelectAction, onOpenFlow, onOpenFile }: ActionInspectorProps) {
   const entries = useMemo(() => actionEntries(definition, actionOrder), [definition, actionOrder]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [visibleCount, setVisibleCount] = useState(INITIAL_ACTIONS);
 
-  useEffect(() => { setSelectedIndex(0); setVisibleCount(INITIAL_ACTIONS); }, [definition, actionOrder]);
+  useEffect(() => {
+    const selected = entries?.findIndex(entry => entry.id === selectedActionId) ?? -1;
+    setSelectedIndex(selected >= 0 ? selected : 0);
+    setVisibleCount(selected >= 0 ? Math.max(INITIAL_ACTIONS, selected + 1) : INITIAL_ACTIONS);
+  }, [entries, selectedActionId]);
 
   if (!entries) return <section className="att-action-inspector" aria-label="Visual action inspector">
     <p role="status">Actions are unavailable because the safe definition does not contain an action map.</p>
@@ -280,7 +286,7 @@ export function ActionInspector({ definition, actionOrder, resourceType, resourc
             return <li key={`${entry.id}:${index}`}>
               <button type="button" aria-pressed={index === selectedIndex} aria-current={index === selectedIndex ? 'step' : undefined}
                 className={entry.disabled ? 'is-disabled-action' : undefined}
-                onClick={() => setSelectedIndex(index)} title={entry.id}>
+                onClick={() => { setSelectedIndex(index); if (entry.id !== selectedActionId) onSelectAction?.(entry.id); }} title={entry.id}>
                 <span className="att-action-number">{index + 1}</span>
                 <span className="att-action-card">
                   <span className="att-action-title-line">
