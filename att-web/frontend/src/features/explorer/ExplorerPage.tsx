@@ -459,12 +459,12 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
     const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
       : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
     setTab(tabs[nextIndex]);
-    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId, tab: tabs[nextIndex] });
+    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId, tab: tabs[nextIndex], ...(resourceRoute?.actionId ? { actionId: resourceRoute.actionId } : {}) });
     event.currentTarget.querySelector<HTMLButtonElement>(`[data-tab="${tabs[nextIndex]}"]`)?.focus();
   };
   const selectDetailTab = (next: DetailTab) => {
     setTab(next);
-    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId, tab: next });
+    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId, tab: next, ...(resourceRoute?.actionId ? { actionId: resourceRoute.actionId } : {}) });
   };
 
   return <main className="page-content att-explorer-page">
@@ -542,6 +542,9 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
                   : definition == null ? <p>No definition projection is available.</p>
                     : <ActionInspector definition={definition} actionOrder={actionOrder} resourceType={identity.type === 'flow' ? 'flow' : 'template'}
                         resourceId={identity.resourceId} references={detail?.references}
+                        selectedActionId={resourceRoute?.actionId}
+                        onSelectAction={actionId => onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId,
+                          logicalId: detail?.logicalId, tab: 'definition', actionId })}
                         onOpenFlow={targetId => onResourceRouteChange({ type: 'flow', resourceId: targetId, tab: 'definition' })}
                         onOpenFile={(path, origin, reference) => onOpenConfigurationFile?.(path, origin, reference)} />
               : definition == null && !detailRequestPending ? <p>No definition projection is available.</p>
