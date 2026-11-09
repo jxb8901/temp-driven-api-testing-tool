@@ -156,15 +156,40 @@ describe('ActionInspector', () => {
     expect(host.querySelector('[aria-label="Referenced files for action sendCT001Confirm"]')?.textContent).toContain('templates/payments/CT001_Confirm.xml');
     click([...host.querySelectorAll<HTMLButtonElement>('.att-action-file-links button')][0]);
     expect(onOpenFile).toHaveBeenLastCalledWith('templates/payments/CT001_Confirm.xml', 'templates/payments/template.yaml', {
-      type: 'template', resourceId: 'template-1', referenceId, returnTab: 'definition',
+      type: 'template', resourceId: 'template-1', referenceId, returnTab: 'definition', actionId: 'sendCT001Confirm',
     });
     click(actionButton('retryConfirm'));
     expect(host.querySelector('[aria-label="Referenced files for action retryConfirm"] button')?.textContent).toBe('View file');
     click(host.querySelector('[aria-label="Referenced files for action retryConfirm"] button')!);
     expect(onOpenFile).toHaveBeenCalledTimes(2);
+    expect(onOpenFile).toHaveBeenLastCalledWith('templates/payments/CT001_Confirm.xml', 'templates/payments/template.yaml', {
+      type: 'template', resourceId: 'template-1', referenceId, returnTab: 'definition', actionId: 'retryConfirm',
+    });
     click(actionButton('blockedAction'));
     expect(host.querySelector('[aria-label="Referenced files for action blockedAction"]')?.textContent).toContain('blocked by the Server source policy');
     expect(host.querySelector('[aria-label="Referenced files for action blockedAction"] button')).toBeNull();
+  });
+
+  it('restores a validated routed Action selection and reports user selection changes', async () => {
+    const onSelectAction = vi.fn();
+    const definition = { actions: {
+      first: { type: 'log', message: 'one' },
+      second: { type: 'log', message: 'two' },
+      third: { type: 'log', message: 'three' },
+    } };
+    await render(<ActionInspector definition={definition} resourceType="flow" resourceId="flow-1"
+      selectedActionId="second" onSelectAction={onSelectAction} onOpenFlow={vi.fn()} />);
+    expect(actionButton('second').getAttribute('aria-pressed')).toBe('true');
+    expect(host.querySelector('[aria-label="Properties for action second"]')).not.toBeNull();
+    click(actionButton('third'));
+    expect(onSelectAction).toHaveBeenCalledWith('third');
+
+    await render(<ActionInspector definition={definition} resourceType="flow" resourceId="flow-1"
+      selectedActionId="first" onSelectAction={onSelectAction} onOpenFlow={vi.fn()} />);
+    expect(actionButton('first').getAttribute('aria-pressed')).toBe('true');
+    await render(<ActionInspector definition={definition} resourceType="flow" resourceId="flow-1"
+      selectedActionId="invalid-action-id" onSelectAction={onSelectAction} onOpenFlow={vi.fn()} />);
+    expect(actionButton('first').getAttribute('aria-pressed')).toBe('true');
   });
 
   it('renders structured properties and advanced views as read-only YAML without escaping expression newlines', async () => {
