@@ -281,7 +281,7 @@ describe('Explorer source viewer', () => {
 
     click(button('View file'));
     expect(onOpenConfigurationFile).toHaveBeenLastCalledWith('templates/checkout/CT001_Confirm.xml', 'templates/checkout/template.yaml', {
-      type: 'template', resourceId: 'checkout', referenceId, returnTab: 'definition',
+      type: 'template', resourceId: 'checkout', referenceId, returnTab: 'definition', actionId: 'sendCT001Confirm',
     });
     click(button('Dependencies'));
     click(button('templates/checkout/CT001_Confirm.xml'));
