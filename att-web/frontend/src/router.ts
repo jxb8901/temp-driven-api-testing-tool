@@ -5,6 +5,8 @@ export interface ResourceRoute {
   resourceId: string;
   logicalId?: string;
   tab?: 'definition' | 'source' | 'relations';
+  /** Selected Visual Action, validated against the safe definition before use. */
+  actionId?: string;
 }
 export interface LoadCatalogRouteState {
   query?: string;
@@ -20,6 +22,7 @@ export type ConfigurationTab = 'source' | 'declared' | 'effective' | 'compare';
 export interface ResourceSourceReferenceRoute {
   type: 'case' | 'template' | 'flow' | 'tool'; resourceId: string; referenceId: string;
   returnTab?: 'definition' | 'source' | 'relations';
+  actionId?: string;
 }
 
 export type AppRoute =
@@ -95,7 +98,8 @@ export function parseRoute(hash: string): AppRoute {
         && referenceId && /^[0-9a-f]{64}$/.test(referenceId)
         ? { type: sourceType as ResourceSourceReferenceRoute['type'], resourceId: sourceResourceId, referenceId,
           ...(sourceReturnTab === 'definition' || sourceReturnTab === 'source' || sourceReturnTab === 'relations'
-            ? { returnTab: sourceReturnTab as ResourceSourceReferenceRoute['returnTab'] } : {}) } : undefined;
+            ? { returnTab: sourceReturnTab as ResourceSourceReferenceRoute['returnTab'] } : {}),
+          ...(safeRouteValue(query.get('sourceAction'), 512) ? { actionId: safeRouteValue(query.get('sourceAction'), 512)! } : {}) } : undefined;
       const filePath = safePackageLogicalPath(query.get('file'));
       const fileOrigin = safePackageLogicalPath(query.get('origin'));
       const returnTo = safePackageReturnTo(query.get('returnTo'), parts[1]);
@@ -114,6 +118,8 @@ export function parseRoute(hash: string): AppRoute {
       return { kind: 'package', packageId: parts[1], ...(query.has('environment') ? { environment: query.get('environment') || '' } : {}), resource: {
         type: parts[3], resourceId: parts[4], ...(query.get('id') ? { logicalId: query.get('id')! } : {}),
         ...(detailTab && detailTab !== 'definition' ? { tab: detailTab } : {}),
+        ...(['template', 'flow'].includes(parts[3]) && safeRouteValue(query.get('action'), 512)
+          ? { actionId: safeRouteValue(query.get('action'), 512)! } : {}),
       } };
     }
     return { kind: 'package', packageId: parts[1] };
@@ -245,16 +251,18 @@ export function formatRoute(route: AppRoute): string {
           query.set('sourceResourceId', route.sourceReference.resourceId);
           query.set('sourceReferenceId', route.sourceReference.referenceId);
           if (route.sourceReference.returnTab) query.set('sourceReturnTab', route.sourceReference.returnTab);
+          if (route.sourceReference.actionId) query.set('sourceAction', route.sourceReference.actionId);
         }
         if (route.returnTo) query.set('returnTo', route.returnTo);
         return root + '/source-file' + (query.size ? '?' + query.toString() : '');
       }
       if (!route.resource) return root;
       const resource = root + '/resources/' + encodeURIComponent(route.resource.type) + '/' + encodeURIComponent(route.resource.resourceId);
-      if ((!route.resource.tab || route.resource.tab === 'definition') && !route.resource.logicalId && route.environment === undefined) return resource;
+      if ((!route.resource.tab || route.resource.tab === 'definition') && !route.resource.logicalId && !route.resource.actionId && route.environment === undefined) return resource;
       const query = new URLSearchParams();
       if (route.resource.tab && route.resource.tab !== 'definition') query.set('detail', route.resource.tab);
       if (route.resource.logicalId) query.set('id', route.resource.logicalId);
+      if (route.resource.actionId) query.set('action', route.resource.actionId);
       if (route.environment !== undefined) query.set('environment', route.environment);
       return resource + '?' + query.toString();
     }
