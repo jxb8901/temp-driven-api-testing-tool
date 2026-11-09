@@ -1014,7 +1014,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         resolveReferences(index, config);
         resolveReadiness(index, config);
         index.revisionDigest = digestFiles(index.files, index.debugSidecars, index.quickLoadPolicies);
-        index.packageSourceRevisionDigest = digestPackageFiles(index.debugSidecars, index.quickLoadPolicies);
+        index.packageSourceRevisionDigest = digestPackageFiles();
         Collections.sort(index.ordered, new Comparator<Resource>() {
             @Override public int compare(Resource left, Resource right) {
                 return left.resourceId.compareTo(right.resourceId);
@@ -2876,16 +2876,18 @@ public final class PackageResourceInspector implements AutoCloseable {
         return hex(digest.digest());
     }
 
-    private String digestPackageFiles(Map<String, Path> debugSidecars,
-                                      Map<String, Path> quickLoadPolicies) throws Exception {
+    private String digestPackageFiles() throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         List<Path> ordered = new ArrayList<Path>();
         try (java.util.stream.Stream<Path> paths = Files.walk(packageRoot, 64)) {
             java.util.Iterator<Path> candidates = paths.iterator();
             while (candidates.hasNext()) {
                 Path candidate = candidates.next();
-                if (candidate.equals(packageRoot) || Files.isSymbolicLink(candidate)
-                        || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
+                // Package Manifest has its own authoritative revision domain.
+                // An edit to package.yaml must not change the Package *source*
+                // revision when all other Package source bytes are unchanged.
+                if (candidate.equals(packageRoot) || candidate.equals(packageRoot.resolve(att.config.PackageConfig.FILE_NAME))
+                        || Files.isSymbolicLink(candidate) || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
                 if (ordered.size() >= MAX_PACKAGE_SOURCE_FILES)
                     throw new ResourceLimitException("resourceInspector.maxPackageSourceFiles", MAX_PACKAGE_SOURCE_FILES, ordered.size() + 1L);
                 ordered.add(resources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE).canonicalPath());
@@ -2909,25 +2911,8 @@ public final class PackageResourceInspector implements AutoCloseable {
             }
             digest.update((byte) 0xff);
         }
-        att.config.PackageConfig manifest = att.config.PackageConfig.load(packageRoot);
-        digest.update(utf8("ATT_PACKAGE_MANIFEST=" + manifest.present() + ":" + manifest.digest()));
-        digest.update((byte) 0);
-        for (Map.Entry<String, Path> sidecar : debugSidecars.entrySet()) {
-            digest.update(utf8("debug-sidecar"));
-            digest.update((byte) 0);
-            digest.update(utf8(sidecar.getKey()));
-            digest.update((byte) 0);
-            digest.update((byte) (sidecar.getValue() == null ? 0 : 1));
-            digest.update((byte) 0xff);
-        }
-        for (Map.Entry<String, Path> policy : quickLoadPolicies.entrySet()) {
-            digest.update(utf8("quick-load-policy"));
-            digest.update((byte) 0);
-            digest.update(utf8(policy.getKey()));
-            digest.update((byte) 0);
-            digest.update((byte) (policy.getValue() == null ? 0 : 1));
-            digest.update((byte) 0xff);
-        }
+        // Only Package-resident source paths and their bytes participate here.
+        // Manifest, Runtime Config and Engine identities are published separately.
         return hex(digest.digest());
     }
 
