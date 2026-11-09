@@ -67,7 +67,8 @@ describe('AppShell', () => {
 
     const packageSelect = header?.querySelector('select[aria-label="Workspace Package"]') as HTMLSelectElement;
     await act(async () => { packageSelect.value = 'ledger'; packageSelect.dispatchEvent(new Event('change', { bubbles: true })); });
-    expect(packageChanged).toHaveBeenCalledExactlyOnceWith('ledger');
+    expect(packageChanged).toHaveBeenCalledTimes(1);
+    expect(packageChanged).toHaveBeenCalledWith('ledger');
     expect(environmentChanged).not.toHaveBeenCalled();
   });
 
