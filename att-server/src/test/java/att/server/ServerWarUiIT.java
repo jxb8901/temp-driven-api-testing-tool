@@ -1191,7 +1191,8 @@ class ServerWarUiIT {
                         + "id: reference.flow.v1\r\nname: Reference Flow\r\n"
                         + "description: Exercises safe package file links in a Flow source.\r\nactions:\r\n"
                         + "  inspectPayload:\r\n    type: log\r\n    message: \"Request &{../../SCHEDULED/payload/request.xml}\"\r\n"
-                        + "  policyBlockedPayload:\r\n    type: log\r\n    message: \"Request &{../../SCHEDULED/payload/unlisted-request.xml}\"\r\n");
+                        + "  policyBlockedPayload:\r\n    type: log\r\n    message: \"Request &{../../SCHEDULED/payload/unlisted-request.xml}\"\r\n"
+                        + "  inspectAgain:\r\n    type: log\r\n    message: \"Replay &{../../SCHEDULED/payload/request.xml}\"\r\n");
     }
 
     private void runServerUiPlaywright(String origin) throws Exception {
