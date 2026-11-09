@@ -151,6 +151,52 @@ class PackageResourceInspectorTest {
         assertTrue(String.valueOf(opened.get("text")).contains("<confirm>safe</confirm>"));
     }
 
+    @Test void redactionDropsAllYamlCommentsAndSuppressesLinksOnlyPresentInMaskedActionFields() throws Exception {
+        Path root=packageWithTemplate("redacted-comments-and-action-metadata", "MASKED", "description: harmless");
+        Path descriptor=root.resolve("templates/MASKED/template.yaml");
+        writeUtf8(root.resolve("templates/MASKED/request.xml"), "<request>safe</request>\\n");
+        String authored="schemaVersion: att-template/v3.6\\n"
+                +"# Safe public documentation note.\\n"
+                +"# Private mapping: internal-lane-kappa-velvet (not a recognizable secret pattern).\\n"
+                +"name: MASKED\\nactions:\\n"
+                +"  send:\\n    type: tool\\n    call: '&{./request.xml}'\\n"
+                +"    evidence:\\n      capture:\\n        payload: '&{./request.xml}'\\n";
+        writeUtf8(descriptor, authored);
+        PackageResourceInspector unredacted=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)unredacted.inspect("list","template",null,null,0,10).get("items");
+        String resourceId=String.valueOf(items.get(0).get("resourceId"));
+        Map<String,Object> raw=unredacted.inspect("source","template",resourceId,null,0,1);
+        assertEquals("original",raw.get("projectionKind"));
+        assertEquals(authored,raw.get("text"));
+        @SuppressWarnings("unchecked") Map<String,Object> rawResource=(Map<String,Object>)unredacted.inspect("detail","template",resourceId,null,0,1).get("resource");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> rawReferences=(List<Map<String,Object>>)rawResource.get("references");
+        Map<String,Object> rawFile=rawReferences.stream().filter(value->"file".equals(value.get("type")))
+                .findFirst().orElseThrow(AssertionError::new);
+        assertEquals(Boolean.TRUE,rawFile.get("available"));
+
+        PackageResourceInspector redacted=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),true,Collections.<String>emptyList(),Collections.<String>emptyList());
+        Map<String,Object> source=redacted.inspect("source","template",resourceId,null,0,1);
+        assertEquals("sanitized",source.get("projectionKind"));
+        assertEquals(Boolean.TRUE,source.get("redacted"));
+        assertFalse(String.valueOf(source.get("text")).contains("internal-lane-kappa-velvet"));
+        assertFalse(String.valueOf(source.get("text")).contains("Safe public documentation note"));
+        assertFalse(String.valueOf(source.get("text")).contains("request.xml"));
+        assertFalse(String.valueOf(source.get("fileReferences")).contains("request.xml"));
+
+        @SuppressWarnings("unchecked") Map<String,Object> resource=(Map<String,Object>)redacted.inspect("detail","template",resourceId,null,0,1).get("resource");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> references=(List<Map<String,Object>>)resource.get("references");
+        assertTrue(references.stream().noneMatch(value->"file".equals(value.get("type"))),
+                "Redacted call/payload values cannot advertise Action file names or opaque links");
+        assertFalse(resource.toString().contains("request.xml"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->redacted.inspect("source-file","template",resourceId,String.valueOf(rawFile.get("referenceId")),
+                        0,1,null,String.valueOf(rawFile.get("originPath"))));
+    }
+
     @Test void maskedTemplateSourceIsLabeledAsSanitizedAndActionFileDependenciesFailClosed() throws Exception {
         Path root=packageWithTemplate("sanitized-source-and-blocked-action-files","SAFE","description: harmless");
         Path templateDir=root.resolve("templates/SAFE");
@@ -176,7 +222,7 @@ class PackageResourceInspectorTest {
         assertDoesNotThrow(()->new att.template.StageTemplateLoader(root,root.resolve("templates"),false).load("SAFE"));
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
                 Collections.<String>emptyList(),4096,262144,false,true,"safe-package-files",
-                Collections.singletonList("**/blocked.xml"),true,Collections.<String>emptyList(),Collections.<String>emptyList());
+                Collections.singletonList("**/blocked.xml"),false,Collections.<String>emptyList(),Collections.<String>emptyList());
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
         String resourceId=String.valueOf(items.get(0).get("resourceId"));
 
