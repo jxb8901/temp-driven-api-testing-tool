@@ -629,6 +629,7 @@ export function AppShell({
 
         <div className="app-frame">
           <header className="topbar">
+            <div className="topbar-main">
             <button ref={mobileMenuButtonRef} className="icon-button mobile-menu-button" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded={mobileNavigationOpen} onClick={() => setMobileNavigationOpen(true)}>
               <span aria-hidden="true">☰</span>
             </button>
@@ -649,6 +650,22 @@ export function AppShell({
             <button className="theme-toggle" type="button" aria-pressed={theme === 'dark'} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={changeTheme}>
               <span className="theme-icon" aria-hidden="true">{theme === 'dark' ? '☼' : '◐'}</span><span className="theme-label">{theme === 'dark' ? 'Light' : 'Dark'}</span>
             </button>
+            </div>
+            <div className="context-toolbar" role="group" aria-label="Workspace context and actions">
+              <label className="context-chip" title={selectedPackage || 'Select a Package'}><span>Workspace Package</span><select aria-label="Workspace Package" value={selectedPackage} disabled={workspaceLocked} aria-describedby={workspaceLocked ? 'workspace-lock-reason' : undefined} onChange={event => onPackageChange(event.currentTarget.value)}>
+                <option value="">Select a Package</option>{[...new Set([...workspacePackages, ...(selectedPackage ? [selectedPackage] : [])])].map(id => <option key={id} value={id}>{id}</option>)}
+              </select></label>
+              <label className="context-chip" title={selectedEnvironment || 'Package default'}><span>Workspace Environment</span><select aria-label="Workspace Environment" value={selectedEnvironment} disabled={workspaceLocked || !selectedPackage} aria-describedby={workspaceLocked ? 'workspace-lock-reason' : undefined} onChange={event => onEnvironmentChange(event.currentTarget.value)}>
+                <option value="">Package default</option>{[...new Set([...workspaceEnvironments, ...(selectedEnvironment ? [selectedEnvironment] : [])])].map(id => <option key={id} value={id}>{id}</option>)}
+              </select></label>
+              {workspaceLocked && <small id="workspace-lock-reason">Workspace is locked while viewing history or editing an execution.</small>}
+              {workspaceNotice && <small role="status">{workspaceNotice}</small>}
+              <div className="context-chip context-identity" title={currentUser ? `${currentUser.displayName || currentUser.loginId} · ${currentUser.loginId} · ${currentUser.role}` : 'Server-managed identity'}><span>Identity</span>
+                {versionData?.authMode === 'local'
+                  ? <><strong>{currentUser?.displayName || currentUser?.loginId || 'Loading identity…'}</strong><small>{currentUser ? `${currentUser.loginId} · ${currentUser.role}` : 'Loading authenticated identity'}</small></>
+                  : <><strong>Server managed</strong><small>not exposed by API</small></>}
+              </div>
+            </div>
           </header>
 
           <div className="page-chrome">
@@ -686,20 +703,7 @@ export function AppShell({
                 {route.kind === 'settings' && <Breadcrumb label="Settings" navigate={navigate} />}
               </ol>
             </nav>
-            <div className="context-toolbar" role="group" aria-label="Workspace context and actions">
-              <label className="context-chip"><span>Workspace Package</span><select aria-label="Workspace Package" value={selectedPackage} disabled={workspaceLocked} aria-describedby={workspaceLocked ? 'workspace-lock-reason' : undefined} onChange={event => onPackageChange(event.currentTarget.value)}>
-                <option value="">Select a Package</option>{[...new Set([...workspacePackages, ...(selectedPackage ? [selectedPackage] : [])])].map(id => <option key={id} value={id}>{id}</option>)}
-              </select></label>
-              <label className="context-chip"><span>Workspace Environment</span><select aria-label="Workspace Environment" value={selectedEnvironment} disabled={workspaceLocked || !selectedPackage} aria-describedby={workspaceLocked ? 'workspace-lock-reason' : undefined} onChange={event => onEnvironmentChange(event.currentTarget.value)}>
-                <option value="">Package default</option>{[...new Set([...workspaceEnvironments, ...(selectedEnvironment ? [selectedEnvironment] : [])])].map(id => <option key={id} value={id}>{id}</option>)}
-              </select></label>
-              {workspaceLocked && <small id="workspace-lock-reason">Workspace is locked while viewing history or editing an execution.</small>}
-              {workspaceNotice && <small role="status">{workspaceNotice}</small>}
-              <div className="context-chip context-identity"><span>Identity</span>
-                {versionData?.authMode === 'local'
-                  ? <><strong>{currentUser?.displayName || currentUser?.loginId || 'Loading identity…'}</strong><small>{currentUser ? `${currentUser.loginId} · ${currentUser.role}` : 'Loading authenticated identity'}</small></>
-                  : <><strong>Server managed</strong><small>not exposed by API</small></>}
-              </div>
+            <div className="page-chrome-actions">
               <a className="button button-primary context-action" href={action.target} hidden={action.hidden || !accessCapabilities.operate} onClick={link(action.target)}>{action.label}</a>
             </div>
           </div>

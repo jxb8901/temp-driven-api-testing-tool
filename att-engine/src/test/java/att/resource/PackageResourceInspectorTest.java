@@ -100,6 +100,163 @@ class PackageResourceInspectorTest {
                 ()->inspector.inspect("list","template",null,null,1,1,"stale-revision"));
     }
 
+    @Test void preservesAuthorizedYamlSourceBytesAndPublishesDeduplicatedActionFileDependencies() throws Exception {
+        Path root=packageWithTemplate("lossless-source-and-action-files","FORMAT","description: harmless");
+        Path descriptor=root.resolve("templates/FORMAT/template.yaml");
+        String authored="schemaVersion: att-template/v3.6\r\n"
+                +"# Keep this comment and the blank line below.\r\n"
+                +"name: FORMAT\r\n\r\n"
+                +"description: \"quoted: value\"\r\n"
+                +"actions:\r\n"
+                +"  sendCT001Confirm:\r\n"
+                +"    type: tool\r\n"
+                +"    call: >-\r\n"
+                +"      #{upper(value='&{./CT001_Confirm.xml}')}\r\n"
+                +"    evidence:\r\n"
+                +"      capture:\r\n"
+                +"        note: 'literal \\n stays two characters'\r\n"
+                +"        details: |-\r\n"
+                +"          café\r\n"
+                +"          ${EXEC.INPUT.value} #{helper.read()}\r\n"
+                +"  retryConfirm:\r\n"
+                +"    type: log\r\n"
+                +"    message: '&{./CT001_Confirm.xml}'\r\n";
+        writeUtf8(descriptor,authored);
+        Path referenced=writeUtf8(root.resolve("templates/FORMAT/CT001_Confirm.xml"),"<confirm>safe</confirm>\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        String resourceId=String.valueOf(items.get(0).get("resourceId"));
+        Map<String,Object> source=inspector.inspect("source","template",resourceId,null,0,1);
+        assertEquals(Boolean.TRUE,source.get("available"),source.toString());
+        assertEquals("original",source.get("projectionKind"));
+        assertEquals(authored,source.get("text"),"Authorized unredacted Source keeps CRLF, comments, scalar style, blank lines, and literal slash-n bytes.");
+
+        Map<String,Object> detail=inspector.inspect("detail","template",resourceId,null,0,1);
+        @SuppressWarnings("unchecked") Map<String,Object> resource=(Map<String,Object>)detail.get("resource");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> dependencies=(List<Map<String,Object>>)resource.get("references");
+        List<Map<String,Object>> fileDependencies=dependencies.stream().filter(value->"file".equals(value.get("type"))).collect(Collectors.toList());
+        assertEquals(1,fileDependencies.size(),"The canonical file is deduplicated even when two Actions reference it.");
+        Map<String,Object> file=fileDependencies.get(0);
+        assertEquals("templates/FORMAT/CT001_Confirm.xml",file.get("logicalId"));
+        assertEquals(Boolean.TRUE,file.get("available"));assertEquals("resolved",file.get("resolution"));
+        assertTrue(String.valueOf(file.get("referenceId")).matches("[0-9a-f]{64}"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> callSites=(List<Map<String,Object>>)file.get("callSites");
+        assertEquals(Arrays.asList("sendCT001Confirm","retryConfirm"),callSites.stream().map(site->String.valueOf(site.get("actionId"))).collect(Collectors.toList()));
+        Map<String,Object> opened=inspector.inspect("source-file","template",resourceId,String.valueOf(file.get("referenceId")),0,1,null,
+                String.valueOf(file.get("originPath")));
+        assertEquals(referenced.getFileName().toString(),Paths.get(String.valueOf(opened.get("logicalPath"))).getFileName().toString());
+        assertTrue(String.valueOf(opened.get("text")).contains("<confirm>safe</confirm>"));
+    }
+
+    @Test void redactionDropsAllYamlCommentsAndSuppressesLinksOnlyPresentInMaskedActionFields() throws Exception {
+        Path root=packageWithTemplate("redacted-comments-and-action-metadata", "MASKED", "description: harmless");
+        Path descriptor=root.resolve("templates/MASKED/template.yaml");
+        writeUtf8(root.resolve("templates/MASKED/request.xml"), "<request>safe</request>\n");
+        String authored="schemaVersion: att-template/v3.6\n"
+                +"# Safe public documentation note.\n"
+                +"# Private mapping: internal-lane-kappa-velvet (not a recognizable secret pattern).\n"
+                +"name: MASKED\ndescription: harmless\nactions:\n"
+                +"  send:\n    type: tool\n    call: \"#{upper(value='&{./request.xml}')}\"\n"
+                +"    evidence:\n      capture:\n        payload: '&{./request.xml}'\n";
+        writeUtf8(descriptor, authored);
+        PackageResourceInspector unredacted=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)unredacted.inspect("list","template",null,null,0,10).get("items");
+        String resourceId=String.valueOf(items.get(0).get("resourceId"));
+        Map<String,Object> raw=unredacted.inspect("source","template",resourceId,null,0,1);
+        assertEquals(Boolean.TRUE,raw.get("available"),raw.toString());
+        assertEquals("original",raw.get("projectionKind"));
+        assertEquals(authored,raw.get("text"));
+        @SuppressWarnings("unchecked") Map<String,Object> rawResource=(Map<String,Object>)unredacted.inspect("detail","template",resourceId,null,0,1).get("resource");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> rawReferences=(List<Map<String,Object>>)rawResource.get("references");
+        Map<String,Object> rawFile=rawReferences.stream().filter(value->"file".equals(value.get("type")))
+                .findFirst().orElseThrow(AssertionError::new);
+        assertEquals(Boolean.TRUE,rawFile.get("available"));
+
+        PackageResourceInspector redacted=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),true,Collections.<String>emptyList(),Collections.<String>emptyList());
+        Map<String,Object> source=redacted.inspect("source","template",resourceId,null,0,1);
+        assertEquals("sanitized",source.get("projectionKind"));
+        assertEquals(Boolean.TRUE,source.get("redacted"));
+        assertFalse(String.valueOf(source.get("text")).contains("internal-lane-kappa-velvet"));
+        assertFalse(String.valueOf(source.get("text")).contains("Safe public documentation note"));
+        assertFalse(String.valueOf(source.get("text")).contains("request.xml"));
+        assertFalse(String.valueOf(source.get("fileReferences")).contains("request.xml"));
+
+        @SuppressWarnings("unchecked") Map<String,Object> resource=(Map<String,Object>)redacted.inspect("detail","template",resourceId,null,0,1).get("resource");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> references=(List<Map<String,Object>>)resource.get("references");
+        assertTrue(references.stream().noneMatch(value->"file".equals(value.get("type"))),
+                "Redacted call/payload values cannot advertise Action file names or opaque links");
+        assertFalse(resource.toString().contains("request.xml"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->redacted.inspect("source-file","template",resourceId,String.valueOf(rawFile.get("referenceId")),
+                        0,1,null,String.valueOf(rawFile.get("originPath"))));
+    }
+
+    @Test void maskedTemplateSourceIsLabeledAsSanitizedAndActionFileDependenciesFailClosed() throws Exception {
+        Path root=packageWithTemplate("sanitized-source-and-blocked-action-files","SAFE","description: harmless");
+        Path templateDir=root.resolve("templates/SAFE");
+        Path descriptor=templateDir.resolve("template.yaml");
+        Files.createDirectories(root.resolve("templates/shared"));
+        Path shared=writeUtf8(root.resolve("templates/shared/parent.xml"),"<parent>safe</parent>\n");
+        Path blocked=writeUtf8(templateDir.resolve("blocked.xml"),"<blocked>must not open</blocked>\n");
+        Path binary=templateDir.resolve("binary.xml");
+        Files.write(binary,new byte[]{'<','x','>',0,'x','<','/','x','>'});
+        Path large=writeUtf8(templateDir.resolve("large.xml"),repeat('L',4097));
+        Path outside=writeUtf8(temp.resolve("outside.xml"),"<outside>private</outside>\n");
+        try { Files.createSymbolicLink(templateDir.resolve("escape.xml"),outside); }
+        catch(UnsupportedOperationException|java.io.IOException|SecurityException unavailable) { }
+        writeUtf8(descriptor,"schemaVersion: att-template/v3.6\nname: SAFE\ndescription: 'password=masked-source-secret'\nactions:\n"
+                +"  direct:\n    type: tool\n    call: \"#{upper(value='&{./blocked.xml}')}\"\n"
+                +"    evidence: {capture: {payload: '&{../shared/parent.xml}'}}\n"
+                +"  nested:\n    type: log\n    message: '&{../shared/parent.xml}'\n"
+                +"  missing:\n    type: log\n    message: '&{./missing.xml}'\n"
+                +"  binary:\n    type: log\n    message: '&{./binary.xml}'\n"
+                +"  large:\n    type: log\n    message: '&{./large.xml}'\n"
+                +"  escape:\n    type: log\n    message: '&{./escape.xml}'\n"
+                +"  crossPackage:\n    type: log\n    message: '&{../../../outside.xml}'\n");
+        assertDoesNotThrow(()->new att.template.StageTemplateLoader(root,root.resolve("templates"),false).load("SAFE"));
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),4096,262144,false,true,"safe-package-files",
+                Collections.singletonList("**/blocked.xml"),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        String resourceId=String.valueOf(items.get(0).get("resourceId"));
+
+        Map<String,Object> source=inspector.inspect("source","template",resourceId,null,0,1);
+        assertEquals("sanitized",source.get("projectionKind"));
+        assertTrue(Boolean.TRUE.equals(source.get("redacted")));
+        assertFalse(String.valueOf(source.get("text")).contains("masked-source-secret"));
+        assertTrue(String.valueOf(source.get("text")).contains("[REDACTED]"));
+
+        Map<String,Object> detail=inspector.inspect("detail","template",resourceId,null,0,1);
+        @SuppressWarnings("unchecked") Map<String,Object> resource=(Map<String,Object>)detail.get("resource");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> dependencies=(List<Map<String,Object>>)resource.get("references");
+        Map<String,Object> parent=dependencies.stream().filter(value->"templates/shared/parent.xml".equals(value.get("logicalId"))).findFirst().orElseThrow(()->new AssertionError(dependencies.toString()));
+        assertEquals(Boolean.TRUE,parent.get("available"));assertEquals("resolved",parent.get("resolution"));
+        Map<String,Object> blockedRef=dependencies.stream().filter(value->"file".equals(value.get("type"))
+                &&"templates/SAFE/blocked.xml".equals(value.get("logicalId"))).findFirst().orElseThrow(AssertionError::new);
+        assertEquals(Boolean.FALSE,blockedRef.get("available"));assertEquals("blocked",blockedRef.get("resolution"));
+        assertEquals("forbidden",blockedRef.get("reason"));assertEquals("templates/SAFE/blocked.xml",blockedRef.get("logicalId"));
+        Map<String,Object> missingRef=dependencies.stream().filter(value->"missing".equals(value.get("reason"))).findFirst().orElseThrow(AssertionError::new);
+        assertEquals("templates/SAFE/missing.xml",missingRef.get("logicalId"));assertEquals("missing",missingRef.get("resolution"));
+        assertFalse(missingRef.containsKey("referenceId"));assertEquals(Boolean.FALSE,missingRef.get("available"));
+        assertTrue(dependencies.stream().anyMatch(value->"binary-file".equals(value.get("reason"))));
+        assertTrue(dependencies.stream().anyMatch(value->"size-limit".equals(value.get("reason"))));
+        assertTrue(dependencies.stream().anyMatch(value->"invalid".equals(value.get("resolution"))));
+        assertFalse(detail.toString().contains(outside.toString()));
+        assertFalse(dependencies.toString().contains("outside.xml"),
+                "The file-dependency projection must not reveal an out-of-Package candidate.");
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspect("source-file","template",resourceId,String.valueOf(blockedRef.get("referenceId")),0,1,null,
+                        String.valueOf(blockedRef.get("originPath"))));
+        assertTrue(Files.exists(shared));assertTrue(Files.exists(large));
+    }
+
     @Test void detailProjectionCarriesAuthoredActionOrderWhenJsonWouldReorderNumericKeys() throws Exception {
         Path root=packageWithTemplate("numeric-action-order","ORDERED","description: authored order");
         writeUtf8(root.resolve("templates/ORDERED/template.yaml"),"schemaVersion: att-template/v3.6\nname: ORDERED\n"
@@ -206,6 +363,39 @@ class PackageResourceInspectorTest {
         for(Map<String,Object> item:items)assertEquals(Boolean.FALSE,item.get("sourceAvailable"));
     }
 
+    @Test void explainsCallBackedAndBuiltInToolsWithoutInventingStandaloneSource() throws Exception {
+        Path root=packageWithTemplate("tool-source-provenance","FORM","description: safe");
+        writeUtf8(root.resolve("config/mqhelper.yaml"),"schemaVersion: att-mqhelper/v1.2\nid: sit\nname: SIT broker\n"
+                +"description: test broker\ndefaults:\n  connection: {queueManager: QM1, host: localhost, port: 1414, channel: DEV}\n"
+                +"instances: [{id: primary}]\n");
+        writeUtf8(root.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"mqhelpers: [config/mqhelper.yaml]\ntestcase: {root: testcase}\ntemplates: {root: templates}\ntools:\n"
+                +"  lookup:\n    name: Billing Lookup\n    description: Configured call-backed lookup\n"
+                +"    call: \"#{mq.sit.request(payload='safe')}\"\n    arguments: {}\n"
+                +"  normalize:\n    name: Normalize\n    description: Built-in-backed virtual Tool\n"
+                +"    call: \"#{upper(value='safe')}\"\n    arguments: {}\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,10).get("items");
+        Map<String,Object> callBacked=items.stream().filter(value->"lookup".equals(value.get("logicalId"))).findFirst().orElseThrow(AssertionError::new);
+        Map<String,Object> builtIn=items.stream().filter(value->"normalize".equals(value.get("logicalId"))).findFirst().orElseThrow(AssertionError::new);
+        assertEquals(Boolean.FALSE,callBacked.get("sourceAvailable"));
+        assertEquals("no-standalone-source",callBacked.get("sourceReason"));
+        assertEquals("call-backed",callBacked.get("sourceKind"));
+        assertEquals("built-in-virtual",builtIn.get("sourceKind"));
+        @SuppressWarnings("unchecked") Map<String,Object> provenance=(Map<String,Object>)callBacked.get("provenance");
+        assertEquals("Default",provenance.get("toolGroupId"));assertEquals("Billing Lookup",provenance.get("toolName"));
+        assertEquals("config/config.yaml",provenance.get("toolConfigLocation"));
+        Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(callBacked.get("resourceId")),null,0,1);
+        assertEquals(Boolean.FALSE,source.get("available"));assertEquals("no-standalone-source",source.get("reason"));
+        assertFalse(source.containsKey("text"));assertFalse(source.toString().contains("payload=safe"));
+        Map<String,Object> detail=inspector.inspect("detail","tool",String.valueOf(callBacked.get("resourceId")),null,0,1);
+        @SuppressWarnings("unchecked") Map<String,Object> definition=(Map<String,Object>)detail.get("definition");
+        assertEquals("call",definition.get("executionKind"));assertEquals("Default",definition.get("groupId"));
+        assertFalse(definition.containsKey("call"),"Safe Tool metadata never exposes provider call internals.");
+    }
+
     @Test void readsToolScriptOnlyWhenItsPackageRelativePathIsAllowlisted() throws Exception {
         Path root=Paths.get("").toRealPath().resolve("packages/default");
         Path config=Paths.get("").toRealPath().resolve("config/config.yaml");
@@ -258,6 +448,9 @@ class PackageResourceInspectorTest {
                 Collections.<String>emptyList(),Collections.<String>emptyList());
         @SuppressWarnings("unchecked") Map<String,Object> deniedItem=((List<Map<String,Object>>)denied.inspect("list","tool",null,null,0,10).get("items")).get(0);
         assertEquals(Boolean.FALSE,deniedItem.get("sourceAvailable"));assertEquals("not-allowlisted",deniedItem.get("sourceReason"));
+        assertEquals("script-backed",deniedItem.get("sourceKind"));
+        Map<String,Object> deniedSource=denied.inspect("source","tool",String.valueOf(deniedItem.get("resourceId")),null,0,1);
+        assertEquals(Boolean.FALSE,deniedSource.get("available"));assertEquals("not-allowlisted",deniedSource.get("reason"));
         assertFalse(deniedItem.toString().contains(script.toString()));
         PackageResourceInspector allowed=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
                 Collections.<String>emptyList(),Collections.singletonList(script.toRealPath().toString()),Collections.singletonList(externalRoot.toRealPath().toString()),
