@@ -206,8 +206,12 @@ async function main() {
     await page.getByText(/Some file references could not be verified/).waitFor();
     await page.getByRole('button', { name: 'Switch to light theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
-    const fileLink = page.locator('.att-explorer-source [data-att-reference]');
-    await fileLink.waitFor();
+    const sourceFileLinks = page.locator('.att-explorer-source [data-att-reference]');
+    await sourceFileLinks.first().waitFor();
+    assert.equal(await sourceFileLinks.count(), 2, 'Both referring Actions remain linked in the authored Source');
+    const referenceIds = await sourceFileLinks.evaluateAll(elements => elements.map(element => element.getAttribute('data-att-reference')));
+    assert.equal(new Set(referenceIds).size, 1, 'Repeated authored file references resolve to one canonical safe file');
+    const fileLink = sourceFileLinks.first();
     assert.equal(await fileLink.getAttribute('data-att-file'), '../../SCHEDULED/payload/request.xml');
     const referenceLine = await fileLink.evaluate(element => {
       const lines = Array.from(element.closest('.cm-content')?.querySelectorAll('.cm-line') || []);
