@@ -129,6 +129,10 @@ async function main() {
       'Dependencies must reopen the server-authorized safe file, including when the response is cached');
     await page.goBack();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+    // The Dependencies link restores its owning tab. The Visual inspector still
+    // exists in the DOM but is hidden, so select Visual before measuring geometry.
+    await page.getByRole('tab', { name: 'Visual' }).click();
+    await actionNodes.first().waitFor({ state: 'visible' });
 
     await page.getByRole('button', { name: 'Switch to dark theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
