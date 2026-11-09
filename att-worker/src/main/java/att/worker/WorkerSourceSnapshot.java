@@ -17,6 +17,11 @@ import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.FileSystems;
+import java.nio.file.WatchEvent;
+import java.nio.file.WatchKey;
+import java.nio.file.WatchService;
+import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.security.MessageDigest;
@@ -48,6 +53,11 @@ final class WorkerSourceSnapshot implements AutoCloseable {
     final JsonNode manifest;
     private final String executionTreeFingerprint;
     private final AutoCloseable planRegistration;
+    private volatile WatchService mutationWatcher;
+    private volatile Thread mutationMonitor;
+    private volatile Thread guardedExecutionThread;
+    private volatile boolean changedDuringExecution;
+    private volatile boolean closed;
 
     private WorkerSourceSnapshot(Path directory, Path packageRoot, Path configRoot, Path configPath,
                                  String packageId, JsonNode manifest,String executionTreeFingerprint,
@@ -76,7 +86,16 @@ final class WorkerSourceSnapshot implements AutoCloseable {
             Files.copy(archive,copy,StandardCopyOption.COPY_ATTRIBUTES);
             if(!request.sourceSnapshotArchiveSha256.equals(digestFile(copy)))
                 throw new IOException("The accepted source snapshot archive failed its integrity check");
-            Path packageRoot=directory.resolve("package"),configRoot=directory.resolve("config");
+            Path originalPackageRoot=Paths.get(request.packageRoot).toAbsolutePath().normalize();
+            Path originalConfigFile=att.config.RuntimeConfigPath.resolve(
+                    request.config==null?null:Paths.get(request.config),originalPackageRoot);
+            Path originalConfigRoot=att.config.RuntimeConfigPath.root(originalConfigFile);
+            boolean packageRootFirst=originalPackageRoot.compareTo(originalConfigRoot)<0;
+            // Preserve the legacy absolute-Path ordering for older archives without an embedded
+            // execution identity. Current archives carry the canonical identity in their manifest.
+            Path firstRoot=directory.resolve("a-source"),secondRoot=directory.resolve("z-source");
+            Path packageRoot=packageRootFirst?firstRoot:secondRoot;
+            Path configRoot=packageRootFirst?secondRoot:firstRoot;
             Files.createDirectory(packageRoot);Files.createDirectory(configRoot);
             JsonNode manifest;String packageId;
             try(ZipFile zip=new ZipFile(copy.toFile())) {
@@ -84,6 +103,11 @@ final class WorkerSourceSnapshot implements AutoCloseable {
                 packageId=manifest.path("packageId").asText(null);
                 if(packageId==null||!packageId.equals(request.registeredPackageId))
                     throw new IOException("The accepted source snapshot belongs to a different Package");
+                String acceptedExecutionRevision=manifest.path("executionRevisionDigest").asText(null);
+                if(acceptedExecutionRevision!=null
+                        &&(request.expectedExecutionRevisionDigest==null
+                        ||!acceptedExecutionRevision.equals(request.expectedExecutionRevisionDigest)))
+                    throw new IOException("The accepted source snapshot execution revision does not match the Worker request");
                 if(!request.sourceSnapshotConfigPath.equals(manifest.path("configurationPath").asText(null)))
                     throw new IOException("The accepted source snapshot Config path does not match the request");
                 extract(zip,"package",packageRoot,manifest.path("packageExecutableFiles"));
@@ -133,6 +157,8 @@ final class WorkerSourceSnapshot implements AutoCloseable {
                     ||!manifest.path("configTreeDigest").asText("").matches("[a-f0-9]{64}")
                     ||!manifest.path("packageExecutableDigest").asText("").matches("[a-f0-9]{64}")
                     ||!manifest.path("configExecutableDigest").asText("").matches("[a-f0-9]{64}")
+                    ||(manifest.hasNonNull("executionRevisionDigest")
+                    &&!manifest.path("executionRevisionDigest").asText("").matches("[a-f0-9]{64}"))
                     ||!manifest.path("packageExecutableDigest").asText().equals(executableDigestManifest(manifest.path("packageExecutableFiles")))
                     ||!manifest.path("configExecutableDigest").asText().equals(executableDigestManifest(manifest.path("configExecutableFiles"))))
                 throw new IOException("The accepted source snapshot manifest is invalid");
@@ -249,13 +275,85 @@ final class WorkerSourceSnapshot implements AutoCloseable {
     }
 
     void verifyUnchanged() throws IOException {
-        if(!manifest.path("packageTreeDigest").asText().equals(treeDigest(packageRoot))
+        if(changedDuringExecution
+                ||!manifest.path("packageTreeDigest").asText().equals(treeDigest(packageRoot))
                 ||!manifest.path("configTreeDigest").asText().equals(treeDigest(configRoot))
                 ||!manifest.path("packageExecutableDigest").asText().equals(executableDigestTree(packageRoot))
                 ||!manifest.path("configExecutableDigest").asText().equals(executableDigestTree(configRoot))
                 ||!executionTreeFingerprint.equals(executionTreeFingerprint(directory)))
-            throw new IOException("The accepted source snapshot changed during Worker execution");
+            throw sourceChanged();
     }
+
+    /** Returns true when the verified archive carries the canonical accepted execution identity. */
+    boolean verifyExecutionRevision(String expected) throws IOException {
+        String accepted=manifest.path("executionRevisionDigest").asText(null);
+        if(accepted==null)return false; // Older v1 archives are checked from their restored tree.
+        if(expected==null||!expected.matches("[a-f0-9]{64}")||!accepted.equals(expected))
+            throw new IOException("The accepted source snapshot execution revision does not match the Worker request");
+        return true;
+    }
+
+    /** Watch the private source trees for the entire execution and interrupt active external Tools on change. */
+    void guardExecution(Thread executionThread) throws IOException {
+        if(executionThread==null)throw new IllegalArgumentException("Worker execution thread is required");
+        WatchService watcher=FileSystems.getDefault().newWatchService();
+        try {
+            registerDirectories(packageRoot,watcher);
+            registerDirectories(configRoot,watcher);
+        } catch(IOException|RuntimeException failure) {
+            try { watcher.close(); } catch(IOException ignored) { }
+            throw failure;
+        }
+        guardedExecutionThread=executionThread;
+        mutationWatcher=watcher;
+        Thread monitor=new Thread(()->monitorMutations(watcher),"att-worker-source-integrity");
+        monitor.setDaemon(true);
+        mutationMonitor=monitor;
+        monitor.start();
+    }
+
+    private static void registerDirectories(Path root,WatchService watcher) throws IOException {
+        Files.walkFileTree(root,new SimpleFileVisitor<Path>() {
+            @Override public FileVisitResult preVisitDirectory(Path directory,BasicFileAttributes attributes)throws IOException {
+                directory.register(watcher,StandardWatchEventKinds.ENTRY_CREATE,
+                        StandardWatchEventKinds.ENTRY_DELETE,StandardWatchEventKinds.ENTRY_MODIFY);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    private void monitorMutations(WatchService watcher) {
+        try {
+            while(!closed) {
+                WatchKey key=watcher.take();
+                boolean changed=false;
+                for(WatchEvent<?> event:key.pollEvents()) {
+                    if(event.kind()==StandardWatchEventKinds.OVERFLOW
+                            ||event.kind()==StandardWatchEventKinds.ENTRY_CREATE
+                            ||event.kind()==StandardWatchEventKinds.ENTRY_DELETE
+                            ||event.kind()==StandardWatchEventKinds.ENTRY_MODIFY)changed=true;
+                }
+                if(changed||!key.reset()) {
+                    changedDuringExecution=true;
+                    Thread execution=guardedExecutionThread;
+                    if(execution!=null)execution.interrupt();
+                    return;
+                }
+            }
+        } catch(InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        } catch(java.nio.file.ClosedWatchServiceException closedWatcher) {
+            // Worker cleanup closed the watcher after the execution ended.
+        }
+    }
+
+    static final class SourceChangedException extends IOException {
+        SourceChangedException() { super("The accepted source snapshot changed during Worker execution"); }
+    }
+
+    private static SourceChangedException sourceChanged() { return new SourceChangedException(); }
+
+    boolean changedDuringExecution() { return changedDuringExecution; }
 
     /** Detects transient same-identity writes even if the original content and mode are restored. */
     private static String executionTreeFingerprint(Path root) throws IOException {
@@ -445,6 +543,11 @@ final class WorkerSourceSnapshot implements AutoCloseable {
     }
 
     @Override public void close() {
+        closed=true;
+        WatchService watcher=mutationWatcher;mutationWatcher=null;
+        if(watcher!=null)try{watcher.close();}catch(IOException ignored){}
+        Thread monitor=mutationMonitor;mutationMonitor=null;
+        if(monitor!=null)monitor.interrupt();
         if(planRegistration!=null)try{planRegistration.close();}catch(Exception ignored){}
         thawTree(directory);
         deleteTree(directory);

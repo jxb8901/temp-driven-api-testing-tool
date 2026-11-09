@@ -153,6 +153,7 @@ public final class WorkerMain {
             if(sourceSnapshot!=null) {
                 request.packageRoot=sourceSnapshot.packageRoot.toAbsolutePath().normalize().toString();
                 request.config=sourceSnapshot.configPath.toAbsolutePath().normalize().toString();
+                sourceSnapshot.guardExecution(Thread.currentThread());
             }
         } catch(Exception invalidSnapshot) {
             return fail("WORKER_SOURCE_SNAPSHOT_INVALID","The accepted source snapshot is unavailable or failed integrity verification");
@@ -241,14 +242,20 @@ public final class WorkerMain {
             }
             recordInspectionAggregate(request,processingStarted,buildsBefore,loadsBefore,bytesBefore);
             Map<String,Object> payload=new LinkedHashMap<String,Object>(); payload.put("status",result.status()); payload.put("exitCode",result.exitCode()); payload.put("durationMs",result.durationMs()); payload.put("result",serialized);
+            if(sourceSnapshot!=null)sourceSnapshot.verifyUnchanged();
             emitResult(payload);
             return result.exitCode();
         } catch(Exception error) {
+            if(sourceSnapshot!=null&&sourceSnapshot.changedDuringExecution())
+                error=new WorkerSourceSnapshot.SourceChangedException();
             if(inspectionDaemon)InspectionMetrics.JVM.record(PROCESSING,System.nanoTime()-processingStarted);
             recordInspectionAggregate(request,processingStarted,buildsBefore,loadsBefore,bytesBefore);
             String code="WORKER_EXECUTION_FAILED", message=error.getMessage();
             int exit=3; String status="ERROR";
-            if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
+            if(error instanceof WorkerSourceSnapshot.SourceChangedException) {
+                code="WORKER_SOURCE_SNAPSHOT_CHANGED";message=error.getMessage();
+            }
+            else if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
             else if(error instanceof PackageResourceInspector.ResourceNotFoundException) { code="ATT-RESOURCE-NOT-FOUND"; message="Package resource was not found"; }
             else if(error instanceof PackageResourceInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package resource response exceeded the configured limit"; }
             else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured scan limit"; }
@@ -717,7 +724,12 @@ public final class WorkerMain {
                 request.maxResponseBytes==null?262144:request.maxResponseBytes,true,
                 sourceBrowsingEnabled,policy,request.sourceDenyGlobs,redactionEnabled,
                 request.sensitivePaths,request.sensitiveFieldPatterns)) {
-            if(prewarmed)inspector.verifyPrewarmRevision(request.expectedExecutionRevisionDigest);
+            boolean archiveBound=sourceSnapshot!=null
+                    &&sourceSnapshot.verifyExecutionRevision(request.expectedExecutionRevisionDigest);
+            if(archiveBound) {
+                if(prewarmed&&!Boolean.TRUE.equals(inspector.prewarmEligibility().get("eligible")))
+                    throw new IllegalArgumentException("Package requires a cold Worker environment");
+            } else if(prewarmed)inspector.verifyPrewarmRevision(request.expectedExecutionRevisionDigest);
             else inspector.verifyRevision(request.expectedExecutionRevisionDigest);
         }
     }

@@ -449,6 +449,8 @@ final class ServerRuntime implements AutoCloseable {
 
     private final Object replayLock=new Object();
     private final Map<String,ReplayReview> replayReviews=new java.util.concurrent.ConcurrentHashMap<>();
+    private record InvalidatedReplayIntent(String source,String principal,String sourcePolicy,String code,Instant expiresAt) {}
+    private final Map<String,InvalidatedReplayIntent> invalidatedReplayIntents=new java.util.concurrent.ConcurrentHashMap<>();
     private record ReplayReview(String source,String principal,String draftId,String packageId,String executionType,String sourcePolicy,
                                 String originalRevision,String selectedRevision,String configurationDigest,
                                 String sourcePath,ObjectNode originalDefinition,ObjectNode definition,Map<String,Object> originalConfiguration,
@@ -598,6 +600,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void requireReplayReviewCapacity(String principal) {
         Instant now=clock.instant();replayReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
+        invalidatedReplayIntents.entrySet().removeIf(entry->!entry.getValue().expiresAt().isAfter(now));
         long owned=replayReviews.values().stream().filter(review->java.util.Objects.equals(principal,review.principal)).count();
         if(replayReviews.size()>=MAX_ACTIVE_DRAFTS||owned>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();
     }
@@ -685,7 +688,17 @@ final class ServerRuntime implements AutoCloseable {
             String accepted=store.replayJob(principal,intent,id);if(accepted!=null){requireJobOwner(accepted,principal);if(requestedPolicy!=null){Map<String,String> acceptedSpec=store.executionSpec(accepted);if(acceptedSpec==null||acceptedSpec.get("spec")==null||!requestedPolicy.equals(JobExecutionSpec.parse(acceptedSpec.get("spec")).value.path("replay").path("sourcePolicy").asText()))throw new JobConflictException("ATT-SERVER-REPLAY-INTENT-MISMATCH","The confirmation intent belongs to a different source policy.");}return jobRecord(accepted);}
             ReplayReview review=replayReviews.get(intent);
             if(review!=null&&(!review.source.equals(id)||!review.principal.equals(principal)))throw new NotFoundException();
-            if(review==null) {if(requestedPolicy!=null)throw new ReplayDraftExpiredException();throw new NotFoundException();}
+            if(review==null) {
+                InvalidatedReplayIntent invalidated=invalidatedReplayIntents.get(intent);
+                if(invalidated!=null&&invalidated.expiresAt().isAfter(clock.instant())) {
+                    if(!invalidated.source().equals(id)||!invalidated.principal().equals(principal))throw new NotFoundException();
+                    if(requestedPolicy!=null&&!requestedPolicy.equals(invalidated.sourcePolicy()))
+                        throw new JobConflictException("ATT-SERVER-REPLAY-INTENT-MISMATCH","The confirmation intent belongs to a different source policy.");
+                    throw new JobConflictException(invalidated.code(),"The Package changed after replay validation. Validate the replay draft again.");
+                }
+                if(invalidated!=null)invalidatedReplayIntents.remove(intent,invalidated);
+                if(requestedPolicy!=null)throw new ReplayDraftExpiredException();throw new NotFoundException();
+            }
             if(!review.expiresAt.isAfter(clock.instant()))throw new ReplayDraftExpiredException();
             requireCurrentRegistryBinding(intent);
             if(review.validationCode!=null)throw new JobConflictException("ATT-SERVER-REPLAY-DRAFT-INVALID","The replay draft must pass validation before it can be accepted.");
@@ -1047,11 +1060,13 @@ final class ServerRuntime implements AutoCloseable {
                         return;
                     }
                     transition(job,"PREPARING");
-                    validateAcceptedPackageRoot(approvedRoot);
-                    if(job.acceptedPackageTreeDigest==null
-                            ||!job.acceptedPackageTreeDigest.equals(SourceRevisionStore.treeDigest(ChangeSetPublisher.PACKAGE_SOURCE,approvedRoot)))
-                        throw new java.io.IOException("Accepted Package source revision failed its integrity check");
-                    verifyAcceptedCentralSource(job.acceptedCentralSourceRoot,job.acceptedCentralTreeDigest);
+                    if(job.sourceLeaseId==null) {
+                        validateAcceptedPackageRoot(approvedRoot);
+                        if(job.acceptedPackageTreeDigest==null
+                                ||!job.acceptedPackageTreeDigest.equals(SourceRevisionStore.treeDigest(ChangeSetPublisher.PACKAGE_SOURCE,approvedRoot)))
+                            throw new java.io.IOException("Accepted Package source revision failed its integrity check");
+                        verifyAcceptedCentralSource(job.acceptedCentralSourceRoot,job.acceptedCentralTreeDigest);
+                    }
                     job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
                     if(warmRevision!=null) {
                         Path selectedRoot=executionPackageRoot(job.packageId);
@@ -1089,11 +1104,15 @@ final class ServerRuntime implements AutoCloseable {
             int exit=process.waitFor();job.workerTerminatedNanos=System.nanoTime();job.exitCode=exit;
             if(!job.terminal()) {
                 try {
-                    Path executedRoot=acceptedPackageRoot(job);
-                    if(job.acceptedPackageTreeDigest==null
-                            ||!job.acceptedPackageTreeDigest.equals(SourceRevisionStore.treeDigest(ChangeSetPublisher.PACKAGE_SOURCE,executedRoot)))
-                        throw new java.io.IOException("Accepted Package execution snapshot changed during Worker reads");
-                    verifyAcceptedCentralSource(job.acceptedCentralSourceRoot,job.acceptedCentralTreeDigest);
+                    if(job.sourceLeaseId!=null) {
+                        if(!sourceDispatchValid(job))throw new java.io.IOException("Accepted source snapshot archive changed during Worker execution");
+                    } else {
+                        Path executedRoot=acceptedPackageRoot(job);
+                        if(job.acceptedPackageTreeDigest==null
+                                ||!job.acceptedPackageTreeDigest.equals(SourceRevisionStore.treeDigest(ChangeSetPublisher.PACKAGE_SOURCE,executedRoot)))
+                            throw new java.io.IOException("Accepted Package execution snapshot changed during Worker reads");
+                        verifyAcceptedCentralSource(job.acceptedCentralSourceRoot,job.acceptedCentralTreeDigest);
+                    }
                 } catch(Exception changedDuringExecution) {
                     finishQuietly(job,"ERROR",3,"ATT-SERVER-SOURCE-SNAPSHOT-CORRUPTED",
                             "An accepted source snapshot changed while its Worker was reading it");
@@ -2084,7 +2103,23 @@ final class ServerRuntime implements AutoCloseable {
             advancedLoadDrafts.entrySet().removeIf(entry->{boolean match=sourceScopeMatches(scope,entry.getValue().packageId,entry.getValue().environment);if(match)removed.add(entry.getKey());return match;});
             catalogLoadDrafts.entrySet().removeIf(entry->{boolean match=sourceScopeMatches(scope,entry.getValue().packageId,entry.getValue().environment);if(match)removed.add(entry.getKey());return match;});
             scheduleExecutionReviews.entrySet().removeIf(entry->{boolean match=sourceScopeMatches(scope,entry.getValue().packageId(),null);if(match)removed.add(entry.getValue().draftId());return match;});
-            replayReviews.entrySet().removeIf(entry->{boolean match=sourceScopeMatches(scope,entry.getValue().packageId,optionalText(entry.getValue().definition,"environment"));if(match)removed.add(entry.getValue().draftId);return match;});
+            replayReviews.entrySet().removeIf(entry->{
+                ReplayReview review=entry.getValue();
+                boolean match=sourceScopeMatches(scope,review.packageId,optionalText(review.definition,"environment"));
+                if(match) {
+                    String code="strict".equals(review.sourcePolicy)
+                            ?"ATT-SERVER-REPLAY-REVISION-CONFLICT":"ATT-SERVER-REPLAY-DRAFT-STALE";
+                    invalidatedReplayIntents.put(entry.getKey(),new InvalidatedReplayIntent(review.source,review.principal,
+                            review.sourcePolicy,code,review.expiresAt));
+                    removed.add(review.draftId);
+                }
+                return match;
+            });
+            if(invalidatedReplayIntents.size()>MAX_ACTIVE_DRAFTS) {
+                invalidatedReplayIntents.entrySet().stream()
+                        .min(java.util.Comparator.comparing(entry->entry.getValue().expiresAt()))
+                        .ifPresent(oldest->invalidatedReplayIntents.remove(oldest.getKey(),oldest.getValue()));
+            }
             for(String id:removed)registryBoundDrafts.remove(id);
         }
         try {
@@ -3201,6 +3236,7 @@ final class ServerRuntime implements AutoCloseable {
         catalogLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
         scheduleExecutionReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt().isAfter(now));
         replayReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
+        invalidatedReplayIntents.entrySet().removeIf(entry->!entry.getValue().expiresAt().isAfter(now));
         Set<String> active=new java.util.HashSet<>();active.addAll(runDrafts.keySet());active.addAll(debugDrafts.keySet());
         active.addAll(quickLoadDrafts.keySet());active.addAll(advancedLoadDrafts.keySet());active.addAll(catalogLoadDrafts.keySet());
         active.addAll(scheduleExecutionReviews.keySet());active.addAll(replayReviews.keySet());registryBoundDrafts.keySet().retainAll(active);
@@ -3358,8 +3394,16 @@ final class ServerRuntime implements AutoCloseable {
         request.setExpectedExecutionRevisionDigest(expectedExecutionRevisionDigest);
         Map<String,Object> effective=executeInspection(root,request);
         Map<String,Object> evidence=new LinkedHashMap<>(att.server.api.ConfigurationSnapshot.copy(effective));
-        Object actualPackageRevision=evidence.remove("packageRevision");
-        if(expectedExecutionRevisionDigest!=null&&!expectedExecutionRevisionDigest.equals(actualPackageRevision))throw new StaleCursorException();
+        Object actualExecutionRevision=evidence.remove("executionRevisionDigest");
+        Object legacyPackageRevision=evidence.remove("packageRevision");
+        if(actualExecutionRevision!=null&&legacyPackageRevision!=null
+                &&!java.util.Objects.equals(actualExecutionRevision,legacyPackageRevision))throw new StaleCursorException();
+        if(actualExecutionRevision==null)actualExecutionRevision=legacyPackageRevision;
+        if(expectedExecutionRevisionDigest!=null&&!expectedExecutionRevisionDigest.equals(actualExecutionRevision))throw new StaleCursorException();
+        if(actualExecutionRevision instanceof String revision) {
+            evidence.put("executionRevisionDigest",revision);
+            evidence.put("packageRevision",revision);
+        }
         String canonical=inspectionEnvironment((String)evidence.get("environment"),"environment");
         config.packageConfiguration.authorizeEnvironment(canonical,selection!=null);
         evidence.put("packageId",packageId);
@@ -3408,6 +3452,10 @@ final class ServerRuntime implements AutoCloseable {
         }
     }
     private void verifyAcceptedExecutionSources(Job job) throws Exception {
+        if(job.sourceLeaseId!=null) {
+            if(!sourceDispatchValid(job))throw new java.io.IOException("Accepted source snapshot archive is unavailable or changed");
+            return;
+        }
         Path packageRoot=acceptedPackageRoot(job);
         if(job.acceptedPackageTreeDigest==null
                 ||!job.acceptedPackageTreeDigest.equals(SourceRevisionStore.treeDigest(
@@ -3421,7 +3469,13 @@ final class ServerRuntime implements AutoCloseable {
     }
     private static Map<String,Object> configurationRevision(Map<String,Object> evidence,String revision) {
         Map<String,Object> result=new LinkedHashMap<>(evidence);
-        if(revision!=null)result.put("packageRevision",revision);
+        Object executionRevision=revision;
+        if(executionRevision==null)executionRevision=result.get("executionRevisionDigest");
+        if(executionRevision==null)executionRevision=result.get("packageRevision");
+        if(executionRevision instanceof String value&&!value.isBlank()) {
+            result.put("executionRevisionDigest",value);
+            result.put("packageRevision",value);
+        }
         return att.server.api.ConfigurationSnapshot.copy(result);
     }
 
@@ -3449,7 +3503,8 @@ final class ServerRuntime implements AutoCloseable {
         RevisionIdentity effective=RevisionIdentity.of(RevisionKind.EFFECTIVE_CONFIG,packageId+"@"+environment,effectiveDigest);
         RevisionIdentity environmentRevision=new RevisionIdentity(RevisionKind.ENVIRONMENT,environment,packageId,effectiveDigest);
         RevisionIdentity schema=RevisionIdentity.of(RevisionKind.ENGINE_SCHEMA,"embedded-engine-schema",schemaDigest);
-        Object rawExecutionRevision=configuration.get("packageRevision");
+        Object rawExecutionRevision=configuration.get("executionRevisionDigest");
+        if(!(rawExecutionRevision instanceof String))rawExecutionRevision=configuration.get("packageRevision");
         RevisionIdentity executionRevision=rawExecutionRevision instanceof String revision&&!revision.isBlank()
                 ?RevisionIdentity.of(RevisionKind.EXECUTION_REVISION,packageId+"@"+environment,revision):null;
         RevisionIdentity scheduleSnapshot=schedule==null?null:new RevisionIdentity(RevisionKind.SCHEDULE_SNAPSHOT,
@@ -4756,7 +4811,7 @@ final class ServerRuntime implements AutoCloseable {
         requireScheduleConfigurationReview(persisted);
         if(persisted.definitionVersion!=schedule.definitionVersion)
             throw new ScheduleConflictException();
-        if(!persisted.enabled)throw new ScheduleConflictException();
+        if(!persisted.enabled&&!"manual".equals(occurrence.get("triggerType")))throw new ScheduleConflictException();
         schedule=persisted;
         String triggeredBy=occurrence==null?null:(String)occurrence.get("triggeredBy");
         String actualExecutionPrincipal=executionPrincipal==null||executionPrincipal.isBlank()

@@ -91,9 +91,14 @@ class ServerRuntimeJobReplayTest {
         List<?> dependencies=(List<?>)provenance.get("dependencyClosure");assertNotNull(dependencies);
         List<? extends Map<?,?>> plans=dependencies.stream().filter(Map.class::isInstance).map(value->(Map<?,?>)value)
                 .filter(value->"FILE".equals(String.valueOf(value.get("kind")))).toList();
-        assertEquals(1,plans.size(),"Template and Flow callers must share one canonical File identity");
-        assertEquals("files/value.txt",plans.get(0).get("canonicalPath"));
-        assertTrue(String.valueOf(plans.get(0).get("sourceFingerprint")).matches("[a-f0-9]{64}"));
+        assertEquals(2,plans.size(),"Each inbound Template or Flow caller must remain available in accepted provenance");
+        assertEquals(1,plans.stream().map(value->value.get("canonicalPath")).distinct().count(),
+                "Shared callers retain one canonical File identity");
+        assertTrue(plans.stream().allMatch(value->"files/value.txt".equals(value.get("canonicalPath"))));
+        assertEquals(1,plans.stream().map(value->value.get("sourceFingerprint")).distinct().count());
+        assertEquals(2,plans.stream().map(value->value.get("callSite")).distinct().count(),
+                "Distinct inbound callers are preserved in accepted dependency metadata");
+        assertTrue(plans.stream().allMatch(value->String.valueOf(value.get("sourceFingerprint")).matches("[a-f0-9]{64}")));
         assertTrue(dependencies.stream().filter(Map.class::isInstance).map(Object::toString)
                 .anyMatch(value->value.contains("MANIFEST")&&value.contains("package.yaml")));
         assertTrue(dependencies.stream().filter(Map.class::isInstance).map(Object::toString)
@@ -148,6 +153,7 @@ class ServerRuntimeJobReplayTest {
             runningId=String.valueOf(runtime.submitAdvancedLoadDraft(submit(String.valueOf(loadDraft.get("draftId"))),"alice").get("jobId"));
             awaitRunning(runtime,runningId);
             Job running=runtime.jobs.get(runningId);assertNotNull(running);
+            assertExecutionRevisionAliases(running);
             packageA=Path.of(running.request.packageRoot);configA=Path.of(running.request.config);
 
             var runDefinition=ServerRuntime.JSON.createObjectNode();runDefinition.put("schemaVersion",RunDefinition.VERSION);runDefinition.put("executionType","run");runDefinition.put("packageId","p");runDefinition.put("environment","SIT");
@@ -155,6 +161,7 @@ class ServerRuntimeJobReplayTest {
             Map<String,Object> queuedDraft=runtime.createRunDraft(runDefinition,"alice");
             queuedId=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(queuedDraft.get("draftId"))),"alice","alice").get("jobId"));
             Job queued=runtime.jobs.get(queuedId);assertNotNull(queued);
+            assertExecutionRevisionAliases(queued);
             assertEquals("QUEUED",queued.status,"The second accepted Job waits behind the running LOAD Worker");
             assertEquals(packageA,Path.of(queued.request.packageRoot));assertEquals(configA,Path.of(queued.request.config));
             assertAcceptedFileClosure(runtime.jobRecord(runningId));
@@ -187,9 +194,9 @@ class ServerRuntimeJobReplayTest {
             assertTrue(Files.readString(configB).contains("central Config B"));
 
             await(runtime,runningId);await(runtime,queuedId);await(runtime,newId);
-            assertEquals("PASS",runtime.jobRecord(runningId).get("status"));
-            assertEquals("PASS",runtime.jobRecord(queuedId).get("status"));
-            assertEquals("PASS",runtime.jobRecord(newId).get("status"));
+            assertEquals("PASS",runtime.jobRecord(runningId).get("status"),runtime.resultRecord(runningId).toString());
+            assertEquals("PASS",runtime.jobRecord(queuedId).get("status"),runtime.resultRecord(queuedId).toString());
+            assertEquals("PASS",runtime.jobRecord(newId).get("status"),runtime.resultRecord(newId).toString());
             Path jobsDirectory=ServerConfig.load(fixture.server).dataDir.resolve("jobs");
             String runningEvents=Files.readString(jobsDirectory.resolve(runningId).resolve("events.jsonl"));
             String queuedEvents=Files.readString(jobsDirectory.resolve(queuedId).resolve("events.jsonl"));
@@ -226,6 +233,17 @@ class ServerRuntimeJobReplayTest {
         Map<?,?> provenance=(Map<?,?>)runtime.jobRecord(jobId).get("sourceProvenance");
         Map<?,?> revisions=(Map<?,?>)provenance.get("revisions");
         return String.valueOf(((Map<?,?>)revisions.get(kind)).get("revision"));
+    }
+
+    private static void assertExecutionRevisionAliases(Job job) {
+        String executionRevision=job.request.expectedExecutionRevisionDigest;
+        assertNotNull(executionRevision);
+        assertEquals(executionRevision,job.request.expectedRevisionDigest,
+                "The legacy Worker request alias remains populated for rolling upgrades");
+        assertNotNull(job.request.configurationProvenance);
+        assertEquals(executionRevision,job.request.configurationProvenance.get("executionRevisionDigest"));
+        assertEquals(executionRevision,job.request.configurationProvenance.get("packageRevision"),
+                "The legacy configuration alias remains consistent with the execution identity");
     }
 
     @Test void schedulePoliciesPreserveSourceAndAllowStaleMetadataEditsAcrossRestart() throws Exception {

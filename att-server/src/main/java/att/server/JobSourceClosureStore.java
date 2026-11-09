@@ -195,9 +195,9 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
     @Override public synchronized SourceLease acquire(SourceLeaseRequest request) throws IOException, StaleSourceException {
         if (request == null || request.packageId == null || request.packageId.isBlank())
             throw new IOException("A Package source scope is required");
-        RevisionIdentity business = request.expectedRevisions.businessSource;
+        RevisionIdentity business = request.expectedRevisions.packageSourceRevision;
         RevisionIdentity config = request.expectedRevisions.configSource;
-        if (business == null || config == null || business.kind != RevisionKind.BUSINESS_SOURCE
+        if (business == null || config == null || business.kind != RevisionKind.PACKAGE_SOURCE
                 || config.kind != RevisionKind.CONFIG_SOURCE || !request.packageId.equals(business.scopeId)
                 || !"central-runtime-config".equals(config.scopeId) || request.logicalPaths.isEmpty())
             throw new StaleSourceException();
@@ -534,8 +534,14 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
                 && java.util.Objects.equals(record.configExecutableDigest,manifest.path("configExecutableDigest").asText(null))
                 && java.util.Objects.equals(record.packageExecutableDigest,executableDigestManifest(manifest.path("packageExecutableFiles")))
                 && java.util.Objects.equals(record.configExecutableDigest,executableDigestManifest(manifest.path("configExecutableFiles")))
-                && revisions.businessSource.revision.equals(manifest.path("packageRevision").asText())
-                && revisions.configSource.revision.equals(manifest.path("configRevision").asText());
+                && revisions.packageSourceRevision.revision.equals(manifest.path("packageSourceRevision")
+                        .asText(manifest.path("packageRevision").asText()))
+                && revisions.packageSourceRevision.revision.equals(manifest.path("packageRevision").asText(
+                        manifest.path("packageSourceRevision").asText()))
+                && revisions.configSource.revision.equals(manifest.path("configRevision").asText())
+                && (revisions.executionRevisionDigest==null
+                    ?manifest.path("executionRevisionDigest").isMissingNode()||manifest.path("executionRevisionDigest").isNull()
+                    :revisions.executionRevisionDigest.revision.equals(manifest.path("executionRevisionDigest").asText()));
     }
 
     private void extractSnapshotTree(ZipFile archive, Path destination, String tree, JsonNode symlinks,
@@ -664,7 +670,10 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
                     Map<String,Object> manifest=new LinkedHashMap<>();
                     manifest.put("schemaVersion",SNAPSHOT_VERSION);manifest.put("packageId",record.packageId);
                     RevisionSet revisions=revisionSet(record.revisions);
-                    manifest.put("packageRevision",revisions.businessSource.revision);manifest.put("configRevision",revisions.configSource.revision);
+                    manifest.put("packageSourceRevision",revisions.packageSourceRevision.revision);
+                    manifest.put("packageRevision",revisions.packageSourceRevision.revision);manifest.put("configRevision",revisions.configSource.revision);
+                    if(revisions.executionRevisionDigest!=null)
+                        manifest.put("executionRevisionDigest",revisions.executionRevisionDigest.revision);
                     manifest.put("configurationPath",record.configPath);manifest.put("packageTreeDigest",packageDigest);
                     manifest.put("configTreeDigest",configDigest);manifest.put("logicalPaths",record.logicalPaths);
                     manifest.put("packageExecutableFiles",executablePaths(packageEntries));
@@ -890,7 +899,9 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
                 identity(raw.get("effectiveConfig"), RevisionKind.EFFECTIVE_CONFIG),
                 identity(raw.get("environment"), RevisionKind.ENVIRONMENT),
                 identity(raw.get("engineSchema"), RevisionKind.ENGINE_SCHEMA),
-                identity(raw.get("scheduleSnapshot"), RevisionKind.SCHEDULE_SNAPSHOT));
+                identity(raw.get("scheduleSnapshot"), RevisionKind.SCHEDULE_SNAPSHOT),
+                identity(raw.get("packageSourceRevision"), RevisionKind.PACKAGE_SOURCE),
+                identity(raw.get("executionRevisionDigest"), RevisionKind.EXECUTION_REVISION));
     }
 
     private static RevisionIdentity identity(Object raw, RevisionKind expected) {
@@ -902,7 +913,8 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
     private static String text(Object value) { return value instanceof String string ? string : null; }
 
     private static String revisionKey(RevisionIdentity identity) {
-        String value = identity.kind.name() + "\n" + identity.scopeId + "\n"
+        RevisionKind kind=identity.kind==RevisionKind.BUSINESS_SOURCE?RevisionKind.PACKAGE_SOURCE:identity.kind;
+        String value = kind.name() + "\n" + identity.scopeId + "\n"
                 + (identity.qualifier == null ? "" : identity.qualifier) + "\n" + identity.revision;
         return digest(value.getBytes(StandardCharsets.UTF_8));
     }

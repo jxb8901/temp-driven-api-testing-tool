@@ -45,6 +45,11 @@ class JobSourceClosureStoreTest {
         JobSourceClosureStore restarted=new JobSourceClosureStore(data);
         JobSourceClosureStore.SourceSnapshot recovered=restarted.snapshotForOwner("job:J0000000000000001");
         assertEquals(lease.leaseId(),recovered.leaseId);
+        assertEquals(revisions.packageSourceRevision.revision,recovered.revisions.packageSourceRevision.revision);
+        assertEquals(revisions.businessSource.revision,recovered.revisions.businessSource.revision,
+                "The legacy businessSource alias survives persisted closure restoration");
+        assertEquals(revisions.executionRevisionDigest.revision,recovered.revisions.executionRevisionDigest.revision,
+                "The execution-bound revision survives persisted closure restoration");
         assertTrue(restarted.verifyDispatch(recovered.leaseId,"job:J0000000000000001",recovered.archivePath.toString(),recovered.archiveSha256,recovered.configRelativePath));
         assertEquals("Config A",new String(Files.readAllBytes(recovered.workerConfigPath),StandardCharsets.UTF_8));
         assertEquals("Package B",Files.readString(packageB.resolve("templates/use.yaml")));
@@ -145,6 +150,31 @@ class JobSourceClosureStoreTest {
         assertEquals("#!/bin/sh\nexit 0\n",Files.readString(recoveredTool));
     }
 
+    @Test void provenanceRestorationReadsCanonicalRevisionsAndLegacyAliases() {
+        RevisionSet revisions=new RevisionSet(
+                RevisionIdentity.of(RevisionKind.PACKAGE_REGISTRATION,PACKAGE_ID,"registry-1"),
+                RevisionIdentity.of(RevisionKind.BUSINESS_SOURCE,PACKAGE_ID,"R50000000000000000000000000000001"),
+                null,null,null,null,null,null,null,
+                RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE,PACKAGE_ID,"R50000000000000000000000000000001"),
+                RevisionIdentity.of(RevisionKind.EXECUTION_REVISION,"p@SIT","a".repeat(64)));
+        Map<String,Object> raw=ServerRuntime.JSON.convertValue(revisions,Map.class);
+        RevisionSet restored=JobSourceClosureStore.revisionsFromProvenance(Map.of(
+                "schemaVersion",JobSourceClosureStore.PROVENANCE_VERSION,"revisions",raw));
+        assertEquals(RevisionKind.PACKAGE_SOURCE,restored.packageSourceRevision.kind);
+        assertEquals(RevisionKind.BUSINESS_SOURCE,restored.businessSource.kind);
+        assertEquals(revisions.packageSourceRevision.revision,restored.businessSource.revision);
+        assertEquals(RevisionKind.EXECUTION_REVISION,restored.executionRevisionDigest.kind);
+        assertEquals(revisions.executionRevisionDigest.revision,restored.executionRevisionDigest.revision);
+
+        Map<String,Object> legacy=new java.util.LinkedHashMap<>(raw);
+        legacy.remove("packageSourceRevision");legacy.remove("executionRevisionDigest");
+        RevisionSet restoredLegacy=JobSourceClosureStore.revisionsFromProvenance(Map.of(
+                "schemaVersion",JobSourceClosureStore.PROVENANCE_VERSION,"revisions",legacy));
+        assertEquals(revisions.businessSource.revision,restoredLegacy.packageSourceRevision.revision,
+                "An old businessSource-only record is upgraded to the canonical Package source identity");
+        assertNull(restoredLegacy.executionRevisionDigest,"Old provenance remains readable without an execution identity");
+    }
+
     @Test void missingOrCorruptSnapshotIsUnavailableAfterRestartAndCanBeRestored() throws Exception {
         Path data=Files.createDirectories(temp.resolve("data"));
         Path packageRoot=sourceTree("R40000000000000000000000000000001","Retained Package",true);
@@ -233,6 +263,8 @@ class JobSourceClosureStoreTest {
                 RevisionIdentity.of(RevisionKind.EFFECTIVE_CONFIG,"p@SIT","b".repeat(64)),
                 new RevisionIdentity(RevisionKind.ENVIRONMENT,"SIT",PACKAGE_ID,"b".repeat(64)),
                 RevisionIdentity.of(RevisionKind.ENGINE_SCHEMA,"embedded-engine-schema","c".repeat(64)),
-                null);
+                null,
+                RevisionIdentity.of(RevisionKind.PACKAGE_SOURCE,PACKAGE_ID,packageRoot.getFileName().toString()),
+                RevisionIdentity.of(RevisionKind.EXECUTION_REVISION,"p@SIT","d".repeat(64)));
     }
 }

@@ -91,6 +91,18 @@ class PrewarmedWorkerTest {
         } finally {process.destroyForcibly();}
     }
 
+    @Test void workerRejectsSnapshotWhoseExecutionIdentityDiffersFromTheRequest() throws Exception {
+        Path root=fixture();SourceArchive accepted=sourceArchive(root);
+        Map<String,Object> request=request(root,"debug");attachSnapshot(request,accepted);
+        request.put("expectedExecutionRevisionDigest","0".repeat(64));
+        Process process=startCold(root);
+        try {
+            String output=assign(process,mapper.writeValueAsString(request));
+            assertNotEquals(0,process.exitValue(),output);
+            assertTrue(output.contains("WORKER_SOURCE_SNAPSHOT_INVALID"),output);
+        } finally {process.destroyForcibly();}
+    }
+
     @Test void packageLocalExecutableToolSurvivesColdAndWarmRunDebugAndLoadSnapshots() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"Package-local shell executable requires POSIX permissions");
         for(String command:Arrays.asList("debug","run"))for(Boolean warm:Arrays.asList(Boolean.FALSE,Boolean.TRUE))
@@ -124,7 +136,8 @@ class PrewarmedWorkerTest {
             while(System.nanoTime()<deadline&&stagedPackage==null) {
                 try(java.util.stream.Stream<Path> directories=Files.list(temp)) {
                     stagedPackage=directories.filter(path->path.getFileName().toString().startsWith("att-source-snapshot-"))
-                            .map(path->path.resolve("package/files/watched.txt"))
+                            .map(path->Files.isRegularFile(path.resolve("a-source/files/watched.txt"),LinkOption.NOFOLLOW_LINKS)
+                                    ?path.resolve("a-source/files/watched.txt"):path.resolve("z-source/files/watched.txt"))
                             .filter(path->Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)).findFirst().orElse(null);
                 }
                 if(stagedPackage==null)Thread.sleep(20L);
@@ -138,19 +151,67 @@ class PrewarmedWorkerTest {
             java.util.Set<PosixFilePermission> permissions=Files.getPosixFilePermissions(protectedSource,LinkOption.NOFOLLOW_LINKS);
             permissions.add(PosixFilePermission.OWNER_WRITE);Files.setPosixFilePermissions(protectedSource,permissions);
             Files.write(protectedSource,"mutated-during-run\n".getBytes(StandardCharsets.UTF_8));
-            Files.createFile(release);
-            awaitFile(secondReadDone,process,"Package-local Tool did not complete its changed-byte read");
-            assertEquals("mutated-during-run",new String(Files.readAllBytes(secondRead),StandardCharsets.UTF_8).trim());
-            Files.write(protectedSource,"accepted-value\n".getBytes(StandardCharsets.UTF_8));
-            permissions.remove(PosixFilePermission.OWNER_WRITE);
-            Files.setPosixFilePermissions(protectedSource,permissions);
-            assertEquals("accepted-value",Files.readString(protectedSource).trim());
-            Files.createFile(finish);
-
             String workerOutput=output.get(20,TimeUnit.SECONDS);
+            assertTrue(process.waitFor(10,TimeUnit.SECONDS),"A source mutation must terminate the active Worker Tool");
             assertNotEquals(0,process.exitValue(),workerOutput);
             assertTrue(workerOutput.contains("The accepted source snapshot changed during Worker execution"),workerOutput);
             assertFalse(workerOutput.contains("\"status\":\"PASS\""),workerOutput);
+            assertFalse(Files.exists(secondReadDone),"A Tool must not continue to its next source read after a staged source mutation");
+            assertFalse(Files.exists(secondRead),"The changed bytes must not be consumed by a later Tool read");
+        } finally {
+            if(!Files.exists(release))Files.createFile(release);
+            process.destroyForcibly();
+        }
+    }
+
+    @Test void workerRejectsAStagedSourceMutationDuringLoadBeforeTheNextRead() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"The mutation fixture uses a POSIX package-local executable");
+        Path started=temp.resolve("load-mutation-tool-started.marker"),release=temp.resolve("load-mutation-tool-release.marker");
+        Path firstRead=temp.resolve("load-mutation-first-read.marker"),secondRead=temp.resolve("load-mutation-second-read.marker");
+        Path secondReadDone=temp.resolve("load-mutation-second-read-done.marker"),finish=temp.resolve("load-mutation-tool-finish.marker");
+        String script="#!/bin/sh\nset -e\ntool_dir=$(CDPATH= cd \"$(dirname \"$0\")\" && pwd)\n"
+                +"cat \"$tool_dir/../files/watched.txt\" > \"$3\"\ntouch \"$1\"\n"
+                +"while [ ! -e \"$2\" ]; do sleep 0.01; done\n"
+                +"cat \"$tool_dir/../files/watched.txt\" > \"$4\"\ntouch \"$5\"\n"
+                +"while [ ! -e \"$6\" ]; do sleep 0.01; done\nprintf 'load-race-tool-ok\\n'\n";
+        Path root=fixtureWithLocalTool(started,script,release.toString(),firstRead.toString(),secondRead.toString(),
+                secondReadDone.toString(),finish.toString());
+        Files.createDirectories(root.resolve("files"));Files.write(root.resolve("files/watched.txt"),"accepted-value\n".getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("load/scenario.yaml"),("schemaVersion: att-load/v1.6\nworkloads:\n"
+                +"  - id: package-local-tool\n    target: {type: template, id: ENV}\n"
+                +"    load: {users: 1, duration: 10s}\n    execution: {thinkTime: 100ms}\n").getBytes(StandardCharsets.UTF_8));
+        SourceArchive accepted=sourceArchive(root);Map<String,Object> request=request(root,"load");
+        request.put("scenario","load/scenario.yaml");attachSnapshot(request,accepted);
+        Process process=startCold(root);
+        try {
+            CompletableFuture<String> output=CompletableFuture.supplyAsync(()->{
+                try{return assign(process,mapper.writeValueAsString(request));}
+                catch(Exception failure){throw new CompletionException(failure);}
+            });
+            awaitFile(started,process,"Package-local Tool did not start during LOAD");
+            Path stagedFile=null;long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+            while(System.nanoTime()<deadline&&stagedFile==null) {
+                try(java.util.stream.Stream<Path> directories=Files.list(temp)) {
+                    stagedFile=directories.filter(path->path.getFileName().toString().startsWith("att-source-snapshot-"))
+                            .map(path->Files.isRegularFile(path.resolve("a-source/files/watched.txt"),LinkOption.NOFOLLOW_LINKS)
+                                    ?path.resolve("a-source/files/watched.txt"):path.resolve("z-source/files/watched.txt"))
+                            .filter(path->Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)).findFirst().orElse(null);
+                }
+                if(stagedFile==null)Thread.sleep(20L);
+            }
+            assertNotNull(stagedFile,"The LOAD Worker must read from its private source snapshot");
+            assertEquals("accepted-value",new String(Files.readAllBytes(firstRead),StandardCharsets.UTF_8).trim());
+            java.util.Set<PosixFilePermission> permissions=Files.getPosixFilePermissions(stagedFile,LinkOption.NOFOLLOW_LINKS);
+            permissions.add(PosixFilePermission.OWNER_WRITE);Files.setPosixFilePermissions(stagedFile,permissions);
+            Files.write(stagedFile,"mutated-during-load\n".getBytes(StandardCharsets.UTF_8));
+
+            String workerOutput=output.get(20,TimeUnit.SECONDS);
+            assertTrue(process.waitFor(10,TimeUnit.SECONDS),"A staged source mutation must terminate the active LOAD Worker");
+            assertNotEquals(0,process.exitValue(),workerOutput);
+            assertTrue(workerOutput.contains("WORKER_SOURCE_SNAPSHOT_CHANGED"),workerOutput);
+            assertFalse(workerOutput.contains("\"status\":\"PASS\""),workerOutput);
+            assertFalse(Files.exists(secondReadDone),"The LOAD Tool must not continue to its next source read after mutation");
+            assertFalse(Files.exists(secondRead),"The changed staged bytes must not be consumed by a later LOAD read");
         } finally {
             if(!Files.exists(release))Files.createFile(release);
             process.destroyForcibly();
@@ -280,8 +341,11 @@ class PrewarmedWorkerTest {
     }
 
     private static final class SourceArchive {
-        final Path archive;final String sha256;final Path packageRoot;final Path configRoot;
-        SourceArchive(Path archive,String sha256,Path packageRoot,Path configRoot){this.archive=archive;this.sha256=sha256;this.packageRoot=packageRoot;this.configRoot=configRoot;}
+        final Path archive;final String sha256;final Path packageRoot;final Path configRoot;final String executionRevisionDigest;
+        SourceArchive(Path archive,String sha256,Path packageRoot,Path configRoot,String executionRevisionDigest){
+            this.archive=archive;this.sha256=sha256;this.packageRoot=packageRoot;this.configRoot=configRoot;
+            this.executionRevisionDigest=executionRevisionDigest;
+        }
     }
     private SourceArchive sourceArchive(Path root) throws Exception {
         Path packageRoot=Files.createDirectories(temp.resolve("snapshot-package-"+UUID.randomUUID()));
@@ -301,6 +365,12 @@ class PrewarmedWorkerTest {
         java.util.List<String> packageExecutables=executablePaths(packageRoot),configExecutables=executablePaths(configRoot);
         manifest.put("packageExecutableFiles",packageExecutables);manifest.put("configExecutableFiles",configExecutables);
         manifest.put("packageExecutableDigest",executableDigest(packageExecutables));manifest.put("configExecutableDigest",executableDigest(configExecutables));
+        String executionRevisionDigest;
+        try(att.resource.PackageResourceInspector inspector=new att.resource.PackageResourceInspector(packageRoot,
+                configRoot.resolve("config/config.yaml"),null,Collections.<String>emptyList(),65536,262144)) {
+            executionRevisionDigest=inspector.executionRevisionDigest();
+        }
+        manifest.put("executionRevisionDigest",executionRevisionDigest);
         manifest.put("logicalPaths",Arrays.asList("templates/ENV/template.yaml","templates/ENV/debug.yaml","config/config.yaml"));
         manifest.put("dependencies",Collections.emptyList());manifest.put("packageSymlinks",Collections.emptyMap());manifest.put("configSymlinks",Collections.emptyMap());
         byte[] compiledPlans=att.template.FileExpressionResolver.FileExpressionSnapshot.empty(packageRoot).serialize();
@@ -311,15 +381,12 @@ class PrewarmedWorkerTest {
             zip.putNextEntry(new ZipEntry("file-plans.bin"));zip.write(compiledPlans);zip.closeEntry();
             zip.putNextEntry(new ZipEntry("manifest.json"));zip.write(mapper.writeValueAsBytes(manifest));zip.closeEntry();
         }
-        return new SourceArchive(archive,digestFile(archive),packageRoot,configRoot);
+        return new SourceArchive(archive,digestFile(archive),packageRoot,configRoot,executionRevisionDigest);
     }
     private void attachSnapshot(Map<String,Object> request,SourceArchive archive) throws Exception {
         request.put("sourceSnapshotArchivePath",archive.archive.toAbsolutePath().toString());
         request.put("sourceSnapshotArchiveSha256",archive.sha256);request.put("sourceSnapshotConfigPath","config/config.yaml");
-        try(att.resource.PackageResourceInspector inspector=new att.resource.PackageResourceInspector(archive.packageRoot,
-                archive.configRoot.resolve("config/config.yaml"),null,Collections.<String>emptyList(),65536,262144)) {
-            request.put("expectedRevisionDigest",inspector.executionRevisionDigest());
-        }
+        request.put("expectedExecutionRevisionDigest",archive.executionRevisionDigest);
     }
     private static void writeTree(ZipOutputStream zip,Path root,String prefix)throws Exception {
         List<Path> files=new ArrayList<Path>();try(java.util.stream.Stream<Path> paths=Files.walk(root)) {
