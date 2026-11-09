@@ -159,7 +159,7 @@ class PackageResourceInspectorTest {
                 +"# Safe public documentation note.\n"
                 +"# Private mapping: internal-lane-kappa-velvet (not a recognizable secret pattern).\n"
                 +"name: MASKED\ndescription: harmless\nactions:\n"
-                +"  send:\n    type: tool\n    call: '&{./request.xml}'\n"
+                +"  send:\n    type: tool\n    call: \"#{upper(value='&{./request.xml}')}\"\n"
                 +"    evidence:\n      capture:\n        payload: '&{./request.xml}'\n";
         writeUtf8(descriptor, authored);
         PackageResourceInspector unredacted=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
