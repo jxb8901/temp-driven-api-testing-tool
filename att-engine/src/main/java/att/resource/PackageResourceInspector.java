@@ -439,11 +439,12 @@ public final class PackageResourceInspector implements AutoCloseable {
                 Object authored = parseYaml(original);
                 Object safe = sourceYamlProjection(yamlMapping(authored),"",logicalPath);
                 String safeOriginal = scrubSourceText(original, logicalPath);
-                boolean redacted = !deepEquals(authored, safe) || !original.equals(safeOriginal);
-                // Keep the original bytes represented as UTF-8 text whenever the
-                // complete document needs no masking.  A masked document is a
-                // projection because comments and scalar styles cannot be
-                // losslessly retained while rewriting only protected spans.
+                // YAML comments are invisible to parsed-value redaction. Never expose
+                // the authored document under a redaction policy, even when its
+                // parsed fields look harmless: private comments would bypass masking.
+                // Byte-exact display is allowed only when redaction is disabled and
+                // both the parsed and text-level safety checks leave it unchanged.
+                boolean redacted = redactionEnabled || !deepEquals(authored, safe) || !original.equals(safeOriginal);
                 String text = redacted ? dumpYaml(safe) : original;
                 if (utf8(text).length > maxSourceBytes) {
                     result.put("available", Boolean.FALSE);
@@ -626,16 +627,19 @@ public final class PackageResourceInspector implements AutoCloseable {
         Map<String, Object> authored;
         try { authored = yamlMapping(loadYaml(resource.yamlSource, maxSourceBytes)); }
         catch (Exception unavailable) { return; }
-        Object rawActions = authored.get("actions");
-        if (!(rawActions instanceof Map)) return;
         String originPath;
         try { originPath = resources.fromInternalPath(resource.yamlSource, PackageResourceResolver.Kind.FILE).logicalName(); }
         catch (Exception unavailable) { return; }
+        // Publish only references surviving the exact projection used by source()
+        // and sourceFile(). Otherwise redacted call/payload strings would reveal
+        // private filenames and produce reference IDs the file viewer rejects.
+        Object safeActions = yamlMapping(sourceYamlProjection(authored, "", originPath)).get("actions");
+        if (!(safeActions instanceof Map)) return;
 
         Map<String, MutableActionFileDependency> resolved = new LinkedHashMap<String, MutableActionFileDependency>();
         ActionFileDependencyDiscovery discovery = new ActionFileDependencyDiscovery();
         FileExpressionResolver resolver = new FileExpressionResolver(packageRoot);
-        for (Map.Entry<?, ?> action : ((Map<?, ?>) rawActions).entrySet()) {
+        for (Map.Entry<?, ?> action : ((Map<?, ?>) safeActions).entrySet()) {
             String actionId = scrub(String.valueOf(action.getKey()));
             collectActionFileDependencies(resource, action.getValue(), actionId, originPath, resolver, discovery, resolved);
             if (discovery.truncated) break;
