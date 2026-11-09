@@ -30,6 +30,7 @@ public final class ResourceInspection {
         public String logicalPath;
         public String text;
         public Boolean redacted;
+        public String projectionKind;
         public List<SourceReference> fileReferences;
         public Boolean fileReferencesTruncated;
         public Boolean fileReferencesUnavailable;
@@ -40,6 +41,7 @@ public final class ResourceInspection {
         public String referenceId;
         public String logicalPath;
         public Boolean available;
+        public String reason;
     }
 
     public static final class Resource {
@@ -54,10 +56,13 @@ public final class ResourceInspection {
         public ExecutionReadiness executionReadiness;
         public Boolean sourceAvailable;
         public String sourceReason;
+        public String sourceKind;
+        public String sourcePath;
         public Boolean redactionEnabled;
         public Map<String, Object> provenance;
         public List<Reference> references;
         public List<Reference> referencedBy;
+        public Boolean fileDependenciesTruncated;
         public List<Diagnostic> diagnostics;
     }
 
@@ -75,7 +80,12 @@ public final class ResourceInspection {
         public String name;
         public String targetKind;
         public String resolution;
+        public Boolean available;
+        public String reason;
+        public String referenceId;
+        public String originPath;
         public Map<String, Object> callSite;
+        public List<Map<String, Object>> callSites;
     }
 
     public static final class Diagnostic {
