@@ -143,7 +143,16 @@ async function main() {
     await page.getByRole('button', { name: 'Switch to light theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
 
+    const flowSourceResponsePromise = page.waitForResponse(response =>
+      response.request().method() === 'GET'
+      && /\/packages\/payments\/resources\/[^/]+\/[^/]+\/source$/.test(new URL(response.url()).pathname));
     await page.getByRole('tab', { name: 'Source' }).click();
+    const flowSourceResponse = await flowSourceResponsePromise;
+    assert.equal(flowSourceResponse.status(), 200, 'the Flow Source tab must use the authorized source endpoint');
+    const flowSourceProjection = await flowSourceResponse.json();
+    assert.equal(flowSourceProjection.projectionKind, 'original', 'the fixture Flow should show original source');
+    assert.ok(flowSourceProjection.text.includes('\r\n'),
+      'the Flow fixture uses CRLF and must retain authored line endings');
     await page.getByRole('tabpanel', { name: 'Source' }).getByText('Code viewer ready.').waitFor();
     const editor = page.locator('.att-explorer-source .cm-editor');
     await editor.waitFor();
@@ -160,13 +169,16 @@ async function main() {
       };
     });
     assert.ok(editorState.text.includes('&{../../SCHEDULED/payload/request.xml}'), 'CodeMirror must preserve the Flow-authored relative reference');
+    assert.equal(editorState.text, flowSourceProjection.text.replace(/\r\n?/g, '\n'),
+      'CodeMirror may render normalized line separators while retaining every displayed YAML line');
     assert.ok(editorState.height > 0, 'CodeMirror must have visible layout under the production CSP');
     assert.ok(editorState.generatedStyles.length > 0 && editorState.generatedStyles.every(nonce => nonce === pageNonce), 'generated editor styles must carry the page nonce');
     assert.ok(editorState.keyText && editorState.keyColor !== editorState.editorColor,
       `YAML keys must have visible syntax color in the light theme: ${JSON.stringify(editorState)}`);
     await editor.locator('xpath=ancestor::section[contains(@class,"att-code-editor")]').getByRole('button', { name: 'Copy' }).click();
     await page.getByText('Copied displayed code.').waitFor();
-    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), editorState.text, 'Copy must match the visible YAML source under the production CSP');
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), flowSourceProjection.text,
+      'Copy must reproduce the complete authorized Source text, including authored CRLF separators');
     await page.getByRole('button', { name: 'Switch to dark theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
     const yamlDark = await inspectEditor(editor, '.att-token-property');
