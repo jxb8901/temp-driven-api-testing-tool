@@ -168,6 +168,7 @@ class PackageResourceInspectorTest {
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)unredacted.inspect("list","template",null,null,0,10).get("items");
         String resourceId=String.valueOf(items.get(0).get("resourceId"));
         Map<String,Object> raw=unredacted.inspect("source","template",resourceId,null,0,1);
+        assertEquals(Boolean.TRUE,raw.get("available"),raw.toString());
         assertEquals("original",raw.get("projectionKind"));
         assertEquals(authored,raw.get("text"));
         @SuppressWarnings("unchecked") Map<String,Object> rawResource=(Map<String,Object>)unredacted.inspect("detail","template",resourceId,null,0,1).get("resource");
