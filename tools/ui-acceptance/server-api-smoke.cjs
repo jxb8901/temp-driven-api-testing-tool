@@ -79,7 +79,7 @@ async function main() {
     await page.getByRole('tab', { name: 'Visual' }).waitFor();
     const actionNodes = page.locator('.att-action-list li > button');
     await actionNodes.first().waitFor();
-    assert.deepEqual(await page.locator('.att-action-list .att-action-name').allTextContents(), ['inspectPayload', 'policyBlockedPayload'],
+    assert.deepEqual(await page.locator('.att-action-list .att-action-name').allTextContents(), ['inspectPayload', 'policyBlockedPayload', 'inspectAgain'],
       'Flow action nodes should preserve their authored order');
     const inspectVisualNode = async () => actionNodes.first().evaluate(element => {
       const rect = element.getBoundingClientRect();
@@ -111,6 +111,25 @@ async function main() {
     assert.equal(authorizedFileProjection.logicalPath, 'templates/SCHEDULED/payload/request.xml');
     await page.goBack();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+
+    // Select a non-first Action and prove its identity survives both browser
+    // history directions and safe source-file navigation (issue #340).
+    await actionNodes.nth(2).click();
+    await page.waitForFunction(() => location.hash.includes('action=inspectAgain'));
+    assert.equal(await actionNodes.nth(2).getAttribute('aria-pressed'), 'true');
+    await page.getByRole('region', { name: 'Referenced files for action inspectAgain' })
+      .getByRole('button', { name: 'View file' }).click();
+    await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
+    assert.ok(page.url().includes('sourceAction=inspectAgain'), 'the safe file URL should carry the selected Action');
+    await page.goBack();
+    await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+    await page.waitForFunction(() => document.querySelector('.att-action-list [aria-pressed="true"] .att-action-name')?.textContent === 'inspectAgain');
+    assert.ok(page.url().includes('action=inspectAgain'), 'Back should restore the originating Action in the URL');
+    await page.goForward();
+    await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
+    await page.goBack();
+    await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+    assert.equal(await actionNodes.nth(2).getAttribute('aria-pressed'), 'true');
 
     await page.getByRole('tab', { name: 'Dependencies' }).click();
     await page.getByRole('button', { name: 'templates/SCHEDULED/payload/request.xml', exact: true }).waitFor();
