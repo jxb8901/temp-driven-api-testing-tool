@@ -154,13 +154,13 @@ class PackageResourceInspectorTest {
     @Test void redactionDropsAllYamlCommentsAndSuppressesLinksOnlyPresentInMaskedActionFields() throws Exception {
         Path root=packageWithTemplate("redacted-comments-and-action-metadata", "MASKED", "description: harmless");
         Path descriptor=root.resolve("templates/MASKED/template.yaml");
-        writeUtf8(root.resolve("templates/MASKED/request.xml"), "<request>safe</request>\\n");
-        String authored="schemaVersion: att-template/v3.6\\n"
-                +"# Safe public documentation note.\\n"
-                +"# Private mapping: internal-lane-kappa-velvet (not a recognizable secret pattern).\\n"
-                +"name: MASKED\\nactions:\\n"
-                +"  send:\\n    type: tool\\n    call: '&{./request.xml}'\\n"
-                +"    evidence:\\n      capture:\\n        payload: '&{./request.xml}'\\n";
+        writeUtf8(root.resolve("templates/MASKED/request.xml"), "<request>safe</request>\n");
+        String authored="schemaVersion: att-template/v3.6\n"
+                +"# Safe public documentation note.\n"
+                +"# Private mapping: internal-lane-kappa-velvet (not a recognizable secret pattern).\n"
+                +"name: MASKED\nactions:\n"
+                +"  send:\n    type: tool\n    call: '&{./request.xml}'\n"
+                +"    evidence:\n      capture:\n        payload: '&{./request.xml}'\n";
         writeUtf8(descriptor, authored);
         PackageResourceInspector unredacted=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
                 Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
