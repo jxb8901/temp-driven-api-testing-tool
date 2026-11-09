@@ -102,6 +102,7 @@ export interface ResourceSourceReference {
   resourceId: string;
   referenceId: string;
   returnTab?: 'definition' | 'source' | 'relations';
+  actionId?: string;
 }
 
 export interface EnvironmentProfile {
@@ -294,10 +295,10 @@ export interface ExplorerPageProps {
   api: ExplorerApi;
   packageId: string;
   /** Route values are untrusted URL segments; Explorer validates the type before API use. */
-  resourceRoute: { type: string; resourceId: string; logicalId?: string; tab?: 'definition' | 'source' | 'relations' } | null;
+  resourceRoute: { type: string; resourceId: string; logicalId?: string; tab?: 'definition' | 'source' | 'relations'; actionId?: string } | null;
   environment: string;
   principalLabel?: string;
-  onResourceRouteChange: (route: (Omit<ResourceIdentity, 'packageId'> & { logicalId?: string; tab?: 'definition' | 'source' | 'relations' }) | null) => void;
+  onResourceRouteChange: (route: (Omit<ResourceIdentity, 'packageId'> & { logicalId?: string; tab?: 'definition' | 'source' | 'relations'; actionId?: string }) | null) => void;
   onRunTarget?: (target: { type: string; resourceId: string; logicalId?: string }) => void;
   onRunBatch?: () => void;
   onJobAccepted: (jobId: string) => void;
