@@ -320,13 +320,25 @@ class PackageResourceInspectorTest {
             initial=inspector.sourceRevisionDigests(null);
         }
 
+        String absentManifestDigest=att.config.PackageConfig.load(root).digest();
+        writeUtf8(root.resolve(att.config.PackageConfig.FILE_NAME),"schemaVersion: att-package/v1\n");
+        Map<String,String> manifestChanged;
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.<String>emptyList(),65536,262144)) {
+            manifestChanged=inspector.sourceRevisionDigests(null);
+        }
+        assertNotEquals(absentManifestDigest,att.config.PackageConfig.load(root).digest());
+        assertEquals(initial.get("packageSourceRevision"),manifestChanged.get("packageSourceRevision"),
+                "Manifest-only changes belong to the separate Package Manifest revision domain");
+        assertNotEquals(initial.get("executionRevisionDigest"),manifestChanged.get("executionRevisionDigest"),
+                "Execution still invalidates when Package Manifest changes");
+
         writeUtf8(sharedConfig,new String(Files.readAllBytes(sharedConfig),StandardCharsets.UTF_8)+"# shared configuration only\n");
         Map<String,String> configChanged;
         try(PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.<String>emptyList(),65536,262144)) {
             configChanged=inspector.sourceRevisionDigests(null);
         }
         assertEquals(initial.get("packageSourceRevision"),configChanged.get("packageSourceRevision"));
-        assertNotEquals(initial.get("executionRevisionDigest"),configChanged.get("executionRevisionDigest"),
+        assertNotEquals(manifestChanged.get("executionRevisionDigest"),configChanged.get("executionRevisionDigest"),
                 "The execution revision remains bound to shared Runtime Config bytes");
 
         Map<String,String> engineA=revisionProbe(root,sharedConfig,"engine-build-a");
