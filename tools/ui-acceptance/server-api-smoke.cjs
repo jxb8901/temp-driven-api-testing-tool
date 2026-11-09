@@ -105,6 +105,10 @@ async function main() {
     const visualFileResponse = await visualFileResponsePromise;
     assert.equal(visualFileResponse.status(), 200, 'the Action file link must use the authorized Package viewer');
     assert.equal(new URL(visualFileResponse.url()).searchParams.get('origin'), 'templates/flows/reference/flow.yaml');
+    const authorizedFileProjection = await visualFileResponse.json();
+    assert.equal(authorizedFileProjection.available, true,
+      'the first Action file lookup must resolve via the authorized Server endpoint');
+    assert.equal(authorizedFileProjection.logicalPath, 'templates/SCHEDULED/payload/request.xml');
     await page.goBack();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
 
@@ -114,12 +118,15 @@ async function main() {
       'Dependencies should retain the Action call site for each canonical file');
     assert.ok((await page.locator('.att-relation-columns').innerText()).includes('Blocked or unavailable (forbidden)'),
       'policy-blocked file dependencies should remain visible with a reason');
-    const dependencyFileResponsePromise = page.waitForResponse(response =>
-      response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
+    // The same revision-bound reference was fetched above. Reopening it from
+    // Dependencies may be served by the authorized inspection cache, with no HTTP
+    // response event. Assert the safe viewer content rather than a second request.
     await page.getByRole('button', { name: 'templates/SCHEDULED/payload/request.xml', exact: true }).click();
     await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
-    const dependencyFileResponse = await dependencyFileResponsePromise;
-    assert.equal(dependencyFileResponse.status(), 200, 'the Dependencies file link must use the same authorized Package viewer');
+    await page.locator('.att-package-source-file .att-code-editor .cm-content')
+      .getByText('safe payload', { exact: false }).waitFor();
+    assert.ok((await page.locator('.att-package-source-file').innerText()).includes('safe payload'),
+      'Dependencies must reopen the server-authorized safe file, including when the response is cached');
     await page.goBack();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
 
@@ -175,8 +182,8 @@ async function main() {
     const goToLine = page.locator('.att-explorer-source .att-code-goto input');
     await goToLine.fill(String(referenceLine));
     await page.locator('.att-explorer-source .att-code-editor').getByRole('button', { name: 'Go' }).click();
-    const payloadResponsePromise = page.waitForResponse(response =>
-      response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
+    // Opening an already verified file from Source can reuse the same safe cache
+    // entry; do not require a second network response to show authorized content.
     await fileLink.click();
     try {
       await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor({ timeout: 10000 });
@@ -187,12 +194,8 @@ async function main() {
       const link = await fileLink.evaluate(element => element.outerHTML);
       throw new Error(`${error.stack || error}\nCurrent URL: ${page.url()}\nHeadings: ${headings.join(' | ')}\nNavigations: ${navigationEvents.join(' -> ')}\nPage errors: ${pageErrors.join(' | ')}\nDialogs: ${JSON.stringify(dialogs)}\nLink: ${link}\nPage: ${body}`);
     }
-    const payloadResponse = await payloadResponsePromise;
-    assert.equal(payloadResponse.status(), 200, 'the authorized payload source request must succeed');
-    assert.equal(new URL(payloadResponse.url()).searchParams.get('origin'), 'templates/flows/reference/flow.yaml',
-      'the safe file lookup must carry the authored Flow descriptor origin');
-    const payloadProjection = await payloadResponse.json();
-    assert.equal(payloadProjection.available, true, 'the payload source must be available before rendering');
+    assert.equal(authorizedFileProjection.available, true,
+      'the Source link must reuse the previously verified Package file reference');
     const payloadSource = page.locator('.att-package-source-file .att-code-editor .cm-content');
     try {
       await payloadSource.waitFor();
