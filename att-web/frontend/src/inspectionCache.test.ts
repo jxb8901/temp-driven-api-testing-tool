@@ -100,6 +100,13 @@ describe('inspection session memory', () => {
     expect(cache.getView('filters')).toEqual({ query: 'checkout' });
   });
 
+  it('notifies mounted package readers when publication invalidates Package projections', () => {
+    const cache = new InspectionQueryCache();
+    const mountedReader = vi.fn(); cache.subscribe(mountedReader);
+    cache.invalidatePackage('payments');
+    expect(mountedReader).toHaveBeenCalledTimes(1);
+  });
+
   it('invalidates old pages and outstanding reads on a package revision change', async () => {
     const cache = new InspectionQueryCache();
     cache.revision('demo', 'v1');

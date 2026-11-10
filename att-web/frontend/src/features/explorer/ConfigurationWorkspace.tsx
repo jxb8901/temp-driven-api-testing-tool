@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
 import { ConfigurationExplorer } from './ConfigurationExplorer';
 import type { ConfigurationFileNode, ExplorerApi, ResourceReference, ResourceSourceReference, SourceProjection } from './types';
+import { SourceAuthoringWorkspace } from './SourceAuthoringWorkspace';
 import './configuration-workspace.css';
 
 type WorkspaceTab = 'source' | 'declared' | 'effective' | 'compare';
@@ -20,6 +21,8 @@ interface ConfigurationWorkspaceProps {
   onTabChange(tab: WorkspaceTab): void;
   onOpenResource(resource: { type: string; resourceId: string }): void;
   canRevealAdminFields?: boolean;
+  canManageCentralConfiguration?: boolean;
+  registerUnsavedChanges?: (isDirty: boolean, description?: string) => () => void;
 }
 interface DirectoryState { items: ConfigurationFileNode[]; loading: boolean; error: string; truncated?: boolean; nextOffset?: number | null }
 
@@ -33,7 +36,7 @@ function errorText(error: unknown, action: string): string {
   if (status) return `${action} failed (HTTP ${status}).`;
   return `Could not ${action}. Check the connection and retry.`;
 }
-export function ConfigurationWorkspace({ api, packageId, environment, filePath, fileOrigin, sourceReference, configurationReferenceId, tab, onEnvironmentChange, onFileChange, onTabChange, onOpenResource, canRevealAdminFields = false }: ConfigurationWorkspaceProps) {
+export function ConfigurationWorkspace({ api, packageId, environment, filePath, fileOrigin, sourceReference, configurationReferenceId, tab, onEnvironmentChange, onFileChange, onTabChange, onOpenResource, canRevealAdminFields = false, canManageCentralConfiguration = false, registerUnsavedChanges }: ConfigurationWorkspaceProps) {
   const inspectionRefresh = useInspectionRefresh(true);
   const [declared, setDeclared] = useState<Awaited<ReturnType<ExplorerApi['getDeclaredConfiguration']>> | null>(null);
   const [directoryMap, setDirectoryMap] = useState<Record<string, DirectoryState>>({});
@@ -263,13 +266,23 @@ export function ConfigurationWorkspace({ api, packageId, environment, filePath, 
           {sourceError && <p className="att-error" role="alert">{sourceError}<button type="button" onClick={() => filePath && void loadDirectory(filePath.split('/').slice(0, -1).join('/'))}>Refresh file list</button></p>}
           {source && !source.available && <div className="att-config-unavailable"><h3>Source is not available</h3><p>The Server withheld or could not read this file. Its path and safe metadata remain visible.</p></div>}
           {source?.available && source.text.includes('&{') && !source.fileReferences?.some(item => item.referenceId && item.available !== false) && <p className="att-config-tree-message" role="status">The Server did not authorize any referenced files for navigation from this source.</p>}
-          {source?.available && <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || filePath || source.format || '')} label={`Safe source ${filePath || ''}`} readOnly sourcePath={source.logicalPath || filePath} fileReferences={source.fileReferences || []} onFileReference={(_locator, origin, referenceId) => {
+          {source?.available && (canManageCentralConfiguration && !sourceReference
+            ? <details className="att-config-safe-source"><summary>Safe inspection projection</summary><CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || filePath || source.format || '')} label={`Safe source ${filePath || ''}`} readOnly sourcePath={source.logicalPath || filePath} fileReferences={source.fileReferences || []} onFileReference={(_locator, origin, referenceId) => {
             const reference = source.fileReferences?.find(item => item.referenceId === referenceId && item.available !== false);
             if (!reference) return;
             const nextOrigin = source.logicalPath || origin;
-            if (sourceReference) onFileChange(reference.logicalPath, nextOrigin, { ...sourceReference, referenceId: reference.referenceId });
-            else onFileChange(reference.logicalPath, nextOrigin, undefined, reference.referenceId);
-          }} maxCharacters={200_000} />}
+            onFileChange(reference.logicalPath, nextOrigin, undefined, reference.referenceId);
+          }} maxCharacters={200_000} /></details>
+            : <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || filePath || source.format || '')} label={`Safe source ${filePath || ''}`} readOnly sourcePath={source.logicalPath || filePath} fileReferences={source.fileReferences || []} onFileReference={(_locator, origin, referenceId) => {
+              const reference = source.fileReferences?.find(item => item.referenceId === referenceId && item.available !== false);
+              if (!reference) return;
+              const nextOrigin = source.logicalPath || origin;
+              if (sourceReference) onFileChange(reference.logicalPath, nextOrigin, { ...sourceReference, referenceId: reference.referenceId });
+              else onFileChange(reference.logicalPath, nextOrigin, undefined, reference.referenceId);
+            }} maxCharacters={200_000} />)}
+          {tab === 'source' && filePath && !sourceReference && canManageCentralConfiguration && <SourceAuthoringWorkspace api={api}
+            target={{ domain: 'CENTRAL_RUNTIME_CONFIG', path: source?.logicalPath || filePath, label: `Shared Runtime Configuration · ${source?.logicalPath || filePath}` }}
+            canManageCentral={canManageCentralConfiguration} registerUnsavedChanges={registerUnsavedChanges} />}
           {!filePath && !sourceLoading && <div className="att-config-empty"><h3>Select a file</h3><p>Choose a configuration file to inspect its safe source.</p></div>}
         </section>}
         {(tab === 'declared' || tab === 'effective' || tab === 'compare') && <ConfigurationExplorer

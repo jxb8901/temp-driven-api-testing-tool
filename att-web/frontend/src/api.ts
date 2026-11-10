@@ -20,6 +20,10 @@ import type {
   SchedulePreviewInput,
 } from './features/schedules/types';
 import { normalizeSchedule, scheduleTransport } from './features/schedules/types';
+import type {
+  ManagedAuthoringSource, PackageAuthoringSourceQuery, SourceChangeAction, SourceChangeSet,
+  SourceDomain, SourceImpactReport, SourceImpactAcknowledgement, SourceOperation, SourcePublishResult, SourceSnapshotRequest,
+} from './features/explorer/sourceManagement';
 
 export interface ServerJobStorageMetrics {
   enabled?: boolean;
@@ -432,6 +436,54 @@ export const api = {
   },
   getPackageAuthoringSource(packageId: string, signal?: AbortSignal): Promise<AuthoringSourceProjection> {
     return request('packages/' + encodeURIComponent(packageId) + '/authoring-source' + queryString({ type: 'manifest' }), { signal });
+  },
+  getManagedPackageAuthoringSource(packageId: string, query: PackageAuthoringSourceQuery, signal?: AbortSignal): Promise<ManagedAuthoringSource> {
+    return request('packages/' + encodeURIComponent(packageId) + '/authoring-source' + queryString({
+      type: query.kind,
+      resourceType: query.resourceType,
+      resourceId: query.resourceId,
+      path: query.path,
+      origin: query.origin,
+      referenceId: query.referenceId,
+      environment: query.environment,
+    }), { signal, cache: 'no-store' });
+  },
+  getCentralAuthoringSource(path: string, signal?: AbortSignal): Promise<ManagedAuthoringSource> {
+    return request('configuration/authoring-source' + queryString({ path }), { signal, cache: 'no-store' });
+  },
+  stageSourceChangeSet(domain: SourceDomain, scopeId: string, baseSourceRevision: string,
+    registryRevision: string | undefined, operations: SourceOperation[], signal?: AbortSignal): Promise<SourceChangeSet> {
+    const path = domain === 'PACKAGE_SOURCE'
+      ? 'packages/' + encodeURIComponent(scopeId) + '/change-sets'
+      : 'configuration/change-sets';
+    return postJson<SourceChangeSet>(path, {
+      baseSourceRevision,
+      ...(domain === 'PACKAGE_SOURCE' ? { registryRevision } : {}),
+      operations,
+    }, signal);
+  },
+  async sourceChangeSetAction(domain: SourceDomain, scopeId: string, changeSetId: string,
+    action: SourceChangeAction, signal?: AbortSignal, impactAcknowledgement?: SourceImpactAcknowledgement): Promise<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }> {
+    const base = domain === 'PACKAGE_SOURCE'
+      ? 'packages/' + encodeURIComponent(scopeId) + '/change-sets'
+      : 'configuration/change-sets';
+    const result = await postJson<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }>(
+      base + '/' + encodeURIComponent(changeSetId) + '/' + action,
+      action === 'publish' && domain === 'CENTRAL_RUNTIME_CONFIG' && impactAcknowledgement ? { impactAcknowledgement } : {}, signal);
+    if (action === 'publish' && 'published' in result && result.published) {
+      if (domain === 'PACKAGE_SOURCE') inspectionCache.invalidatePackage(scopeId);
+      else inspectionCache.clear();
+    }
+    return result;
+  },
+  generateTestcaseSnapshot(packageId: string, changeSetId: string, input: SourceSnapshotRequest,
+    signal?: AbortSignal): Promise<SourceChangeSet> {
+    return postJson('packages/' + encodeURIComponent(packageId) + '/change-sets/'
+      + encodeURIComponent(changeSetId) + '/generate-snapshot', input, signal);
+  },
+  getCentralConfigImpact(changeSetId: string, cursor?: string, signal?: AbortSignal): Promise<SourceImpactReport> {
+    return request<SourceImpactReport>('configuration/change-sets/'
+      + encodeURIComponent(changeSetId) + '/impact' + queryString({ cursor }), { signal, cache: 'no-store' });
   },
   stagePackageManifest(packageId: string, source: string, expectedManifestDigest: string, signal?: AbortSignal): Promise<ManifestDraft> {
     return postJson('packages/' + encodeURIComponent(packageId) + '/package-configuration/drafts', { source, expectedManifestDigest }, signal);

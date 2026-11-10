@@ -71,10 +71,11 @@ export class InspectionQueryCache {
       if (path.startsWith(marker) && path !== exceptPath) { flight.controller.abort(); this.flights.delete(key); }
     }
     this.views.clear(); this.revisions.delete(packageId);
+    this.notify();
   }
   revision(packageId: string, revision: string, path?: string) {
     const previous = this.revisions.get(packageId);
-    if (previous && previous !== revision) { this.invalidatePackage(packageId, path); this.notify(); }
+    if (previous && previous !== revision) this.invalidatePackage(packageId, path);
     this.revisions.set(packageId, revision);
     while (this.revisions.size > 32) this.revisions.delete(this.revisions.keys().next().value!);
   }

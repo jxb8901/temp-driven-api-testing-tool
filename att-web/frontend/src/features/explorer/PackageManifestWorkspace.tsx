@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
+import { AppShellContext } from '../../AppShell';
 import { CodeEditor } from '../code/CodeEditor';
 import type { ManifestDraft, ManifestHistory, ManifestProjection, ManifestView, PackageManifestApi } from './packageManifest';
 import './configuration-workspace.css';
@@ -19,6 +20,7 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
   registerUnsavedChanges?: (dirty: boolean, description?: string) => () => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const workspace = useContext(AppShellContext);
   const [view, setView] = useState<ManifestView>('effective');
   const [environment, setEnvironment] = useState('');
   const [selection, setSelection] = useState('');
@@ -32,6 +34,10 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
   const [message, setMessage] = useState('');
   const [revision, refresh] = useState(0);
   const dirty = source !== baseline || !!draft;
+  useEffect(() => {
+    workspace?.setWorkspaceEditorLock?.(Boolean(projection?.canEdit && (view === 'source' || dirty)));
+    return () => workspace?.setWorkspaceEditorLock?.(false);
+  }, [workspace?.setWorkspaceEditorLock, projection?.canEdit, view, dirty]);
   useEffect(() => registerUnsavedChanges?.(dirty, 'unpublished Package Manifest changes'), [dirty, registerUnsavedChanges]);
   useEffect(() => { onDirtyChange?.(dirty);return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
   const request = useRef<AbortController | null>(null);

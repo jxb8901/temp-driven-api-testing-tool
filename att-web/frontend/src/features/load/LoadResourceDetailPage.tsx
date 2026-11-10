@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../types';
 import type { LoadCatalogDetail, ServerDiagnostic } from './types';
 import { CodeEditor } from '../code/CodeEditor';
+import type { ExplorerApi } from '../explorer/types';
+import { SourceAuthoringWorkspace } from '../explorer/SourceAuthoringWorkspace';
 import './load.css';
 
 type DetailApi = {
@@ -62,7 +64,7 @@ function DetailSection({ title, value }: { title: string; value: unknown }) {
 }
 
 export function LoadResourceDetailPage({ api, packageId, resourceId, environment, environments, environmentState = 'ready',
-  environmentNotice, inlineLoadEnabled, onEnvironmentChange, onRetryEnvironments, onBack, onQuickLoad }: {
+  environmentNotice, inlineLoadEnabled, onEnvironmentChange, onRetryEnvironments, onBack, onQuickLoad, registerUnsavedChanges }: {
   api: DetailApi;
   packageId: string;
   resourceId: string;
@@ -75,6 +77,7 @@ export function LoadResourceDetailPage({ api, packageId, resourceId, environment
   onRetryEnvironments?(): void;
   onBack(): void;
   onQuickLoad(packageId: string, detail: LoadCatalogDetail): void;
+  registerUnsavedChanges?: (isDirty: boolean, description?: string) => () => void;
 }) {
   const [detail, setDetail] = useState<LoadCatalogDetail | null>(null);
   const [detailState, setDetailState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -248,6 +251,9 @@ export function LoadResourceDetailPage({ api, packageId, resourceId, environment
         {sourceState === 'error' && <p role="alert" className="att-inline-error">{source.reason}</p>}
         {sourceState === 'ready' && <>{source.redacted && <p role="status">Sensitive values are redacted in this source view.</p>}
           <CodeEditor value={source.text || ''} language="yaml" label="Load YAML Source" readOnly /></>}
+        {detail.path && <SourceAuthoringWorkspace api={api as unknown as ExplorerApi} target={{ domain: 'PACKAGE_SOURCE', packageId,
+          query: { kind: 'load', path: detail.path }, label: `LOAD source · ${detail.path}`, allowFileOperations: true, allowCreate: true }}
+          registerUnsavedChanges={registerUnsavedChanges} />}
       </section>
     </>}
   </main>;

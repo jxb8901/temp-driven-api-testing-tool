@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
 import { ResourceTree, resourceKey } from './ResourceTree';
+import { SourceAuthoringWorkspace } from './SourceAuthoringWorkspace';
+import { PackageFileCatalog } from './PackageFileCatalog';
 import { SourceViewer } from './SourceViewer';
+import { TestcaseAuthoringWorkspace } from './TestcaseAuthoringWorkspace';
 import { ActionInspector } from './ActionInspector';
 import { CodeEditor } from '../code/CodeEditor';
 import { TypedSidecarForm } from './TypedSidecarForm';
@@ -114,10 +117,13 @@ function ExplorerReference({ reference, onOpen, onOpenFile, sourceIdentity }: {
 
 export function ExplorerPage({ api, packageId, resourceRoute, environment,
   principalLabel = '', onResourceRouteChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad,
-  onRunTarget, onRunBatch, onScheduleDebug, onOpenConfigurationFile, onOpenTestdata, registerUnsavedChanges }: ExplorerPageProps) {
+  onRunTarget, onRunBatch, onScheduleDebug, onOpenConfigurationFile, onOpenTestdata, registerUnsavedChanges,
+  canManagePackageSource = false }: ExplorerPageProps) {
   const initialListState = useRef(savedExplorerList(packageId)).current;
   const [query, setQuery] = useState(initialListState.query);
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
+  const [listView, setListView] = useState<'resources' | 'files'>('resources');
+  const [newTestcaseOpen, setNewTestcaseOpen] = useState(false);
   const [sortKey, setSortKey] = useState<ResourceSortField>(initialListState.sortKey);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(initialListState.sortDirection);
   const [resources, setResources] = useState<ResourceSummary[]>([]);
@@ -469,14 +475,21 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
 
   return <main className="page-content att-explorer-page">
     <header className="att-explorer-page-heading">
-      <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>{identity ? 'Resource details' : 'Package Explorer'}</h1>
+      <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>{identity ? 'Resource details' : newTestcaseOpen ? 'New Testcase' : 'Package Explorer'}</h1>
         <p>{identity ? 'View the safe definition, source, and dependencies for this resource.' : 'Search, sort, and open resources. Choose an execution environment from the RUN or Quick LOAD editor.'}</p></div>
       {!identity && onRunBatch && <button className="button button-primary" type="button" onClick={onRunBatch}>Batch RUN</button>}
     </header>
 
     <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}${identity ? '' : ' att-query-workspace'}`}>
-      <aside className="att-explorer-navigation" aria-label="Resource navigation" hidden={Boolean(identity)}>
-        {onOpenTestdata && <nav className="att-explorer-view-nav" aria-label="Package Explorer views"><button type="button" onClick={onOpenTestdata}>Testdata</button></nav>}
+      <aside className="att-explorer-navigation" aria-label="Resource navigation" hidden={Boolean(identity || newTestcaseOpen)}>
+        <nav className="att-explorer-view-nav" aria-label="Package Explorer views">
+          <button type="button" aria-pressed={listView === 'resources'} onClick={() => setListView('resources')}>Resources</button>
+          <button type="button" aria-pressed={listView === 'files'} onClick={() => setListView('files')}>File</button>
+          {canManagePackageSource && <button type="button" onClick={() => setNewTestcaseOpen(true)}>New Testcase</button>}
+          {onOpenTestdata && <button type="button" onClick={onOpenTestdata}>Testdata</button>}
+        </nav>
+        {listView === 'files' ? <PackageFileCatalog api={api} packageId={packageId}
+          onOpenFile={(path, origin, reference) => onOpenConfigurationFile?.(path, origin, reference)} /> : <>
         <section className="att-query-filter-panel" aria-label="Resource filters">
           <h2>Resources</h2>
           <div className="att-query-filter-grid">
@@ -504,10 +517,13 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
             onLoadMore={() => void loadMore()} scrollContainerRef={resourceListRef} onListScroll={handleListScroll} />
           <p className="att-explorer-total">{totalResources.toLocaleString()} {typeFilter === 'all' ? 'package resources' : typeFilter + ' resources'}</p>
         </section>
+        </>}
       </aside>
 
-      <section className="att-explorer-detail" aria-label="Resource details" hidden={!identity}>
-        {!identity && <div className="att-explorer-empty-state"><h2>Select a resource</h2><p>Choose a Case, Template, Flow, or Tool from the resource list.</p></div>}
+      <section className="att-explorer-detail" aria-label={newTestcaseOpen ? 'New Testcase authoring' : 'Resource details'} hidden={!identity && !newTestcaseOpen}>
+        {!identity && !newTestcaseOpen && <div className="att-explorer-empty-state"><h2>Select a resource</h2><p>Choose a Case, Template, Flow, or Tool from the resource list.</p></div>}
+        {!identity && newTestcaseOpen && <TestcaseAuthoringWorkspace key={`${packageId}:new-testcase`} api={api} packageId={packageId}
+          onBack={() => setNewTestcaseOpen(false)} registerUnsavedChanges={registerUnsavedChanges} />}
         {identity && <>
           <button className="button button-quiet" type="button" onClick={() => onResourceRouteChange(null)}>Back to resources</button>
           <header className="att-resource-title">
@@ -551,7 +567,17 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
                 : <CodeEditor value={detailText} language="json" label="Safe resource definition" readOnly sourcePath={detail?.sourcePath} fileReferences={[]} />}
           </section>
           {sourceIdentity && <section id="att-explorer-panel-source" role="tabpanel" aria-labelledby="att-explorer-tab-source" hidden={tab !== 'source'}>
-            <SourceViewer api={api} identity={sourceIdentity} available={detail?.sourceAvailable === true} active={tab === 'source'} resource={detail} onFileReference={onOpenConfigurationFile} />
+            {tab === 'source' && (sourceIdentity.type === 'case' ? <>
+              <SourceViewer api={api} identity={sourceIdentity} available={detail?.sourceAvailable === true} active resource={detail}
+                onFileReference={(path, origin, reference) => onOpenConfigurationFile?.(path, origin, reference)} />
+              <TestcaseAuthoringWorkspace key={`${packageId}:${sourceIdentity.resourceId}`} api={api} packageId={packageId} sourcePath={detail?.sourcePath}
+                registerUnsavedChanges={registerUnsavedChanges} />
+            </> : <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
+                query: { kind: 'resource', resourceType: sourceIdentity.type, resourceId: sourceIdentity.resourceId },
+                label: `${sourceIdentity.type} source`, fallbackIdentity: sourceIdentity,
+                fallbackAvailable: detail?.sourceAvailable === true, allowFileOperations: true, allowCreate: true }}
+                registerUnsavedChanges={registerUnsavedChanges}
+                onOpenFileReference={(path, origin, reference) => onOpenConfigurationFile?.(path, origin, reference)} />)}
           </section>}
           <section id="att-explorer-panel-relations" role="tabpanel" aria-labelledby="att-explorer-tab-relations" hidden={tab !== 'relations'}>
             <div className="att-relation-columns">
