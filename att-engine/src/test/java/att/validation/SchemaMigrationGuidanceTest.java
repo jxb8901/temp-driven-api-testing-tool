@@ -23,6 +23,22 @@ class SchemaMigrationGuidanceTest {
     }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
+    @Test void twoClassloadersCanHoldNonOverlappingLeasesWithoutAllowingCacheDeletion() throws Exception {
+        Path schema=SchemaFiles.resolve(root,"att-flow-v3.6.schema.json");
+        Path leaseFile=schema.getParent().getParent().resolve(".cache-use.lock");
+        try(java.nio.channels.FileChannel second=java.nio.channels.FileChannel.open(leaseFile,
+                java.nio.file.StandardOpenOption.READ,java.nio.file.StandardOpenOption.WRITE)) {
+            // The Engine's own lease uses a distinct random nonzero byte range.
+            // Another classloader can take byte zero in the same JVM.
+            try(java.nio.channels.FileLock other=second.tryLock(0L,1L,true)) {
+                assertNotNull(other);
+                assertThrows(java.nio.channels.OverlappingFileLockException.class,
+                        ()->second.tryLock(0L,Long.MAX_VALUE,false),
+                        "The cache reaper must never acquire a whole-file exclusive lock while in use");
+            }
+        }
+    }
+
     @Test void releasingServletClassloaderSchemaLeaseAllowsVerifiedReinitialization() throws Exception {
         String initial=SchemaFiles.registryDigest();
         Path initialSchema=SchemaFiles.resolve(root,"att-flow-v3.6.schema.json");
