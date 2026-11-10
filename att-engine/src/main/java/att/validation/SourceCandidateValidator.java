@@ -229,7 +229,7 @@ public final class SourceCandidateValidator {
         collectManifestDependencies(pkg, packageId, bindings);
         collectFileDependencies(pkg, packageId, selected, effective, bindings);
         collectPackageResourceDependencies(pkg, config, effective, packageId, selected, bindings);
-        if(loadScenarioPath!=null&&!loadScenarioPath.isBlank()) {
+        if(loadScenarioPath!=null&&!loadScenarioPath.trim().isEmpty()) {
             PackageResourceResolver.PackageResource source=new PackageResourceResolver(pkg)
                     .resolvePackageRelative(loadScenarioPath,PackageResourceResolver.Kind.FILE);
             collectLoadScenarioDependencies(pkg,packageId,selected,effective,
