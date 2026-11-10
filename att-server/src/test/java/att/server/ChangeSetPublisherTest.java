@@ -305,6 +305,7 @@ class ChangeSetPublisherTest {
         Arrays.fill(workbookBytes, (byte) 0x5A);
         Files.write(workbook, workbookBytes);
         ChangeSetPublisher publisher = publisher(candidate -> {
+            validatorCalls.incrementAndGet();
             assertTrue(candidate.files().contains("testcase/orders.xlsx"));
             assertArrayEquals(workbookBytes, candidate.read("testcase/orders.xlsx"));
             return ChangeSetPublisher.ValidationResult.accepted(VALIDATION_REVISION);
