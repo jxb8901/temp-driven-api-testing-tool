@@ -101,6 +101,26 @@ class ClosedVuSchedulerTest {
     }
 
     @Test
+    void delayedVirtualWorkerCannotOverflowTheRunClockAtItsDeadline() throws Exception {
+        LoadScenario scenario = scenario(1, 0L, 0L, 5L, 0L, 0L);
+        FakeTiming fake = new FakeTiming();
+        AtomicInteger calls = new AtomicInteger();
+        LoadIterationRunner runner = request -> {
+            calls.incrementAndGet();
+            try { Thread.sleep(20L); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            fake.advance(5L);
+            return result(request.iterationId(), ResultStatus.PASS);
+        };
+
+        LoadRunResult result = new ClosedVuScheduler(scenario, runner, "virtual-deadline",
+                (java.util.function.Consumer<LoadEvent>) null, fake.timing()).run();
+        assertEquals(1, calls.get(), "An in-flight worker must not cause clock overflow and extra VU iterations");
+        assertEquals(5L, result.endedAt().toEpochMilli() - result.startedAt().toEpochMilli());
+        assertEquals(1L, result.metrics().longValue("completed"));
+    }
+
+    @Test
     void anIterationFailureIsRecordedWithoutStoppingTheVirtualUser() throws Exception {
         LoadScenario scenario = scenario(1, 0L, 0L, 20L, 0L, 0L);
         FakeTiming fake = new FakeTiming();

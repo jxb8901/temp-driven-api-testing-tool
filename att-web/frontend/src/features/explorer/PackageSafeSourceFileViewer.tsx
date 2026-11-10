@@ -62,6 +62,8 @@ export function PackageSafeSourceFileViewer({ api, packageId, filePath, fileOrig
     if (!identity || reference.available === false) return;
     onOpenFile(reference.logicalPath, projection?.logicalPath || filePath, {
       type: identity.type, resourceId: identity.resourceId, referenceId: reference.referenceId,
+      returnTab: sourceReference?.returnTab || 'source',
+      ...(sourceReference?.actionId ? { actionId: sourceReference.actionId } : {}),
     });
   };
 
