@@ -1014,7 +1014,6 @@ public final class PackageResourceInspector implements AutoCloseable {
         resolveReferences(index, config);
         resolveReadiness(index, config);
         index.revisionDigest = digestFiles(index.files, index.debugSidecars, index.quickLoadPolicies);
-        index.packageSourceRevisionDigest = digestPackageFiles();
         Collections.sort(index.ordered, new Comparator<Resource>() {
             @Override public int compare(Resource left, Resource right) {
                 return left.resourceId.compareTo(right.resourceId);
@@ -1628,7 +1627,10 @@ public final class PackageResourceInspector implements AutoCloseable {
     public String executionRevisionDigest() throws Exception { return refreshedIndexForVerification().revisionDigest; }
 
     /** Revision of the indexed content rooted in this Package, without Engine or shared configuration identity. */
-    public String packageSourceRevisionDigest() throws Exception { return refreshedIndexForVerification().packageSourceRevisionDigest; }
+    public String packageSourceRevisionDigest() throws Exception {
+        Index index = refreshedIndexForVerification();
+        return digestPackageFiles(index);
+    }
 
     /** Returns both authoring and execution revisions from one fresh inspection snapshot. */
     public Map<String, String> sourceRevisionDigests(String expectedExecutionRevisionDigest) throws Exception {
@@ -1636,7 +1638,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         requireExpectedRevision(index, expectedExecutionRevisionDigest);
         Map<String, String> result = new LinkedHashMap<String, String>();
         result.put("executionRevisionDigest", index.revisionDigest);
-        result.put("packageSourceRevision", index.packageSourceRevisionDigest);
+        result.put("packageSourceRevision", digestPackageFiles(index));
         return result;
     }
 
@@ -2876,22 +2878,26 @@ public final class PackageResourceInspector implements AutoCloseable {
         return hex(digest.digest());
     }
 
-    private String digestPackageFiles() throws Exception {
+    /**
+     * Authoring identity is calculated only for /scope (revision inspection), never
+     * for ordinary list/detail/catalog or execution-index construction. Only files
+     * already discovered by the resource index are eligible: unreferenced archives,
+     * generated output, VCS objects and arbitrary directories are not Package
+     * source, even when they happen to be under packageRoot.
+     */
+    private String digestPackageFiles(Index index) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update(utf8("ATT_PACKAGE_INDEXED_SOURCES_V1"));
+        digest.update((byte) 0);
         List<Path> ordered = new ArrayList<Path>();
-        try (java.util.stream.Stream<Path> paths = Files.walk(packageRoot, 64)) {
-            java.util.Iterator<Path> candidates = paths.iterator();
-            while (candidates.hasNext()) {
-                Path candidate = candidates.next();
-                // Package Manifest has its own authoritative revision domain.
-                // An edit to package.yaml must not change the Package *source*
-                // revision when all other Package source bytes are unchanged.
-                if (candidate.equals(packageRoot) || candidate.equals(packageRoot.resolve(att.config.PackageConfig.FILE_NAME))
-                        || Files.isSymbolicLink(candidate) || !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
-                if (ordered.size() >= MAX_PACKAGE_SOURCE_FILES)
-                    throw new ResourceLimitException("resourceInspector.maxPackageSourceFiles", MAX_PACKAGE_SOURCE_FILES, ordered.size() + 1L);
-                ordered.add(resources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE).canonicalPath());
-            }
+        Path manifestPath = packageRoot.resolve(att.config.PackageConfig.FILE_NAME).toAbsolutePath().normalize();
+        for (Path candidate : index.files) {
+            Path path = candidate.toAbsolutePath().normalize();
+            // Central config and the Package Manifest have separate revision domains.
+            if (!path.startsWith(packageRoot) || path.equals(manifestPath)) continue;
+            if (ordered.size() >= MAX_PACKAGE_SOURCE_FILES)
+                throw new ResourceLimitException("resourceInspector.maxPackageSourceFiles", MAX_PACKAGE_SOURCE_FILES, ordered.size() + 1L);
+            ordered.add(resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE).canonicalPath());
         }
         Collections.sort(ordered);
         long total = 0;
@@ -2905,14 +2911,13 @@ public final class PackageResourceInspector implements AutoCloseable {
                 while ((read = input.read(buffer)) >= 0) {
                     InspectionMetrics.JVM.add(READ_BYTES, read);
                     total += read;
-                    if (total > MAX_REVISION_BYTES) throw new ResourceLimitException("resourceInspector.maxRevisionBytes", MAX_REVISION_BYTES, total);
+                    if (total > MAX_REVISION_BYTES)
+                        throw new ResourceLimitException("resourceInspector.maxRevisionBytes", MAX_REVISION_BYTES, total);
                     digest.update(buffer, 0, read);
                 }
             }
             digest.update((byte) 0xff);
         }
-        // Only Package-resident source paths and their bytes participate here.
-        // Manifest, Runtime Config and Engine identities are published separately.
         return hex(digest.digest());
     }
 
@@ -3221,7 +3226,6 @@ public final class PackageResourceInspector implements AutoCloseable {
         final Map<String, Path> debugSidecars = new TreeMap<String, Path>();
         final Map<String, Path> quickLoadPolicies = new TreeMap<String, Path>();
         String revisionDigest;
-        String packageSourceRevisionDigest;
         boolean prewarmCompatible;
 
         void add(Resource resource) {
