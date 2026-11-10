@@ -334,6 +334,9 @@ public final class SourceCandidateValidator {
         String selected = environment == null || environment.trim().isEmpty() ? "default" : environment.trim();
         FrameworkConfig effective = new FrameworkConfigLoader().loadDiscovery(config, runtime, pkg,
                 "default".equalsIgnoreCase(selected) ? null : selected);
+        if (!hasTemplateTree(pkg, effective.templatesRoot()))
+            return FileExpressionResolver.FileExpressionSnapshot.merge(pkg,
+                    Collections.<FileExpressionResolver.FileExpressionSnapshot>emptyList()).serialize();
         StageTemplateLoader templates = new StageTemplateLoader(pkg, effective.templatesRoot(), false);
         FlowRegistry flows = new FlowRegistry(pkg, effective.templatesRoot(), false);
         List<FileExpressionResolver.FileExpressionSnapshot> snapshots = new ArrayList<FileExpressionResolver.FileExpressionSnapshot>();
@@ -587,9 +590,24 @@ public final class SourceCandidateValidator {
         }
     }
 
+    /**
+     * Optional roots are valid for Packages that only expose Testcases, or for
+     * server-side fault/admission fixtures with no runnable template catalog.
+     * An existing non-directory or symlink still fails closed.
+     */
+    private static boolean hasTemplateTree(Path packageRoot, Path configured) throws IOException {
+        Path root=packageRoot.resolve(configured).normalize();
+        if(!root.startsWith(packageRoot))throw new IllegalArgumentException("Templates root escapes the Package");
+        if(!Files.exists(root, LinkOption.NOFOLLOW_LINKS))return false;
+        if(Files.isSymbolicLink(root)||!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Configured templates root is not a safe directory");
+        return true;
+    }
+
     private static void collectFileDependencies(Path packageRoot, String packageId, String environment,
                                                FrameworkConfig config,
                                                List<DependencyReference> output) throws Exception {
+        if(!hasTemplateTree(packageRoot,config.templatesRoot()))return;
         StageTemplateLoader templates = new StageTemplateLoader(packageRoot, config.templatesRoot(), false);
         FlowRegistry flows = new FlowRegistry(packageRoot, config.templatesRoot(), false);
         Map<String, DependencyReference> found = new LinkedHashMap<String, DependencyReference>();
