@@ -4800,8 +4800,11 @@ final class ServerRuntime implements AutoCloseable {
     }
     void deleteLoadSchedule(String id,String principal) throws Exception {requireSchedulingEnabled();requireLocalOperator(principal);LoadSchedule schedule=store.schedule(id);if(schedule==null)throw new NotFoundException();store.deleteSchedule(id);releaseScheduleSource(schedule);store.audit(principal,"SCHEDULE_DELETE",null,schedule.packageId,"DELETED");}
     Map<String,Object> triggerLoadSchedule(String id,String principal) throws Exception {
-        sourcePublicationBarrier.readLock().lock();
-        try {
+        // Never acquire the publication read fence before taking the Scheduler monitor.
+        // Automatic occurrences take the Scheduler monitor before their admission fence;
+        // reversing that order deadlocks when a publication writer queues in between.
+        // submitScheduledJob() rechecks the authoritative persisted approval and obtains
+        // the publication fence across preparation and actual admission for both triggers.
         requireSchedulingEnabled();requireLocalOperator(principal);
         LoadSchedule current=store.schedule(id);if(current==null)throw new NotFoundException();
         requireScheduleConfigurationReview(current);
@@ -4812,7 +4815,6 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> occurrence=loadScheduleScheduler.trigger(schedule,executionPrincipal,principal);
         store.audit(principal,"SCHEDULE_TRIGGER",String.valueOf(occurrence.get("jobId")),schedule.packageId,String.valueOf(occurrence.get("status")));
         return occurrence;
-        } finally { sourcePublicationBarrier.readLock().unlock(); }
     }
 
     private void requireLocalOperator(String principal) throws Exception {

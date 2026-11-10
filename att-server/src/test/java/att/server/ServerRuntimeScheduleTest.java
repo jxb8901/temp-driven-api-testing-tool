@@ -648,6 +648,53 @@ class ServerRuntimeScheduleTest {
         } finally {runtime.close();}
     }
 
+    @Test void manualTriggerDoesNotHoldPublicationReadLockWhileWaitingForSchedulerMonitor() throws Exception {
+        ScheduleRaceFixture fixture=scheduleRaceFixture("manual-scheduler-publication-order");
+        try(ServerRuntime runtime=new ServerRuntime(fixture.config,fixture.libs)) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            LoadSchedule schedule=fixture.createSchedule(runtime,false);
+            var schedulerField=ServerRuntime.class.getDeclaredField("loadScheduleScheduler");
+            schedulerField.setAccessible(true);
+            LoadScheduleScheduler scheduler=(LoadScheduleScheduler)schedulerField.get(runtime);
+            var barrierField=ServerRuntime.class.getDeclaredField("sourcePublicationBarrier");
+            barrierField.setAccessible(true);
+            SourcePublicationBarrier barrier=(SourcePublicationBarrier)barrierField.get(runtime);
+
+            CountDownLatch monitorHeld=new CountDownLatch(1),releaseMonitor=new CountDownLatch(1);
+            Thread holder=new Thread(()->{
+                synchronized(scheduler) {
+                    monitorHeld.countDown();
+                    try { if(!releaseMonitor.await(20,TimeUnit.SECONDS))throw new AssertionError("Scheduler release timed out"); }
+                    catch(InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+                }
+            },"test-hold-scheduler-monitor");
+            holder.start();
+            FutureTask<Map<String,Object>> manual=null;
+            Thread manualThread=null;
+            try {
+                assertTrue(monitorHeld.await(10,TimeUnit.SECONDS));
+                manual=new FutureTask<>(()->runtime.triggerLoadSchedule(schedule.id,"alice"));
+                manualThread=new Thread(manual,"test-manual-trigger");
+                manualThread.start();
+                long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+                while(manualThread.getState()!=Thread.State.BLOCKED&&System.nanoTime()<deadline)
+                    Thread.sleep(10);
+                assertEquals(Thread.State.BLOCKED,manualThread.getState(),
+                        "Manual trigger must reach the held Scheduler monitor");
+                // A publication writer must not be blocked by a manual trigger whose
+                // only remaining work is waiting for the Scheduler monitor.
+                assertTrue(barrier.writeLock().tryLock(3,TimeUnit.SECONDS),
+                        "Manual trigger holds a publication reader while waiting for the Scheduler: lock inversion");
+                barrier.writeLock().unlock();
+            } finally {
+                releaseMonitor.countDown();
+                holder.join(10000);
+            }
+            assertNotNull(manual);
+            assertEquals("submitted",manual.get(30,TimeUnit.SECONDS).get("status"));
+        }
+    }
+
     private ScheduleRaceFixture scheduleRaceFixture(String name) throws Exception {
         Path allowed=Files.createDirectories(temp.resolve(name+"-packages"));
         Path packageRoot=Files.createDirectories(allowed.resolve("p"));
