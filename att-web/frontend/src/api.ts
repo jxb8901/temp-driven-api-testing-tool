@@ -1,5 +1,5 @@
 export interface SavedLoadScenario { id: string; packageId: string; name: string; description: string; tags: string[]; model: string; revision: number; updatedAt: string; workloadCount?: number }
-import type { ManifestView, ManifestProjection, ManifestDraft, ManifestHistory } from './features/explorer/packageManifest';
+import type { ManifestView, ManifestProjection, ManifestDraft, ManifestHistory, AuthoringSourceProjection } from './features/explorer/packageManifest';
 import type { JobReplay, JobReplayEditorDraft } from "./features/load/types";
 import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type MonitoringJobJournal, type MonitoringSnapshot, type PackageSummary, type ServerVersion } from './types';
 import type {
@@ -429,6 +429,9 @@ export const api = {
   },
   getPackageManifest(packageId: string, view: ManifestView, environment?: string, signal?: AbortSignal): Promise<ManifestProjection> {
     return request('packages/' + encodeURIComponent(packageId) + '/package-configuration/' + view + queryString({ environment }), { signal });
+  },
+  getPackageAuthoringSource(packageId: string, signal?: AbortSignal): Promise<AuthoringSourceProjection> {
+    return request('packages/' + encodeURIComponent(packageId) + '/authoring-source' + queryString({ type: 'manifest' }), { signal });
   },
   stagePackageManifest(packageId: string, source: string, expectedManifestDigest: string, signal?: AbortSignal): Promise<ManifestDraft> {
     return postJson('packages/' + encodeURIComponent(packageId) + '/package-configuration/drafts', { source, expectedManifestDigest }, signal);

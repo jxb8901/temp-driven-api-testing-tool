@@ -92,7 +92,10 @@ final class PackageManifestPublisher implements AutoCloseable {
         pruneHistory(history,draft.beforeDigest,afterDigest);
         // Auditing before replacement makes an accepted publication recoverable even if the process exits after rename.
         audit.record(actor,"PACKAGE_MANIFEST_PUBLISH_INTENT",packageId,draft.beforeDigest+" -> "+afterDigest);
-        atomicWrite(live,after);
+        unchanged(draft); // Recheck role, registered canonical root, and source immediately before the commit.
+        Path commitRoot=authorizedRoot(packageId,actor);
+        if(!root.equals(commitRoot)||!live.equals(commitRoot.resolve("package.yaml")))throw new Conflict();
+        atomicWrite(commitRoot.resolve("package.yaml"),after);
         drafts.remove(id);
         boolean auditConfirmed=true;
         try {audit.record(actor,"PACKAGE_MANIFEST_PUBLISH",packageId,draft.beforeDigest+" -> "+afterDigest);}

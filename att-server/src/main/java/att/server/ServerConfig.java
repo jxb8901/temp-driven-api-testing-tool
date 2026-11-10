@@ -33,6 +33,7 @@ public final class ServerConfig {
     public final int maxRequestBytes, maxEventsPerJob, maxArtifacts;
     public final long maxEventJournalBytes, maxEventJournalMemoryBytes;
     public final boolean authenticationRequired;
+    public final boolean centralConfigurationEditingEnabled;
     public final String authMode;
     public final Security security;
     public final Map<String, Path> packages;
@@ -51,12 +52,12 @@ public final class ServerConfig {
     private ServerConfig(Path sourceFile, Path dataDir, Path runtimeConfigPath, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, long maxEventJournalBytes, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ArchiveCompression archiveCompression, ExecutionPool executionPool, PackageConfigurationPolicy packageConfiguration, String sourceDigest, Map<?,?> sourceDocument) {
+                         int maxEventsPerJob, long maxEventJournalBytes, int maxArtifacts, boolean authenticationRequired, boolean centralConfigurationEditingEnabled, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ArchiveCompression archiveCompression, ExecutionPool executionPool, PackageConfigurationPolicy packageConfiguration, String sourceDigest, Map<?,?> sourceDocument) {
         this.sourceFile=sourceFile;this.dataDir=dataDir; this.runtimeConfigPath=runtimeConfigPath; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.sourceDigest=sourceDigest;this.sourceDocument=Collections.unmodifiableMap(new LinkedHashMap<>(sourceDocument));
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
-        this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob;this.maxEventJournalBytes=maxEventJournalBytes; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;this.authMode=authMode;this.security=security;
+        this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob;this.maxEventJournalBytes=maxEventJournalBytes; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;this.centralConfigurationEditingEnabled=centralConfigurationEditingEnabled;this.authMode=authMode;this.security=security;
         long retainedJobLimit=Math.max(1L,(long)maxConcurrent+queuedLimit);
         this.maxEventJournalMemoryBytes=Math.max(1024L,
                 Math.min(JobEvents.MAX_RETAINED_MEMORY_BYTES,(128L*1024L*1024L)/retainedJobLimit));
@@ -144,6 +145,7 @@ public final class ServerConfig {
         long eventJournalBytes=longValue(server,"maxEventJournalBytes",JobEvents.DEFAULT_MAX_JOURNAL_BYTES,
                 1024L*1024L,256L*1024L*1024L);
         boolean authenticationRequired=boolValue(server,"authenticationRequired",true);
+        boolean centralConfigurationEditingEnabled=boolValue(server,"centralConfigurationEditingEnabled",false);
         Map<?,?> auth=server.get("auth")==null?Collections.emptyMap():map(server.get("auth"),"server.auth");
         String authMode=auth.get("mode")==null?"container":string(auth.get("mode"),"server.auth.mode").toLowerCase(Locale.ROOT);
         if(!Set.of("container","local").contains(authMode))throw new IllegalArgumentException("server.auth.mode must be container or local");
@@ -172,7 +174,7 @@ public final class ServerConfig {
         if (initializeDataDirectory) {
             privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
         }
-        return new ServerConfig(configFile,realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,eventJournalBytes,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,archiveCompression,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")),digest(sourceBytes),root);
+        return new ServerConfig(configFile,realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,eventJournalBytes,artifacts,authenticationRequired,centralConfigurationEditingEnabled,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,archiveCompression,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")),digest(sourceBytes),root);
     }
 
     private static String digest(byte[] bytes) throws Exception {

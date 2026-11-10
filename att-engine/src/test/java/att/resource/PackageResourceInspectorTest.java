@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -82,6 +83,27 @@ class PackageResourceInspectorTest {
             assertTrue(String.valueOf(item.get("resourceId")).matches("[A-Za-z0-9._-]+"));
             assertFalse(item.toString().contains(Paths.get("").toAbsolutePath().toString()));
         }
+    }
+
+    @Test void authoringTestcaseSidecarRequiresAReadyIndexedCaseAndFixedSelector() throws Exception {
+        Path root=packageWithCaseWorkbook("authoring-testcase-sidecar",1);
+        String expected=new String(Files.readAllBytes(root.resolve("testcase/cases.yaml")),StandardCharsets.UTF_8);
+        PackageResourceInspector inspector=new PackageResourceInspector(root,root.resolve("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",
+                Collections.<String>emptyList(),false,Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") Map<String,Object> page=inspector.inspect("list","case",null,null,0,100);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> cases=(List<Map<String,Object>>)page.get("items");
+        Map<String,Object> testCase=cases.stream().filter(item->"ready".equals(item.get("state"))).findFirst()
+                .orElseThrow(()->new AssertionError(page.toString()));
+        String resourceId=String.valueOf(testCase.get("resourceId"));
+        Map<String,Object> source=inspector.inspectAuthoringTestcaseSource(resourceId,"sidecar");
+        assertEquals("testcase/cases.yaml",source.get("logicalPath"));
+        assertEquals("testcase-sidecar",source.get("sourceType"));
+        assertEquals(expected,source.get("text"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspectAuthoringTestcaseSource(resourceId,"workbook"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspectAuthoringTestcaseSource("case.not-indexed","sidecar"));
     }
 
     @Test void returnsSafeTemplateProjectionAndEnforcesRevisionBoundPagination() throws Exception {
@@ -256,6 +278,25 @@ class PackageResourceInspectorTest {
                 ()->inspector.inspect("source-file","template",resourceId,String.valueOf(blockedRef.get("referenceId")),0,1,null,
                         String.valueOf(blockedRef.get("originPath"))));
         assertTrue(Files.exists(shared));assertTrue(Files.exists(large));
+    }
+
+    @Test void ownerAuthoringSourcePreservesExactTemplateBytesAndUsesContentEtag() throws Exception {
+        Path root=packageWithTemplate("lossless-authoring-source","SOURCE","description: authored source");
+        String authored="# keep this comment and key order\nschemaVersion: att-template/v3.6\nname: SOURCE\n"
+                +"description: authored source\nactions:\n  note: {type: log, message: safe}\n";
+        writeUtf8(root.resolve("templates/SOURCE/template.yaml"),authored);
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.singletonList("templates/SOURCE/template.yaml"),65536,262144);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        String resourceId=String.valueOf(items.get(0).get("resourceId"));
+        Map<String,Object> raw=inspector.inspectAuthoringResourceSource("template",resourceId);
+        byte[] digestBytes=java.security.MessageDigest.getInstance("SHA-256").digest(authored.getBytes(StandardCharsets.UTF_8));
+        StringBuilder digestHex=new StringBuilder(digestBytes.length*2);
+        for(byte value:digestBytes)digestHex.append(String.format(Locale.ROOT,"%02x",value&0xff));
+        String digest=digestHex.toString();
+        assertEquals(authored,raw.get("text"));assertEquals(digest,raw.get("revision"));
+        assertEquals("\"sha256:"+digest+"\"",raw.get("sourceEtag"));
+        assertEquals("templates/SOURCE/template.yaml",raw.get("logicalPath"));
     }
 
     @Test void detailProjectionCarriesAuthoredActionOrderWhenJsonWouldReorderNumericKeys() throws Exception {
@@ -647,6 +688,119 @@ class PackageResourceInspectorTest {
         Map<String,Object> nestedFile=inspector.inspect("source-file","template",resourceId,nestedId,0,1,null,"templates/SOURCE/payload/request.xml");
         assertEquals(Boolean.TRUE,nestedFile.get("available"));assertEquals("text",nestedFile.get("format"));
         assertTrue(String.valueOf(nestedFile.get("text")).contains("café"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspectAuthoringSourceFile("template",resourceId,nestedId,"templates/SOURCE/payload/request.xml"),
+                "Linked file text cannot create another owner authoring-source grant");
+        Map<String,Object> rawFile=inspector.inspectAuthoringSourceFile("template",resourceId,firstId,null);
+        assertEquals("<request>&{./nested.sql}</request>\n",rawFile.get("text"),"Owner source must preserve exact referenced-file bytes");
+    }
+
+    @Test void authoringFileSourcesFollowTypedValuesAndEvidenceCallsButNotMetadataOrLinkedFiles() throws Exception {
+        Path root=packageWithTemplate("authoring-action-reference-origin","FORM","description: source origin test");
+        Path shared=Files.createDirectories(root.resolve("templates/shared"));
+        writeUtf8(shared.resolve("allowed.txt"),"direct Action source");
+        writeUtf8(shared.resolve("description-only.txt"),"description source\n");
+        writeUtf8(shared.resolve("nested-map.txt"),"nested Action map value source\n");
+        writeUtf8(shared.resolve("nested-list.txt"),"nested Action list value source\n");
+        writeUtf8(shared.resolve("collector-call.txt"),"evidence collector call source\n");
+        writeUtf8(shared.resolve("unrelated-metadata.txt"),"unrelated metadata source\n");
+        writeUtf8(shared.resolve("collector-metadata.txt"),"collector metadata source\n");
+        writeUtf8(shared.resolve("collector-extension-metadata.txt"),"collector extension metadata source\n");
+        writeUtf8(shared.resolve("linked-only.txt"),"nested linked-file source\n");
+        Path template=root.resolve("templates/FORM/template.yaml");
+        writeUtf8(template,"schemaVersion: att-template/v3.6\nname: FORM\n"
+                +"description: '&{../shared/description-only.txt}'\n"
+                +"actions:\n  direct:\n    type: log\n    message: '&{../shared/allowed.txt}'\n"
+                +"    value:\n      nested: '&{../shared/nested-map.txt}'\n"
+                +"      list:\n        - '&{../shared/nested-list.txt}'\n"
+                +"    x-note:\n      nested: '&{../shared/unrelated-metadata.txt}'\n"
+                +"  callPayment:\n    type: tool\n    call: '#{echo()}'\n    evidence:\n      appLog:\n"
+                +"        call: '&{../shared/collector-call.txt}'\n        x-note: '&{../shared/collector-metadata.txt}'\n"
+                +"      x-audit:\n        call: '&{../shared/collector-extension-metadata.txt}'\n"
+                +"  linked:\n    type: assign\n    name: linked\n    expression: '&{../shared/linked.txt}'\n");
+        writeUtf8(shared.resolve("linked.txt"),"&{./linked-only.txt}\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),Collections.<String>emptyList(),Collections.<String>emptyList(),
+                65536,262144,false,true,"safe-package-files",Collections.<String>emptyList(),false,
+                Collections.<String>emptyList(),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        String resourceId=String.valueOf(items.get(0).get("resourceId"));
+        Map<String,Object> source=inspector.inspect("source","template",resourceId,null,0,1);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> references=(List<Map<String,Object>>)source.get("fileReferences");
+        Map<String,Object> allowed=references.stream().filter(item->"templates/shared/allowed.txt".equals(item.get("logicalPath")))
+                .findFirst().orElseThrow(()->new AssertionError(source.toString()));
+        assertEquals("direct Action source",inspector.inspectAuthoringSourceFile("template",resourceId,
+                String.valueOf(allowed.get("referenceId")),null).get("text"));
+        for(String allowedPath:Arrays.asList("templates/shared/nested-map.txt","templates/shared/nested-list.txt",
+                "templates/shared/collector-call.txt")) {
+            Map<String,Object> nestedAllowed=references.stream().filter(item->allowedPath.equals(item.get("logicalPath")))
+                    .findFirst().orElseThrow(()->new AssertionError(source.toString()));
+            assertTrue(String.valueOf(inspector.inspectAuthoringSourceFile("template",resourceId,
+                    String.valueOf(nestedAllowed.get("referenceId")),null).get("text")).contains("source"),allowedPath);
+        }
+        for(String deniedPath:Arrays.asList("templates/shared/description-only.txt","templates/shared/unrelated-metadata.txt",
+                "templates/shared/collector-metadata.txt","templates/shared/collector-extension-metadata.txt")) {
+            Map<String,Object> denied=references.stream().filter(item->deniedPath.equals(item.get("logicalPath")))
+                    .findFirst().orElseThrow(()->new AssertionError(source.toString()));
+            assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                    ()->inspector.inspectAuthoringSourceFile("template",resourceId,String.valueOf(denied.get("referenceId")),null),deniedPath);
+        }
+
+        Map<String,Object> linked=references.stream().filter(item->"templates/shared/linked.txt".equals(item.get("logicalPath")))
+                .findFirst().orElseThrow(()->new AssertionError(source.toString()));
+        Map<String,Object> linkedView=inspector.inspect("source-file","template",resourceId,
+                String.valueOf(linked.get("referenceId")),0,1,null,null);
+        @SuppressWarnings("unchecked") List<Map<String,Object>> linkedReferences=(List<Map<String,Object>>)linkedView.get("fileReferences");
+        Map<String,Object> nested=linkedReferences.stream().filter(item->"templates/shared/linked-only.txt".equals(item.get("logicalPath")))
+                .findFirst().orElseThrow(()->new AssertionError(linkedView.toString()));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspectAuthoringSourceFile("template",resourceId,String.valueOf(nested.get("referenceId")),
+                        "templates/shared/linked.txt"));
+    }
+
+    @Test void ownerAuthoringSourceFailsClosedForClassifiedAndConfiguredPackageFields() throws Exception {
+        Path root=packageWithTemplate("authoring-source-secret-gate","FORM","description: source secret gate");
+        Path template=root.resolve("templates/FORM/template.yaml");
+        writeUtf8(template,"schemaVersion: att-template/v3.6\nname: FORM\ndescription: source secret gate\nactions:\n"
+                +"  note:\n    type: log\n    message: custom-template-canary\n");
+        Path flow=Files.createDirectories(root.resolve("templates/flows/private-flow")).resolve("flow.yaml");
+        writeUtf8(flow,"schemaVersion: att-flow/v3.6\nid: private-flow.v1\nname: Private flow\ndescription: private flow\nactions:\n"
+                +"  note:\n    type: log\n    message: custom-flow-canary\n");
+        Files.createDirectories(root.resolve("load"));
+        writeUtf8(root.resolve("load/private.yaml"),"schemaVersion: att-load/v1.6\ncustomPayload: custom-load-canary\n");
+        writeUtf8(root.resolve("package.yaml"),"schemaVersion: att-package/v1\n");
+        Files.createDirectories(root.resolve("templates/shared"));
+        writeUtf8(root.resolve("templates/shared/private.txt"),"classification: secret\nvalue: classified-file-canary\n");
+        writeUtf8(root.resolve("templates/FORM/template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: source secret gate\nactions:\n"
+                +"  note:\n    type: log\n    message: '&{../shared/private.txt}'\n");
+        PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",Collections.<String>emptyList(),
+                false,Arrays.asList("actions.note.message","schemaVersion"),Collections.singletonList("^customPayload$"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","template",null,null,0,10).get("items");
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspectAuthoringResourceSource("template",String.valueOf(items.get(0).get("resourceId"))));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> flows=(List<Map<String,Object>>)inspector.inspect("list","flow",null,null,0,10).get("items");
+        assertEquals(1,flows.size());
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspectAuthoringResourceSource("flow",String.valueOf(flows.get(0).get("resourceId"))));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->inspector.inspectAuthoringLoadSource("load/private.yaml"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,inspector::inspectAuthoringManifestSource);
+
+        PackageResourceInspector classifiedFileInspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"safe-package-files",Collections.<String>emptyList(),
+                false,Collections.singletonList("schemaVersion"),Collections.<String>emptyList());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> fileItems=(List<Map<String,Object>>)classifiedFileInspector
+                .inspect("list","template",null,null,0,10).get("items");
+        String fileResourceId=String.valueOf(fileItems.get(0).get("resourceId"));
+        Map<String,Object> source=classifiedFileInspector.inspect("source","template",fileResourceId,null,0,1);
+        assertEquals(Boolean.TRUE,source.get("available"),source.toString());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> references=(List<Map<String,Object>>)source.get("fileReferences");
+        Map<String,Object> file=references.stream().filter(item->"templates/shared/private.txt".equals(item.get("logicalPath")))
+                .findFirst().orElseThrow(()->new AssertionError(source.toString()));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->classifiedFileInspector.inspectAuthoringSourceFile("template",fileResourceId,
+                        String.valueOf(file.get("referenceId")),null));
     }
 
     @Test void discoversActionFileReferencesFromTemplateAndFlowOriginsWithoutEvaluatingExpressions() throws Exception {
