@@ -1,6 +1,17 @@
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.3.0 -->
 
 # Package inspection APIs
+
+## Trusted registry and source scope
+
+The Server loads Package roots only from the selected deployment-controlled `att-server.yaml` `packages.entries` mapping. It polls for in-place edits and atomic replacements while Tomcat serves requests. Each candidate mapping is validated as a whole against canonical existing directories and `packages.allowedRoots`; invalid or unstable candidates keep the last-known-good registry. Changes to settings outside `packages` are reported as restart-required and are not partially applied. Unregistered directories never appear as Packages.
+
+```http
+GET /api/v1/registry
+GET /api/v1/packages/payments/scope
+```
+
+`GET /registry` returns `att-package-registry/v1`: a content-addressable `revision`, monotonic `generation`, reload timestamps, `Ready` or `Invalid` status, sanitized diagnostic, and explicitly registered logical package IDs with `Registered`, `Warming`, or `Ready` states. It does not expose filesystem paths. `GET /packages/{packageId}/scope` returns `att-source-scope/v1` with distinct registry, Package source, Package Manifest, Central Runtime Config source, active effective Config, and embedded Engine schema revision identities, plus safe environment/version metadata. It is read-only; the API does not accept source roots from clients. Drafts and approvals created against a prior registry revision are rejected after a registry change. Accepted Jobs retain their already-approved package root and inputs.
 
 ## Package resource inspection
 

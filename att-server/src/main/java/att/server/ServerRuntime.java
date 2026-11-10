@@ -81,6 +81,7 @@ final class ServerRuntime implements AutoCloseable {
         ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model,boolean containsSensitiveValues,boolean containsSensitiveAuthoredValues){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;this.containsSensitiveValues=containsSensitiveValues;this.containsSensitiveAuthoredValues=containsSensitiveAuthoredValues;}
     }
     final ServerConfig config;
+    final PackageRegistry packageRegistry;
     final JobStore store;
     private final LoadProgressPersistence loadProgressPersistence;
     final AuthService auth;
@@ -157,6 +158,7 @@ final class ServerRuntime implements AutoCloseable {
     private record ScheduleExecutionReview(String scheduleId,String principal,long definitionVersion,String updatedAt,
                                            String draftId,String packageId,String executionType,String revision,Instant expiresAt,JsonNode packageEdit) { }
     private final ConcurrentHashMap<String,ScheduleExecutionReview> scheduleExecutionReviews=new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String,String> registryBoundDrafts=new ConcurrentHashMap<>();
     private final List<InspectionWorker> inspectionWorkerPool=new ArrayList<>();
     private final ScheduledExecutorService inspectionWarmup;
     private volatile boolean closing;
@@ -192,6 +194,11 @@ final class ServerRuntime implements AutoCloseable {
         manifestPublisher=new PackageManifestPublisher(config.dataDir,config.packageConfiguration,clock,
                 this::manifestEditableRoot,this::validateManifestCandidate,
                 (actor,action,packageId,detail)->store.audit(actor,action,null,packageId,detail));
+        packageRegistry=new PackageRegistry(config,clock,
+                java.time.Duration.ofMillis(PackageRegistry.DEBOUNCE_MILLIS),
+                java.time.Duration.ofMillis(PackageRegistry.MAX_OBSERVATION_MILLIS),
+                mutation->{admissionLifecycle.writeLock().lock();try{mutation.run();}finally{admissionLifecycle.writeLock().unlock();}},
+                (previous,next)->invalidateRegistryBoundState());
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -228,6 +235,7 @@ final class ServerRuntime implements AutoCloseable {
         } else loadScheduleScheduler=null;
         executionWorkers=new ExecutionWorkerPool(config,id->workerBuilder(true,id),this::startWorkerProcess,
                 ()->ExecutionWorkerPool.fingerprint(this.workerLibs,config.workerLibraryDirs),workerSchemaRegistryDigest);
+        packageRegistry.start();
         if(inspectionWarmup!=null)inspectionWarmup.scheduleWithFixedDelay(this::warmInspectionSafely,250,250,TimeUnit.MILLISECONDS);
         if(config.inspection.enabled&&!config.inspection.redactionEnabled)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Inspection masking is disabled; ordinary package values are visible to authorized callers, while classified secrets remain protected");
         if(!config.security.checkCrossOrigin)java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("server.security.checkCrossOrigin is disabled; configure trusted proxy origin handling and retain local-auth CSRF protection");
@@ -418,22 +426,27 @@ final class ServerRuntime implements AutoCloseable {
             JsonNode environmentOverride=request.path("overrides").path("environment");
             if(packageDefaultEnvironment&&(!environmentOverride.isTextual()||environmentOverride.asText().isBlank()))definition.remove("environment");
             String packageId=required(definition,"packageId"),environment=optionalText(definition,"environment");
+            PackageRegistry.Snapshot replayRegistry=packageRegistry.snapshot();
+            Path replayPackageRoot=replayRegistry.packages.get(packageId);
             if("strict".equals(sourcePolicy))verifyStrictReplayRevision(packageId,environment,spec.revision());
             boolean run="run".equals(definition.path("executionType").asText());
             Map<String,Object> draft=null;String validationCode=null;List<Map<String,Object>> diagnostics=Collections.emptyList();
             try {
                 if(run)draft=createRunDraft(definition,principal,true,null);
                 else if(spec.value.has("sourcePath")) {
-                    String path=safeRelative(spec.value.path("sourcePath").asText(),"scenario");validatePackagePath(packageRoot(packageId),path,"scenario");
+                    if(replayPackageRoot==null)throw new NotFoundException();validatePackageRoot(replayPackageRoot);
+                    String path=safeRelative(spec.value.path("sourcePath").asText(),"scenario");validatePackagePath(replayPackageRoot,path,"scenario");
                     LoadSchedule source=new LoadSchedule();source.packageId=packageId;source.environment=environment;
                     source.inlineScenario=JSON.convertValue(definition.get("scenario"),Map.class);
-                    ValidatedScheduledScenario validated=validateScheduledScenario(packageRoot(packageId),source,source.inlineScenario,false);
+                    ValidatedScheduledScenario validated=validateScheduledScenario(replayPackageRoot,source,source.inlineScenario,false);
                     validatePackageBackedReplayLoadLimits(config.inlineLoad,validated.scenario);
                     if(validated.containsSensitiveValues)throw new ReplayInputMissingException("Sensitive LOAD inputs were not retained. Enter them again through the authorized input controls.");
                     definition.set("scenario",JSON.valueToTree(validated.scenario));
-                    Map<String,Object> configuration=configurationRevision(resolveExecutionConfiguration(packageId,packageRoot(packageId),environment),validated.revisionDigest);
+                    Map<String,Object> configuration=configurationRevision(resolveExecutionConfiguration(packageId,replayPackageRoot,environment),validated.revisionDigest);
                     CatalogLoadDraftState retained=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,environment,path,validated.revisionDigest,validated.model,validated.scenario,null,configuration,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
-                    synchronized(draftLock){expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(retained.id,retained);}
+                    publishRegistryBoundDraft(retained.id,replayRegistry.revision,()->{
+                        expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(retained.id,retained);
+                    });
                     draft=catalogLoadDraftView(retained);
                 } else {
                     ObjectNode input=definition.deepCopy();input.remove("executionType");draft=createAdvancedLoadDraft(input,principal,null);
@@ -459,9 +472,12 @@ final class ServerRuntime implements AutoCloseable {
             if("strict".equals(sourcePolicy)&&!selectedRevision.equals(spec.revision()))verifyStrictReplayRevision(packageId,effectiveEnvironment,spec.revision());
             requireReplayReviewCapacity(principal);
             String intent=UUID.randomUUID().toString();Instant expires=clock.instant().plusMillis(DRAFT_TTL_MILLIS);
-            replayReviews.put(intent,new ReplayReview(id,principal,draftId,packageId,run?"run":"load",sourcePolicy,spec.revision(),selectedRevision,
+            String registryRevision=registryBoundDrafts.get(draftId);
+            if(registryRevision==null)throw new StaleDraftException();
+            ReplayReview review=new ReplayReview(id,principal,draftId,packageId,run?"run":"load",sourcePolicy,spec.revision(),selectedRevision,
                     replayConfigurationDigest(configuration),spec.value.path("sourcePath").asText(null),originalDefinition.deepCopy(),definition.deepCopy(),spec.configuration(),
-                    att.server.api.ConfigurationSnapshot.copy(configuration),null,Collections.emptyList(),expires));
+                    att.server.api.ConfigurationSnapshot.copy(configuration),null,Collections.emptyList(),expires);
+            publishRegistryBoundDraft(intent,registryRevision,()->replayReviews.put(intent,review));
             Map<String,Object> result=new LinkedHashMap<>(jobReplay(id,principal));
             Object oldConfiguration=result.remove("configuration");if(oldConfiguration!=null)result.put("originalConfiguration",oldConfiguration);
             result.put("schemaVersion","att-job-replay-draft/v1");result.put("sourceJobId",id);result.put("definition",definition);result.put("originalDefinition",originalDefinition);result.put("sourcePolicy",sourcePolicy);
@@ -473,6 +489,7 @@ final class ServerRuntime implements AutoCloseable {
     private Map<String,Object> createInvalidReplayDraft(String id,String principal,JobExecutionSpec spec,String sourcePolicy,
             ObjectNode originalDefinition,ObjectNode definition,String packageId,boolean run,String validationCode,
             List<Map<String,Object>> diagnostics) throws Exception {
+        String registryRevision=packageRegistry.snapshot().revision;
         String environment=optionalText(definition,"environment"),selectedRevision="";Map<String,Object> configuration=Collections.emptyMap();
         try {
             Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();
@@ -487,9 +504,10 @@ final class ServerRuntime implements AutoCloseable {
         if(effectiveEnvironment!=null)definition.put("environment",effectiveEnvironment);
         String draftRef=(run?"R":"C")+UUID.randomUUID().toString().replace("-","").toUpperCase(java.util.Locale.ROOT);
         Instant expires=clock.instant().plusMillis(DRAFT_TTL_MILLIS);requireReplayReviewCapacity(principal);
-        replayReviews.put(UUID.randomUUID().toString(),new ReplayReview(id,principal,draftRef,packageId,run?"run":"load",sourcePolicy,spec.revision(),selectedRevision,
+        String intent=UUID.randomUUID().toString();ReplayReview review=new ReplayReview(id,principal,draftRef,packageId,run?"run":"load",sourcePolicy,spec.revision(),selectedRevision,
                 null,spec.value.path("sourcePath").asText(null),originalDefinition.deepCopy(),definition.deepCopy(),spec.configuration(),
-                configuration,validationCode,safeReplayDiagnostics(diagnostics,validationCode),expires));
+                configuration,validationCode,safeReplayDiagnostics(diagnostics,validationCode),expires);
+        publishRegistryBoundDraft(intent,registryRevision,()->replayReviews.put(intent,review));
         Map<String,Object> result=new LinkedHashMap<>(jobReplay(id,principal));Object oldConfiguration=result.remove("configuration");
         if(oldConfiguration!=null)result.put("originalConfiguration",oldConfiguration);
         result.put("schemaVersion","att-job-replay-draft/v1");result.put("draftRef",draftRef);result.put("draftId",draftRef);result.put("sourceJobId",id);
@@ -591,6 +609,8 @@ final class ServerRuntime implements AutoCloseable {
             if(review!=null&&(!review.source.equals(id)||!review.principal.equals(principal)))throw new NotFoundException();
             if(review==null) {if(requestedPolicy!=null)throw new ReplayDraftExpiredException();throw new NotFoundException();}
             if(!review.expiresAt.isAfter(clock.instant()))throw new ReplayDraftExpiredException();
+            requireCurrentRegistryBinding(intent);
+            if(review.validationCode!=null)throw new JobConflictException("ATT-SERVER-REPLAY-DRAFT-INVALID","The replay draft must pass validation before it can be accepted.");
             if(requestedPolicy!=null&&!requestedPolicy.equals(review.sourcePolicy))throw new JobConflictException("ATT-SERVER-REPLAY-INTENT-MISMATCH","The confirmation intent belongs to a different source policy.");
             Map<String,String> record=ownedExecutionSpec(id,principal);JobExecutionSpec spec=JobExecutionSpec.parse(record.get("spec"));
             if("strict".equals(review.sourcePolicy))verifyStrictReplayRevision(review.packageId,optionalText(review.definition,"environment"),review.originalRevision);
@@ -614,6 +634,7 @@ final class ServerRuntime implements AutoCloseable {
             input.put("expectedRevisionDigest",review.selectedRevision);
             input.set("configurationProvenance",JSON.valueToTree(review.configuration));
             applyInspectionPolicy(input,review.packageId);
+            bindRegistryDraftForAdmission(input,intent);
             JobExecutionSpec retained=capturePrevalidatedExecutionSpec(review.executionType,input,null)
                     .withReplaySource(id,review.sourcePolicy,review.originalRevision,review.selectedRevision);
             Map<String,Object> result=submit(review.executionType,input,principal,true,null,"load".equals(review.executionType)&&review.definition.has("scenario")&&spec.value.has("sourcePath"),id,intent,retained,
@@ -621,6 +642,7 @@ final class ServerRuntime implements AutoCloseable {
             store.audit(principal,"JOB_RERUN_SOURCE",id,review.packageId,review.sourcePolicy);
             store.audit(principal,"JOB_RERUN",String.valueOf(result.get("jobId")),review.packageId,"ACCEPTED");
             runDrafts.remove(review.draftId);advancedLoadDrafts.remove(review.draftId);catalogLoadDrafts.remove(review.draftId);replayReviews.remove(intent);
+            registryBoundDrafts.remove(intent);
             return result;
         }
     }
@@ -668,6 +690,7 @@ final class ServerRuntime implements AutoCloseable {
         long requestReceivedNanos=System.nanoTime();
         if(!List.of("run","debug","load","validate").contains(command))throw new IllegalArgumentException("Unsupported job command");
         String packageId=required(input,"packageId");
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();
         boolean loadAdmission="load".equals(command);
         // Reject requests that already cannot be admitted before any legacy direct-request inspection runs.
         // The final semaphore acquisition below remains authoritative when concurrent submissions race this check.
@@ -677,6 +700,11 @@ final class ServerRuntime implements AutoCloseable {
                 ||input.has("expectedRevisionDigest")||input.has("expectedSchemaRegistryDigest")||input.has("draftResourceId")
                 ||input.has("configurationProvenance")||input.has("registeredPackageId")))
             throw new IllegalArgumentException("Inline execution fields require a server-issued draft");
+        if(input.has("_attRegistryRevision")) {
+            if(!serverIssuedDraft||!input.path("_attRegistryRevision").isTextual()
+                    ||!registry.revision.equals(input.path("_attRegistryRevision").asText()))throw new StaleDraftException();
+            ObjectNode clean=((ObjectNode)input).deepCopy();clean.remove("_attRegistryRevision");input=clean;
+        }
         if(serverIssuedDraft&&"load".equals(command)) {
             if(!scheduleIssued&&!fileBackedReplay)requireInlineLoadEnabled();
             JsonNode scenarioNode=input.get("inlineLoadScenario");
@@ -689,7 +717,7 @@ final class ServerRuntime implements AutoCloseable {
                 validatePackageBackedReplayLoadLimits(config.inlineLoad,scenario);
             } else if(scheduleIssued)validateScheduledLoadLimits(config.inlineLoad,scenario);else enforceInlineLoadLimits(scenario);
         }
-        Path root=packageRoot(packageId);
+        Path root=registry.packages.get(packageId);
         if(root==null)throw new IllegalArgumentException("Unknown packageId");
         validatePackageRoot(root);
         ObjectNode pinned=((ObjectNode)input).deepCopy();
@@ -832,32 +860,41 @@ final class ServerRuntime implements AutoCloseable {
         try {
             // Inspector work must not hold the cancellation/process-publication lock.
             String warmRevision=prewarmRevision(job);
+            Path approvedRoot=acceptedPackageRoot(job);
             Process process;
             OutputStream workerInput;
-            synchronized(job) {
-                // Publish the process while holding the same lock used by cancel(). A
-                // cancellation that wins before launch prevents the Worker from starting;
-                // one that follows launch always sees and terminates that exact process.
-                if(job.terminal())return;
-                if(closing){finishQuietly(job,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown stopped the queued Worker");return;}
-                transition(job,"PREPARING");
-                validatePackageRoot(packageRoot(job.packageId));
-                job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
-                if(warmRevision!=null) {
-                    long leaseStart=System.nanoTime();warm=executionWorkers.lease(job.packageId);
-                    job.prewarmLeaseMs=(System.nanoTime()-leaseStart)/1_000_000.0;
-                    if(warm!=null)job.request.expectedRevisionDigest=warmRevision;
-                    else job.prewarmFallbackReason="no_ready_worker";
+            admissionLifecycle.readLock().lock();
+            try {
+                synchronized(job) {
+                    // Publish the process while holding the same lock used by cancel(). A
+                    // cancellation that wins before launch prevents the Worker from starting;
+                    // one that follows launch always sees and terminates that exact process.
+                    if(job.terminal())return;
+                    if(closing){finishQuietly(job,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown stopped the queued Worker");return;}
+                    transition(job,"PREPARING");
+                    validateAcceptedPackageRoot(approvedRoot);
+                    job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
+                    if(warmRevision!=null) {
+                        Path selectedRoot=packageRoot(job.packageId);
+                        if(selectedRoot==null||!selectedRoot.equals(approvedRoot)) {
+                            warmRevision=null;job.prewarmFallbackReason="registry_changed";
+                        } else {
+                            long leaseStart=System.nanoTime();warm=executionWorkers.lease(job.packageId);
+                            job.prewarmLeaseMs=(System.nanoTime()-leaseStart)/1_000_000.0;
+                            if(warm!=null)job.request.expectedRevisionDigest=warmRevision;
+                            else job.prewarmFallbackReason="no_ready_worker";
+                        }
+                    }
+                    ProcessBuilder coldBuilder=warm==null?workerBuilder(false,job.packageId,approvedRoot):null;
+                    job.workerSpawnStartedNanos=System.nanoTime();
+                    process=warm==null?startWorkerProcess(coldBuilder):warm.process;
+                    job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=warm==null?new WorkerProcessFence(process):warm.fence;
+                    workerInput=process.getOutputStream();
+                    if(warm!=null){job.workerDispatch="warm";job.prewarmBootstrapMs=(warm.readyNanos-warm.startedNanos)/1_000_000.0;}
+                    job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
+                    if(warm!=null)warm.transferred();
                 }
-                ProcessBuilder coldBuilder=warm==null?workerBuilder(false,job.packageId):null;
-                job.workerSpawnStartedNanos=System.nanoTime();
-                process=warm==null?startWorkerProcess(coldBuilder):warm.process;
-                job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=warm==null?new WorkerProcessFence(process):warm.fence;
-                workerInput=process.getOutputStream();
-                if(warm!=null){job.workerDispatch="warm";job.prewarmBootstrapMs=(warm.readyNanos-warm.startedNanos)/1_000_000.0;}
-                job.workerPid=process.pid();job.workerStartTime=process.info().startInstant().orElse(Instant.now());job.startedAt=Instant.now();transition(job,"RUNNING");rememberWorkerProcesses(job,job.processFence);
-                if(warm!=null)warm.transferred();
-            }
+            } finally {admissionLifecycle.readLock().unlock();}
             startStderrDrainer(process,"att-server-worker-stderr");
             workerInput.write(workerRequestBytes(job.request,warm!=null));workerInput.write('\n');workerInput.flush();
             if(!"load".equals(job.command))workerInput.close();
@@ -925,12 +962,16 @@ final class ServerRuntime implements AutoCloseable {
         return WorkerRuntimeClasspath.entries(workerLibs,config.workerLibraryDirs);
     }
     private ProcessBuilder workerBuilder(boolean prewarm,String packageId) {
+        return workerBuilder(prewarm,packageId,packageRoot(packageId));
+    }
+    private ProcessBuilder workerBuilder(boolean prewarm,String packageId,Path packageRoot) {
         List<String> command=new ArrayList<>();command.add(config.javaExecutable.toString());
         if(config.workerHeapInitialMb>0)command.add("-Xms"+config.workerHeapInitialMb+"m");
         if(config.workerHeapMaxMb>0)command.add("-Xmx"+config.workerHeapMaxMb+"m");
         command.add("-cp");command.add(String.join(java.io.File.pathSeparator,workerClasspath()));command.add("att.worker.WorkerMain");
         if(prewarm)command.add("--prewarmed-one-shot");
-        return new ProcessBuilder(command).directory(packageRoot(packageId).toFile());
+        if(packageRoot==null)throw new NotFoundException();
+        return new ProcessBuilder(command).directory(packageRoot.toFile());
     }
     private boolean environmentFitsPrewarm() {
         // JVM bootstrap options cannot be applied after READY. Keep those
@@ -945,6 +986,8 @@ final class ServerRuntime implements AutoCloseable {
     String prewarmRevision(Job job) throws InterruptedException {
         if(!config.executionPool.enabled||!config.executionPool.packageIds.contains(job.packageId)
                 ||!("run".equals(job.command)||"debug".equals(job.command)))return null;
+        Path initialRoot=config.packages.get(job.packageId);
+        if(initialRoot==null||!initialRoot.equals(acceptedPackageRoot(job))) {job.prewarmFallbackReason="registry_changed";return null;}
         if(!environmentFitsPrewarm()) {job.prewarmFallbackReason="startup_environment";return null;}
         if(!config.workerLibraryDirs.isEmpty()) {job.prewarmFallbackReason="addon_libraries";return null;}
         if(!config.inspection.enabled) {job.prewarmFallbackReason="inspection_disabled";return null;}
@@ -1572,17 +1615,109 @@ final class ServerRuntime implements AutoCloseable {
         return out;
     }
     List<Map<String,Object>> packages(String principal) throws Exception {
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();
         List<Map<String,Object>> out=new ArrayList<>();
-        for(Map.Entry<String,Path> entry:packageRoots().entrySet())out.add(packageMetadata(entry.getKey(),entry.getValue(),principal));
+        for(Map.Entry<String,Path> entry:registry.packages.entrySet())out.add(packageMetadata(entry.getKey(),entry.getValue(),principal,registry));
         return out;
     }
     Map<String,Object> packageView(String id,String principal) throws Exception {
-        Path root=packageRoot(id);if(root==null)throw new NotFoundException();return packageMetadata(id,root,principal);
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();Path root=registry.packages.get(id);if(root==null)throw new NotFoundException();return packageMetadata(id,root,principal,registry);
     }
-    private Map<String,Object> packageMetadata(String id,Path root,String principal) throws Exception {
+    Map<String,Object> packageRegistryView() { return packageRegistry.snapshot().view(); }
+    private Map<String,Object> packageMetadata(String id,Path root,String principal,PackageRegistry.Snapshot registry) throws Exception {
         Map<String,Object> item=new LinkedHashMap<>();item.put("packageId",id);item.put("name",root.getFileName().toString());
-        item.put("canExecute",isOperationalPrincipal(principal));
+        item.put("canExecute",isOperationalPrincipal(principal));item.put("registryRevision",registry.revision);
+        item.put("state",registry.packageStates.getOrDefault(id,"Registered"));
         return item;
+    }
+
+    Map<String,Object> packageScope(String packageId) throws Exception {
+        return packageScope(packageId,()->{ });
+    }
+
+    // Test seam permits a deterministic in-place edit between the two Worker
+    // observations without introducing timing sleeps or production-only hooks.
+    Map<String,Object> packageScope(String packageId,Runnable afterRevisionObserved) throws Exception {
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();Path root=registry.packages.get(packageId);
+        if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        packageRegistry.markWarming(packageId,registry.revision);
+        try {
+            WorkerRequest sourceRequest=inspectionRequest(packageId,root,null);sourceRequest.inspectionAction="revision";
+            Map<String,Object> source=executeInspection(root,sourceRequest);
+            String packageSourceRevision=requiredDigest(source.get("packageSourceRevision"),"Package source revision");
+            String executionRevision=requiredDigest(source.get("executionRevisionDigest"),"Package execution revision");
+            afterRevisionObserved.run();
+            Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,null);
+            // Configuration is resolved by a separate Worker inspection. If package
+            // source, Manifest or Central Runtime Config changed between the two,
+            // never publish a mixed-time tuple as a valid /scope precondition.
+            WorkerRequest verification=inspectionRequest(packageId,root,null);
+            verification.inspectionAction="revision";
+            verification.expectedRevisionDigest=executionRevision;
+            Map<String,Object> rechecked;
+            try { rechecked=executeInspection(root,verification); }
+            catch(StaleCursorException changed) { throw new StaleDraftException(); }
+            if(!executionRevision.equals(rechecked.get("executionRevisionDigest"))
+                    ||!packageSourceRevision.equals(rechecked.get("packageSourceRevision")))throw new StaleDraftException();
+            PackageRegistry.Snapshot current=packageRegistry.snapshot();
+            if(!registry.revision.equals(current.revision)||!root.equals(current.packages.get(packageId)))throw new StaleDraftException();
+            String manifestRevision=requiredDigest(configuration.get("manifestDigest"),"Package Manifest revision");
+            String centralConfigRevision=requiredDigest(configuration.get("globalDigest"),"Central Runtime Config revision");
+            String effectiveConfigRevision=requiredDigest(configuration.get("configurationIdentity"),"Effective Config revision");
+            String schemaRevision=workerSchemaRegistryDigest==null?null:requiredDigest(workerSchemaRegistryDigest,"Engine schema revision");
+            packageRegistry.markReady(packageId,registry.revision);
+            Map<String,Object> result=new LinkedHashMap<>();result.put("schemaVersion",PackageRegistry.SCOPE_CONTRACT);
+            result.put("scopeId","package:"+packageId);result.put("packageId",packageId);result.put("status","Ready");
+            result.put("registryRevision",registry.revision);result.put("registryGeneration",registry.generation);
+            result.put("packageSourceRevision",packageSourceRevision);result.put("executionRevisionDigest",executionRevision);
+            result.put("packageManifestRevision",manifestRevision);
+            result.put("centralConfigSourceRevision",centralConfigRevision);result.put("activeEffectiveConfigRevision",effectiveConfigRevision);
+            result.put("embeddedEngineSchemaRevision",schemaRevision);
+            result.put("engineVersion",configuration.get("engineVersion"));result.put("engineRevision",configuration.get("engineRevision"));
+            result.put("environment",configuration.get("environment"));result.put("observedAt",clock.instant().toString());
+            result.put("centralConfigScopeId","central-runtime-config");result.put("engineSchemaScopeId","embedded-engine-schema");
+            return result;
+        } catch(Exception failure) {
+            packageRegistry.markRegistered(packageId,registry.revision);
+            throw failure;
+        }
+    }
+
+    private static String requiredDigest(Object value,String name) {
+        if(!(value instanceof String digest)||!digest.matches("[a-f0-9]{64}"))throw new IllegalStateException(name+" is unavailable");
+        return digest;
+    }
+
+    private void invalidateRegistryBoundState() {
+        synchronized(draftLock) {
+            runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();
+            catalogLoadDrafts.clear();scheduleExecutionReviews.clear();replayReviews.clear();
+            registryBoundDrafts.clear();
+        }
+        manifestPublisher.invalidateDrafts();
+    }
+
+    private void publishRegistryBoundDraft(String draftId,String registryRevision,Runnable publish) {
+        admissionLifecycle.readLock().lock();
+        try {
+            if(!packageRegistry.snapshot().revision.equals(registryRevision))throw new StaleDraftException();
+            synchronized(draftLock) {
+                publish.run();
+                // Draft publication often expires old drafts first. Record this binding only
+                // after that cleanup so it sees the newly published draft as active.
+                registryBoundDrafts.put(draftId,registryRevision);
+            }
+        } finally {admissionLifecycle.readLock().unlock();}
+    }
+
+    private void bindRegistryDraftForAdmission(com.fasterxml.jackson.databind.node.ObjectNode input,String draftId) {
+        requireCurrentRegistryBinding(draftId);
+        String revision=registryBoundDrafts.get(draftId);
+        input.put("_attRegistryRevision",revision);
+    }
+    private void requireCurrentRegistryBinding(String draftId) {
+        String revision=registryBoundDrafts.get(draftId);
+        if(revision==null||!revision.equals(packageRegistry.snapshot().revision))throw new StaleDraftException();
     }
     private boolean isOperationalPrincipal(String principal) throws Exception {
         if(principal==null||principal.isBlank()||RequestIdentity.ANONYMOUS.equals(principal))return config.authorization.allowAnonymousOperations&&!config.authenticationRequired;
@@ -1590,10 +1725,10 @@ final class ServerRuntime implements AutoCloseable {
         return true; // The servlet layer has already verified the configured trusted USER role.
     }
     private Path packageRoot(String id) {
-        return config.packages.get(id);
+        return packageRegistry.snapshot().packages.get(id);
     }
     private Map<String,Path> packageRoots() {
-        return config.packages;
+        return packageRegistry.snapshot().packages;
     }
     Map<String,Object> inspectResource(String packageId,String action,String type,String resourceId,String query,int requestedLimit,String cursor,String principal) throws Exception {
         return inspectResource(packageId,action,type,resourceId,query,requestedLimit,cursor,"name","asc",null,principal);
@@ -1686,7 +1821,8 @@ final class ServerRuntime implements AutoCloseable {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(resourceId==null||resourceId.isBlank()||resourceId.length()>1024)throw new IllegalArgumentException("resourceId is invalid");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();Path root=registry.packages.get(packageId);
+        if(root==null)throw new NotFoundException();validatePackageRoot(root);
         Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,environment);
         String selected=(String)configuration.get("environment");
         WorkerRequest request=inspectionRequest(packageId,root,selected);request.inspectionAction="load-scenario";request.inspectionPath=resourceId;
@@ -1709,9 +1845,9 @@ final class ServerRuntime implements AutoCloseable {
                     principal,packageId,selected,resourceId,(String)rawRevision,(String)rawModel,scenario,
                     (String)result.get("previewYaml"),configuration,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
             try {
-                synchronized(draftLock) {
+                publishRegistryBoundDraft(draft.id,registry.revision,()->{
                     expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(draft.id,draft);
-                }
+                });
                 result.put("scheduleAvailable",Boolean.TRUE);result.put("draftId",draft.id);result.put("expiresAt",draft.expiresAt.toString());
             } catch(DraftCapacityException full) {
                 result.put("scheduleReason","Temporary Schedule draft capacity is full. Retry validation to try again.");
@@ -1777,11 +1913,11 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> createDebugDraft(JsonNode input,String principal) throws Exception {
         DebugDraft draft=buildDebugDraft(input,principal);
-        synchronized(draftLock) {
+        publishRegistryBoundDraft(draft.id,draft.registryRevision,()->{
             expireDrafts();
             checkDraftCapacity(principal);
             debugDrafts.put(draft.id,draft);
-        }
+        });
         return debugDraftView(draft);
     }
     private DebugDraft buildDebugDraft(JsonNode input,String principal) throws Exception {
@@ -1789,7 +1925,8 @@ final class ServerRuntime implements AutoCloseable {
         if(!config.inspection.enabled)throw new NotFoundException();
         requireObject(input,"A JSON object is required");
         requireOnlyFields(input,"packageId","environment","target","input");
-        String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String packageId=required(input,"packageId");PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+        Path root=registry.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(input,"environment"));
         String environment=(String)configuration.get("environment");
         JsonNode targetNode=input.get("target");requireObject(targetNode,"target must be a JSON object");requireOnlyFields(targetNode,"type","id");
@@ -1819,7 +1956,7 @@ final class ServerRuntime implements AutoCloseable {
         String resolvedType=String.valueOf(resolvedTarget.get("type")),resolvedId=String.valueOf(resolvedTarget.get("id"));
         DebugDraft draft=new DebugDraft("D"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,
                 environment,resolvedType,resolvedId,resourceId,(String)rawDigest,normalized,submitted,((Boolean)rawSensitive).booleanValue(),inspected,
-                clock.instant().plusMillis(DRAFT_TTL_MILLIS));
+                clock.instant().plusMillis(DRAFT_TTL_MILLIS),registry.revision);
         return draft;
     }
     Map<String,Object> createQuickLoadDraft(JsonNode input,String principal) throws Exception {
@@ -1828,7 +1965,8 @@ final class ServerRuntime implements AutoCloseable {
         requireInlineLoadEnabled();
         requireObject(input,"A JSON object is required");
         requireOnlyFields(input,"packageId","environment","target","model","input","load","execution","testdata");
-        String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String packageId=required(input,"packageId");PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+        Path root=registry.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(input,"environment"));
         String environment=(String)configuration.get("environment");
         JsonNode targetNode=input.get("target");requireObject(targetNode,"target must be a JSON object");requireOnlyFields(targetNode,"type","id");
@@ -1864,11 +2002,11 @@ final class ServerRuntime implements AutoCloseable {
         QuickLoadDraft draft=new QuickLoadDraft("L"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
                 principal,packageId,environment,resolvedType,resolvedId,resourceId,model,(String)rawDigest,
                 scenario,((Boolean)rawSensitive).booleanValue(),inspected,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
-        synchronized(draftLock) {
+        publishRegistryBoundDraft(draft.id,registry.revision,()->{
             expireDrafts();
             checkDraftCapacity(principal);
             quickLoadDrafts.put(draft.id,draft);
-        }
+        });
         return quickLoadDraftView(draft);
     }
     Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal) throws Exception {
@@ -1879,7 +2017,8 @@ final class ServerRuntime implements AutoCloseable {
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
         requireObject(input,"A JSON object is required");requireOnlyFields(input,"packageId","environment","scenario","templateComposition");
-        String packageId=required(input,"packageId");Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String packageId=required(input,"packageId");PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+        Path root=registry.packages.get(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(input,"environment"));
         if(approvedConfiguration!=null)configuration=approvedConfiguration;
         String environment=(String)configuration.get("environment");
@@ -1901,11 +2040,11 @@ final class ServerRuntime implements AutoCloseable {
         AdvancedLoadDraftState draft=new AdvancedLoadDraftState("A"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
                 principal,packageId,environment,(String)rawModel,(String)rawDigest,scenario,((Boolean)rawSensitive).booleanValue(),inspected,
                 clock.instant().plusMillis(DRAFT_TTL_MILLIS), scenarioInput, input.has("templateComposition"), ((Boolean)rawAuthoredSensitive).booleanValue());
-        synchronized(draftLock) {
+        publishRegistryBoundDraft(draft.id,registry.revision,()->{
             expireDrafts();
             checkDraftCapacity(principal);
             advancedLoadDrafts.put(draft.id,draft);
-        }
+        });
         return advancedLoadDraftView(draft);
     }
     /** Saves only the server-captured authored input of a fresh, validated draft. */
@@ -1938,15 +2077,19 @@ final class ServerRuntime implements AutoCloseable {
         if(draft.environment!=null)authored.put("environment",draft.environment);
         authored.put(draft.templateComposition?"templateComposition":"scenario",draft.authored);
         record.authoredJson=JSON.writeValueAsString(authored);record.revision=1;record.createdAt=clock.instant().toString();record.updatedAt=record.createdAt;
-        synchronized(draftLock) {
-            requireLiveDraft(draft.expiresAt);
-            if(advancedLoadDrafts.get(draftId)!=draft)throw new StaleDraftException();
-            if(draft.savedScenarioId==null)store.createSavedLoadScenario(record,100);
-            else {
-                if(!owner.equals(draft.savedScenarioOwner))throw new NotFoundException();
-                store.withSavedRevision(draft.savedScenarioId,owner,draft.savedScenarioRevision,draft.packageId,()->{store.createSavedLoadScenario(record,100);return null;});
+        admissionLifecycle.readLock().lock();
+        try {
+            requireCurrentRegistryBinding(draftId);
+            synchronized(draftLock) {
+                requireLiveDraft(draft.expiresAt);
+                if(advancedLoadDrafts.get(draftId)!=draft)throw new StaleDraftException();
+                if(draft.savedScenarioId==null)store.createSavedLoadScenario(record,100);
+                else {
+                    if(!owner.equals(draft.savedScenarioOwner))throw new NotFoundException();
+                    store.withSavedRevision(draft.savedScenarioId,owner,draft.savedScenarioRevision,draft.packageId,()->{store.createSavedLoadScenario(record,100);return null;});
+                }
             }
-        }
+        } finally {admissionLifecycle.readLock().unlock();}
         store.audit(principal,"SAVED_LOAD_CREATE",null,draft.packageId,"CREATED");
         Map<String,Object> view=new LinkedHashMap<>();view.put("id",record.id);view.put("revision",record.revision);
         view.put("name",record.name);view.put("packageId",record.packageId);view.put("model",record.model);
@@ -1998,8 +2141,14 @@ final class ServerRuntime implements AutoCloseable {
         authored.put(draft.templateComposition?"templateComposition":"scenario",draft.authored);
         record.name=name;record.description=description;record.tagsJson=JSON.writeValueAsString(tags);record.authoredJson=JSON.writeValueAsString(authored);
         record.model=draft.model;record.sourceRevision=draft.revisionDigest;record.updatedAt=clock.instant().toString();record.revision=expected+1;
-        synchronized(draftLock) {requireLiveDraft(draft.expiresAt);if(advancedLoadDrafts.get(draftId)!=draft)throw new StaleDraftException();
-            if(!store.updateSavedLoadScenario(record,expected))throw new SavedScenarioConflictException();}
+        admissionLifecycle.readLock().lock();
+        try {
+            requireCurrentRegistryBinding(draftId);
+            synchronized(draftLock) {
+                requireLiveDraft(draft.expiresAt);if(advancedLoadDrafts.get(draftId)!=draft)throw new StaleDraftException();
+                if(!store.updateSavedLoadScenario(record,expected))throw new SavedScenarioConflictException();
+            }
+        } finally {admissionLifecycle.readLock().unlock();}
         store.audit(principal,"SAVED_LOAD_UPDATE",null,record.packageId,"UPDATED");return getSavedLoadScenario(id,principal);
     }
     Map<String,Object> duplicateSavedLoadScenario(String id,long expected,String principal) throws Exception {
@@ -2088,7 +2237,8 @@ final class ServerRuntime implements AutoCloseable {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         String packageId=run.workerInput.path("packageId").asText();
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();Path root=registry.packages.get(packageId);
+        if(root==null)throw new NotFoundException();validatePackageRoot(root);
         ObjectNode input=run.workerInput.deepCopy();
         Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(input,"environment"));
         if(approvedConfiguration!=null)configuration=approvedConfiguration;
@@ -2129,11 +2279,11 @@ final class ServerRuntime implements AutoCloseable {
         input.put("expectedRevisionDigest",revision);applyInspectionPolicy(input,packageId);
         RunDraft draft=new RunDraft("R"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,revision,input,
                 new LinkedHashMap<>(preview),clock.instant().plusMillis(DRAFT_TTL_MILLIS),resourceDebugDraft);
-        synchronized(draftLock) {
+        publishRegistryBoundDraft(draft.id,registry.revision,()->{
             expireDrafts();
             checkDraftCapacity(principal);
             runDrafts.put(draft.id,draft);
-        }
+        });
         return runDraftView(draft);
     }
     private void resolveFailedCases(ObjectNode input,String principal,String packageId) throws Exception {
@@ -2218,8 +2368,10 @@ final class ServerRuntime implements AutoCloseable {
             catch(StaleCursorException stale) {runDrafts.remove(draft.id,draft);throw new StaleDraftException();}
             JobExecutionSpec retained=draft.resourceDebugDraft!=null&&draft.resourceDebugDraft.containsSensitiveValues
                     ?null:capturePrevalidatedExecutionSpec("run",draft.workerInput,null);
-            Map<String,Object> accepted=submit("run",draft.workerInput,persistedPrincipal,true,null,false,null,null,retained);
+            ObjectNode internal=((ObjectNode)draft.workerInput).deepCopy();bindRegistryDraftForAdmission(internal,draft.id);
+            Map<String,Object> accepted=submit("run",internal,persistedPrincipal,true,null,false,null,null,retained);
             runDrafts.remove(draft.id,draft);
+            registryBoundDrafts.remove(draft.id);
             return accepted;
         }
     }
@@ -2256,9 +2408,10 @@ final class ServerRuntime implements AutoCloseable {
             internal.put("expectedRevisionDigest",draft.revisionDigest);internal.put("draftResourceId",draft.resourceId);
             applyInspectionPolicy(internal,draft.packageId);
             requireLiveDraft(draft);
+            bindRegistryDraftForAdmission(internal,draft.id);
             JobExecutionSpec retained=draft.containsSensitiveValues?null:capturePrevalidatedExecutionSpec("debug",internal,null);
             Map<String,Object> accepted=submit("debug",internal,persistedPrincipal,true,null,false,null,null,retained);
-            debugDrafts.remove(draft.id,draft);submitted=true;return accepted;
+            debugDrafts.remove(draft.id,draft);registryBoundDrafts.remove(draft.id);submitted=true;return accepted;
         } catch(StaleDraftException stale) {
             debugDrafts.remove(draft.id,draft);throw stale;
         } catch(StaleCursorException|NotFoundException stale) {
@@ -2293,9 +2446,10 @@ final class ServerRuntime implements AutoCloseable {
             internal.put("expectedRevisionDigest",draft.revisionDigest);internal.put("draftResourceId",draft.resourceId);
             applyInspectionPolicy(internal,draft.packageId);
             requireLiveDraft(draft.expiresAt);
+            bindRegistryDraftForAdmission(internal,draft.id);
             JobExecutionSpec retained=draft.containsSensitiveValues?null:capturePrevalidatedExecutionSpec("load",internal,null);
             Map<String,Object> accepted=submit("load",internal,persistedPrincipal,true,null,false,null,null,retained);
-            quickLoadDrafts.remove(draft.id,draft);submitted=true;return accepted;
+            quickLoadDrafts.remove(draft.id,draft);registryBoundDrafts.remove(draft.id);submitted=true;return accepted;
         } catch(StaleDraftException stale) {
             quickLoadDrafts.remove(draft.id,draft);throw stale;
         } catch(StaleCursorException|NotFoundException stale) {
@@ -2329,6 +2483,7 @@ final class ServerRuntime implements AutoCloseable {
             internal.put("expectedRevisionDigest",draft.revisionDigest);
             applyInspectionPolicy(internal,draft.packageId);
             requireLiveDraft(draft.expiresAt);
+            bindRegistryDraftForAdmission(internal,draft.id);
             JobExecutionSpec retained=draft.containsSensitiveValues?null:capturePrevalidatedExecutionSpec("load",internal,null);
             Map<String,Object> accepted;
             if(draft.savedScenarioId==null)accepted=submit("load",internal,persistedPrincipal,true,null,false,null,null,retained);
@@ -2340,7 +2495,7 @@ final class ServerRuntime implements AutoCloseable {
                     return submit("load",internal,persistedPrincipal,true,null,false,null,null,retained);
                 });
             }
-            advancedLoadDrafts.remove(draft.id,draft);submitted=true;return accepted;
+            advancedLoadDrafts.remove(draft.id,draft);registryBoundDrafts.remove(draft.id);submitted=true;return accepted;
         } catch(StaleDraftException stale) {
             advancedLoadDrafts.remove(draft.id,draft);throw stale;
         } catch(StaleCursorException|NotFoundException stale) {
@@ -2384,6 +2539,7 @@ final class ServerRuntime implements AutoCloseable {
     WorkerRequest inspectionRequest(String packageId,Path root,String environment) {
         WorkerRequest request=new WorkerRequest();request.protocolVersion="att-worker/v1";request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.command="inspect";
         request.packageRoot=root.toString();request.config=config.runtimeConfigPath.toString();request.environment=environment;request.registeredPackageId=packageId;
+        if(packageId!=null&&!packageId.isBlank())request.packageRegistryRevision=packageRegistry.snapshot().revision;
         request.maxResponseBytes=config.inspection.maxResponseBytes;request.maxSourceBytes=config.inspection.maxSourceBytes;
         request.safeTextSources=config.inspection.safeTextSources(packageId);
         request.externalTextSources=config.inspection.externalTextSources(packageId);
@@ -2459,7 +2615,7 @@ final class ServerRuntime implements AutoCloseable {
                         "Correct the active ATT Server Config and retry read-only validation."));report.exitCode(2);
             }
         }
-        List<Map.Entry<String,Path>> packages=new ArrayList<>(config.packages.entrySet());packages.sort(Map.Entry.comparingByKey());
+        List<Map.Entry<String,Path>> packages=new ArrayList<>(packageRoots().entrySet());packages.sort(Map.Entry.comparingByKey());
         packages=boundValidationPackages(packages,report);
         long validationWorkUnits=0L;
         for(int packageIndex=0;packageIndex<packages.size();packageIndex++) {
@@ -2627,6 +2783,11 @@ final class ServerRuntime implements AutoCloseable {
         quickLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
         advancedLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
         catalogLoadDrafts.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
+        scheduleExecutionReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt().isAfter(now));
+        replayReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt.isAfter(now));
+        Set<String> active=new java.util.HashSet<>();active.addAll(runDrafts.keySet());active.addAll(debugDrafts.keySet());
+        active.addAll(quickLoadDrafts.keySet());active.addAll(advancedLoadDrafts.keySet());active.addAll(catalogLoadDrafts.keySet());
+        active.addAll(scheduleExecutionReviews.keySet());active.addAll(replayReviews.keySet());registryBoundDrafts.keySet().retainAll(active);
     }
     private void expireDraftsSafely() {
         synchronized(draftLock){expireDrafts();}
@@ -3145,11 +3306,18 @@ final class ServerRuntime implements AutoCloseable {
         return value.trim();
     }
     private Map<String,Object> runInspectionWorker(Path root,WorkerRequest request) throws Exception {
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+        if(request.registeredPackageId!=null&&!request.registeredPackageId.isBlank()
+                &&!root.equals(registry.packages.get(request.registeredPackageId)))throw new StaleCursorException();
+        if(request.registeredPackageId!=null&&!request.registeredPackageId.isBlank()
+                &&!registry.revision.equals(request.packageRegistryRevision))throw new StaleCursorException();
         String affinity=inspectionAffinity(root,request);
         InspectionWorker worker=acquireInspectionWorker(affinity);
         long started=System.nanoTime();
         try {
             Map<String,Object> response=worker.request(root,request);
+            PackageRegistry.Snapshot after=packageRegistry.snapshot();
+            if(!registry.revision.equals(after.revision))throw new StaleCursorException();
             return response;
         }
         finally { inspectionMetrics.record(DISPATCH,System.nanoTime()-started);worker.lock.unlock(); }
@@ -3172,19 +3340,30 @@ final class ServerRuntime implements AutoCloseable {
                 for(int i=slot;i<keys.size();i+=config.inspection.warmup.workers())assigned.add(keys.get(i));
                 if(assigned.isEmpty()&&!packageRoots().isEmpty())assigned.add(new ServerConfig.WarmupKey(packageRoots().keySet().iterator().next(),null));
                 for(ServerConfig.WarmupKey key:assigned) {
-                    int attempts=worker.warmAttempts.getOrDefault(key,0);
-                    if(worker.warmed.contains(key)||attempts>=3||System.nanoTime()<worker.warmRetryAt)continue;
-                    worker.warmAttempts.put(key,attempts+1);
+                    PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+                    InspectionWorker.WarmupStateKey stateKey=new InspectionWorker.WarmupStateKey(key,registry.revision);
+                    worker.warmAttempts.keySet().removeIf(previous->previous.key.equals(key)&&!previous.registryRevision.equals(registry.revision));
+                    worker.warmed.removeIf(previous->previous.key.equals(key)&&!previous.registryRevision.equals(registry.revision));
+                    int attempts=worker.warmAttempts.getOrDefault(stateKey,0);
+                    if(worker.warmed.contains(stateKey)||System.nanoTime()<worker.warmRetryAt)continue;
+                    if(attempts>=3){attempts=0;worker.warmAttempts.put(stateKey,0);}
+                    worker.warmAttempts.put(stateKey,attempts+1);
                     worker.warming=true;
+                    packageRegistry.markWarming(key.packageId(),registry.revision);
+                    boolean ready=false;
                     try {
                         Path root=packageRoot(key.packageId());
                         if(root==null)continue; // Missing packages never affect Server startup.
                         WorkerRequest request=inspectionRequest(key.packageId(),root,key.environment());
                         request.inspectionAction="list";request.inspectionType="template";request.inspectionLimit=1;request.inspectionOffset=0;
                         Map<String,Object> response=worker.request(root,request);
-                        if(!response.containsKey("errorCode"))worker.warmed.add(key);
+                        if(!response.containsKey("errorCode")){worker.warmed.add(stateKey);ready=true;}
                     } catch(Exception ignored) { /* No package contents or paths in background failure logs. */ }
-                    finally {worker.warming=false;worker.warmRetryAt=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(250L<<attempts);}
+                    finally {
+                        worker.warming=false;worker.warmRetryAt=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(250L<<attempts);
+                        if(ready)packageRegistry.markReady(key.packageId(),registry.revision);
+                        else packageRegistry.markRegistered(key.packageId(),registry.revision);
+                    }
                     return;
                 }
             } finally {worker.lock.unlock();}
@@ -3216,8 +3395,8 @@ final class ServerRuntime implements AutoCloseable {
     private final class InspectionWorker implements AutoCloseable {
         final ReentrantLock lock=new ReentrantLock();
         private volatile boolean warming;
-        private final Map<ServerConfig.WarmupKey,Integer> warmAttempts=new LinkedHashMap<>();
-        private final java.util.Set<ServerConfig.WarmupKey> warmed=new java.util.HashSet<>();
+        private final Map<WarmupStateKey,Integer> warmAttempts=new LinkedHashMap<>();
+        private final java.util.Set<WarmupStateKey> warmed=new java.util.HashSet<>();
         private long warmRetryAt;
         private final java.util.LinkedHashSet<String> retained=new java.util.LinkedHashSet<>();
         boolean holds(String key){synchronized(retained){return retained.contains(key);}}
@@ -3233,6 +3412,8 @@ final class ServerRuntime implements AutoCloseable {
         private volatile Process process;
         private volatile InspectionProtocolReader reader;
         private volatile OutputStream writer;
+
+        private record WarmupStateKey(ServerConfig.WarmupKey key,String registryRevision) { }
 
         Map<String,Object> request(Path root,WorkerRequest request) throws Exception {
             request.expectedSchemaRegistryDigest=workerSchemaRegistryDigest;
@@ -3522,6 +3703,8 @@ final class ServerRuntime implements AutoCloseable {
     LoadSchedule createLoadSchedule(JsonNode input,String principal) throws Exception {
         requireSchedulingEnabled();
         requireLocalOperator(principal);
+        String submittedDraftId=optionalText(input,"draftId");
+        if(submittedDraftId!=null)requireCurrentRegistryBinding(submittedDraftId);
         AdvancedLoadDraftState savedDraft=null;
         if(input.hasNonNull("draftId")) synchronized(draftLock) {
             expireDrafts();AdvancedLoadDraftState candidate=advancedLoadDrafts.get(input.path("draftId").asText());
@@ -3531,18 +3714,24 @@ final class ServerRuntime implements AutoCloseable {
         if(input.hasNonNull("draftId"))for(ReplayReview review:replayReviews.values())if(review.draftId.equals(input.path("draftId").asText())&&review.principal.equals(principal)) {
             ownedExecutionSpec(review.source,principal);
             if(!review.expiresAt.isAfter(clock.instant()))throw new NotFoundException();
+            requireCurrentRegistryBinding(review.draftId);
             schedule.sourceJobId=review.source;
             JobExecutionSpec spec=JobExecutionSpec.parse(store.executionSpec(review.source).get("spec"));
             verifyPackageRevision(schedule.packageId,schedule.environment,spec.revision());
             schedule.expectedRevisionDigest=spec.revision();
         }
-        if(savedDraft==null)store.createSchedule(schedule,config.scheduling.maxSchedules);
-        else synchronized(draftLock) {
-            requireLiveDraft(savedDraft.expiresAt);
-            if(advancedLoadDrafts.get(savedDraft.id)!=savedDraft)throw new StaleDraftException();
-            schedule.savedScenarioId=savedDraft.savedScenarioId;schedule.savedScenarioRevision=savedDraft.savedScenarioRevision;
-            store.createScheduleFromSaved(schedule,savedDraft.savedScenarioOwner,savedDraft.savedScenarioRevision,config.scheduling.maxSchedules);
-        }
+        admissionLifecycle.readLock().lock();
+        try {
+            if(submittedDraftId!=null)requireCurrentRegistryBinding(submittedDraftId);
+            if(savedDraft==null)store.createSchedule(schedule,config.scheduling.maxSchedules);
+            else synchronized(draftLock) {
+                requireLiveDraft(savedDraft.expiresAt);
+                requireCurrentRegistryBinding(savedDraft.id);
+                if(advancedLoadDrafts.get(savedDraft.id)!=savedDraft)throw new StaleDraftException();
+                schedule.savedScenarioId=savedDraft.savedScenarioId;schedule.savedScenarioRevision=savedDraft.savedScenarioRevision;
+                store.createScheduleFromSaved(schedule,savedDraft.savedScenarioOwner,savedDraft.savedScenarioRevision,config.scheduling.maxSchedules);
+            }
+        } finally {admissionLifecycle.readLock().unlock();}
         store.audit(principal,"SCHEDULE_CREATE",null,schedule.packageId,"CREATED");return schedule;
     }
     Map<String,Object> previewLoadSchedule(JsonNode input) {
@@ -3582,6 +3771,7 @@ final class ServerRuntime implements AutoCloseable {
         }
     }
     private Map<String,Object> createScheduleExecutionDraftForSource(String id,JsonNode input,String principal,long expected,LoadSchedule source,boolean shared) throws Exception {
+        String registryRevision=packageRegistry.snapshot().revision;
         if(source.definitionVersion!=expected)throw new ScheduleConflictException();
         if(!Set.of("run","load").contains(source.effectiveJobType()))throw new IllegalArgumentException("This legacy schedule type cannot be edited here");
         if("load".equals(source.effectiveJobType())&&source.inlineScenario==null) {
@@ -3595,7 +3785,9 @@ final class ServerRuntime implements AutoCloseable {
             LoadSchedule latest=store.schedule(id);if(latest==null||latest.definitionVersion!=source.definitionVersion)throw new ScheduleConflictException();
             String reviewId="P"+UUID.randomUUID().toString().replace("-","").toUpperCase();Instant expires=clock.instant().plusMillis(DRAFT_TTL_MILLIS);
             ScheduleExecutionReview review=new ScheduleExecutionReview(id,principal,source.definitionVersion,source.updatedAt,reviewId,source.packageId,"load",revision,expires,edit.deepCopy());
-            synchronized(draftLock) {scheduleExecutionReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt().isAfter(clock.instant()));if(scheduleExecutionReviews.size()>=MAX_ACTIVE_DRAFTS||scheduleExecutionReviews.values().stream().filter(item->item.principal().equals(principal)).count()>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();scheduleExecutionReviews.put(reviewId,review);}
+            publishRegistryBoundDraft(reviewId,registryRevision,()->{
+                synchronized(draftLock) {scheduleExecutionReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt().isAfter(clock.instant()));if(scheduleExecutionReviews.size()>=MAX_ACTIVE_DRAFTS||scheduleExecutionReviews.values().stream().filter(item->item.principal().equals(principal)).count()>=MAX_DRAFTS_PER_PRINCIPAL)throw new DraftCapacityException();scheduleExecutionReviews.put(reviewId,review);}
+            });
             Map<String,Object> result=new LinkedHashMap<>();result.put("draftId",reviewId);result.put("expiresAt",expires.toString());result.put("definitionVersion",source.definitionVersion);
             result.put("snapshotVersion",source.snapshotVersion);result.put("nextRunAt",source.nextRunAt);result.put("revisionDigest",revision);result.put("sourcePolicy",effectivePackageChangePolicy(source));
             result.put("originalPreview",Map.of("previewYaml",JSON.writeValueAsString(source.listSummary==null?Map.of():source.listSummary)));
@@ -3630,7 +3822,11 @@ final class ServerRuntime implements AutoCloseable {
         Instant expires=Instant.parse(String.valueOf(validated.get("expiresAt")));
         String reviewId="P"+UUID.randomUUID().toString().replace("-","").toUpperCase();
         ScheduleExecutionReview review=new ScheduleExecutionReview(id,principal,source.definitionVersion,source.updatedAt,draftId,source.packageId,source.effectiveJobType(),revision,expires,null);
-        synchronized(draftLock) {scheduleExecutionReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt().isAfter(clock.instant()));scheduleExecutionReviews.put(reviewId,review);}
+        String draftRegistryRevision=registryBoundDrafts.get(draftId);
+        if(draftRegistryRevision==null||!draftRegistryRevision.equals(registryRevision))throw new StaleDraftException();
+        publishRegistryBoundDraft(reviewId,draftRegistryRevision,()->{
+            synchronized(draftLock) {scheduleExecutionReviews.entrySet().removeIf(entry->!entry.getValue().expiresAt().isAfter(clock.instant()));scheduleExecutionReviews.put(reviewId,review);}
+        });
         validated.remove("draftId");
         if(shared) {
             originalPreview=Map.of("previewYaml",JSON.writeValueAsString(JobListIdentity.from(definition)));
@@ -3648,7 +3844,8 @@ final class ServerRuntime implements AutoCloseable {
         String packageId=required(definition,"packageId");
         if(!source.packageId.equals(packageId))throw new IllegalArgumentException("Schedule package cannot be changed here");
         JsonNode scenarioNode=definition.get("scenario");requireObject(scenarioNode,"A retained Load scenario is required");
-        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();Path root=registry.packages.get(packageId);
+        if(root==null)throw new NotFoundException();validatePackageRoot(root);
         Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,optionalText(definition,"environment"));
         String environment=(String)configuration.get("environment");
         LoadSchedule context=source.copy();context.environment=environment;
@@ -3661,7 +3858,7 @@ final class ServerRuntime implements AutoCloseable {
         CatalogLoadDraftState draft=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
                 principal,packageId,environment,null,validated.revisionDigest,validated.model,validated.scenario,
                 JSON.writeValueAsString(safeSummary),configuration,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
-        synchronized(draftLock){expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(draft.id,draft);}
+        publishRegistryBoundDraft(draft.id,registry.revision,()->{expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(draft.id,draft);});
         return catalogLoadDraftView(draft);
     }
 
@@ -3685,7 +3882,10 @@ final class ServerRuntime implements AutoCloseable {
         }
     }
     private LoadSchedule replaceScheduleExecutionReviewed(String id,String principal,String draftId,long expected) throws Exception {
-        synchronized(draftLock) {
+        admissionLifecycle.readLock().lock();
+        try {
+          requireCurrentRegistryBinding(draftId);
+          synchronized(draftLock) {
             ScheduleExecutionReview review=scheduleExecutionReviews.get(draftId);
             if(review==null||!review.scheduleId().equals(id)||!review.principal().equals(principal))throw new NotFoundException();
             requireLiveDraft(review.expiresAt());
@@ -3725,7 +3925,8 @@ final class ServerRuntime implements AutoCloseable {
             requireLiveDraft(review.expiresAt());verifyPackageRevision(review.packageId(),replacement.environment,review.revision());
             LoadSchedule saved=store.updateScheduleAuthorized(replacement,prior.updatedAt,"local".equals(config.authMode)?principal:null);if(saved==null)throw new NotFoundException();
             scheduleExecutionReviews.remove(draftId);store.audit(principal,"SCHEDULE_EXECUTION_REPLACE",null,saved.packageId,"version="+prior.snapshotVersion+"->"+saved.snapshotVersion);return saved;
-        }
+          }
+        } finally {admissionLifecycle.readLock().unlock();}
     }
 
     LoadSchedule updateLoadSchedule(String id,JsonNode input,String principal) throws Exception {
@@ -4590,14 +4791,34 @@ final class ServerRuntime implements AutoCloseable {
     private static List<String> safePaths(List<String> paths,String name){if(paths==null)return null;List<String> out=new ArrayList<>();for(String p:paths){if(p==null)throw new IllegalArgumentException(name+" entries must be non-empty paths");out.add(safeRelative(p,name));}return out;}
     private void validatePackageRoot(Path root) throws Exception {
         Path current=root.toRealPath();
-        if(!current.equals(root)||!config.allowedRoots.stream().anyMatch(current::startsWith))
-            throw new IllegalArgumentException("Configured package root no longer resolves within its original allowed root");
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+        if(!current.equals(root)||!Files.isDirectory(current,java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                ||!Files.isReadable(current)||!Files.isExecutable(current)
+                ||!ServerConfig.hasReadSearchPermissionBits(current)
+                ||registry.packages.values().stream().noneMatch(current::equals)
+                ||!registry.allowedRoots.stream().anyMatch(current::startsWith))
+            throw new IllegalArgumentException("Configured Package root is no longer registered under the original allowed root, canonical, and accessible");
+    }
+    private Path acceptedPackageRoot(Job job) {
+        try {
+            String retained=job.request.packageRoot;
+            Path root=retained==null||retained.isBlank()?packageRoot(job.packageId):Paths.get(retained);
+            if(root==null)throw new IllegalArgumentException("Accepted Package root is unavailable");
+            if(!root.isAbsolute())throw new IllegalArgumentException("Accepted Package root is unavailable");
+            return root.normalize();
+        } catch(Exception invalid) { throw new IllegalArgumentException("Accepted Package root is unavailable"); }
+    }
+    private static void validateAcceptedPackageRoot(Path root) throws Exception {
+        if(Files.isSymbolicLink(root)||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                ||!Files.isReadable(root)||!Files.isExecutable(root)||!ServerConfig.hasReadSearchPermissionBits(root)
+                ||!root.equals(root.toRealPath()))
+            throw new IllegalArgumentException("Accepted Package source is no longer safely available");
     }
     private static void validatePackagePath(Path root,String relative,String name) throws Exception {if(relative==null)return;Path base=root.toRealPath();Path candidate=base.resolve(relative).normalize();if(!candidate.startsWith(base))throw new IllegalArgumentException(name+" escapes PACKAGE_ROOT");Path existing=candidate;while(existing!=null&&!Files.exists(existing))existing=existing.getParent();if(existing!=null&&!existing.toRealPath().startsWith(base))throw new IllegalArgumentException(name+" resolves outside PACKAGE_ROOT");}
     private static void validateTarget(Map<String,Object> target){if(target==null)throw new IllegalArgumentException("target is required");Object type=target.get("type"),id=target.get("id");if(!(type instanceof String)||!(id instanceof String))throw new IllegalArgumentException("target.type and target.id are required");}
     Path packageRootForJob(String id) throws Exception {
         Job active=jobs.get(id);
-        if(active!=null)return packageRoot(active.packageId);
+        if(active!=null)return acceptedPackageRoot(active);
         Map<String,Object> row=store.get(id);
         if(row==null)throw new NotFoundException();
         return packageRoot(String.valueOf(row.get("packageId")));
@@ -5376,6 +5597,7 @@ final class ServerRuntime implements AutoCloseable {
     @Override public synchronized void close() {
         admissionLifecycle.writeLock().lock();
         try {if(closing)return;closing=true;}finally{admissionLifecycle.writeLock().unlock();}
+        packageRegistry.close();
         if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();
         manifestPublisher.close();
         if(executionWorkers!=null)executionWorkers.close();
@@ -5508,16 +5730,17 @@ final class ServerRuntime implements AutoCloseable {
         }
     }
     private static final class DebugDraft {
-        final String id,principal,packageId,environment,targetType,targetId,resourceId,revisionDigest;
+        final String id,principal,packageId,environment,targetType,targetId,resourceId,revisionDigest,registryRevision;
         final Map<String,Object> input,scheduleInput,preview;
         final boolean containsSensitiveValues;
         final Instant expiresAt;
         boolean submitting;
         DebugDraft(String id,String principal,String packageId,String environment,String targetType,String targetId,
                    String resourceId,String revisionDigest,Map<String,Object> input,Map<String,Object> scheduleInput,
-                   boolean containsSensitiveValues,Map<String,Object> preview,Instant expiresAt) {
+                   boolean containsSensitiveValues,Map<String,Object> preview,Instant expiresAt,String registryRevision) {
             this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
             this.targetType=targetType;this.targetId=targetId;this.resourceId=resourceId;this.revisionDigest=revisionDigest;
+            this.registryRevision=registryRevision;
             this.input=deepMap(input);this.scheduleInput=deepMap(scheduleInput);this.containsSensitiveValues=containsSensitiveValues;
             this.preview=deepMap(preview);this.expiresAt=expiresAt;
         }

@@ -1,6 +1,17 @@
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.3.0 -->
 
 # Package 檢視 API
+
+## 可信任的 registry 與 source scope
+
+Server 只會從選定、由部署管理的 `att-server.yaml` 之 `packages.entries` 載入 Package 根目錄。Tomcat 持續服務時，Server 會監看原地編輯及原子替換；候選 mapping 必須整體通過 canonical 既存目錄及 `packages.allowedRoots` 驗證。無效或不穩定的候選設定會保留最後已知良好的 registry。`packages` 以外的設定變更會標示為需要重新啟動，不會部分套用。未註冊的目錄不會成為 Package。
+
+```http
+GET /api/v1/registry
+GET /api/v1/packages/payments/scope
+```
+
+`GET /registry` 回傳 `att-package-registry/v1`：content-addressable `revision`、單調遞增的 `generation`、reload 時間、`Ready` 或 `Invalid` 狀態、安全診斷，以及明確註冊的邏輯 Package ID 和 `Registered`、`Warming` 或 `Ready` 狀態。回應不會公開檔案系統路徑。`GET /packages/{packageId}/scope` 回傳 `att-source-scope/v1`，並區分 registry、Package source、Package Manifest、Central Runtime Config source、active effective Config 及 embedded Engine schema 的 revision identity，以及安全的 environment/version metadata。此 API 僅供讀取；client 不能指定 source root。registry 變更後，以舊 registry revision 建立的 draft 和 approval 會被拒絕。已接受的 Job 會保留其已核准的 Package root 與輸入。
 
 ## 套件資源探索
 

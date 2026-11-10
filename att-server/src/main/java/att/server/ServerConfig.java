@@ -4,7 +4,7 @@ import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
-import java.io.InputStream;
+import java.io.ByteArrayInputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -23,6 +23,8 @@ public final class ServerConfig {
     private static final int LOAD_PREPARATION_SERVER_CONNECTIONS = 256;
     private static final int MAX_SERVER_LOAD_WORKERS = LOAD_PREPARATION_SERVER_CONNECTIONS / LOAD_PREPARATION_PER_WORKER_CONNECTIONS;
     public final Path sourceFile;
+    final String sourceDigest;
+    final Map<?,?> sourceDocument;
     public final Path dataDir;
     public final Path runtimeConfigPath;
     public final Path javaExecutable;
@@ -49,8 +51,9 @@ public final class ServerConfig {
     private ServerConfig(Path sourceFile, Path dataDir, Path runtimeConfigPath, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, long maxEventJournalBytes, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ArchiveCompression archiveCompression, ExecutionPool executionPool, PackageConfigurationPolicy packageConfiguration) {
+                         int maxEventsPerJob, long maxEventJournalBytes, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ArchiveCompression archiveCompression, ExecutionPool executionPool, PackageConfigurationPolicy packageConfiguration, String sourceDigest, Map<?,?> sourceDocument) {
         this.sourceFile=sourceFile;this.dataDir=dataDir; this.runtimeConfigPath=runtimeConfigPath; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
+        this.sourceDigest=sourceDigest;this.sourceDocument=Collections.unmodifiableMap(new LinkedHashMap<>(sourceDocument));
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
         this.maxRequestBytes=maxRequestBytes; this.maxEventsPerJob=maxEventsPerJob;this.maxEventJournalBytes=maxEventJournalBytes; this.maxArtifacts=maxArtifacts;this.authenticationRequired=authenticationRequired;this.authMode=authMode;this.security=security;
@@ -88,9 +91,11 @@ public final class ServerConfig {
         if (!Files.isReadable(configFile))
             throw new IllegalStateException("ATT Server configuration is not readable: "+configFile);
         LoaderOptions options=new LoaderOptions(); options.setAllowDuplicateKeys(false); options.setMaxAliasesForCollections(20);
+        byte[] sourceBytes;
         Object raw;
-        try (InputStream in=Files.newInputStream(configFile)) {
-            raw=new Yaml(new SafeConstructor(options)).load(in);
+        try {
+            sourceBytes=Files.readAllBytes(configFile);
+            raw=new Yaml(new SafeConstructor(options)).load(new ByteArrayInputStream(sourceBytes));
         } catch (Exception invalid) {
             throw new IllegalArgumentException("Unable to read or parse ATT Server configuration at "+configFile+": "+invalid.getMessage(), invalid);
         }
@@ -113,25 +118,10 @@ public final class ServerConfig {
                 Paths.get(string(server.get("javaExecutable"),"server.javaExecutable"));
         java=java.toAbsolutePath().normalize();
         if (!Files.isRegularFile(java) || !Files.isExecutable(java)) throw new IllegalArgumentException("server.javaExecutable must be an executable Java runtime");
-        List<?> roots=list(packagesNode.get("allowedRoots"),"packages.allowedRoots");
         List<?> libraryDirs=workers.get("libraryDirs")==null?List.of():list(workers.get("libraryDirs"),"workers.libraryDirs");
-        Map<?,?> entries=packagesNode.get("entries")==null?Collections.emptyMap():map(packagesNode.get("entries"),"packages.entries");
-        java.util.ArrayList<Path> allowed=new java.util.ArrayList<>();
-        for(Object r:roots) allowed.add(canonicalRequired(string(r,"packages.allowedRoots entry"),"packages.allowedRoots entry",true));
-        if(allowed.isEmpty()) throw new IllegalArgumentException("packages.allowedRoots must contain at least one directory");
-        Map<String,Path> resolved=new LinkedHashMap<>();
-        for(Map.Entry<?,?> e:entries.entrySet()) {
-            String id=string(e.getKey(),"package ID");
-            if(!id.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")) throw new IllegalArgumentException("Invalid package ID: "+id);
-            Path packageRoot=canonicalRequired(string(e.getValue(),"packages.entries."+id),"packages.entries."+id,true);
-            if(allowed.stream().noneMatch(packageRoot::startsWith)) throw new IllegalArgumentException("Package root is outside packages.allowedRoots: "+id);
-            if(packageRoot.startsWith(data)||data.startsWith(packageRoot)) throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
-            Path configDirectory=runtimeConfig.getParent();
-            if(runtimeConfig.startsWith(packageRoot)||configDirectory.startsWith(packageRoot)||packageRoot.startsWith(configDirectory))
-                throw new IllegalArgumentException("server.runtimeConfigPath and its config directory must be outside registered package roots");
-            resolved.put(id,packageRoot);
-        }
-        if(resolved.isEmpty()) throw new IllegalArgumentException("packages.entries must define at least one package ID");
+        PackageRoots packageRoots=validatePackageRoots(packagesNode,data,runtimeConfig,true);
+        List<Path> allowed=packageRoots.allowedRoots();
+        Map<String,Path> resolved=packageRoots.packages();
         java.util.ArrayList<Path> workerLibraries=new java.util.ArrayList<>();
         for(Object entry:libraryDirs){Path library=canonicalRequired(string(entry,"workers.libraryDirs entry"),"workers.libraryDirs entry",true);if(!Files.isReadable(library))throw new IllegalArgumentException("workers.libraryDirs entry must be readable: "+library);workerLibraries.add(library);}
         int max=intValue(workers,"maxConcurrent",8,1,256), queue=intValue(workers,"queuedLimit",100,0,100000),
@@ -182,7 +172,11 @@ public final class ServerConfig {
         if (initializeDataDirectory) {
             privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
         }
-        return new ServerConfig(configFile,realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,eventJournalBytes,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,archiveCompression,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")));
+        return new ServerConfig(configFile,realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,eventJournalBytes,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,archiveCompression,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")),digest(sourceBytes),root);
+    }
+
+    private static String digest(byte[] bytes) throws Exception {
+        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
     }
 
     public static final class ArchiveCompression {
@@ -272,6 +266,83 @@ public final class ServerConfig {
             if(current.getFileName()!=null&&"config".equals(current.getFileName().toString())&&current.getParent()!=null)
                 return current.getParent();
         return parent==null?Paths.get("").toAbsolutePath().normalize():parent;
+    }
+
+    /** Canonical, trusted roots selected from the deployment-controlled packages section. */
+    record PackageRoots(Map<String,Path> packages,List<Path> allowedRoots) { }
+
+    /** Validate an entire proposed Package Registry before a caller publishes it. */
+    static PackageRoots validatePackageRoots(Object raw,Path dataDirectory,Path runtimeConfiguration,
+                                             boolean allowEmpty) throws Exception {
+        Map<?,?> packagesNode=map(raw,"packages");
+        for(Object key:packagesNode.keySet())if(!(key instanceof String name)||!Set.of("allowedRoots","entries").contains(name))
+            throw new IllegalArgumentException("packages contains an unsupported registry setting");
+        List<?> roots=list(packagesNode.get("allowedRoots"),"packages.allowedRoots");
+        Map<?,?> entries=packagesNode.get("entries")==null?Collections.emptyMap():map(packagesNode.get("entries"),"packages.entries");
+        Path data=dataDirectory.toAbsolutePath().normalize();
+        Path candidateData=canonicalFuturePath(data);
+        Path runtime=runtimeConfiguration.toAbsolutePath().normalize();
+        if(Files.isSymbolicLink(runtime)||!Files.isRegularFile(runtime,LinkOption.NOFOLLOW_LINKS)||!Files.isReadable(runtime))
+            throw new IllegalArgumentException("server.runtimeConfigPath must be a readable regular file");
+        if(!hasReadPermissionBits(runtime))throw new IllegalArgumentException("server.runtimeConfigPath permissions must allow reading");
+        Path canonicalRuntime=runtime.toRealPath();
+        Path configDirectory=canonicalRuntime.getParent();
+        java.util.ArrayList<Path> allowed=new java.util.ArrayList<>();
+        for(Object value:roots) {
+            Path root=trustedDirectory(string(value,"packages.allowedRoots entry"),"packages.allowedRoots entry");
+            if(allowed.contains(root))throw new IllegalArgumentException("packages.allowedRoots contains a duplicate directory");
+            allowed.add(root);
+        }
+        if(allowed.isEmpty())throw new IllegalArgumentException("packages.allowedRoots must contain at least one directory");
+        Map<String,Path> resolved=new LinkedHashMap<>();
+        for(Map.Entry<?,?> entry:entries.entrySet()) {
+            String id=string(entry.getKey(),"package ID");
+            if(!id.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}"))throw new IllegalArgumentException("Invalid package ID");
+            Path packageRoot=trustedDirectory(string(entry.getValue(),"packages.entries."+id),"packages.entries."+id);
+            if(allowed.stream().noneMatch(packageRoot::startsWith))throw new IllegalArgumentException("Package root is outside packages.allowedRoots");
+            if(packageRoot.startsWith(candidateData)||candidateData.startsWith(packageRoot))
+                throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
+            if(canonicalRuntime.startsWith(packageRoot)||configDirectory.startsWith(packageRoot)||packageRoot.startsWith(configDirectory))
+                throw new IllegalArgumentException("server.runtimeConfigPath and its config directory must be outside registered package roots");
+            for(Path prior:resolved.values())if(packageRoot.startsWith(prior)||prior.startsWith(packageRoot))
+                throw new IllegalArgumentException("Package entries collide on overlapping directories");
+            resolved.put(id,packageRoot);
+        }
+        if(resolved.isEmpty()&&!allowEmpty)throw new IllegalArgumentException("packages.entries must define at least one package ID");
+        return new PackageRoots(Collections.unmodifiableMap(new LinkedHashMap<>(resolved)),List.copyOf(allowed));
+    }
+
+    private static Path trustedDirectory(String value,String field) throws Exception {
+        Path path=Paths.get(value);
+        if(!path.isAbsolute())throw new IllegalArgumentException(field+" must be an absolute path");
+        path=path.toAbsolutePath().normalize();
+        if(Files.isSymbolicLink(path))throw new IllegalArgumentException(field+" must not be a symbolic link");
+        if(!Files.isDirectory(path,LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException(field+" must be an existing directory");
+        if(!Files.isReadable(path)||!Files.isExecutable(path))throw new IllegalArgumentException(field+" must be readable and searchable");
+        if(!hasReadSearchPermissionBits(path))throw new IllegalArgumentException(field+" permissions must allow reading and directory traversal");
+        return path.toRealPath();
+    }
+
+    static boolean hasReadPermissionBits(Path file) throws Exception {
+        try {
+            Set<java.nio.file.attribute.PosixFilePermission> permissions=Files.getPosixFilePermissions(file,LinkOption.NOFOLLOW_LINKS);
+            return permissions.contains(java.nio.file.attribute.PosixFilePermission.OWNER_READ)
+                    ||permissions.contains(java.nio.file.attribute.PosixFilePermission.GROUP_READ)
+                    ||permissions.contains(java.nio.file.attribute.PosixFilePermission.OTHERS_READ);
+        } catch(UnsupportedOperationException ignored) { return true; }
+    }
+
+    static boolean hasReadSearchPermissionBits(Path directory) throws Exception {
+        try {
+            Set<java.nio.file.attribute.PosixFilePermission> permissions=Files.getPosixFilePermissions(directory,LinkOption.NOFOLLOW_LINKS);
+            boolean readable=permissions.contains(java.nio.file.attribute.PosixFilePermission.OWNER_READ)
+                    ||permissions.contains(java.nio.file.attribute.PosixFilePermission.GROUP_READ)
+                    ||permissions.contains(java.nio.file.attribute.PosixFilePermission.OTHERS_READ);
+            boolean searchable=permissions.contains(java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE)
+                    ||permissions.contains(java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE)
+                    ||permissions.contains(java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE);
+            return readable&&searchable;
+        } catch(UnsupportedOperationException ignored) { return true; }
     }
 
     private static String firstNonBlank(String first,String second) {

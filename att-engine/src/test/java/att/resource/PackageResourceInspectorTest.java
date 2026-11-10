@@ -7,6 +7,7 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
+import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -307,6 +308,106 @@ class PackageResourceInspectorTest {
         assertNotEquals(sit,uat,"An effective environment change must invalidate validated revisions");
         assertTrue(att.validation.SchemaFiles.registryDigest().matches("[a-f0-9]{64}"),
                 "Revision identity includes the bundled registry fingerprint");
+    }
+
+    @Test void incidentalLargeAndNumerousFilesDoNotAffectPackageSourceOrResourceInspection() throws Exception {
+        Path root=packageWithTemplate("incidental-source-files","PAYMENT","description: scoped authoring inputs");
+        Path artifacts=Files.createDirectories(root.resolve("artifacts"));
+        Path archive=artifacts.resolve("unreferenced-archive.bin");
+        // Sparse file: test the 256 MiB regression without allocating/writing 300 MiB.
+        try(java.io.RandomAccessFile output=new java.io.RandomAccessFile(archive.toFile(),"rw")) {
+            output.setLength(300L*1024L*1024L);
+        }
+        Path objects=Files.createDirectories(root.resolve(".git/objects"));
+        for(int i=0;i<20001;i++)Files.createFile(objects.resolve("object-"+i));
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),
+                "SIT",Collections.<String>emptyList(),65536,262144)) {
+            @SuppressWarnings("unchecked") Map<String,Object> list=inspector.inspect("list","template",null,null,0,10);
+            assertEquals(1,((List<?>)list.get("items")).size(),"Incidental files must not disrupt Explorer");
+            assertEquals(inspector.executionRevisionDigest(),list.get("revisionDigest"));
+            String sourceBefore=inspector.sourceRevisionDigests(null).get("packageSourceRevision");
+            Files.write(archive,new byte[]{1},java.nio.file.StandardOpenOption.WRITE);
+            Files.createFile(objects.resolve("another-unrelated-object"));
+            assertEquals(sourceBefore,inspector.sourceRevisionDigests(null).get("packageSourceRevision"),
+                    "Unindexed binary data and VCS object churn cannot alter authoring identity");
+            writeUtf8(root.resolve("templates/PAYMENT/template.yaml"),
+                    templateYaml("PAYMENT","description: modified indexed source"));
+            assertNotEquals(sourceBefore,inspector.sourceRevisionDigests(null).get("packageSourceRevision"),
+                    "An actual indexed template edit must invalidate Package authoring identity");
+        }
+    }
+
+    @Test void packageSourceRevisionIgnoresSharedConfigAndEngineOnlyChanges() throws Exception {
+        Path root=packageWithTemplate("package-source-revision", "PAYMENT", "description: revision context");
+        Path sharedConfig=Files.createDirectories(temp.resolve("source-revision-shared/config")).resolve("config.yaml");
+        writeUtf8(sharedConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
+        Map<String,String> initial;
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.<String>emptyList(),65536,262144)) {
+            initial=inspector.sourceRevisionDigests(null);
+        }
+
+        String absentManifestDigest=att.config.PackageConfig.load(root).digest();
+        writeUtf8(root.resolve(att.config.PackageConfig.FILE_NAME),"schemaVersion: att-package/v1\n");
+        Map<String,String> manifestChanged;
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.<String>emptyList(),65536,262144)) {
+            manifestChanged=inspector.sourceRevisionDigests(null);
+        }
+        assertNotEquals(absentManifestDigest,att.config.PackageConfig.load(root).digest());
+        assertEquals(initial.get("packageSourceRevision"),manifestChanged.get("packageSourceRevision"),
+                "Manifest-only changes belong to the separate Package Manifest revision domain");
+        assertNotEquals(initial.get("executionRevisionDigest"),manifestChanged.get("executionRevisionDigest"),
+                "Execution still invalidates when Package Manifest changes");
+
+        writeUtf8(sharedConfig,new String(Files.readAllBytes(sharedConfig),StandardCharsets.UTF_8)+"# shared configuration only\n");
+        Map<String,String> configChanged;
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,sharedConfig,"SIT",Collections.<String>emptyList(),65536,262144)) {
+            configChanged=inspector.sourceRevisionDigests(null);
+        }
+        assertEquals(initial.get("packageSourceRevision"),configChanged.get("packageSourceRevision"));
+        assertNotEquals(manifestChanged.get("executionRevisionDigest"),configChanged.get("executionRevisionDigest"),
+                "The execution revision remains bound to shared Runtime Config bytes");
+
+        Map<String,String> engineA=revisionProbe(root,sharedConfig,"engine-build-a");
+        Map<String,String> engineB=revisionProbe(root,sharedConfig,"engine-build-b");
+        assertEquals(configChanged.get("packageSourceRevision"),engineA.get("packageSourceRevision"));
+        assertEquals(engineA.get("packageSourceRevision"),engineB.get("packageSourceRevision"));
+        assertNotEquals(engineA.get("executionRevisionDigest"),engineB.get("executionRevisionDigest"),
+                "Engine build identity remains bound to the composite execution revision");
+    }
+
+    private Map<String,String> revisionProbe(Path root,Path config,String engineCommit) throws Exception {
+        String javaExecutable=Paths.get(System.getProperty("java.home"),"bin","java").toString();
+        Path buildInfo=Files.createDirectories(temp.resolve("build-info-"+engineCommit));
+        writeUtf8(buildInfo.resolve("att-build.properties"),"att.version=4.3.0\natt.gitCommit="+engineCommit+"\natt.buildTime=test\n");
+        String classpath=buildInfo.toString()+java.io.File.pathSeparator
+                +System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
+        Process process=new ProcessBuilder(javaExecutable,"-cp",classpath,
+                RevisionProbe.class.getName(),root.toString(),config.toString()).redirectErrorStream(true).start();
+        byte[] output;
+        try(java.io.InputStream input=process.getInputStream();ByteArrayOutputStream captured=new ByteArrayOutputStream()) {
+            byte[] buffer=new byte[4096];int count;
+            while((count=input.read(buffer))!=-1)captured.write(buffer,0,count);
+            output=captured.toByteArray();
+        }
+        int exit=process.waitFor();
+        assertEquals(0,exit,"Revision probe failed: "+new String(output,StandardCharsets.UTF_8));
+        String[] values=new String(output,StandardCharsets.UTF_8).trim().split(" ");
+        assertEquals(2,values.length);
+        Map<String,String> revisions=new LinkedHashMap<>();
+        revisions.put("executionRevisionDigest",values[0]);
+        revisions.put("packageSourceRevision",values[1]);
+        return revisions;
+    }
+
+    public static class RevisionProbe {
+        public static void main(String[] args) throws Exception {
+            try(PackageResourceInspector inspector=new PackageResourceInspector(Paths.get(args[0]),Paths.get(args[1]),"SIT",
+                    Collections.<String>emptyList(),65536,262144)) {
+                Map<String,String> revisions=inspector.sourceRevisionDigests(null);
+                System.out.print(revisions.get("executionRevisionDigest")+" "+revisions.get("packageSourceRevision"));
+            }
+        }
     }
 
     @Test void loadCatalogDistinguishesPolicyTemplatesAndInvalidYamlAndRestrictsSourcePaths() throws Exception {

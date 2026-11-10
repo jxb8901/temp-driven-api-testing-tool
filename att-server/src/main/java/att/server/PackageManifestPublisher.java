@@ -189,7 +189,8 @@ final class PackageManifestPublisher implements AutoCloseable {
     }
     static String digest(byte[] bytes) throws Exception {return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}
     private static void requireDigest(String value){if(value==null||!value.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("A valid expected Manifest digest is required");}
-    @Override public synchronized void close(){drafts.clear();}
+    synchronized void invalidateDrafts(){drafts.clear();}
+    @Override public synchronized void close(){invalidateDrafts();}
     static final class Conflict extends RuntimeException { }
     static final class Denied extends RuntimeException { }
     static final class Missing extends RuntimeException { }

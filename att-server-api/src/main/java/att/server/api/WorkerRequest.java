@@ -21,6 +21,8 @@ public class WorkerRequest {
     /** Internal Server-approved value-free configuration snapshot. */
     public Map<String,Object> configurationProvenance;
     public String registeredPackageId;
+    /** Internal identity for the trusted Package Registry snapshot used by this inspection. */
+    public String packageRegistryRevision;
     public String outputDirectory;
     public String runId;
     public String debugId;

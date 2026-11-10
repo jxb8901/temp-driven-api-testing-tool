@@ -35,16 +35,80 @@ class InspectionCacheRuntimeTest {
         }
     }
 
-    @Test void startupWarmupIsNonblockingAndRetryBoundedForUnavailableWorkers() throws Exception {
+    @Test void startupWarmupIsNonblockingAndBacksOffAfterUnavailableWorkers() throws Exception {
         Path root=fixture("unavailable");AtomicInteger attempts=new AtomicInteger();
         ServerConfig config=config(root,1,"    warmup:\n      enabled: true\n      keys: [{packageId: p}]\n");
         ServerRuntime runtime=new ServerRuntime(config,libs().toString(),builder->{attempts.incrementAndGet();throw new IOException("Unavailable");});
         try {
             assertEquals(0,attempts.get(),"Warmup must not wait for a Worker during startup");
             await(()->attempts.get()==3);
-            Thread.sleep(1200);assertEquals(3,attempts.get());
+            Thread.sleep(200);assertEquals(3,attempts.get(),"Exhausted attempts must cool down before a new retry cycle");
         } finally {runtime.close();}
         Thread.sleep(300);assertEquals(3,attempts.get(),"Shutdown cancels background work");
+    }
+
+    @Test void sameIdRegistryRepointGetsASeparateWarmupState() throws Exception {
+        Path original=fixture("warm-repoint-original");Path repointed=fixture("warm-repoint-new");
+        Path repointedReal=repointed.toRealPath();
+        Path configFile=temp.resolve("server.yaml");
+        config(original,1,"    warmup:\n      enabled: true\n      keys: [{packageId: p}]\n");
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(configFile),libs().toString(),ProcessBuilder::start)) {
+            await(()->indexBuilds(runtime)>=1);
+            long initialGeneration=runtime.packageRegistry.snapshot().generation;
+            String updatedYaml=Files.readString(configFile).replace("p: "+yaml(original),"p: "+yaml(repointed));
+            Files.writeString(configFile,updatedYaml);
+            await(()->runtime.packageRegistry.snapshot().generation>initialGeneration
+                    &&repointedReal.equals(runtime.packageRegistry.snapshot().packages.get("p")));
+            await(()->indexBuilds(runtime)>=2);
+            list(runtime,"p");
+            assertTrue(indexBuilds(runtime)>=2,"The repointed source must be indexed by the background warmup");
+        }
+    }
+
+    @Test void packageScopeReportsPackageAndExecutionRevisionsSeparately() throws Exception {
+        Path root=fixture("package-scope-revisions");
+        try(ServerRuntime runtime=new ServerRuntime(config(root,1,""),libs().toString(),ProcessBuilder::start)) {
+            Map<String,Object> scope=runtime.packageScope("p");
+            assertTrue(String.valueOf(scope.get("packageSourceRevision")).matches("[a-f0-9]{64}"));
+            assertTrue(String.valueOf(scope.get("executionRevisionDigest")).matches("[a-f0-9]{64}"));
+            assertNotEquals(scope.get("packageSourceRevision"),scope.get("executionRevisionDigest"));
+        }
+    }
+
+    @Test void packageScopeRejectsInPlaceEditsBetweenRevisionAndConfigurationObservations() throws Exception {
+        Path root=fixture("scope-revision-race");
+        try(ServerRuntime runtime=new ServerRuntime(config(root,1,""),libs().toString(),ProcessBuilder::start)) {
+            Map<String,Object> baseline=runtime.packageScope("p");
+            Path manifest=root.resolve("package.yaml");
+            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.packageScope("p",()->{
+                try {Files.writeString(manifest,"schemaVersion: att-package/v1\n");}
+                catch(IOException failed){throw new UncheckedIOException(failed);}
+            }),"Manifest changes between snapshots must reject a mixed revision tuple");
+            Map<String,Object> afterManifest=runtime.packageScope("p");
+            assertEquals(baseline.get("packageSourceRevision"),afterManifest.get("packageSourceRevision"));
+            assertNotEquals(baseline.get("packageManifestRevision"),afterManifest.get("packageManifestRevision"));
+
+            Path central=temp.resolve("shared-config/config/config.yaml");
+            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.packageScope("p",()->{
+                try {Files.writeString(central,Files.readString(central)+"# changed runtime configuration\n");}
+                catch(IOException failed){throw new UncheckedIOException(failed);}
+            }),"Central Config changes between snapshots must reject a mixed revision tuple");
+            Map<String,Object> afterConfig=runtime.packageScope("p");
+            assertEquals(afterManifest.get("packageSourceRevision"),afterConfig.get("packageSourceRevision"));
+            assertNotEquals(afterManifest.get("executionRevisionDigest"),afterConfig.get("executionRevisionDigest"));
+        }
+    }
+
+    @Test void warmupRetriesAfterTheFirstThreeAttemptsFail() throws Exception {
+        Path root=fixture("warmup-recovers-after-exhaustion");AtomicInteger attempts=new AtomicInteger();
+        ServerConfig config=config(root,1,"    warmup:\n      enabled: true\n      keys: [{packageId: p}]\n");
+        try(ServerRuntime runtime=new ServerRuntime(config,libs().toString(),builder->{
+            if(attempts.incrementAndGet()<=3)throw new IOException("Temporarily unavailable");
+            return builder.start();
+        })) {
+            await(()->attempts.get()>=4&&indexBuilds(runtime)>=1);
+            assertTrue(attempts.get()>=4,"A package must get another warmup cycle after three failed attempts");
+        }
     }
 
     @Test void preloadsAtMostTwoKeysAndWarmsAgainAfterAProcessCrash() throws Exception {
