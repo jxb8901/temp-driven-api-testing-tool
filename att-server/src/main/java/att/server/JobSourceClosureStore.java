@@ -50,7 +50,7 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
     static final String SCHEDULE_OWNER_PREFIX = "schedule:";
     private static final long MAX_READ_BYTES = 64L * 1024L * 1024L;
     private static final long MAX_SNAPSHOT_BYTES = 512L * 1024L * 1024L;
-    private static final String SNAPSHOT_VERSION = "att-worker-source-snapshot/v1";
+    private static final String SNAPSHOT_VERSION = "att-worker-source-snapshot/v2";
     private static final String PACKAGE_DOMAIN = ChangeSetPublisher.PACKAGE_SOURCE;
     private static final String CONFIG_DOMAIN = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG;
 
