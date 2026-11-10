@@ -32,4 +32,24 @@ class JobExecutionSpecTest {
         JobExecutionSpec overLimit=new JobExecutionSpec(large,"a".repeat(64),null);
         assertThrows(IllegalArgumentException.class,overLimit::json);
     }
+
+    @Test void retainedSourceProvenanceAllowsValueFreeDependencyClosureAndRejectsUnknownFields() throws Exception {
+        var definition=run();JobExecutionSpec spec=new JobExecutionSpec(definition,"a".repeat(64),null);
+        var provenance=ServerRuntime.JSON.createObjectNode();provenance.put("schemaVersion","att-job-source-provenance/v1");
+        provenance.set("revisions",ServerRuntime.JSON.createObjectNode().put("schemaVersion","att-source-revision-set/v1"));
+        provenance.put("validationFingerprint","b".repeat(64));provenance.put("snapshotState","RETAINED");
+        var dependency=provenance.putArray("dependencyClosure").addObject();
+        dependency.put("schemaVersion","att-source-dependency/v1");dependency.put("kind","FILE");
+        dependency.put("packageId","p");dependency.put("environment","SIT");dependency.put("logicalId","value.txt");
+        dependency.put("canonicalPath","files/value.txt");dependency.put("sourceFingerprint","c".repeat(64));
+        dependency.put("relationship","file-expression");dependency.put("callSite","templates/SIMPLE/template.yaml");
+        dependency.put("certainty","KNOWN");
+        spec.withSourceProvenance(ServerRuntime.JSON.convertValue(provenance,java.util.Map.class));
+        JobExecutionSpec parsed=JobExecutionSpec.parse(spec.json());
+        assertEquals("files/value.txt",parsed.value.path("sourceProvenance").path("dependencyClosure").get(0).path("canonicalPath").asText());
+        assertFalse(parsed.json().contains("file-content"));
+
+        ((com.fasterxml.jackson.databind.node.ObjectNode)provenance.path("dependencyClosure").get(0)).put("secretValue","must-not-be-retained");
+        assertThrows(IllegalArgumentException.class,()->spec.withSourceProvenance(ServerRuntime.JSON.convertValue(provenance,java.util.Map.class)));
+    }
 }

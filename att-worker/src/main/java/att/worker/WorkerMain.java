@@ -47,6 +47,7 @@ public final class WorkerMain {
     private att.load.LoadConsoleSampler loadSampler;
     private String loadSummaryLine;
     private volatile boolean shutdownCancellationRequested;
+    private WorkerSourceSnapshot sourceSnapshot;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
         // Trusted evidence retains original diagnostics. Protocol secrets are protected
@@ -104,7 +105,8 @@ public final class WorkerMain {
                 return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
             }
         }
-        return executeRequest(input);
+        try { return executeRequest(input); }
+        finally { closeSourceSnapshot(); }
     }
 
     private void executeInspectionDaemon() throws Exception {
@@ -124,7 +126,8 @@ public final class WorkerMain {
                     fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
                     continue;
                 }
-                executeRequest(input);
+                try { executeRequest(input); }
+                finally { closeSourceSnapshot(); }
             }
         } finally {
             closeResourceInspectors();
@@ -145,6 +148,16 @@ public final class WorkerMain {
             if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes;
         }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
+        try {
+            sourceSnapshot=WorkerSourceSnapshot.stage(request);
+            if(sourceSnapshot!=null) {
+                request.packageRoot=sourceSnapshot.packageRoot.toAbsolutePath().normalize().toString();
+                request.config=sourceSnapshot.configPath.toAbsolutePath().normalize().toString();
+                sourceSnapshot.guardExecution(Thread.currentThread());
+            }
+        } catch(Exception invalidSnapshot) {
+            return fail("WORKER_SOURCE_SNAPSHOT_INVALID","The accepted source snapshot is unavailable or failed integrity verification");
+        }
         currentCommand=request.command;
         try { consoleOptions=att.console.ExecutionConsoleFormatter.Options.published(
                 request.liveOutputMaxEntryChars==null?4000:request.liveOutputMaxEntryChars,
@@ -156,7 +169,10 @@ public final class WorkerMain {
         if(prewarmed) {
             if(!("run".equals(request.command)||"debug".equals(request.command)))
                 return fail("WORKER_REQUEST_INVALID","Prewarmed Workers accept only one RUN/DEBUG Job");
-            if(request.packageRoot==null||!Paths.get(request.packageRoot).toRealPath().equals(Paths.get("").toRealPath()))
+            if(sourceSnapshot!=null) {
+                if(!java.util.Objects.equals(request.registeredPackageId,sourceSnapshot.packageId))
+                    return fail("WORKER_REQUEST_INVALID","Prewarmed Worker Package affinity mismatch");
+            } else if(request.packageRoot==null||!Paths.get(request.packageRoot).toRealPath().equals(Paths.get("").toRealPath()))
                 return fail("WORKER_REQUEST_INVALID","Prewarmed Worker package affinity mismatch");
             if(request.expectedExecutionRevisionDigest==null)
                 return fail("WORKER_REQUEST_INVALID","Prewarmed execution requires an immutable package revision");
@@ -202,6 +218,7 @@ public final class WorkerMain {
                     throw new PackageResourceInspector.StaleResourceCursorException();
             }
             OperationResult result=dispatch(request);
+            if(sourceSnapshot!=null)sourceSnapshot.verifyUnchanged();
             Map<String,Object> serialized=result instanceof att.api.LoadResult && "load".equals(request.command)
                     ? ((att.api.LoadResult)result).toWorkerMap() : result.toMap();
             if(configuration!=null) {
@@ -225,14 +242,20 @@ public final class WorkerMain {
             }
             recordInspectionAggregate(request,processingStarted,buildsBefore,loadsBefore,bytesBefore);
             Map<String,Object> payload=new LinkedHashMap<String,Object>(); payload.put("status",result.status()); payload.put("exitCode",result.exitCode()); payload.put("durationMs",result.durationMs()); payload.put("result",serialized);
+            if(sourceSnapshot!=null)sourceSnapshot.verifyUnchanged();
             emitResult(payload);
             return result.exitCode();
         } catch(Exception error) {
+            if(sourceSnapshot!=null&&sourceSnapshot.changedDuringExecution())
+                error=new WorkerSourceSnapshot.SourceChangedException();
             if(inspectionDaemon)InspectionMetrics.JVM.record(PROCESSING,System.nanoTime()-processingStarted);
             recordInspectionAggregate(request,processingStarted,buildsBefore,loadsBefore,bytesBefore);
             String code="WORKER_EXECUTION_FAILED", message=error.getMessage();
             int exit=3; String status="ERROR";
-            if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
+            if(error instanceof WorkerSourceSnapshot.SourceChangedException) {
+                code="WORKER_SOURCE_SNAPSHOT_CHANGED";message=error.getMessage();
+            }
+            else if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
             else if(error instanceof PackageResourceInspector.ResourceNotFoundException) { code="ATT-RESOURCE-NOT-FOUND"; message="Package resource was not found"; }
             else if(error instanceof PackageResourceInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package resource response exceeded the configured limit"; }
             else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured scan limit"; }
@@ -323,6 +346,10 @@ public final class WorkerMain {
                 }
             }
         } catch(Exception ignored) { /* Closing stdin ends the optional control channel. */ }
+    }
+    private void closeSourceSnapshot() {
+        WorkerSourceSnapshot snapshot=sourceSnapshot;sourceSnapshot=null;
+        if(snapshot!=null)snapshot.close();
     }
     private OperationResult dispatch(WorkerRequest r) throws Exception {
         if(r.packageRoot==null||r.packageRoot.trim().isEmpty()) throw new IllegalArgumentException("packageRoot is required");
@@ -697,7 +724,12 @@ public final class WorkerMain {
                 request.maxResponseBytes==null?262144:request.maxResponseBytes,true,
                 sourceBrowsingEnabled,policy,request.sourceDenyGlobs,redactionEnabled,
                 request.sensitivePaths,request.sensitiveFieldPatterns)) {
-            if(prewarmed)inspector.verifyPrewarmRevision(request.expectedExecutionRevisionDigest);
+            boolean archiveBound=sourceSnapshot!=null
+                    &&sourceSnapshot.verifyExecutionRevision(request.expectedExecutionRevisionDigest);
+            if(archiveBound) {
+                if(prewarmed&&!Boolean.TRUE.equals(inspector.prewarmEligibility().get("eligible")))
+                    throw new IllegalArgumentException("Package requires a cold Worker environment");
+            } else if(prewarmed)inspector.verifyPrewarmRevision(request.expectedExecutionRevisionDigest);
             else inspector.verifyRevision(request.expectedExecutionRevisionDigest);
         }
     }

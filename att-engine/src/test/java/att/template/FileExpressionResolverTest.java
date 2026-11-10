@@ -10,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -148,6 +149,58 @@ class FileExpressionResolverTest {
         assertEquals(1, snapshot.size());
     }
 
+    @Test void mergedSnapshotsRetainEveryAuthoredCallerForSharedFilePlans() throws Exception {
+        write("templates/shared/request.txt", "accepted");
+        FileExpressionResolver resolver = new FileExpressionResolver(project);
+        StageTemplate first = template("one", "templates/one", "../shared/request.txt");
+        StageTemplate second = template("two", "templates/two", "../shared/request.txt");
+
+        FileExpressionResolver.FileExpressionSnapshot merged = FileExpressionResolver.FileExpressionSnapshot.merge(
+                project, Arrays.asList(resolver.snapshotFor(first, null), resolver.snapshotFor(second, null)));
+
+        assertEquals(2, merged.size(), "Each authored source directory keeps its own compiled plan");
+        assertEquals(2, merged.references().size(), "Both authored inbound edges remain available");
+        assertEquals("templates/shared/request.txt", merged.references().get(0).logicalPath());
+        assertEquals(merged.references().get(0).logicalPath(), merged.references().get(1).logicalPath());
+        assertEquals(merged.references().get(0).sourceFingerprint(), merged.references().get(1).sourceFingerprint());
+        assertTrue(merged.references().stream().anyMatch(reference -> reference.callSite().contains("templates/one")),
+                merged.references().get(0).callSite() + " | " + merged.references().get(1).callSite());
+        assertTrue(merged.references().stream().anyMatch(reference -> reference.callSite().contains("templates/two")),
+                merged.references().get(0).callSite() + " | " + merged.references().get(1).callSite());
+    }
+
+    @Test void portableApprovedPlanRestoresCompiledAstAndNeverRereadsWorkerFile() throws Exception {
+        Path templateDirectory = project.resolve("templates/T");
+        Files.createDirectories(templateDirectory);
+        Path source = write("templates/T/request.txt", "id=${EXEC.INPUT.id}|name=#{upper(value=${EXEC.INPUT.name})}");
+        StageTemplate template = new StageTemplate("T", templateDirectory, Collections.singletonList(
+                new TemplateAction("request", values("type", "assign", "name", "request",
+                        "expression", "&{./request.txt}"), Version.TEMPLATE_SCHEMA)), Version.TEMPLATE_SCHEMA,
+                templateDirectory.resolve("template.yaml"));
+        FileExpressionResolver.FileExpressionSnapshot accepted = new FileExpressionResolver(project)
+                .snapshotFor(template, null);
+        byte[] encoded = accepted.serialize();
+
+        Path workerRoot = Files.createDirectories(project.resolveSibling("worker-plan-root" + System.nanoTime()));
+        Path workerDirectory = Files.createDirectories(workerRoot.resolve("templates/T"));
+        Files.copy(source, workerDirectory.resolve("request.txt"));
+        Files.write(source, "owner mutation B".getBytes(StandardCharsets.UTF_8));
+        FileExpressionResolver.FileExpressionSnapshot restored = FileExpressionResolver.FileExpressionSnapshot.restore(workerRoot, encoded);
+        Files.write(workerDirectory.resolve("request.txt"), "worker filesystem mutation C".getBytes(StandardCharsets.UTF_8));
+
+        Map<String,Object> values = new LinkedHashMap<String,Object>();
+        values.put("EXEC.INPUT.id", "accepted-A");values.put("EXEC.INPUT.name", "alice");
+        try (AutoCloseable ignored = FileExpressionResolver.registerApprovedSnapshot(workerRoot, restored)) {
+            FileExpressionResolver workerResolver = new FileExpressionResolver(workerRoot);
+            assertEquals("id=accepted-A|name=ALICE", workerResolver.evaluate("./request.txt", workerDirectory, runtime(values)));
+            assertEquals(1, restored.size());
+        } finally {
+            try (java.util.stream.Stream<Path> paths = Files.walk(workerRoot)) {
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> { try { Files.deleteIfExists(path); } catch (Exception ignored) { } });
+            }
+        }
+    }
+
     @Test void directFlowLoadSnapshotTraversesTheActualFlowBehindItsSyntheticWrapper() throws Exception {
         att.TestSchemas.install(project);
         Path flowDirectory = project.resolve("templates/flows/mqtest");
@@ -242,6 +295,15 @@ class FileExpressionResolverTest {
         Files.createDirectories(file.getParent());
         Files.write(file, value.getBytes(StandardCharsets.UTF_8));
         return file;
+    }
+
+    private StageTemplate template(String name, String directory, String file) throws Exception {
+        Path sourceDirectory = Files.createDirectories(project.resolve(directory));
+        Path sourceFile = sourceDirectory.resolve("template.yaml");
+        Files.write(sourceFile, Collections.<String>emptyList());
+        return new StageTemplate(name, sourceDirectory, Collections.singletonList(new TemplateAction("read",
+                values("type", "log", "message", "&{" + file + "}"), Version.TEMPLATE_SCHEMA)),
+                Version.TEMPLATE_SCHEMA, sourceFile.toRealPath());
     }
 
     private RuntimeStub runtime(final Map<String, Object> values) {

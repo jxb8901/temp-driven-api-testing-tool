@@ -1,6 +1,7 @@
 /* Author: Jeffrey + ChatGPT */
 package att.template;
 
+import java.io.Serializable;
 import java.lang.reflect.Array;
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -94,7 +95,8 @@ public final class ExpressionBlockEvaluator {
     private static final class Parsed { private final Node root; private Parsed(Node root) { this.root = root; } }
 
     /** Immutable compiled expression used by cached file-content plans. */
-    public static final class CompiledExpression {
+    public static final class CompiledExpression implements Serializable {
+        private static final long serialVersionUID = 1L;
         private final Node root;
         private CompiledExpression(Node root) { this.root = root; }
 
@@ -120,7 +122,7 @@ public final class ExpressionBlockEvaluator {
         }
     }
 
-    private interface Node {
+    private interface Node extends Serializable {
         Object evaluate(Resolver resolver) throws Exception;
         void collectCalls(List<ToolCallParser.ParsedCall> calls);
         void collectContextPaths(List<String> paths);
@@ -306,7 +308,11 @@ public final class ExpressionBlockEvaluator {
         @Override public void collectFilePaths(List<String> paths) { for (CallArgument argument : arguments) argument.value.collectFilePaths(paths); }
     }
 
-    private static final class CallArgument { private final String name; private final Node value; private CallArgument(String name, Node value) { this.name = name; this.value = value; } }
+    private static final class CallArgument implements Serializable {
+        private static final long serialVersionUID = 1L;
+        private final String name; private final Node value;
+        private CallArgument(String name, Node value) { this.name = name; this.value = value; }
+    }
 
     private static boolean bool(Object value) {
         if (value instanceof Boolean) return ((Boolean) value).booleanValue();

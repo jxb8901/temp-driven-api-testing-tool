@@ -1616,6 +1616,12 @@ public final class PackageResourceInspector implements AutoCloseable {
                                                        att.load.LoadScenario scenario) throws Exception {
         att.load.LoadRunCoordinator.resolveAndValidateTargets(packageRoot, config, scenario);
         Map<String, Object> scenarioMap = scenario.toMap();
+        if(!scenario.testdataDescriptors().isEmpty()) {
+            List<String> selectedOverlays=new ArrayList<String>();
+            for(Path overlay:scenario.testdataDescriptors())
+                selectedOverlays.add(resources.fromInternalPath(overlay,PackageResourceResolver.Kind.FILE).logicalName());
+            scenarioMap.put("testdata",selectedOverlays);
+        }
         Map<String, Object> projection = projectSafeLoadScenario(scenarioMap, engine);
         @SuppressWarnings("unchecked") Map<String, Object> safeScenario = (Map<String, Object>) projection.get("value");
         DumperOptions options = new DumperOptions();

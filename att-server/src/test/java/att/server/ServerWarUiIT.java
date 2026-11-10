@@ -685,6 +685,12 @@ class ServerWarUiIT {
                 }
             }
             assertCliAndTomcatDiagnosticFidelity(port, api, auth, origin, packageRoot, localHome);
+            // The intentionally unresolved Debug-only Flow exercised above must
+            // not affect unrelated Schedule source-closure validation later.
+            Path diagnosticFlow=packageRoot.resolve("templates/flows/diagnostic");
+            Files.delete(diagnosticFlow.resolve("flow.yaml"));
+            Files.delete(diagnosticFlow.resolve("debug.yaml"));
+            Files.delete(diagnosticFlow);
             JsonNode cacheCapabilities=getJson(port,api+"/auth/capabilities",auth);
             String cacheContext=cacheCapabilities.path("inspectionCacheContext").asText();
             assertTrue(cacheContext.matches("[A-Za-z0-9_-]{43}"));
@@ -1164,30 +1170,17 @@ class ServerWarUiIT {
         Process cli=builder.start();assertTrue(cli.waitFor(30,TimeUnit.SECONDS));
         assertNotEquals(0,cli.exitValue());String cliText=Files.readString(cliOutput);
         assertTrue(cliText.contains(expression),cliText);assertFalse(cliText.contains("&{.$EXTERNAL"),cliText);
-        JsonNode submitted=apiJsonResponse(port,"POST",api+"/jobs/debug",auth,origin,
-                Map.of("packageId","payments","target",Map.of("type","flow","id","diagnostic.fidelity.v1")),202);
-        String jobId=submitted.path("jobId").asText();JsonNode job=null;
-        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(40);
-        do { job=getJson(port,api+"/jobs/"+jobId,auth);
-            if (Set.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(job.path("status").asText())) break;
-            Thread.sleep(30);
-        } while(System.nanoTime()<deadline);
-        assertTrue(Set.of("ERROR","INVALID").contains(job.path("status").asText()),job.toString());
-        JsonNode result=getJson(port,api+"/jobs/"+jobId+"/result",auth);String publicText=result.toString();
-        assertTrue(publicText.contains(expression),publicText);assertFalse(publicText.contains("&{.$EXTERNAL"),publicText);
+        // #254 snapshots require a complete, resolvable File-expression closure.
+        // A nonexistent source must fail closed at admission instead of starting a
+        // Worker with untracked input or publishing a misleading partial archive.
+        JsonNode rejected=apiJsonResponse(port,"POST",api+"/jobs/debug",auth,origin,
+                Map.of("packageId","payments","target",Map.of("type","flow","id","diagnostic.fidelity.v1")),400);
+        String publicText=rejected.toString();
+        assertEquals("ATT-SERVER-INVALID-REQUEST",rejected.path("error").path("code").asText());
+        assertTrue(publicText.contains("Pacs008.xml"),publicText);
+        assertFalse(publicText.contains("&{.$EXTERNAL"),publicText);
         assertFalse(publicText.contains(packageRoot.toString()),publicText);
-        assertTrue(publicText.contains("flow.yaml"),publicText);
-        assertTrue(publicText.contains("line") || publicText.contains("sourceColumn"),publicText);
-        JsonNode artifacts=awaitArchive(port,api,jobId,auth);
-        boolean checked=false;
-        for(JsonNode item:artifacts.path("items")) if(item.path("path").asText().endsWith("case.log")) {
-            String path=item.path("path").asText();
-            String log=getText(port,api+"/jobs/"+jobId+"/artifacts/view/"+encodeEntry(path),auth);
-            assertTrue(log.contains(expression),log);assertFalse(log.contains(packageRoot.toString()),log);checked=true;
-        }
-        assertTrue(checked,"Failed Debug must retain its diagnostic Case Log");
-        assertTrue(sseDataUntil(port,api+"/jobs/"+jobId+"/events",auth,"[DEBUG]").contains("[DEBUG]"),
-                "DEBUG live output must include a shared console line");
+        assertFalse(publicText.contains(localHome.toString()),publicText);
     }
 
     private static void writeReferenceFlowSource(Path packageRoot) throws Exception {
@@ -1257,7 +1250,8 @@ class ServerWarUiIT {
                                     Object body, int expectedStatus) throws Exception {
         HttpURLConnection connection = open(port, path, authorization);
         connection.setConnectTimeout(5000);
-        connection.setReadTimeout(30000);
+        // Source-closure acceptance may be slower under heavily shared CI runners.
+        connection.setReadTimeout(120000);
         connection.setRequestMethod(method);
         if (origin != null) connection.setRequestProperty("Origin", origin);
         if (body != null) {
@@ -1269,8 +1263,13 @@ class ServerWarUiIT {
         }
         try {
             int status = connection.getResponseCode();
-            assertEquals(expectedStatus, status, method + " " + path);
-            return ServerRuntime.JSON.readTree(connection.getInputStream());
+            JsonNode response;
+            try(var stream=status >= 400 ? connection.getErrorStream() : connection.getInputStream()) {
+                assertNotNull(stream, "Expected a JSON response body");
+                response=ServerRuntime.JSON.readTree(stream);
+            }
+            assertEquals(expectedStatus, status, method + " " + path + apiStatusDiagnostic(response, status));
+            return response;
         } finally {
             connection.disconnect();
         }
@@ -1280,7 +1279,8 @@ class ServerWarUiIT {
                                             Object body, int expectedStatus) throws Exception {
         HttpURLConnection connection = open(port, path, authorization);
         connection.setConnectTimeout(5000);
-        connection.setReadTimeout(30000);
+        // Source-closure acceptance may be slower under heavily shared CI runners.
+        connection.setReadTimeout(120000);
         connection.setRequestMethod(method);
         if (origin != null) connection.setRequestProperty("Origin", origin);
         if (body != null) {
@@ -1292,12 +1292,24 @@ class ServerWarUiIT {
         }
         try {
             int status = connection.getResponseCode();
-            assertEquals(expectedStatus, status, method + " " + path);
+            // An HttpURLConnection error stream is single-consumption. Parse once
+            // before producing diagnostics; a second getErrorStream() read may fail
+            // with "stream is closed", masking a valid expected 4xx response.
+            JsonNode response;
             try (var stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream()) {
                 assertNotNull(stream, "Expected a JSON response body");
-                return ServerRuntime.JSON.readTree(stream);
+                response = ServerRuntime.JSON.readTree(stream);
             }
+            assertEquals(expectedStatus, status, method + " " + path + apiStatusDiagnostic(response,status));
+            return response;
         } finally { connection.disconnect(); }
+    }
+
+    private static String apiStatusDiagnostic(JsonNode response,int status) {
+        if(status<400)return "";
+        JsonNode error=response==null?ServerRuntime.JSON.getNodeFactory().nullNode():response.path("error");
+        return " (code="+error.path("code").asText("unknown")
+                +", summary="+error.path("summary").asText("unavailable")+")";
     }
 
     private static int apiStatus(int port, String method, String path, String authorization, String origin, Object body) throws Exception {

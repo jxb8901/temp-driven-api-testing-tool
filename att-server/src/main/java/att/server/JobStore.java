@@ -520,6 +520,80 @@ final class JobStore implements AutoCloseable {
             }
         }
     }
+
+    synchronized void markPackageSchedulesSourceChanged(String packageId,String sourceRevision,String serverPolicy,String at) throws Exception {
+        if(packageId==null||packageId.isBlank())return;
+        for(LoadSchedule schedule:schedules())if(packageId.equals(schedule.packageId)) {
+            String effectivePolicy=schedule.packageChangePolicy==null?serverPolicy:schedule.packageChangePolicy;
+            markScheduleSourceChanged(schedule.id,sourceRevision,"pause".equals(effectivePolicy),at);
+        }
+    }
+
+    private void markScheduleSourceChanged(String id,String sourceRevision,boolean pause,String at) throws Exception {
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try(PreparedStatement select=c.prepareStatement("SELECT schedule_json FROM load_schedules WHERE schedule_id=? FOR UPDATE")) {
+                select.setString(1,id);
+                try(ResultSet rows=select.executeQuery()) {
+                    if(!rows.next()){c.rollback();return;}
+                    LoadSchedule current=ServerRuntime.JSON.readValue(rows.getString(1),LoadSchedule.class);
+                    boolean newlyObserved=!java.util.Objects.equals(current.currentSourceRevision,sourceRevision);
+                    boolean autoPause=pause&&current.enabled;
+                    current.sourceStatus="package-revision-changed";current.currentSourceRevision=sourceRevision;
+                    if(autoPause){current.enabled=false;current.autoPauseReason="package-revision-changed";current.autoPausedAt=at;current.updatedAt=at;current.updatedBy="system:load-scheduler";current.definitionVersion++;}
+                    try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=?,enabled=?,next_run_at=?,updated_at=? WHERE schedule_id=?")) {
+                        update.setString(1,ServerRuntime.JSON.writeValueAsString(current));update.setBoolean(2,current.enabled);
+                        update.setString(3,current.nextRunAt);update.setString(4,current.updatedAt);update.setString(5,id);update.executeUpdate();
+                    }
+                    if(newlyObserved)try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,package_id,created_at,outcome) VALUES('system:load-scheduler','SCHEDULE_SOURCE_CHANGED',?,?,?)")) {
+                        audit.setString(1,current.packageId);audit.setString(2,at);audit.setString(3,"schedule="+current.id+";sourceRevision="+sourceRevision);audit.executeUpdate();
+                    }
+                    if(autoPause)try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,package_id,created_at,outcome) VALUES('system:load-scheduler','SCHEDULE_AUTO_PAUSE',?,?,?)")) {
+                        audit.setString(1,current.packageId);audit.setString(2,at);audit.setString(3,"package-revision-changed;schedule="+current.id);audit.executeUpdate();
+                    }
+                    c.commit();
+                }
+            } catch(Exception failure){c.rollback();throw failure;}
+        }
+    }
+
+    synchronized void markScheduleConfigurationChanged(String packageId,String environment,String at) throws Exception {
+        markScheduleConfigurationChanged(schedule->java.util.Objects.equals(packageId,schedule.packageId)
+                &&(environment==null||java.util.Objects.equals(environment,schedule.environment)),at);
+    }
+
+    @FunctionalInterface private interface SchedulePredicate { boolean test(LoadSchedule schedule); }
+    private void markScheduleConfigurationChanged(SchedulePredicate predicate,String at) throws Exception {
+        for(LoadSchedule schedule:schedules())if(predicate.test(schedule))try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try(PreparedStatement select=c.prepareStatement("SELECT schedule_json FROM load_schedules WHERE schedule_id=? FOR UPDATE")) {
+                select.setString(1,schedule.id);
+                try(ResultSet rows=select.executeQuery()) {
+                    if(!rows.next()){c.rollback();continue;}
+                    LoadSchedule current=ServerRuntime.JSON.readValue(rows.getString(1),LoadSchedule.class);
+                    if("configuration-revision-changed".equals(current.configurationStatus)){c.rollback();continue;}
+                    current.configurationStatus="configuration-revision-changed";
+                    boolean autoPause=current.enabled;
+                    if(autoPause) {
+                        current.enabled=false;current.autoPauseReason="configuration-revision-changed";
+                        current.autoPausedAt=at;current.updatedAt=at;current.updatedBy="system:load-scheduler";
+                        current.definitionVersion++;
+                    }
+                    try(PreparedStatement update=c.prepareStatement("UPDATE load_schedules SET schedule_json=?,enabled=?,next_run_at=?,updated_at=? WHERE schedule_id=?")) {
+                        update.setString(1,ServerRuntime.JSON.writeValueAsString(current));update.setBoolean(2,current.enabled);
+                        update.setString(3,current.nextRunAt);update.setString(4,current.updatedAt);update.setString(5,current.id);update.executeUpdate();
+                    }
+                    try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,package_id,created_at,outcome) VALUES('system:load-scheduler','SCHEDULE_CONFIG_CHANGED',?,?,?)")) {
+                        audit.setString(1,current.packageId);audit.setString(2,at);audit.setString(3,"schedule="+current.id+";environment="+current.environment);audit.executeUpdate();
+                    }
+                    if(autoPause)try(PreparedStatement audit=c.prepareStatement("INSERT INTO audit(principal,action,package_id,created_at,outcome) VALUES('system:load-scheduler','SCHEDULE_AUTO_PAUSE',?,?,?)")) {
+                        audit.setString(1,current.packageId);audit.setString(2,at);audit.setString(3,"configuration-revision-changed;schedule="+current.id);audit.executeUpdate();
+                    }
+                    c.commit();
+                }
+            } catch(Exception failure){c.rollback();throw failure;}
+        }
+    }
     synchronized void recordScheduleSourceRestored(LoadSchedule expected,String currentRevision,String at) throws Exception {
         try(Connection c=connect()) {
             c.setAutoCommit(false);
@@ -1264,7 +1338,7 @@ final class JobStore implements AutoCloseable {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id,command,package_id,principal,status,created_at,started_at,finished_at,worker_pid,exit_code,result_json,diagnostic_json,att_version,performance_json,retention_state,pinned,pinned_at,pinned_by,pin_reason,request_summary,target_identity,load_progress_json,originating_schedule_id,submission_source,schedule_owner,execution_principal,submitted_by,triggered_by FROM jobs WHERE job_id=?")) {
             p.setString(1,id);try(ResultSet r=p.executeQuery()){if(!r.next()||"DELETING".equals(r.getString(15)))return null;var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("workerPid",r.getObject(9));m.put("exitCode",r.getObject(10));m.put("resultJson",r.getString(11));m.put("diagnosticJson",r.getString(12));m.put("attVersion",r.getString(13));m.put("performanceJson",r.getString(14));m.put("pinned",r.getBoolean(16));m.put("pinnedAt",r.getString(17));m.put("pinnedBy",r.getString(18));m.put("pinReason",r.getString(19));m.put("deletionState",r.getString(15));
                 m.put("originatingScheduleId",r.getString(23));m.put("scheduleId",r.getString(23));m.put("submissionSource",r.getString(24)==null?"manual":r.getString(24));m.put("scheduleOwner",r.getString(25));m.put("executionPrincipal",r.getString(26));m.put("submittedBy",r.getString(27));m.put("triggeredBy",r.getString(28));
-                String summary=r.getString(20);if(summary!=null)try{Map<?,?> details=ServerRuntime.JSON.readValue(summary,Map.class);for(String key:List.of("environment","configuration"))if(details.get(key)!=null)m.put(key,details.get(key));}catch(Exception ignored){}
+                String summary=r.getString(20);if(summary!=null)try{Map<?,?> details=ServerRuntime.JSON.readValue(summary,Map.class);for(String key:List.of("environment","configuration","sourceProvenance"))if(details.get(key)!=null)m.put(key,details.get(key));}catch(Exception ignored){}
                 String identity=r.getString(21);if(identity!=null)try{m.put("targetIdentity",ServerRuntime.JSON.readValue(identity,Map.class));}catch(Exception ignored){}
                 String progress=r.getString(22);if(progress!=null)try{Map<?,?> state=ServerRuntime.JSON.readValue(progress,Map.class);for(String key:List.of("latest","recent","trend","checkpoints"))if(state.get(key)!=null)m.put(switch(key){case "latest"->"loadProgress";case "recent"->"loadProgressHistory";case "trend"->"loadProgressTrend";default->"loadCheckpointHistory";},state.get(key));}catch(Exception ignored){}
                 return m;}}

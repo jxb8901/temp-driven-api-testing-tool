@@ -15,6 +15,13 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InvalidClassException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.ObjectStreamClass;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -24,6 +31,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -32,6 +40,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * evaluated for each call.
  */
 public final class FileExpressionResolver {
+    private static final int MAX_PORTABLE_SNAPSHOT_BYTES = 128 * 1024 * 1024;
+    private static final Map<Path, FileExpressionSnapshot> APPROVED_SNAPSHOTS = new ConcurrentHashMap<Path, FileExpressionSnapshot>();
     private final Path projectRoot;
     private final PackageResourceResolver packageResources;
     private final FileExpressionSnapshot snapshot;
@@ -53,7 +63,18 @@ public final class FileExpressionResolver {
         try { this.projectRoot = projectRoot.toRealPath(); }
         catch (Exception error) { throw new IllegalArgumentException("ATT package root is unavailable", error); }
         this.packageResources = new PackageResourceResolver(this.projectRoot);
-        this.snapshot = snapshot;
+        this.snapshot = snapshot == null ? APPROVED_SNAPSHOTS.get(this.projectRoot) : snapshot;
+    }
+
+    /** Installs a Server-approved immutable plan snapshot for this private Worker Package root. */
+    public static AutoCloseable registerApprovedSnapshot(Path packageRoot, FileExpressionSnapshot snapshot) throws Exception {
+        if (packageRoot == null || snapshot == null) throw new IllegalArgumentException("Approved File-expression snapshot is required");
+        Path root = packageRoot.toRealPath().normalize();
+        if (!root.equals(snapshot.projectRoot().toRealPath().normalize()))
+            throw new IllegalArgumentException("Approved File-expression snapshot belongs to another Package root");
+        FileExpressionSnapshot existing = APPROVED_SNAPSHOTS.putIfAbsent(root, snapshot);
+        if (existing != null && existing != snapshot) throw new IllegalStateException("An approved File-expression snapshot is already registered for this Package root");
+        return () -> APPROVED_SNAPSHOTS.remove(root, snapshot);
     }
 
     /** Runtime bridge used by immutable file plans. */
@@ -357,7 +378,7 @@ public final class FileExpressionResolver {
         return -1;
     }
 
-    private interface Segment { Object evaluate(Runtime runtime) throws Exception; }
+    private interface Segment extends java.io.Serializable { Object evaluate(Runtime runtime) throws Exception; }
     private static final class LiteralSegment implements Segment {
         private final String value; private LiteralSegment(String value) { this.value = value; }
         @Override public Object evaluate(Runtime runtime) { return value; }
@@ -453,6 +474,141 @@ public final class FileExpressionResolver {
         }
         private CompiledFilePlan lookup(String authoredPath, Path sourceDirectory) {
             return plans.get(ReferenceKey.of(authoredPath, sourceDirectory));
+        }
+
+        public static FileExpressionSnapshot empty(Path projectRoot) throws Exception {
+            if (projectRoot == null) throw new IllegalArgumentException("Package root is required");
+            return new FileExpressionSnapshot(projectRoot.toRealPath(), Collections.<ReferenceKey, CompiledFilePlan>emptyMap(),
+                    Collections.<CompiledFileReference>emptyList());
+        }
+
+        /** Combines immutable plans while retaining each canonical action source directory. */
+        public static FileExpressionSnapshot merge(Path projectRoot, Iterable<FileExpressionSnapshot> snapshots) throws Exception {
+            if (projectRoot == null) throw new IllegalArgumentException("Package root is required");
+            Path root = projectRoot.toRealPath().normalize();
+            Map<ReferenceKey, CompiledFilePlan> merged = new LinkedHashMap<ReferenceKey, CompiledFilePlan>();
+            List<CompiledFileReference> mergedReferences = new ArrayList<CompiledFileReference>();
+            if (snapshots != null) for (FileExpressionSnapshot snapshot : snapshots) {
+                if (snapshot == null) continue;
+                if (!root.equals(snapshot.projectRoot.toRealPath().normalize()))
+                    throw new IllegalArgumentException("Compiled File-expression snapshots belong to different Packages");
+                mergedReferences.addAll(snapshot.references);
+                for (Map.Entry<ReferenceKey, CompiledFilePlan> entry : snapshot.plans.entrySet()) {
+                    CompiledFilePlan previous = merged.putIfAbsent(entry.getKey(), entry.getValue());
+                    if (previous != null && (!previous.source().equals(entry.getValue().source())
+                            || !previous.file().equals(entry.getValue().file())))
+                        throw new IllegalArgumentException("Compiled File-expression plan identity is ambiguous");
+                }
+            }
+            return new FileExpressionSnapshot(root, merged, mergedReferences);
+        }
+
+        /** Encodes immutable plan nodes for a private, integrity-checked Worker snapshot archive. */
+        public byte[] serialize() throws Exception {
+            Path root = projectRoot.toRealPath().normalize();
+            List<PortablePlan> portable = new ArrayList<PortablePlan>();
+            for (CompiledFilePlan plan : plans.values()) {
+                Path sourceDirectory = plan.sourceDirectory().toRealPath().normalize();
+                Path file = plan.file().toRealPath().normalize();
+                if (!sourceDirectory.startsWith(root) || !file.startsWith(root))
+                    throw new IllegalArgumentException("Compiled File-expression plan escapes its Package");
+                portable.add(new PortablePlan(plan.authoredPath(), relative(root, sourceDirectory),
+                        relative(root, file), plan.source(), new ArrayList<Segment>(plan.segments),
+                        plan.staticConstant, new ArrayList<String>(plan.filePaths())));
+            }
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            try (ObjectOutputStream output = new ObjectOutputStream(bytes)) { output.writeObject(portable); }
+            if (bytes.size() > MAX_PORTABLE_SNAPSHOT_BYTES)
+                throw new IOException("Compiled File-expression plans exceed the source snapshot limit");
+            return bytes.toByteArray();
+        }
+
+        /** Restores compiled plan nodes against a separately verified, extracted Package tree. */
+        public static FileExpressionSnapshot restore(Path packageRoot, byte[] bytes) throws Exception {
+            if (packageRoot == null || bytes == null || bytes.length == 0 || bytes.length > MAX_PORTABLE_SNAPSHOT_BYTES)
+                throw new IOException("Compiled File-expression snapshot is unavailable or oversized");
+            Path root = packageRoot.toRealPath().normalize();
+            Object decoded;
+            try (ObjectInputStream input = new ObjectInputStream(new ByteArrayInputStream(bytes)) {
+                @Override protected Class<?> resolveClass(ObjectStreamClass descriptor) throws IOException, ClassNotFoundException {
+                    String name = descriptor.getName();
+                    if (!portableClass(name)) throw new InvalidClassException("Unsupported compiled plan class", name);
+                    return super.resolveClass(descriptor);
+                }
+            }) { decoded = input.readObject(); }
+            if (!(decoded instanceof List<?>)) throw new IOException("Compiled File-expression snapshot has an invalid format");
+            FileExpressionResolver validator = new FileExpressionResolver(root);
+            Map<ReferenceKey, CompiledFilePlan> restored = new LinkedHashMap<ReferenceKey, CompiledFilePlan>();
+            for (Object value : (List<?>) decoded) {
+                if (!(value instanceof PortablePlan)) throw new IOException("Compiled File-expression snapshot has an invalid plan");
+                PortablePlan plan = (PortablePlan) value;
+                String authored = validator.validateAuthoredPath(plan.authoredPath);
+                Path sourceDirectory = root.resolve(resolvePortablePath(plan.sourceDirectory, true)).normalize();
+                Path file = root.resolve(resolvePortablePath(plan.file, false)).normalize();
+                if (!sourceDirectory.startsWith(root) || !file.startsWith(root)
+                        || !Files.isDirectory(sourceDirectory, LinkOption.NOFOLLOW_LINKS)
+                        || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS))
+                    throw new IOException("Compiled File-expression plan source is unavailable");
+                sourceDirectory = sourceDirectory.toRealPath().normalize();
+                file = file.toRealPath().normalize();
+                if (!sourceDirectory.startsWith(root) || !file.startsWith(root)
+                        || plan.source == null || !validator.readUtf8(file, authored).equals(plan.source))
+                    throw new IOException("Compiled File-expression plan does not match the accepted source bytes");
+                if (plan.segments == null || plan.filePaths == null)
+                    throw new IOException("Compiled File-expression plan is incomplete");
+                CompiledFilePlan compiled = new CompiledFilePlan(authored, sourceDirectory, file,
+                        plan.source, plan.segments, plan.staticConstant, plan.filePaths);
+                if (restored.put(ReferenceKey.of(authored, sourceDirectory), compiled) != null)
+                    throw new IOException("Compiled File-expression snapshot contains a duplicate plan");
+            }
+            return new FileExpressionSnapshot(root, restored, Collections.<CompiledFileReference>emptyList());
+        }
+
+        private static String relative(Path root, Path path) {
+            return root.relativize(path).toString().replace('\\', '/');
+        }
+
+        private static Path resolvePortablePath(String value, boolean allowEmpty) throws IOException {
+            if (value == null || (!allowEmpty && value.isEmpty()) || value.startsWith("/")
+                    || value.indexOf('\\') >= 0 || value.indexOf(':') >= 0 || value.indexOf('\0') >= 0)
+                throw new IOException("Compiled File-expression snapshot contains an invalid path");
+            if (value.isEmpty()) return Paths.get("");
+            Path relative;
+            try { relative = Paths.get(value).normalize(); }
+            catch (RuntimeException invalid) { throw new IOException("Compiled File-expression snapshot contains an invalid path", invalid); }
+            if (relative.isAbsolute() || relative.startsWith("..")
+                    || !relative.toString().replace('\\', '/').equals(value))
+                throw new IOException("Compiled File-expression snapshot contains an unsafe path");
+            return relative;
+        }
+
+        private static boolean portableClass(String name) {
+            return name.equals(PortablePlan.class.getName())
+                    || name.startsWith("att.template.FileExpressionResolver$")
+                    || name.startsWith("att.template.ExpressionBlockEvaluator$")
+                    || name.equals("java.lang.String") || name.equals("java.lang.Boolean")
+                    || name.equals("java.lang.Integer") || name.equals("java.lang.Long")
+                    || name.equals("java.lang.Number") || name.equals("java.util.ArrayList")
+                    || name.equals("java.util.LinkedHashMap") || name.equals("java.util.HashMap")
+                    || name.equals("java.math.BigDecimal") || name.equals("java.math.BigInteger")
+                    || name.startsWith("[Latt.template.ExpressionBlockEvaluator$")
+                    || name.equals("[Ljava.lang.Object;");
+        }
+    }
+
+    private static final class PortablePlan implements java.io.Serializable {
+        private static final long serialVersionUID = 1L;
+        private final String authoredPath;
+        private final String sourceDirectory;
+        private final String file;
+        private final String source;
+        private final List<Segment> segments;
+        private final boolean staticConstant;
+        private final List<String> filePaths;
+        private PortablePlan(String authoredPath, String sourceDirectory, String file, String source,
+                             List<Segment> segments, boolean staticConstant, List<String> filePaths) {
+            this.authoredPath = authoredPath; this.sourceDirectory = sourceDirectory; this.file = file;
+            this.source = source; this.segments = segments; this.staticConstant = staticConstant; this.filePaths = filePaths;
         }
     }
 

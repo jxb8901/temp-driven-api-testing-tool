@@ -17,6 +17,12 @@ public class WorkerRequest {
     public Boolean diagnosticMode;
     public String packageRoot;
     public String config;
+    /** Internal immutable Package plus central Config source bundle used for accepted Jobs. */
+    public String sourceSnapshotArchivePath;
+    /** SHA-256 of the complete source snapshot archive; Worker verifies before extraction. */
+    public String sourceSnapshotArchiveSha256;
+    /** Config path relative to the Config root inside sourceSnapshotArchivePath. */
+    public String sourceSnapshotConfigPath;
     public String environment;
     /** Internal Server-approved value-free configuration snapshot. */
     public Map<String,Object> configurationProvenance;
