@@ -1292,25 +1292,24 @@ class ServerWarUiIT {
         }
         try {
             int status = connection.getResponseCode();
-            assertEquals(expectedStatus, status, method + " " + path + apiStatusDiagnostic(connection, status));
+            // An HttpURLConnection error stream is single-consumption. Parse once
+            // before producing diagnostics; a second getErrorStream() read may fail
+            // with "stream is closed", masking a valid expected 4xx response.
+            JsonNode response;
             try (var stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream()) {
                 assertNotNull(stream, "Expected a JSON response body");
-                return ServerRuntime.JSON.readTree(stream);
+                response = ServerRuntime.JSON.readTree(stream);
             }
+            assertEquals(expectedStatus, status, method + " " + path + apiStatusDiagnostic(response,status));
+            return response;
         } finally { connection.disconnect(); }
     }
 
-    private static String apiStatusDiagnostic(HttpURLConnection connection,int status) {
+    private static String apiStatusDiagnostic(JsonNode response,int status) {
         if(status<400)return "";
-        try(var stream=connection.getErrorStream()) {
-            if(stream==null)return " (no error response)";
-            JsonNode response=ServerRuntime.JSON.readTree(stream.readNBytes(4096));
-            JsonNode error=response==null?ServerRuntime.JSON.getNodeFactory().nullNode():response.path("error");
-            return " (code="+error.path("code").asText("unknown")
-                    +", summary="+error.path("summary").asText("unavailable")+")";
-        } catch(Exception unavailable) {
-            return " (error response unreadable)";
-        }
+        JsonNode error=response==null?ServerRuntime.JSON.getNodeFactory().nullNode():response.path("error");
+        return " (code="+error.path("code").asText("unknown")
+                +", summary="+error.path("summary").asText("unavailable")+")";
     }
 
     private static int apiStatus(int port, String method, String path, String authorization, String origin, Object body) throws Exception {
