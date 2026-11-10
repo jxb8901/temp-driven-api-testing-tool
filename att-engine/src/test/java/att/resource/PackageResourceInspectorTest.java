@@ -351,6 +351,35 @@ class PackageResourceInspectorTest {
                 "Revision identity includes the bundled registry fingerprint");
     }
 
+    @Test void engineAndPublisherSourceIdentityIncludesScriptsAndBinaryRuntimeFilesButNotManifestOrOutput() throws Exception {
+        Path root=packageWithTemplate("shared-revision-contract","PAYMENT","description: source identity");
+        Path executable=writeUtf8(root.resolve("templates/PAYMENT/execute.sh"),"echo before\n");
+        Path binaries=Files.createDirectories(root.resolve("files")).resolve("request.bin");
+        Files.write(binaries,new byte[]{0,1,2,3});
+        Path output=Files.createDirectories(root.resolve("output")).resolve("output.yaml");
+        writeUtf8(output,"generated: before\n");
+        String initial;
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),
+                "SIT",Collections.<String>emptyList(),65536,262144)) {
+            initial=inspector.packageSourceRevisionDigest();
+        }
+        assertEquals(att.server.api.source.PackageSourceRevision.digest(root),initial);
+        writeUtf8(root.resolve("package.yaml"),"schemaVersion: att-package/v1\n");
+        writeUtf8(output,"generated: changed\n");
+        assertEquals(initial,att.server.api.source.PackageSourceRevision.digest(root),
+                "Manifest and generated output must not enter the Package source domain");
+        writeUtf8(executable,"echo after\n");
+        String scriptRevision=att.server.api.source.PackageSourceRevision.digest(root);
+        assertNotEquals(initial,scriptRevision,"A script Tool dependency must be in the source closure");
+        Files.write(binaries,new byte[]{0,1,2,4});
+        String binaryRevision=att.server.api.source.PackageSourceRevision.digest(root);
+        assertNotEquals(scriptRevision,binaryRevision,"A referenced binary payload must be in the source closure");
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),
+                "SIT",Collections.<String>emptyList(),65536,262144)) {
+            assertEquals(binaryRevision,inspector.packageSourceRevisionDigest());
+        }
+    }
+
     @Test void incidentalLargeAndNumerousFilesDoNotAffectPackageSourceOrResourceInspection() throws Exception {
         Path root=packageWithTemplate("incidental-source-files","PAYMENT","description: scoped authoring inputs");
         Path artifacts=Files.createDirectories(root.resolve("artifacts"));

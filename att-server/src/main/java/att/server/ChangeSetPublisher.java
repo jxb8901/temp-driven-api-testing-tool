@@ -59,9 +59,6 @@ final class ChangeSetPublisher implements AutoCloseable {
     // Runtime source and validation closure is wider than the owner editing allowlist.
     // A referenced Tool script or binary File Expression can change execution even
     // when online editing of its extension is forbidden.
-    private static final Set<String> RUNTIME_RESOURCE_EXTENSIONS = set("sh", "bash", "py", "js", "ts",
-            "groovy", "rb", "pl", "ps1", "bat", "cmd", "xsd", "wsdl", "html",
-            "graphql", "gql", "bin", "dat", "png", "jpg", "jpeg", "pdf");
     private static final Set<String> CENTRAL_REFERENCE_EXTENSIONS = set("yaml", "yml", "xml", "json", "csv", "tsv", "txt", "sql",
             "properties", "md", "sh", "bash", "py", "js", "ts", "groovy", "rb", "pl", "ps1", "bat", "cmd", "xsd", "wsdl", "html",
             "graphql", "gql");
@@ -195,12 +192,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         String changeSetId() { return id; }
         String packageSourceRevision() throws Exception {
             if (!PACKAGE_SOURCE.equals(scope.domain)) return null;
-            Map<String, String> hashes = new LinkedHashMap<String, String>(base.packageIndex.hashes);
-            for (Map.Entry<String, byte[]> entry : changes.entrySet()) {
-                if (entry.getValue() == null) hashes.remove(entry.getKey());
-                else hashes.put(entry.getKey(), hash(entry.getValue()));
-            }
-            return digestHashes(hashes);
+            return att.server.api.source.PackageSourceRevision.digest(scope.root, changes);
         }
         List<Map<String, Object>> changedFiles() { return diffView(diff); }
         Set<String> paths() { return Collections.unmodifiableSet(new HashSet<String>(changes.keySet())); }
@@ -881,7 +873,8 @@ final class ChangeSetPublisher implements AutoCloseable {
     private RevisionState state(Scope scope) throws Exception {
         Path root = canonicalRoot(scope.root);
         ScanIndex primary = scan(root, scope.domain);
-        String packageTree = PACKAGE_SOURCE.equals(scope.domain) ? digestIndex(primary) : null;
+        String packageTree = PACKAGE_SOURCE.equals(scope.domain)
+                ? att.server.api.source.PackageSourceRevision.digest(root) : null;
         String centralTree;
         ScanIndex centralIndex;
         if (PACKAGE_SOURCE.equals(scope.domain)) {
@@ -981,14 +974,8 @@ final class ChangeSetPublisher implements AutoCloseable {
     private static boolean runtimeSourceDependency(String path, String domain) {
         if (CENTRAL_RUNTIME_CONFIG.equals(domain))
             return centralSnapshotReferenceFile(path);
-        if (!PACKAGE_SOURCE.equals(domain)) return false;
-        String normalized = path.toLowerCase(Locale.ROOT);
-        int dot = normalized.lastIndexOf('.');
-        if (dot < 0 || !RUNTIME_RESOURCE_EXTENSIONS.contains(normalized.substring(dot + 1))) return false;
-        for (String root : List.of("templates/", "flows/", "testcase/", "testdata/",
-                "load/", "files/", "resources/", "scripts/", "tools/"))
-            if (normalized.startsWith(root)) return true;
-        return false;
+        return PACKAGE_SOURCE.equals(domain)
+                && att.server.api.source.PackageSourceRevision.includes(path);
     }
 
     static boolean centralPath(String path) {
@@ -1269,11 +1256,12 @@ final class ChangeSetPublisher implements AutoCloseable {
                 : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
                 att.server.api.source.SourceManagementContracts.RevisionKind.PACKAGE_REGISTRATION,
                 "package-registry", draft.base.registryRevision);
+        String candidatePackageRevision = new Candidate(draft).packageSourceRevision();
         att.server.api.source.SourceManagementContracts.RevisionIdentity packageSource =
-                draft.base.packageTreeRevision == null ? null
+                candidatePackageRevision == null ? null
                         : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
                         att.server.api.source.SourceManagementContracts.RevisionKind.PACKAGE_SOURCE,
-                        draft.scope.scopeId, draft.base.packageTreeRevision);
+                        draft.scope.scopeId, candidatePackageRevision);
         att.server.api.source.SourceManagementContracts.RevisionIdentity changeSet =
                 att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
                         att.server.api.source.SourceManagementContracts.RevisionKind.CHANGE_SET,
@@ -1488,7 +1476,8 @@ final class ChangeSetPublisher implements AutoCloseable {
             if (entry.getValue() == null) targetHashes.remove(entry.getKey());
             else targetHashes.put(entry.getKey(), hash(entry.getValue()));
         }
-        String packageTree = PACKAGE_SOURCE.equals(candidate.domain()) ? digestHashes(packageHashes) : null;
+        String packageTree = PACKAGE_SOURCE.equals(candidate.domain())
+                ? candidate.packageSourceRevision() : null;
         String centralTree = PACKAGE_SOURCE.equals(candidate.domain())
                 ? candidate.base.centralTreeRevision : digestHashes(centralHashes);
         String manifest = PACKAGE_SOURCE.equals(candidate.domain())

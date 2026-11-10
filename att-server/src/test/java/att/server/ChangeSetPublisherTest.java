@@ -129,21 +129,21 @@ class ChangeSetPublisherTest {
 
     @Test void externalToolScriptEditInvalidatesDraftAndScriptIsMaterializedButNotAuthorable() throws Exception {
         Path script = Files.createDirectories(packageRoot.resolve("templates/payment")).resolve("worker.sh");
-        Files.write(script, bytes("#!/bin/sh\\necho FIRST\\n"));
+        Files.write(script, bytes("#!/bin/sh\necho FIRST\n"));
         ChangeSetPublisher publisher = publisher(candidate -> {
             assertTrue(candidate.files().contains("templates/payment/worker.sh"),
                     "A runtime script must be in the validation closure even though editing is forbidden");
-            assertArrayEquals(bytes("#!/bin/sh\\necho FIRST\\n"), candidate.read("templates/payment/worker.sh"));
+            assertArrayEquals(bytes("#!/bin/sh\necho FIRST\n"), candidate.read("templates/payment/worker.sh"));
             return ChangeSetPublisher.ValidationResult.accepted(VALIDATION_REVISION);
         }, allowingGate());
         try {
             assertThrows(IllegalArgumentException.class, () -> stagePackage(publisher, List.of(
-                    ChangeSetPublisher.OperationInput.replace("templates/payment/worker.sh", bytes("echo INVALID\\n")))));
+                    ChangeSetPublisher.OperationInput.replace("templates/payment/worker.sh", bytes("echo INVALID\n")))));
             Map<String,Object> staged = stagePackage(publisher, List.of(
-                    ChangeSetPublisher.OperationInput.create("templates/payment.yaml", bytes("id: payment\\n"))));
+                    ChangeSetPublisher.OperationInput.create("templates/payment.yaml", bytes("id: payment\n"))));
             String id = String.valueOf(staged.get("changeSetId"));
             validateReview(publisher, id);
-            externalPackageWrite("templates/payment/worker.sh", bytes("#!/bin/sh\\necho SECOND\\n"));
+            externalPackageWrite("templates/payment/worker.sh", bytes("#!/bin/sh\necho SECOND\n"));
             assertThrows(ChangeSetPublisher.Conflict.class, () ->
                     publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id),
                     "A changed script must invalidate the Package source CAS fence");
@@ -152,12 +152,12 @@ class ChangeSetPublisherTest {
 
     @Test void configCandidateRevisionIncludesHelperClosureAndDiffersFromBase() throws Exception {
         Path tools = Files.createDirectories(centralRoot.resolve("config/tools"));
-        Files.write(tools.resolve("notify.yaml"), bytes("schemaVersion: att-tool/v1\\nname: before\\n"));
+        Files.write(tools.resolve("notify.yaml"), bytes("schemaVersion: att-tool/v1\nname: before\n"));
         ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
         try {
             Map<String,Object> draft = stageCentral(publisher, List.of(
                     ChangeSetPublisher.OperationInput.replace("config/tools/notify.yaml",
-                            bytes("schemaVersion: att-tool/v1\\nname: after\\n"))));
+                            bytes("schemaVersion: att-tool/v1\nname: after\n"))));
             @SuppressWarnings("unchecked") Map<String,Object> revisions = (Map<String,Object>)draft.get("revisions");
             @SuppressWarnings("unchecked") Map<String,Object> config = (Map<String,Object>)revisions.get("configSource");
             String candidateRevision = String.valueOf(config.get("revision"));
@@ -169,6 +169,33 @@ class ChangeSetPublisherTest {
             @SuppressWarnings("unchecked") Map<String,Object> validatedRevisions = (Map<String,Object>)validated.get("revisions");
             @SuppressWarnings("unchecked") Map<String,Object> validatedConfig = (Map<String,Object>)validatedRevisions.get("configSource");
             assertEquals(candidateRevision, validatedConfig.get("revision"));
+        } finally { publisher.close(); }
+    }
+
+    @Test void packageSourceHasSameIdentityAtDraftValidationAndPublication() throws Exception {
+        ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
+        try {
+            byte[] source = bytes("schemaVersion: att-template/v3.6\nname: payment\n");
+            Map<String,Object> staged = stagePackage(publisher, List.of(
+                    ChangeSetPublisher.OperationInput.create("templates/payment.yaml", source)));
+            @SuppressWarnings("unchecked") Map<String,Object> stagedRevisions =
+                    (Map<String,Object>)staged.get("revisions");
+            @SuppressWarnings("unchecked") Map<String,Object> stagedSource =
+                    (Map<String,Object>)stagedRevisions.get("packageSourceRevision");
+            String expected = att.server.api.source.PackageSourceRevision.digest(activePackageRoot(),
+                    Map.of("templates/payment.yaml", source));
+            assertEquals(expected, stagedSource.get("revision"));
+            String id = String.valueOf(staged.get("changeSetId"));
+            Map<String,Object> validated = publisher.validate(ChangeSetPublisher.PACKAGE_SOURCE,
+                    "owner", "owner", false, id);
+            @SuppressWarnings("unchecked") Map<String,Object> checkedRevisions =
+                    (Map<String,Object>)validated.get("revisions");
+            @SuppressWarnings("unchecked") Map<String,Object> checkedSource =
+                    (Map<String,Object>)checkedRevisions.get("packageSourceRevision");
+            assertEquals(expected, checkedSource.get("revision"));
+            publisher.review(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id);
+            publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id);
+            assertEquals(expected, att.server.api.source.PackageSourceRevision.digest(activePackageRoot()));
         } finally { publisher.close(); }
     }
 

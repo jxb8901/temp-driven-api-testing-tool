@@ -3068,51 +3068,10 @@ public final class PackageResourceInspector implements AutoCloseable {
      * source, even when they happen to be under packageRoot.
      */
     private String digestPackageFiles(Index index) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        digest.update(utf8("ATT_PACKAGE_INDEXED_SOURCES_V1"));
-        digest.update((byte) 0);
-        java.util.Set<Path> indexed = new java.util.TreeSet<Path>();
-        Path manifestPath = packageRoot.resolve(att.config.PackageConfig.FILE_NAME).toAbsolutePath().normalize();
-        for (Path candidate : index.files) {
-            Path path = candidate.toAbsolutePath().normalize();
-            // Central config and the Package Manifest have separate revision domains.
-            if (!path.startsWith(packageRoot) || path.equals(manifestPath)) continue;
-            indexed.add(resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE).canonicalPath());
-        }
-        // Package Testdata descriptors are Package-owned source even when they are
-        // not referenced by a visible Template/Flow/Case index entry. Include
-        // every declared Environment layer so this revision is independent of
-        // the caller's selected execution Environment.
-        att.config.PackageConfig manifest = att.config.PackageConfig.load(packageRoot);
-        for (List<Path> layer : manifest.descriptorLayers()) for (Path declared : layer) {
-            Path path = declared.toAbsolutePath().normalize();
-            if (!path.startsWith(packageRoot) || path.equals(manifestPath))
-                throw new IllegalArgumentException("Package Testdata source is outside the selected Package");
-            indexed.add(resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE).canonicalPath());
-        }
-        if (indexed.size() > MAX_PACKAGE_SOURCE_FILES)
-            throw new ResourceLimitException("resourceInspector.maxPackageSourceFiles",
-                    MAX_PACKAGE_SOURCE_FILES, indexed.size());
-        List<Path> ordered = new ArrayList<Path>(indexed);
-        long total = 0;
-        byte[] buffer = new byte[8192];
-        for (Path file : ordered) {
-            PackageResourceResolver.PackageResource resource = resources.fromInternalPath(file, PackageResourceResolver.Kind.FILE);
-            digest.update(utf8(resource.logicalName()));
-            digest.update((byte) 0);
-            try (InputStream input = Files.newInputStream(resource.canonicalPath())) {
-                int read;
-                while ((read = input.read(buffer)) >= 0) {
-                    InspectionMetrics.JVM.add(READ_BYTES, read);
-                    total += read;
-                    if (total > MAX_REVISION_BYTES)
-                        throw new ResourceLimitException("resourceInspector.maxRevisionBytes", MAX_REVISION_BYTES, total);
-                    digest.update(buffer, 0, read);
-                }
-            }
-            digest.update((byte) 0xff);
-        }
-        return hex(digest.digest());
+        // Shared with ChangeSet staging, candidate validation and publication.
+        // The Environment-independent Package source domain is separate from
+        // package.yaml (Manifest), central Config and execution revision.
+        return att.server.api.source.PackageSourceRevision.digest(packageRoot);
     }
 
     private void indexQuickLoadPolicies(Index index) {
