@@ -81,7 +81,7 @@ class InspectionCacheRuntimeTest {
             Map<String,Object> baseline=runtime.packageScope("p");
             Path manifest=root.resolve("package.yaml");
             assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.packageScope("p",()->{
-                try {Files.writeString(manifest,"schemaVersion: att-package/v1\\n");}
+                try {Files.writeString(manifest,"schemaVersion: att-package/v1\n");}
                 catch(IOException failed){throw new UncheckedIOException(failed);}
             }),"Manifest changes between snapshots must reject a mixed revision tuple");
             Map<String,Object> afterManifest=runtime.packageScope("p");
@@ -90,7 +90,7 @@ class InspectionCacheRuntimeTest {
 
             Path central=temp.resolve("shared-config/config/config.yaml");
             assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.packageScope("p",()->{
-                try {Files.writeString(central,Files.readString(central)+"# changed runtime configuration\\n");}
+                try {Files.writeString(central,Files.readString(central)+"# changed runtime configuration\n");}
                 catch(IOException failed){throw new UncheckedIOException(failed);}
             }),"Central Config changes between snapshots must reject a mixed revision tuple");
             Map<String,Object> afterConfig=runtime.packageScope("p");
