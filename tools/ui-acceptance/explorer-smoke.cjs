@@ -562,6 +562,9 @@ async function main() {
 
     authFailure = true;
     await page.goto(`${base}#/packages/payments/resources/template/checkout`);
+    // A same-document hash navigation can reuse a prior safe-source projection.
+    // Reload to exercise the fresh 401 response rather than cached inspection data.
+    await page.reload();
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
     await page.getByRole('tab', { name: 'Visual' }).focus();
     await page.keyboard.press('ArrowRight');
