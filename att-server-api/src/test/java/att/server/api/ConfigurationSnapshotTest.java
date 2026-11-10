@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ConfigurationSnapshotTest {
-    private static final String EXECUTION_REVISION="a".repeat(64);
+    private static final String EXECUTION_REVISION=String.join("",java.util.Collections.nCopies(64,"a"));
 
     private Map<String,Object> valid() {
         Map<String,Object> value=new LinkedHashMap<String,Object>();
@@ -62,7 +62,7 @@ class ConfigurationSnapshotTest {
 
     @Test void conflictingExecutionAndLegacyRevisionAliasesAreRejected() {
         Map<String,Object> input=valid();input.put("executionRevisionDigest",EXECUTION_REVISION);
-        input.put("packageRevision","b".repeat(64));
+        input.put("packageRevision",String.join("",java.util.Collections.nCopies(64,"b")));
 
         assertThrows(IllegalArgumentException.class,()->ConfigurationSnapshot.copy(input));
     }
