@@ -19,10 +19,10 @@ const LoadResourceDetailPage = lazy(() => import('./features/load/LoadResourceDe
 const StandaloneJobArtifactPage = lazy(() => import('./features/load/StandaloneJobArtifactPage').then(module => ({ default: module.StandaloneJobArtifactPage })));
 import type { LoadJobsApi, PackageOption } from './features/load/types';
 const SettingsPage = lazy(() => import('./SettingsPage').then(module => ({ default: module.SettingsPage })));
-import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspace';
-import { PackageManifestWorkspace } from './features/explorer/PackageManifestWorkspace';
-import { PackageTestdataWorkspace } from './features/explorer/PackageTestdataCatalog';
-import { PackageSafeSourceFileViewer } from './features/explorer/PackageSafeSourceFileViewer';
+const ConfigurationWorkspace = lazy(() => import('./features/explorer/ConfigurationWorkspace').then(module => ({ default: module.ConfigurationWorkspace })));
+const PackageManifestWorkspace = lazy(() => import('./features/explorer/PackageManifestWorkspace').then(module => ({ default: module.PackageManifestWorkspace })));
+const PackageTestdataWorkspace = lazy(() => import('./features/explorer/PackageTestdataCatalog').then(module => ({ default: module.PackageTestdataWorkspace })));
+const PackageSafeSourceFileViewer = lazy(() => import('./features/explorer/PackageSafeSourceFileViewer').then(module => ({ default: module.PackageSafeSourceFileViewer })));
 const LoadTestingPage = lazy(() => import('./features/load/LoadTestingPage').then(module => ({ default: module.LoadTestingPage })));
 const SavedLoadScenarios = lazy(() => import('./features/load/SavedLoadScenarios').then(module => ({ default: module.SavedLoadScenarios })));
 const LoadTemplateBuilder = lazy(() => import('./features/load/LoadTemplateBuilder').then(module => ({ default: module.LoadTemplateBuilder })));
@@ -532,7 +532,7 @@ export default function App() {
   } else if (navigation.route.kind === 'settings') {
     content = <Suspense fallback={<div role="status">Loading settings...</div>}><SettingsPage /></Suspense>;
   } else if (navigation.route.kind === 'configuration') {
-    content = <ConfigurationRouteView route={navigation.route} />;
+    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Configuration…</div>}><ConfigurationRouteView route={navigation.route} /></Suspense>;
   } else if (navigation.route.kind === 'quick-load') {
     content = <QuickLoadRouteView key={`${navigation.route.packageId}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.templateId || ''}:${navigation.route.model || ''}`}
       route={navigation.route} inlineLoadEnabled={capabilities.inlineLoadEnabled}
