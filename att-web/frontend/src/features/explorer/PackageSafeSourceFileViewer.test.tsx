@@ -36,6 +36,7 @@ describe('PackageSafeSourceFileViewer', () => {
     expect(getResourceSourceFile).toHaveBeenCalledWith({ packageId: 'payments', type: 'flow', resourceId: 'checkout' }, referenceId,
       expect.any(AbortSignal), 'templates/payment/flow.yaml');
     expect(host.querySelector('h1')?.textContent).toBe('templates/payment/request.xml');
+    expect(host.querySelector('.att-source-authoring')).toBeNull(); // safe view is not an owner editor
     expect(host.querySelector('pre')?.textContent).toContain('&{./headers.json}');
     expect(host.textContent).toContain('View referenced file');
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'View referenced file')?.click());

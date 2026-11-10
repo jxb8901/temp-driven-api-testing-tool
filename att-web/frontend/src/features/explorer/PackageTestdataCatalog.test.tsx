@@ -76,17 +76,39 @@ function setInputValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSel
   });
 }
 
-function Harness({ api, initialEnvironment = '', descriptorId, registered = true, onOpenPackageConfiguration }: {
-  api: ExplorerApi; initialEnvironment?: string; descriptorId?: string; registered?: boolean; onOpenPackageConfiguration?: () => void;
+function Harness({ api, initialEnvironment = '', descriptorId, registered = true, onOpenPackageConfiguration, canManagePackageSource = true }: {
+  api: ExplorerApi; initialEnvironment?: string; descriptorId?: string; registered?: boolean; onOpenPackageConfiguration?: () => void; canManagePackageSource?: boolean;
 }) {
   const [environment, setEnvironment] = useState(initialEnvironment);
   const [selectedDescriptor, setSelectedDescriptor] = useState(descriptorId);
   return <PackageTestdataWorkspace api={api} packageId="payments" packageLabel="Payments" registrationState="ready" registered={registered}
     environment={environment} descriptorId={selectedDescriptor} onEnvironmentChange={setEnvironment}
-    onDescriptorChange={setSelectedDescriptor} onBackToResources={vi.fn()} onOpenResource={vi.fn()} onOpenPackageConfiguration={onOpenPackageConfiguration || vi.fn()} />;
+    onDescriptorChange={setSelectedDescriptor} onBackToResources={vi.fn()} onOpenResource={vi.fn()} onOpenPackageConfiguration={onOpenPackageConfiguration || vi.fn()}
+    canManagePackageSource={canManagePackageSource} />;
 }
 
 describe('PackageTestdataWorkspace', () => {
+  it('keeps Testdata browsing available while withholding owner-only editing from non-owners', async () => {
+    const managedSource = vi.fn(async () => ({
+      available: true, present: true, logicalPath: 'testdata/accounts.yaml', format: 'yaml', text: 'records: []',
+      sourceEtag: 'owner-etag', baseSourceRevision: 'owner-revision',
+    }));
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getEffectiveConfiguration: vi.fn(async () => ({
+        sections: [{ id: 'testdata', entries: [{ id: 'accounts', source: 'testdata/accounts.yaml' }] }],
+      })),
+      getTestdataRecords: vi.fn(async () => ({ descriptorId: 'accounts', offset: 0, limit: 50, total: 0, records: [] })),
+      getManagedPackageAuthoringSource: managedSource,
+    } as unknown as ExplorerApi;
+    await act(async () => root.render(<Harness api={api} descriptorId="accounts" canManagePackageSource={false} />));
+    await flush();
+    expect(host.textContent).toContain('accounts');
+    expect(host.textContent).not.toContain('Create Testdata descriptor');
+    expect(host.querySelector('.att-source-authoring')).toBeNull();
+    expect(managedSource).not.toHaveBeenCalled();
+  });
+
   it('creates and publishes a Testdata descriptor with its Manifest registration and overlay in one candidate', async () => {
     let published = false;
     const draft = { changeSetId: 'cs-testdata', domain: 'PACKAGE_SOURCE' as const, scopeId: 'payments', state: 'draft',

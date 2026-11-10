@@ -19,8 +19,8 @@ function safeError(error: unknown): string {
   return 'Safe Package file could not be loaded. Check the connection and retry.';
 }
 
-export function PackageSafeSourceFileViewer({ api, packageId, filePath, fileOrigin, sourceReference, onBack, onOpenFile, registerUnsavedChanges }: {
-  api: ExplorerApi; packageId: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReference;
+export function PackageSafeSourceFileViewer({ api, packageId, filePath, fileOrigin, sourceReference, onBack, onOpenFile, registerUnsavedChanges, canManagePackageSource = false }: {
+  api: ExplorerApi; packageId: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReference; canManagePackageSource?: boolean;
   onBack(): void; registerUnsavedChanges?: (isDirty: boolean, description?: string) => () => void;
   onOpenFile(path: string, origin: string | undefined, sourceReference: ResourceSourceReference): void;
 }) {
@@ -102,7 +102,7 @@ export function PackageSafeSourceFileViewer({ api, packageId, filePath, fileOrig
       </li>)}</ul> : null}
       {projection.fileReferencesTruncated && <p role="status">Additional references were omitted by the Server safety limit.</p>}
     </section> : null}
-    {identity && sourceReference && <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
+    {canManagePackageSource && identity && sourceReference && <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
       query: { kind: 'file', resourceType: sourceReference.type, resourceId: sourceReference.resourceId,
         referenceId: sourceReference.referenceId, origin: fileOrigin },
       label: `File authoring · ${projection?.logicalPath || filePath || 'referenced Package file'}`,

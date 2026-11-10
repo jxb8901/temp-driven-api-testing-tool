@@ -97,12 +97,12 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
       environment={environment} descriptorId={route.testdataDescriptorId} onEnvironmentChange={onTestdataEnvironmentChange}
       onDescriptorChange={onTestdataDescriptorChange} onBackToResources={() => navigation.navigate({ kind: 'package', packageId, environment })}
       onOpenResource={onOpenTestdataResource} onOpenPackageConfiguration={onOpenPackageConfiguration}
-      registerUnsavedChanges={navigation.registerUnsavedChanges} />
+      canManagePackageSource={canManagePackageSource} registerUnsavedChanges={navigation.registerUnsavedChanges} />
   </>;
   if (route.view === 'source-file') return <>
     {contextNotice}
     <PackageSafeSourceFileViewer api={api} packageId={packageId} filePath={route.filePath} fileOrigin={route.fileOrigin}
-      sourceReference={route.sourceReference} onBack={() => navigation.navigate(route.returnTo || formatRoute({ kind: 'package', packageId,
+      sourceReference={route.sourceReference} canManagePackageSource={canManagePackageSource} onBack={() => navigation.navigate(route.returnTo || formatRoute({ kind: 'package', packageId,
         ...(route.sourceReference ? { resource: { type: route.sourceReference.type, resourceId: route.sourceReference.resourceId, tab: route.sourceReference.returnTab || 'source' as const, ...(route.sourceReference.actionId ? { actionId: route.sourceReference.actionId } : {}) } } : {}) }))}
       registerUnsavedChanges={navigation.registerUnsavedChanges}
       onOpenFile={(path, origin, sourceReference) => navigation.navigate({ kind: 'package', packageId, view: 'source-file', environment,
