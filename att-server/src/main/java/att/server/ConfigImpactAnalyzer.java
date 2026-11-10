@@ -5,6 +5,7 @@ import att.config.FrameworkConfig;
 import att.config.FrameworkConfigLoader;
 import att.config.PackageConfig;
 import att.server.api.source.SourceManagementContracts;
+import att.server.api.source.PackageSourceRevision;
 import att.server.api.source.SourceManagementContracts.AffectedPackage;
 import att.server.api.source.SourceManagementContracts.AffectedSchedule;
 import att.server.api.source.SourceManagementContracts.ApprovalDecision;
@@ -1070,42 +1071,12 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
         return hex(digest.digest());
     }
 
+    /** Use the same PACKAGE_SOURCE closure and digest as Publisher, Engine and /scope. */
     private static String boundedTreeDigest(Path root, TreeBudget budget) throws Exception {
-        Path canonical = safePackageRoot(root);
-        if (Files.isSymbolicLink(canonical) || !Files.isDirectory(canonical, LinkOption.NOFOLLOW_LINKS))
-            throw new IOException("Package source root is unavailable");
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        List<String> directories = new ArrayList<>();
-        List<Path> files = new ArrayList<>();
-        Files.walkFileTree(canonical, new SimpleFileVisitor<>() {
-            @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                if (attrs.isSymbolicLink() || Files.isSymbolicLink(dir)) throw new IOException("Package source contains an unsafe directory");
-                if (!dir.equals(canonical)) directories.add(canonical.relativize(dir).toString().replace('\\', '/'));
-                return FileVisitResult.CONTINUE;
-            }
-            @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                if (attrs.isSymbolicLink() || Files.isSymbolicLink(file) || !attrs.isRegularFile())
-                    throw new IOException("Package source contains an unsafe file");
-                files.add(file);
-                return FileVisitResult.CONTINUE;
-            }
-        });
-        directories.sort(String::compareTo);
-        for (String logical : directories) update(digest, "directory/" + logical);
-        files.sort(Comparator.comparing(file -> canonical.relativize(file).toString().replace('\\', '/')));
-        for (Path file : files) {
-            checkTime(budget.deadline);
-            BasicFileAttributes before = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-            if (before.isSymbolicLink() || !before.isRegularFile() || Files.isSymbolicLink(file))
-                throw new IOException("Package source contains an unsafe file");
-            budget.add(before.size());
-            byte[] bytes = Files.readAllBytes(file);
-            BasicFileAttributes after = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-            if (!sameFileObservation(before, after) || bytes.length != before.size()) throw new StaleInputException();
-            String logical = canonical.relativize(file).toString().replace('\\', '/');
-            update(digest, "file/" + logical); digest.update(bytes); digest.update((byte) 0);
-        }
-        return hex(digest.digest());
+        checkTime(budget.deadline);
+        String revision = PackageSourceRevision.digest(safePackageRoot(root));
+        checkTime(budget.deadline);
+        return revision;
     }
 
     private static void copyPackageSnapshot(Path source, Path destination, TreeBudget budget) throws Exception {
@@ -1114,6 +1085,9 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
         Files.walkFileTree(canonical, new SimpleFileVisitor<>() {
             @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                 checkTime(budget.deadline);
+                if (!dir.equals(canonical) && PackageSourceRevision.excludedDirectory(
+                        canonical.relativize(dir).toString().replace('\\', '/')))
+                    return FileVisitResult.SKIP_SUBTREE;
                 if (attrs.isSymbolicLink() || Files.isSymbolicLink(dir))
                     throw new IOException("Package source contains an unsafe directory");
                 Path target = destination.resolve(canonical.relativize(dir)).normalize();
@@ -1124,6 +1098,9 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
 
             @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 checkTime(budget.deadline);
+                String logical = canonical.relativize(file).toString().replace('\\', '/');
+                if (!"package.yaml".equals(logical) && !PackageSourceRevision.includes(logical))
+                    return FileVisitResult.CONTINUE;
                 if (attrs.isSymbolicLink() || Files.isSymbolicLink(file) || !attrs.isRegularFile())
                     throw new IOException("Package source contains an unsafe file");
                 budget.add(attrs.size());
