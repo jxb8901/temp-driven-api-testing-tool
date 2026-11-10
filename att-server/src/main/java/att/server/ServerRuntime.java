@@ -1929,7 +1929,9 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> publishConfigurationChangeSet(String actor,String changeSetId,String requestId,
             att.server.api.source.SourceManagementContracts.ImpactAcknowledgement acknowledgement) throws Exception {
-        return ConfigImpactPublicationFence.runPublication(admissionLifecycle.readLock(),
+        // New Job admission and Worker startup use readLock; publishing must hold the
+        // exclusive writeLock through the source switch and activation handoff.
+        return ConfigImpactPublicationFence.runPublication(admissionLifecycle.writeLock(),
                 ()->packageRegistry.snapshot().packages,sourceFileTransaction,store,()->
                 withImpactScheduleSnapshot(()->changeSetPublisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
                         ChangeSetPublisher.CENTRAL_SCOPE_ID,actor,true,changeSetId,requestId,acknowledgement)));
