@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -84,7 +85,9 @@ public final class FileExpressionResolver {
         }
 
         ResolvedFile resolved = resolveFile(path, base);
-        PlanKey key = PlanKey.of(resolved.canonical);
+        // The same bytes can be reached from multiple authored locations. Preserve each
+        // caller's locator context so dependency projections do not collapse inbound refs.
+        PlanKey key = PlanKey.of(resolved.canonical, path, base);
         synchronized (plans) {
             CompiledFilePlan cached = plans.get(key);
             if (cached != null) { hits.incrementAndGet(); return cached; }
@@ -150,37 +153,55 @@ public final class FileExpressionResolver {
     private FileExpressionSnapshot captureSnapshot(StageTemplate template, FlowRegistry flows,
                                                     String rootSourceOverride) throws Exception {
         Map<ReferenceKey, CompiledFilePlan> captured = new LinkedHashMap<ReferenceKey, CompiledFilePlan>();
+        List<CompiledFileReference> references = new ArrayList<CompiledFileReference>();
         Deque<Reference> pending = new ArrayDeque<Reference>();
-        Set<String> visitedTemplates = new LinkedHashSet<String>();
-        enqueueActions(template, pending, visitedTemplates, flows, rootSourceOverride);
+        enqueueActions(template, pending, flows, rootSourceOverride, "", new LinkedHashSet<String>());
         Set<ReferenceKey> visited = new LinkedHashSet<ReferenceKey>();
         while (!pending.isEmpty()) {
             Reference reference = pending.removeFirst();
             Path sourceDirectory = safeSourceDirectory(reference.sourceDirectory);
             ReferenceKey key = ReferenceKey.of(reference.authoredPath, sourceDirectory);
-            if (!visited.add(key)) continue;
             CompiledFilePlan plan = compile(reference.authoredPath, sourceDirectory);
-            captured.put(key, plan);
-            for (String nested : plan.filePaths())
-                pending.addLast(new Reference(nested, plan.file().getParent()));
+            if (visited.add(key)) {
+                captured.put(key, plan);
+                for (String nested : plan.filePaths())
+                    pending.addLast(new Reference(nested, plan.file().getParent(), reference.callSite + " -> nested:" + nested));
+            }
+            references.add(new CompiledFileReference(projectRoot, plan, reference.callSite));
         }
-        return new FileExpressionSnapshot(projectRoot, captured);
+        return new FileExpressionSnapshot(projectRoot, captured, references);
     }
 
-    private void enqueueActions(StageTemplate template, Deque<Reference> pending,
-                                Set<String> visitedTemplates, FlowRegistry flows, String sourceOverride) throws Exception {
-        if (template == null || !visitedTemplates.add(sourceOverride == null ? sourceIdentity(template) : sourceOverride)) return;
+    private void enqueueActions(StageTemplate template, Deque<Reference> pending, FlowRegistry flows,
+                                String sourceOverride, String invocation, Set<String> ancestry) throws Exception {
+        if (template == null) return;
+        String identity = sourceOverride == null ? sourceIdentity(template) : sourceOverride;
+        if (ancestry.contains(identity)) return;
+        Set<String> nestedAncestry = new LinkedHashSet<String>(ancestry);
+        nestedAncestry.add(identity);
         for (TemplateAction action : template.actions()) {
-            collectStrings(action.raw(), template.directory(), pending);
+            String actionSite = descriptorPath(template) + "#actions[" + action.key() + "]";
+            if (!invocation.isEmpty()) actionSite = invocation + " -> " + actionSite;
+            collectStrings(action.raw(), template.directory(), pending, actionSite, "");
             if ("flow".equalsIgnoreCase(action.type()) && flows != null) {
                 FlowDefinition flow = flows.get(action.use());
                 if (flow != null) {
                     enqueueActions(new StageTemplate(flow.name(), flow.directory(), flow.actions(),
                             flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml")), pending,
-                            visitedTemplates, flows, null);
+                            flows, null, actionSite + "[flow=" + action.use() + "]", nestedAncestry);
                 }
             }
         }
+    }
+
+    private String descriptorPath(StageTemplate template) {
+        Path source = template.sourceFile();
+        if (source != null) {
+            Path normalized = source.toAbsolutePath().normalize();
+            if (normalized.startsWith(projectRoot))
+                return projectRoot.relativize(normalized).toString().replace('\\', '/');
+        }
+        return "descriptor:" + template.name();
     }
 
     private String sourceIdentity(StageTemplate template) throws Exception {
@@ -194,16 +215,26 @@ public final class FileExpressionResolver {
     }
 
     @SuppressWarnings("unchecked")
-    private void collectStrings(Object value, Path sourceDirectory, Deque<Reference> pending) {
+    private void collectStrings(Object value, Path sourceDirectory, Deque<Reference> pending,
+                                String callSite, String fieldPath) {
         if (value instanceof String) {
-            for (String path : extractReferences((String) value)) pending.addLast(new Reference(path, sourceDirectory));
+            List<String> paths = extractReferences((String) value);
+            for (int index = 0; index < paths.size(); index++)
+                pending.addLast(new Reference(paths.get(index), sourceDirectory,
+                        callSite + fieldPath + "#file[" + index + "]"));
         } else if (value instanceof Map) {
-            for (Object child : ((Map<?, ?>) value).values()) collectStrings(child, sourceDirectory, pending);
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet())
+                collectStrings(entry.getValue(), sourceDirectory, pending,
+                        callSite, fieldPath + "." + String.valueOf(entry.getKey()));
         } else if (value instanceof Iterable) {
-            for (Object child : (Iterable<?>) value) collectStrings(child, sourceDirectory, pending);
+            int index = 0;
+            for (Object child : (Iterable<?>) value)
+                collectStrings(child, sourceDirectory, pending, callSite, fieldPath + "[" + index++ + "]");
         } else if (value != null && value.getClass().isArray()) {
             int length = java.lang.reflect.Array.getLength(value);
-            for (int index = 0; index < length; index++) collectStrings(java.lang.reflect.Array.get(value, index), sourceDirectory, pending);
+            for (int index = 0; index < length; index++)
+                collectStrings(java.lang.reflect.Array.get(value, index), sourceDirectory, pending,
+                        callSite, fieldPath + "[" + index + "]");
         }
     }
 
@@ -391,15 +422,74 @@ public final class FileExpressionResolver {
     public static final class FileExpressionSnapshot {
         private final Path projectRoot;
         private final Map<ReferenceKey, CompiledFilePlan> plans;
-        private FileExpressionSnapshot(Path projectRoot, Map<ReferenceKey, CompiledFilePlan> plans) {
+        private final List<CompiledFileReference> references;
+        private FileExpressionSnapshot(Path projectRoot, Map<ReferenceKey, CompiledFilePlan> plans,
+                                       List<CompiledFileReference> references) {
             this.projectRoot = projectRoot;
             this.plans = Collections.unmodifiableMap(new LinkedHashMap<ReferenceKey, CompiledFilePlan>(plans));
+            this.references = Collections.unmodifiableList(new ArrayList<CompiledFileReference>(references));
         }
         public Path projectRoot() { return projectRoot; }
         public int size() { return plans.size(); }
+        /** Returns value-free compiled dependency metadata without exposing authored file contents. */
+        public List<CompiledFileDependency> dependencies() throws Exception {
+            List<CompiledFileDependency> result = new ArrayList<CompiledFileDependency>();
+            Path root = projectRoot.toRealPath();
+            for (CompiledFilePlan plan : plans.values()) {
+                Path file = plan.file().toRealPath();
+                Path sourceDirectory = plan.sourceDirectory().toRealPath();
+                if (!file.startsWith(root) || !sourceDirectory.startsWith(root))
+                    throw new IllegalArgumentException("Compiled File-expression dependency escapes its Package");
+                byte[] hash = MessageDigest.getInstance("SHA-256").digest(plan.source().getBytes(StandardCharsets.UTF_8));
+                result.add(new CompiledFileDependency(plan.authoredPath(),
+                        root.relativize(sourceDirectory).toString().replace('\\', '/'),
+                        root.relativize(file).toString().replace('\\', '/'), hex(hash)));
+            }
+            return Collections.unmodifiableList(result);
+        }
+        /** Each authored inbound edge, including repeated Actions and transitive Flow callers. */
+        public List<CompiledFileReference> references() {
+            return references;
+        }
         private CompiledFilePlan lookup(String authoredPath, Path sourceDirectory) {
             return plans.get(ReferenceKey.of(authoredPath, sourceDirectory));
         }
+    }
+
+    /** Value-free Action call site pointing at a deduplicated compiled plan. */
+    public static final class CompiledFileReference {
+        private final Path projectRoot;
+        private final CompiledFilePlan plan;
+        private final String callSite;
+        private CompiledFileReference(Path projectRoot, CompiledFilePlan plan, String callSite) {
+            this.projectRoot = projectRoot; this.plan = plan; this.callSite = callSite;
+        }
+        public String authoredPath() { return plan.authoredPath(); }
+        public String sourceDirectory() {
+            return projectRoot.relativize(plan.sourceDirectory()).toString().replace('\\', '/');
+        }
+        public String logicalPath() {
+            return projectRoot.relativize(plan.file()).toString().replace('\\', '/');
+        }
+        public String sourceFingerprint() {
+            try { return hex(MessageDigest.getInstance("SHA-256").digest(plan.source().getBytes(StandardCharsets.UTF_8))); }
+            catch (Exception unavailable) { throw new IllegalStateException("Unable to fingerprint compiled File reference", unavailable); }
+        }
+        public String callSite() { return callSite; }
+    }
+
+    /** Value-free closure entry for dependency and freshness projections. */
+    public static final class CompiledFileDependency {
+        private final String authoredPath, sourceDirectory, logicalPath, sourceFingerprint;
+        private CompiledFileDependency(String authoredPath, String sourceDirectory,
+                                       String logicalPath, String sourceFingerprint) {
+            this.authoredPath = authoredPath; this.sourceDirectory = sourceDirectory;
+            this.logicalPath = logicalPath; this.sourceFingerprint = sourceFingerprint;
+        }
+        public String authoredPath() { return authoredPath; }
+        public String sourceDirectory() { return sourceDirectory; }
+        public String logicalPath() { return logicalPath; }
+        public String sourceFingerprint() { return sourceFingerprint; }
     }
 
     public static final class Stats {
@@ -417,10 +507,18 @@ public final class FileExpressionResolver {
         public long renderedChars() { return renderedChars; }
     }
 
+    private static String hex(byte[] value) {
+        StringBuilder result = new StringBuilder(value.length * 2);
+        for (byte item : value) result.append(String.format("%02x", item & 255));
+        return result.toString();
+    }
+
     private static final class ResolvedFile { private final Path canonical; private ResolvedFile(Path canonical) { this.canonical = canonical; } }
     private static final class Reference {
-        private final String authoredPath; private final Path sourceDirectory;
-        private Reference(String authoredPath, Path sourceDirectory) { this.authoredPath = authoredPath; this.sourceDirectory = sourceDirectory; }
+        private final String authoredPath; private final Path sourceDirectory; private final String callSite;
+        private Reference(String authoredPath, Path sourceDirectory, String callSite) {
+            this.authoredPath = authoredPath; this.sourceDirectory = sourceDirectory; this.callSite = callSite;
+        }
     }
     private static final class ReferenceKey {
         private final String authoredPath; private final Path sourceDirectory;
@@ -431,9 +529,24 @@ public final class FileExpressionResolver {
     }
     private static final class PlanKey {
         private final Path path; private final long size; private final long modified;
-        private PlanKey(Path path, long size, long modified) { this.path = path; this.size = size; this.modified = modified; }
-        private static PlanKey of(Path path) throws Exception { return new PlanKey(path, Files.size(path), Files.getLastModifiedTime(path).toMillis()); }
-        @Override public boolean equals(Object value) { if (!(value instanceof PlanKey)) return false; PlanKey other = (PlanKey) value; return size == other.size && modified == other.modified && path.equals(other.path); }
-        @Override public int hashCode() { int result = path.hashCode(); result = 31 * result + Long.valueOf(size).hashCode(); return 31 * result + Long.valueOf(modified).hashCode(); }
+        private final String authoredPath; private final Path sourceDirectory;
+        private PlanKey(Path path, long size, long modified, String authoredPath, Path sourceDirectory) {
+            this.path = path; this.size = size; this.modified = modified;
+            this.authoredPath = authoredPath; this.sourceDirectory = sourceDirectory;
+        }
+        private static PlanKey of(Path path, String authoredPath, Path sourceDirectory) throws Exception {
+            return new PlanKey(path, Files.size(path), Files.getLastModifiedTime(path).toMillis(), authoredPath, sourceDirectory);
+        }
+        @Override public boolean equals(Object value) {
+            if (!(value instanceof PlanKey)) return false;
+            PlanKey other = (PlanKey) value;
+            return size == other.size && modified == other.modified && path.equals(other.path)
+                    && authoredPath.equals(other.authoredPath) && sourceDirectory.equals(other.sourceDirectory);
+        }
+        @Override public int hashCode() {
+            int result = path.hashCode(); result = 31 * result + Long.valueOf(size).hashCode();
+            result = 31 * result + Long.valueOf(modified).hashCode(); result = 31 * result + authoredPath.hashCode();
+            return 31 * result + sourceDirectory.hashCode();
+        }
     }
 }

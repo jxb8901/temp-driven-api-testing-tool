@@ -134,8 +134,8 @@ class ServerWarUiIT {
                 +"  - id: one-shot-control\n    target: {type: template, id: PARITY}\n"
                 +"    load: {users: 1, duration: 1s}\n");
         Path holdScript=Files.createDirectories(pkg.resolve("tools")).resolve("hold.sh");
-        Files.writeString(holdScript,"#!/bin/sh\nprintf '%s' \"$$\" > \"$ATT_ROOT_DIR/tools/child.pid\"\n"
-                +"touch \"$ATT_ROOT_DIR/tools/started\"\nexec sleep 60\n");
+        Files.writeString(holdScript,"#!/bin/sh\nprintf '%s' \"$$\" > \"$ATT_CASE_OUTPUT_DIR/child.pid\"\n"
+                +"touch \"$ATT_CASE_OUTPUT_DIR/started\"\nexec sleep 60\n");
         holdScript.toFile().setExecutable(true);
         Files.createDirectories(pkg.resolve("testcase"));
         try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();var out=Files.newOutputStream(pkg.resolve("testcase/parity.xlsx"))) {
@@ -271,8 +271,6 @@ class ServerWarUiIT {
     private PackagedExecutionCapture executePackagedInterruptedDraft(int port,String api,String auth,String origin,
                                                                      Path pkg,Object runtime,String type,String template,
                                                                      boolean cancel,boolean prewarm) throws Exception {
-        Path started=pkg.resolve("tools/started"),childPid=pkg.resolve("tools/child.pid");
-        Files.deleteIfExists(started);Files.deleteIfExists(childPid);
         long previousLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
         Map<String,Object> definition=type.equals("run")
                 ?Map.of("schemaVersion","att-execution/v1","executionType","run","packageId","parity","environment","SIT",
@@ -282,10 +280,11 @@ class ServerWarUiIT {
         JsonNode accepted=apiJsonResponse(port,"POST",api+"/jobs/"+type,auth,origin,
                 Map.of("packageId","parity","draftId",draft.path("draftId").asText()),202);
         String id=accepted.path("jobId").asText(),jobPath=api+"/jobs/"+id;
+        Path output=jobOutputDirectory(runtime,id);
         long startDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);
-        while((!Files.exists(started)||!Files.exists(childPid))&&System.nanoTime()<startDeadline)Thread.sleep(10);
-        assertTrue(Files.exists(started)&&Files.exists(childPid),type+" "+template+" Tool must start before cancellation/timeout evidence");
-        long toolPid=Long.parseLong(Files.readString(childPid).trim());
+        while((!outputHas(output,"started")||!outputHas(output,"child.pid"))&&System.nanoTime()<startDeadline)Thread.sleep(10);
+        assertTrue(outputHas(output,"started")&&outputHas(output,"child.pid"),type+" "+template+" Tool must start before cancellation/timeout evidence");
+        long toolPid=Long.parseLong(Files.readString(outputFile(output,"child.pid")).trim());
         if(cancel) {
             JsonNode cancelled=apiJsonResponse(port,"DELETE",api+"/jobs/"+id,auth,origin,null,200);
             assertEquals("CANCELLED",cancelled.path("status").asText());
@@ -350,6 +349,19 @@ class ServerWarUiIT {
             Thread.sleep(25);
         }
         fail("The deployed WAR did not become ready with a prewarmed Worker");return List.of();
+    }
+
+    private static Path jobOutputDirectory(Object runtime,String jobId) throws Exception {
+        var output=runtime.getClass().getDeclaredMethod("outputDirectoryForJob",String.class);output.setAccessible(true);
+        return (Path)output.invoke(runtime,jobId);
+    }
+
+    private static boolean outputHas(Path root,String name) { return outputFile(root,name)!=null; }
+    private static Path outputFile(Path root,String name) {
+        if(root==null||!Files.isDirectory(root))return null;
+        try(var paths=Files.walk(root)) {
+            return paths.filter(path->path.getFileName()!=null&&name.equals(path.getFileName().toString())).findFirst().orElse(null);
+        } catch(Exception unavailable) { return null; }
     }
 
     @Test
@@ -777,11 +789,15 @@ class ServerWarUiIT {
             }
             assertTrue(entries.contains("att/server/ApiServlet.class"));
             assertTrue(entries.contains("att/server/api/ServerApi.class"));
+            assertTrue(entries.contains("att/validation/SourceCandidateValidator.class"),
+                    "Whole-candidate validation must remain available in the combined Server application jar");
             assertTrue(entries.contains("att/metrics/InspectionMetrics.class"),
                     "The combined Server jar must bundle the Inspector metrics classes the webapp instantiates");
             assertTrue(entries.contains("att/metrics/InspectionMetrics$Stage.class"));
             assertTrue(entries.contains("att/metrics/InspectionCacheKey.class"));
             assertTrue(entries.contains("att/security/SecretProtection.class"));
+            assertTrue(entries.contains("att/load/LoadScenarioLoader.class"),
+                    "The combined Server application jar carries the Engine and Load validation runtime");
             assertTrue(entries.contains("META-INF/resources/ui/index.html"));
             assertTrue(entries.stream().anyMatch(name -> name.matches("META-INF/resources/ui/assets/index-[^/]+\\.js")),
                     "The active Vite bundle must be packaged under Servlet static resources.");
@@ -791,8 +807,6 @@ class ServerWarUiIT {
             assertTrue(entries.contains("att-build.properties"));
             assertFalse(entries.contains("att/worker/WorkerMain.class"),
                     "Worker classes belong only in the Local runtime jar");
-            assertFalse(entries.stream().anyMatch(name -> name.startsWith("att/engine/") || name.startsWith("att/load/")),
-                    "Engine and Load runtime classes belong only in the Local runtime jar");
         }
     }
 

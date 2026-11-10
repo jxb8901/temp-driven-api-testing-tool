@@ -3068,39 +3068,10 @@ public final class PackageResourceInspector implements AutoCloseable {
      * source, even when they happen to be under packageRoot.
      */
     private String digestPackageFiles(Index index) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        digest.update(utf8("ATT_PACKAGE_INDEXED_SOURCES_V1"));
-        digest.update((byte) 0);
-        List<Path> ordered = new ArrayList<Path>();
-        Path manifestPath = packageRoot.resolve(att.config.PackageConfig.FILE_NAME).toAbsolutePath().normalize();
-        for (Path candidate : index.files) {
-            Path path = candidate.toAbsolutePath().normalize();
-            // Central config and the Package Manifest have separate revision domains.
-            if (!path.startsWith(packageRoot) || path.equals(manifestPath)) continue;
-            if (ordered.size() >= MAX_PACKAGE_SOURCE_FILES)
-                throw new ResourceLimitException("resourceInspector.maxPackageSourceFiles", MAX_PACKAGE_SOURCE_FILES, ordered.size() + 1L);
-            ordered.add(resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE).canonicalPath());
-        }
-        Collections.sort(ordered);
-        long total = 0;
-        byte[] buffer = new byte[8192];
-        for (Path file : ordered) {
-            PackageResourceResolver.PackageResource resource = resources.fromInternalPath(file, PackageResourceResolver.Kind.FILE);
-            digest.update(utf8(resource.logicalName()));
-            digest.update((byte) 0);
-            try (InputStream input = Files.newInputStream(resource.canonicalPath())) {
-                int read;
-                while ((read = input.read(buffer)) >= 0) {
-                    InspectionMetrics.JVM.add(READ_BYTES, read);
-                    total += read;
-                    if (total > MAX_REVISION_BYTES)
-                        throw new ResourceLimitException("resourceInspector.maxRevisionBytes", MAX_REVISION_BYTES, total);
-                    digest.update(buffer, 0, read);
-                }
-            }
-            digest.update((byte) 0xff);
-        }
-        return hex(digest.digest());
+        // Shared with ChangeSet staging, candidate validation and publication.
+        // The Environment-independent Package source domain is separate from
+        // package.yaml (Manifest), central Config and execution revision.
+        return att.server.api.source.PackageSourceRevision.digest(packageRoot);
     }
 
     private void indexQuickLoadPolicies(Index index) {

@@ -10,6 +10,12 @@
     <description>Single-node ATT control plane for external Jakarta Servlet containers.</description>
     <dependencies>
         <dependency><groupId>att</groupId><artifactId>att-server-api</artifactId><version>${project.version}</version></dependency>
+        <!-- Candidate validation uses the installed Engine runtime; its classes are bundled into the combined Server application jar. -->
+        <dependency>
+            <groupId>att</groupId><artifactId>att-engine</artifactId><version>${project.version}</version>
+            <!-- The Server reads and writes workbook cells but does not run POI formula evaluation. -->
+            <exclusions><exclusion><groupId>org.apache.commons</groupId><artifactId>commons-math3</artifactId></exclusion></exclusions>
+        </dependency>
         <!-- ServerRuntime directly uses att.metrics/att.security classes, so keep the
              dependency explicit: the application-jar assembly only bundles direct deps. -->
         <dependency><groupId>att</groupId><artifactId>att-security</artifactId><version>${project.version}</version></dependency>
@@ -36,7 +42,7 @@
         </plugin>
         <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-war-plugin</artifactId><version>3.4.0</version><configuration>
             <failOnMissingWebXml>false</failOnMissingWebXml>
-            <packagingExcludes>WEB-INF/classes/**,WEB-INF/lib/att-security-*.jar,WEB-INF/lib/att-server-api-*.jar,WEB-INF/lib/att-web-*.jar</packagingExcludes>
+            <packagingExcludes>WEB-INF/classes/**,WEB-INF/lib/att-engine-*.jar,WEB-INF/lib/att-security-*.jar,WEB-INF/lib/att-server-api-*.jar,WEB-INF/lib/att-web-*.jar</packagingExcludes>
             <webResources><resource><directory>${project.build.directory}</directory><targetPath>WEB-INF/lib</targetPath><includes><include>att-server-${project.version}.jar</include></includes></resource></webResources>
         </configuration></plugin>
         <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><configuration><skipTests>${att.skipServerUnitTests}</skipTests><workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory></configuration></plugin>

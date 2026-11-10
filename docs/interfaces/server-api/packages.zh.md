@@ -11,7 +11,7 @@ GET /api/v1/registry
 GET /api/v1/packages/payments/scope
 ```
 
-`GET /registry` 回傳 `att-package-registry/v1`：content-addressable `revision`、單調遞增的 `generation`、reload 時間、`Ready` 或 `Invalid` 狀態、安全診斷，以及明確註冊的邏輯 Package ID 和 `Registered`、`Warming` 或 `Ready` 狀態。回應不會公開檔案系統路徑。`GET /packages/{packageId}/scope` 回傳 `att-source-scope/v1`，並區分 registry、Package source、Package Manifest、Central Runtime Config source、active effective Config 及 embedded Engine schema 的 revision identity，以及安全的 environment/version metadata。此 API 僅供讀取；client 不能指定 source root。registry 變更後，以舊 registry revision 建立的 draft 和 approval 會被拒絕。已接受的 Job 會保留其已核准的 Package root 與輸入。
+`GET /registry` 回傳 `att-package-registry/v1`：content-addressable `revision`、單調遞增的 `generation`、reload 時間、`Ready` 或 `Invalid` 狀態、安全診斷，以及明確註冊的邏輯 Package ID 和 `Registered`、`Warming` 或 `Ready` 狀態。回應不會公開檔案系統路徑。`GET /packages/{packageId}/scope` 回傳 `att-source-scope/v1`，並區分 registry、Package source、Package Manifest、Central Runtime Config source、active effective Config、execution 及 embedded Engine schema 的 revision identity，以及安全的 environment/version metadata。`packageSourceRevision` 追蹤 Package 擁有的內容；`executionRevisionDigest` 綁定所選 Engine/schema、effective Config 與 Environment 的 execution 比對。Change Set 的 `baseSourceRevision` 是獨立的 aggregate optimistic-concurrency fence，不可代替上述兩種 identity。Versioned Source Management `RevisionSet` 會提供 typed `packageSourceRevision` 和 `executionRevisionDigest`；`businessSource` 保留為 Package source 的相容別名。此 API 僅供讀取；client 不能指定 source root。registry 變更後，以舊 registry revision 建立的 draft 和 approval 會被拒絕。已接受的 Job 會保留其已核准的 Package root 與輸入。
 
 ## 套件資源探索
 

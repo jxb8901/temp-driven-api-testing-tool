@@ -2,6 +2,7 @@
 package att.validation;
 
 import att.config.*;
+import att.core.ExecutionOptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -671,11 +672,13 @@ class PackageValidatorTest {
         assertFalse(Files.exists(tempDir.resolve("config")));
         assertFalse(Files.exists(tempDir.resolve("schemas")));
         PackageValidator validator = new PackageValidator(tempDir, config);
-        java.lang.reflect.Method layout = PackageValidator.class.getDeclaredMethod("validatePackageLayout", List.class);
+        java.lang.reflect.Method layout = PackageValidator.class.getDeclaredMethod("validatePackageLayout", ExecutionOptions.class, List.class);
         layout.setAccessible(true);
         List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
+        ExecutionOptions options = new ExecutionOptions(null, null, null, Collections.emptySet(), Collections.emptySet(),
+                Collections.emptySet(), "layout-test", false, false, false, null);
 
-        layout.invoke(validator, diagnostics);
+        layout.invoke(validator, options, diagnostics);
 
         assertFalse(diagnostics.stream().anyMatch(d -> d.message().contains("Missing required package path: att.sh")
                 || d.message().contains("Missing required package path: att.bat")
