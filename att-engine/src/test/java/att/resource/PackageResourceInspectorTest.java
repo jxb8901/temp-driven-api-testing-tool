@@ -378,6 +378,32 @@ class PackageResourceInspectorTest {
         }
     }
 
+    @Test void declaredTestdataLayersChangePackageSourceRevisionIndependentlyOfSelectedEnvironment() throws Exception {
+        Path root=packageWithTemplate("package-testdata-source-identity","PAYMENT","description: testdata revision");
+        Path shared=Files.createDirectories(temp.resolve("testdata-identity-shared/config")).resolve("config.yaml");
+        writeUtf8(shared,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n");
+        writeUtf8(root.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata:\n"
+                +"  descriptors: [testdata/default.yaml]\n"
+                +"  environments:\n    UAT: [testdata/uat.yaml]\n");
+        writeUtf8(root.resolve("testdata/default.yaml"),"schemaVersion: att-testdata/v1.0\nid: customer\nrecords: [{id: default}]\n");
+        Path uat=root.resolve("testdata/uat.yaml");
+        writeUtf8(uat,"schemaVersion: att-testdata/v1.0\nid: customer\nrecords: [{id: uat-1}]\n");
+        String originalSit,originalUat;
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,shared,"SIT",Collections.<String>emptyList(),65536,262144)) {
+            originalSit=inspector.packageSourceRevisionDigest();
+        }
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,shared,"UAT",Collections.<String>emptyList(),65536,262144)) {
+            originalUat=inspector.packageSourceRevisionDigest();
+        }
+        assertEquals(originalSit,originalUat,"The Package source domain includes all declared Testdata layers, not the selected Environment");
+        writeUtf8(uat,"schemaVersion: att-testdata/v1.0\nid: customer\nrecords: [{id: uat-2}]\n");
+        String changed;
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,shared,"SIT",Collections.<String>emptyList(),65536,262144)) {
+            changed=inspector.packageSourceRevisionDigest();
+        }
+        assertNotEquals(originalSit,changed,"An inactive Environment's declared Testdata source must still invalidate Package authoring identity");
+    }
+
     @Test void packageSourceRevisionIgnoresSharedConfigAndEngineOnlyChanges() throws Exception {
         Path root=packageWithTemplate("package-source-revision", "PAYMENT", "description: revision context");
         Path sharedConfig=Files.createDirectories(temp.resolve("source-revision-shared/config")).resolve("config.yaml");
