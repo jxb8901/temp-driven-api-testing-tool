@@ -1164,30 +1164,17 @@ class ServerWarUiIT {
         Process cli=builder.start();assertTrue(cli.waitFor(30,TimeUnit.SECONDS));
         assertNotEquals(0,cli.exitValue());String cliText=Files.readString(cliOutput);
         assertTrue(cliText.contains(expression),cliText);assertFalse(cliText.contains("&{.$EXTERNAL"),cliText);
-        JsonNode submitted=apiJsonResponse(port,"POST",api+"/jobs/debug",auth,origin,
-                Map.of("packageId","payments","target",Map.of("type","flow","id","diagnostic.fidelity.v1")),202);
-        String jobId=submitted.path("jobId").asText();JsonNode job=null;
-        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(40);
-        do { job=getJson(port,api+"/jobs/"+jobId,auth);
-            if (Set.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(job.path("status").asText())) break;
-            Thread.sleep(30);
-        } while(System.nanoTime()<deadline);
-        assertTrue(Set.of("ERROR","INVALID").contains(job.path("status").asText()),job.toString());
-        JsonNode result=getJson(port,api+"/jobs/"+jobId+"/result",auth);String publicText=result.toString();
-        assertTrue(publicText.contains(expression),publicText);assertFalse(publicText.contains("&{.$EXTERNAL"),publicText);
+        // #254 snapshots require a complete, resolvable File-expression closure.
+        // A nonexistent source must fail closed at admission instead of starting a
+        // Worker with untracked input or publishing a misleading partial archive.
+        JsonNode rejected=apiJsonResponse(port,"POST",api+"/jobs/debug",auth,origin,
+                Map.of("packageId","payments","target",Map.of("type","flow","id","diagnostic.fidelity.v1")),400);
+        String publicText=rejected.toString();
+        assertEquals("ATT-SERVER-INVALID-REQUEST",rejected.path("error").path("code").asText());
+        assertTrue(publicText.contains("Pacs008.xml"),publicText);
+        assertFalse(publicText.contains("&{.$EXTERNAL"),publicText);
         assertFalse(publicText.contains(packageRoot.toString()),publicText);
-        assertTrue(publicText.contains("flow.yaml"),publicText);
-        assertTrue(publicText.contains("line") || publicText.contains("sourceColumn"),publicText);
-        JsonNode artifacts=awaitArchive(port,api,jobId,auth);
-        boolean checked=false;
-        for(JsonNode item:artifacts.path("items")) if(item.path("path").asText().endsWith("case.log")) {
-            String path=item.path("path").asText();
-            String log=getText(port,api+"/jobs/"+jobId+"/artifacts/view/"+encodeEntry(path),auth);
-            assertTrue(log.contains(expression),log);assertFalse(log.contains(packageRoot.toString()),log);checked=true;
-        }
-        assertTrue(checked,"Failed Debug must retain its diagnostic Case Log");
-        assertTrue(sseDataUntil(port,api+"/jobs/"+jobId+"/events",auth,"[DEBUG]").contains("[DEBUG]"),
-                "DEBUG live output must include a shared console line");
+        assertFalse(publicText.contains(localHome.toString()),publicText);
     }
 
     private static void writeReferenceFlowSource(Path packageRoot) throws Exception {
