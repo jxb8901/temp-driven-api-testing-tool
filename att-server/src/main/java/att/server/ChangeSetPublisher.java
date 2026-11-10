@@ -56,6 +56,12 @@ final class ChangeSetPublisher implements AutoCloseable {
     private static final Pattern FILE_EXPRESSION = Pattern.compile("&\\{([^{}\\r\\n]{1,512})\\}");
     private static final Set<String> TEXT_EXTENSIONS = set("yaml", "yml", "xml", "json", "csv", "tsv", "txt", "sql", "properties", "md", "xlsx", "xls");
     private static final Set<String> BINARY_EXTENSIONS = set("xlsx", "xls");
+    // Runtime source and validation closure is wider than the owner editing allowlist.
+    // A referenced Tool script or binary File Expression can change execution even
+    // when online editing of its extension is forbidden.
+    private static final Set<String> RUNTIME_RESOURCE_EXTENSIONS = set("sh", "bash", "py", "js", "ts",
+            "groovy", "rb", "pl", "ps1", "bat", "cmd", "xsd", "wsdl", "html",
+            "graphql", "gql", "bin", "dat", "png", "jpg", "jpeg", "pdf");
     private static final Set<String> CENTRAL_REFERENCE_EXTENSIONS = set("yaml", "yml", "xml", "json", "csv", "tsv", "txt", "sql",
             "properties", "md", "sh", "bash", "py", "js", "ts", "groovy", "rb", "pl", "ps1", "bat", "cmd", "xsd", "wsdl", "html",
             "graphql", "gql");
@@ -176,7 +182,15 @@ final class ChangeSetPublisher implements AutoCloseable {
         String sourceRevision() { return sourceRevision; }
         String registryRevision() { return registryRevision; }
         String manifestRevision() { return manifestRevision; }
-        String configRevision() { return configRevision; }
+        String configRevision() throws Exception {
+            if (!CENTRAL_RUNTIME_CONFIG.equals(scope.domain)) return configRevision;
+            Map<String, String> hashes = new LinkedHashMap<String, String>(base.centralIndex.hashes);
+            for (Map.Entry<String, byte[]> entry : changes.entrySet()) {
+                if (entry.getValue() == null) hashes.remove(entry.getKey());
+                else hashes.put(entry.getKey(), hash(entry.getValue()));
+            }
+            return digestHashes(hashes);
+        }
         String schemaRevision() { return schemaRevision; }
         String changeSetId() { return id; }
         String packageSourceRevision() throws Exception {
@@ -879,7 +893,8 @@ final class ChangeSetPublisher implements AutoCloseable {
             centralTree = digestIndex(primary);
         }
         String manifest = PACKAGE_SOURCE.equals(scope.domain) ? primary.hashes.getOrDefault("package.yaml", hash(new byte[0])) : null;
-        String config = centralIndex.hashes.getOrDefault("config/config.yaml", hash(new byte[0]));
+        // CONFIG_SOURCE is the approved Config descriptor closure, not just config.yaml.
+        String config = centralTree;
         String schema = scope.schemaRevision == null ? "unavailable" : requireDigest(scope.schemaRevision);
         String registry = PACKAGE_SOURCE.equals(scope.domain) ? requireDigest(scope.registryRevision) : null;
         String source = hash(join(scope.domain, scope.scopeId, packageTree, centralTree, registry, manifest, config, schema));
@@ -915,7 +930,8 @@ final class ChangeSetPublisher implements AutoCloseable {
                 if (!managedPath(domain, name)) return FileVisitResult.CONTINUE;
                 if (Files.isSymbolicLink(file) || attrs.isSymbolicLink() || !attrs.isRegularFile())
                     throw new IOException("Source tree contains an unsafe file");
-                if (!authorableExtension(name, domain)) return FileVisitResult.CONTINUE;
+                if (!authorableExtension(name, domain) && !runtimeSourceDependency(name, domain))
+                    return FileVisitResult.CONTINUE;
                 if (index.files.size() >= MAX_REVISION_FILES) throw new IOException("Source tree exceeds its file limit");
                 long size = attrs.size();
                 if (size > MAX_REVISION_FILE_BYTES || index.bytes + size > MAX_REVISION_BYTES)
@@ -960,6 +976,19 @@ final class ChangeSetPublisher implements AutoCloseable {
         if (!TEXT_EXTENSIONS.contains(extension)) return false;
         if (CENTRAL_RUNTIME_CONFIG.equals(domain)) return centralPath(normalized);
         return true;
+    }
+
+    private static boolean runtimeSourceDependency(String path, String domain) {
+        if (CENTRAL_RUNTIME_CONFIG.equals(domain))
+            return centralSnapshotReferenceFile(path);
+        if (!PACKAGE_SOURCE.equals(domain)) return false;
+        String normalized = path.toLowerCase(Locale.ROOT);
+        int dot = normalized.lastIndexOf('.');
+        if (dot < 0 || !RUNTIME_RESOURCE_EXTENSIONS.contains(normalized.substring(dot + 1))) return false;
+        for (String root : List.of("templates/", "flows/", "testcase/", "testdata/",
+                "load/", "files/", "resources/", "scripts/", "tools/"))
+            if (normalized.startsWith(root)) return true;
+        return false;
     }
 
     static boolean centralPath(String path) {
@@ -1235,7 +1264,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         return ServerRuntime.JSON.convertValue(dto, LinkedHashMap.class);
     }
 
-    private static att.server.api.source.SourceManagementContracts.RevisionSet revisionSet(Draft draft) {
+    private static att.server.api.source.SourceManagementContracts.RevisionSet revisionSet(Draft draft) throws Exception {
         att.server.api.source.SourceManagementContracts.RevisionIdentity registration = draft.base.registryRevision == null ? null
                 : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
                 att.server.api.source.SourceManagementContracts.RevisionKind.PACKAGE_REGISTRATION,
@@ -1253,10 +1282,11 @@ final class ChangeSetPublisher implements AutoCloseable {
                 : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
                 att.server.api.source.SourceManagementContracts.RevisionKind.PACKAGE_MANIFEST,
                 draft.scope.scopeId, draft.base.manifestRevision);
-        att.server.api.source.SourceManagementContracts.RevisionIdentity config = draft.base.configRevision == null ? null
+        String effectiveConfigRevision = new Candidate(draft).configRevision();
+        att.server.api.source.SourceManagementContracts.RevisionIdentity config = effectiveConfigRevision == null ? null
                 : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
                 att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE,
-                "central-runtime-config", draft.base.configRevision);
+                "central-runtime-config", effectiveConfigRevision);
         att.server.api.source.SourceManagementContracts.RevisionIdentity schema = draft.base.schemaRevision == null ? null
                 : att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
                 att.server.api.source.SourceManagementContracts.RevisionKind.ENGINE_SCHEMA,
@@ -1463,8 +1493,8 @@ final class ChangeSetPublisher implements AutoCloseable {
                 ? candidate.base.centralTreeRevision : digestHashes(centralHashes);
         String manifest = PACKAGE_SOURCE.equals(candidate.domain())
                 ? packageHashes.getOrDefault("package.yaml", hash(new byte[0])) : null;
-        String config = PACKAGE_SOURCE.equals(candidate.domain()) ? candidate.configRevision
-                : centralHashes.getOrDefault("config/config.yaml", hash(new byte[0]));
+        String config = PACKAGE_SOURCE.equals(candidate.domain()) ? candidate.configRevision()
+                : digestHashes(centralHashes);
         return hash(join(candidate.domain(), candidate.scopeId(), packageTree, centralTree,
                 candidate.registryRevision(), manifest, config, candidate.schemaRevision()));
     }
