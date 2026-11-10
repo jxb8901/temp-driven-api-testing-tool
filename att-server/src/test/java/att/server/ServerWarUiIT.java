@@ -1269,7 +1269,7 @@ class ServerWarUiIT {
         }
         try {
             int status = connection.getResponseCode();
-            assertEquals(expectedStatus, status, method + " " + path);
+            assertEquals(expectedStatus, status, method + " " + path + apiStatusDiagnostic(connection, status));
             return ServerRuntime.JSON.readTree(connection.getInputStream());
         } finally {
             connection.disconnect();
@@ -1292,12 +1292,24 @@ class ServerWarUiIT {
         }
         try {
             int status = connection.getResponseCode();
-            assertEquals(expectedStatus, status, method + " " + path);
+            assertEquals(expectedStatus, status, method + " " + path + apiStatusDiagnostic(connection, status));
             try (var stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream()) {
                 assertNotNull(stream, "Expected a JSON response body");
                 return ServerRuntime.JSON.readTree(stream);
             }
         } finally { connection.disconnect(); }
+    }
+
+    private static String apiStatusDiagnostic(HttpURLConnection connection,int status) {
+        if(status<400)return "";
+        try(var stream=connection.getErrorStream()) {
+            if(stream==null)return " (no error response)";
+            JsonNode error=ServerRuntime.JSON.readTree(stream.readNBytes(4096));
+            return " (code="+error.path("code").asText("unknown")
+                    +", message="+error.path("message").asText("unavailable")+")";
+        } catch(Exception unavailable) {
+            return " (error response unreadable)";
+        }
     }
 
     private static int apiStatus(int port, String method, String path, String authorization, String origin, Object body) throws Exception {
