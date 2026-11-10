@@ -120,6 +120,43 @@ class ConfigImpactPublicationFenceTest {
         }
     }
 
+    @Test void exclusiveConfigPublicationBlocksAdmissionsUntilActivationFenceCompletes() throws Exception {
+        ReentrantReadWriteLock lifecycle = new ReentrantReadWriteLock(true);
+        Object scheduleStore = new Object();
+        SourceFileTransaction transaction = new SourceFileTransaction(
+                Files.createDirectories(temp.resolve("admission-fence-data")),
+                new SourcePublicationBarrier());
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch admissionStarted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Boolean> publication = executor.submit(() -> ConfigImpactPublicationFence.runPublication(
+                    lifecycle.writeLock(), Map::of, transaction, scheduleStore, () -> {
+                        entered.countDown();
+                        assertTrue(release.await(2, TimeUnit.SECONDS));
+                        return true;
+                    }));
+            assertTrue(entered.await(1, TimeUnit.SECONDS), "publication must enter exclusive activation fence");
+            Future<Boolean> admission = executor.submit(() -> {
+                admissionStarted.countDown();
+                lifecycle.readLock().lock();
+                try { return true; }
+                finally { lifecycle.readLock().unlock(); }
+            });
+            assertTrue(admissionStarted.await(1, TimeUnit.SECONDS));
+            Thread.sleep(50);
+            assertFalse(admission.isDone(),
+                    "Job admission and Worker startup must not use old/new source during activation");
+            release.countDown();
+            assertTrue(publication.get(1, TimeUnit.SECONDS));
+            assertTrue(admission.get(1, TimeUnit.SECONDS));
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
+    }
+
     private static String digest(byte[] bytes) throws Exception {
         return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
     }
