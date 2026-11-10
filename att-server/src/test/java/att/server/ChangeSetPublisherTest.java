@@ -130,20 +130,24 @@ class ChangeSetPublisherTest {
     @Test void externalToolScriptEditInvalidatesDraftAndScriptIsMaterializedButNotAuthorable() throws Exception {
         Path script = Files.createDirectories(packageRoot.resolve("templates/payment")).resolve("worker.sh");
         Files.write(script, bytes("#!/bin/sh\necho FIRST\n"));
+        Path custom = Files.createDirectories(packageRoot.resolve("custom")).resolve("tool.groovy");
+        Files.write(custom, bytes("println 'FIRST'\n"));
         ChangeSetPublisher publisher = publisher(candidate -> {
             assertTrue(candidate.files().contains("templates/payment/worker.sh"),
                     "A runtime script must be in the validation closure even though editing is forbidden");
             assertArrayEquals(bytes("#!/bin/sh\necho FIRST\n"), candidate.read("templates/payment/worker.sh"));
+            assertTrue(candidate.files().contains("custom/tool.groovy"));
+            assertArrayEquals(bytes("println 'FIRST'\n"), candidate.read("custom/tool.groovy"));
             return ChangeSetPublisher.ValidationResult.accepted(VALIDATION_REVISION);
         }, allowingGate());
         try {
             assertThrows(IllegalArgumentException.class, () -> stagePackage(publisher, List.of(
                     ChangeSetPublisher.OperationInput.replace("templates/payment/worker.sh", bytes("echo INVALID\n")))));
             Map<String,Object> staged = stagePackage(publisher, List.of(
-                    ChangeSetPublisher.OperationInput.create("templates/payment.yaml", bytes("id: payment\n"))));
+                    ChangeSetPublisher.OperationInput.create("templates/payment.yaml", bytes("id: payment\nscript: '&{custom/tool.groovy}'\n"))));
             String id = String.valueOf(staged.get("changeSetId"));
             validateReview(publisher, id);
-            externalPackageWrite("templates/payment/worker.sh", bytes("#!/bin/sh\necho SECOND\n"));
+            externalPackageWrite("custom/tool.groovy", bytes("println 'SECOND'\n"));
             assertThrows(ChangeSetPublisher.Conflict.class, () ->
                     publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id),
                     "A changed script must invalidate the Package source CAS fence");

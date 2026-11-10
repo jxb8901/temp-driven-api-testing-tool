@@ -38,6 +38,9 @@ public final class PackageSourceRevision {
     private static final Set<String> RUNTIME = set("sh", "bash", "py", "js", "ts", "groovy",
             "rb", "pl", "ps1", "bat", "cmd", "xsd", "wsdl", "html", "graphql", "gql",
             "bin", "dat", "png", "jpg", "jpeg", "pdf");
+    private static final Set<String> SCRIPT_EXTENSIONS = set("sh", "bash", "py", "js", "ts",
+            "groovy", "rb", "pl", "ps1", "bat", "cmd");
+    private static final Set<String> RAW_ASSET_ROOTS = set("files", "resources", "scripts", "tools");
     private static final Set<String> SOURCE_ROOTS = set("templates", "flows", "testcase",
             "testdata", "load", "files", "resources", "scripts", "tools", "actions", "stages");
     private static final Set<String> EXCLUDED = set("secrets", "credentials", "private",
@@ -60,11 +63,14 @@ public final class PackageSourceRevision {
         String[] segments = lower.split("/");
         for (String segment : segments) if (segment.isEmpty() || ".".equals(segment)
                 || "..".equals(segment) || EXCLUDED.contains(segment)) return false;
+        // Raw runtime asset roots may contain extensionless/binary File Expressions.
+        // A script referenced by a Template can also live in a custom Package path.
+        if (RAW_ASSET_ROOTS.contains(segments[0])) return true;
         String name = segments[segments.length - 1];
         int dot = name.lastIndexOf('.');
         if (dot < 0 || dot == name.length() - 1) return false;
         String extension = name.substring(dot + 1);
-        if (TEXT.contains(extension)) return true;
+        if (TEXT.contains(extension) || SCRIPT_EXTENSIONS.contains(extension)) return true;
         return SOURCE_ROOTS.contains(segments[0]) && RUNTIME.contains(extension);
     }
 
