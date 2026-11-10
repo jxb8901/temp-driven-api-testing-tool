@@ -48,6 +48,36 @@ public final class SchemaFiles {
     private static volatile FileLock cacheLease;
     private SchemaFiles() {}
 
+    /**
+     * Release this Engine classloader's schema-cache lease when its owning Servlet
+     * application is undeployed. Shared OS leases are held until JVM exit for CLI
+     * and Worker processes, but a Tomcat redeploy creates a fresh classloader in
+     * the same JVM: leaving the previous lock open causes overlapping-file-lock
+     * failures when the new deployment resolves its trusted schemas.
+     *
+     * Call only after all execution and inspection users of this classloader have
+     * stopped. A later initialization may safely acquire and verify the cache again.
+     */
+    public static void releaseForClassLoaderShutdown() throws IOException {
+        synchronized (SchemaFiles.class) {
+            try {
+                if (cacheLease != null && cacheLease.isValid()) cacheLease.release();
+            } finally {
+                cacheLease = null;
+                try {
+                    if (cacheLeaseChannel != null) cacheLeaseChannel.close();
+                } finally {
+                    cacheLeaseChannel = null;
+                    trustedRoot = null;
+                    trustedRegistryDigest = null;
+                    trustedResources = Collections.emptyMap();
+                    trustedSchemaPaths = Collections.emptyMap();
+                    trustedJsonSchemas = Collections.emptyList();
+                }
+            }
+        }
+    }
+
     /** Returns the SHA-256 identity of the catalog and schema bytes embedded in this Engine. */
     public static String registryDigest() {
         try {
