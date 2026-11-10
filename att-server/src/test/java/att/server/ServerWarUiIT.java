@@ -1256,8 +1256,13 @@ class ServerWarUiIT {
         }
         try {
             int status = connection.getResponseCode();
-            assertEquals(expectedStatus, status, method + " " + path + apiStatusDiagnostic(connection, status));
-            return ServerRuntime.JSON.readTree(connection.getInputStream());
+            JsonNode response;
+            try(var stream=status >= 400 ? connection.getErrorStream() : connection.getInputStream()) {
+                assertNotNull(stream, "Expected a JSON response body");
+                response=ServerRuntime.JSON.readTree(stream);
+            }
+            assertEquals(expectedStatus, status, method + " " + path + apiStatusDiagnostic(response, status));
+            return response;
         } finally {
             connection.disconnect();
         }
