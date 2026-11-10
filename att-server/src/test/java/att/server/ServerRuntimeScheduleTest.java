@@ -648,6 +648,26 @@ class ServerRuntimeScheduleTest {
         } finally {runtime.close();}
     }
 
+    @Test void manualRunNowAllowsPausedScheduleButStillRejectsStaleConfigApproval() throws Exception {
+        ScheduleRaceFixture fixture=scheduleRaceFixture("paused-manual-approval");
+        try(ServerRuntime runtime=new ServerRuntime(fixture.config,fixture.libs)) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            LoadSchedule active=fixture.createSchedule(runtime,false);
+            runtime.setLoadScheduleEnabled(active.id,false,"alice");
+            assertFalse(runtime.loadSchedule(active.id).enabled);
+
+            Map<String,Object> submitted=runtime.triggerLoadSchedule(active.id,"alice");
+            assertEquals("submitted",submitted.get("status"),
+                    "Manual Run Now must work without enabling recurring Schedule execution");
+
+            runtime.invalidateEffectiveConfiguration("p","SIT");
+            ServerRuntime.JobConflictException blocked=assertThrows(ServerRuntime.JobConflictException.class,
+                    ()->runtime.triggerLoadSchedule(active.id,"alice"));
+            assertEquals("ATT-SCHEDULE-CONFIG-REVIEW-REQUIRED",blocked.code,
+                    "Manual Run Now must not bypass Config review on paused Schedules");
+        }
+    }
+
     @Test void manualTriggerDoesNotHoldPublicationReadLockWhileWaitingForSchedulerMonitor() throws Exception {
         ScheduleRaceFixture fixture=scheduleRaceFixture("manual-scheduler-publication-order");
         try(ServerRuntime runtime=new ServerRuntime(fixture.config,fixture.libs)) {
