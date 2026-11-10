@@ -117,7 +117,15 @@ final class ConfigActivationCoordinator implements PublicationLifecycleHook {
             }
             if (status.state == ActivationState.ACTIVE && same(status.activeRevision, published)
                     && status.failureCode == null) {
-                store(status);
+                // The activation result is an acknowledgement, not proof that the live
+                // runtime guard switched its dispatch state. Verify its read-back.
+                ActivationStatus observed = guardStatus(scopeId);
+                if (verifiedActive(observed, scopeId, published)) {
+                    store(observed);
+                } else {
+                    store(new ActivationStatus(scopeId, published, lastKnownGood,
+                            ActivationState.FAILED, "ATT-CONFIG-ACTIVATION-STATE-UNVERIFIED"));
+                }
             } else {
                 ActivationState state = status.state == ActivationState.ACTIVE ? ActivationState.FAILED : status.state;
                 String failureCode = status.failureCode == null
