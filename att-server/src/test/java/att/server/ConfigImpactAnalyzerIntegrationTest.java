@@ -142,6 +142,12 @@ class ConfigImpactAnalyzerIntegrationTest {
             assertTrue(commentImpact.affectedPackages.isEmpty());
             assertFalse(commentImpact.acknowledgementRequired);
 
+            assertEquals(att.server.api.source.PackageSourceRevision.digest(packageRoot),
+                    commentImpact.freshness.packageSources.stream()
+                            .filter(source -> "default".equals(source.scopeId))
+                            .findFirst().orElseThrow().revision,
+                    "Impact must publish the canonical Package source revision, not an all-directory digest");
+
             String unusedTool = original.replace("Baseline description for an unreferenced tool",
                     "Changed description for an unreferenced tool").replace(
                     "                    arguments: {}\n                environments:",
@@ -300,6 +306,24 @@ class ConfigImpactAnalyzerIntegrationTest {
             Files.write(packageManifest, originalManifest);
 
             compatibleAck = compatibleAcknowledgement(publisher, boundId);
+
+            // Generated runtime output and cache are not PACKAGE_SOURCE. They must not
+            // invalidate an issued report, even though an active LOAD may write them.
+            Path generated = Files.createDirectories(packageRoot.resolve("output/load-1")).resolve("events.jsonl");
+            Path cached = Files.createDirectories(packageRoot.resolve("cache")).resolve("summary.json");
+            Files.writeString(generated, "{\"event\":1}\n");
+            Files.writeString(cached, "{\"temporary\":true}\n");
+            var afterIncidentalWrites = publisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, boundId, null);
+            assertEquals(ImpactDecision.COMPATIBLE, afterIncidentalWrites.decision);
+            assertEquals(compatibleAck.freshnessFingerprint,
+                    ConfigImpactAnalyzer.freshnessFingerprint(afterIncidentalWrites.freshness),
+                    "Unrelated output/cache writes must not stale a Config Impact approval");
+            assertEquals(att.server.api.source.PackageSourceRevision.digest(packageRoot),
+                    afterIncidentalWrites.freshness.packageSources.stream()
+                            .filter(source -> "default".equals(source.scopeId))
+                            .findFirst().orElseThrow().revision);
+
             Map<String, Object> compatiblePublished = publisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
                     ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, boundId,
                     "compatible-with-current-report", compatibleAck);
