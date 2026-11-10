@@ -382,6 +382,7 @@ class PackageResourceInspectorTest {
         Path root=packageWithTemplate("package-testdata-source-identity","PAYMENT","description: testdata revision");
         Path shared=Files.createDirectories(temp.resolve("testdata-identity-shared/config")).resolve("config.yaml");
         writeUtf8(shared,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n");
+        Files.createDirectories(root.resolve("testdata"));
         writeUtf8(root.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata:\n"
                 +"  descriptors: [testdata/default.yaml]\n"
                 +"  environments:\n    UAT: [testdata/uat.yaml]\n");
