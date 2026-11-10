@@ -79,7 +79,7 @@ async function main() {
     await page.getByRole('tab', { name: 'Visual' }).waitFor();
     const actionNodes = page.locator('.att-action-list li > button');
     await actionNodes.first().waitFor();
-    assert.deepEqual(await page.locator('.att-action-list .att-action-name').allTextContents(), ['inspectPayload', 'policyBlockedPayload'],
+    assert.deepEqual(await page.locator('.att-action-list .att-action-name').allTextContents(), ['inspectPayload', 'policyBlockedPayload', 'inspectAgain'],
       'Flow action nodes should preserve their authored order');
     const inspectVisualNode = async () => actionNodes.first().evaluate(element => {
       const rect = element.getBoundingClientRect();
@@ -94,6 +94,65 @@ async function main() {
       `Flow Visual nodes must be visible under the production CSP in the light theme: ${JSON.stringify(visualLight)}`);
     assert.ok((await page.locator('.att-action-properties').innerText()).includes('&{../../SCHEDULED/payload/request.xml}'),
       'the selected Flow action should show its authored property value');
+    const visualFileLinks = page.getByRole('region', { name: 'Referenced files for action inspectPayload' });
+    await visualFileLinks.getByRole('button', { name: 'View file', exact: true }).waitFor();
+    assert.ok((await visualFileLinks.innerText()).includes('templates/SCHEDULED/payload/request.xml'),
+      'Visual should show the server-canonical file dependency for the selected Action');
+    const visualFileResponsePromise = page.waitForResponse(response =>
+      response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
+    await visualFileLinks.getByRole('button', { name: 'View file', exact: true }).click();
+    await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
+    const visualFileResponse = await visualFileResponsePromise;
+    assert.equal(visualFileResponse.status(), 200, 'the Action file link must use the authorized Package viewer');
+    assert.equal(new URL(visualFileResponse.url()).searchParams.get('origin'), 'templates/flows/reference/flow.yaml');
+    const authorizedFileProjection = await visualFileResponse.json();
+    assert.equal(authorizedFileProjection.available, true,
+      'the first Action file lookup must resolve via the authorized Server endpoint');
+    assert.equal(authorizedFileProjection.logicalPath, 'templates/SCHEDULED/payload/request.xml');
+    await page.goBack();
+    await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+
+    // Select a non-first Action and prove its identity survives both browser
+    // history directions and safe source-file navigation (issue #340).
+    await actionNodes.nth(2).click();
+    await page.waitForFunction(() => location.hash.includes('action=inspectAgain'));
+    assert.equal(await actionNodes.nth(2).getAttribute('aria-pressed'), 'true');
+    await page.getByRole('region', { name: 'Referenced files for action inspectAgain' })
+      .getByRole('button', { name: 'View file' }).click();
+    await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
+    assert.ok(page.url().includes('sourceAction=inspectAgain'), 'the safe file URL should carry the selected Action');
+    await page.goBack();
+    await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+    await page.waitForFunction(() => document.querySelector('.att-action-list [aria-pressed="true"] .att-action-name')?.textContent === 'inspectAgain');
+    assert.ok(page.url().includes('action=inspectAgain'), 'Back should restore the originating Action in the URL');
+    await page.goForward();
+    await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
+    await page.goBack();
+    await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+    assert.equal(await actionNodes.nth(2).getAttribute('aria-pressed'), 'true');
+
+    await page.getByRole('tab', { name: 'Dependencies' }).click();
+    await page.getByRole('button', { name: 'templates/SCHEDULED/payload/request.xml', exact: true }).waitFor();
+    assert.ok((await page.locator('.att-relation-columns').innerText()).includes('Actions: inspectPayload'),
+      'Dependencies should retain the Action call site for each canonical file');
+    assert.ok((await page.locator('.att-relation-columns').innerText()).includes('Blocked or unavailable (forbidden)'),
+      'policy-blocked file dependencies should remain visible with a reason');
+    // The same revision-bound reference was fetched above. Reopening it from
+    // Dependencies may be served by the authorized inspection cache, with no HTTP
+    // response event. Assert the safe viewer content rather than a second request.
+    await page.getByRole('button', { name: 'templates/SCHEDULED/payload/request.xml', exact: true }).click();
+    await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
+    await page.locator('.att-package-source-file .att-code-editor .cm-content')
+      .getByText('safe payload', { exact: false }).waitFor();
+    assert.ok((await page.locator('.att-package-source-file').innerText()).includes('safe payload'),
+      'Dependencies must reopen the server-authorized safe file, including when the response is cached');
+    await page.goBack();
+    await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+    // The Dependencies link restores its owning tab. The Visual inspector still
+    // exists in the DOM but is hidden, so select Visual before measuring geometry.
+    await page.getByRole('tab', { name: 'Visual' }).click();
+    await actionNodes.first().waitFor({ state: 'visible' });
+
     await page.getByRole('button', { name: 'Switch to dark theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
     const visualDark = await inspectVisualNode();
@@ -103,7 +162,16 @@ async function main() {
     await page.getByRole('button', { name: 'Switch to light theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
 
+    const flowSourceResponsePromise = page.waitForResponse(response =>
+      response.request().method() === 'GET'
+      && /\/packages\/payments\/resources\/[^/]+\/[^/]+\/source$/.test(new URL(response.url()).pathname));
     await page.getByRole('tab', { name: 'Source' }).click();
+    const flowSourceResponse = await flowSourceResponsePromise;
+    assert.equal(flowSourceResponse.status(), 200, 'the Flow Source tab must use the authorized source endpoint');
+    const flowSourceProjection = await flowSourceResponse.json();
+    assert.equal(flowSourceProjection.projectionKind, 'original', 'the fixture Flow should show original source');
+    assert.ok(flowSourceProjection.text.includes('\r\n'),
+      'the Flow fixture uses CRLF and must retain authored line endings');
     await page.getByRole('tabpanel', { name: 'Source' }).getByText('Code viewer ready.').waitFor();
     const editor = page.locator('.att-explorer-source .cm-editor');
     await editor.waitFor();
@@ -120,13 +188,16 @@ async function main() {
       };
     });
     assert.ok(editorState.text.includes('&{../../SCHEDULED/payload/request.xml}'), 'CodeMirror must preserve the Flow-authored relative reference');
+    assert.equal(editorState.text, flowSourceProjection.text.replace(/\r\n?/g, '\n'),
+      'CodeMirror may render normalized line separators while retaining every displayed YAML line');
     assert.ok(editorState.height > 0, 'CodeMirror must have visible layout under the production CSP');
     assert.ok(editorState.generatedStyles.length > 0 && editorState.generatedStyles.every(nonce => nonce === pageNonce), 'generated editor styles must carry the page nonce');
     assert.ok(editorState.keyText && editorState.keyColor !== editorState.editorColor,
       `YAML keys must have visible syntax color in the light theme: ${JSON.stringify(editorState)}`);
     await editor.locator('xpath=ancestor::section[contains(@class,"att-code-editor")]').getByRole('button', { name: 'Copy' }).click();
     await page.getByText('Copied displayed code.').waitFor();
-    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), editorState.text, 'Copy must match the visible YAML source under the production CSP');
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), flowSourceProjection.text,
+      'Copy must reproduce the complete authorized Source text, including authored CRLF separators');
     await page.getByRole('button', { name: 'Switch to dark theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
     const yamlDark = await inspectEditor(editor, '.att-token-property');
@@ -135,8 +206,12 @@ async function main() {
     await page.getByText(/Some file references could not be verified/).waitFor();
     await page.getByRole('button', { name: 'Switch to light theme' }).click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
-    const fileLink = page.locator('.att-explorer-source [data-att-reference]');
-    await fileLink.waitFor();
+    const sourceFileLinks = page.locator('.att-explorer-source [data-att-reference]');
+    await sourceFileLinks.first().waitFor();
+    assert.equal(await sourceFileLinks.count(), 2, 'Both referring Actions remain linked in the authored Source');
+    const referenceIds = await sourceFileLinks.evaluateAll(elements => elements.map(element => element.getAttribute('data-att-reference')));
+    assert.equal(new Set(referenceIds).size, 1, 'Repeated authored file references resolve to one canonical safe file');
+    const fileLink = sourceFileLinks.first();
     assert.equal(await fileLink.getAttribute('data-att-file'), '../../SCHEDULED/payload/request.xml');
     const referenceLine = await fileLink.evaluate(element => {
       const lines = Array.from(element.closest('.cm-content')?.querySelectorAll('.cm-line') || []);
@@ -146,8 +221,8 @@ async function main() {
     const goToLine = page.locator('.att-explorer-source .att-code-goto input');
     await goToLine.fill(String(referenceLine));
     await page.locator('.att-explorer-source .att-code-editor').getByRole('button', { name: 'Go' }).click();
-    const payloadResponsePromise = page.waitForResponse(response =>
-      response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
+    // Opening an already verified file from Source can reuse the same safe cache
+    // entry; do not require a second network response to show authorized content.
     await fileLink.click();
     try {
       await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor({ timeout: 10000 });
@@ -158,12 +233,8 @@ async function main() {
       const link = await fileLink.evaluate(element => element.outerHTML);
       throw new Error(`${error.stack || error}\nCurrent URL: ${page.url()}\nHeadings: ${headings.join(' | ')}\nNavigations: ${navigationEvents.join(' -> ')}\nPage errors: ${pageErrors.join(' | ')}\nDialogs: ${JSON.stringify(dialogs)}\nLink: ${link}\nPage: ${body}`);
     }
-    const payloadResponse = await payloadResponsePromise;
-    assert.equal(payloadResponse.status(), 200, 'the authorized payload source request must succeed');
-    assert.equal(new URL(payloadResponse.url()).searchParams.get('origin'), 'templates/flows/reference/flow.yaml',
-      'the safe file lookup must carry the authored Flow descriptor origin');
-    const payloadProjection = await payloadResponse.json();
-    assert.equal(payloadProjection.available, true, 'the payload source must be available before rendering');
+    assert.equal(authorizedFileProjection.available, true,
+      'the Source link must reuse the previously verified Package file reference');
     const payloadSource = page.locator('.att-package-source-file .att-code-editor .cm-content');
     try {
       await payloadSource.waitFor();
@@ -179,6 +250,13 @@ async function main() {
 
     await page.goBack();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+    if (process.env.ATT_UI_EXPLORER_ONLY === '1') {
+      assert.deepEqual(pageErrors, [], 'the packaged Explorer source flow must not throw browser errors');
+      assert.deepEqual(consoleErrors.filter(message => /content security policy|refused to apply inline style/i.test(message)), [],
+        'the packaged Explorer source flow must not violate CSP');
+      process.stdout.write('Packaged-WAR Explorer source and dependency browser checks passed under /tools/att.\n');
+      return;
+    }
     for (const packageId of ['', 'default', 'jeffreyjiang']) {
       await page.goto(`${origin}/tools/att/ui/index.html#/configuration${packageId ? '/' + packageId : ''}?tab=source`);
       await page.getByRole('heading', { name: 'Configuration', level: 1 }).waitFor();

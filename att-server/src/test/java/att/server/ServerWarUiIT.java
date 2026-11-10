@@ -710,7 +710,10 @@ class ServerWarUiIT {
             JsonNode referenceFlowSource = getJson(port, api + "/packages/payments/resources/flow/"
                     + referenceFlow.path("resourceId").asText() + "/source", scheduleAdminAuth);
             assertTrue(referenceFlowSource.path("available").asBoolean(), referenceFlowSource.toString());
+            assertEquals("original", referenceFlowSource.path("projectionKind").asText(), referenceFlowSource.toString());
             assertEquals("templates/flows/reference/flow.yaml", referenceFlowSource.path("logicalPath").asText());
+            assertEquals(Files.readString(packageRoot.resolve("templates/flows/reference/flow.yaml")),
+                    referenceFlowSource.path("text").asText(), "The authenticated Server route returns authored YAML text unchanged.");
             assertTrue(referenceFlowSource.path("text").asText().contains("&{../../SCHEDULED/payload/request.xml}"),
                     referenceFlowSource.toString());
             assertTrue(referenceFlowSource.path("text").asText().contains("&{../../SCHEDULED/payload/unlisted-request.xml}"),
@@ -722,6 +725,25 @@ class ServerWarUiIT {
                     "A policy-blocked Flow locator should have a safe unavailable signal alongside the navigable reference.");
             assertFalse(referenceFlowSource.toString().contains("policy-blocked payload"),
                     "The unavailable referenced file contents must not enter the source response.");
+            JsonNode flowDependencies = referenceFlowSource.path("resource").path("references");
+            JsonNode requestDependency = null;
+            JsonNode blockedDependency = null;
+            for (JsonNode dependency : flowDependencies) {
+                if (!"file".equals(dependency.path("type").asText())) continue;
+                if ("templates/SCHEDULED/payload/request.xml".equals(dependency.path("logicalId").asText())) requestDependency = dependency;
+                if ("templates/SCHEDULED/payload/unlisted-request.xml".equals(dependency.path("logicalId").asText())) blockedDependency = dependency;
+            }
+            assertNotNull(requestDependency, flowDependencies.toString());
+            assertEquals("resolved", requestDependency.path("resolution").asText());
+            assertTrue(requestDependency.path("available").asBoolean());
+            assertEquals("templates/flows/reference/flow.yaml", requestDependency.path("originPath").asText());
+            assertTrue(requestDependency.path("referenceId").asText().matches("[0-9a-f]{64}"));
+            assertEquals("inspectPayload", requestDependency.path("callSites").get(0).path("actionId").asText());
+            assertNotNull(blockedDependency, flowDependencies.toString());
+            assertEquals("blocked", blockedDependency.path("resolution").asText());
+            assertFalse(blockedDependency.path("available").asBoolean());
+            assertEquals("forbidden", blockedDependency.path("reason").asText());
+            assertFalse(flowDependencies.toString().contains(packageRoot.toString()));
             JsonNode toolResources = getJson(port, api + "/packages/payments/resources?type=tool", auth);
             JsonNode checkQueue = null;
             for (JsonNode item : toolResources.path("items"))
@@ -1179,15 +1201,18 @@ class ServerWarUiIT {
         Files.writeString(payload.resolve("request.xml"), "<request>safe payload</request>\n");
         Files.writeString(payload.resolve("unlisted-request.xml"), "<request>policy-blocked payload</request>\n");
         Files.writeString(referenceFlow.resolve("flow.yaml"),
-                "schemaVersion: att-flow/v3.6\nid: reference.flow.v1\nname: Reference Flow\n"
-                        + "description: Exercises safe package file links in a Flow source.\nactions:\n"
-                        + "  inspectPayload:\n    type: log\n    message: \"Request &{../../SCHEDULED/payload/request.xml}\"\n"
-                        + "  policyBlockedPayload:\n    type: log\n    message: \"Request &{../../SCHEDULED/payload/unlisted-request.xml}\"\n");
+                "schemaVersion: att-flow/v3.6\r\n# Source formatting survives the authorized Server view.\r\n\r\n"
+                        + "id: reference.flow.v1\r\nname: Reference Flow\r\n"
+                        + "description: Exercises safe package file links in a Flow source.\r\nactions:\r\n"
+                        + "  inspectPayload:\r\n    type: log\r\n    message: \"Request &{../../SCHEDULED/payload/request.xml}\"\r\n"
+                        + "  policyBlockedPayload:\r\n    type: log\r\n    message: \"Request &{../../SCHEDULED/payload/unlisted-request.xml}\"\r\n"
+                        + "  inspectAgain:\r\n    type: log\r\n    message: \"Replay &{../../SCHEDULED/payload/request.xml}\"\r\n");
     }
 
     private void runServerUiPlaywright(String origin) throws Exception {
         Path output = temp.resolve("server-ui-playwright.log");
         runServerUiPlaywrightScript(origin, "server-api-smoke.cjs", output);
+        if ("1".equals(System.getenv("ATT_UI_EXPLORER_ONLY"))) return;
         runServerUiPlaywrightScript(origin, "saved-scenario-server.cjs", temp.resolve("saved-scenario-playwright.log"));
     }
 
