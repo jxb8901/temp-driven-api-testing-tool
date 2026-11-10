@@ -241,7 +241,12 @@ public final class SourceCandidateValidator {
                     new att.load.LoadScenarioLoader(pkg).loadInline(copy),bindings);
         }
         PackageConfig manifest = PackageConfig.load(pkg);
-        String schemaDigest = SchemaFiles.registryDigest();
+        // Runtime Server/WAR does not necessarily bundle the Engine schema resource tree.
+        // Its Worker has already resolved the trusted registry digest and pinned it in
+        // execution provenance. Reuse that identity instead of probing the Servlet classpath.
+        // Candidate validation without approved provenance still reads the local registry.
+        String schemaDigest = provenance != null && provenance.engineSchema != null
+                ? provenance.engineSchema.revision : SchemaFiles.registryDigest();
         Map<String, String> semanticFingerprints = semanticFingerprints(pkg, runtime, effective, origins, bindings);
         String effectiveDigest = digestFingerprints(selected, semanticFingerprints);
         String envFingerprint = digest(selected + "\n" + effectiveDigest);
