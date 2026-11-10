@@ -1305,7 +1305,7 @@ class ServerWarUiIT {
         try(var stream=connection.getErrorStream()) {
             if(stream==null)return " (no error response)";
             JsonNode response=ServerRuntime.JSON.readTree(stream.readNBytes(4096));
-            JsonNode error=response==null?ServerRuntime.JSON.nullNode():response.path("error");
+            JsonNode error=response==null?ServerRuntime.JSON.getNodeFactory().nullNode():response.path("error");
             return " (code="+error.path("code").asText("unknown")
                     +", summary="+error.path("summary").asText("unavailable")+")";
         } catch(Exception unavailable) {
