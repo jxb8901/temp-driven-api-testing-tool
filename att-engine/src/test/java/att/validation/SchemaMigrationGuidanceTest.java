@@ -23,6 +23,20 @@ class SchemaMigrationGuidanceTest {
     }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
+    @Test void releasingServletClassloaderSchemaLeaseAllowsVerifiedReinitialization() throws Exception {
+        String initial=SchemaFiles.registryDigest();
+        Path initialSchema=SchemaFiles.resolve(root,"att-flow-v3.6.schema.json");
+        assertTrue(Files.isRegularFile(initialSchema));
+        SchemaFiles.releaseForClassLoaderShutdown();
+        assertEquals(initial,SchemaFiles.registryDigest(),
+                "A restarted classloader must verify the identical embedded schema registry");
+        assertEquals(initialSchema,SchemaFiles.resolve(root,"att-flow-v3.6.schema.json"));
+        // The shutdown path may be invoked again on a partially initialized context.
+        SchemaFiles.releaseForClassLoaderShutdown();
+        SchemaFiles.releaseForClassLoaderShutdown();
+        assertEquals(initial,SchemaFiles.registryDigest());
+    }
+
     @Test void currentAndHistoricalSchemasHaveSingleLocations() throws Exception {
         Path packageRoot = Paths.get("").toAbsolutePath().resolve("packages/default");
         Path flow31=SchemaFiles.resolve(packageRoot, "att-flow-v3.1.schema.json");
