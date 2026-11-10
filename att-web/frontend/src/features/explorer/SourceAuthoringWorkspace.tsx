@@ -13,6 +13,7 @@ import {
   isPackageSourceRevisionIdentity, isSourceRevisionIdentity,
   resolveExecutionRevisionIdentity, resolvePackageSourceRevisionIdentity,
 } from './sourceManagement';
+import { createImpactAcknowledgement } from './impactAcknowledgement';
 import './source-authoring.css';
 
 type PackageSourceTarget = {
@@ -146,6 +147,8 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   const [impact, setImpact] = useState<SourceImpactReport | null>(null);
   const [impactLoading, setImpactLoading] = useState(false);
   const [impactFilter, setImpactFilter] = useState('');
+  const [impactActorEntry, setImpactActorEntry] = useState('');
+  const [acknowledgedImpact, setAcknowledgedImpact] = useState<{ key: string; actor: string } | null>(null);
   const [diagnostics, setDiagnostics] = useState<SourceValidationDiagnostic[]>([]);
   const [editorBaseSourceRevision, setEditorBaseSourceRevision] = useState('');
   const [error, setError] = useState('');
@@ -183,11 +186,13 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   const packageSourceIdentity = resolvePackageSourceRevisionIdentity(revisionSet);
   const executionRevisionIdentity = resolveExecutionRevisionIdentity(revisionSet);
   const impactMatchesCurrentDraft = Boolean(draft && impactFreshnessMatches(impact, draft.changeSetId, expectedCentralRevision));
-  const centralReportReady = Boolean(!draftStale && impact?.providerState === 'AVAILABLE'
-    && impactMatchesCurrentDraft
-    && impact.coverage === 'COMPLETE'
-    && impact.decision && impact.decision !== 'BLOCKED'
-    && !(impact.acknowledgementRequired && impact.decision === 'REQUIRES_REVIEW'));
+  const impactKey = JSON.stringify(impact?.freshness || null);
+  const impactActor = (workspace?.currentUser?.loginId || impactActorEntry).trim();
+  const impactAcknowledged = Boolean(impact?.freshness && acknowledgedImpact?.key === impactKey
+    && acknowledgedImpact.actor === impactActor && impactActor);
+  const centralReportReady = Boolean(!draftStale && !impactLoading && impact?.providerState === 'AVAILABLE'
+    && impactMatchesCurrentDraft && impact.coverage === 'COMPLETE'
+    && impact.decision && impact.decision !== 'BLOCKED' && impactAcknowledged);
 
   useLayoutEffect(() => {
     if (previousTargetKeyRef.current === targetKey) return;
@@ -195,7 +200,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     controllerRef.current?.abort();
     actionControllerRef.current?.abort();
     impactControllerRef.current?.abort(); impactControllerRef.current = null;
-    setSource(null); setDraft(null); setPublished(null); setImpact(null); setDiagnostics([]);
+    setSource(null); setDraft(null); setPublished(null); setImpact(null); setAcknowledgedImpact(null); setImpactActorEntry(''); setDiagnostics([]);
     setContent(''); setMode('view'); setCreatePath(''); setMovePath(''); setEditorBaseSourceRevision(''); setImpactLoading(false);
     setPendingOperations([]); setRelatedPath(''); setRelatedContent(''); setRelatedOperation('create');
     setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
@@ -290,7 +295,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       setSuspended(true);
       controllerRef.current?.abort();
       impactControllerRef.current?.abort(); impactControllerRef.current = null;
-      setSource(null); setImpact(null); setLoading(false);
+      setSource(null); setImpact(null); setAcknowledgedImpact(null); setLoading(false);
       if (!recoveryRequiredRef.current) {
         setDraft(null); setPublished(null); setContent(''); setMode('view'); setCreatePath(''); setMovePath('');
         setEditorBaseSourceRevision(''); setPendingOperations([]); setRelatedPath(''); setRelatedContent('');
@@ -324,7 +329,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     controllerRef.current?.abort();
     actionControllerRef.current?.abort();
     impactControllerRef.current?.abort(); impactControllerRef.current = null;
-    setSource(null); setDraft(null); setPublished(null); setImpact(null); setImpactLoading(false);
+    setSource(null); setDraft(null); setPublished(null); setImpact(null); setAcknowledgedImpact(null); setImpactLoading(false);
     setContent(''); setMode('view'); setCreatePath(''); setMovePath(''); setEditorBaseSourceRevision(''); setAccess('denied');
     setPendingOperations([]); setRelatedPath(''); setRelatedContent(''); setRecoveryPending(false); setSuspended(false);
     setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
@@ -365,7 +370,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       const result = await api.stageSourceChangeSet!(target.domain, getScopeId(), source.baseSourceRevision,
         target.domain === 'PACKAGE_SOURCE' ? source.registryRevision : undefined, operations, signal);
       if (signal.aborted) return;
-      setDraft(result); setImpact(null); setPublished(null); setMode('view');
+      setDraft(result); setImpact(null); setAcknowledgedImpact(null); setPublished(null); setMode('view');
       setPendingOperations([]); setRelatedPath(''); setRelatedContent(''); setRelatedOperation('create');
       setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
       setStatus(`Draft ${result.changeSetId} saved. Published source is unchanged.`);
@@ -385,18 +390,21 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     if (action === 'publish' && !window.confirm(`Publish the reviewed source draft for ${displayedPath}? This changes published source.`)) return;
     if (action === 'discard' && !window.confirm(`Discard draft ${draft.changeSetId}? Its staged source changes will be removed.`)) return;
     await withBusy(`${action} the source draft`, async signal => {
-      const result = await api.sourceChangeSetAction!(target.domain, getScopeId(), draft.changeSetId, action, signal);
+      const acknowledgement = action === 'publish' && centralTarget && impact?.freshness
+        ? await createImpactAcknowledgement(impact.freshness, impactActor) : undefined;
+      if (signal.aborted) return;
+      const result = await api.sourceChangeSetAction!(target.domain, getScopeId(), draft.changeSetId, action, signal, acknowledgement);
       if (signal.aborted) return;
       if (action === 'publish' && 'published' in result) {
         const publication = result as SourcePublishResult;
-        setPublished(publication); setDraft(null); setImpact(null); setSource(null); setContent(''); setMode('view');
+        setPublished(publication); setDraft(null); setImpact(null); setAcknowledgedImpact(null); setSource(null); setContent(''); setMode('view');
         setPendingOperations([]); recoveryRequiredRef.current = false; setRecoveryPending(false);
         setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
         setStatus(`Published revision ${publication.revision}.${publication.auditConfirmed === false ? ' The Server reports the durable audit record is pending confirmation.' : ''}`);
         onPublished?.(publication);
         setRefreshKey(value => value + 1);
       } else if (action === 'discard') {
-        setDraft(null); setImpact(null); setContent(source?.text || ''); setPendingOperations([]);
+        setDraft(null); setImpact(null); setAcknowledgedImpact(null); setContent(source?.text || ''); setPendingOperations([]);
         setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
         recoveryRequiredRef.current = false; setRecoveryPending(false); setSuspended(false); suspendedRef.current = false;
         setStatus('Draft discarded. Published source is unchanged.');
@@ -414,6 +422,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     }
     const controller = new AbortController();
     impactControllerRef.current?.abort(); impactControllerRef.current = controller;
+    if (!cursor) setAcknowledgedImpact(null);
     setImpactLoading(true); setError('');
     try {
       const report = await api.getCentralConfigImpact(changeSetId, cursor, controller.signal);
@@ -446,7 +455,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
         setError('The Server blocked this central Config candidate. Review the impact result and diagnostics; publication is disabled.'); return;
       }
       if (report.acknowledgementRequired && report.decision === 'REQUIRES_REVIEW') {
-        setError('This change requires explicit impact acknowledgement. The acknowledgment binding endpoint is unavailable, so publication remains disabled.'); return;
+        setStatus('Review and explicitly acknowledge this current Config impact report before publishing.');
       }
       if (!cursor) {
         await withBusy('review the central Config draft', async signal => {
@@ -747,6 +756,9 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
           <button type="button" onClick={() => void act('discard')} disabled={busy}>Discard Draft</button>
         </div>
         {centralTarget && impact && <ImpactReview report={impact} loading={impactLoading} filter={impactFilter} onFilter={setImpactFilter}
+          actor={impactActor} actorEntry={impactActorEntry} onActorEntry={setImpactActorEntry} actorFromSession={Boolean(workspace?.currentUser?.loginId)}
+          acknowledged={impactAcknowledged} onAcknowledged={checked => setAcknowledgedImpact(checked && impact?.freshness && impactActor ? { key: impactKey, actor: impactActor } : null)}
+          canAcknowledge={impactMatchesCurrentDraft && impact.providerState === 'AVAILABLE' && impact.coverage === 'COMPLETE' && impact.decision !== 'BLOCKED'}
           onLoadMore={() => impact.schedules?.nextCursor && void loadImpact(draft.changeSetId, impact.schedules.nextCursor, true)} />}
         {centralTarget && !impact && <p className="att-source-authoring-note">Central publication requires a current #335 Impact Report. Review will load the server report and block publication when its provider is unavailable or stale.</p>}
       </section>}
@@ -776,8 +788,10 @@ export function ChangedFiles({ files }: { files: ChangedSourceFile[] }) {
   </div>;
 }
 
-function ImpactReview({ report, loading, filter, onFilter, onLoadMore }: {
+function ImpactReview({ report, loading, filter, onFilter, onLoadMore, actor, actorEntry, onActorEntry, actorFromSession, acknowledged, onAcknowledged, canAcknowledge }: {
   report: SourceImpactReport; loading: boolean; filter: string; onFilter(value: string): void; onLoadMore(): void;
+  actor: string; actorEntry: string; onActorEntry(value: string): void; actorFromSession: boolean;
+  acknowledged: boolean; onAcknowledged(value: boolean): void; canAcknowledge: boolean;
 }) {
   const query = filter.trim().toLocaleLowerCase();
   const packages = (report.affectedPackages || []).filter(item => !query
@@ -798,7 +812,13 @@ function ImpactReview({ report, loading, filter, onFilter, onLoadMore }: {
         <div><dt>Package registry</dt><dd><code>{report.freshness.packageRegistry.revision}</code></dd></div>
         <div><dt>Package / Manifest / Schema / Schedule snapshots</dt><dd>{report.freshness.packageSources.length} / {report.freshness.manifests.length} / {report.freshness.engineSchema.revision} / {report.freshness.scheduleSnapshots.length}</dd></div>
       </dl></details>}
-      {report.acknowledgementRequired && <p className="att-source-impact-ack" role="alert">This impact report requires explicit acknowledgement. Publish stays disabled until the Server exposes a revision-bound acknowledgement action.</p>}
+      {report.acknowledgementRequired && <p className="att-source-impact-ack" role="status">This report requires administrator acknowledgement of the current impact assessment.</p>}
+      {!actorFromSession && <label>Authenticated administrator ID <input aria-label="Authenticated administrator ID" value={actorEntry}
+        onChange={event => onActorEntry(event.currentTarget.value)} placeholder="Exact authenticated Server principal" autoComplete="off" /></label>}
+      <label><input type="checkbox" aria-label="Acknowledge current Config impact" checked={acknowledged}
+        disabled={!canAcknowledge || !actor || loading} onChange={event => onAcknowledged(event.currentTarget.checked)} />
+        I have reviewed affected Packages and Schedules and approve this exact revision for publication.</label>
+      {!actor && <p role="status">Enter your authenticated administrator ID to bind approval to the current Server principal; publication remains disabled.</p>}
       <label>Filter affected Packages / Environments <input type="search" value={filter} onChange={event => onFilter(event.currentTarget.value)} /></label>
       <div className="att-source-impact-table-wrap"><table><thead><tr><th>Package</th><th>Environment</th><th>Certainty</th><th>Why</th><th>Changed logical IDs</th></tr></thead>
         <tbody>{packages.map((item: SourceAffectedPackage, index: number) => <tr key={`${item.packageId}:${item.environment}:${index}`}>

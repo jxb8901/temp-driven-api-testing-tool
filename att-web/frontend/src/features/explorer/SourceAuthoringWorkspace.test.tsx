@@ -39,6 +39,14 @@ function setInputValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSel
     element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
   });
 }
+function acknowledgeCentralImpact(actor = 'admin') {
+  const identity = host.querySelector<HTMLInputElement>('input[aria-label="Authenticated administrator ID"]');
+  if (identity) setInputValue(identity, actor);
+  const checkbox = host.querySelector<HTMLInputElement>('input[aria-label="Acknowledge current Config impact"]');
+  if (!checkbox) throw new Error('Impact acknowledgement checkbox not found');
+  act(() => checkbox.click());
+}
+
 function source(path = 'templates/example/template.yaml') {
   return { available: true, present: true, logicalPath: path, format: 'yaml', text: 'enabled: false\n',
     sourceEtag: 'etag-1', revision: 'revision-1', baseSourceRevision: 'base-1', registryRevision: 'registry-1' };
@@ -245,7 +253,6 @@ describe('SourceAuthoringWorkspace', () => {
     ['impact route unavailable with HTTP 404', null],
     ['provider stale', { ...centralImpact(), providerState: 'STALE', decision: null }],
     ['blocked by impact', { ...centralImpact('BLOCKED') }],
-    ['explicit acknowledgement missing', { ...centralImpact('REQUIRES_REVIEW', true) }],
     ['draft freshness mismatch', { ...centralImpact(), freshness: { ...centralImpact().freshness!, draftId: 'another-draft' } }],
     ['partial coverage', { ...centralImpact(), coverage: 'PARTIAL' }],
   ])('fails closed for #335 impact state: %s', async (_name, report) => {
@@ -294,6 +301,8 @@ describe('SourceAuthoringWorkspace', () => {
     setInputValue(editor, 'enabled: true\n'); click(button('Save Draft')); await settle();
     click(button('Validate')); await settle(); click(button('Review changed files / Impact')); await settle();
     expect(action.mock.calls.map(call => call[3])).toEqual(['validate', 'review']);
+    expect(button('Publish').disabled).toBe(true);
+    acknowledgeCentralImpact();
     expect(button('Publish').disabled).toBe(false);
   });
 
@@ -324,6 +333,7 @@ describe('SourceAuthoringWorkspace', () => {
     if (!editor) throw new Error('Central owner source editor was not rendered.');
     setInputValue(editor, 'enabled: true\n'); click(button('Save Draft')); await settle();
     click(button('Validate')); await settle(); click(button('Review changed files / Impact')); await settle();
+    if (accepted) acknowledgeCentralImpact();
     expect(button('Publish').disabled).toBe(!accepted);
     expect(action.mock.calls.map(call => call[3])).toEqual(accepted ? ['validate', 'review'] : ['validate']);
   });
