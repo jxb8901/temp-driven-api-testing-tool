@@ -47,6 +47,20 @@ class SourceCandidateValidatorTest {
         validator = new SourceCandidateValidator();
     }
 
+    @Test void missingOptionalTemplateRootDoesNotBlockUnrelatedSourceClosure() throws Exception {
+        Files.delete(firstPackage.resolve("templates"));
+        EffectiveResolution resolution=validator.resolveEffective("first","SIT",firstPackage,
+                configFile,runtimeRoot,revisions("first"));
+        assertTrue(resolution.complete,resolution.diagnostics.toString());
+        byte[] plans=validator.compileFileExpressionSnapshot(firstPackage,configFile,runtimeRoot,"SIT");
+        assertTrue(plans.length>0,"An empty catalog still produces a valid compiled plan snapshot");
+
+        // An existing unsafe root must not be silently interpreted as absent.
+        Files.createSymbolicLink(firstPackage.resolve("templates"),firstPackage.resolve("flows"));
+        assertThrows(Exception.class,()->validator.resolveEffective("first","SIT",firstPackage,
+                configFile,runtimeRoot,revisions("first")));
+    }
+
     @Test void validatesWholePackageAndKeepsSameNamedTestdataReferencesPackageScoped() throws Exception {
         Path secondPackage = Files.createDirectories(temp.resolve("packages/second"));
         att.TestSchemas.install(secondPackage);
