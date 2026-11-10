@@ -310,6 +310,33 @@ class PackageResourceInspectorTest {
                 "Revision identity includes the bundled registry fingerprint");
     }
 
+    @Test void incidentalLargeAndNumerousFilesDoNotAffectPackageSourceOrResourceInspection() throws Exception {
+        Path root=packageWithTemplate("incidental-source-files","PAYMENT","description: scoped authoring inputs");
+        Path artifacts=Files.createDirectories(root.resolve("artifacts"));
+        Path archive=artifacts.resolve("unreferenced-archive.bin");
+        // Sparse file: test the 256 MiB regression without allocating/writing 300 MiB.
+        try(java.io.RandomAccessFile output=new java.io.RandomAccessFile(archive.toFile(),"rw")) {
+            output.setLength(300L*1024L*1024L);
+        }
+        Path objects=Files.createDirectories(root.resolve(".git/objects"));
+        for(int i=0;i<20001;i++)Files.createFile(objects.resolve("object-"+i));
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),
+                "SIT",Collections.<String>emptyList(),65536,262144)) {
+            @SuppressWarnings("unchecked") Map<String,Object> list=inspector.inspect("list","template",null,null,0,10);
+            assertEquals(1,((List<?>)list.get("items")).size(),"Incidental files must not disrupt Explorer");
+            assertEquals(inspector.executionRevisionDigest(),list.get("revisionDigest"));
+            String sourceBefore=inspector.sourceRevisionDigests(null).get("packageSourceRevision");
+            Files.write(archive,new byte[]{1},java.nio.file.StandardOpenOption.WRITE);
+            Files.createFile(objects.resolve("another-unrelated-object"));
+            assertEquals(sourceBefore,inspector.sourceRevisionDigests(null).get("packageSourceRevision"),
+                    "Unindexed binary data and VCS object churn cannot alter authoring identity");
+            writeUtf8(root.resolve("templates/PAYMENT/template.yaml"),
+                    templateYaml("PAYMENT","description: modified indexed source"));
+            assertNotEquals(sourceBefore,inspector.sourceRevisionDigests(null).get("packageSourceRevision"),
+                    "An actual indexed template edit must invalidate Package authoring identity");
+        }
+    }
+
     @Test void packageSourceRevisionIgnoresSharedConfigAndEngineOnlyChanges() throws Exception {
         Path root=packageWithTemplate("package-source-revision", "PAYMENT", "description: revision context");
         Path sharedConfig=Files.createDirectories(temp.resolve("source-revision-shared/config")).resolve("config.yaml");
