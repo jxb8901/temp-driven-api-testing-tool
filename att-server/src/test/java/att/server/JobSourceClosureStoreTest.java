@@ -35,6 +35,17 @@ class JobSourceClosureStoreTest {
         Path approvedConfig=configA.resolve("config.yaml");
         first.bindWorkerConfiguration(lease.leaseId(),approvedConfig);
         JobSourceClosureStore.SourceSnapshot accepted=first.snapshotForOwner("job:J0000000000000001");
+        // Executable-mode metadata is now mandatory: never reuse the legacy v1
+        // identifier for archives that older Workers cannot safely interpret.
+        try(java.util.zip.ZipFile archive=new java.util.zip.ZipFile(accepted.archivePath.toFile())) {
+            java.util.zip.ZipEntry manifestEntry=archive.getEntry("manifest.json");
+            assertNotNull(manifestEntry);
+            try(var content=archive.getInputStream(manifestEntry)) {
+                assertEquals("att-worker-source-snapshot/v2",
+                        ServerRuntime.JSON.readTree(content).path("schemaVersion").asText());
+            }
+        }
+
 
         assertEquals("Package A",new String(lease.read("templates/use.yaml").bytes(),StandardCharsets.UTF_8));
         assertEquals("Package A",new String(lease.read("testdata/cases.yaml").bytes(),StandardCharsets.UTF_8));
