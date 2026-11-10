@@ -39,7 +39,7 @@ import java.util.zip.ZipFile;
 
 /** Verifies an acceptance-time source archive and stages it privately for one Worker process. */
 final class WorkerSourceSnapshot implements AutoCloseable {
-    static final String VERSION = "att-worker-source-snapshot/v1";
+    static final String VERSION = "att-worker-source-snapshot/v2";
     private static final long MAX_ARCHIVE_BYTES = 512L * 1024L * 1024L;
     private static final long MAX_MANIFEST_BYTES = 1024L * 1024L;
     private static final int MAX_ARCHIVE_ENTRIES = 100000;
