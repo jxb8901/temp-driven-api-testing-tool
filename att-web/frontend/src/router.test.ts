@@ -17,6 +17,11 @@ describe('ATT hash route contract', () => {
     expect(parseRoute(formatRoute(resource))).toEqual(resource);
     const relations = { ...resource, resource: { ...resource.resource, tab: 'relations' as const } };
     expect(parseRoute(formatRoute(relations))).toEqual(relations);
+    const selected = { ...resource, resource: { ...resource.resource, actionId: 'sendCT001Confirm' } };
+    expect(parseRoute(formatRoute(selected))).toEqual(selected);
+    expect(formatRoute(selected)).toContain('action=sendCT001Confirm');
+    expect(parseRoute('#/packages/payments/resources/flow/checkout?action=' + 'x'.repeat(513)))
+      .not.toHaveProperty('resource.actionId');
     expect(parseRoute('#/packages/payments/resources/flow/checkout?detail=source')).toEqual({
       kind: 'package', packageId: 'payments', resource: { type: 'flow', resourceId: 'checkout', tab: 'source' },
     });
@@ -49,15 +54,18 @@ describe('ATT hash route contract', () => {
   });
 
   it('round-trips safe Package source-file navigation and rejects forged route data', () => {
-    const caller = formatRoute({ kind: 'package', packageId: 'payments', resource: { type: 'flow', resourceId: 'checkout', tab: 'source' } });
     const route = { kind: 'package', packageId: 'payments', view: 'source-file', filePath: 'templates/payment/request.xml',
-      fileOrigin: 'templates/payment/flow.yaml', sourceReference: { type: 'flow', resourceId: 'checkout', referenceId: 'a'.repeat(64) }, returnTo: caller } as const;
+      fileOrigin: 'templates/payment/flow.yaml', sourceReference: { type: 'flow', resourceId: 'checkout', referenceId: 'a'.repeat(64), returnTab: 'definition' as const, actionId: 'sendCT001Confirm' },
+      returnTo: formatRoute({ kind: 'package', packageId: 'payments', resource: { type: 'flow', resourceId: 'checkout', tab: 'definition', actionId: 'sendCT001Confirm' } }) } as const;
     expect(parseRoute(formatRoute(route))).toEqual(route);
     const nested = { ...route, filePath: 'templates/payment/headers.json', fileOrigin: route.filePath,
       sourceReference: { ...route.sourceReference, referenceId: 'b'.repeat(64) }, returnTo: formatRoute(route) } as const;
     expect(parseRoute(formatRoute(nested))).toEqual(nested);
     const forged = parseRoute('#/packages/payments/source-file?file=%2Fetc%2Fpasswd&sourceType=flow&sourceResourceId=checkout&sourceReferenceId=bad&returnTo=https%3A%2F%2Fevil.example');
     expect(forged).toEqual({ kind: 'package', packageId: 'payments', view: 'source-file' });
+    const invalidAction = parseRoute('#/packages/payments/source-file?sourceType=flow&sourceResourceId=checkout&sourceReferenceId='
+      + 'a'.repeat(64) + '&sourceAction=' + 'x'.repeat(513));
+    expect(invalidAction).not.toHaveProperty('sourceReference.actionId');
   });
 
   it('round-trips safe resource-source references and rejects malformed reference tokens', () => {

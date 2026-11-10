@@ -70,8 +70,35 @@ function resourceRouteKey(route: ExplorerPageProps['resourceRoute']): string {
   return route ? `${route.type}:${route.resourceId}` : '';
 }
 
-function ExplorerReference({ reference, onOpen }: { reference: ResourceReference; onOpen: ExplorerPageProps['onResourceRouteChange'] }) {
+function ExplorerReference({ reference, onOpen, onOpenFile, sourceIdentity }: {
+  reference: ResourceReference;
+  onOpen: ExplorerPageProps['onResourceRouteChange'];
+  onOpenFile?: ExplorerPageProps['onOpenConfigurationFile'];
+  sourceIdentity?: ResourceIdentity | null;
+}) {
   const label = reference.logicalId || reference.name || reference.resourceId || 'Unresolved reference';
+  if (reference.type === 'file') {
+    const calls = reference.callSites || (reference.callSite ? [reference.callSite] : []);
+    const actionIds = calls.map(site => typeof site.actionId === 'string' ? site.actionId : '').filter(Boolean);
+    const path = typeof reference.logicalId === 'string' ? reference.logicalId : '';
+    const originPath = typeof reference.originPath === 'string' ? reference.originPath : '';
+    const referenceId = typeof reference.referenceId === 'string' ? reference.referenceId : '';
+    const canOpen = reference.available === true && Boolean(path && originPath && /^[0-9a-f]{64}$/.test(referenceId)
+      && sourceIdentity && (sourceIdentity.type === 'template' || sourceIdentity.type === 'flow') && onOpenFile);
+    const message = reference.reason === 'missing' ? 'Missing file.'
+      : reference.reason === 'invalid' || reference.reason === 'invalid-reference' ? 'Invalid or out-of-Package reference.'
+        : reference.available === false ? `Blocked or unavailable (${reference.reason || reference.resolution || 'Server policy'}).` : '';
+    return <li>
+      {canOpen
+        ? <button type="button" onClick={() => onOpenFile!(path, originPath, {
+          type: sourceIdentity!.type as 'template' | 'flow', resourceId: sourceIdentity!.resourceId, referenceId, returnTab: 'relations',
+        })}>{path}</button>
+        : <span>{path || 'Package file reference'}</span>}
+      <span>{reference.resolution || 'unresolved'}</span>
+      {actionIds.length > 0 && <span>Actions: {actionIds.join(', ')}</span>}
+      {message && <span role="status">{message}</span>}
+    </li>;
+  }
   if (reference.targetKind === 'helper' && reference.resolution === 'resolved') {
     const callSite = reference.callSite && typeof reference.callSite.actionId === 'string' ? reference.callSite.actionId : '';
     return <li><details className="att-helper-reference"><summary>{label}<span>Configured Helper method</span></summary>
@@ -79,8 +106,9 @@ function ExplorerReference({ reference, onOpen }: { reference: ResourceReference
       {callSite && <p>Called from action {callSite}.</p>}
     </details></li>;
   }
-  const valid = Boolean(reference.type && ['case', 'template', 'flow', 'tool'].includes(reference.type) && reference.resourceId && reference.resolution !== 'unresolved');
-  return <li>{valid ? <button type="button" onClick={() => onOpen({ type: reference.type!, resourceId: reference.resourceId!, tab: 'definition' })}>{label}</button> : <span>{label}</span>}
+  const referenceType = reference.type;
+  const valid = Boolean(referenceType && ['case', 'template', 'flow', 'tool'].includes(referenceType) && reference.resourceId && reference.resolution !== 'unresolved');
+  return <li>{valid ? <button type="button" onClick={() => onOpen({ type: referenceType!, resourceId: reference.resourceId!, tab: 'definition' })}>{label}</button> : <span>{label}</span>}
     <span>{reference.resolution === 'unresolved' ? 'Unresolved reference' : reference.type || reference.resolution || 'unresolved'}</span></li>;
 }
 
@@ -431,12 +459,12 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
     const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
       : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
     setTab(tabs[nextIndex]);
-    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId, tab: tabs[nextIndex] });
+    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId, tab: tabs[nextIndex], ...(resourceRoute?.actionId ? { actionId: resourceRoute.actionId } : {}) });
     event.currentTarget.querySelector<HTMLButtonElement>(`[data-tab="${tabs[nextIndex]}"]`)?.focus();
   };
   const selectDetailTab = (next: DetailTab) => {
     setTab(next);
-    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId, tab: next });
+    if (identity) onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId, tab: next, ...(resourceRoute?.actionId ? { actionId: resourceRoute.actionId } : {}) });
   };
 
   return <main className="page-content att-explorer-page">
@@ -514,16 +542,21 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
                   : definition == null ? <p>No definition projection is available.</p>
                     : <ActionInspector definition={definition} actionOrder={actionOrder} resourceType={identity.type === 'flow' ? 'flow' : 'template'}
                         resourceId={identity.resourceId} references={detail?.references}
-                        onOpenFlow={targetId => onResourceRouteChange({ type: 'flow', resourceId: targetId, tab: 'definition' })} />
+                        selectedActionId={resourceRoute?.actionId}
+                        onSelectAction={actionId => onResourceRouteChange({ type: identity.type, resourceId: identity.resourceId,
+                          logicalId: detail?.logicalId, tab: 'definition', actionId })}
+                        onOpenFlow={targetId => onResourceRouteChange({ type: 'flow', resourceId: targetId, tab: 'definition' })}
+                        onOpenFile={(path, origin, reference) => onOpenConfigurationFile?.(path, origin, reference)} />
               : definition == null && !detailRequestPending ? <p>No definition projection is available.</p>
                 : <CodeEditor value={detailText} language="json" label="Safe resource definition" readOnly sourcePath={detail?.sourcePath} fileReferences={[]} />}
           </section>
           {sourceIdentity && <section id="att-explorer-panel-source" role="tabpanel" aria-labelledby="att-explorer-tab-source" hidden={tab !== 'source'}>
-            <SourceViewer api={api} identity={sourceIdentity} available={detail?.sourceAvailable === true} active={tab === 'source'} onFileReference={onOpenConfigurationFile} />
+            <SourceViewer api={api} identity={sourceIdentity} available={detail?.sourceAvailable === true} active={tab === 'source'} resource={detail} onFileReference={onOpenConfigurationFile} />
           </section>}
           <section id="att-explorer-panel-relations" role="tabpanel" aria-labelledby="att-explorer-tab-relations" hidden={tab !== 'relations'}>
             <div className="att-relation-columns">
-              <div><h3>References</h3><ul>{(detail?.references || []).map((reference, index) => <ExplorerReference key={`${reference.type}:${reference.resourceId}:${index}`} reference={reference} onOpen={onResourceRouteChange} />)}</ul>{!detail?.references?.length && <p>None</p>}</div>
+              <div><h3>References</h3><ul>{(detail?.references || []).map((reference, index) => <ExplorerReference key={`${reference.type}:${reference.logicalId || reference.resourceId}:${index}`} reference={reference} onOpen={onResourceRouteChange} onOpenFile={onOpenConfigurationFile} sourceIdentity={identity} />)}</ul>{!detail?.references?.length && <p>None</p>}
+                {detail?.fileDependenciesTruncated && <p role="status">Additional Package file dependencies were omitted by the Server safety limit.</p>}</div>
               <div><h3>Referenced by</h3><ul>{(detail?.referencedBy || []).map((reference, index) => <ExplorerReference key={`${reference.type}:${reference.resourceId}:${index}`} reference={reference} onOpen={onResourceRouteChange} />)}</ul>{!detail?.referencedBy?.length && <p>None</p>}</div>
             </div>
             {detail?.diagnostics?.map((item, index) => <p className="att-diagnostic" key={`${item.code}:${index}`}>{item.code ? `${item.code}: ` : ''}{item.summary}</p>)}

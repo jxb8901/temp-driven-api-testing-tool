@@ -1721,6 +1721,12 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     Map<String,Object> packageScope(String packageId) throws Exception {
+        return packageScope(packageId,()->{ });
+    }
+
+    // Test seam permits a deterministic in-place edit between the two Worker
+    // observations without introducing timing sleeps or production-only hooks.
+    Map<String,Object> packageScope(String packageId,Runnable afterRevisionObserved) throws Exception {
         PackageRegistry.Snapshot registry=packageRegistry.snapshot();Path root=pinPackageRoot(registry,packageId);
         if(root==null)throw new NotFoundException();validatePackageRoot(root);
         packageRegistry.markWarming(packageId,registry.revision);
@@ -1729,7 +1735,19 @@ final class ServerRuntime implements AutoCloseable {
             Map<String,Object> source=executeInspection(root,sourceRequest);
             String packageSourceRevision=requiredDigest(source.get("packageSourceRevision"),"Package source revision");
             String executionRevision=requiredDigest(source.get("executionRevisionDigest"),"Package execution revision");
+            afterRevisionObserved.run();
             Map<String,Object> configuration=resolveExecutionConfiguration(packageId,root,null);
+            // Configuration is resolved by a separate Worker inspection. If package
+            // source, Manifest or Central Runtime Config changed between the two,
+            // never publish a mixed-time tuple as a valid /scope precondition.
+            WorkerRequest verification=inspectionRequest(packageId,root,null);
+            verification.inspectionAction="revision";
+            verification.expectedRevisionDigest=executionRevision;
+            Map<String,Object> rechecked;
+            try { rechecked=executeInspection(root,verification); }
+            catch(StaleCursorException changed) { throw new StaleDraftException(); }
+            if(!executionRevision.equals(rechecked.get("executionRevisionDigest"))
+                    ||!packageSourceRevision.equals(rechecked.get("packageSourceRevision")))throw new StaleDraftException();
             PackageRegistry.Snapshot current=packageRegistry.snapshot();
             if(!registry.revision.equals(current.revision)||!root.equals(packageRoot(packageId)))throw new StaleDraftException();
             String manifestRevision=requiredDigest(configuration.get("manifestDigest"),"Package Manifest revision");

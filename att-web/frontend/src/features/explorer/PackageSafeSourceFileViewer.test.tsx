@@ -40,7 +40,7 @@ describe('PackageSafeSourceFileViewer', () => {
     expect(host.textContent).toContain('View referenced file');
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'View referenced file')?.click());
     expect(onOpenFile).toHaveBeenCalledWith('templates/payment/headers.json', 'templates/payment/request.xml', {
-      type: 'flow', resourceId: 'checkout', referenceId: nestedReferenceId,
+      type: 'flow', resourceId: 'checkout', referenceId: nestedReferenceId, returnTab: 'source',
     });
   });
 

@@ -35,6 +35,18 @@ async function main() {
     await page.getByLabel('Jobs list scope').selectOption('all');await pkg.selectOption('ledger');
     await page.waitForTimeout(300);assert.equal(await env.inputValue(),'');assert.equal(queries.at(-1).packageId,undefined);
     await page.getByLabel('Jobs list scope').selectOption('follow');await page.waitForTimeout(300);assert.equal(queries.at(-1).packageId,'ledger');assert.equal(queries.at(-1).environment,'SIT');
+    // The shared workspace header must stay visible after long Explorer/Jobs content is scrolled.
+    await page.evaluate(() => {
+      const tall = document.createElement('div'); tall.style.height = '2400px'; tall.setAttribute('aria-hidden', 'true');
+      document.querySelector('#main-content')?.appendChild(tall);
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    });
+    await page.waitForFunction(() => window.scrollY > 200);
+    const headerBounds = await page.locator('.app-frame > .topbar').boundingBox();
+    const workspaceBounds = await page.getByLabel('Workspace Package').boundingBox();
+    assert.ok(headerBounds && Math.abs(headerBounds.y) < 2, 'App Shell header must stick to the viewport top');
+    assert.ok(workspaceBounds && workspaceBounds.y >= 0 && workspaceBounds.y < 180, 'Workspace selector must remain visible during scrolling');
+    assert.equal(await page.locator('.context-toolbar').count(), 1);
     const second=await context.newPage();await second.goto(base+'#/jobs');await second.getByLabel('Workspace Package').waitFor();
     assert.equal(await second.getByLabel('Workspace Package').inputValue(),'');
     await second.getByLabel('Workspace Package').selectOption('payments');assert.equal(await pkg.inputValue(),'ledger');
