@@ -3445,7 +3445,19 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> resolved=resolveExecutionConfiguration(packageId,root,selection,pinnedWorkerConfig,expectedExecutionRevisionDigest);
         if(retainedEvidence!=null&&!sameConfigurationEvidence(retainedEvidence,resolved))throw new StaleDraftException();
         String centralTreeDigest=SourceRevisionStore.treeDigest(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,pinnedCentralRoot);
-        Path sourceCentralRoot=centralSourceRoot();
+        // Execution admission must bind the source lease to the very revision whose
+        // Worker Config was inspected. Reading the *current* central pointer here
+        // mixes two publication instants when another Server publishes midflight.
+        // Confirm the execution pin belongs to this registered scope, then resolve
+        // its retained immutable revision rather than consulting the new active tip.
+        Path configuredCentralRoot=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath)
+                .toAbsolutePath().normalize().toRealPath();
+        if(!sourceFileTransaction.ownsExecutionRevision(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                ChangeSetPublisher.CENTRAL_SCOPE_ID,configuredCentralRoot,pinnedCentralRoot))
+            throw new StaleDraftException();
+        String pinnedRevisionId=pinnedCentralRoot.getFileName().toString();
+        Path sourceCentralRoot=sourceFileTransaction.revisionRoot(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                ChangeSetPublisher.CENTRAL_SCOPE_ID,configuredCentralRoot,pinnedRevisionId);
         if(!centralTreeDigest.equals(SourceRevisionStore.treeDigest(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,sourceCentralRoot)))
             throw new StaleDraftException();
         Path sourceWorkerConfig=workerConfigPath(sourceCentralRoot);
