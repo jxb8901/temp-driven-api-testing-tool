@@ -297,6 +297,29 @@ class ChangeSetPublisherTest {
         } finally { publisher.close(); }
     }
 
+    @Test void unchangedWorkbookAboveIncomingEditLimitCanStillValidateAnUnrelatedChangeSet() throws Exception {
+        Path workbook = Files.createDirectories(packageRoot.resolve("testcase")).resolve("orders.xlsx");
+        // The revision store accepts this pre-existing file (up to 64 MiB);
+        // an unrelated small edit must not fail the candidate materializer's 4 MiB edit gate.
+        byte[] workbookBytes = new byte[5 * 1024 * 1024 + 13];
+        Arrays.fill(workbookBytes, (byte) 0x5A);
+        Files.write(workbook, workbookBytes);
+        ChangeSetPublisher publisher = publisher(candidate -> {
+            assertTrue(candidate.files().contains("testcase/orders.xlsx"));
+            assertArrayEquals(workbookBytes, candidate.read("testcase/orders.xlsx"));
+            return ChangeSetPublisher.ValidationResult.accepted(VALIDATION_REVISION);
+        }, allowingGate());
+        try {
+            Map<String,Object> draft = stagePackage(publisher, List.of(
+                    ChangeSetPublisher.OperationInput.create("templates/small.yaml", bytes("id: small\n"))));
+            Map<String,Object> validated = publisher.validate(ChangeSetPublisher.PACKAGE_SOURCE,
+                    "owner", "owner", false, String.valueOf(draft.get("changeSetId")));
+            assertEquals("validated", validated.get("state"));
+            assertEquals(1, validatorCalls.get(), "The unchanged workbook must be part of validation");
+            assertTrue(Files.exists(activePackageRoot().resolve("testcase/orders.xlsx")));
+        } finally { publisher.close(); }
+    }
+
     @Test void publisherRejectsTruncatedLoadInventoryAsNonExecutable() throws Exception {
         Path scenarios=Files.createDirectories(packageRoot.resolve("load/scenarios"));
         for(int index=0;index<=att.validation.SourceCandidateValidator.MAX_LOAD_DESCRIPTORS;index++)
