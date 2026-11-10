@@ -94,7 +94,7 @@ class PrewarmedWorkerTest {
     @Test void workerRejectsSnapshotWhoseExecutionIdentityDiffersFromTheRequest() throws Exception {
         Path root=fixture();SourceArchive accepted=sourceArchive(root);
         Map<String,Object> request=request(root,"debug");attachSnapshot(request,accepted);
-        request.put("expectedExecutionRevisionDigest","0".repeat(64));
+        request.put("expectedExecutionRevisionDigest",String.join("",java.util.Collections.nCopies(64,"0")));
         Process process=startCold(root);
         try {
             String output=assign(process,mapper.writeValueAsString(request));
