@@ -77,6 +77,26 @@ class ConfigActivationCoordinatorTest {
         assertEquals(1, invalidations.get());
     }
 
+    @Test void claimedActivationWithoutLiveGuardReadbackMustFailClosed() {
+        RevisionIdentity before = revision("a");
+        RevisionIdentity after = revision("b");
+        ConfigActivationCoordinator coordinator = new ConfigActivationCoordinator(new Guard(before) {
+            @Override public ActivationStatus activate(PublicationEvent event) {
+                // Misbehaving guard returns success without changing actual live dispatch.
+                return new ActivationStatus(SCOPE, event.after.configSource,
+                        event.after.configSource, ActivationState.ACTIVE, null);
+            }
+        });
+        coordinator.seed(SCOPE, before);
+        coordinator.committed(event(before, after));
+
+        ActivationStatus status = coordinator.activationStatus(SCOPE);
+        assertEquals(ActivationState.FAILED, status.state);
+        assertEquals(after.revision, status.publishedRevision.revision);
+        assertEquals(before.revision, status.activeRevision.revision);
+        assertEquals("ATT-CONFIG-ACTIVATION-STATE-UNVERIFIED", status.failureCode);
+    }
+
     @Test void nonActiveOrInconsistentGuardResponsesKeepTheLastKnownGoodRevision() {
         RevisionIdentity before = revision("a");
         RevisionIdentity after = revision("b");
