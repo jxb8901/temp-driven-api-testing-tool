@@ -317,7 +317,7 @@ public final class SchemaFiles {
                 FileLock lease;
                 try {
                     restrictPermissions(leasePath, false);
-                    lease = leaseChannel.lock(0L, Long.MAX_VALUE, true);
+                    lease = acquireSharedCacheLease(leaseChannel);
                 } catch (IOException | RuntimeException failure) {
                     leaseChannel.close();
                     throw failure;
@@ -341,6 +341,26 @@ public final class SchemaFiles {
      * no Worker or CLI process is using them. A process crash releases its lease
      * automatically; cleanup retries the next time a registry is initialized.
      */
+    /**
+     * Multiple Engine classloaders in one Tomcat JVM may use the same verified
+     * content-addressed cache. Java refuses overlapping FileLocks even when both
+     * holders request shared locks, so assign each classloader a distinct byte
+     * range. The cleanup probe still locks [0, Long.MAX_VALUE) exclusively and
+     * therefore cannot delete a cache used by any classloader or Worker JVM.
+     */
+    private static FileLock acquireSharedCacheLease(FileChannel channel) throws IOException {
+        for (int attempt = 0; attempt < 32; attempt++) {
+            long position = java.util.concurrent.ThreadLocalRandom.current().nextLong(1L, Long.MAX_VALUE - 1L);
+            try {
+                FileLock lease = channel.tryLock(position, 1L, true);
+                if (lease != null) return lease;
+            } catch (java.nio.channels.OverlappingFileLockException alreadyUsedInThisJvm) {
+                // Random byte-range collision; retry without weakening the lease.
+            }
+        }
+        throw new IOException("Unable to acquire a non-overlapping trusted schema cache lease");
+    }
+
     private static void pruneOldCaches(Path cacheBase, Path activeRoot) {
         List<Path> versions = new ArrayList<Path>();
         try (Stream<Path> paths = Files.list(cacheBase)) {
