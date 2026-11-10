@@ -1,5 +1,4 @@
-import { webcrypto } from 'node:crypto';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { canonicalImpactFreshness, createImpactAcknowledgement } from './impactAcknowledgement';
 import type { SourceImpactReport } from './sourceManagement';
 
@@ -10,7 +9,6 @@ const freshness: NonNullable<SourceImpactReport['freshness']> = {
   packageRegistry: { kind: 'PACKAGE_REGISTRATION', scopeId: 'packages', revision: 'registry-1' },
   packageSources: [], manifests: [], engineSchema: { kind: 'ENGINE_SCHEMA', scopeId: 'runtime', revision: 'schema-1' }, scheduleSnapshots: [],
 };
-beforeAll(() => vi.stubGlobal('crypto', webcrypto));
 describe('Config impact acknowledgement (#335 contract)', () => {
   it('matches Server SHA-256 freshness and actor-bound acknowledgement protocol', async () => {
     expect(canonicalImpactFreshness(freshness)).toContain('CONFIG_SOURCE\tcentral-runtime-config\tnull\tconfig-1');
