@@ -36,6 +36,46 @@ class ApiServletIntegratedLimitsTest {
     private static final int DEFAULT_INSPECTION_TIMEOUT_MS=30_000;
     @TempDir Path temp;
 
+    @Test void staleCentralImpactReturnsConflictThroughPublishRoute() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("impact-api-packages"));
+        Path packageRoot=createPackage(packages.resolve("p"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        Path libs=workerLibraries("impact-api-libs");
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"impact-api-data",DEFAULT_INSPECTION_TIMEOUT_MS,
+                null,libs,true,true)) {
+            Map<String,String> revisions=runtime.changeSetPublisher.currentRevisions(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true);
+            String candidate=Files.readString(runtimeConfig)+"# impact API candidate\n";
+            Map<String,Object> draft=runtime.changeSetPublisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,revisions.get("baseSourceRevision"),null,
+                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml",candidate.getBytes(StandardCharsets.UTF_8))));
+            String id=String.valueOf(draft.get("changeSetId"));
+            runtime.changeSetPublisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id);
+            runtime.changeSetPublisher.review(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id);
+            var impact=runtime.changeSetPublisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id,null);
+            assertNotNull(impact.freshness);
+            String freshness=ConfigImpactAnalyzer.freshnessFingerprint(impact.freshness);
+            att.server.api.source.SourceManagementContracts.ImpactAcknowledgement acknowledgement=
+                    new att.server.api.source.SourceManagementContracts.ImpactAcknowledgement(freshness,"alice",
+                            ConfigImpactAnalyzer.acknowledgementDigest(freshness,"alice"));
+
+            Path manifest=packageRoot.resolve("package.yaml");
+            Files.writeString(manifest,Files.readString(manifest)+"# concurrent manifest change\n");
+            Captured response=invokeAsAdmin(servlet(runtime),"alice","POST",
+                    "/configuration/change-sets/"+id+"/publish",Map.of(),ServerRuntime.JSON.writeValueAsBytes(Map.of(
+                            "impactAcknowledgement",Map.of("freshnessFingerprint",freshness,"actor","alice",
+                                    "acknowledgementDigest",acknowledgement.acknowledgementDigest))));
+            JsonNode error=ServerRuntime.JSON.readTree(response.body()).path("error");
+            assertEquals(409,response.status,new String(response.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-CONFIG-IMPACT-STALE",error.path("code").asText());
+            assertFalse(Files.readString(runtimeConfig).contains("# impact API candidate"),
+                    "a stale impact must leave the central source unchanged");
+        }
+    }
+
     @Test void emptyRegisteredPackageReturnsEmptyInspectorInventoryAndDoesNotAffectAnotherPackage() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("empty-package-packages"));
         Files.createDirectory(packages.resolve("lilyzhou"));
@@ -527,6 +567,12 @@ class ApiServletIntegratedLimitsTest {
 
     private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
                                   ServerRuntime.WorkerProcessLauncher launcher,Path libs) throws Exception {
+        return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,false,false);
+    }
+
+    private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
+                                  ServerRuntime.WorkerProcessLauncher launcher,Path libs,
+                                  boolean authenticationRequired,boolean centralConfigurationEditingEnabled) throws Exception {
         Path yaml=temp.resolve(dataName+".yaml");
         StringBuilder entries=new StringBuilder();
         try(java.util.stream.Stream<Path> children=Files.list(packages)) {
@@ -535,7 +581,9 @@ class ApiServletIntegratedLimitsTest {
         }
         String config="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve(dataName))
                 +"\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
-                +"\n  maxRequestBytes: 1024\n  authenticationRequired: false\n  authorization:\n    allowAnonymousOperations: true\n"
+                +"\n  maxRequestBytes: 1024\n  authenticationRequired: "+authenticationRequired
+                +"\n  centralConfigurationEditingEnabled: "+centralConfigurationEditingEnabled
+                +"\n  authorization:\n    allowAnonymousOperations: "+(!authenticationRequired)+"\n"
                 +"  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 0\n    timeoutMs: "+timeout
                 +"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 0\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(packages)
                 +"\n  entries:\n"+entries;
@@ -579,7 +627,17 @@ class ApiServletIntegratedLimitsTest {
         return invokeAs(servlet,"alice",method,path,parameters,body);
     }
 
+    private Captured invokeAsAdmin(ApiServlet servlet,String login,String method,String path,
+                                   Map<String,String> parameters,byte[] body) throws Exception {
+        return invokeAs(servlet,login,method,path,parameters,body,true);
+    }
+
     private Captured invokeAs(ApiServlet servlet,String login,String method,String path,Map<String,String> parameters,byte[] body) throws Exception {
+        return invokeAs(servlet,login,method,path,parameters,body,false);
+    }
+
+    private Captured invokeAs(ApiServlet servlet,String login,String method,String path,Map<String,String> parameters,
+                              byte[] body,boolean admin) throws Exception {
         ServletContext context=servlet.getServletContext();
         HttpServletRequest request=proxy(HttpServletRequest.class,(self,called,args)->{
             switch(called.getName()) {
@@ -592,7 +650,7 @@ class ApiServletIntegratedLimitsTest {
                 case "getHeader": return "X-Request-ID".equals(args[0])?"limits-test":null;
                 case "getContentType": return "application/json";
                 case "getUserPrincipal": return (Principal)()->login;
-                case "isUserInRole": return runtimeRole(servlet,args[0]);
+                case "isUserInRole": return admin?runtimeAdminRole(servlet,args[0]):runtimeRole(servlet,args[0]);
                 case "getInputStream": return input(body);
                 case "getRemoteAddr": return "127.0.0.1";
                 default: return defaultValue(called.getReturnType());
@@ -614,6 +672,14 @@ class ApiServletIntegratedLimitsTest {
             Field field=ApiServlet.class.getDeclaredField("runtime");field.setAccessible(true);
             ServerRuntime runtime=(ServerRuntime)field.get(servlet);
             return runtime.config.authorization.userRole.equals(role);
+        } catch(Exception failure){throw new IllegalStateException(failure);}
+    }
+
+    private boolean runtimeAdminRole(ApiServlet servlet,Object role) {
+        try {
+            Field field=ApiServlet.class.getDeclaredField("runtime");field.setAccessible(true);
+            ServerRuntime runtime=(ServerRuntime)field.get(servlet);
+            return runtime.config.authorization.adminRole.equals(role);
         } catch(Exception failure){throw new IllegalStateException(failure);}
     }
 

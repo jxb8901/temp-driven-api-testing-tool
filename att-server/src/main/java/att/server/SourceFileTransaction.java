@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.TimeUnit;
 
@@ -99,6 +100,35 @@ final class SourceFileTransaction {
     }
 
     Lock readLock() { return barrier.readLock(); }
+
+    /** Hold every registered Package source writer lock in stable order while a central Config is committed. */
+    <T> T withPackageWriterLocks(Map<String, Path> packageRoots, Callable<T> operation) throws Exception {
+        List<Map.Entry<String, Path>> ordered = new ArrayList<>(packageRoots.entrySet());
+        ordered.sort(Map.Entry.comparingByKey());
+        List<SourceRevisionStore.WriterLock> held = new ArrayList<>();
+        Throwable operationFailure = null;
+        try {
+            for (Map.Entry<String, Path> entry : ordered)
+                held.add(revisions.lock(ChangeSetPublisher.PACKAGE_SOURCE, entry.getKey(), entry.getValue()));
+            return operation.call();
+        } catch (Exception | Error failure) {
+            operationFailure = failure;
+            throw failure;
+        } finally {
+            Exception closeFailure = null;
+            for (int index = held.size() - 1; index >= 0; index--) {
+                try { held.get(index).close(); }
+                catch (Exception failure) {
+                    if (closeFailure == null) closeFailure = failure;
+                    else closeFailure.addSuppressed(failure);
+                }
+            }
+            if (closeFailure != null) {
+                if (operationFailure != null) operationFailure.addSuppressed(closeFailure);
+                else throw closeFailure;
+            }
+        }
+    }
 
     void registerRoot(String domain, String scopeId, Path root) throws Exception { revisions.register(domain, scopeId, root); }
     void registerRoot(String domain, String scopeId, Path root, Path configuredConfigFile) throws Exception {

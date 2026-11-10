@@ -74,6 +74,14 @@ public final class PackageSourceRevision {
         return SOURCE_ROOTS.contains(segments[0]) && RUNTIME.contains(extension);
     }
 
+    /** Exclude deployment and generated trees when capturing a Package source snapshot. */
+    public static boolean excludedDirectory(String logicalPath) {
+        if (logicalPath == null || logicalPath.isEmpty()) return false;
+        for (String segment : logicalPath.toLowerCase(Locale.ROOT).split("/"))
+            if (EXCLUDED.contains(segment)) return true;
+        return false;
+    }
+
     public static String digest(Path root) throws IOException {
         return digest(root, Collections.<String, byte[]>emptyMap());
     }
@@ -89,6 +97,7 @@ public final class PackageSourceRevision {
         final int[] visited = new int[] { 0 };
         Files.walkFileTree(canonical, new SimpleFileVisitor<Path>() {
             @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                if (Thread.currentThread().isInterrupted()) throw new IOException("Package source digest cancelled");
                 if (++visited[0] > MAX_ENTRIES) throw new IOException("Package source entry limit exceeded");
                 if (dir.equals(canonical)) return FileVisitResult.CONTINUE;
                 String logical = canonical.relativize(dir).toString().replace('\\', '/');
@@ -99,6 +108,7 @@ public final class PackageSourceRevision {
                 return FileVisitResult.CONTINUE;
             }
             @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                if (Thread.currentThread().isInterrupted()) throw new IOException("Package source digest cancelled");
                 if (++visited[0] > MAX_ENTRIES) throw new IOException("Package source entry limit exceeded");
                 String logical = canonical.relativize(file).toString().replace('\\', '/');
                 if (!includes(logical)) return FileVisitResult.CONTINUE;
@@ -128,6 +138,7 @@ public final class PackageSourceRevision {
         long total = 0;
         byte[] buffer = new byte[8192];
         for (Map.Entry<String, Path> source : sources.entrySet()) {
+            if (Thread.currentThread().isInterrupted()) throw new IOException("Package source digest cancelled");
             String path = source.getKey();
             digest.update(path.getBytes(StandardCharsets.UTF_8));
             digest.update((byte) 0);
@@ -146,6 +157,7 @@ public final class PackageSourceRevision {
                 try (InputStream input = Files.newInputStream(file)) {
                     int read;
                     while ((read = input.read(buffer)) != -1) {
+                        if (Thread.currentThread().isInterrupted()) throw new IOException("Package source digest cancelled");
                         total += read;
                         if (total > MAX_BYTES) throw new IOException("Package source exceeds byte limit");
                         digest.update(buffer, 0, read);
