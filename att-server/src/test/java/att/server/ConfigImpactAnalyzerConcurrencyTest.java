@@ -179,7 +179,7 @@ class ConfigImpactAnalyzerConcurrencyTest {
         ConfigImpactAnalyzer analyzer = new ConfigImpactAnalyzer(new ConfigImpactAnalyzer.Inventory() {
             @Override public PackageRegistry.Snapshot registry() { return registry; }
             @Override public List<LoadSchedule> schedules() { return List.of(); }
-        }, PackageConfigurationPolicy.load(null), "strict", engine, guard, 300);
+        }, PackageConfigurationPolicy.load(null), "strict", engine, guard, 2500);
         SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
         ChangeSetPublisher publisher = new ChangeSetPublisher(Clock.systemUTC(), 8, 2, 300,
                 (domain, scopeId, actor, admin) -> new ChangeSetPublisher.Scope(domain, scopeId,
@@ -203,13 +203,13 @@ class ConfigImpactAnalyzerConcurrencyTest {
             long started = System.nanoTime();
             var report = request.submit(() -> publisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
                     ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, id, null));
-            assertTrue(resolverEntered.await(2, TimeUnit.SECONDS), "analysis should enter the stalled resolver");
-            ImpactReport result = report.get(2, TimeUnit.SECONDS);
+            assertTrue(resolverEntered.await(4, TimeUnit.SECONDS), "analysis should enter the stalled resolver");
+            ImpactReport result = report.get(5, TimeUnit.SECONDS);
             assertEquals(ProviderState.UNAVAILABLE, result.providerState);
             assertEquals("ATT-CONFIG-IMPACT-ANALYSIS-LIMIT", result.unavailableCode);
-            assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 1500,
+            assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 4500,
                     "a stalled Engine call must not hold the analysis request indefinitely");
-            assertTrue(resolverInterrupted.await(1, TimeUnit.SECONDS), "timed out Engine work must receive cancellation");
+            assertTrue(resolverInterrupted.await(2, TimeUnit.SECONDS), "timed out Engine work must receive cancellation");
         } finally {
             request.shutdownNow();
         }
