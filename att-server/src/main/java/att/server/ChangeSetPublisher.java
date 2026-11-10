@@ -219,7 +219,7 @@ final class ChangeSetPublisher implements AutoCloseable {
             if (source == null) return null;
             if (Files.isSymbolicLink(source) || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS))
                 throw new IOException("Pinned central source is unavailable");
-            byte[] bytes = readBounded(source);
+            byte[] bytes = readBounded(source, MAX_REVISION_FILE_BYTES);
             String expected = base.centralIndex.hashes.get(path);
             if (!matchesHash(expected, bytes)) throw new IOException("Pinned central source changed");
             return bytes;
@@ -232,7 +232,7 @@ final class ChangeSetPublisher implements AutoCloseable {
             if (source == null) return null;
             if (Files.isSymbolicLink(source) || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS))
                 throw new IOException("Pinned central baseline is unavailable");
-            byte[] bytes = readBounded(source);
+            byte[] bytes = readBounded(source, MAX_REVISION_FILE_BYTES);
             if (!matchesHash(base.centralIndex.hashes.get(path), bytes))
                 throw new IOException("Pinned central baseline changed");
             return bytes;
@@ -248,7 +248,7 @@ final class ChangeSetPublisher implements AutoCloseable {
             if (!Files.exists(source, LinkOption.NOFOLLOW_LINKS)) return null;
             if (Files.isSymbolicLink(source) || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS))
                 throw new IOException("Candidate source is unavailable");
-            byte[] bytes = readBounded(source);
+            byte[] bytes = readBounded(source, MAX_REVISION_FILE_BYTES);
             ScanIndex index = PACKAGE_SOURCE.equals(scope.domain) ? base.packageIndex : base.centralIndex;
             String expected = index.hashes.get(path);
             if (!matchesHash(expected, bytes)) throw new IOException("Pinned candidate source changed");
@@ -1122,12 +1122,21 @@ final class ChangeSetPublisher implements AutoCloseable {
     }
 
     private static byte[] readBounded(Path path) throws IOException {
+        return readBounded(path, MAX_FILE_BYTES);
+    }
+
+    /**
+     * Unchanged pinned source can be up to the bounded revision-file limit.
+     * Do not apply the tighter incoming-edit limit when materializing the
+     * already-digested full candidate for validation.
+     */
+    private static byte[] readBounded(Path path, long limit) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream(8192);
         try (java.io.InputStream input = Files.newInputStream(path)) {
             byte[] buffer = new byte[8192];
             int count;
             while ((count = input.read(buffer)) >= 0) {
-                if (output.size() + count > MAX_FILE_BYTES)
+                if ((long)output.size() + count > limit)
                     throw new IllegalArgumentException("Source file exceeds its size limit");
                 output.write(buffer, 0, count);
             }
