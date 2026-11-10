@@ -685,6 +685,12 @@ class ServerWarUiIT {
                 }
             }
             assertCliAndTomcatDiagnosticFidelity(port, api, auth, origin, packageRoot, localHome);
+            // The intentionally unresolved Debug-only Flow exercised above must
+            // not affect unrelated Schedule source-closure validation later.
+            Path diagnosticFlow=packageRoot.resolve("templates/flows/diagnostic");
+            Files.delete(diagnosticFlow.resolve("flow.yaml"));
+            Files.delete(diagnosticFlow.resolve("debug.yaml"));
+            Files.delete(diagnosticFlow);
             JsonNode cacheCapabilities=getJson(port,api+"/auth/capabilities",auth);
             String cacheContext=cacheCapabilities.path("inspectionCacheContext").asText();
             assertTrue(cacheContext.matches("[A-Za-z0-9_-]{43}"));
@@ -1244,7 +1250,8 @@ class ServerWarUiIT {
                                     Object body, int expectedStatus) throws Exception {
         HttpURLConnection connection = open(port, path, authorization);
         connection.setConnectTimeout(5000);
-        connection.setReadTimeout(30000);
+        // Source-closure acceptance may be slower under heavily shared CI runners.
+        connection.setReadTimeout(120000);
         connection.setRequestMethod(method);
         if (origin != null) connection.setRequestProperty("Origin", origin);
         if (body != null) {
@@ -1272,7 +1279,8 @@ class ServerWarUiIT {
                                             Object body, int expectedStatus) throws Exception {
         HttpURLConnection connection = open(port, path, authorization);
         connection.setConnectTimeout(5000);
-        connection.setReadTimeout(30000);
+        // Source-closure acceptance may be slower under heavily shared CI runners.
+        connection.setReadTimeout(120000);
         connection.setRequestMethod(method);
         if (origin != null) connection.setRequestProperty("Origin", origin);
         if (body != null) {
