@@ -1304,9 +1304,10 @@ class ServerWarUiIT {
         if(status<400)return "";
         try(var stream=connection.getErrorStream()) {
             if(stream==null)return " (no error response)";
-            JsonNode error=ServerRuntime.JSON.readTree(stream.readNBytes(4096));
+            JsonNode response=ServerRuntime.JSON.readTree(stream.readNBytes(4096));
+            JsonNode error=response==null?ServerRuntime.JSON.nullNode():response.path("error");
             return " (code="+error.path("code").asText("unknown")
-                    +", message="+error.path("message").asText("unavailable")+")";
+                    +", summary="+error.path("summary").asText("unavailable")+")";
         } catch(Exception unavailable) {
             return " (error response unreadable)";
         }
