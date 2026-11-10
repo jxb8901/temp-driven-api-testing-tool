@@ -1,6 +1,6 @@
 import type {
   ManagedAuthoringSource, PackageAuthoringSourceQuery, SourceChangeAction, SourceChangeSet,
-  SourceDomain, SourceImpactReport, SourceOperation, SourcePublishResult, SourceSnapshotRequest,
+  SourceDomain, SourceImpactReport, SourceImpactAcknowledgement, SourceOperation, SourcePublishResult, SourceSnapshotRequest,
 } from './sourceManagement';
 
 export type ResourceType = 'case' | 'template' | 'flow' | 'tool';
@@ -285,7 +285,7 @@ export interface ExplorerApi {
   stageSourceChangeSet?(domain: SourceDomain, scopeId: string, baseSourceRevision: string, registryRevision: string | undefined,
     operations: SourceOperation[], signal?: AbortSignal): Promise<SourceChangeSet>;
   sourceChangeSetAction?(domain: SourceDomain, scopeId: string, changeSetId: string, action: SourceChangeAction,
-    signal?: AbortSignal): Promise<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }>;
+    signal?: AbortSignal, impactAcknowledgement?: SourceImpactAcknowledgement): Promise<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }>;
   generateTestcaseSnapshot?(packageId: string, changeSetId: string, input: SourceSnapshotRequest, signal?: AbortSignal): Promise<SourceChangeSet>;
   getCentralConfigImpact?(changeSetId: string, cursor?: string, signal?: AbortSignal): Promise<SourceImpactReport>;
   getResourceSourceFile?(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection>;

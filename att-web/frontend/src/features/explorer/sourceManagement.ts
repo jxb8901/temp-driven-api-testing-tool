@@ -185,6 +185,13 @@ export interface SourceAffectedSchedule {
   safeReason?: string | null;
 }
 
+/** ADMIN acknowledgement is bound to this central Config publish, never a separate request. */
+export interface SourceImpactAcknowledgement {
+  freshnessFingerprint: string;
+  actor: string;
+  acknowledgementDigest: string;
+}
+
 export interface SourceImpactReport {
   schemaVersion?: 'att-config-impact-report/v1' | string;
   providerState: 'AVAILABLE' | 'UNAVAILABLE' | 'STALE' | string;

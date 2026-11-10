@@ -22,7 +22,7 @@ import type {
 import { normalizeSchedule, scheduleTransport } from './features/schedules/types';
 import type {
   ManagedAuthoringSource, PackageAuthoringSourceQuery, SourceChangeAction, SourceChangeSet,
-  SourceDomain, SourceImpactReport, SourceOperation, SourcePublishResult, SourceSnapshotRequest,
+  SourceDomain, SourceImpactReport, SourceImpactAcknowledgement, SourceOperation, SourcePublishResult, SourceSnapshotRequest,
 } from './features/explorer/sourceManagement';
 
 export interface ServerJobStorageMetrics {
@@ -463,12 +463,13 @@ export const api = {
     }, signal);
   },
   async sourceChangeSetAction(domain: SourceDomain, scopeId: string, changeSetId: string,
-    action: SourceChangeAction, signal?: AbortSignal): Promise<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }> {
+    action: SourceChangeAction, signal?: AbortSignal, impactAcknowledgement?: SourceImpactAcknowledgement): Promise<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }> {
     const base = domain === 'PACKAGE_SOURCE'
       ? 'packages/' + encodeURIComponent(scopeId) + '/change-sets'
       : 'configuration/change-sets';
     const result = await postJson<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }>(
-      base + '/' + encodeURIComponent(changeSetId) + '/' + action, {}, signal);
+      base + '/' + encodeURIComponent(changeSetId) + '/' + action,
+      action === 'publish' && domain === 'CENTRAL_RUNTIME_CONFIG' && impactAcknowledgement ? { impactAcknowledgement } : {}, signal);
     if (action === 'publish' && 'published' in result && result.published) {
       if (domain === 'PACKAGE_SOURCE') inspectionCache.invalidatePackage(scopeId);
       else inspectionCache.clear();
@@ -481,7 +482,7 @@ export const api = {
       + encodeURIComponent(changeSetId) + '/generate-snapshot', input, signal);
   },
   getCentralConfigImpact(changeSetId: string, cursor?: string, signal?: AbortSignal): Promise<SourceImpactReport> {
-    return request<SourceImpactReport>('admin/runtime-configuration/drafts/'
+    return request<SourceImpactReport>('configuration/change-sets/'
       + encodeURIComponent(changeSetId) + '/impact' + queryString({ cursor }), { signal, cache: 'no-store' });
   },
   stagePackageManifest(packageId: string, source: string, expectedManifestDigest: string, signal?: AbortSignal): Promise<ManifestDraft> {
