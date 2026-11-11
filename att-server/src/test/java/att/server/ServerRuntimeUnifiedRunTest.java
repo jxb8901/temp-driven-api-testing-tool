@@ -30,8 +30,9 @@ class ServerRuntimeUnifiedRunTest {
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}, UAT: {}}\ntemplates: {root: templates}\ntestcase: {root: testcase}\n");
 
         Files.writeString(Files.createDirectories(root.resolve("tools")).resolve("version.yaml"),
-                "schemaVersion: att-tool/v1\\nid: version\\nname: Version\\ndescription: Local runtime version\\n"
-                +"command: ["+ServerRuntimeTestSupport.yaml(javaBin)+", '-version']\\nstdoutFormat: text\\narguments: {}\\n");        Files.writeString(root.resolve("templates/SIMPLE/template.yaml"),"schemaVersion: att-template/v3.6\nname: SIMPLE\ndescription: Unified RUN fixture\nactions:\n  show: {type: log, message: once}\n");
+                "schemaVersion: att-tool/v1\nid: version\nname: Version\ndescription: Local runtime version\n"
+                +"command: ["+ServerRuntimeTestSupport.yaml(javaBin)+", '-version']\nstdoutFormat: text\narguments: {}\n");
+        Files.writeString(root.resolve("templates/SIMPLE/template.yaml"),"schemaVersion: att-template/v3.6\nname: SIMPLE\ndescription: Unified RUN fixture\nactions:\n  show: {type: log, message: once}\n");
         Files.writeString(root.resolve("templates/BAD/template.yaml"),"schemaVersion: att-template/v3.6\nname: BAD\ndescription: Failed Case fixture\nactions:\n  check: {type: assert, assert: '#{1 == 2}'}\n");
         Files.writeString(root.resolve("templates/flows/simple/flow.yaml"),"schemaVersion: att-flow/v3.6\nid: simple.flow.v1\nname: Simple flow\ndescription: Unified RUN flow\nactions:\n  show: {type: log, message: once}\n");
         Path workbook=root.resolve("testcase/cases.xlsx");
