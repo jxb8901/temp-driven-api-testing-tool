@@ -2079,9 +2079,9 @@ public final class PackageValidator {
         if (tool == null) {
             String suggestion = nearestTool(toolName, config.tools().keySet());
             throw new DiagnosticException(DiagnosticCodes.TOOL_INVALID, "Unknown configured tool '" + toolName + "'",
-                    "The template call does not match any global or qualified group.tool name. Available tools: " + String.join(", ", config.tools().keySet()),
+                    "The template call does not match a Tool in the selected Package. Available Package Tools: " + String.join(", ", config.tools().keySet()),
                     null, "call", null, null, null, null, null,
-                    suggestion == null ? "Define the tool in config/tools or correct the qualified group.tool name." : "Use '#{" + suggestion + "(...)}' if that is the intended tool.", null);
+                    suggestion == null ? "Define a Package-local att-tool/v1 descriptor under tools/ or correct the Tool ID." : "Use '#{" + suggestion + "(...)}' if that is the intended tool.", null);
         }
         if (tool.callBacked() && isWriteFacade(tool) && !allowWriteFacade) {
             String target = callParser.parse(tool.call()).name();

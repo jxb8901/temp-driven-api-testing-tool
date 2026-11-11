@@ -150,9 +150,9 @@ public class ToolInvoker {
         config.requireExecutionConfig();
         if (tool == null) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_INVALID,
-                    "Unknown configured tool '" + toolName + "'", "Available tools: " + String.join(", ", config.tools().keySet()),
+                    "Unknown Package Tool '" + toolName + "'", "Available Package Tools: " + String.join(", ", config.tools().keySet()),
                     null, "call", null, null, null, null, null,
-                    "Correct the case-sensitive qualified group.tool name or define it in the loaded configuration.", null);
+                    "Define an att-tool/v1 descriptor in the selected Package tools/ directory, or correct the Package-local Tool ID.", null);
         }
         if (tool.callBacked()) throw new IllegalStateException("call-backed Tool must be executed by the unified expression engine: " + toolName);
         String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(toolName) : invocationId;

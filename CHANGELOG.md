@@ -1,3 +1,10 @@
+# ATT 4.2.10 - 2026-11-11
+
+- Introduce `att-tool/v1` as a versioned, JAR-embedded schema for Package-owned Tools, with deterministic `tools/*.yaml` discovery and Package-scoped Tool resolution (#352).
+- Keep DB/MQ/HTTP/SSH Helper definitions centralized; reject unsupported legacy global Tools with explicit migration guidance instead of dispatch fallback.
+- Add Package Tool source inspection to Explorer; remove Tool and Tool Group catalogs from Shared Configuration; include Package Tool descriptors in revision fingerprints.
+- Convert bundled Package examples from global Tool declarations and document migration from older configurations.
+
 # Changelog
 
 # ATT 4.2.9 - 2026-11-05
