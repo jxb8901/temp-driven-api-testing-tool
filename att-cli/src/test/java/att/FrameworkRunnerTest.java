@@ -32,7 +32,7 @@ class FrameworkRunnerTest {
         }
         Path config = temp.resolve("config.yaml");
         Files.write(config, ("schemaVersion: att-config/v2.11\nenvironment: SIT\noutputDirectory: reports\n"
-                + "templates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n")
+                + "templates: {root: templates}\ntestcase: {root: testcase}\n")
                 .getBytes("UTF-8"));
         Process process = new ProcessBuilder(Paths.get(System.getProperty("java.home"), "bin", "java").toString(),
                 "-cp", System.getProperty("java.class.path"), FrameworkRunner.class.getName(), "report",
