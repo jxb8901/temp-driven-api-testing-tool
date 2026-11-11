@@ -1,0 +1,27 @@
+schemaVersion: att-tool/v1
+id: fpp.invokeApi
+name: Invoke FPP API
+description: Reference API invocation skeleton returning an XML result envelope
+command: [./tools/fpp_invoke_api.sh, "${input.requestId}", "${input.requestType}", "${input.requestText}", "${input.requestFile}", "${input.apiLogPath}"]
+stdoutFormat: xml
+arguments:
+  requestId:
+    name: Request ID
+    description: Unique request correlation ID
+    required: true
+  requestType:
+    name: Request Type
+    description: FPP request or message type
+    required: true
+  requestText:
+    name: Request Text
+    description: Already-rendered request document text
+    required: false
+  requestFile:
+    name: Request File
+    description: Absolute path of the request payload file
+    required: false
+  apiLogPath:
+    name: API Log Path
+    description: Full path of the API integration log file
+    required: true

@@ -1,0 +1,15 @@
+schemaVersion: att-tool/v1
+id: fpp.searchText
+name: Search fixed text
+description: Count lines containing one literal keyword in a regular text file
+command: [./tools/fpp_search_text.sh, "${input.file}", "${input.keyword}"]
+stdoutFormat: yaml
+arguments:
+  file:
+    name: File
+    description: Text file to search
+    required: true
+  keyword:
+    name: Keyword
+    description: Non-blank literal text; no regular-expression evaluation
+    required: true

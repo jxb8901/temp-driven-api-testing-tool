@@ -1,0 +1,11 @@
+schemaVersion: att-tool/v1
+id: genEndToEndId
+name: Generate end-to-end ID
+description: Generate a unique end-to-end identifier
+command: [./tools/gen_e2e_id.sh, "${input.caseId}"]
+stdoutFormat: text
+arguments:
+  caseId:
+    name: Case ID
+    description: Full V2 Case ID
+    required: true

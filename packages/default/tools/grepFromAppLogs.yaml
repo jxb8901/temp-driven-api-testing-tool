@@ -1,0 +1,15 @@
+schemaVersion: att-tool/v1
+id: grepFromAppLogs
+name: Grep application logs
+description: Find one or more keywords in application logs
+command: [./tools/grep_from_app_logs.sh, "${input.logText}", "${input.keywords}"]
+stdoutFormat: yaml
+arguments:
+  logText:
+    name: Log Text
+    description: Application log text to search
+    required: true
+  keywords:
+    name: Keywords
+    description: Ordered YAML array of literal keywords
+    required: true

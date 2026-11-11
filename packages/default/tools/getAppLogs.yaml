@@ -1,0 +1,11 @@
+schemaVersion: att-tool/v1
+id: getAppLogs
+name: Get application logs
+description: Collect application logs for a case
+command: [./tools/get_app_logs.sh, "${input.caseId}"]
+stdoutFormat: text
+arguments:
+  caseId:
+    name: Case ID
+    description: Full V2 Case ID
+    required: true

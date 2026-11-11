@@ -1,0 +1,7 @@
+schemaVersion: att-tool/v1
+id: sample.getAcDate
+name: Get account date through a group
+description: Return the current account date through the sample dispatcher
+command: [./tools/tool_group_dispatch.sh, ./tools/get_ac_date.sh]
+stdoutFormat: text
+arguments: {}
