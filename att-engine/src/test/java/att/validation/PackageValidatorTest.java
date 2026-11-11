@@ -211,9 +211,9 @@ class PackageValidatorTest {
         Map<String, Path> sidecars = new LinkedHashMap<String, Path>();
         sidecars.put("template", tempDir.resolve("templates/T/debug.yaml"));
         sidecars.put("flow", tempDir.resolve("templates/flows/g/e/debug.yaml"));
-        sidecars.put("plain tool", tempDir.resolve("config/tools/plain.debug.yaml"));
-        sidecars.put("grouped tool", tempDir.resolve("config/tools/g.debug.yaml"));
-        for (Path sidecar : sidecars.values()) Files.write(sidecar, historical.getBytes("UTF-8"));
+        sidecars.put("plain tool", tempDir.resolve("tools/debug/plain.yaml"));
+        sidecars.put("grouped tool", tempDir.resolve("tools/debug/g.named.yaml"));
+        for (Path sidecar : sidecars.values()) { Files.createDirectories(sidecar.getParent()); Files.write(sidecar, historical.getBytes("UTF-8")); }
 
         PackageValidator.ValidationSummary summary = new PackageValidator(tempDir, config)
                 .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
@@ -241,7 +241,7 @@ class PackageValidatorTest {
         PackageValidator.ValidationSummary optional = new PackageValidator(tempDir, config)
                 .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
         assertFalse(optional.diagnostics.stream().anyMatch(item -> item.code().equals(DiagnosticCodes.DEBUG_INVALID)
-                && item.message().contains("config/tools/g.debug.yaml")));
+                && item.message().contains("tools/debug/g.named.yaml")));
     }
 
     @Test void projectFileCallsFollowNormalToolAndHelperValidation() throws Exception {

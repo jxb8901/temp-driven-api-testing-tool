@@ -371,7 +371,7 @@ class LoadCrossModeTest {
     @Test void loadDebugPromotesTypedToolArgumentsIntoTheNormalLoadRuntime() throws Exception {
         Path project = fixture();
         FrameworkConfig config = config();
-        write(project, "config/tools/echo.debug.yaml", "schemaVersion: att-debug/v1.2\narguments: {value: sidecar}\n");
+        write(project, "tools/debug/echo.yaml", "schemaVersion: att-debug/v1.2\narguments: {value: sidecar}\n");
         ExecutionOptions options = att.core.ExecutionOptionsTestSupport.parse(new String[]{"load", "--debug", "tool", "echo",
                 "--users", "1", "--duration", "1s", "--set", "arg.value=typed-load"});
         Map<String, Object> promoted = new DebugEngine(project, config).loadBootstrapInputForLoad(options);
@@ -390,7 +390,7 @@ class LoadCrossModeTest {
 
     @Test void groupedToolSidecarOverridesSurviveQuickLoadPromotion() throws Exception {
         Path project = fixture();
-        write(project, "config/tools/group.debug.yaml", "schemaVersion: att-debug/v1.2\narguments: {value: from-root}\n"
+        write(project, "tools/debug/group.echo.yaml", "schemaVersion: att-debug/v1.2\narguments: {value: from-root}\n"
                 + "tools:\n  echo:\n    arguments: {value: from-sidecar}\n");
         Map<String, att.config.ToolArgumentConfig> arguments = Collections.singletonMap("value",
                 new att.config.ToolArgumentConfig("value", "Value", "Value", true, ""));
