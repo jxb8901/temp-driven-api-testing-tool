@@ -176,7 +176,8 @@ public final class FrameworkConfigLoader {
                             new HttpHelperConfigLoader(references)::load)
                     : Collections.<String, HttpHelperConfig>emptyMap();
             // Package Tool definitions are discovered solely from packages/<id>/tools/*.yaml.
-            // Global DB/MQ/HTTP/SSH Helpers remain centrally configured.            Map<String, DbHelperConfig> dbHelpers = (v29 || v28 || v27 || v26 || v25)
+            // Global DB/MQ/HTTP/SSH Helpers remain centrally configured.
+            Map<String, DbHelperConfig> dbHelpers = (v29 || v28 || v27 || v26 || v25)
                     ? HelperDiscoveryLoader.load("db", map.get("dbhelpers"), runtimeConfigRoot, references,
                             new DbHelperConfigLoader(references)::load)
                     : Collections.<String, DbHelperConfig>emptyMap();
