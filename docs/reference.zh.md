@@ -3492,6 +3492,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | HTTPHelper | att-httphelper/v1.1 |
 | SSHHelper | att-sshhelper/v1.0 |
 | Package Tool | att-tool/v1 |
+| Legacy Tool group (migration only) | att-tool-group/v2.9 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
 | Template | att-template/v3.6 |
