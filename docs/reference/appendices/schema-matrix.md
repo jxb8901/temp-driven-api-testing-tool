@@ -13,7 +13,7 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | MQHelper | att-mqhelper/v1.3 |
 | HTTPHelper | att-httphelper/v1.1 |
 | SSHHelper | att-sshhelper/v1.0 |
-| Tool group | att-tool-group/v2.9 |
+| Package Tool | att-tool/v1 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
 | Template | att-template/v3.6 |
