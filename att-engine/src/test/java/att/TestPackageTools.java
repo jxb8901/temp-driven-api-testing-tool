@@ -39,8 +39,8 @@ public final class TestPackageTools {
         Files.createDirectories(toolRoot);
         for (Map.Entry<String,Map<String,Object>> item : converted.entrySet()) {
             Path file = toolRoot.resolve(item.getKey() + ".yaml").normalize();
-            if (!file.startsWith(toolRoot) || Files.exists(file))
-                throw new IllegalArgumentException("Duplicate fixture Tool: " + item.getKey());
+            if (!file.startsWith(toolRoot))
+                throw new IllegalArgumentException("Unsafe fixture Tool: " + item.getKey());
             Files.write(file, YamlSupport.parser().dump(item.getValue()).getBytes(StandardCharsets.UTF_8));
         }
         global.put("schemaVersion", "att-config/v2.13");
@@ -61,6 +61,8 @@ public final class TestPackageTools {
             tool.put("id", id);
             tool.put("name", raw.getOrDefault("name", id));
             tool.put("description", raw.getOrDefault("description", "Fixture " + id));
+            if (groupSsh instanceof Map && !((Map<?,?>) groupSsh).containsKey("helper"))
+                throw new IllegalArgumentException("Legacy Tool Group direct SSH credentials require a global SSH Helper.");
             if (groupSsh != null) tool.put("ssh", groupSsh);
             for (Map.Entry<String,Object> field : raw.entrySet()) {
                 if ("name".equals(field.getKey()) || "description".equals(field.getKey())) continue;
