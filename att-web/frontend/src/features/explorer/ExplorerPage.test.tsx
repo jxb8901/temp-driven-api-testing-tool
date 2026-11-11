@@ -255,9 +255,9 @@ describe('Explorer source viewer', () => {
         provenance: { toolGroupId: 'billing', toolName: 'Lookup' } }),
     }} />);
     expect(container.textContent).toContain('No standalone source file');
-    expect(container.textContent).toContain('Tool Group: billing');
-    expect(container.textContent).toContain('Tool: Lookup');
-    expect(container.textContent).toContain('Call-backed Tools use their configured provider');
+    expect(container.textContent).toContain('Package-local Tool: lookup');
+    expect(container.textContent).toContain('Name: Lookup');
+    expect(container.textContent).not.toContain('Tool Group:');
     expect(container.textContent).not.toContain('Source is not available for this resource');
 
     await render(<SourceViewer api={api} identity={identity} available={false} active resource={{
