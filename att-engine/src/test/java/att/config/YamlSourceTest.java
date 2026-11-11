@@ -59,7 +59,7 @@ class YamlSourceTest {
                 () -> new FrameworkConfigLoader().load(config, root));
         assertEquals("$ATT_PACKAGE_ROOT/tools/orders.date.yaml", error.file());
         assertEquals(DiagnosticCodes.TOOL_INVALID, error.code());
-        assertTrue(error.detail().contains("date") || error.detail().contains("call"),error.toString());
+        assertTrue(error.detail().contains("Expected rparen"),error.toString());
         assertNotNull(error.source());
     }
 

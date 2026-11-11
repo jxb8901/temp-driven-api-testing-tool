@@ -1356,7 +1356,7 @@ class PackageResourceInspectorTest {
     private static Path writeUtf8(Path path,String text) throws Exception {
         Path written=Files.write(path,text.getBytes(StandardCharsets.UTF_8));
         if ("config.yaml".equals(path.getFileName().toString())
-                && (text.contains("\ntools:\n") || text.contains("\ntoolGroups:\n")))
+                && (text.contains("\ntools:") || text.contains("\ntoolGroups:")))
             att.TestPackageTools.migrate(path,path.toAbsolutePath().getParent().getParent());
         return written;
     }

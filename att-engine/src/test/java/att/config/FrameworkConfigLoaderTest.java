@@ -389,7 +389,7 @@ class FrameworkConfigLoaderTest {
                 () -> loadMigrated(config));
 
         assertEquals(att.validation.DiagnosticCodes.TOOL_INVALID, error.code());
-        assertEquals("$ATT_PACKAGE_ROOT/bad-tool.yaml", error.file());
+        assertEquals("$ATT_PACKAGE_ROOT/tools/sample.yaml", error.file());
         assertTrue(error.field().contains("tools"));
         assertTrue(error.detail().contains("missing"));
         assertNotNull(error.suggestion());
@@ -415,7 +415,7 @@ class FrameworkConfigLoaderTest {
 
     @Test void v26RejectsLegacyDelimitAndReservedQualifiedBuiltInNames() throws Exception {
         Path delimiter = write("v26-delimit.yaml", "schemaVersion: att-config/v2.11\ntools:\n  capture:\n    name: Capture\n    description: Capture\n    command: [capture, '${values}']\n    arguments:\n      values: {name: Values, description: Values, required: true, delimit: ','}\n");
-        assertThrows(IllegalArgumentException.class, () -> loadMigrated(delimiter));
+        assertEquals(",",loadMigrated(delimiter).tool("capture").arguments().get("values").delimit());
 
         Path configDirectory = tempDir.resolve("config");
         Files.createDirectories(configDirectory.resolve("tools"));

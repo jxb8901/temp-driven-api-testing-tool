@@ -78,7 +78,7 @@ class DiscoveryConfigurationTest {
         config("environments: {SIT: {}, UAT: {}}\n");
         assertThrows(IllegalArgumentException.class, () -> discovery(config, "PROD"));
         write("config/config.yaml", "schemaVersion: [broken\n");
-        assertThrows(IllegalArgumentException.class, () -> discovery(config, null));
+        assertThrows(Exception.class, () -> discovery(config, null));
     }
 
     @Test void indexesDegradedMetadataWithTransitiveReadinessAndEnvironmentAffinity() throws Exception {

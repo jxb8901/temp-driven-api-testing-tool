@@ -71,7 +71,7 @@ public final class PackageToolRegistry {
                 String sshStrategy = "";
                 if (raw.get("ssh") instanceof Map) {
                     Map<?, ?> ssh = (Map<?, ?>) raw.get("ssh");
-                    sshHelper = String.valueOf(ssh.get("helper"));
+                    sshHelper = String.valueOf(ssh.get("helper")).toLowerCase(java.util.Locale.ROOT);
                     Object selection = ssh.get("selection");
                     if (selection instanceof Map) sshStrategy = String.valueOf(((Map<?, ?>) selection).get("strategy"));
                 }
