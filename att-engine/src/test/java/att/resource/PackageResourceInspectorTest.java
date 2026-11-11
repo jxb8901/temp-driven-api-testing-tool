@@ -400,7 +400,9 @@ class PackageResourceInspectorTest {
         Path root=Paths.get("").toRealPath().resolve("packages/default");
         Path config=Paths.get("").toRealPath().resolve("config/config.yaml");
         PackageResourceInspector inspector=new PackageResourceInspector(root,config,"SIT",
-                Collections.singletonList("tools/tool_group_dispatch.sh"),65536,262144);
+                Collections.singletonList("tools/tool_group_dispatch.sh"),65536,262144,false,true,
+                "safe-package-files",Collections.<String>emptyList(),false,
+                Collections.<String>emptyList(),Collections.<String>emptyList());
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,100).get("items");
         Map<String,Object> permitted=items.stream().filter(item->Boolean.TRUE.equals(item.get("sourceAvailable"))).findFirst().get();
         Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(permitted.get("resourceId")),null,0,1);
@@ -447,10 +449,11 @@ class PackageResourceInspectorTest {
                 65536,262144,false,true,"safe-package-files",Collections.<String>emptyList(),false,
                 Collections.<String>emptyList(),Collections.<String>emptyList());
         @SuppressWarnings("unchecked") Map<String,Object> deniedItem=((List<Map<String,Object>>)denied.inspect("list","tool",null,null,0,10).get("items")).get(0);
-        assertEquals(Boolean.FALSE,deniedItem.get("sourceAvailable"));assertEquals("not-allowlisted",deniedItem.get("sourceReason"));
-        assertEquals("script-backed",deniedItem.get("sourceKind"));
+        assertEquals(Boolean.TRUE,deniedItem.get("sourceAvailable"));
+        assertEquals("package-tool-descriptor",deniedItem.get("sourceKind"));
         Map<String,Object> deniedSource=denied.inspect("source","tool",String.valueOf(deniedItem.get("resourceId")),null,0,1);
-        assertEquals(Boolean.FALSE,deniedSource.get("available"));assertEquals("not-allowlisted",deniedSource.get("reason"));
+        assertEquals(Boolean.TRUE,deniedSource.get("available"));
+        assertEquals("tools/queue.yaml",deniedSource.get("logicalPath"));
         assertFalse(deniedItem.toString().contains(script.toString()));
         PackageResourceInspector allowed=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",
                 Collections.<String>emptyList(),Collections.singletonList(script.toRealPath().toString()),Collections.singletonList(externalRoot.toRealPath().toString()),
@@ -459,12 +462,13 @@ class PackageResourceInspectorTest {
         @SuppressWarnings("unchecked") Map<String,Object> allowedItem=((List<Map<String,Object>>)allowed.inspect("list","tool",null,null,0,10).get("items")).get(0);
         assertEquals(Boolean.TRUE,allowedItem.get("sourceAvailable"));
         Map<String,Object> source=allowed.inspect("source","tool",String.valueOf(allowedItem.get("resourceId")),null,0,1);
-        assertEquals(Boolean.TRUE,source.get("available"));assertEquals("shell",source.get("format"));
-        assertTrue(String.valueOf(source.get("logicalPath")).matches("external/[0-9a-f]{64}\\.sh"));
-        assertFalse(source.toString().contains(externalRoot.toString()));assertTrue(String.valueOf(source.get("text")).contains("echo external"));
+        assertEquals(Boolean.TRUE,source.get("available"));assertEquals("yaml",source.get("format"));
+        assertEquals("tools/queue.yaml",source.get("logicalPath"));
+        assertFalse(source.toString().contains("echo external"),"External script contents are not returned with Tool descriptor source.");
         Files.delete(script);
         Map<String,Object> missing=allowed.inspect("source","tool",String.valueOf(allowedItem.get("resourceId")),null,0,1);
-        assertEquals(Boolean.FALSE,missing.get("available"));assertEquals("missing",missing.get("reason"));
+        assertEquals(Boolean.TRUE,missing.get("available"));
+        assertEquals("tools/queue.yaml",missing.get("logicalPath"));
     }
 
     @Test void appliesDenyGlobsToCanonicalExternalRootRelativePathsBeforeAliasing() throws Exception {
@@ -484,11 +488,11 @@ class PackageResourceInspectorTest {
                 Collections.singletonList("**/private/**"),false,Collections.<String>emptyList(),Collections.<String>emptyList());
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,10).get("items");
         Map<String,Object> denied=items.stream().filter(item->"Private external script".equals(item.get("name"))).findFirst().get();
-        assertEquals(Boolean.FALSE,denied.get("sourceAvailable"),denied.toString());
-        assertEquals("forbidden",denied.get("sourceReason"),denied.toString());
+        assertEquals(Boolean.TRUE,denied.get("sourceAvailable"),denied.toString());
+        assertEquals("package-tool-descriptor",denied.get("sourceKind"),denied.toString());
         Map<String,Object> deniedSource=inspector.inspect("source","tool",String.valueOf(denied.get("resourceId")),null,0,1);
-        assertEquals(Boolean.FALSE,deniedSource.get("available"),deniedSource.toString());
-        assertEquals("forbidden",deniedSource.get("reason"),deniedSource.toString());
+        assertEquals(Boolean.TRUE,deniedSource.get("available"),deniedSource.toString());
+        assertEquals("tools/privateCheck.yaml",deniedSource.get("logicalPath"));
         assertFalse(denied.toString().contains(externalRoot.toString()));
         assertFalse(deniedSource.toString().contains(externalRoot.toString()));
 
@@ -496,8 +500,8 @@ class PackageResourceInspectorTest {
         assertEquals(Boolean.TRUE,allowed.get("sourceAvailable"),allowed.toString());
         Map<String,Object> allowedSource=inspector.inspect("source","tool",String.valueOf(allowed.get("resourceId")),null,0,1);
         assertEquals(Boolean.TRUE,allowedSource.get("available"),allowedSource.toString());
-        assertTrue(String.valueOf(allowedSource.get("logicalPath")).matches("external/[0-9a-f]{64}\\.sh"));
-        assertTrue(String.valueOf(allowedSource.get("text")).contains("echo allowed"));
+        assertEquals("tools/mqCheck.yaml",allowedSource.get("logicalPath"));
+        assertFalse(String.valueOf(allowedSource.get("text")).contains("echo allowed"));
         assertFalse(allowedSource.toString().contains(externalRoot.toString()));
     }
 
@@ -516,7 +520,11 @@ class PackageResourceInspectorTest {
                 65536,262144,false,true,"safe-package-files",Collections.<String>emptyList(),false,
                 Collections.<String>emptyList(),Collections.<String>emptyList());
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,10).get("items");
-        assertEquals(2,items.size());for(Map<String,Object> item:items){assertEquals(Boolean.FALSE,item.get("sourceAvailable"));assertEquals("out-of-root",item.get("sourceReason"));}
+        assertEquals(2,items.size());
+        for(Map<String,Object> item:items){
+            assertEquals(Boolean.TRUE,item.get("sourceAvailable"));
+            assertEquals("package-tool-descriptor",item.get("sourceKind"));
+        }
         assertFalse(items.toString().contains(secret.toString()));
     }
 
@@ -633,10 +641,12 @@ class PackageResourceInspectorTest {
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,10).get("items");
         Map<String,Object> item=items.stream().filter(value->"binary".equals(value.get("logicalId"))).findFirst()
                 .orElseThrow(()->new AssertionError("binary Tool should be indexed"));
-        assertEquals(Boolean.FALSE,item.get("sourceAvailable"));assertEquals("binary-file",item.get("sourceReason"));
+        assertEquals(Boolean.TRUE,item.get("sourceAvailable"));
+        assertEquals("package-tool-descriptor",item.get("sourceKind"));
         Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(item.get("resourceId")),null,0,1);
-        assertEquals(Boolean.FALSE,source.get("available"));assertEquals("binary-file",source.get("reason"));
-        assertFalse(source.containsKey("text"));
+        assertEquals(Boolean.TRUE,source.get("available"));
+        assertEquals("tools/binary.yaml",source.get("logicalPath"));
+        assertFalse(source.toString().contains("0xff"));
     }
 
     @Test void manifestSourceUsesExistingVisibilityAndStructuredRedactionWithoutExposingOtherUnlinkedFiles() throws Exception {
