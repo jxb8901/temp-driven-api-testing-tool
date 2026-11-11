@@ -1711,18 +1711,20 @@ Load scenarios may set evidence.resources.output to inherit (default) or none. n
 
 ### Tool
 
-A Tool is a named external or framework-native capability. A descriptor selects exactly one backend: command or call.
+A Tool is a named capability owned by the selected Package. Each `tools/*.yaml` file defines one `att-tool/v1` descriptor with exactly one command or call backend. DB/MQ/HTTP/SSH Helpers and their bindings remain global.
 
 #### Command-backed Tool
 
 A command Tool declares stdoutFormat to parse external stdout into the typed result:
 
 ~~~yaml
-tools:
-  queryOrder:
-    command: [./tools/query-order.sh]
-    stdoutFormat: json
-    arguments: {}
+schemaVersion: att-tool/v1
+id: queryOrder
+name: queryOrder
+description: Package Tool queryOrder
+command: [./tools/query-order.sh]
+stdoutFormat: json
+arguments: {}
 ~~~
 
 stdoutFormat accepts text, json, yaml or xml. It is ingress parsing: ATT parses stdout once and publishes the typed value at output.result. It does not control human-readable logging or file output. Exit code, bounded stdout/stderr preview and streamed process artifacts remain evidence.
@@ -1732,14 +1734,14 @@ stdoutFormat accepts text, json, yaml or xml. It is ingress parsing: ATT parses 
 A call-backed Tool invokes a built-in or supported native DB/MQ/HTTP/SSH operation. Its native typed return value is output.result. Call-backed descriptors do not declare stdoutFormat.
 
 ~~~yaml
-tools:
-  queryOrder:
-    call: "#{db.orders.query(sql='select id from orders where id=:id', parameters={id: ${input.orderId}})}"
-    arguments:
-      orderId:
-        name: Order ID
-        description: Order key
-        required: true
+schemaVersion: att-tool/v1
+id: queryOrder
+call: "#{db.orders.query(sql='select id from orders where id=:id', parameters={id: ${input.orderId}})}"
+arguments:
+  orderId:
+    name: Order ID
+    description: Order key
+    required: true
 ~~~
 
 Tool invocation has no result.format/path/overwrite contract. File persistence is explicit to an API that defines it; human-readable presentation belongs to Log or configured evidence output. HTTP/MQ parsing is owned by those transport boundaries.
@@ -1761,24 +1763,24 @@ A configured Tool `command` also has its own restricted Context. It may referenc
 For example:
 
 ```yaml
-tools:
-  invokePaymentApi:
-    name: Invoke Payment API
-    description: Invoke a file-content payment request
-    command:
-      - ./tools/invoke_payment_api.sh
-      - "${input.requestText}"
-      - "${input.environment}"
-    stdoutFormat: json
-    arguments:
-      requestText:
-        name: Request Body
-        description: Request body String
-        required: true
-      environment:
-        name: Environment
-        description: Target environment
-        required: true
+schemaVersion: att-tool/v1
+id: invokePaymentApi
+name: Invoke Payment API
+description: Invoke a file-content payment request
+command:
+  - ./tools/invoke_payment_api.sh
+  - "${input.requestText}"
+  - "${input.environment}"
+stdoutFormat: json
+arguments:
+  requestText:
+    name: Request Body
+    description: Request body String
+    required: true
+  environment:
+    name: Environment
+    description: Target environment
+    required: true
 ```
 
 The action call is the boundary between the general Runtime Context and this restricted Tool-input Context:
@@ -1820,21 +1822,21 @@ Quotes inside a Tool call belong to the ATT expression grammar; they are not she
 The following configured Tool keeps each declared input as one argv value:
 
 ```yaml
-tools:
-  writeAudit:
-    name: Write audit
-    description: Write one audit message for one source file
-    command: [./tools/write_audit.sh, "${input.message}", "${input.sourceFile}"]
-    stdoutFormat: yaml
-    arguments:
-      message:
-        name: Message
-        description: Exact audit message
-        required: true
-      sourceFile:
-        name: Source file
-        description: File associated with the message
-        required: true
+schemaVersion: att-tool/v1
+id: writeAudit
+name: Write audit
+description: Write one audit message for one source file
+command: [./tools/write_audit.sh, "${input.message}", "${input.sourceFile}"]
+stdoutFormat: yaml
+arguments:
+  message:
+    name: Message
+    description: Exact audit message
+    required: true
+  sourceFile:
+    name: Source file
+    description: File associated with the message
+    required: true
 ```
 
 Use a YAML block scalar when a call contains several quote layers:
@@ -1898,7 +1900,7 @@ Configured Tool calls are not available inside `command`:
 #{anotherConfiguredTool(value=${requestText})}
 ```
 
-This is rejected during configuration loading. Expanding one Tool's command cannot invoke another Tool or recursively invoke itself. An unknown, misspelled, differently cased, or undeclared `${...}` argument reference is also a validation error. For a standalone global Tool, the executable token is static and cannot itself contain `${...}` or `#{...}`.
+This is rejected during configuration loading. Expanding one Tool's command cannot invoke another Tool or recursively invoke itself. An unknown, misspelled, differently cased, or undeclared `${...}` argument reference is also a validation error. For a Package Tool, the executable token is static and cannot itself contain `${...}` or `#{...}`.
 
 If an argument declares a non-empty `argName`, its placeholder must appear exactly once and occupy one complete command token:
 
@@ -1920,12 +1922,12 @@ Call-backed expressions use the declared `arguments` map and preserve typed valu
 
 #### Inline Tool descriptor fields
 
-Global `tools` and Tool-group `tools` entries use the same Tool contract:
+Each `att-tool/v1` file defines one Package Tool. Global `tools` and `toolGroups` are no longer accepted:
 
 | Object | Allowed properties |
 |---|---|
-| `tools.<key>` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
-| call-backed `tools.<key>.cache` | required `scope: case|db` |
+| `att-tool/v1` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
+| call-backed `att-tool/v1.cache` | required `scope: case|db` |
 | `arguments.<key>` | `name`, `description`, `required`, optional `type`, `enumValues` (required only for `type: enum`), `argName`, `argNameMode`, `delimit`, `x-*` |
 
 An argument `type` declares the final resolved value contract for configured Tools: `string`, `integer`, `long`, `decimal`, `boolean`, `enum`, `bytes`, `map`, or `list`. Omitted `type` remains `any` for existing descriptors. Numeric and Boolean scalar types accept native values or trimmed numeric/`true`/`false` Strings; enum values must match one of `enumValues`; `bytes` accepts a byte array or converts a String to UTF-8. `string`, `map`, and `list` require that native value type. These checks run after the complete nested expression resolves, in validation when safely static and at runtime otherwise.
