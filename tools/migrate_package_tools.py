@@ -50,19 +50,41 @@ def main():
     raw = yaml.safe_load(source)
     if not isinstance(raw, dict):
         raise ValueError("Expected a global YAML mapping")
+    has_legacy_fields = "tools" in raw or "toolGroups" in raw
+    global_tools = raw.get("tools") or {}
+    if not isinstance(global_tools, dict):
+        raise ValueError("Global tools must be a mapping")
+    group_paths = raw.get("toolGroups") or []
+    if not isinstance(group_paths, list):
+        raise ValueError("Global toolGroups must be a list")
     definitions = {}
-    for tool_id, tool in (raw.get("tools") or {}).items():
+    for tool_id, tool in global_tools.items():
+        if isinstance(tool_id, str) and tool_id.startswith("x-"):
+            continue
+        if not isinstance(tool_id, str):
+            raise ValueError("Tool ID must be text")
         if not isinstance(tool, dict):
             raise ValueError("Invalid global Tool: " + tool_id)
         definitions[tool_id] = dict(tool)
-    for group_path in raw.get("toolGroups") or []:
+    for group_path in group_paths:
+        if not isinstance(group_path, str):
+            raise ValueError("Tool Group path must be text")
         path = safe(runtime, group_path)
         group = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(group, dict):
+            raise ValueError("Invalid Tool Group descriptor: " + str(group_path))
         if group.get("ssh"):
             raise ValueError("Unsupported legacy Tool Group SSH binding in " + str(group_path))
         prefix = group["id"] + "."
         script = argv(group["script"]) if "script" in group else []
-        for local_id, tool in group["tools"].items():
+        group_tools = group.get("tools")
+        if not isinstance(group_tools, dict):
+            raise ValueError("Tool Group tools must be a mapping: " + str(group_path))
+        for local_id, tool in group_tools.items():
+            if isinstance(local_id, str) and local_id.startswith("x-"):
+                continue
+            if not isinstance(local_id, str) or not isinstance(tool, dict):
+                raise ValueError("Invalid Tool in Tool Group: " + str(group_path))
             identifier = prefix + local_id
             if identifier in definitions:
                 raise ValueError("Duplicate migrated Tool ID: " + identifier)
@@ -72,9 +94,11 @@ def main():
                     raise ValueError("Group script with non-command Tool: " + identifier)
                 definition["command"] = script + argv(definition["command"])
             definitions[identifier] = definition
-    if not definitions:
-        print("No legacy Tool definitions were found.")
+    if not definitions and not has_legacy_fields:
+        print("No legacy Tool fields were found.")
         return
+    if not definitions:
+        print("Legacy tools/toolGroups are empty or disabled; obsolete Config keys must still be removed.")
     paths = []
     for package in args.package:
         root = package.resolve()
