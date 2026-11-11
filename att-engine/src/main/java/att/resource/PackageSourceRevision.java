@@ -58,6 +58,19 @@ final class PackageSourceRevision {
         binding(digest, root, candidate.templatesRoot());
         binding(digest, root, candidate.testcaseRoot());
         for (Path dependency : business) file(digest, root, dependency, bytes);
+        Path toolRoot = root.resolve("tools");
+        text(digest, "tools/");
+        if (Files.exists(toolRoot, LinkOption.NOFOLLOW_LINKS)) {
+            if (Files.isSymbolicLink(toolRoot) || !Files.isDirectory(toolRoot, LinkOption.NOFOLLOW_LINKS))
+                throw new IOException("Unsafe Package tools/ directory");
+            java.util.List<Path> descriptors = new java.util.ArrayList<Path>();
+            try (java.util.stream.Stream<Path> stream = Files.list(toolRoot)) {
+                stream.filter(p -> p.getFileName().toString().endsWith(".yaml")).forEach(descriptors::add);
+            }
+            descriptors.sort(java.util.Comparator.comparing(p -> p.getFileName().toString()));
+            if (descriptors.size() + business.size() + shared.size() > MAX_DEPENDENCIES) throw limit("dependency count");
+            for (Path descriptor : descriptors) file(digest, root, descriptor, bytes);
+        }
         text(digest, att.validation.SchemaFiles.registryDigest());
         StringBuilder result = new StringBuilder();
         for (byte value : digest.digest()) result.append(String.format("%02x", value & 255));
@@ -65,7 +78,7 @@ final class PackageSourceRevision {
     }
 
     private static void imports(Map<?, ?> source, Path runtime, Set<Path> paths) throws IOException {
-        for (String field : new String[]{"toolGroups", "dbhelpers", "mqhelpers", "httphelpers", "sshhelpers"}) {
+        for (String field : new String[]{"dbhelpers", "mqhelpers", "httphelpers", "sshhelpers"}) {
             Object configured = source.get(field);
             if (!(configured instanceof Iterable)) continue; // The configuration loader diagnoses invalid contracts.
             for (Object item : (Iterable<?>) configured) {

@@ -127,11 +127,11 @@ export function SourceViewer({ api, identity, available, active, resource, onFil
       This projection was reformatted to apply safety masking. It is not byte-exact source and cannot be used as an authoritative edit or publish draft.
     </p>}
     {identity.type === 'tool' && <section className="att-tool-source-provenance" aria-label="Tool source provenance">
-      <p>Tool Group: {String(toolProvenance.toolGroupId || 'Default')}</p>
-      <p>Tool: {String(toolProvenance.toolName || resource?.name || resource?.logicalId || identity.resourceId)}</p>
+      <p>Package-local Tool: {String(resource?.logicalId || identity.resourceId)}</p>
+      <p>Name: {String(toolProvenance.toolName || resource?.name || resource?.logicalId || identity.resourceId)}</p>
       <p>Source kind: {String(resource?.sourceKind || toolProvenance.toolSourceKind || 'configured Tool')}</p>
       {typeof toolProvenance.toolConfigLocation === 'string' && <p>Tool config: <code>{toolProvenance.toolConfigLocation}</code></p>}
-      {resource?.sourceKind === 'call-backed' && <p>Call-backed Tools use their configured provider; there is no standalone Tool YAML source.</p>}
+      {resource?.sourceKind === 'package-tool-descriptor' && <p>Source is the Package-owned att-tool/v1 descriptor; global Helpers remain centrally configured.</p>}
       {resource?.sourceKind === 'built-in-virtual' && <p>This Tool uses a built-in or virtual provider and has no standalone source file.</p>}
     </section>}
     {error && <button type="button" onClick={refreshSource} disabled={loading}>Retry source</button>}

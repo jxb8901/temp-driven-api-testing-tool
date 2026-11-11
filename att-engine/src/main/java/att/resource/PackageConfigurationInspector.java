@@ -50,7 +50,7 @@ public final class PackageConfigurationInspector {
     private static final List<String> RESOURCE_LISTS = Arrays.asList(
             "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata");
     private static final List<String> ALL_SECTIONS = Arrays.asList(
-            "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "toolGroups", "tools", "testdata");
+            "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata");
 
     private final Path packageRoot;
     private final Path configPath;
@@ -281,7 +281,10 @@ public final class PackageConfigurationInspector {
             List<Map<String, Object>> profiles = profiles(raw);
             result.put("environments", profiles);
             result.put("sections", declaredSections(raw, profiles));
-            result.put("diagnostics", Collections.emptyList());
+            result.put("diagnostics", raw.containsKey("tools") || raw.containsKey("toolGroups")
+                    ? Collections.singletonList(diagnostic("ATT-TOOL-MIGRATION-REQUIRED",
+                            "Legacy global Tools are unsupported. Move definitions to Package tools/*.yaml (att-tool/v1) and remove tools/toolGroups."))
+                    : Collections.emptyList());
             result.put("redactionEnabled", Boolean.valueOf(redactionEnabled));
             return result;
         } catch (ConfigurationLimitException exceeded) {
@@ -473,7 +476,6 @@ public final class PackageConfigurationInspector {
         sections.add(sshSection(config.sshHelpers(), sshOrigin));
         String httpOrigin = origin(raw, environment, "httphelpers");
         sections.add(httpSection(config.httpHelpers(), httpOrigin));
-        sections.add(toolSection(config.tools()));
         if(!sharedRuntime)sections.add(testdataSection(config, origin(raw, environment, "testdata")));
         if (selectedSection != null) for (Map<String,Object> section : sections) {
             if (!selectedSection.equals(section.get("id"))) continue;
@@ -856,36 +858,6 @@ public final class PackageConfigurationInspector {
         return section("httphelpers", "HTTP helpers", source, entries);
     }
 
-    private Map<String, Object> toolSection(Map<String, ToolConfig> tools) {
-        List<Map<String, Object>> entries = new ArrayList<Map<String, Object>>();
-        for (Map.Entry<String, ToolConfig> toolEntry : tools.entrySet()) {
-            ToolConfig tool = toolEntry.getValue();
-            Map<String, Object> entry = entry(toolEntry.getKey(), "global");
-            Map<String, Object> fields = fields(entry);
-            visible(fields, "groupId", tool.grouped() ? safeIdentifier(tool.groupId()) : "", "global");
-            visible(fields, "stdoutFormat", safeEnum(tool.stdoutFormat(), "", "text", "json", "yaml", "xml"), "global");
-            visible(fields, "commandBacked", Boolean.valueOf(tool.commandBacked()), "global");
-            if (tool.timeoutMs() != null) visible(fields, "timeoutMs", tool.timeoutMs(), "global");
-            List<Map<String, Object>> arguments = new ArrayList<Map<String, Object>>();
-            for (Map.Entry<String, ToolArgumentConfig> argumentEntry : tool.arguments().entrySet()) {
-                ToolArgumentConfig argument = argumentEntry.getValue();
-                Map<String, Object> item = new LinkedHashMap<String, Object>();
-                item.put("id", safeIdentifier(argumentEntry.getKey()));
-                Map<String, Object> argumentFields = new LinkedHashMap<String, Object>();
-                visible(argumentFields, "type", safeEnum(argument.type(), "any", "string", "number", "integer", "boolean", "object", "array"), "global");
-                visible(argumentFields, "required", Boolean.valueOf(argument.required()), "global");
-                visible(argumentFields, "multiValue", Boolean.valueOf(argument.multiValue()), "global");
-                visible(argumentFields, "namedArgv", Boolean.valueOf(argument.namedArgv()), "global");
-                visible(argumentFields, "repeatArgName", Boolean.valueOf(argument.repeatArgName()), "global");
-                item.put("fields", argumentFields);
-                arguments.add(item);
-            }
-            entry.put("arguments", arguments);
-            entries.add(entry);
-        }
-        return section("tools", "Tools and Tool groups", "global", entries);
-    }
-
     private Map<String, Object> testdataSection(FrameworkConfig config, String source) throws Exception {
         List<Map<String, Object>> entries = new ArrayList<Map<String, Object>>();
         TestdataDescriptorLoader loader = new TestdataDescriptorLoader(packageRoot);
@@ -943,13 +915,6 @@ public final class PackageConfigurationInspector {
         long totalBytes = 0;
         int count = 0;
         Map<?, ?> profile = profileMap(raw, environment);
-        for (String key : Arrays.asList("toolGroups")) {
-            List<?> values = listOrEmpty(raw.get(key));
-            for (Object value : values) {
-                if (!(value instanceof String)) continue;
-                totalBytes = checkDescriptorLimit(++count, totalBytes, String.valueOf(value), true);
-            }
-        }
         for (String key : RESOURCE_LISTS) {
             if(sharedRuntime&&"testdata".equals(key))continue;
             Object configured = profile != null && profile.containsKey(key) ? profile.get(key) : raw.get(key);
@@ -1190,7 +1155,6 @@ public final class PackageConfigurationInspector {
         if ("mqhelpers".equals(id)) return "MQ helpers";
         if ("sshhelpers".equals(id)) return "SSH helpers";
         if ("httphelpers".equals(id)) return "HTTP helpers";
-        if ("toolGroups".equals(id)) return "Tool groups";
         if ("testdata".equals(id)) return "Testdata descriptors";
         return "Tools";
     }
