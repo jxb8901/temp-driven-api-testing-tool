@@ -176,12 +176,14 @@ class WorkerMainTest {
         String javaExecutable=Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString();
         String classpath=System.getProperty("java.class.path");
         Path config=root.resolve("config/config.yaml");
-        Files.write(config,("schemaVersion: att-config/v2.11\nenvironment: SIT\noutputDirectory: output\n"
-                +"templates: {root: templates}\ntestcase: {root: testcase}\ntools:\n"
-                +"  slow:\n    name: Slow command\n    description: Worker termination regression\n"
-                +"    command: ["+yamlQuote(javaExecutable)+", '-cp', "+yamlQuote(classpath)+", 'att.worker.ToolProcessFixture', 'parent', "
+        Files.write(config,("schemaVersion: att-config/v2.13\nenvironment: SIT\noutputDirectory: output\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("tools/slow.yaml"),("schemaVersion: att-tool/v1\nid: slow\n"
+                +"name: Slow command\ndescription: Worker termination regression\n"
+                +"command: ["+yamlQuote(javaExecutable)+", '-cp', "+yamlQuote(classpath)+", 'att.worker.ToolProcessFixture', 'parent', "
                 +yamlQuote(parentStarted)+", "+yamlQuote(started)+", "+yamlQuote(completed)+"]\n"
-                +"    stdoutFormat: text\n    arguments: {}\n")
+                +"stdoutFormat: text\narguments: {}\n")
                 .getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SLOW/template.yaml"),("schemaVersion: att-template/v3.4\nname: SLOW\n"
                 +"description: command termination boundary\nactions:\n  invoke:\n    type: tool\n    call: \"#{slow()}\"\n")
