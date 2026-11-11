@@ -148,8 +148,10 @@ class ServerWarUiIT {
                 +"  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
         Files.writeString(home.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments: {SIT: {}}\ntestcase: {root: testcase}\ntemplates: {root: templates}\n"
-                +"tools:\n  hold:\n    name: Hold\n    description: Packaged WAR lifecycle parity fixture\n"
-                +"    command: [./tools/hold.sh]\n    stdoutFormat: text\n    arguments: {}\n");
+                "");
+        Files.writeString(Files.createDirectories(pkg.resolve("tools")).resolve("hold.yaml"),
+                "schemaVersion: att-tool/v1\nid: hold\nname: Hold\ndescription: Packaged WAR lifecycle parity fixture\n"
+                +"command: [./tools/hold.sh]\nstdoutFormat: text\narguments: {}\n");
         copySchemas(pkg);
         new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(pkg,home.resolve("config/config.yaml"),
                 "SIT",List.of(Path.of("testcase/parity.xlsx")),null,Set.of(),false));
@@ -743,8 +745,8 @@ class ServerWarUiIT {
             assertEquals(401, get(port, toolSourcePath, null), "Tool source retains the Tomcat authentication boundary.");
             JsonNode toolSource = getJson(port, toolSourcePath, auth);
             assertTrue(toolSource.path("available").asBoolean(), toolSource.toString());
-            assertEquals("tools/mq/check-queue.sh", toolSource.path("logicalPath").asText());
-            assertTrue(toolSource.path("text").asText().contains("package-local script source"));
+            assertEquals("tools/checkQueue.yaml", toolSource.path("logicalPath").asText());
+            assertTrue(toolSource.path("text").asText().contains("att-tool/v1"));
             assertFalse(toolSource.toString().contains(packageRoot.toString()), "Package filesystem paths remain private.");
             apiJson(port, "POST", api + "/load-schedules", scheduleAdminAuth, origin,
                     scheduleRequest("Packaged UI schedule", "load/scenario.yaml"), 201);
@@ -1112,12 +1114,14 @@ class ServerWarUiIT {
         Path configRoot = Files.createDirectories(localHome.resolve("config"));
         Files.writeString(configRoot.resolve("config.yaml"),
                 "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n"
-                        + "testcase:\n  root: testcase\ntemplates:\n  root: templates\ntools:\n  checkQueue:\n"
-                        + "    name: Check queue\n    description: Nested Tool script default source\n"
-                        + "    command: [bash, tools/mq/check-queue.sh]\n    stdoutFormat: text\n    arguments: {}\n");
+                        + "testcase:\n  root: testcase\ntemplates:\n  root: templates\n");
         Files.writeString(configRoot.resolve("source-references.yaml"), "payload: '&{config/tools/att-helper.sh}'\n");
         Path tools = Files.createDirectories(configRoot.resolve("tools"));
         Files.writeString(tools.resolve("att-helper.sh"), "#!/bin/sh\n# Safe configuration helper source\necho password=helper-secret\n");
+        Files.writeString(packageRoot.resolve("tools/checkQueue.yaml"),
+                "schemaVersion: att-tool/v1\nid: checkQueue\nname: Check queue\n"
+                +"description: Nested Tool script default source\ncommand: [bash, tools/mq/check-queue.sh]\n"
+                +"stdoutFormat: text\narguments: {}\n");
         Files.writeString(nestedTool, "#!/bin/sh\n# package-local script source\necho safe\n");
         Files.writeString(packageRoot.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata: {descriptors: [testdata/generated.yaml]}\n");
         Path testdata = Files.createDirectories(packageRoot.resolve("testdata"));

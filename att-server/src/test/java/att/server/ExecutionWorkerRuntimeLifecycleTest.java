@@ -37,7 +37,9 @@ class ExecutionWorkerRuntimeLifecycleTest {
 
         Path runtimeConfig=temp.resolve("local/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\n"
-                +"tools:\n  hold:\n    name: Hold\n    description: Hold the Worker for lifecycle checks\n    command: [./tools/hold.sh]\n    stdoutFormat: text\n    arguments: {}\n");
+                "");
+        Files.writeString(tools.resolve("hold.yaml"),"schemaVersion: att-tool/v1\nid: hold\nname: Hold\n"
+                +"description: Hold the Worker for lifecycle checks\ncommand: [./tools/hold.sh]\nstdoutFormat: text\narguments: {}\n");
         Path serverConfig=temp.resolve("server.yaml");
         Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
                 +"  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("data"))+"\n  auth: {mode: local}\n"
