@@ -232,7 +232,7 @@ class WorkerMainTest {
         Path template=root.resolve("templates/SIMPLE/template.yaml");
         Path scenario=root.resolve("load/long-running.yaml");
         Files.write(config,("schemaVersion: att-config/v2.11\nenvironment: SIT\noutputDirectory: output\n"
-                +"templates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(template,("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: termination boundary\n"
                 +"actions: {show: {type: log, message: worker-termination}}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(scenario,("schemaVersion: att-load/v1.6\nworkloads:\n- id: long-running\n"
@@ -355,7 +355,7 @@ class WorkerMainTest {
         Path root=temp.resolve("package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase"));
         copyTree(Paths.get("schemas"),root.resolve("schemas"));
-        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: worker parity\nactions: {show: {type: log, message: 'amount=${EXEC.INPUT.amount}|seed=${EXEC.VARS.seed}'}}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SIMPLE/debug.yaml"),("schemaVersion: att-debug/v1.2\ninputs: {amount: 1}\nvars: {seed: default}\n").getBytes(StandardCharsets.UTF_8));
         List<String> templateOverrides=java.util.Arrays.asList("input.amount=42","vars.seed=api");
@@ -406,13 +406,15 @@ class WorkerMainTest {
         Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/flows/debug/echo"));
         Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase"));
         copyTree(Paths.get("schemas"),root.resolve("schemas"));
-        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\n"
-                + "templates: {root: templates}\ntestcase: {root: testcase}\ntools:\n"
-                + "  echo:\n    name: Echo\n    description: Test echo tool\n    command: [echo, '${value}']\n"
-                + "    stdoutFormat: text\n    arguments:\n      value: {name: Value, description: Value, required: true}\n")
+        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+                + "templates: {root: templates}\ntestcase: {root: testcase}\n")
                 .getBytes(StandardCharsets.UTF_8));
-        Files.createDirectories(root.resolve("config/tools"));
-        Files.write(root.resolve("config/tools/echo.debug.yaml"),"schemaVersion: att-debug/v1.2\n".getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(root.resolve("tools/debug"));
+        Files.write(root.resolve("tools/echo.yaml"),("schemaVersion: att-tool/v1\nid: echo\n"
+                + "name: Echo\ndescription: Test echo tool\ncommand: [echo, '${value}']\n"
+                + "stdoutFormat: text\narguments:\n  value: {name: Value, description: Value, required: true}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("tools/debug/echo.yaml"),"schemaVersion: att-debug/v1.2\n".getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/flows/debug/echo/flow.yaml"),("schemaVersion: att-flow/v3.4\n"
                 + "id: debug.echo.v1\nname: Debug Echo\ndescription: override flow\nactions:\n"
                 + "  show: {type: log, message: 'flow=${EXEC.INPUT.message}|seed=${EXEC.VARS.seed}'}\n")
@@ -478,7 +480,7 @@ class WorkerMainTest {
         Path root=temp.resolve("load-package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("load"));
         copyTree(Paths.get("schemas"),root.resolve("schemas"));
-        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: worker load parity\nactions: {show: {type: log, message: worker-load-parity}}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("load/scenario.yaml"),("schemaVersion: att-load/v1.6\nworkloads:\n- id: worker-parity\n  target: {type: template, id: SIMPLE}\n  load: {users: 1, duration: 20ms}\n").getBytes(StandardCharsets.UTF_8));
         LoadResult direct=new DefaultAttService().load(new LoadRequest(root,null,null,null,"api-load",root.resolve("load/scenario.yaml"),null,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList()));
@@ -526,7 +528,7 @@ class WorkerMainTest {
         Path root=temp.resolve("load-generated-id"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates/SIMPLE"));
         Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("load"));
         copyTree(Paths.get("schemas"),root.resolve("schemas"));
-        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\nname: SIMPLE\ndescription: generated load id\nactions: {show: {type: log, message: generated-load-id}}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("load/scenario.yaml"),("schemaVersion: att-load/v1.6\nworkloads:\n- id: generated-id\n  target: {type: template, id: SIMPLE}\n  load: {users: 1, duration: 20ms}\n").getBytes(StandardCharsets.UTF_8));
         String request=mapper.writeValueAsString(fields("protocolVersion","att-worker/v1","jobId","worker-generated-load","command","load","packageRoot",root.toString(),"scenario","load/scenario.yaml"));
@@ -567,17 +569,17 @@ class WorkerMainTest {
     }
 
     @Test void cliWorkerAndDirectApiReturnEquivalentRunOutcomes() throws Exception {
-        Path root=temp.resolve("run-package"); Files.createDirectories(root.resolve("config/tools")); Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("tools"));
+        Path root=temp.resolve("run-package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("tools"));
         copyTree(Paths.get("schemas"),root.resolve("schemas"));
         Files.copy(Paths.get("packages/default/testcase/quick_start.xlsx"),root.resolve("testcase/quick_start.xlsx"));
         Files.copy(Paths.get("packages/default/testcase/quick_start.yaml"),root.resolve("testcase/quick_start.yaml"));
         Files.copy(Paths.get("packages/default/testcase/quick_start.xml"),root.resolve("testcase/quick_start.xml"));
         copyTree(Paths.get("packages/default/templates/QUICK_START"),root.resolve("templates/QUICK_START"));
-        Files.copy(Paths.get("config/tools/sample.yaml"),root.resolve("config/tools/sample.yaml"));
+        Files.copy(Paths.get("packages/default/tools/sample.getAcDate.yaml"),root.resolve("tools/sample.getAcDate.yaml"));
         Files.copy(Paths.get("packages/default/tools/get_ac_date.sh"),root.resolve("tools/get_ac_date.sh"));
         Path dispatcher=root.resolve("tools/tool_group_dispatch.sh"); Files.copy(Paths.get("packages/default/tools/tool_group_dispatch.sh"),dispatcher);
         dispatcher.toFile().setExecutable(true,true); root.resolve("tools/get_ac_date.sh").toFile().setExecutable(true,true);
-        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\nenvironment: SIT\noutputDirectory: output\ntemplates: {root: templates}\ntestcase: {root: testcase}\ntoolGroups: [config/tools/sample.yaml]\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.13\nenvironment: SIT\noutputDirectory: output\ntemplates: {root: templates}\ntestcase: {root: testcase}\n").getBytes(StandardCharsets.UTF_8));
         List<ExecutionEvent> directEvents=new ArrayList<ExecutionEvent>();
         RunResult direct=new DefaultAttService().run(new RunRequest(root,null,null,null,null,
                 Collections.singletonList(Paths.get("testcase/quick_start.xlsx")),null,Collections.<String>emptySet(),
