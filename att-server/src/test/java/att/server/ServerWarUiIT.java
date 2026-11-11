@@ -147,8 +147,7 @@ class ServerWarUiIT {
         Files.writeString(pkg.resolve("testcase/parity.yaml"),"schemaVersion: att-sidecar/v2.2\nid: parity\nexcel:\n"
                 +"  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
         Files.writeString(home.resolve("config/config.yaml"),"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
-                +"environments: {SIT: {}}\ntestcase: {root: testcase}\ntemplates: {root: templates}\n"
-                "");
+                +"environments: {SIT: {}}\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
         Files.writeString(Files.createDirectories(pkg.resolve("tools")).resolve("hold.yaml"),
                 "schemaVersion: att-tool/v1\nid: hold\nname: Hold\ndescription: Packaged WAR lifecycle parity fixture\n"
                 +"command: [./tools/hold.sh]\nstdoutFormat: text\narguments: {}\n");

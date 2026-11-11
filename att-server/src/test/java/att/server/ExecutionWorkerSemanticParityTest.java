@@ -108,8 +108,7 @@ class ExecutionWorkerSemanticParityTest {
         Path runtimeConfig=temp.resolve("lifecycle-runtime/config/config.yaml");
         Files.createDirectories(runtimeConfig.getParent());
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
-                +"templates: {root: templates}\ntestcase: {root: testcase}\n"
-                "");
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
         Files.writeString(tools.resolve("hold.yaml"),"schemaVersion: att-tool/v1\nid: hold\nname: Hold\n"
                 +"description: Hold the Worker for lifecycle parity checks\ncommand: [./tools/hold.sh]\nstdoutFormat: text\narguments: {}\n");
         Path libs=Files.createDirectories(temp.resolve("lifecycle-libs"));

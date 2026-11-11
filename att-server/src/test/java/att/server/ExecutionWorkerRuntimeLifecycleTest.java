@@ -36,8 +36,7 @@ class ExecutionWorkerRuntimeLifecycleTest {
                 +"actions:\n  hold:\n    type: tool\n    call: '#{hold()}'\n    timeoutMs: 300\n");
 
         Path runtimeConfig=temp.resolve("local/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
-        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\n"
-                "");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\n");
         Files.writeString(tools.resolve("hold.yaml"),"schemaVersion: att-tool/v1\nid: hold\nname: Hold\n"
                 +"description: Hold the Worker for lifecycle checks\ncommand: [./tools/hold.sh]\nstdoutFormat: text\narguments: {}\n");
         Path serverConfig=temp.resolve("server.yaml");
