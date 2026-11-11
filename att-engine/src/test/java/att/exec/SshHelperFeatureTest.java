@@ -47,14 +47,14 @@ class SshHelperFeatureTest {
     }
 
     private void group(String strategy) throws IOException {
-        write("config/tools/remote.yaml", "schemaVersion: att-tool-group/v2.9\nid: remote\nname: Remote\ndescription: Remote commands\n"
-                + "ssh:\n  helper: application\n" + (strategy == null ? "" : "  selection: {strategy: " + strategy + "}\n")
-                + "tools:\n  echo:\n    name: Echo\n    description: Echo\n    command: [echo, ok]\n    stdoutFormat: text\n");
+        write("tools/remote.echo.yaml", "schemaVersion: att-tool/v1\nid: remote.echo\nname: Echo\n"
+                + "description: Remote commands\nssh:\n  helper: application\n"
+                + (strategy == null ? "" : "  selection: {strategy: " + strategy + "}\n")
+                + "command: [echo, ok]\nstdoutFormat: text\n");
     }
 
     private Path profileConfig() throws IOException {
-        return write("config/config.yaml", "schemaVersion: att-config/v2.11\nenvironment: SIT\n"
-                + "toolGroups: [config/tools/remote.yaml]\n"
+        return write("config/config.yaml", "schemaVersion: att-config/v2.13\nenvironment: SIT\n"
                 + "environments:\n  SIT:\n    sshhelpers: [config/ssh/sit.yaml]\n"
                 + "  UAT:\n    sshhelpers: [config/ssh/uat.yaml]\n");
     }
@@ -215,7 +215,8 @@ class SshHelperFeatureTest {
         write("config/ssh/sit.yaml", descriptor("  - {id: one, host: sit.example}\n", "random") + "unsupported: true\n");
         assertThrows(Exception.class, () -> new FrameworkConfigLoader().load(config, root, "SIT"));
         write("config/ssh/sit.yaml", descriptor("  - {id: one, host: sit.example}\n", "random"));
-        write("config/tools/remote.yaml", "schemaVersion: att-tool-group/v2.9\nid: remote\nname: Remote\ndescription: Remote\nssh: {helper: absent}\ntools:\n  echo: {name: Echo, description: Echo, command: [echo, ok], stdoutFormat: text}\n");
+        write("tools/remote.echo.yaml", "schemaVersion: att-tool/v1\nid: remote.echo\nname: Echo\n"
+                + "description: Remote\nssh: {helper: absent}\ncommand: [echo, ok]\nstdoutFormat: text\n");
         assertThrows(Exception.class, () -> new FrameworkConfigLoader().load(config, root, "SIT"));
     }
 
@@ -224,18 +225,18 @@ class SshHelperFeatureTest {
         write("config/ssh/sit.yaml", descriptor("  - {id: one, host: sit.example}\n", "random"));
         write("config/ssh/uat.yaml", descriptor("  - {id: one, host: uat.example}\n", "random"));
         write("config/ssh/duplicate.yaml", descriptor("  - {id: one, host: other.example}\n", "random").replace("id: application", "id: APPLICATION"));
-        write("config/config.yaml", "schemaVersion: att-config/v2.11\nenvironment: SIT\n"
-                + "toolGroups: [config/tools/remote.yaml]\n"
+        write("config/config.yaml", "schemaVersion: att-config/v2.13\nenvironment: SIT\n"
                 + "environments:\n  SIT:\n    sshhelpers: [config/ssh/sit.yaml, config/ssh/duplicate.yaml]\n");
         assertThrows(Exception.class, () -> new FrameworkConfigLoader().load(config, root, "SIT"));
-        write("config/config.yaml", "schemaVersion: att-config/v2.11\nenvironment: SIT\n"
-                + "toolGroups: [config/tools/remote.yaml]\nsshhelpers: [config/ssh/sit.yaml]\n");
+        write("config/config.yaml", "schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+                + "sshhelpers: [config/ssh/sit.yaml]\n");
         write("config/ssh/sit.yaml", descriptor("  - {id: one, host: one.example}\n  - {id: two, host: two.example}\n", "random")
                 .replace("selection: {strategy: random}\n", ""));
         assertThrows(Exception.class, () -> new FrameworkConfigLoader().load(config, root));
         write("config/ssh/sit.yaml", descriptor("  - {id: one, host: one.example}\n", "random"));
-        write("config/tools/remote.yaml", "schemaVersion: att-tool-group/v2.9\nid: remote\nname: Remote\ndescription: Remote\n"
-                + "ssh: {helper: application, host: bypass.example}\ntools:\n  echo: {name: Echo, description: Echo, command: [echo, ok], stdoutFormat: text}\n");
+        write("tools/remote.echo.yaml", "schemaVersion: att-tool/v1\nid: remote.echo\nname: Echo\n"
+                + "description: Remote\nssh: {helper: application, host: bypass.example}\n"
+                + "command: [echo, ok]\nstdoutFormat: text\n");
         assertThrows(Exception.class, () -> new FrameworkConfigLoader().load(config, root));
     }
 
