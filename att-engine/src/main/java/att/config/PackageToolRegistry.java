@@ -67,9 +67,17 @@ public final class PackageToolRegistry {
                 String local = dot < 0 ? id : id.substring(dot + 1);
                 if (local.isEmpty() || (dot >= 0 && group.isEmpty()))
                     throw new IllegalArgumentException("Invalid Tool ID " + id);
+                String sshHelper = "";
+                String sshStrategy = "";
+                if (raw.get("ssh") instanceof Map) {
+                    Map<?, ?> ssh = (Map<?, ?>) raw.get("ssh");
+                    sshHelper = String.valueOf(ssh.get("helper"));
+                    Object selection = ssh.get("selection");
+                    if (selection instanceof Map) sshStrategy = String.valueOf(((Map<?, ?>) selection).get("strategy"));
+                }
                 Map<String, Object> fields = new LinkedHashMap<String, Object>();
                 for (Map.Entry<?, ?> entry : raw.entrySet())
-                    if (!"schemaVersion".equals(entry.getKey()) && !"id".equals(entry.getKey()))
+                    if (!"schemaVersion".equals(entry.getKey()) && !"id".equals(entry.getKey()) && !"ssh".equals(entry.getKey()))
                         fields.put(String.valueOf(entry.getKey()), entry.getValue());
                 if (!fields.containsKey("name")) fields.put("name", id);
                 if (!fields.containsKey("description")) fields.put("description", "Package Tool " + id);
@@ -90,7 +98,7 @@ public final class PackageToolRegistry {
                 }
                 Map<String, Object> one = Collections.singletonMap(local, fields);
                 FrameworkConfigLoader.addTools(one, result, group, Collections.<String>emptyList(), null,
-                        "", "", "tools", file, true, false, false, true);
+                        sshHelper, sshStrategy, "tools", file, true, false, false, true);
             } catch (Exception failure) {
                 throw new IOException("Package Tool " + logical + " is invalid: " + failure.getMessage(), failure);
             }

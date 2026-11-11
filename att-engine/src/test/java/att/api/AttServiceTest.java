@@ -26,7 +26,7 @@ class AttServiceTest {
         att.TestSchemas.install(root);
         Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.11\n"
                 + "outputDirectory: output\nenvironment: SIT\ntimeoutMs: 10000\n"
-                + "templates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes("UTF-8"));
+                + "templates: {root: templates}\ntestcase: {root: testcase}\n").getBytes("UTF-8"));
         ByteArrayOutputStream out=new ByteArrayOutputStream(), err=new ByteArrayOutputStream();
         PrintStream oldOut=System.out, oldErr=System.err;
         ValidateResult result;
@@ -52,7 +52,7 @@ class AttServiceTest {
         Files.createDirectories(root.resolve("tools"));
         att.TestSchemas.install(root);
         Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.12\n"
-                + "templates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n"
+                + "templates: {root: templates}\ntestcase: {root: testcase}\n"
                 + "execution: {runIdFormat: \"#{seq.next()}\"}\n").getBytes("UTF-8"));
         ValidateResult result=new DefaultAttService().validate(new ValidateRequest(root,Paths.get("config/config.yaml"),null,
                 Collections.<Path>emptyList(),null,Collections.<String>emptySet(),Collections.<String>emptySet(),
@@ -68,7 +68,7 @@ class AttServiceTest {
         att.TestSchemas.install(root);
         Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.11\n"
                 + "outputDirectory: output\nenvironment: SIT\n"
-                + "templates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes("UTF-8"));
+                + "templates: {root: templates}\ntestcase: {root: testcase}\n").getBytes("UTF-8"));
         DebugResult result=new DefaultAttService().debug(new DebugRequest(root,Paths.get("config/config.yaml"),null,
                 null,null,"template","MISSING",null,false));
         assertEquals(1,result.diagnostics().size());
@@ -86,7 +86,7 @@ class AttServiceTest {
         att.TestSchemas.install(root);
         Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.11\n"
                 + "outputDirectory: output\nenvironment: SIT\n"
-                + "templates: {root: templates}\ntestcase: {root: testcase}\ntools: {}\n").getBytes("UTF-8"));
+                + "templates: {root: templates}\ntestcase: {root: testcase}\n").getBytes("UTF-8"));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"), ("schemaVersion: att-template/v3.4\n"
                 + "name: SIMPLE\ndescription: debug profile test\nactions:\n"
                 + "  say: {type: log, message: hello}\n").getBytes("UTF-8"));
@@ -118,7 +118,7 @@ class AttServiceTest {
         att.TestSchemas.install(root);
         Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.11\n"
                 + "outputDirectory: output\nenvironment: SIT\ntemplates: {root: templates}\n"
-                + "testcase: {root: testcase}\ntools: {}\n").getBytes("UTF-8"));
+                + "testcase: {root: testcase}\n").getBytes("UTF-8"));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"), ("schemaVersion: att-template/v3.4\n"
                 + "name: SIMPLE\ndescription: collision regression\nactions:\n"
                 + "  show: {type: log, message: load-started}\n").getBytes("UTF-8"));
@@ -162,7 +162,7 @@ class AttServiceTest {
         att.TestSchemas.install(root);
         Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.11\n"
                 + "outputDirectory: output\nenvironment: SIT\ntemplates: {root: templates}\n"
-                + "testcase: {root: testcase}\ntools: {}\n").getBytes("UTF-8"));
+                + "testcase: {root: testcase}\n").getBytes("UTF-8"));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"), ("schemaVersion: att-template/v3.4\n"
                 + "name: SIMPLE\ndescription: report failure outcome test\nactions:\n"
                 + "  show: {type: log, message: load-pass}\n").getBytes("UTF-8"));
@@ -207,7 +207,7 @@ class AttServiceTest {
                 +"  message: {requestQueues: [REQUEST.Q]}\ninstances: [{id: primary}]\n").getBytes("UTF-8"));
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.11\n"
                 +"outputDirectory: output\nenvironment: SIT\ntemplates: {root: templates}\n"
-                +"testcase: {root: testcase}\ntools: {}\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
+                +"testcase: {root: testcase}\nmqhelpers: [config/mqhelpers/broker.yaml]\n").getBytes("UTF-8"));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"),("schemaVersion: att-template/v3.4\n"
                 +"name: SIMPLE\ndescription: cleanup failure result preservation\nactions:\n"
                 +"  show: {type: log, message: completed-before-cleanup}\n"
@@ -303,7 +303,7 @@ class AttServiceTest {
         att.TestSchemas.install(root);
         Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.12\n"
                 + "outputDirectory: output\nenvironment: SIT\ntemplates: {root: templates}\n"
-                + "testcase: {root: testcase}\ntools: {}\n"
+                + "testcase: {root: testcase}\n"
                 + "execution: {runIdFormat: \"run-#{str.replace(value=${EXEC.RUN_STARTED_AT}, target=':', replacement='-')}\"}\n").getBytes("UTF-8"));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"), ("schemaVersion: att-template/v3.4\n"
                 + "name: SIMPLE\ndescription: load identity timestamp\nactions:\n"

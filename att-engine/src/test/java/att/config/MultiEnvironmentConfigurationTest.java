@@ -30,13 +30,18 @@ class MultiEnvironmentConfigurationTest {
 
         assertEquals("SIT", sit.get("environment"));
         assertEquals("UAT", uat.get("environment"));
-        assertEquals(sit.get("toolGroups"), uat.get("toolGroups"));
-        assertEquals(sit.get("tools"), uat.get("tools"));
-        assertEquals(Arrays.asList("config/tools/sample.yaml", "config/tools/fpp.yaml", "config/tools/orders-db.yaml"), sit.get("toolGroups"));
+        assertFalse(sit.containsKey("toolGroups"));
+        assertFalse(uat.containsKey("toolGroups"));
+        assertFalse(sit.containsKey("tools"));
+        assertFalse(uat.containsKey("tools"));
 
-        Map<?, ?> sitTools = map(sit.get("tools"));
-        assertNotNull(sitTools.get("invokePaymentApi"));
-        assertNotNull(sitTools.get("getAcDate"));
+        Map<String, ToolConfig> packageTools = PackageToolRegistry.load(root);
+        assertNotNull(packageTools.get("invokePaymentApi"));
+        assertNotNull(packageTools.get("getAcDate"));
+        assertNotNull(packageTools.get("fpp.invokeApi"));
+        assertNotNull(packageTools.get("orders.find"));
+        for (ToolConfig tool : packageTools.values())
+            JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolve(root,"att-tool-v1.schema.json"), yaml(tool.sourceFile()));
 
         assertEquals(Arrays.asList("config/dbhelpers/sit/orders.yaml"), sit.get("dbhelpers"));
         assertEquals(Arrays.asList("config/dbhelpers/uat/orders.yaml"), uat.get("dbhelpers"));

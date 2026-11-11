@@ -79,6 +79,41 @@
         "yaml",
         "xml"
       ]
+    },
+    "ssh": {
+      "type": "object",
+      "required": [
+        "helper"
+      ],
+      "properties": {
+        "helper": {
+          "type": "string",
+          "minLength": 1
+        },
+        "selection": {
+          "type": "object",
+          "required": [
+            "strategy"
+          ],
+          "properties": {
+            "strategy": {
+              "enum": [
+                "random",
+                "roundRobin",
+                "all"
+              ]
+            }
+          },
+          "patternProperties": {
+            "^x-": {}
+          },
+          "additionalProperties": false
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
     }
   },
   "oneOf": [
