@@ -380,16 +380,16 @@ class PackageResourceInspectorTest {
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,10).get("items");
         Map<String,Object> callBacked=items.stream().filter(value->"lookup".equals(value.get("logicalId"))).findFirst().orElseThrow(AssertionError::new);
         Map<String,Object> builtIn=items.stream().filter(value->"normalize".equals(value.get("logicalId"))).findFirst().orElseThrow(AssertionError::new);
-        assertEquals(Boolean.FALSE,callBacked.get("sourceAvailable"));
-        assertEquals("no-standalone-source",callBacked.get("sourceReason"));
-        assertEquals("call-backed",callBacked.get("sourceKind"));
-        assertEquals("built-in-virtual",builtIn.get("sourceKind"));
+        assertEquals(Boolean.TRUE,callBacked.get("sourceAvailable"));
+        assertEquals("package-tool-descriptor",callBacked.get("sourceKind"));
+        assertEquals("package-tool-descriptor",builtIn.get("sourceKind"));
         @SuppressWarnings("unchecked") Map<String,Object> provenance=(Map<String,Object>)callBacked.get("provenance");
         assertEquals("Default",provenance.get("toolGroupId"));assertEquals("Billing Lookup",provenance.get("toolName"));
-        assertEquals("config/config.yaml",provenance.get("toolConfigLocation"));
+        assertEquals("tools/lookup.yaml",provenance.get("toolConfigLocation"));
         Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(callBacked.get("resourceId")),null,0,1);
-        assertEquals(Boolean.FALSE,source.get("available"));assertEquals("no-standalone-source",source.get("reason"));
-        assertFalse(source.containsKey("text"));assertFalse(source.toString().contains("payload=safe"));
+        assertEquals(Boolean.TRUE,source.get("available"));
+        assertEquals("tools/lookup.yaml",source.get("logicalPath"));
+        assertTrue(String.valueOf(source.get("text")).contains("att-tool/v1"));
         Map<String,Object> detail=inspector.inspect("detail","tool",String.valueOf(callBacked.get("resourceId")),null,0,1);
         @SuppressWarnings("unchecked") Map<String,Object> definition=(Map<String,Object>)detail.get("definition");
         assertEquals("call",definition.get("executionKind"));assertEquals("Default",definition.get("groupId"));
@@ -404,8 +404,8 @@ class PackageResourceInspectorTest {
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list","tool",null,null,0,100).get("items");
         Map<String,Object> permitted=items.stream().filter(item->Boolean.TRUE.equals(item.get("sourceAvailable"))).findFirst().get();
         Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(permitted.get("resourceId")),null,0,1);
-        assertEquals(Boolean.TRUE,source.get("available"));assertEquals("shell",source.get("format"));
-        assertEquals("tools/tool_group_dispatch.sh",source.get("logicalPath"));
+        assertEquals(Boolean.TRUE,source.get("available"));assertEquals("yaml",source.get("format"));
+        assertTrue(String.valueOf(source.get("logicalPath")).matches("tools/[^/]+\\.yaml"));
         assertFalse(String.valueOf(source.get("text")).contains(root.toString()));
     }
 
@@ -428,9 +428,9 @@ class PackageResourceInspectorTest {
             assertEquals(Boolean.TRUE,item.get("sourceAvailable"),item.toString());
             Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(item.get("resourceId")),null,0,1);
             assertEquals(Boolean.TRUE,source.get("available"),source.toString());
-            assertEquals("tools/mq/檢查佇列.sh",source.get("logicalPath"));
-            assertEquals("shell",source.get("format"));
-            assertTrue(String.valueOf(source.get("text")).contains("café"));
+            assertTrue(String.valueOf(source.get("logicalPath")).matches("tools/(relative|absolute)\\.yaml"));
+            assertEquals("yaml",source.get("format"));
+            assertTrue(String.valueOf(source.get("text")).contains("att-tool/v1"));
             assertFalse(source.toString().contains(root.toString()));
         }
     }
@@ -995,7 +995,7 @@ class PackageResourceInspectorTest {
         writeUtf8(root.resolve("templates/FORM/debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {amount: 7}\nvars: {reference: REF001}\n");
         writeUtf8(root.resolve("templates/flows/demo/flow.yaml").getParent().resolve("debug.yaml"),
                 "schemaVersion: att-debug/v1.2\ninputs: {flowValue: 9}\nvars: {flowRef: FLOW01}\n");
-        writeUtf8(root.resolve("config/tools/echo.debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {toolInput: 11}\narguments: {value: typed-argument}\n");
+        writeUtf8(Files.createDirectories(root.resolve("tools/debug")).resolve("echo.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {toolInput: 11}\narguments: {value: typed-argument}\n");
         PackageResourceInspector inspector=new PackageResourceInspector(root,Paths.get("config/config.yaml"),"SIT",Collections.<String>emptyList(),65536,262144);
         for(String type:java.util.Arrays.asList("template","flow","tool")) {
             @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)inspector.inspect("list",type,null,null,0,20).get("items");
@@ -1344,7 +1344,11 @@ class PackageResourceInspectorTest {
     }
 
     private static Path writeUtf8(Path path,String text) throws Exception {
-        return Files.write(path,text.getBytes(StandardCharsets.UTF_8));
+        Path written=Files.write(path,text.getBytes(StandardCharsets.UTF_8));
+        if ("config.yaml".equals(path.getFileName().toString())
+                && (text.contains("\ntools:\n") || text.contains("\ntoolGroups:\n")))
+            att.TestPackageTools.migrate(path,path.toAbsolutePath().getParent().getParent());
+        return written;
     }
 
     private static String repeat(char value,int count) {

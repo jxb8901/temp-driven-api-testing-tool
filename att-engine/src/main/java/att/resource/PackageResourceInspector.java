@@ -2479,7 +2479,7 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private String sourceUnavailableReason(Resource resource) {
-        if (resource != null && "tool".equals(resource.type)
+        if (resource != null && "tool".equals(resource.type) && resource.yamlSource == null
                 && resource.textSource == null && resource.textSourceCandidate == null) return "no-standalone-source";
         if (!sourceBrowsingEnabled) return "source-disabled";
         if (resource != null && resource.textSource != null) return textSourceReason(resource,resource.textSource);
