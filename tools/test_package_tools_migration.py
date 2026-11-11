@@ -62,9 +62,15 @@ class PackageToolMigrationTest(unittest.TestCase):
             self.assertEqual("att-tool/v1", tool["schemaVersion"])
             self.assertEqual(["echo", "${input.message}"], tool["command"])
         self.assertNotIn("tools", yaml.safe_load(self.config.read_text(encoding="utf-8")))
+        # Repeating an already completed cutover is a harmless no-op.
         repeat = self.run_cli(*options, "--write")
-        self.assertNotEqual(0, repeat.returncode)
-        self.assertIn("Refusing to overwrite", repeat.stderr)
+        self.assertEqual(0, repeat.returncode, repeat.stderr)
+        # Re-introducing the legacy source must never overwrite existing Package Tools.
+        self.config.write_text(original, encoding="utf-8")
+        collision = self.run_cli(*options, "--write")
+        self.assertNotEqual(0, collision.returncode)
+        self.assertIn("Refusing to overwrite", collision.stderr)
+        self.assertEqual(original, self.config.read_text(encoding="utf-8"))
 
     def test_disabled_entries_are_not_migrated(self):
         self.config.write_text(
