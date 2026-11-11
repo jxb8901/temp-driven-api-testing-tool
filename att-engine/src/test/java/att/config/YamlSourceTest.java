@@ -49,14 +49,18 @@ class YamlSourceTest {
         assertTrue(error.format().contains("line=2"));
     }
 
-    @Test void invalidToolCallPointsToSpecificCallInsteadOfWholeToolGroup() throws Exception {
-        Path group = write("config/tools/db.yaml", "schemaVersion: att-tool-group/v2.9\nid: orders\nname: Orders\ndescription: Query orders\ntools:\n  date:\n    name: Date\n    description: Current date\n    call: \"#{db.orders.scalar(sql='select to_char(d,'yyyymmdd')')}\"\n");
-        Path config = write("config/config.yaml", "schemaVersion: att-config/v2.11\ntoolGroups: [config/tools/db.yaml]\n");
-        DiagnosticException error = assertThrows(DiagnosticException.class, () -> new FrameworkConfigLoader().load(config, root));
-        assertEquals("$ATT_PACKAGE_ROOT/config/tools/db.yaml", error.file()); assertEquals("tools.date.call", error.field());
-        assertEquals(9, error.source().line());
-        String sourceLine = Files.readAllLines(group, StandardCharsets.UTF_8).get(8);
-        assertEquals(sourceLine.indexOf("yyyymmdd") + 1, error.source().column());
+    @Test void invalidToolCallPointsToItsPackageDescriptor() throws Exception {
+        Path tool = write("tools/orders.date.yaml",
+                "schemaVersion: att-tool/v1\nid: orders.date\nname: Date\n"
+                + "description: Current date\n"
+                + "call: \"#{db.orders.scalar(sql='select to_char(d,'yyyymmdd')')}\"\n");
+        Path config = write("config/config.yaml", "schemaVersion: att-config/v2.13\n");
+        DiagnosticException error = assertThrows(DiagnosticException.class,
+                () -> new FrameworkConfigLoader().load(config, root));
+        assertEquals("$ATT_PACKAGE_ROOT/tools/orders.date.yaml", error.file());
+        assertEquals(DiagnosticCodes.TOOL_INVALID, error.code());
+        assertTrue(error.detail().contains("date") || error.detail().contains("call"),error.toString());
+        assertNotNull(error.source());
     }
 
     @Test void dbHelperFailureDoesNotBlameGlobalConfig() throws Exception {

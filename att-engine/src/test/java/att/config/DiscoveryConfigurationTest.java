@@ -287,9 +287,11 @@ class DiscoveryConfigurationTest {
     }
 
     private FrameworkConfig discovery(Path config, String environment) throws Exception {
+        att.TestPackageTools.migrate(config,root);
         return new FrameworkConfigLoader().loadDiscovery(config, root, root, environment);
     }
-    private PackageResourceInspector inspector(Path config, String environment) {
+    private PackageResourceInspector inspector(Path config, String environment) throws Exception {
+        att.TestPackageTools.migrate(config,root);
         return new PackageResourceInspector(root, config, environment, Collections.emptyList(), 65536, 262144, true);
     }
     private Path config(String fields) throws Exception {

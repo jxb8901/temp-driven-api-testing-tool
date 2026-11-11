@@ -99,8 +99,14 @@ public final class PackageToolRegistry {
                 Map<String, Object> one = Collections.singletonMap(local, fields);
                 FrameworkConfigLoader.addTools(one, result, group, Collections.<String>emptyList(), null,
                         sshHelper, sshStrategy, "tools", file, true, false, false, true);
+            } catch (att.validation.DiagnosticException diagnostic) {
+                throw diagnostic;
             } catch (Exception failure) {
-                throw new IOException("Package Tool " + logical + " is invalid: " + failure.getMessage(), failure);
+                att.validation.DiagnosticException error = att.validation.DiagnosticException.wrap(
+                        att.validation.DiagnosticCodes.TOOL_INVALID,
+                        "Invalid Package Tool '" + logical + "'", failure,
+                        candidate.toString(), "tools", "Correct the att-tool/v1 descriptor and referenced Helper.");
+                throw YamlSupport.locate(error,candidate,error.field());
             }
         }
         return Collections.unmodifiableMap(result);
