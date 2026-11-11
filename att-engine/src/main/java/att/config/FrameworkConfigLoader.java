@@ -185,6 +185,19 @@ public final class FrameworkConfigLoader {
                     ? HelperDiscoveryLoader.load("mq", map.get("mqhelpers"), runtimeConfigRoot, references,
                             new MqHelperConfigLoader(references)::load)
                     : Collections.<String, MqHelperConfig>emptyMap();
+            if (!references.isDiscovery()) for (ToolConfig tool : tools.values()) {
+                if (tool.sshHelper().isEmpty()) continue;
+                boolean known = false;
+                for (String id : sshHelpers.keySet()) if (id.equalsIgnoreCase(tool.sshHelper())) known = true;
+                if (!known) throw new att.validation.DiagnosticException(
+                        att.validation.DiagnosticCodes.TOOL_INVALID,
+                        "Package Tool references an unknown global SSH Helper",
+                        "Tool '" + tool.key() + "' requires SSH Helper '" + tool.sshHelper()
+                                + "' in the selected Environment.",
+                        tool.sourceFile() == null ? null : tool.sourceFile().toString(),
+                        "ssh.helper", null, null, null, null, null,
+                        "Configure the Helper in global sshhelpers for this Environment, or fix the Tool ssh.helper reference.", null);
+            }
             FrameworkConfig global = new FrameworkConfig(relativePath(map.get("outputDirectory"), "output", "outputDirectory"),
                     Paths.get("report"), Paths.get("logs"),
                     map.get("environment") == null ? "SIT" : SchemaSupport.string(map.get("environment"), "environment", true), positiveInteger(map.get("timeoutMs"), 10000, "timeoutMs"),
