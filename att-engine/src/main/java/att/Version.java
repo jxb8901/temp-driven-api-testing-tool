@@ -10,6 +10,7 @@ public final class Version {
     public static final String BUILD_TIME = property("att.buildTime", "unknown");
     public static final String GIT_COMMIT = property("att.gitCommit", "unknown");
     public static final String PACKAGE_SCHEMA = "att-package/v1";
+    public static final String TOOL_SCHEMA = "att-tool/v1";
     public static final String CONFIG_SCHEMA = "att-config/v2.13";
     public static final String PREVIOUS_CONFIG_SCHEMA = "att-config/v2.12";
     public static final String OLDER_CONFIG_SCHEMA = "att-config/v2.7";

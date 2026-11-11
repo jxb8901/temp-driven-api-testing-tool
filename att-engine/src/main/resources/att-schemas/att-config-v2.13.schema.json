@@ -193,14 +193,6 @@
       },
       "additionalProperties": false
     },
-    "toolGroups": {
-      "type": "array",
-      "uniqueItems": true,
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
     "dbhelpers": {
       "type": "array",
       "uniqueItems": true,
@@ -264,18 +256,6 @@
     },
     "ssh": {
       "$ref": "#/$defs/ssh"
-    },
-    "tools": {
-      "type": "object",
-      "propertyNames": {
-        "pattern": "^(?:x-.*|[A-Za-z_][A-Za-z0-9_-]*)$"
-      },
-      "patternProperties": {
-        "^x-": {}
-      },
-      "additionalProperties": {
-        "$ref": "#/$defs/tool"
-      }
     },
     "packagePolicy": {
       "type": "object",

@@ -136,6 +136,7 @@ public final class FrameworkConfigLoader {
                     ? schema(runtimeConfigRoot, "att-config-v2.13.schema.json")
                     : att.validation.SchemaFiles.resolveVersion(runtimeConfigRoot, schemaVersion))
                     : schema(runtimeConfigRoot, schemaName);
+            rejectLegacyGlobalTools(rawMap);
             att.validation.SchemaMigrationGuidance.verify(schema,
                     schema(runtimeConfigRoot, "att-config-v2.13.schema.json"), rawMap, schemaVersion, Version.CONFIG_SCHEMA);
             SchemaSupport.rejectUnknown(rawMap, "config", v28
@@ -162,8 +163,10 @@ public final class FrameworkConfigLoader {
                     v29 || v28, selector);
             att.validation.SchemaMigrationGuidance.verify(schema,
                     schema(runtimeConfigRoot, "att-config-v2.13.schema.json"), map, schemaVersion, Version.CONFIG_SCHEMA);
+            rejectLegacyGlobalTools(map);
             validateGlobalMappings(map);
-            Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+            Map<String, ToolConfig> tools = packageAware ? PackageToolRegistry.load(packageRoot)
+                    : Collections.<String, ToolConfig>emptyMap();
             Map<String, SshHelperConfig> sshHelpers = (v29 || v28 || v27)
                     ? HelperDiscoveryLoader.load("ssh", map.get("sshhelpers"), runtimeConfigRoot, references,
                             new SshHelperConfigLoader(references)::load)
@@ -172,17 +175,8 @@ public final class FrameworkConfigLoader {
                     ? HelperDiscoveryLoader.load("http", map.get("httphelpers"), runtimeConfigRoot, references,
                             new HttpHelperConfigLoader(references)::load)
                     : Collections.<String, HttpHelperConfig>emptyMap();
-            SshConfig globalSsh = ssh(map.get("ssh"), "config.ssh");
-            try {
-                addTools(map.get("tools"), tools, "", Collections.<String>emptyList(), globalSsh, "", "", "tools", path,
-                        v29 || v28 || v27 || v26, !(v29 || v28 || v27 || v26), v29, v210);
-                if (v29 || v28 || v27 || v26 || v25 || v22) addToolGroups(map.get("toolGroups"), runtimeConfigRoot, tools, sshHelpers, references.isDiscovery());
-            } catch (Exception e) {
-                throw att.validation.DiagnosticException.wrap(att.validation.DiagnosticCodes.TOOL_INVALID,
-                        "Invalid tool configuration", e, path.toString(), "tools/toolGroups",
-                        "Check the qualified tool/group name, required metadata, declared arguments, command placeholders, and executable path.");
-            }
-            Map<String, DbHelperConfig> dbHelpers = (v29 || v28 || v27 || v26 || v25)
+            // Package Tool definitions are discovered solely from packages/<id>/tools/*.yaml.
+            // Global DB/MQ/HTTP/SSH Helpers remain centrally configured.            Map<String, DbHelperConfig> dbHelpers = (v29 || v28 || v27 || v26 || v25)
                     ? HelperDiscoveryLoader.load("db", map.get("dbhelpers"), runtimeConfigRoot, references,
                             new DbHelperConfigLoader(references)::load)
                     : Collections.<String, DbHelperConfig>emptyMap();
@@ -391,7 +385,20 @@ public final class FrameworkConfigLoader {
         return value instanceof Map ? relativePath(((Map<?, ?>) value).get("root"), "testcase", "testcase.root") : Paths.get("testcase");
     }
 
-    private static void addTools(Object configured, Map<String, ToolConfig> result, String groupId,
+    private static void rejectLegacyGlobalTools(Map<?, ?> raw) {
+        if (raw.containsKey("tools") || raw.containsKey("toolGroups"))
+            throw new IllegalArgumentException("Legacy global tools/toolGroups are unsupported in ATT 4.2.10. "
+                    + "Migrate each Tool into the selected Package's tools/*.yaml with schemaVersion: att-tool/v1; "
+                    + "remove tools and toolGroups from config/config.yaml. No global Tool fallback is provided.");
+        Object profiles = raw.get("environments");
+        if (profiles instanceof Map) for (Object value : ((Map<?, ?>) profiles).values())
+            if (value instanceof Map && (((Map<?, ?>) value).containsKey("tools")
+                    || ((Map<?, ?>) value).containsKey("toolGroups")))
+                throw new IllegalArgumentException("Legacy Environment tools/toolGroups are unsupported; "
+                        + "migrate Tool definitions into Package tools/*.yaml.");
+    }
+
+    static void addTools(Object configured, Map<String, ToolConfig> result, String groupId,
                                  List<String> script, SshConfig ssh, String sshHelper, String sshStrategy, String owner, Path sourceFile,
                                  boolean allowCall, boolean allowLegacyDelimit, boolean currentResultContract, boolean typedResultContract) {
         if (!(configured instanceof Map)) return;
