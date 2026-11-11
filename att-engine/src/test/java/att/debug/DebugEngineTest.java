@@ -131,8 +131,8 @@ class DebugEngineTest {
                 + "    details:\n      message: 'temporary credential is violet-123'\n"
                 + "  values: ['array secret one', '[REDACTED]']\n  overrideValue: original\n"
                 + "vars: {orderId: ORD-PRIVATE-123}\n").getBytes(StandardCharsets.UTF_8));
-        Path tools = Files.createDirectories(project.resolve("config/tools"));
-        Files.write(tools.resolve("echo.debug.yaml"), ("schemaVersion: att-debug/v1.2\n"
+        Path tools = Files.createDirectories(project.resolve("tools/debug"));
+        Files.write(tools.resolve("echo.yaml"), ("schemaVersion: att-debug/v1.2\n"
                 + "arguments: {value: 'tool argument secret: private-tool-value'}\n").getBytes(StandardCharsets.UTF_8));
         Map<String, ToolArgumentConfig> args = Collections.singletonMap("value",
                 new ToolArgumentConfig("value", "Value", "Value", true, ""));

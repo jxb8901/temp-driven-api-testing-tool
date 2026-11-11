@@ -1021,7 +1021,7 @@ class PackageResourceInspectorTest {
 
     @Test void advancedLoadRestoresTypedToolInputsAndArgumentsFromTheRedactedSidecar() throws Exception {
         Path root=packageWithQuickLoadTargets("advanced-load-tool-values");
-        writeUtf8(root.resolve("config/tools/echo.debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {correlationId: CORR-DEFAULT}\narguments: {value: ARG-DEFAULT}\n");
+        writeUtf8(Files.createDirectories(root.resolve("tools/debug")).resolve("echo.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {correlationId: CORR-DEFAULT}\narguments: {value: ARG-DEFAULT}\n");
         Map<String,Object> keepInput=mapOf("$attDebugKeepDefault","/inputs/correlationId");
         Map<String,Object> keepArgument=mapOf("$attDebugKeepDefault","/arguments/value");
         Map<String,Object> request=mapOf("schemaVersion","att-load/v1.6","load",mapOf("users",2,"duration","5s"),
