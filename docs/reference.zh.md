@@ -2415,7 +2415,7 @@ Package 預設值、根目錄與 Testdata 改由 [Package Manifest](reference.zh
 | MQ helper | `mqhelpers` 引用的獨立 YAML | v1.2 IBM MQ logical group、instances、transport、response parsing、pool 與 evidence policy |
 | SSHHelper | `sshhelpers` 引用的獨立 YAML | 邏輯 SSH ID、實體 instances、defaults、selection 與 fan-out 上限 |
 | HTTPHelper | `httphelpers` 引用的獨立 YAML | 邏輯 HTTP ID、base URL、預設值、連線池、認證與 TLS |
-| Package Tool | `<PACKAGE_ROOT>/tools/*.yaml` | 每個 `att-tool/v1` 檔案只定義一個 Tool；Helper 仍為全局配置 |
+| Package Tool / Tool Group | `<PACKAGE_ROOT>/tools/*.yaml` 和 `tools/<folder>/tool-group.yaml` | `att-tool/v1` 定義單一 Tool；`att-tool-group/v3.0` 明確列出 Group 成員，Helper 仍屬全局配置 |
 | Workbook | `<workbook>.yaml` | Excel 映射、Stage、Workbook 標簽 |
 | Template | `template.yaml` | Template 身份和有序 Action |
 | CLI | 命令選項 | 選擇、Run ID、輸出覆蓋、展示、CI 格式 |
@@ -2477,10 +2477,14 @@ ATT_HOME/
     ├── testcase/
     ├── templates/
     ├── testdata/accounts.yaml
-    └── tools/*.yaml
+    └── tools/
+        ├── standaloneTool.yaml
+        └── fpp/
+            ├── tool-group.yaml
+            └── invokeApi.yaml
 ```
 
-common config 保留 run/execution/report 與全局 DB/MQ/HTTP/SSH Helpers；`att-tool/v1` 僅從所選 Package 的 `tools/*.yaml` 發現。舊式全局 Tool 宣告必須明確遷移。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
+common config 保留 run/execution/report 與全局 DB/MQ/HTTP/SSH Helpers。Tool 只由所選 Package 發現：根目錄 `tools/*.yaml` 為獨立 `att-tool/v1` Tool，而 `tools/<folder>/tool-group.yaml`（`att-tool-group/v3.0`）明確列出成員 YAML，公開名稱保持 `group.tool`。舊式全局 Tool 宣告必須明確遷移。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
 
 ```yaml
 # config/config.yaml
