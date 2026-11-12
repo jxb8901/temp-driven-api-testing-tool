@@ -79,7 +79,7 @@ public final class PackageToolRegistry {
                 String sshStrategy = "";
                 if (group.get("ssh") instanceof Map) {
                     Map<?, ?> ssh = (Map<?, ?>) group.get("ssh");
-                    sshHelper = String.valueOf(ssh.get("helper"));
+                    sshHelper = String.valueOf(ssh.get("helper")).toLowerCase(java.util.Locale.ROOT);
                     if (ssh.get("selection") instanceof Map) {
                         Object strategy = ((Map<?, ?>) ssh.get("selection")).get("strategy");
                         if (strategy != null) sshStrategy = String.valueOf(strategy);
@@ -163,7 +163,7 @@ public final class PackageToolRegistry {
                 if (!groupSshHelper.isEmpty())
                     throw new IllegalArgumentException("Tool SSH binding cannot override its Group SSH binding");
                 Map<?, ?> ssh = (Map<?, ?>) raw.get("ssh");
-                sshHelper = String.valueOf(ssh.get("helper"));
+                sshHelper = String.valueOf(ssh.get("helper")).toLowerCase(java.util.Locale.ROOT);
                 Object selection = ssh.get("selection");
                 if (selection instanceof Map) {
                     Object strategy = ((Map<?, ?>) selection).get("strategy");
