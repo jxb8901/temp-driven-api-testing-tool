@@ -575,7 +575,9 @@ class WorkerMainTest {
         Files.copy(Paths.get("packages/default/testcase/quick_start.yaml"),root.resolve("testcase/quick_start.yaml"));
         Files.copy(Paths.get("packages/default/testcase/quick_start.xml"),root.resolve("testcase/quick_start.xml"));
         copyTree(Paths.get("packages/default/templates/QUICK_START"),root.resolve("templates/QUICK_START"));
-        Files.copy(Paths.get("packages/default/tools/sample.getAcDate.yaml"),root.resolve("tools/sample.getAcDate.yaml"));
+        Files.createDirectories(root.resolve("tools/sample"));
+        Files.copy(Paths.get("packages/default/tools/sample/tool-group.yaml"),root.resolve("tools/sample/tool-group.yaml"));
+        Files.copy(Paths.get("packages/default/tools/sample/getAcDate.yaml"),root.resolve("tools/sample/getAcDate.yaml"));
         Files.copy(Paths.get("packages/default/tools/get_ac_date.sh"),root.resolve("tools/get_ac_date.sh"));
         Path dispatcher=root.resolve("tools/tool_group_dispatch.sh"); Files.copy(Paths.get("packages/default/tools/tool_group_dispatch.sh"),dispatcher);
         dispatcher.toFile().setExecutable(true,true); root.resolve("tools/get_ac_date.sh").toFile().setExecutable(true,true);
