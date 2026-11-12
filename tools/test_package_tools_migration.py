@@ -190,9 +190,9 @@ class PackageToolMigrationTest(unittest.TestCase):
         self.config.write_text(
             "schemaVersion: att-config/v2.13\n"
             "tools:\n"
-            '  orders: {name: Orders, description: Query, call: "#{db.orders.query(sql=\\'select 1\\')}"}\n'
-            '  broker: {name: Broker, description: Request, call: "#{mq.fpp.publish(payload=\\'x\\')}"}\n'
-            '  api: {name: API, description: HTTP, call: "#{http.sut.get(url=\\'/\\')}"}\n',
+            '  orders: {name: Orders, description: Query, call: "#{db.orders.query()}"}\n'
+            '  broker: {name: Broker, description: Request, call: "#{mq.fpp.publish()}"}\n'
+            '  api: {name: API, description: HTTP, call: "#{http.sut.get()}"}\n',
             encoding="utf-8")
         dry = self.run_cli()
         self.assertEqual(0, dry.returncode, dry.stderr)
