@@ -51,6 +51,20 @@ def main():
     raw = yaml.safe_load(source)
     if not isinstance(raw, dict):
         raise ValueError("Expected a global YAML mapping")
+    # Package-only Tools cannot silently inherit Environment-specific legacy entries.
+    # This migration path must reject these before creating any files or deleting Config.
+    profiles = raw.get("environments") or {}
+    if not isinstance(profiles, dict):
+        raise ValueError("Global environments must be a mapping")
+    for profile_name, profile in profiles.items():
+        if str(profile_name).startswith("x-"):
+            continue
+        if isinstance(profile, dict) and ("tools" in profile or "toolGroups" in profile):
+            fields = ", ".join(k for k in ("tools", "toolGroups") if k in profile)
+            raise ValueError("Environment-scoped legacy Tool declarations at environments."
+                             + str(profile_name) + ": " + fields
+                             + "; migrate each Environment's Tools into explicit Packages "
+                             + "and remove these profile bindings manually before --write")
     has_legacy_fields = "tools" in raw or "toolGroups" in raw
     global_tools = raw.get("tools") or {}
     if not isinstance(global_tools, dict):
@@ -110,6 +124,7 @@ def main():
         print("Legacy tools/toolGroups are empty or disabled; obsolete Config keys must still be removed.")
 
     paths = []
+    destination_roots = {}
     for package in args.package:
         root = package.resolve()
         for tool_id, definition in sorted(standalone.items()):
@@ -120,6 +135,7 @@ def main():
             destination = root / "tools" / (tool_id + ".yaml")
             converted = dict(schemaVersion="att-tool/v1", id=tool_id, **definition)
             paths.append((destination, yaml.safe_dump(converted, sort_keys=False, allow_unicode=True)))
+            destination_roots[destination] = root
         for group_id, (group, members) in sorted(groups.items()):
             folder = root / "tools" / group_id
             manifest = {
@@ -135,10 +151,12 @@ def main():
                 manifest["ssh"] = group["ssh"]
             paths.append((folder / "tool-group.yaml",
                           yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True)))
+            destination_roots[folder / "tool-group.yaml"] = root
             for name, definition in sorted(members.items()):
                 converted = dict(schemaVersion="att-tool/v1", id=name, **definition)
                 paths.append((folder / (name + ".yaml"),
                               yaml.safe_dump(converted, sort_keys=False, allow_unicode=True)))
+                destination_roots[folder / (name + ".yaml")] = root
         # Preflight ALL destinations before creating any file in any Package.
     target_paths = [destination for destination, _ in paths]
     if len(set(target_paths)) != len(target_paths):
@@ -149,15 +167,19 @@ def main():
         converted = yaml.safe_load(content)
         if "command" in converted:
             executable = argv(converted["command"])[0]
-            if executable.startswith("./") and not (destination.parents[1] / executable).exists():
+            if executable.startswith("./") and not (destination_roots[destination] / executable).exists():
                 print("WARNING: review Package-local script path: " + executable
                       + " in " + str(destination))
         if "script" in converted:
             executable = argv(converted["script"])[0]
-            print("INFO: migrated Group dispatcher " + executable + " for " + str(destination)
-                  + "; review Package-relative script path")
+            if executable.startswith("./") and not (destination_roots[destination] / executable).exists():
+                print("WARNING: review Package-local Group dispatcher path: " + executable
+                      + " in " + str(destination))
+            else:
+                print("INFO: migrated Group dispatcher " + executable + " for " + str(destination)
+                      + "; review Package-relative script path")
         if "call" in converted:
-            helpers = re.findall(r"#\\{\\s*((?:db|mq|http|ssh)\\.[A-Za-z_][A-Za-z0-9_-]*)\\.",
+            helpers = re.findall(r"#\{\s*((?:db|mq|http|ssh)\.[A-Za-z_][A-Za-z0-9_-]*)\.",
                                  converted["call"])
             if helpers:
                 print("INFO: " + str(converted["id"]) + " depends on global Helper(s): "
