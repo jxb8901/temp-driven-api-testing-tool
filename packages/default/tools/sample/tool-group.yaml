@@ -1,0 +1,8 @@
+schemaVersion: att-tool-group/v3.0
+id: sample
+name: Sample grouped tools
+description: Demonstrates qualified Tool calls and a group dispatcher
+script: [./tools/tool_group_dispatch.sh]
+tools:
+  - getAcDate.yaml
+  - getSeq.yaml
