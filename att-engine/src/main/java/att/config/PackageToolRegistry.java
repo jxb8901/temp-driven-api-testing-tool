@@ -211,7 +211,7 @@ public final class PackageToolRegistry {
     }
 
     /** Content-addressed closure including group membership/defaults and member Tool definitions. */
-    public static String revision(Map<String, ToolConfig> tools) throws Exception {
+    public static String revision(Map<String, ToolConfig> tools, Path packageRoot) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         List<String> keys = new ArrayList<String>(tools.keySet());
         Collections.sort(keys);
@@ -231,6 +231,19 @@ public final class PackageToolRegistry {
             } else {
                 digest.update(String.valueOf(tool.call()).getBytes(StandardCharsets.UTF_8));
                 digest.update(String.valueOf(tool.commandArgv()).getBytes(StandardCharsets.UTF_8));
+            }
+            // The accepted closure also includes scripts executed by both
+            // the Group dispatcher and the member Tool.
+            for (Path script : PackageToolScripts.referenced(packageRoot, tool)) {
+                Path relative = packageRoot.toAbsolutePath().normalize().relativize(script);
+                digest.update(relative.toString().replace('\\', '/').getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) 0);
+                if (Files.isRegularFile(script, LinkOption.NOFOLLOW_LINKS)) {
+                    digest.update(Files.readAllBytes(script));
+                } else {
+                    digest.update("missing-script".getBytes(StandardCharsets.UTF_8));
+                }
+                digest.update((byte) 0);
             }
             digest.update((byte) 0);
         }
