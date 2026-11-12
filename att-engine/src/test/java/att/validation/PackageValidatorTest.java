@@ -23,7 +23,7 @@ class PackageValidatorTest {
                  + "tools: [getAcDate.yaml]\n").getBytes("UTF-8"));
         Files.write(group.resolve("getAcDate.yaml"),
                 ("schemaVersion: att-tool/v1\nid: getAcDate\nname: Date\n"
-                 + "description: Date tool\ncommand: [./tools/missing-date.sh]\n").getBytes("UTF-8"));
+                 + "description: Date tool\ncommand: [./tools/missing-date.sh]\nstdoutFormat: text\n").getBytes("UTF-8"));
         Path dispatcher = tools.resolve("dispatcher.sh");
         Files.write(dispatcher, "#!/bin/sh\necho dispatch\n".getBytes("UTF-8"));
         dispatcher.toFile().setExecutable(true);
