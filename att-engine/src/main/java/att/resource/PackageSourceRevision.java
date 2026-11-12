@@ -63,12 +63,31 @@ final class PackageSourceRevision {
         if (Files.exists(toolRoot, LinkOption.NOFOLLOW_LINKS)) {
             if (Files.isSymbolicLink(toolRoot) || !Files.isDirectory(toolRoot, LinkOption.NOFOLLOW_LINKS))
                 throw new IOException("Unsafe Package tools/ directory");
-            java.util.List<Path> descriptors = new java.util.ArrayList<Path>();
+            // Include selected Group manifests and their explicit members in the source revision.
+            // Do not recursively discover incidental YAML under tools/scripts/.
+            Set<Path> descriptors = new TreeSet<Path>();
             try (java.util.stream.Stream<Path> stream = Files.list(toolRoot)) {
-                stream.filter(p -> p.getFileName().toString().endsWith(".yaml")).forEach(descriptors::add);
+                for (Path entry : (Iterable<Path>) stream::iterator) {
+                    if (Files.isSymbolicLink(entry)) throw new IOException("Unsafe Package Tool entry");
+                    if (Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)
+                            && entry.getFileName().toString().endsWith(".yaml")) descriptors.add(entry);
+                    if (!Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) continue;
+                    Path manifest = entry.resolve("tool-group.yaml");
+                    if (!Files.exists(manifest, LinkOption.NOFOLLOW_LINKS)) continue;
+                    descriptors.add(manifest);
+                    Object parsed = YamlSupport.load(manifest);
+                    if (!(parsed instanceof Map) || !(((Map<?, ?>) parsed).get("tools") instanceof List))
+                        throw new IOException("Invalid Package Tool Group manifest: " + manifest);
+                    for (Object member : (List<?>) ((Map<?, ?>) parsed).get("tools")) {
+                        if (!(member instanceof String) || !((String) member).matches("[A-Za-z_][A-Za-z0-9_.-]*[.]yaml")
+                                || ((String) member).contains(".."))
+                            throw new IOException("Invalid Package Tool Group member path");
+                        descriptors.add(entry.resolve((String) member));
+                    }
+                }
             }
-            descriptors.sort(java.util.Comparator.comparing(p -> p.getFileName().toString()));
-            if (descriptors.size() + business.size() + shared.size() > MAX_DEPENDENCIES) throw limit("dependency count");
+            if (descriptors.size() + business.size() + shared.size() > MAX_DEPENDENCIES)
+                throw limit("dependency count");
             for (Path descriptor : descriptors) file(digest, root, descriptor, bytes);
         }
         text(digest, att.validation.SchemaFiles.registryDigest());
