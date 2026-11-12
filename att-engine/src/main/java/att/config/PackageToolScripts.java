@@ -65,9 +65,55 @@ public final class PackageToolScripts {
         return Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS);
     }
 
+    /**
+     * For known interpreters the first non-option operand is a script file even
+     * when it has no extension (for example: bash ./tools/task).
+     * Inline-code modes such as bash -c or python -m have no script operand.
+     */
+    private static int interpreterScriptOperand(List<String> argv) {
+        if (argv == null || argv.isEmpty()) return -1;
+        int firstArg = 1;
+        String executable = interpreterName(argv.get(0));
+        if ("env".equals(executable) && argv.size() > 1) {
+            executable = interpreterName(argv.get(1));
+            firstArg = 2;
+        }
+        if (!isInterpreter(executable)) return -1;
+        for (int i = firstArg; i < argv.size(); i++) {
+            String argument = argv.get(i);
+            if (argument == null || argument.isEmpty()) continue;
+            if ("-c".equals(argument) || "-m".equals(argument) || "-e".equals(argument)
+                    || "--eval".equals(argument) || "--command".equals(argument)
+                    || argument.matches("-[A-Za-z]*[cm][A-Za-z]*")) return -1;
+            if ("--".equals(argument) || argument.startsWith("-")) continue;
+            return i;
+        }
+        return -1;
+    }
+
+    private static String interpreterName(String raw) {
+        if (raw == null || raw.isEmpty()) return "";
+        try {
+            String name = Paths.get(raw).getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+            return name.endsWith(".exe") ? name.substring(0, name.length() - 4) : name;
+        } catch (RuntimeException invalid) {
+            return "";
+        }
+    }
+
+    private static boolean isInterpreter(String name) {
+        return "bash".equals(name) || "sh".equals(name) || "dash".equals(name)
+                || "zsh".equals(name) || "ksh".equals(name) || "fish".equals(name)
+                || "perl".equals(name) || "ruby".equals(name)
+                || "node".equals(name) || "nodejs".equals(name)
+                || "pwsh".equals(name) || "powershell".equals(name)
+                || name.matches("python[0-9]*(?:\\.[0-9]+)?");
+    }
+
     private static void append(Path packageRoot, List<String> argv, Set<Path> result) throws IOException {
         if (argv == null) return;
         Path root = packageRoot.toAbsolutePath().normalize();
+        int interpreterOperand = interpreterScriptOperand(argv);
         for (int i = 0; i < argv.size(); i++) {
             String token = argv.get(i);
             if (token == null || token.isEmpty() || token.contains("${")
@@ -79,9 +125,10 @@ public final class PackageToolScripts {
             boolean insideAbsolute = supplied.isAbsolute() && supplied.normalize().startsWith(root);
             if (!explicit && !insideAbsolute) continue;
             String lower = token.toLowerCase(java.util.Locale.ROOT);
-            // An explicit executable at argv[0] need not have a suffix. Later argv are
-            // considered script references only when their suffix identifies script code.
-            boolean script = i == 0 || lower.endsWith(".sh") || lower.endsWith(".py")
+            // An explicit executable at argv[0] or a known interpreter's script
+            // operand need not have a suffix. Preserve suffix detection elsewhere.
+            boolean script = i == 0 || i == interpreterOperand
+                    || lower.endsWith(".sh") || lower.endsWith(".py")
                     || lower.endsWith(".bat") || lower.endsWith(".cmd") || lower.endsWith(".ps1")
                     || lower.endsWith(".rb") || lower.endsWith(".js") || lower.endsWith(".pl");
             if (!script) continue;
