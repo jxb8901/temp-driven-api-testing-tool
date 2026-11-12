@@ -48,6 +48,28 @@ class PackageSourceRevisionTest {
         Exception error=assertThrows(Exception.class,()->capture(pkg,config));
         assertFalse(error.getMessage().contains(outside.toString()));
     }
+    @Test void prewarmValidationRevisionTracksDispatcherAndMemberScriptChanges() throws Exception {
+        Path config = write("central/config/config.yaml",
+                "schemaVersion: att-config/v2.13\nenvironment: SIT\n");
+        Path pkg = Files.createDirectories(root.resolve("package"));
+        write("package/tools/sample/tool-group.yaml",
+                "schemaVersion: att-tool-group/v3.0\nid: sample\nname: Sample\n"
+                + "description: Group\nscript: [./tools/dispatch.sh]\ntools: [date.yaml]\n");
+        write("package/tools/sample/date.yaml",
+                "schemaVersion: att-tool/v1\nid: date\nname: Date\n"
+                + "description: Date tool\ncommand: [./tools/date.sh]\n");
+        Path dispatcher = write("package/tools/dispatch.sh", "#!/bin/sh\necho dispatch\n");
+        Path member = write("package/tools/date.sh", "#!/bin/sh\necho first\n");
+        String prepared = capture(pkg, config);
+        Files.write(member, "#!/bin/sh\necho second\n".getBytes("UTF-8"));
+        String changedMember = capture(pkg, config);
+        assertNotEquals(prepared, changedMember,
+                "Prewarmed validation must invalidate on a member script edit");
+        Files.write(dispatcher, "#!/bin/sh\necho updated\n".getBytes("UTF-8"));
+        assertNotEquals(changedMember, capture(pkg, config),
+                "Prewarmed validation must invalidate on a Group dispatcher edit");
+    }
+
     @Test void candidateValidationRevisionChangesForDeclaredDescriptorsButNotUnrelatedBusinessFiles() throws Exception {
         Path config=write("central/config.yaml","schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments: {SIT: {}}\n");
         Path pkg=Files.createDirectories(root.resolve("package"));
