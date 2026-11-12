@@ -131,6 +131,7 @@ export function SourceViewer({ api, identity, available, active, resource, onFil
       <p>Name: {String(toolProvenance.toolName || resource?.name || resource?.logicalId || identity.resourceId)}</p>
       <p>Source kind: {String(resource?.sourceKind || toolProvenance.toolSourceKind || 'configured Tool')}</p>
       {typeof toolProvenance.toolConfigLocation === 'string' && <p>Tool config: <code>{toolProvenance.toolConfigLocation}</code></p>}
+      {typeof toolProvenance.toolGroupManifest === 'string' && <p>Tool Group manifest: <code>{toolProvenance.toolGroupManifest}</code></p>}
       {resource?.sourceKind === 'package-tool-descriptor' && <p>Source is the Package-owned att-tool/v1 descriptor; global Helpers remain centrally configured.</p>}
       {resource?.sourceKind === 'built-in-virtual' && <p>This Tool uses a built-in or virtual provider and has no standalone source file.</p>}
     </section>}
