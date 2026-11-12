@@ -15,6 +15,25 @@ class FrameworkConfigLoaderTest {
     }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
+    @Test void disabledEnvironmentLegacyToolMetadataIsNotAnActiveGlobalToolDeclaration() throws Exception {
+        Path config = write("disabled-environment-tools.yaml",
+                "schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+                + "environments:\n  SIT: {}\n"
+                + "  x-old: {tools: {legacy: {command: [echo]}}, toolGroups: [config/old.yaml]}\n");
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(config, tempDir, "SIT");
+        assertEquals("SIT", loaded.environment());
+        assertTrue(loaded.tools().isEmpty(), "Disabled x-* metadata cannot create active Tools");
+
+        Path invalid = write("active-environment-tools.yaml",
+                "schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+                + "environments:\n  SIT: {tools: {legacy: {command: [echo]}}}\n"
+                + "  x-old: {tools: {ignored: {command: [echo]}}}\n");
+        IllegalArgumentException rejected = assertThrows(IllegalArgumentException.class,
+                () -> new FrameworkConfigLoader().load(invalid, tempDir, "SIT"));
+        assertTrue(String.valueOf(rejected.getMessage()).contains("Legacy"),
+                String.valueOf(rejected));
+    }
+
     @Test void flatGlobalEnvironmentCanBePinnedWithoutAddingUndeclaredProfiles() throws Exception {
         Path config=write("flat-environment.yaml", "schemaVersion: att-config/v2.13\nenvironment: SIT\n");
         FrameworkConfigLoader loader=new FrameworkConfigLoader();
