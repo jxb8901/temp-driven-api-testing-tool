@@ -40,7 +40,8 @@ schemas:
   legacyGlobalConfig: history/att-config-v2.2.schema.json
   legacyGlobalConfigV21: history/att-config-v2.1.schema.json
   dbhelper: att-dbhelper-v2.6.schema.json
-  toolGroup: att-tool-group-v2.9.schema.json
+  toolGroup: att-tool-group-v3.0.schema.json
+  previousToolGroupV29: history/att-tool-group-v2.9.schema.json
   previousToolGroup: history/att-tool-group-v2.7.schema.json
   previousToolGroupV26: history/att-tool-group-v2.6.schema.json
   sshhelper: att-sshhelper-v1.0.schema.json
