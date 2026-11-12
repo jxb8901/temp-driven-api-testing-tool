@@ -48,6 +48,23 @@ public final class PackageToolScripts {
         return Collections.unmodifiableList(ordered);
     }
 
+    /**
+     * Only ordinary Package files can be read for a revision. Reject every symlink
+     * component, including a link in a parent directory, without following its target.
+     */
+    public static boolean isSafeRegularScript(Path packageRoot, Path candidate) throws IOException {
+        Path root = packageRoot.toAbsolutePath().normalize();
+        Path path = candidate.toAbsolutePath().normalize();
+        if (!path.startsWith(root))
+            throw new IOException("Package Tool script dependency escapes its Package root");
+        Path current = root;
+        for (Path name : root.relativize(path)) {
+            current = current.resolve(name);
+            if (Files.isSymbolicLink(current)) return false;
+        }
+        return Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS);
+    }
+
     private static void append(Path packageRoot, List<String> argv, Set<Path> result) throws IOException {
         if (argv == null) return;
         Path root = packageRoot.toAbsolutePath().normalize();
@@ -71,18 +88,12 @@ public final class PackageToolScripts {
             Path candidate = (supplied.isAbsolute() ? supplied : root.resolve(supplied)).normalize();
             if (!candidate.startsWith(root))
                 throw new IOException("Package Tool script dependency escapes its Package root");
-            Path part = root;
-            for (Path name : root.relativize(candidate)) {
-                part = part.resolve(name);
-                if (Files.isSymbolicLink(part))
-                    throw new IOException("Symlink in Package Tool script dependency");
-            }
-            if (Files.exists(candidate, LinkOption.NOFOLLOW_LINKS)) {
-                if (!Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS))
-                    throw new IOException("Package Tool script dependency is not a regular file");
-                if (Files.size(candidate) > MAX_SOURCE_BYTES)
-                    throw new IOException("Package Tool script dependency exceeds 8 MiB limit");
-            }
+            // Preserve the logical reference without following a symlink. Inspector
+            // must still be able to show the Tool YAML as a safe source projection;
+            // execution validation separately rejects unsafe local script targets.
+            if (isSafeRegularScript(root, candidate)
+                    && Files.size(candidate) > MAX_SOURCE_BYTES)
+                throw new IOException("Package Tool script dependency exceeds 8 MiB limit");
             result.add(candidate);
             if (result.size() > MAX_REFERENCES)
                 throw new IOException("Package Tool script dependency count exceeds " + MAX_REFERENCES);
