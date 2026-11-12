@@ -1,6 +1,7 @@
 package att.resource;
 
 import att.config.PackageConfig;
+import att.config.PackageToolScripts;
 import att.config.RuntimeConfigPath;
 import att.config.SchemaSupport;
 import att.config.YamlSupport;
@@ -89,6 +90,21 @@ final class PackageSourceRevision {
             if (descriptors.size() + business.size() + shared.size() > MAX_DEPENDENCIES)
                 throw limit("dependency count");
             for (Path descriptor : descriptors) file(digest, root, descriptor, bytes);
+            // A queued/prewarmed Job must become stale on script changes even if
+            // the tool YAML and group manifest remain byte-for-byte unchanged.
+            Set<Path> scripts = new TreeSet<Path>();
+            for (Path descriptor : descriptors) {
+                if (!Files.isRegularFile(descriptor, LinkOption.NOFOLLOW_LINKS)) continue;
+                Object authored = YamlSupport.load(descriptor);
+                if (!(authored instanceof Map)) continue;
+                Map<?, ?> fields = (Map<?, ?>) authored;
+                scripts.addAll(PackageToolScripts.referencedArgv(root, fields.get("script")));
+                scripts.addAll(PackageToolScripts.referencedArgv(root, fields.get("command")));
+                if (scripts.size() + descriptors.size() + business.size() + shared.size() > MAX_DEPENDENCIES)
+                    throw limit("dependency count");
+            }
+            text(digest, "tool-scripts/");
+            for (Path script : scripts) file(digest, root, script, bytes);
         }
         text(digest, att.validation.SchemaFiles.registryDigest());
         StringBuilder result = new StringBuilder();
