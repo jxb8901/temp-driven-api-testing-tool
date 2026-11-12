@@ -899,7 +899,7 @@ public final class PackageValidator {
             // Interpreted scripts can be in a later argument (bash tools/foo.sh).
             // Track all bounded statically referenced Package script sources.
             for (Path script : att.config.PackageToolScripts.referenced(projectRoot, tool)) {
-                if (!Files.isRegularFile(script, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                if (!att.config.PackageToolScripts.isSafeRegularScript(projectRoot, script))
                     throw new IllegalArgumentException("Missing Package Tool script dependency: "
                             + projectRoot.toAbsolutePath().normalize().relativize(script));
             }
