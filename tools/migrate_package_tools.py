@@ -28,16 +28,45 @@ def safe(root, name):
     return target
 
 def remove_top_level(source, names):
+    """Remove recognized top-level YAML mappings while preserving unrelated source.
+
+    Use parsed YAML node marks, not a regex that misses quoted keys. Flow-style
+    top-level documents/ambiguous boundaries fail *before* Package files are written.
+    """
+    document = yaml.compose(source)
+    if not isinstance(document, yaml.MappingNode):
+        raise ValueError("Expected a top-level YAML mapping for migration")
     lines = source.splitlines(keepends=True)
-    output = []
-    skip = False
-    for line in lines:
-        if re.match(r"^[A-Za-z_][A-Za-z0-9_-]*:", line):
-            key = line.split(":", 1)[0]
-            skip = key in names
-        if not skip:
-            output.append(line)
-    return "".join(output)
+    marked = []
+    key_lines = set()
+    for key, value in document.value:
+        if not isinstance(key, yaml.ScalarNode):
+            raise ValueError("Unsupported complex YAML key in global configuration")
+        if key.value not in names:
+            key_lines.add(key.start_mark.line)
+            continue
+        if key.start_mark.column != 0:
+            raise ValueError("Unsupported inline/flow-style top-level legacy Tool key: "
+                             + key.value + "; use block mapping YAML for migration")
+        start = key.start_mark.line
+        end = max(start + 1, value.end_mark.line
+                  + (1 if value.end_mark.column > 0 else 0))
+        if end > len(lines) or any(first <= start < last for first, last in marked):
+            raise ValueError("Ambiguous legacy Tool mapping boundaries: " + key.value)
+        marked.append((start, end))
+    for start, end in marked:
+        if any(start <= line < end for line in key_lines):
+            raise ValueError("Legacy Tool mapping overlaps another top-level key")
+    kept = "".join(line for index, line in enumerate(lines)
+                   if not any(start <= index < end for start, end in marked))
+    expected = yaml.safe_load(source)
+    for name in names:
+        expected.pop(name, None)
+    actual = yaml.safe_load(kept) or {}
+    if actual != expected:
+        raise ValueError("Legacy Tool removal would change unrelated YAML content; "
+                         "no Package descriptors were written")
+    return kept
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -158,6 +187,9 @@ def main():
                               yaml.safe_dump(converted, sort_keys=False, allow_unicode=True)))
                 destination_roots[folder / (name + ".yaml")] = root
         # Preflight ALL destinations before creating any file in any Package.
+    # Verify the legacy Config can be safely rewritten before writing any
+    # Package descriptor, so unsupported YAML cannot cause a partial cutover.
+    converted_config = remove_top_level(source, {"tools", "toolGroups"})
     target_paths = [destination for destination, _ in paths]
     if len(set(target_paths)) != len(target_paths):
         raise ValueError("Duplicate migrated Tool or Group destination")
@@ -194,7 +226,7 @@ def main():
     for destination, content in paths:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(content, encoding="utf-8")
-    config.write_text(remove_top_level(source, {"tools", "toolGroups"}), encoding="utf-8")
+    config.write_text(converted_config, encoding="utf-8")
     print("Wrote standalone Tool descriptors and Group manifests/member Tools; revalidate all Packages.")
 
 if __name__ == "__main__":
