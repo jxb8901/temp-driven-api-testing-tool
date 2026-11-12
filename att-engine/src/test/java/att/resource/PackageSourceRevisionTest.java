@@ -70,6 +70,26 @@ class PackageSourceRevisionTest {
                 "Prewarmed validation must invalidate on a Group dispatcher edit");
     }
 
+    @Test void prewarmRevisionTracksExtensionlessInterpreterOperands() throws Exception {
+        Path config = write("central/config/config.yaml", "schemaVersion: att-config/v2.13\n");
+        Path pkg = Files.createDirectories(root.resolve("package"));
+        write("package/tools/sample/tool-group.yaml",
+                "schemaVersion: att-tool-group/v3.0\nid: sample\nname: Sample\n"
+                + "description: Group\nscript: [bash, ./tools/dispatch]\ntools: [task.yaml]\n");
+        write("package/tools/sample/task.yaml",
+                "schemaVersion: att-tool/v1\nid: task\nname: Task\n"
+                + "description: Task\ncommand: [bash, ./tools/task]\nstdoutFormat: text\n");
+        Path dispatcher = write("package/tools/dispatch", "#!/bin/sh\necho start\n");
+        Path member = write("package/tools/task", "#!/bin/sh\necho first\n");
+        String accepted = capture(pkg, config);
+        Files.write(member, "#!/bin/sh\necho second\n".getBytes("UTF-8"));
+        String afterMember = capture(pkg, config);
+        assertNotEquals(accepted, afterMember, "Extensionless member must stale prewarmed source");
+        Files.write(dispatcher, "#!/bin/sh\necho new\n".getBytes("UTF-8"));
+        assertNotEquals(afterMember, capture(pkg, config),
+                "Extensionless Group dispatcher must stale prewarmed source");
+    }
+
     @Test void candidateValidationRevisionChangesForDeclaredDescriptorsButNotUnrelatedBusinessFiles() throws Exception {
         Path config=write("central/config.yaml","schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments: {SIT: {}}\n");
         Path pkg=Files.createDirectories(root.resolve("package"));
