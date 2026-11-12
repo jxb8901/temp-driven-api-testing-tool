@@ -2496,7 +2496,7 @@ The authenticated `/api/v1/configuration/{declared|effective|compare|files|sourc
 | Layer | Source | Owns |
 |---|---|---|
 | Shared runtime | `ATT_HOME/config/config.yaml` | output/environment/runtime defaults, reports, XML mode, DB/MQ/HTTP/SSHHelper paths and central connection settings |
-| Package Tool | `<PACKAGE_ROOT>/tools/*.yaml` | One `att-tool/v1` descriptor per Tool; the global Helpers remain central |
+| Package Tool / Tool Group | `<PACKAGE_ROOT>/tools/*.yaml` and `tools/<folder>/tool-group.yaml` | Standalone `att-tool/v1` Tools or explicitly listed `att-tool/v1` group members under `att-tool-group/v3.0`; Helpers remain global |
 | DB/MQ/SSH/HTTP helper | configured YAML under `ATT_HOME/config/` | logical resource identity, endpoint, connection, pool, timeout, and evidence policy |
 | Package Testdata | package-relative `testdata/` path | Package Manifest inventory selected by the effective Environment |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
@@ -2560,10 +2560,14 @@ ATT_HOME/
     ├── testcase/
     ├── templates/
     ├── testdata/accounts.yaml
-    └── tools/*.yaml
+    └── tools/
+        ├── standaloneTool.yaml
+        └── fpp/
+            ├── tool-group.yaml
+            └── invokeApi.yaml
 ```
 
-The common config keeps run/execution/report settings and global DB/MQ/HTTP/SSH Helpers. Package Tools are discovered exclusively from the selected Package's `tools/*.yaml`; global Tool declarations now produce migration errors. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
+The common config keeps run/execution/report settings and global DB/MQ/HTTP/SSH Helpers. Tools belong exclusively to the selected Package: root-level `tools/*.yaml` files are standalone `att-tool/v1` definitions, while `tools/<folder>/tool-group.yaml` (`att-tool-group/v3.0`) explicitly lists grouped `att-tool/v1` members and preserves qualified `group.tool` calls. Global Tool declarations produce migration errors. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
 
 ```yaml
 # config/config.yaml
