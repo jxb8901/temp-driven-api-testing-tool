@@ -104,7 +104,16 @@ final class PackageSourceRevision {
                     throw limit("dependency count");
             }
             text(digest, "tool-scripts/");
-            for (Path script : scripts) file(digest, root, script, bytes);
+            for (Path script : scripts) {
+                if (PackageToolScripts.isSafeRegularScript(root, script)) {
+                    file(digest, root, script, bytes);
+                } else {
+                    // A symlink or unavailable path must never be followed while
+                    // hashing. Record its logical identity and a stable marker.
+                    text(digest, root.relativize(script).toString().replace('\\', '/'));
+                    text(digest, "unavailable-tool-script");
+                }
+            }
         }
         text(digest, att.validation.SchemaFiles.registryDigest());
         StringBuilder result = new StringBuilder();
