@@ -238,7 +238,7 @@ public final class PackageToolRegistry {
                 Path relative = packageRoot.toAbsolutePath().normalize().relativize(script);
                 digest.update(relative.toString().replace('\\', '/').getBytes(StandardCharsets.UTF_8));
                 digest.update((byte) 0);
-                if (Files.isRegularFile(script, LinkOption.NOFOLLOW_LINKS)) {
+                if (PackageToolScripts.isSafeRegularScript(packageRoot, script)) {
                     digest.update(Files.readAllBytes(script));
                 } else {
                     digest.update("missing-script".getBytes(StandardCharsets.UTF_8));
