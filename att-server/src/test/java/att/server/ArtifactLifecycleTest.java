@@ -320,6 +320,12 @@ class ArtifactLifecycleTest {
         try(ServerRuntime restarted=new ServerRuntime(config,temp.resolve("libs").toString())) {
             awaitState(restarted,id,"READY");
             assertTrue(ArtifactArchive.verify(archive,true).containsKey("entries"));
+            // READY may become observable just before asynchronous private-output cleanup.
+            // Other recovery cases already use a bounded cleanup wait; preserve the
+            // strong postcondition without racing the cleanup executor.
+            long cleanupDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (Files.exists(output) && System.nanoTime() < cleanupDeadline)
+                Thread.sleep(10);
             assertFalse(Files.exists(output),"Only the recovered committed archive may replace private output");
             try(var files=Files.list(jobDirectory)) {
                 assertTrue(files.noneMatch(path->{String name=path.getFileName().toString();return name.startsWith(".artifact-export-")
