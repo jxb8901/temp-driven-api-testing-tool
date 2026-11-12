@@ -396,6 +396,40 @@ class PackageResourceInspectorTest {
         assertFalse(definition.containsKey("call"),"Safe Tool metadata never exposes provider call internals.");
     }
 
+    @Test void groupedPackageToolShowsSourceAndGroupManifestProvenance() throws Exception {
+        Path root = packageWithTemplate("grouped-tool-source", "FORM", "description: safe");
+        Path folder = Files.createDirectories(root.resolve("tools/fpp"));
+        writeUtf8(folder.resolve("tool-group.yaml"),
+                "schemaVersion: att-tool-group/v3.0\nid: fpp\nname: FPP tools\n"
+                + "description: FPP group\ntools: [invokeApi.yaml]\n");
+        writeUtf8(folder.resolve("invokeApi.yaml"),
+                "schemaVersion: att-tool/v1\nid: invokeApi\nname: Invoke API\n"
+                + "description: Grouped package call\ncall: \"#{upper('valid')}\"\narguments: {}\n");
+        try (PackageResourceInspector inspector = new PackageResourceInspector(root,
+                Paths.get("config/config.yaml"), "SIT", Collections.<String>emptyList(),
+                65536, 262144, false, true, "safe-package-files",
+                Collections.<String>emptyList(), false, Collections.<String>emptyList(),
+                Collections.<String>emptyList())) {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> items = (List<Map<String, Object>>)
+                    inspector.inspect("list", "tool", null, null, 0, 20).get("items");
+            Map<String, Object> member = items.stream()
+                    .filter(value -> "fpp.invokeApi".equals(value.get("logicalId")))
+                    .findFirst().orElseThrow(AssertionError::new);
+            assertEquals(Boolean.TRUE, member.get("sourceAvailable"), member.toString());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> provenance = (Map<String, Object>) member.get("provenance");
+            assertEquals("fpp", provenance.get("toolGroupId"));
+            assertEquals("tools/fpp/invokeApi.yaml", provenance.get("toolConfigLocation"));
+            assertEquals("tools/fpp/tool-group.yaml", provenance.get("toolGroupManifest"));
+            Map<String, Object> source = inspector.inspect("source", "tool",
+                    String.valueOf(member.get("resourceId")), null, 0, 1);
+            assertEquals(Boolean.TRUE, source.get("available"), source.toString());
+            assertEquals("tools/fpp/invokeApi.yaml", source.get("logicalPath"));
+            assertTrue(String.valueOf(source.get("text")).contains("schemaVersion: att-tool/v1"));
+        }
+    }
+
     @Test void readsToolScriptOnlyWhenItsPackageRelativePathIsAllowlisted() throws Exception {
         Path root=Paths.get("").toRealPath().resolve("packages/default");
         Path config=Paths.get("").toRealPath().resolve("config/config.yaml");
@@ -407,7 +441,7 @@ class PackageResourceInspectorTest {
         Map<String,Object> permitted=items.stream().filter(item->Boolean.TRUE.equals(item.get("sourceAvailable"))).findFirst().get();
         Map<String,Object> source=inspector.inspect("source","tool",String.valueOf(permitted.get("resourceId")),null,0,1);
         assertEquals(Boolean.TRUE,source.get("available"));assertEquals("yaml",source.get("format"));
-        assertTrue(String.valueOf(source.get("logicalPath")).matches("tools/[^/]+\\.yaml"));
+        assertTrue(String.valueOf(source.get("logicalPath")).matches("tools/(?:[^/]+\\.yaml|[^/]+/[^/]+\\.yaml)"));
         assertFalse(String.valueOf(source.get("text")).contains(root.toString()));
     }
 
