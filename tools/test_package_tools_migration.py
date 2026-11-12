@@ -83,6 +83,68 @@ class PackageToolMigrationTest(unittest.TestCase):
         self.assertTrue((self.a / "tools/echo.yaml").exists())
         self.assertFalse((self.a / "tools/x-disabled.yaml").exists())
 
+    def test_quoted_legacy_keys_are_removed_before_package_cutover(self):
+        group = self.root / "config/tools/sample.yaml"
+        group.parent.mkdir(parents=True)
+        group.write_text(
+            "schemaVersion: att-tool-group/v2.9\nid: sample\n"
+            "name: Sample\ndescription: Sample group\n"
+            "tools:\n  ping: {name: Ping, description: Ping, command: [echo], stdoutFormat: text}\n",
+            encoding="utf-8")
+        original = ("schemaVersion: att-config/v2.13\n"
+                    "environment: SIT\n"
+                    "report: {mode: none}\n"
+                    "'tools':\n"
+                    "  echo: {name: Echo, description: Echo, command: [echo], stdoutFormat: text}\n"
+                    '"toolGroups": [config/tools/sample.yaml]\n')
+        self.config.write_text(original, encoding="utf-8")
+        preview = self.run_cli()
+        self.assertEqual(0, preview.returncode, preview.stderr)
+        self.assertEqual(original, self.config.read_text(encoding="utf-8"))
+        self.assertFalse((self.a / "tools").exists())
+        result = self.run_cli("--write")
+        self.assertEqual(0, result.returncode, result.stderr)
+        config = yaml.safe_load(self.config.read_text(encoding="utf-8"))
+        self.assertEqual("SIT", config["environment"])
+        self.assertEqual({"mode": "none"}, config["report"])
+        self.assertNotIn("tools", config)
+        self.assertNotIn("toolGroups", config)
+        self.assertIn("report: {mode: none}", self.config.read_text(encoding="utf-8"))
+        self.assertTrue((self.a / "tools/echo.yaml").exists())
+        self.assertTrue((self.a / "tools/sample/tool-group.yaml").exists())
+        self.assertTrue((self.a / "tools/sample/ping.yaml").exists())
+        second = self.run_cli("--write")
+        self.assertEqual(0, second.returncode, second.stderr)
+
+    def test_unsupported_inline_legacy_root_keys_fail_before_writes(self):
+        original = ("{schemaVersion: att-config/v2.13, "
+                    "'tools': {echo: {name: Echo, description: Echo, "
+                    "command: [echo], stdoutFormat: text}}}\n")
+        self.config.write_text(original, encoding="utf-8")
+        failure = self.run_cli("--write")
+        self.assertNotEqual(0, failure.returncode)
+        self.assertIn("Unsupported inline/flow-style", failure.stderr)
+        self.assertEqual(original, self.config.read_text(encoding="utf-8"))
+        self.assertFalse((self.a / "tools").exists())
+
+    def test_disabled_environment_with_legacy_tool_metadata_is_preserved(self):
+        self.config.write_text(
+            "schemaVersion: att-config/v2.13\n"
+            "environment: SIT\n"
+            "environments:\n  SIT: {}\n"
+            "  x-old: {tools: {old: {command: [echo]}}, toolGroups: [config/old.yaml]}\n"
+            "tools:\n"
+            "  echo: {name: Echo, description: Active, command: [echo], stdoutFormat: text}\n",
+            encoding="utf-8")
+        result = self.run_cli("--write")
+        self.assertEqual(0, result.returncode, result.stderr)
+        config = yaml.safe_load(self.config.read_text(encoding="utf-8"))
+        self.assertNotIn("tools", config)
+        self.assertNotIn("toolGroups", config)
+        self.assertIn("tools", config["environments"]["x-old"])
+        self.assertIn("toolGroups", config["environments"]["x-old"])
+        self.assertTrue((self.a / "tools/echo.yaml").exists())
+
     def test_tool_group_migrates_to_folder_without_changing_caller_ids_or_dispatcher(self):
         group_file = self.root / "config/tools/sample.yaml"
         group_file.parent.mkdir(parents=True)
