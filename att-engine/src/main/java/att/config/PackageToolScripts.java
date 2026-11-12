@@ -82,8 +82,10 @@ public final class PackageToolScripts {
         for (int i = firstArg; i < argv.size(); i++) {
             String argument = argv.get(i);
             if (argument == null || argument.isEmpty()) continue;
-            if ("-c".equals(argument) || "-m".equals(argument) || "-e".equals(argument)
+            if ("-c".equals(argument) || "-m".equals(argument)
                     || "--eval".equals(argument) || "--command".equals(argument)
+                    || ("-e".equals(argument) && ("node".equals(executable)
+                        || "nodejs".equals(executable) || "perl".equals(executable)))
                     || argument.matches("-[A-Za-z]*[cm][A-Za-z]*")) return -1;
             if ("--".equals(argument) || argument.startsWith("-")) continue;
             return i;
