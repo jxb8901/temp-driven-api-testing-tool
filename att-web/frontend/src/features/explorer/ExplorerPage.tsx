@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type UIEvent } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type UIEvent } from 'react';
+import { AppShellContext } from '../../AppShell';
 import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
 import { ResourceTree, resourceKey } from './ResourceTree';
@@ -53,6 +54,12 @@ function isRunnable(resource?: ResourceSummary | null): boolean {
 }
 function isResourceType(type: string): type is ResourceSummary['type'] {
   return ['case', 'template', 'flow', 'tool'].includes(type);
+}
+function safeSuiteTarget(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value || value.length > 2048 || value.startsWith('/') || value.includes('\\')
+    || /^[a-z][a-z\d+.-]*:/i.test(value) || /[\u0000-\u001f\u007f]/.test(value)) return undefined;
+  const parts = value.split('/');
+  return parts.some(part => !part || part === '.' || part === '..') ? undefined : value;
 }
 function debugGroups(type?: string) {
   return type === 'tool'
@@ -114,7 +121,11 @@ function ExplorerReference({ reference, onOpen, onOpenFile, sourceIdentity }: {
 
 export function ExplorerPage({ api, packageId, resourceRoute, environment,
   principalLabel = '', onResourceRouteChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad,
-  onRunTarget, onRunBatch, onScheduleDebug, onOpenConfigurationFile, onOpenTestdata, registerUnsavedChanges }: ExplorerPageProps) {
+  onRunTarget, onValidateTarget, onRunBatch, onScheduleDebug, onOpenConfigurationFile, onOpenTestdata, registerUnsavedChanges }: ExplorerPageProps) {
+  const workspace = useContext(AppShellContext);
+  const validationText = workspace?.uiLocale === 'zh-Hant'
+    ? { case: '唯讀驗證 Case', resource: '唯讀驗證', suite: '唯讀驗證 Suite' }
+    : { case: 'Read-only validate Case', resource: 'Read-only validate', suite: 'Read-only validate Suite' };
   const initialListState = useRef(savedExplorerList(packageId)).current;
   const [query, setQuery] = useState(initialListState.query);
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
@@ -526,6 +537,12 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
           </section>}
           <div className="att-explorer-detail-actions">
             {onRunTarget && detail?.state !== 'invalid' && <button className="button button-primary" type="button" onClick={() => onRunTarget({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId })}>Run</button>}
+            {onValidateTarget && detail && detail.type === 'case' && detail.logicalId && <button className="button button-quiet" type="button"
+              onClick={() => onValidateTarget('case', detail.resourceId, { type: 'case', resourceId: detail.resourceId, logicalId: detail.logicalId })}>{validationText.case}</button>}
+            {onValidateTarget && detail && detail.type !== 'case' && <button className="button button-quiet" type="button"
+              onClick={() => onValidateTarget(detail.type, detail.resourceId, { type: detail.type, resourceId: detail.resourceId, logicalId: detail.logicalId })}>{validationText.resource}</button>}
+            {onValidateTarget && detail?.type === 'case' && safeSuiteTarget(detail.provenance?.suite) && <button className="button button-quiet" type="button"
+              onClick={() => onValidateTarget('suite', safeSuiteTarget(detail.provenance?.suite)!, { type: 'case', resourceId: detail.resourceId, logicalId: detail.logicalId })}>{validationText.suite}</button>}
             {onOpenQuickLoad && detail?.state !== 'invalid' && ['template','flow','tool'].includes(identity.type) && <button className="button button-quiet" type="button" onClick={() => onOpenQuickLoad({ packageId, type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId })}>Quick LOAD</button>}
           </div>
           {detailLoading && <p role="status">Loading resource detail…</p>}

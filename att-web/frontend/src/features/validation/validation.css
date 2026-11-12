@@ -1,0 +1,63 @@
+.att-validation-page { max-width: 76rem; }
+.att-validation-page .att-feature-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.5rem; margin-block-end: var(--att-space-4, 1rem); }
+.att-validation-page .att-feature-header h1 { margin: 0; }
+.att-validation-page .att-feature-header p:last-child { max-width: 58rem; color: var(--att-color-muted); line-height: 1.55; }
+.att-validation-form, .att-validation-report { min-width: 0; padding: clamp(1rem, 2vw, 1.5rem); border: 1px solid var(--att-color-border); border-radius: var(--att-radius-lg, .85rem); background: var(--att-color-surface); box-shadow: var(--att-shadow-sm, 0 1px 2px rgb(15 23 42 / .06)); }
+.att-validation-fields { display: grid; grid-template-columns: repeat(3, minmax(12rem, 1fr)); gap: 1rem; align-items: start; }
+.att-validation-fields > label, .att-validation-target-picker > label, .att-validation-filters > label { display: grid; gap: .4rem; min-width: 0; color: var(--att-color-muted); font-size: .875rem; font-weight: 650; }
+.att-validation-fields input, .att-validation-fields select, .att-validation-filters input, .att-validation-filters select { width: 100%; min-height: 2.5rem; padding: .45rem .65rem; border: 1px solid var(--att-color-border); border-radius: .45rem; background: var(--att-color-surface); color: var(--att-color-text); font: inherit; }
+.att-validation-fields input:focus-visible, .att-validation-fields select:focus-visible, .att-validation-filters input:focus-visible, .att-validation-filters select:focus-visible, .att-validation-page button:focus-visible, .att-validation-report summary:focus-visible { outline: 3px solid color-mix(in srgb, var(--att-color-primary) 55%, transparent); outline-offset: 2px; }
+.att-validation-target-picker { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(14rem, 1fr) minmax(14rem, 1fr); gap: 1rem; padding: 1rem; border: 1px solid var(--att-color-border); border-radius: .65rem; background: var(--att-color-canvas); }
+.att-validation-search-row { display: flex; gap: .5rem; }
+.att-validation-search-row input { flex: 1; }
+.att-validation-target-picker p { grid-column: 1 / -1; margin: 0; }
+.att-validation-help { color: var(--att-color-muted); }
+.att-validation-gate, .att-validation-error, .att-validation-incomplete { display: grid; gap: .35rem; margin-block: 1rem; padding: .85rem 1rem; border: 1px solid color-mix(in srgb, var(--att-color-warning) 48%, var(--att-color-border)); border-inline-start: 4px solid var(--att-color-warning); border-radius: .45rem; background: color-mix(in srgb, var(--att-color-warning) 8%, var(--att-color-surface)); }
+.att-validation-error, .att-validation-page .att-error { color: var(--att-color-danger); }
+.att-validation-error { border-color: color-mix(in srgb, var(--att-color-danger) 45%, var(--att-color-border)); border-inline-start-color: var(--att-color-danger); background: color-mix(in srgb, var(--att-color-danger) 7%, var(--att-color-surface)); }
+.att-validation-error small { overflow-wrap: anywhere; }
+.att-validation-submit-row, .att-validation-report-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-block-start: 1rem; }
+.att-validation-notice { padding: .65rem .8rem; border-inline-start: 3px solid var(--att-color-primary); background: var(--att-color-canvas); }
+.att-validation-report { margin-block-start: 1.25rem; }
+.att-validation-report-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.att-validation-report-heading h2 { margin: 0; }
+.att-validation-report-actions { margin: 0; justify-content: flex-end; }
+.att-validation-status { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; margin-block: 1rem; padding: .8rem 1rem; border: 1px solid var(--att-color-border); border-radius: .55rem; background: var(--att-color-canvas); }
+.att-validation-status strong { font-size: 1.1rem; }
+.att-validation-status.is-pass { color: var(--att-color-success); border-color: color-mix(in srgb, var(--att-color-success) 45%, var(--att-color-border)); }
+.att-validation-status.is-invalid { color: var(--att-color-danger); border-color: color-mix(in srgb, var(--att-color-danger) 45%, var(--att-color-border)); }
+.att-validation-status.is-partial { color: var(--att-color-warning); border-color: color-mix(in srgb, var(--att-color-warning) 45%, var(--att-color-border)); }
+.att-validation-summary { display: grid; grid-template-columns: repeat(3, minmax(10rem, 1fr)); gap: .65rem; margin: 0 0 1rem; }
+.att-validation-summary > div { min-width: 0; padding: .65rem .75rem; border: 1px solid var(--att-color-border); border-radius: .45rem; }
+.att-validation-summary dt { color: var(--att-color-muted); font-size: .78rem; }
+.att-validation-summary dd { margin: .25rem 0 0; overflow-wrap: anywhere; font-weight: 600; }
+.att-validation-incomplete { border-color: color-mix(in srgb, var(--att-color-danger) 45%, var(--att-color-border)); border-inline-start-color: var(--att-color-danger); background: color-mix(in srgb, var(--att-color-danger) 7%, var(--att-color-surface)); }
+.att-validation-sections, .att-validation-diagnostics { margin-block-start: 1.25rem; }
+.att-validation-section-tree, .att-validation-section-diagnostics, .att-validation-diagnostic-list { display: grid; gap: .55rem; padding-inline-start: 1.25rem; }
+.att-validation-section-tree details { padding: .55rem .7rem; border: 1px solid var(--att-color-border); border-radius: .45rem; }
+.att-validation-section-tree summary { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; cursor: pointer; }
+.att-validation-section-tree summary code { margin-inline-start: auto; color: var(--att-color-muted); overflow-wrap: anywhere; }
+.att-validation-section-status { padding: .1rem .4rem; border-radius: 99px; color: var(--att-color-text); background: var(--att-color-canvas); font-size: .75rem; font-weight: 700; }
+.att-validation-section-status.is-pass { color: var(--att-color-success); }
+.att-validation-section-status.is-fail { color: var(--att-color-danger); }
+.att-validation-section-status.is-warn, .att-validation-section-status.is-skip { color: var(--att-color-warning); }
+.att-validation-section-diagnostics li, .att-validation-diagnostic-list li { display: grid; gap: .3rem; padding: .7rem; border-inline-start: 3px solid var(--att-color-border); background: var(--att-color-canvas); overflow-wrap: anywhere; }
+.att-validation-section-diagnostics small, .att-validation-diagnostic-list small { color: var(--att-color-muted); }
+.att-validation-filters { display: grid; grid-template-columns: repeat(5, minmax(8rem, 1fr)); gap: .65rem; }
+.att-validation-diagnostic-list { list-style: none; padding-inline-start: 0; }
+.att-validation-diagnostic-list li strong { color: var(--att-color-danger); }
+.att-validation-diagnostic-list li p { margin: 0; line-height: 1.5; }
+
+@media (max-width: 900px) {
+  .att-validation-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .att-validation-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .att-validation-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .att-validation-page .att-feature-header, .att-validation-report-heading { display: grid; }
+  .att-validation-fields, .att-validation-target-picker, .att-validation-summary, .att-validation-filters { grid-template-columns: minmax(0, 1fr); }
+  .att-validation-target-picker > *, .att-validation-target-picker p { grid-column: auto; }
+  .att-validation-search-row { align-items: stretch; flex-direction: column; }
+  .att-validation-report-actions { justify-content: flex-start; }
+  .att-validation-section-tree summary code { margin-inline-start: 0; }
+}

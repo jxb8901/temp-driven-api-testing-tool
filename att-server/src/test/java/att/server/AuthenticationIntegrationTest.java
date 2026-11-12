@@ -389,16 +389,20 @@ class AuthenticationIntegrationTest {
             assertEquals(401,get(port,formPath,null),"Debug defaults must remain behind container authentication");
             assertEquals(401,postStatus(port,null,"/att/api/v1/drafts/debug",Map.of("packageId","debug")),"Draft creation must remain behind container authentication");
             assertEquals(401,postStatus(port,null,"/att/api/v1/validation",Map.of("command","validate","targetKind","config")),"Validation API must remain behind container authentication");
+            JsonNode jobsBeforeValidation=getJson(port,"/att/api/v1/jobs",basic).path("items");
             JsonNode validation=postJson(port,"/att/api/v1/validation",basic,
                     ServerRuntime.JSON.valueToTree(Map.of("command","validate","targetKind","config")),200);
             assertEquals("att-validation/v1",validation.path("schemaVersion").asText());
             assertEquals("SERVER",validation.path("backend").asText());
             assertTrue(validation.path("requestId").isTextual()&&!validation.path("requestId").asText().isBlank());
+            assertFalse(validation.has("draftId"),"Read-only validation must not create a draft");
             JsonNode packageDefaultValidation=postJson(port,"/att/api/v1/validation",basic,
                     ServerRuntime.JSON.valueToTree(Map.of("command","validate","targetKind","config","packageId","debug")),200);
             assertEquals("UAT",packageDefaultValidation.path("context").path("environment").asText());
             assertEquals("PASS",packageDefaultValidation.path("overallStatus").asText());
             assertTrue(packageDefaultValidation.toString().contains("UAT — Tool Groups and DB/MQ/HTTP/SSH Helpers"));
+            assertEquals(jobsBeforeValidation.size(),getJson(port,"/att/api/v1/jobs",basic).path("items").size(),
+                    "Read-only Config validation must not create a persisted Job");
             assertEquals(400,postStatus(port,basic,"/att/api/v1/validation",Map.of("command","validate","unexpected","field")));
             assertEquals(403,postStatus(port,basic,"/att/api/v1/validation",Map.of("command","validate","all",true)),
                     "Installation-wide validation requires system-administrator access");
@@ -413,7 +417,10 @@ class AuthenticationIntegrationTest {
             assertEquals(403,get(port,"/att/api/v1/drafts/"+draftId,other),"Non-USER container principals cannot access operational API resources");
             JsonNode loadPolicy=getJson(port,"/att/api/v1/packages/debug/load-policy?model=virtualUsers",basic);
             assertEquals("virtualUsers",loadPolicy.path("model").asText());
-            assertTrue(getJson(port,"/att/api/v1/version",basic).path("inlineLoadEnabled").asBoolean(false));
+            JsonNode version=getJson(port,"/att/api/v1/version",basic);
+            assertTrue(version.path("inlineLoadEnabled").asBoolean(false));
+            assertEquals("att-validation/v1",version.path("validationApiVersion").asText(),
+                    "Studio uses the advertised validation report version as its capability gate");
             JsonNode advancedScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6",
                     "load",Map.of("users",1,"duration","1s"),"workloads",List.of(Map.of("id","auth-load",
                             "load",Map.of("users",1),"target",Map.of("type","template","id","FORM"),

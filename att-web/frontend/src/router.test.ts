@@ -12,6 +12,19 @@ describe('ATT hash route contract', () => {
     expect(parseRoute('#/settings')).toEqual({ kind: 'settings' });
   });
 
+  it('round-trips read-only validation scope, environment, target, and resource context', () => {
+    const selectedCase = { kind: 'validation', scope: 'case', packageId: 'payments', environment: 'SIT', target: 'PAYMENT.submit',
+      resource: { type: 'case', resourceId: 'testcase/checkout.yaml', logicalId: 'PAYMENT.submit' } } as const;
+    expect(parseRoute(formatRoute(selectedCase))).toEqual(selectedCase);
+    expect(formatRoute(selectedCase)).toContain('scope=case');
+    expect(formatRoute(selectedCase)).toContain('resourceId=testcase%2Fcheckout.yaml');
+    const loadScenario = { kind: 'validation', scope: 'load', packageId: 'payments', environment: '', target: 'load/checkout/smoke.yaml' } as const;
+    expect(parseRoute(formatRoute(loadScenario))).toEqual(loadScenario);
+    expect(parseRoute('#/validate?scope=suite&package=p&target=..%2Foutside.yaml'))
+      .not.toHaveProperty('target');
+    expect(parseRoute('#/validate?scope=unknown&package=p')).toEqual({ kind: 'validation', packageId: 'p' });
+  });
+
   it('round-trips package resource, Load, and job deep links', () => {
     const resource = { kind: 'package', packageId: 'payments and ledger', resource: { type: 'template', resourceId: 'PAYMENT%2Fv1' } } as const;
     expect(parseRoute(formatRoute(resource))).toEqual(resource);

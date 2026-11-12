@@ -1201,6 +1201,7 @@ class ServerWarUiIT {
     private void runServerUiPlaywright(String origin) throws Exception {
         Path output = temp.resolve("server-ui-playwright.log");
         runServerUiPlaywrightScript(origin, "server-api-smoke.cjs", output);
+        runServerUiPlaywrightScript(origin, "validation-server-smoke.cjs", temp.resolve("validation-server-playwright.log"));
         if ("1".equals(System.getenv("ATT_UI_EXPLORER_ONLY"))) return;
         runServerUiPlaywrightScript(origin, "saved-scenario-server.cjs", temp.resolve("saved-scenario-playwright.log"));
     }

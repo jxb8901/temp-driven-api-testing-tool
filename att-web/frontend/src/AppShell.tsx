@@ -76,6 +76,8 @@ export interface AppShellContextValue {
   uiLocale: UiLocale;
   uiLocalePreference: UiLocalePreference;
   authMode?: 'container' | 'local';
+  authContextKey?: string;
+  inspectionSessionEpoch?: number;
   currentUser: Pick<LocalAuthUser,'loginId'|'displayName'|'role'> | null;
   accessCapabilities: AccessCapabilities;
   preferenceStatus: PreferenceStatus;
@@ -102,9 +104,10 @@ function routeLink(event: MouseEvent<HTMLAnchorElement>, action: () => void) {
   action();
 }
 
-function routeTitle(route: AppRoute): string {
+function routeTitle(route: AppRoute, locale: UiLocale): string {
   if (route.kind === 'dashboard') return 'Dashboard';
   if (route.kind === 'monitoring') return 'Monitoring';
+  if (route.kind === 'validation') return locale === 'zh-Hant' ? '驗證' : 'Validate';
   if (route.kind === 'run') return 'Run';
   if (route.kind === 'packages') return 'Explorer';
   if (route.kind === 'package') return route.view === 'testdata' ? 'Testdata' : route.view === 'source-file' ? route.filePath?.split('/').pop() || 'Package source' : route.resource ? route.resource.resourceId : route.packageId;
@@ -121,6 +124,7 @@ function routeTitle(route: AppRoute): string {
 }
 
 function activeNavigation(route: AppRoute): string {
+  if (route.kind === 'validation') return 'validation';
   if (route.kind === 'monitoring') return 'monitoring';
   if (route.kind === 'run' || route.kind === 'packages' || route.kind === 'package') return 'explorer';
   if (route.kind === 'configuration') return 'configuration';
@@ -132,12 +136,13 @@ function activeNavigation(route: AppRoute): string {
   return 'dashboard';
 }
 
-function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, accessCapabilities, onClose, onNavigate }: {
+function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, accessCapabilities, uiLocale, onClose, onNavigate }: {
   open: boolean;
   mode: 'palette' | 'shortcuts';
   showScheduledLoad: boolean;
   selectedPackage: string;
   accessCapabilities: AccessCapabilities;
+  uiLocale: UiLocale;
   onClose(): void;
   onNavigate(route: AppRoute): void;
 }) {
@@ -150,6 +155,8 @@ function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, access
     { label: 'Monitoring', description: 'Live server health and capacity', route: { kind: 'monitoring' } },
     { label: 'Explorer', description: 'Choose a package, browse resources, and run targets', route: selectedPackage ? { kind: 'package', packageId: selectedPackage } : { kind: 'packages' } },
     { label: 'Configuration', description: 'Inspect shared runtime configuration', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
+    { label: uiLocale === 'zh-Hant' ? '驗證' : 'Validate', description: uiLocale === 'zh-Hant'
+      ? '唯讀驗證 Config、Package 及所選 resource' : 'Run bounded, read-only validation for Config, Packages, and selected resources', route: { kind: 'validation', scope: 'config' } },
     { label: 'Load testing', description: 'Create a validated Load job', route: { kind: 'load' } },
     { label: 'Jobs and results', description: 'Inspect recent jobs', route: { kind: 'jobs' } },
     ...(showScheduledLoad ? [{ label: 'Schedules', description: 'Manage RUN and LOAD schedules', route: { kind: 'schedules' } as AppRoute }] : []),
@@ -306,7 +313,7 @@ export function AppShell({
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const wasMobileNavigationOpen = useRef(false);
-  const currentPage = routeTitle(route);
+  const currentPage = routeTitle(route, uiLocale);
   const activeNav = activeNavigation(route);
   const versionStatus = serverVersion.status === 'ready' ? 'Connected'
     : serverVersion.status === 'error' ? 'Unavailable' : 'Connecting…';
@@ -578,7 +585,7 @@ export function AppShell({
 
   return (
     <NavigationGuardContext.Provider value={navigation}>
-      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, workspaceResolvedEnvironment, workspaceResolutionError, themePreference, uiLocale, uiLocalePreference, authMode: versionData?.authMode, currentUser, accessCapabilities, preferenceStatus, canRevealConfigurationFields, setWorkspaceEditorLock, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onUiLocaleChange: changeUiLocale, onJobAccepted }}>
+      <AppShellContext.Provider value={{ selectedPackage, selectedEnvironment, workspaceResolvedEnvironment, workspaceResolutionError, themePreference, uiLocale, uiLocalePreference, authMode: versionData?.authMode, authContextKey, inspectionSessionEpoch, currentUser, accessCapabilities, preferenceStatus, canRevealConfigurationFields, setWorkspaceEditorLock, onPackageChange, onEnvironmentChange, onThemePreferenceChange: changeThemePreference, onUiLocaleChange: changeUiLocale, onJobAccepted }}>
       {(route.kind === 'job-console' || route.kind === 'job-artifact' || (route.kind === 'jobs' && route.standalone)) ? <main key={inspectionSessionEpoch} id="main-content" className="att-standalone-console-shell" tabIndex={-1}>
         {capabilitiesResolved ? children : <div role="status" aria-busy="true">Checking ATT access…</div>}
       </main> : <JobConsoleProvider jobsApi={api}>
@@ -607,6 +614,9 @@ export function AppShell({
             <a className="nav-link" href={configurationHref} data-nav="configuration" aria-current={activeNav === 'configuration' ? 'page' : undefined} onClick={link(configurationHref)}>
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Configuration</span>
             </a>
+            <a className="nav-link" href="#/validate?scope=config" data-nav="validation" aria-current={activeNav === 'validation' ? 'page' : undefined} onClick={link('#/validate?scope=config')}>
+              <span className="nav-icon" aria-hidden="true">✓</span><span className="nav-label">{uiLocale === 'zh-Hant' ? '驗證' : 'Validate'}</span>
+            </a>
             <a className="nav-link" href={loadHref} data-nav="load-testing" aria-current={activeNav === 'load-testing' ? 'page' : undefined} onClick={link(loadHref)}>
               <span className="nav-icon" aria-hidden="true">⌁</span><span className="nav-label">Load testing</span>
             </a>
@@ -624,7 +634,7 @@ export function AppShell({
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span>
             </a>}
           </nav>
-          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.9'}</span></div>
+          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.10'}</span></div>
         </aside>
 
         <div className="app-frame">
@@ -715,7 +725,7 @@ export function AppShell({
         </div>
         <DiscardChangesDialog navigation={navigation} />
         <ChangePasswordDialog open={changePasswordOpen} locale={uiLocale} onClose={()=>setChangePasswordOpen(false)} />
-        <KeyboardDialog open={keyboardMode !== null} mode={keyboardMode || 'palette'} showScheduledLoad={showScheduledLoad&&accessCapabilities.operate} selectedPackage={selectedPackage} accessCapabilities={accessCapabilities}
+        <KeyboardDialog open={keyboardMode !== null} mode={keyboardMode || 'palette'} showScheduledLoad={showScheduledLoad&&accessCapabilities.operate} selectedPackage={selectedPackage} accessCapabilities={accessCapabilities} uiLocale={uiLocale}
           onClose={() => setKeyboardMode(null)} onNavigate={target => { navigate(target); setKeyboardMode(null); setMobileNavigationOpen(false); }} />
       </div>
       </JobConsoleProvider>}

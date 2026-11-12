@@ -4,6 +4,7 @@
 - Keep DB/MQ/HTTP/SSH Helper definitions centralized; reject unsupported legacy global Tools with explicit migration guidance instead of dispatch fallback.
 - Add Package Tool source inspection to Explorer; remove Tool and Tool Group catalogs from Shared Configuration; include Package Tool descriptors in revision fingerprints.
 - Convert bundled Package examples from global Tool declarations and document migration from older configurations.
+- Add the Studio Read-only Validate workspace for shared/effective Config, registered Packages, Explorer resources, and executable LOAD Scenarios; advertise the `att-validation/v1` Server capability and report contract (#355).
 
 # Changelog
 

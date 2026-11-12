@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.2.10 -->
 
 # Studio Load testing
 
@@ -11,6 +11,8 @@
 *Load builder 靜態 UI shell 基線截圖，使用示例 workload；圖中版本標籤屬於截圖基線。*
 
 瀏覽器建立的 Quick Load 與 Advanced Load 預設停用。Server 管理員必須設定 `server.inlineLoad.enabled: true`，並配置 workload、target、user、rate、並行數及 duration 上限，這些表單才可建立 draft。UI 會從 `/api/v1/version` 讀取 `inlineLoadEnabled`；功能關閉時會停用 Advanced Load 入口、隱藏 Quick Load，直接開啟頁面則會顯示停用狀態。停用時 endpoint 回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`；超出上限的 draft 會回傳 `400 ATT-SERVER-INLINE-LOAD-LIMIT`，並以摘要指出超出的設定。此設定不會停用既有 path-based Load 用戶端。
+
+LOAD Catalog 中的可執行情境亦提供 **Read-only validate**，會帶入 scenario path 及 Environment 開啟 `#/validate`。在該工作區選擇 **Run Validation** 後才會呼叫同步 validation API，不會建立 LOAD draft 或 Job。旁邊的 **Validate** action 保持既有 draft validation 行為，供 Run Now 及 Schedule 使用。
 
 Inline draft 及 package-backed scenario 均使用 Server 設定的 LOAD duration 上限（`server.inlineLoad.maxDurationSeconds`，最多 864,000 秒／10 日）。完整 envelope 依 ramp-up、warmup、steady duration 及 ramp-down 順序執行。長時間 run 會以唯讀方式估算保留 evidence 檔案及位元組數，並檢查 evidence quota、Tool output 保留設定、artifact archive 容量及可用輸出磁碟空間；風險會以 warning 顯示，duration 本身不會令工作被拒絕。
 
