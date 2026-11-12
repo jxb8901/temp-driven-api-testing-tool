@@ -1916,6 +1916,16 @@ public final class PackageResourceInspector implements AutoCloseable {
                 indexFileIfPackage(index, script);
             }
             if (tool.sourceFile() != null) indexFileIfPackage(index, tool.sourceFile());
+            // Both the dispatcher and the member script must participate in the
+            // Inspector's watched-file closure (rather than only the first source).
+            try {
+                for (Path dependency : att.config.PackageToolScripts.referenced(packageRoot, tool))
+                    indexFileIfPackage(index, dependency);
+            } catch (java.io.IOException unsafe) {
+                resource.diagnostics.add(diagnostic("ATT-RESOURCE-TOOL-SCRIPT-INVALID",
+                        "Package Tool has an invalid local script dependency"));
+                resource.state = "invalid";
+            }
             index.toolAliases.put(alias("tool", key), resource);
             index.add(resource);
         }
