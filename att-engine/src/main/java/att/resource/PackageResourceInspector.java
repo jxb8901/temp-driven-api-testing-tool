@@ -2478,7 +2478,8 @@ public final class PackageResourceInspector implements AutoCloseable {
             PackageResourceResolver.PackageResource resolved = resources.fromInternalPath(resource.yamlSource, PackageResourceResolver.Kind.FILE);
             String logical = resolved.logicalName();
             String lower = logical.toLowerCase(Locale.ROOT);
-            boolean packageTool = "tool".equals(resource.type) && lower.matches("tools/[^/]+\\.yaml");
+            boolean packageTool = "tool".equals(resource.type) && (lower.matches("tools/[^/]+\\.yaml")
+                    || lower.matches("tools/[^/]+/[^/]+\\.yaml"));
             if (!packageTool && !(lower.endsWith("/template.yaml") || lower.endsWith("/flow.yaml"))) return false;
             if (deniedSourcePath(logical)) return false;
             if (!packageSourceAllowed(logical,resolved.canonicalPath())) return false;
