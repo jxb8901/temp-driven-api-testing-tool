@@ -1842,6 +1842,21 @@ Call-backed Tool 使用相同的聲明參數理念，但保留 typed value，並
 
 `type` 宣告 configured Tool 完整解析後的值 contract，可用 `any`、`string`、`integer`、`long`、`decimal`、`boolean`、`enum`、`bytes`、`map` 或 `list`。未填 `type` 時仍按 `any` 處理，維持舊 descriptor 行為。數值和 Boolean scalar 接受原生值或去除前後空白的數字／`true`／`false` 字串；enum 必須符合其中一個 `enumValues`；`bytes` 接受 byte array 或 UTF-8 String。`string`、`map` 和 `list` 要求原生值型別吻合。這些檢查在巢狀 expression 完整解析後執行；靜態安全可求值的內容會在 validation 檢查，其餘在 runtime 檢查。
 
+#### Package-local Tool Group（ATT 4.2.10）
+
+Standalone Tool 使用 `tools/<id>.yaml` 與 `att-tool/v1`；Grouped Tools 則由固定名稱 `tools/<folder>/tool-group.yaml`（`att-tool-group/v3.0`）明確列出每個 `att-tool/v1` 成員，不遞迴掃描。
+
+```yaml
+# packages/fpp/tools/fpp/tool-group.yaml
+schemaVersion: att-tool-group/v3.0
+id: fpp
+name: FPP Tools
+description: FPP integration commands
+tools: [invokeApi.yaml, loghelper.yaml]
+```
+
+`tools/fpp/invokeApi.yaml` 的 `id: invokeApi` 對外仍是 `#{fpp.invokeApi(...)}`。公開前綴來自 Manifest 的 `id`，不是目錄名稱。可選 `script` 保留 Group Dispatcher + 成員 ID + 成員命令 argv 順序。可選 `ssh: {helper: application}` 綁定 Global SSHHelper，不容許在 Manifest 定義主機或憑證。缺失／重複成員和歧義 qualified ID 會阻止驗證。Tool 屬所選 Package；Helper 繼續屬於全域配置。
+
 ### DBHelper
 
 DBHelper 是獨立於 Tool 的一級 JDBC resource。每個 descriptor 使用 `schemaVersion: att-dbhelper/v2.6` 和穩定 logical `id`；global `dbhelpers` 只引用 descriptor file。
@@ -3494,7 +3509,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | HTTPHelper | att-httphelper/v1.1 |
 | SSHHelper | att-sshhelper/v1.0 |
 | Package Tool | att-tool/v1 |
-| Legacy Tool group (migration only) | att-tool-group/v3.0 |
+| Package Tool Group | att-tool-group/v3.0 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
 | Template | att-template/v3.6 |
