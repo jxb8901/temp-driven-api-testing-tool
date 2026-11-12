@@ -13,6 +13,38 @@ import static org.junit.jupiter.api.Assertions.*;
 class PackageValidatorTest {
     @TempDir Path tempDir;
 
+    @Test void groupedToolValidationRejectsMissingMemberScriptDespitePresentDispatcher() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("grouped"));
+        Path tools = Files.createDirectories(root.resolve("tools"));
+        Path group = Files.createDirectories(tools.resolve("sample"));
+        Files.write(group.resolve("tool-group.yaml"),
+                ("schemaVersion: att-tool-group/v3.0\nid: sample\nname: Sample\n"
+                 + "description: Group\nscript: [./tools/dispatcher.sh]\n"
+                 + "tools: [getAcDate.yaml]\n").getBytes("UTF-8"));
+        Files.write(group.resolve("getAcDate.yaml"),
+                ("schemaVersion: att-tool/v1\nid: getAcDate\nname: Date\n"
+                 + "description: Date tool\ncommand: [./tools/missing-date.sh]\n").getBytes("UTF-8"));
+        Path dispatcher = tools.resolve("dispatcher.sh");
+        Files.write(dispatcher, "#!/bin/sh\necho dispatch\n".getBytes("UTF-8"));
+        dispatcher.toFile().setExecutable(true);
+        att.TestSchemas.install(root);
+        Path config = root.resolve("config/config.yaml");
+        Files.createDirectories(config.getParent());
+        Files.write(config, "schemaVersion: att-config/v2.13\n".getBytes("UTF-8"));
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(config, root, root, null);
+        ToolConfig member = loaded.tool("sample.getAcDate");
+        assertNotNull(member);
+        PackageValidator validator = new PackageValidator(root, loaded);
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod(
+                "validateToolExecutable", ToolConfig.class);
+        method.setAccessible(true);
+        java.lang.reflect.InvocationTargetException missing =
+                assertThrows(java.lang.reflect.InvocationTargetException.class,
+                        () -> method.invoke(validator, member));
+        assertTrue(String.valueOf(missing.getCause().getMessage()).contains("missing-date.sh"),
+                String.valueOf(missing.getCause()));
+    }
+
     @Test void retryConditionUsesCompletedAttemptScopeAndRejectsForbiddenCalls() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
                 Collections.<String, ToolConfig>emptyMap(), null, null);
