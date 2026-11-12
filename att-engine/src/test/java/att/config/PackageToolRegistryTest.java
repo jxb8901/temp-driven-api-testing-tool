@@ -160,6 +160,40 @@ class PackageToolRegistryTest {
         assertNotEquals(afterMember, afterDispatcher, "Editing only a dispatcher script must make an accepted Job stale");
     }
 
+    @Test void extensionlessInterpreterScriptsChangeEffectiveRevisionForMemberAndDispatcher() throws Exception {
+        Path pkg = temp.resolve("packages/extensionless");
+        tool(pkg, "sample/tool-group.yaml",
+                "schemaVersion: att-tool-group/v3.0\nid: sample\nname: Sample\n"
+                + "description: Extensionless group\nscript: [bash, ./tools/dispatch]\n"
+                + "tools: [task.yaml]\n");
+        tool(pkg, "sample/task.yaml",
+                "schemaVersion: att-tool/v1\nid: task\nname: Task\n"
+                + "description: Extensionless member\ncommand: [bash, ./tools/task]\n"
+                + "stdoutFormat: text\n");
+        Path dispatcher = tool(pkg, "dispatch", "#!/bin/sh\necho dispatcher\n");
+        Path member = tool(pkg, "task", "#!/bin/sh\necho first\n");
+        FrameworkConfigLoader loader = new FrameworkConfigLoader();
+        Path central = config();
+        FrameworkConfig first = loader.load(central, temp, pkg, null);
+        assertEquals(java.util.Arrays.asList(dispatcher, member),
+                PackageToolScripts.referenced(pkg, first.tool("sample.task")),
+                "Both extensionless scripts must enter the effective Tool closure");
+        assertEquals(java.util.Collections.singletonList(member),
+                PackageToolScripts.referencedArgv(pkg,
+                        java.util.Arrays.asList("bash", "-e", "./tools/task")),
+                "Shell -e is an option, not inline code");
+        assertTrue(PackageToolScripts.referencedArgv(pkg,
+                java.util.Arrays.asList("node", "-e", "./tools/task")).isEmpty(),
+                "Node -e interprets an inline expression, not a script file");
+        String accepted = first.effectiveConfiguration().identity();
+        Files.write(member, "#!/bin/sh\necho second\n".getBytes(StandardCharsets.UTF_8));
+        String afterMember = loader.load(central, temp, pkg, null).effectiveConfiguration().identity();
+        assertNotEquals(accepted, afterMember, "Member script-only edit invalidates effective revision");
+        Files.write(dispatcher, "#!/bin/sh\necho changed\n".getBytes(StandardCharsets.UTF_8));
+        String afterDispatcher = loader.load(central, temp, pkg, null).effectiveConfiguration().identity();
+        assertNotEquals(afterMember, afterDispatcher, "Dispatcher-only edit invalidates effective revision");
+    }
+
     @Test void invalidGroupMembershipAndCollisionsFailClosed() throws Exception {
         Path pkg = temp.resolve("packages/invalid-group");
         tool(pkg, "first/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\nid: payments\n"
