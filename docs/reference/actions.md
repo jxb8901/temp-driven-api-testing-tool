@@ -9,7 +9,8 @@ This page defines the active ATT action contract. Templates use att-template/v3.
 | tool | call | Invokes a configured Tool, built-in or helper call and preserves the native typed result. DB query/scalar/update calls are ordinary Tool calls. |
 | assert | assert | Evaluates a boolean condition and records PASS or FAIL. expected and actual are optional diagnostic values. |
 | log | message or value | Formats a typed value for the Case log. Its fields are message, value and format. |
-| assign | name and expression | Publishes the expression's typed result below EXEC.VARS. |
+| assign | name and expression | Publishes the expression's typed result below EXEC.VARS once. |
+| set | name and expression | Replaces an existing top-level EXEC.VARS value with the expression's typed result. |
 | flow | use | Runs a registered Flow in a nested Action scope and restores the caller's scope on return. |
 
 Actions run in YAML order. Where supported, an action may also define id, description, onFailure and runWhen. Action IDs are unique within their scope. Type-specific invalid fields fail validation. Action result, Log file and Log fields are not part of the current action contract.
@@ -174,7 +175,20 @@ When both message and value are supplied, Log emits the message, a newline, then
 
 Action expressions use the regular ATT expression engine. A complete ${...} or #{...} expression keeps its result type; embedding an expression in surrounding text produces a String. See [Expressions and Built-ins](expressions.md).
 
-assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Values assigned in one Stage are available to later Stages. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; publish values to EXEC.VARS when the caller needs them after the Flow returns.
+assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Use set with the same name and expression fields to update an existing top-level EXEC.VARS value; set never declares a missing variable. Its expression reads the old Context value and publishes only after evaluation succeeds, preserving the native result type. Both Actions share EXEC.VARS across Stages and nested Flow calls. A set of a Debug/Load bootstrap variable consumes its first-assign allowance; a later assign cannot overwrite that update. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; EXEC.VARS updates remain visible to the caller.
+
+~~~yaml
+initializeCounter:
+  type: assign
+  name: counter
+  expression: "#{0}"
+incrementCounter:
+  type: set
+  name: counter
+  expression: "#{${EXEC.VARS.counter} + 1}"
+~~~
+
+The example leaves `EXEC.VARS.counter` as a typed number. A skipped or failed set leaves its previous value unchanged.
 
 ## Resource output evidence
 

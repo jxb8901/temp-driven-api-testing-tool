@@ -172,6 +172,32 @@ class FlowRuntimeTest {
         assertEquals("REF-001", context.resolve("EXEC.VARS.copiedRef"));
     }
 
+    @Test void repeatedFlowSetActionsUpdateTheCallerSharedVariable() throws Exception {
+        writeFlow("increment", "schemaVersion: att-flow/v3.6\nid: common.increment.v1\nname: Increment\ndescription: Increment\nactions:\n"
+                + "  addOne: {type: set, name: counter, expression: '#{${EXEC.VARS.counter} + 1}'}\n");
+        FlowRegistry flows = new FlowRegistry(tempDir, tempDir.resolve("templates"));
+        Map<String,Object> initialize = new LinkedHashMap<String,Object>();
+        initialize.put("type", "assign"); initialize.put("name", "counter"); initialize.put("expression", "#{0}");
+        Map<String,Object> call = new LinkedHashMap<String,Object>();
+        call.put("type", "flow"); call.put("use", "common.increment.v1");
+        StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("initialize", initialize, "att-template/v3.6"),
+                new TemplateAction("firstIncrement", call, "att-template/v3.6"),
+                new TemplateAction("secondIncrement", call, "att-template/v3.6")), "att-template/v3.6");
+        CaseRuntimeContext context = context();
+        try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("case.log"))) {
+            List<ValidationResult> results = new StageTemplateRunner(new UnifiedTemplateEngine(null), flows)
+                    .execute("verify", template, context, log);
+            assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS, ResultStatus.PASS), Arrays.asList(
+                    results.get(0).status(), results.get(1).status(), results.get(2).status()));
+        }
+        assertEquals(2L, ((Number) context.resolve("EXEC.VARS.counter")).longValue());
+        assertEquals(1L, ((Number) CaseRuntimeContext.getPath(context.caseTree(),
+                "STAGES.verify.TEMPLATE.ACTIONS.firstIncrement.flow.actions.addOne.output.result")).longValue());
+        assertEquals(2L, ((Number) CaseRuntimeContext.getPath(context.caseTree(),
+                "STAGES.verify.TEMPLATE.ACTIONS.secondIncrement.flow.actions.addOne.output.result")).longValue());
+    }
+
     @Test void movingRenderActionIntoFlowKeepsCaseExpressionsAndResultUnchanged() throws Exception {
         String payload = "case=${CASE.caseId}\nref=${CASE.SrcRefNo}\namount=${CASE.amount}\nchannel=${CASE.channel}\n";
         Files.write(tempDir.resolve("request.txt"), payload.getBytes(StandardCharsets.UTF_8));

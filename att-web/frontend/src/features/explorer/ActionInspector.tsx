@@ -15,6 +15,7 @@ const TYPE_FIELDS: Record<string, ReadonlySet<string>> = {
   assert: new Set(['assert', 'expected', 'actual']),
   log: new Set(['message', 'value', 'format']),
   assign: new Set(['name', 'expression', 'value']),
+  set: new Set(['name', 'expression']),
   flow: new Set(['use']),
 };
 
@@ -96,6 +97,7 @@ function actionSummary(type: string, action: Record<string, unknown> | null): st
       case 'assert': return { label: 'Assert', value: action?.assert };
       case 'log': return { label: 'Log', value: action?.message ?? action?.value ?? action?.format };
       case 'assign': return { label: 'Assign', value: action?.name ?? action?.expression ?? action?.value };
+      case 'set': return { label: 'Set', value: action?.name ?? action?.expression };
       default: return { label: type === 'unknown' ? 'Unsupported action' : type, value: undefined };
     }
   })();

@@ -440,14 +440,15 @@ public final class PackageValidator {
                     "VALIDATE", projectRoot, projectRoot.resolve(".att-validation.log"));
             context.setProject(projectRoot);
             context.put("CASE.environment", config.environment());
-            for (String name : assignedCaseVariables) context.putValidationPlaceholder("EXEC.VARS." + name);
+            for (String name : assignedCaseVariables) context.noteValidationCaseVariableAssigned(name);
             context.beginStage(stage, template.name(), template.directory());
             att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(null);
             for (TemplateAction action : template.actions()) {
                 addContextMigrationWarningsForAction(diagnostics, engine, template, action,
                         MigrationPhase.PRE_PUBLICATION, context);
                 context.putValidationPlaceholder("EXEC.ACTIONS." + action.id() + ".output");
-                if ("assign".equalsIgnoreCase(action.type())) context.putValidationPlaceholder("EXEC.VARS." + action.name());
+                if ("assign".equalsIgnoreCase(action.type()) || "set".equalsIgnoreCase(action.type()))
+                    context.putValidationPlaceholder("EXEC.VARS." + action.name());
                 addContextMigrationWarningsForAction(diagnostics, engine, template, action,
                         MigrationPhase.POST_PUBLICATION, context);
             }
@@ -1062,7 +1063,9 @@ public final class PackageValidator {
             if (action.id().contains(".")) throw new IllegalArgumentException("Action ID must not contain '.': " + action.id());
             if (!actionIds.add(action.id())) throw new IllegalArgumentException("Duplicate Action ID: " + action.id());
             String type = action.type().toLowerCase(java.util.Locale.ROOT);
-            if (!("render".equals(type) || "tool".equals(type) || "db".equals(type) || "assert".equals(type) || "log".equals(type) || "assign".equals(type) || "flow".equals(type))) throw new IllegalArgumentException("Unsupported action type: " + action.type());
+            if (!("render".equals(type) || "tool".equals(type) || "db".equals(type) || "assert".equals(type) || "log".equals(type) || "assign".equals(type) || "set".equals(type) || "flow".equals(type))) throw new IllegalArgumentException("Unsupported action type: " + action.type());
+            if ("set".equals(type) && !att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion()))
+                throw new IllegalArgumentException("Set actions require " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
             if ("db".equals(type) && att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())) {
                 throw new IllegalArgumentException("Action type 'db' is historical-only; use type: tool with a db.<helper>.query|scalar|update(...) call under " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
             }
@@ -1107,18 +1110,20 @@ public final class PackageValidator {
                 validateInlineExpressions(String.valueOf(action.value() == null ? "" : action.value()), syntaxEngine, config);
                 validateValueTreeSyntax(action.value(), syntaxEngine, config);
             }
-            if ("assign".equals(type)) {
-                require(action.name(), "name is required for assign action " + action.id());
-                require(action.expression(), "expression is required for assign action " + action.id());
-                if (!action.name().matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Assign name must match [A-Za-z_][A-Za-z0-9_]*: " + action.name());
-                if (!assignmentNames.add(action.name())) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
+            if ("assign".equals(type) || "set".equals(type)) {
+                String verb = "set".equals(type) ? "set" : "assign";
+                require(action.name(), "name is required for " + verb + " action " + action.id());
+                require(action.expression(), "expression is required for " + verb + " action " + action.id());
+                if (!action.name().matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException(
+                        verb + " name must match [A-Za-z_][A-Za-z0-9_]*: " + action.name());
+                if ("assign".equals(type) && !assignmentNames.add(action.name())) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
                         "Duplicate EXEC.VARS assignment '${EXEC.VARS." + action.name() + "}'",
                         "The same variable name is assigned more than once in template '" + template.name() + "'.",
                         null, "name", null, null, null, template.name(), action.id(),
                         "Use a unique Case-scoped variable name; assign does not overwrite.", null);
                 forbid(action, "output", "payload", "result", "call", "db", "query", "update", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
                 validateInlineExpressions(action.expression(), syntaxEngine, config);
-            validateStaticContextStructure(action.expression(), syntaxEngine, completedActions, false, action.id());
+                validateStaticContextStructure(action.expression(), syntaxEngine, completedActions, false, action.id());
             }
             if ("flow".equals(type)) {
                 if (!att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())
@@ -1605,7 +1610,7 @@ public final class PackageValidator {
         context.put("CASE.environment", config.environment());
         context.setLegacyInputsView(legacyInputs);
         context.seedDebugVariables(debugVariables);
-        for (String name : assignedCaseVariables) context.putValidationPlaceholder("EXEC.VARS." + name);
+        for (String name : assignedCaseVariables) context.noteValidationCaseVariableAssigned(name);
         context.beginStage(stage, template.name(), template.directory());
         att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(new att.exec.ToolInvoker(projectRoot, config));
         Set<String> completedActions = new LinkedHashSet<String>();
@@ -1622,6 +1627,11 @@ public final class PackageValidator {
         for (TemplateAction action : template.actions()) {
             Path sourceFile = template.sourceFile();
             String sourceField = "actions." + action.id();
+            boolean setTargetPresent = false;
+            boolean setTargetBootstrap = false;
+            boolean setTargetUncertain = false;
+            boolean setConditional = !action.runWhen().trim().isEmpty();
+            boolean setConsumesBootstrap = false;
             try {
                 if (!actionIds.add(action.id())) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
                         "Duplicate expanded Action ID '" + action.id() + "'",
@@ -1652,6 +1662,28 @@ public final class PackageValidator {
                     for (ToolCallParser.ParsedCall call : engine.parseCalls(action.expression())) {
                         validateCallArguments(call, context, engine);
                     }
+                } else if ("set".equalsIgnoreCase(action.type())) {
+                    sourceField = "actions." + action.id() + ".name";
+                    setTargetPresent = context.hasCaseVariable(action.name());
+                    setTargetBootstrap = setTargetPresent && context.isBootstrapCaseVariable(action.name());
+                    setTargetUncertain = setTargetPresent && context.isValidationCaseVariableUncertain(action.name());
+                    if (!setTargetPresent) {
+                        if (context.inFlow()) {
+                            // A reusable Flow can be called with a caller-owned
+                            // bootstrap or prior assignment unknown here.
+                            context.markValidationCaseVariableUncertain(action.name());
+                            setTargetUncertain = true;
+                        } else if (!setConditional) {
+                            context.requireCaseVariablePresent(action.name());
+                        }
+                    }
+                    sourceField = "actions." + action.id() + ".expression";
+                    validateContextStructure(action.expression(), engine, context, testCase, completedActions, action.id());
+                    engine.renderValidationValues(action.expression(), context);
+                    for (ToolCallParser.ParsedCall call : engine.parseCalls(action.expression())) {
+                        validateCallArguments(call, context, engine);
+                    }
+                    setConsumesBootstrap = setTargetBootstrap && !setConditional && !context.inFlow();
                 }
 
                 sourceField = "actions." + action.id() + ".message";
@@ -1741,7 +1773,20 @@ public final class PackageValidator {
                 // This keeps validation-time shorthand resolution aligned with
                 // the runtime publication boundary.
                 context.putValidationPlaceholder("EXEC.ACTIONS." + action.id() + ".output");
-                if ("assign".equalsIgnoreCase(action.type())) context.putValidationPlaceholder("EXEC.VARS." + action.name());
+                if ("assign".equalsIgnoreCase(action.type())) {
+                    context.noteValidationCaseVariableAssigned(action.name());
+                } else if ("set".equalsIgnoreCase(action.type())) {
+                    if (setTargetPresent && setTargetBootstrap && (setConditional || context.inFlow())) {
+                        // A skipped/outer-skipped set does not consume a
+                        // bootstrap's first-assign allowance on every path.
+                        context.markValidationCaseVariableUncertain(action.name());
+                    } else if (setTargetPresent && !setTargetUncertain) {
+                        // Preserve the target's definite existence, but discard
+                        // its old type because the set expression publishes a
+                        // potentially different native value.
+                        context.publishValidationCaseVariable(action.name());
+                    }
+                }
 
                 sourceField = "actions." + action.id() + ".description";
                 validateContextStructure(action.description(), engine, context, testCase, afterCurrentAction, action.id());
@@ -1791,6 +1836,7 @@ public final class PackageValidator {
                 completedActions.add(action.id());
             }
             if ("assign".equalsIgnoreCase(action.type())) assignedCaseVariables.add(action.name());
+            if (setConsumesBootstrap) assignedCaseVariables.add(action.name());
         }
     }
 

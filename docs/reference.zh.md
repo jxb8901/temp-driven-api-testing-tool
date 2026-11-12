@@ -164,7 +164,7 @@ Testcase
   `-- ordered Stage
         `-- Template
               |-- Action
-              |     |-- file-content expression / assert / log / assign
+              |     |-- file-content expression / assert / log / assign / set
               |     |-- Tool
               |     `-- DB
               `-- Flow -> ordered Actions
@@ -438,7 +438,8 @@ ATT 不會拼接父子標簽。表頭匹配會移除空格、製表符、換行�
 | tool | call | 呼叫已配置 Tool、built-in 或 helper，保留原生型別化結果；DB query/scalar/update 也是普通 Tool call。 |
 | assert | assert | 評估布林條件並記錄 PASS 或 FAIL。expected、actual 是可選診斷值。 |
 | log | message 或 value | 將型別化值格式化後寫入 Case 日誌。欄位為 message、value、format。 |
-| assign | name、expression | 將 expression 的型別化結果發布至 EXEC.VARS。 |
+| assign | name、expression | 將 expression 的型別化結果發布至 EXEC.VARS 一次。 |
+| set | name、expression | 以 expression 的型別化結果取代既有的頂層 EXEC.VARS 值。 |
 | flow | use | 在巢狀 Action scope 執行已註冊 Flow，返回時還原 caller scope。 |
 
 Actions 按 YAML 順序執行。依類型允許時，也可定義 id、description、onFailure、runWhen。Action ID 在 scope 內必須唯一。類型不支援的欄位會在 validation 失敗。共用 Action result、Log file 與 Log fields 不屬於現行契約。
@@ -604,7 +605,20 @@ Log 是一般 Case-log entry，沒有 user-authored severity；現行 v3.6 契�
 
 Action expression 使用一般 ATT expression engine。完整 ${...} 或 #{...} expression 保留結果型別；expression 放在一般字串內才會成為 String。請參閱[Expressions and Built-ins](reference.zh/expressions.md)。
 
-assign 會將 typed value 發布至 EXEC.VARS.<name> 一次。name 必須符合 [A-Za-z_][A-Za-z0-9_]*，且在 Case 中唯一。一個 Stage 指派的值可供後續 Stage 使用。Action 執行期間可讀取 output.*，發布後可讀取 EXEC.ACTIONS.<id>.output.*。Flow 有暫時 Action namespace；若 caller 在 Flow 返回後仍需要該值，請發布到 EXEC.VARS。
+assign 會將 typed value 發布至 EXEC.VARS.<name> 一次。name 必須符合 [A-Za-z_][A-Za-z0-9_]*，且在 Case 中唯一。使用相同的 name 和 expression 欄位可透過 set 更新既有的頂層 EXEC.VARS 值；set 不會宣告不存在的變數。Expression 會讀取更新前的 Context 值，且只在成功評估後發布，並保留原生型別。兩種 Action 的 EXEC.VARS 都會跨 Stage 和巢狀 Flow 共用。set 更新 Debug/Load bootstrap 變數時會消耗首次 assign 的許可；之後的 assign 不可覆寫該更新。Action 執行期間可讀取 output.*，發布後可讀取 EXEC.ACTIONS.<id>.output.*。Flow 有暫時 Action namespace；EXEC.VARS 更新仍會保留給 caller。
+
+~~~yaml
+initializeCounter:
+  type: assign
+  name: counter
+  expression: "#{0}"
+incrementCounter:
+  type: set
+  name: counter
+  expression: "#{${EXEC.VARS.counter} + 1}"
+~~~
+
+此範例會讓 `EXEC.VARS.counter` 保持型別化數字。set 若遭略過或評估失敗，原有值會維持不變。
 
 ### Resource output Evidence
 
@@ -673,7 +687,7 @@ Standalone Debug bootstrap value 會映射到這些 canonical root：`inputs` �
 | EXEC.RUN_STARTED_AT | 外層 run 開始時間；ISO-8601 String。 | 三種模式均可用。 |
 | EXEC.OUTPUT_DIR | execution workspace 絕對路徑。 | 初始化後可用；Load 中可能先有 planned path，尚未實際建立。 |
 | EXEC.INPUT | Case/stage、Debug sidecar 或 Load workload input map。 | 三種模式均可用；Stage input 暫時 overlay Case input。 |
-| EXEC.VARS | assign 發布的型別化值。 | 三種模式均可用；指派前為空。 |
+| EXEC.VARS | assign 建立或 set 更新的型別化值。 | 三種模式均可用；assign 或 bootstrap 前為空。 |
 | EXEC.ACTIONS | active Template/Flow scope 已完成的 Actions。 | 發布 Action 後可用；Flow 有巢狀 scope。 |
 | EXEC.LOAD.MODEL | closed 或 arrivalRate。 | 僅 Load；ID 產生前可用。 |
 | EXEC.LOAD.WORKLOAD_ID | 配置的 workload ID。 | 僅 Load；ID 產生前可用。 |
@@ -751,7 +765,7 @@ assert: "#{${EXEC.INPUT.amount} > 0}"
 description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 ~~~
 
-依各欄位支援的形式使用 expression。File-content 內容、Action description/assert、Log message/value、assign expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](reference.zh/actions.md)。
+依各欄位支援的形式使用 expression。File-content 內容、Action description/assert、Log message/value、assign/set expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](reference.zh/actions.md)。
 
 ### File-content expression
 
@@ -1154,7 +1168,7 @@ Descriptor path 相對於 package root，並使用一般 `att-testdata/v1.0` 格
 
 此 flag 僅供 standalone `debug` 使用。ATT 會在執行前顯示警告，保留 configured-secret redaction，並在 result 寫入 `failureDetailMode: local-unsafe`。它不會 dump raw inputs、argv、request body 或 Context values。預設仍為 `safe-default`；Run、Validate、Snapshot 及 `load --debug` 不能啟用此 override。
 
-`vars` 使用共用 expression engine：完整 `${EXEC.INPUT.amount}` 保留原生型別；混合文字會成為字串；`#{...}` 保留 expression result 型別。Map/list 會遞迴處理，map key 維持字面值。Vars 可按任意順序相依；循環、缺少 var、不可用 root 及 side-effecting call 會在 target 開始前失敗。第一次正常 `assign` 可以取代 bootstrap variable，之後仍遵守一般 duplicate-assignment rules。Final values 會使用既有 canonical `EXEC.VARS`/`CASE.VARS` context 及 result artifacts，並套用既有 redaction policy；不會建立第二個 Debug-only namespace。
+`vars` 使用共用 expression engine：完整 `${EXEC.INPUT.amount}` 保留原生型別；混合文字會成為字串；`#{...}` 保留 expression result 型別。Map/list 會遞迴處理，map key 維持字面值。Vars 可按任意順序相依；循環、缺少 var、不可用 root 及 side-effecting call 會在 target 開始前失敗。第一次正常 `assign` 可以取代 bootstrap variable，之後仍遵守一般 duplicate-assignment rules。成功的 `set` 會更新既有 bootstrap 值並消耗首次 assign 許可。Final values 會使用既有 canonical `EXEC.VARS`/`CASE.VARS` context 及 result artifacts，並套用既有 redaction policy；不會建立第二個 Debug-only namespace。
 
 Bootstrap value 可使用已初始化 execution identity、`EXEC.INPUT`、有提供時的 `EXEC.LOAD`、其他 `EXEC.VARS.<name>`，以及穩定 project/source/target/template metadata。`EXEC.ACTIONS`、action-local `output`、invocation-scoped metadata 不可用。Tool/DB/MQ/HTTP/SSH/process/filesystem 或 stateful calls 會被拒絕；安全純 built-in 使用 ATT 一般 parser。可重複使用 `--set input.path=value`、`--set vars.path=value`，以及僅限 Tool 的 `--set arg.name=value`。值以 safe YAML 解析；可用巢狀 map 及數字 list index。例：`--set 'vars.refNo=${EXEC.INPUT.refNo}'` 會在 evaluation 前修改原始定義。
 
@@ -1455,7 +1469,7 @@ Selection evidence 只記錄 testdata ID、來源 layer、record index、適用�
 
 #### 初始化 Template 和 Flow variables
 
-Scheduler identity 及唯一 EXEC.ID/EXEC.OUTPUT_DIR 初始化完成後，ATT 會在 Template 或 Flow 開始前評估 workload 的 vars tree。完整 `${...}` reference 保留原生型別，混合文字會轉成字串，`#{...}` 使用一般 typed expression parser，巢狀 map/list 會遞迴評估。Vars 之間的依賴不受宣告順序影響；缺少變數或循環會在 target 開始前失敗。每個 iteration 都有獨立 map/list，因此併發 user/workload 不會共用可變值。第一次一般 `assign` 可取代 bootstrap variable。
+Scheduler identity 及唯一 EXEC.ID/EXEC.OUTPUT_DIR 初始化完成後，ATT 會在 Template 或 Flow 開始前評估 workload 的 vars tree。完整 `${...}` reference 保留原生型別，混合文字會轉成字串，`#{...}` 使用一般 typed expression parser，巢狀 map/list 會遞迴評估。Vars 之間的依賴不受宣告順序影響；缺少變數或循環會在 target 開始前失敗。每個 iteration 都有獨立 map/list，因此併發 user/workload 不會共用可變值。第一次一般 `assign` 可取代 bootstrap variable；成功的 `set` 會更新該值並消耗首次 assign 許可。各 iteration 的 set 不會影響其他 iteration。
 
 Bootstrap expression 可使用已初始化的 `EXEC.RUN_ID`、`EXEC.ID`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.LOAD`、其他 `EXEC.VARS.<name>`，以及穩定的 project/source/target/template metadata。`EXEC.ACTIONS`、action-local `output`、invocation-scoped metadata，以及 Tool/DB/MQ/HTTP/SSH/process/filesystem 或 stateful calls 不可用。只允許安全的純 built-in。Tool arguments 與 vars 是不同 contract。
 

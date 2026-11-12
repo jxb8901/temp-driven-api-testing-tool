@@ -9,7 +9,8 @@
 | tool | call | 呼叫已配置 Tool、built-in 或 helper，保留原生型別化結果；DB query/scalar/update 也是普通 Tool call。 |
 | assert | assert | 評估布林條件並記錄 PASS 或 FAIL。expected、actual 是可選診斷值。 |
 | log | message 或 value | 將型別化值格式化後寫入 Case 日誌。欄位為 message、value、format。 |
-| assign | name、expression | 將 expression 的型別化結果發布至 EXEC.VARS。 |
+| assign | name、expression | 將 expression 的型別化結果發布至 EXEC.VARS 一次。 |
+| set | name、expression | 以 expression 的型別化結果取代既有的頂層 EXEC.VARS 值。 |
 | flow | use | 在巢狀 Action scope 執行已註冊 Flow，返回時還原 caller scope。 |
 
 Actions 按 YAML 順序執行。依類型允許時，也可定義 id、description、onFailure、runWhen。Action ID 在 scope 內必須唯一。類型不支援的欄位會在 validation 失敗。共用 Action result、Log file 與 Log fields 不屬於現行契約。
@@ -175,7 +176,20 @@ Log 是一般 Case-log entry，沒有 user-authored severity；現行 v3.6 契�
 
 Action expression 使用一般 ATT expression engine。完整 ${...} 或 #{...} expression 保留結果型別；expression 放在一般字串內才會成為 String。請參閱[Expressions and Built-ins](expressions.md)。
 
-assign 會將 typed value 發布至 EXEC.VARS.<name> 一次。name 必須符合 [A-Za-z_][A-Za-z0-9_]*，且在 Case 中唯一。一個 Stage 指派的值可供後續 Stage 使用。Action 執行期間可讀取 output.*，發布後可讀取 EXEC.ACTIONS.<id>.output.*。Flow 有暫時 Action namespace；若 caller 在 Flow 返回後仍需要該值，請發布到 EXEC.VARS。
+assign 會將 typed value 發布至 EXEC.VARS.<name> 一次。name 必須符合 [A-Za-z_][A-Za-z0-9_]*，且在 Case 中唯一。使用相同的 name 和 expression 欄位可透過 set 更新既有的頂層 EXEC.VARS 值；set 不會宣告不存在的變數。Expression 會讀取更新前的 Context 值，且只在成功評估後發布，並保留原生型別。兩種 Action 的 EXEC.VARS 都會跨 Stage 和巢狀 Flow 共用。set 更新 Debug/Load bootstrap 變數時會消耗首次 assign 的許可；之後的 assign 不可覆寫該更新。Action 執行期間可讀取 output.*，發布後可讀取 EXEC.ACTIONS.<id>.output.*。Flow 有暫時 Action namespace；EXEC.VARS 更新仍會保留給 caller。
+
+~~~yaml
+initializeCounter:
+  type: assign
+  name: counter
+  expression: "#{0}"
+incrementCounter:
+  type: set
+  name: counter
+  expression: "#{${EXEC.VARS.counter} + 1}"
+~~~
+
+此範例會讓 `EXEC.VARS.counter` 保持型別化數字。set 若遭略過或評估失敗，原有值會維持不變。
 
 ## Resource output Evidence
 

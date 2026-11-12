@@ -56,6 +56,7 @@
             "assert",
             "log",
             "assign",
+            "set",
             "flow"
           ]
         },
@@ -247,6 +248,21 @@
             "properties": {
               "type": {
                 "const": "assign"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "name",
+              "expression"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "set"
               }
             }
           },

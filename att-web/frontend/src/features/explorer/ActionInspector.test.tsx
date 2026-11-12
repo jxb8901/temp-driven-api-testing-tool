@@ -71,11 +71,12 @@ describe('ActionInspector', () => {
     expect(host.querySelector('.att-action-properties')?.textContent).toContain('#{neverRuns()}');
   });
 
-  it('shows contextual values for tool, log, and assign actions', async () => {
+  it('shows contextual values for tool, log, assign, and set actions', async () => {
     const definition = { actions: {
       invoke: { type: 'tool', call: '#{lookup(id=${EXEC.INPUT.id})}', timeoutMs: 500 },
       report: { type: 'log', message: 'done', value: { ok: true }, format: 'json' },
       publish: { type: 'assign', name: 'result', expression: "concat(${EXEC.INPUT.id}, '-done')" },
+      update: { type: 'set', name: 'result', expression: "#{${EXEC.VARS.result} + 1}" },
     } };
     await render(<ActionInspector definition={definition} resourceType="flow" resourceId="flow-1" onOpenFlow={vi.fn()} />);
 
@@ -86,6 +87,9 @@ describe('ActionInspector', () => {
     expect(host.querySelector('.att-action-properties')?.textContent).toContain('ok: true');
     click(actionButton('publish'));
     expect(host.querySelector('.att-action-properties')?.textContent).toContain("concat(${EXEC.INPUT.id}, '-done')");
+    click(actionButton('update'));
+    expect(host.querySelector('.att-action-properties')?.textContent).toContain('#{${EXEC.VARS.result} + 1}');
+    expect(actionButton('update').textContent).toContain('Set · result');
   });
 
   it('summarizes action types, authored descriptions, execution modifiers, and grouped properties', async () => {

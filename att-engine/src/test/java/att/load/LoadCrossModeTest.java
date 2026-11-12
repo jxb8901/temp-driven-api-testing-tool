@@ -19,6 +19,8 @@ import att.template.UnifiedTemplateEngine;
 import att.exec.ToolInvoker;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -386,6 +388,52 @@ class LoadCrossModeTest {
                         "STEADY", Instant.now(), "VU-1", scenario.inputs()));
         assertEquals(ResultStatus.PASS, result.status());
         assertTrue(String.valueOf(result.context().resolve("EXEC.ACTIONS.loadTool.output.result")).contains("typed-load"));
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void packageLocalToolScriptRunsFromRunDebugAndLoadWorkingDirectories() throws Exception {
+        Path project = fixture();
+        Path script = project.resolve("tools/scripts/echo-value.sh");
+        Files.createDirectories(script.getParent());
+        Files.write(script, "#!/bin/sh\nprintf 'value=%s' \"$1\"\n".getBytes(StandardCharsets.UTF_8));
+        assertTrue(script.toFile().setExecutable(true, true));
+        write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.6\n"
+                + "name: SHARED\ndescription: Package-local script cwd parity\nactions:\n"
+                + "  invoke:\n    type: tool\n    call: \"#{packageScript(value=${EXEC.INPUT.value})}\"\n");
+        Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("value",
+                new ToolArgumentConfig("value", "Value", "Value", true, ""));
+        ToolConfig packageScript = new ToolConfig("packageScript", "packageScript", "", "Package Script", "Package-relative executable",
+                Arrays.asList("tools/scripts/echo-value.sh", "${value}"), Collections.<String>emptyList(),
+                "text", arguments, null);
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"),
+                "SIT", 10000, project.resolve("templates"), Collections.singletonMap(packageScript.key(), packageScript),
+                null, null);
+        StageTemplate template = new StageTemplateLoader(project, config.templatesRoot(), false).loadSelected("SHARED");
+        FlowRegistry flows = new FlowRegistry(project, config.templatesRoot(), false);
+
+        CaseRuntimeContext runContext = testcaseContext(project, template, Collections.<String, Object>singletonMap("value", "run"));
+        List<att.core.ValidationResult> run = execute(project, config, template, flows, runContext, "testcase");
+        assertEquals(ResultStatus.PASS, run.get(0).status());
+        assertEquals("value=run", runContext.resolve("EXEC.ACTIONS.invoke.output.result"));
+
+        write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.2\ninputs: {value: debug}\n");
+        DebugEngine.Result debug = new DebugEngine(project, config).run(att.core.ExecutionOptionsTestSupport.parse(
+                new String[] {"debug", "template", "SHARED", "--output-dir", temp.resolve("package-script-debug").toString(), "--format", "json"}));
+        assertEquals(ResultStatus.PASS, debug.status());
+        assertTrue(new String(Files.readAllBytes(debug.logPath()), StandardCharsets.UTF_8).contains("value=debug"));
+
+        Path scenarioFile = write(project, "load/package-script.yaml", "schemaVersion: att-load/v1.9\nworkloads:\n"
+                + "  - id: package-script\n    target: {type: template, id: SHARED}\n"
+                + "    inputs: {value: load}\n    load: {users: 1, duration: 100ms}\n");
+        LoadScenario scenario = new LoadScenarioLoader(project).load(scenarioFile);
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        IterationResult load = new IterationExecutor(project, config, target).execute(
+                IterationRequest.closed("package-script-load", "package-script-load-1", 1,
+                        "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+        assertEquals(ResultStatus.PASS, load.status());
+        assertEquals("value=load", load.context().resolve("EXEC.ACTIONS.invoke.output.result"));
     }
 
     @Test void groupedToolSidecarOverridesSurviveQuickLoadPromotion() throws Exception {

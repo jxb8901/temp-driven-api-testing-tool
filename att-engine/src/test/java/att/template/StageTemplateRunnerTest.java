@@ -1082,6 +1082,101 @@ class StageTemplateRunnerTest {
         assertNull(context.resolve("CASE.VARS.missingValue"));
         assertNull(context.resolve("CASE.VARS.missingValueOptional"));
     }
+
+    @Test void setUpdatesOnlyExistingValuesAndPublishesTypedResultsAfterSuccess() throws Exception {
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.emptyMap(), null);
+        Path caseDir = tempDir.resolve("set-case");
+        Files.createDirectories(caseDir);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "DEBUG-1", tempDir,
+                caseDir.resolve("case.log"), "debug");
+        context.seedExecutionBootstrapVariable("counter", Long.valueOf(0));
+        context.beginStage(new StageCaseData("prepare", "PREPARE", Collections.<String,Object>emptyMap()),
+                "PREPARE", tempDir);
+        List<TemplateAction> actions = Arrays.asList(
+                new TemplateAction("increment", map("type", "set", "name", "counter",
+                        "expression", "#{${EXEC.VARS.counter} + 1}")),
+                new TemplateAction("incrementAgain", map("type", "set", "name", "counter",
+                        "expression", "#{${EXEC.VARS.counter} + 1}")),
+                new TemplateAction("duplicateAssign", map("type", "assign", "name", "counter",
+                        "expression", "100", "onFailure", "continue")));
+        List<ValidationResult> results;
+        try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+            results = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("prepare",
+                    new StageTemplate("PREPARE", tempDir, actions), context, log);
+        }
+        assertEquals(Arrays.asList(ResultStatus.PASS, ResultStatus.PASS, ResultStatus.ERROR),
+                Arrays.asList(results.get(0).status(), results.get(1).status(), results.get(2).status()));
+        assertEquals(2L, ((Number) context.resolve("EXEC.VARS.counter")).longValue());
+        assertEquals(2L, ((Number) context.resolve("ACTIONS.incrementAgain.output.result")).longValue());
+
+        context.beginStage(new StageCaseData("invoke", "INVOKE", Collections.<String,Object>emptyMap()), "INVOKE", tempDir);
+        try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+            ValidationResult laterStage = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("invoke",
+                    new StageTemplate("INVOKE", tempDir, Collections.singletonList(new TemplateAction("incrementLater",
+                            map("type", "set", "name", "counter", "expression", "#{${EXEC.VARS.counter} + 1}")))),
+                    context, log).get(0);
+            assertEquals(ResultStatus.PASS, laterStage.status());
+        }
+        assertEquals(3L, ((Number) context.resolve("EXEC.VARS.counter")).longValue());
+    }
+
+    @Test void missingFailedAndSkippedSetsPreserveValuesAndDoNotDeclareNames() throws Exception {
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.emptyMap(), null);
+        Path caseDir = tempDir.resolve("set-failures");
+        Files.createDirectories(caseDir);
+        CaseRuntimeContext context = new CaseRuntimeContext(test, caseDir, "R", tempDir, caseDir.resolve("case.log"));
+        context.seedExecutionBootstrapVariable("counter", Integer.valueOf(7));
+        context.beginStage(new StageCaseData("verify", "VERIFY", Collections.<String,Object>emptyMap()), "VERIFY", tempDir);
+        List<TemplateAction> actions = Arrays.asList(
+                new TemplateAction("failed", map("type", "set", "name", "counter", "expression", "${CASE.missing}", "onFailure", "continue")),
+                new TemplateAction("skipped", map("type", "set", "name", "counter", "expression", "99", "runWhen", "false")),
+                new TemplateAction("missing", map("type", "set", "name", "later", "expression", "first", "onFailure", "continue")),
+                new TemplateAction("declareLater", map("type", "assign", "name", "later", "expression", "declared")));
+        List<ValidationResult> results;
+        try (CaseExecutionLog log = new CaseExecutionLog(caseDir.resolve("case.log"))) {
+            results = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("verify",
+                    new StageTemplate("VERIFY", tempDir, actions), context, log);
+        }
+        assertEquals(ResultStatus.ERROR, results.get(0).status());
+        assertEquals(ResultStatus.SKIPPED, results.get(1).status());
+        assertEquals(ResultStatus.ERROR, results.get(2).status());
+        assertEquals(ResultStatus.PASS, results.get(3).status());
+        assertEquals(Integer.valueOf(7), context.resolve("EXEC.VARS.counter"));
+        assertEquals("declared", context.resolve("EXEC.VARS.later"));
+    }
+
+    @Test void setKeepsMutableBootstrapValuesIndependentAcrossLoadContexts() throws Exception {
+        TestCase test = new TestCase(2, "g", "s", "TC1", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.emptyMap(), null);
+        Map<String,Object> replacement = map("count", Long.valueOf(2), "items", new ArrayList<Object>(Collections.<Object>singletonList("first")));
+        CaseRuntimeContext first = new CaseRuntimeContext(test, tempDir.resolve("load-1"), "LOAD-1", tempDir,
+                tempDir.resolve("load-1/case.log"), "load");
+        CaseRuntimeContext second = new CaseRuntimeContext(test, tempDir.resolve("load-2"), "LOAD-2", tempDir,
+                tempDir.resolve("load-2/case.log"), "load");
+        for (CaseRuntimeContext iteration : Arrays.asList(first, second)) {
+            iteration.seedExecutionBootstrapVariable("state", "old");
+            iteration.seedExecutionBootstrapVariable("replacement", replacement);
+            iteration.beginStage(new StageCaseData("verify", "VERIFY", Collections.<String,Object>emptyMap()), "VERIFY", tempDir);
+            Path directory = iteration == first ? tempDir.resolve("load-1") : tempDir.resolve("load-2");
+            Files.createDirectories(directory);
+            try (CaseExecutionLog log = new CaseExecutionLog(directory.resolve("case.log"))) {
+                ValidationResult result = new StageTemplateRunner(new UnifiedTemplateEngine(null)).execute("verify",
+                        new StageTemplate("VERIFY", tempDir, Collections.singletonList(new TemplateAction("replace",
+                                map("type", "set", "name", "state", "expression", "${EXEC.VARS.replacement}")))),
+                        iteration, log).get(0);
+                assertEquals(ResultStatus.PASS, result.status());
+            }
+        }
+        Map<?,?> firstValue = (Map<?,?>) first.resolve("EXEC.VARS.state");
+        Map<?,?> secondValue = (Map<?,?>) second.resolve("EXEC.VARS.state");
+        assertEquals(2L, ((Number) firstValue.get("count")).longValue());
+        assertEquals(2L, ((Number) secondValue.get("count")).longValue());
+        @SuppressWarnings("unchecked") List<Object> firstItems = (List<Object>) firstValue.get("items");
+        firstItems.add("iteration one");
+        assertEquals(Collections.singletonList("first"), secondValue.get("items"));
+    }
     private static final class CaptureBuiltIns implements BuiltInProvider {
         int calls;
         Map<String,Object> last;

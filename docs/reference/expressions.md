@@ -14,7 +14,7 @@ assert: "#{${EXEC.INPUT.amount} > 0}"
 description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 ~~~
 
-Use the expression form supported by each field. File-content content, Action descriptions/assertions, Log message/value, assign expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](actions.md).
+Use the expression form supported by each field. File-content content, Action descriptions/assertions, Log message/value, assign/set expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](actions.md).
 
 ## File-content expressions
 

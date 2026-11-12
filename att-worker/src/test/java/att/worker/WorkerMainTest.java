@@ -579,6 +579,10 @@ class WorkerMainTest {
         Files.copy(Paths.get("packages/default/tools/sample/tool-group.yaml"),root.resolve("tools/sample/tool-group.yaml"));
         Files.copy(Paths.get("packages/default/tools/sample/getAcDate.yaml"),root.resolve("tools/sample/getAcDate.yaml"));
         Files.copy(Paths.get("packages/default/tools/sample/getSeq.yaml"),root.resolve("tools/sample/getSeq.yaml"));
+        Path packageRelativeMember=root.resolve("tools/sample/getAcDate.yaml");
+        String packageRelativeDescriptor=new String(Files.readAllBytes(packageRelativeMember),StandardCharsets.UTF_8)
+                .replace("command: [./tools/get_ac_date.sh]", "command: [tools/get_ac_date.sh]");
+        Files.write(packageRelativeMember,packageRelativeDescriptor.getBytes(StandardCharsets.UTF_8));
         Files.copy(Paths.get("packages/default/tools/get_ac_date.sh"),root.resolve("tools/get_ac_date.sh"));
         Files.copy(Paths.get("packages/default/tools/get_seq.sh"),root.resolve("tools/get_seq.sh"));
         Path dispatcher=root.resolve("tools/tool_group_dispatch.sh"); Files.copy(Paths.get("packages/default/tools/tool_group_dispatch.sh"),dispatcher);

@@ -1391,6 +1391,89 @@ class PackageValidatorTest {
         assertTrue(String.valueOf(error.getCause().getMessage()).contains("Duplicate EXEC.VARS assignment"));
     }
 
+    @Test void validateSetOrderingAllowsConditionalAndCallerProvidedFlowTargets() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String,ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues",
+                StageTemplate.class, att.core.TestCase.class, att.core.StageCaseData.class,
+                FrameworkConfig.class, Path.class, Set.class);
+        values.setAccessible(true);
+        att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "T", Collections.<String,Object>emptyMap());
+        att.core.TestCase testCase = new att.core.TestCase(2, "book", "sheet", "TC1", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
+        Path caseFile = tempDir.resolve("cases.xlsx");
+
+        StageTemplate missing = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("tooEarly", map("type", "set", "name", "counter", "expression", "1", "onFailure", "continue"), att.Version.TEMPLATE_SCHEMA),
+                new TemplateAction("assignLater", map("type", "assign", "name", "counter", "expression", "1"), att.Version.TEMPLATE_SCHEMA)),
+                att.Version.TEMPLATE_SCHEMA);
+        java.lang.reflect.InvocationTargetException early = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> values.invoke(validator, missing, testCase, stage, config, caseFile, new LinkedHashSet<String>()));
+        DiagnosticException missingVariable = DiagnosticException.find(early.getCause());
+        assertNotNull(missingVariable);
+        assertEquals(DiagnosticCodes.CONTEXT_INVALID, missingVariable.code());
+        assertEquals("actions.tooEarly.name", missingVariable.field());
+
+        StageTemplate conditional = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("maybe", map("type", "set", "name", "counter", "expression", "1", "runWhen", "false"), att.Version.TEMPLATE_SCHEMA),
+                new TemplateAction("assignAfterSkip", map("type", "assign", "name", "counter", "expression", "1"), att.Version.TEMPLATE_SCHEMA)),
+                att.Version.TEMPLATE_SCHEMA);
+        assertDoesNotThrow(() -> {
+            try { values.invoke(validator, conditional, testCase, stage, config, caseFile, new LinkedHashSet<String>()); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+            catch (Exception e) { throw new RuntimeException(e); }
+        });
+
+        Path flowDirectory = tempDir.resolve("templates/flows/caller-counter");
+        Files.createDirectories(flowDirectory);
+        Files.write(flowDirectory.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.6\nid: common.caller-counter.v1\n"
+                + "name: Caller counter\ndescription: Update a caller value\nactions:\n"
+                + "  increment: {type: set, name: counter, expression: '#{${EXEC.VARS.counter} + 1}'}\n")
+                .getBytes("UTF-8"));
+        java.lang.reflect.Field registryField = PackageValidator.class.getDeclaredField("flows");
+        registryField.setAccessible(true);
+        registryField.set(validator, new att.flow.FlowRegistry(tempDir, tempDir.resolve("templates")));
+        Map<String,Object> flowCall = map("type", "flow", "use", "common.caller-counter.v1", "runWhen", "false");
+        StageTemplate caller = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("update", flowCall, att.Version.TEMPLATE_SCHEMA),
+                new TemplateAction("assignAfterFlow", map("type", "assign", "name", "counter", "expression", "2"), att.Version.TEMPLATE_SCHEMA)), att.Version.TEMPLATE_SCHEMA);
+        java.lang.reflect.Method bootstrapValues = PackageValidator.class.getDeclaredMethod("validateTemplateValues",
+                StageTemplate.class, att.core.TestCase.class, att.core.StageCaseData.class,
+                FrameworkConfig.class, Path.class, Set.class, String.class, Map.class, Map.class);
+        bootstrapValues.setAccessible(true);
+        assertDoesNotThrow(() -> {
+            try { bootstrapValues.invoke(validator, caller, testCase, stage, config, caseFile,
+                    new LinkedHashSet<String>(), "debug", null, Collections.<String,Object>singletonMap("counter", 0)); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+            catch (Exception e) { throw new RuntimeException(e); }
+        });
+    }
+
+    @Test void validateSetConsumesBootstrapAssignAllowanceButDoesNotReplaceDuplicateAssignGuard() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String,ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues",
+                StageTemplate.class, att.core.TestCase.class, att.core.StageCaseData.class,
+                FrameworkConfig.class, Path.class, Set.class, String.class, Map.class, Map.class);
+        values.setAccessible(true);
+        att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "T", Collections.<String,Object>emptyMap());
+        att.core.TestCase testCase = new att.core.TestCase(2, "book", "sheet", "TC1", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
+        StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("setValue", map("type", "set", "name", "counter", "expression", "2"), att.Version.TEMPLATE_SCHEMA),
+                new TemplateAction("assignAgain", map("type", "assign", "name", "counter", "expression", "3"), att.Version.TEMPLATE_SCHEMA)),
+                att.Version.TEMPLATE_SCHEMA);
+        java.lang.reflect.InvocationTargetException duplicate = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> values.invoke(validator, template, testCase, stage, config, tempDir.resolve("cases.xlsx"),
+                        new LinkedHashSet<String>(), "debug", null, Collections.<String,Object>singletonMap("counter", 1)));
+        DiagnosticException error = DiagnosticException.find(duplicate.getCause());
+        assertNotNull(error);
+        assertEquals(DiagnosticCodes.CONTEXT_INVALID, error.code());
+        assertEquals("actions.assignAgain.name", error.field());
+    }
+
     private void assertExpandedCollision(java.lang.reflect.Method contract, PackageValidator validator,
                                          StageTemplate template, FrameworkConfig config) throws Exception {
         java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class,

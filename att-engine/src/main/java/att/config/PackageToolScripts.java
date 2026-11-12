@@ -28,6 +28,44 @@ public final class PackageToolScripts {
         return Collections.unmodifiableList(ordered);
     }
 
+    /**
+     * Rebase statically-authored Package-local script operands so execution does
+     * not depend on the process working directory. {@code sourceTokens} maps
+     * each expanded argv value back to its authored Tool token; this prevents a
+     * runtime argument that happens to look like a Package path from being
+     * rewritten.
+     */
+    public static List<String> resolveLocalScriptOperands(Path packageRoot, List<String> argv,
+            List<String> sourceTokens) throws IOException {
+        if (argv == null || argv.isEmpty()) return Collections.emptyList();
+        if (sourceTokens == null || sourceTokens.size() != argv.size())
+            throw new IllegalArgumentException("Expanded Tool argv source mapping is inconsistent");
+        Path root = packageRoot.toAbsolutePath().normalize();
+        List<String> resolved = new ArrayList<String>(argv);
+        int interpreterOperand = interpreterScriptOperand(argv);
+        for (int index : new int[] {0, interpreterOperand}) {
+            if (index < 0 || index >= argv.size()) continue;
+            String source = sourceTokens.get(index);
+            String value = argv.get(index);
+            if (source == null || value == null || source.isEmpty() || !source.equals(value)
+                    || source.contains("${") || source.contains("#{") || source.contains("&{")) continue;
+            Path authored;
+            try { authored = Paths.get(source); }
+            catch (RuntimeException invalid) { continue; }
+            if (authored.isAbsolute()) {
+                // Absolute Package-local paths already work from any cwd.
+                if (authored.normalize().startsWith(root)) continue;
+                continue;
+            }
+            if (!(source.startsWith("./") || source.startsWith("../") || source.startsWith("tools/"))) continue;
+            Path candidate = root.resolve(authored).normalize();
+            if (!candidate.startsWith(root))
+                throw new IOException("Package Tool script operand escapes its Package root: " + source);
+            resolved.set(index, candidate.toString());
+        }
+        return Collections.unmodifiableList(resolved);
+    }
+
     /** Also usable while hashing descriptor source, before resolving a full Tool config. */
     public static List<Path> referencedArgv(Path packageRoot, Object raw) throws IOException {
         if (raw == null) return Collections.emptyList();

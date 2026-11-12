@@ -164,7 +164,7 @@ Testcase
   `-- ordered Stage
         `-- Template
               |-- Action
-              |     |-- file-content expression / assert / log / assign
+              |     |-- file-content expression / assert / log / assign / set
               |     |-- Tool
               |     `-- DB
               `-- Flow -> ordered Actions
@@ -438,7 +438,8 @@ This page defines the active ATT action contract. Templates use att-template/v3.
 | tool | call | Invokes a configured Tool, built-in or helper call and preserves the native typed result. DB query/scalar/update calls are ordinary Tool calls. |
 | assert | assert | Evaluates a boolean condition and records PASS or FAIL. expected and actual are optional diagnostic values. |
 | log | message or value | Formats a typed value for the Case log. Its fields are message, value and format. |
-| assign | name and expression | Publishes the expression's typed result below EXEC.VARS. |
+| assign | name and expression | Publishes the expression's typed result below EXEC.VARS once. |
+| set | name and expression | Replaces an existing top-level EXEC.VARS value with the expression's typed result. |
 | flow | use | Runs a registered Flow in a nested Action scope and restores the caller's scope on return. |
 
 Actions run in YAML order. Where supported, an action may also define id, description, onFailure and runWhen. Action IDs are unique within their scope. Type-specific invalid fields fail validation. Action result, Log file and Log fields are not part of the current action contract.
@@ -603,7 +604,20 @@ When both message and value are supplied, Log emits the message, a newline, then
 
 Action expressions use the regular ATT expression engine. A complete ${...} or #{...} expression keeps its result type; embedding an expression in surrounding text produces a String. See [Expressions and Built-ins](reference/expressions.md).
 
-assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Values assigned in one Stage are available to later Stages. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; publish values to EXEC.VARS when the caller needs them after the Flow returns.
+assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Use set with the same name and expression fields to update an existing top-level EXEC.VARS value; set never declares a missing variable. Its expression reads the old Context value and publishes only after evaluation succeeds, preserving the native result type. Both Actions share EXEC.VARS across Stages and nested Flow calls. A set of a Debug/Load bootstrap variable consumes its first-assign allowance; a later assign cannot overwrite that update. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; EXEC.VARS updates remain visible to the caller.
+
+~~~yaml
+initializeCounter:
+  type: assign
+  name: counter
+  expression: "#{0}"
+incrementCounter:
+  type: set
+  name: counter
+  expression: "#{${EXEC.VARS.counter} + 1}"
+~~~
+
+The example leaves `EXEC.VARS.counter` as a typed number. A skipped or failed set leaves its previous value unchanged.
 
 ### Resource output evidence
 
@@ -672,7 +686,7 @@ Standalone Debug bootstrap values are mapped into these canonical roots: `inputs
 | EXEC.RUN_STARTED_AT | Enclosing run start time; ISO-8601 String. | All modes. |
 | EXEC.OUTPUT_DIR | Absolute execution workspace path. | After initialization; in Load it may be planned and not yet exist. |
 | EXEC.INPUT | Case/stage, Debug sidecar or Load workload input map. | All modes. Stage inputs temporarily overlay Case inputs. |
-| EXEC.VARS | Typed values published by assign. | All modes; empty before assignment. |
+| EXEC.VARS | Typed values created by assign or updated by set. | All modes; empty before assignment or bootstrap. |
 | EXEC.ACTIONS | Completed Actions in the active Template/Flow scope. | After an Action is published; Flow has a nested scope. |
 | EXEC.LOAD.MODEL | closed or arrivalRate. | Load only; available before ID generation. |
 | EXEC.LOAD.WORKLOAD_ID | Configured workload ID. | Load only; available before ID generation. |
@@ -750,7 +764,7 @@ assert: "#{${EXEC.INPUT.amount} > 0}"
 description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 ~~~
 
-Use the expression form supported by each field. File-content content, Action descriptions/assertions, Log message/value, assign expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](reference/actions.md).
+Use the expression form supported by each field. File-content content, Action descriptions/assertions, Log message/value, assign/set expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](reference/actions.md).
 
 ### File-content expressions
 
@@ -1174,7 +1188,7 @@ For collector failures whose safe projection hides details, local runs can opt i
 
 This flag is accepted only by standalone `debug`. ATT prints a warning before execution, preserves configured-secret redaction, and includes `failureDetailMode: local-unsafe` in the result. It does not dump raw inputs, argv, request bodies, or Context values. The default remains `safe-default`; `load --debug`, Run, Validate, and Snapshot cannot enable the override.
 
-`vars` values use the shared expression engine: an exact `${EXEC.INPUT.amount}` preserves its native type, interpolated text becomes a string, and `#{...}` preserves the expression result type. Maps and lists recurse; map keys remain literal. Vars may reference other vars regardless of declaration order; cycles, missing vars, unavailable roots, and side-effecting calls fail before the target starts. The first normal `assign` may replace a bootstrapped variable, after which normal duplicate-assignment rules apply. Final values appear through the normal `EXEC.VARS`/`CASE.VARS` context and result artifacts, subject to existing redaction rules; no second Debug-only namespace is created.
+`vars` values use the shared expression engine: an exact `${EXEC.INPUT.amount}` preserves its native type, interpolated text becomes a string, and `#{...}` preserves the expression result type. Maps and lists recurse; map keys remain literal. Vars may reference other vars regardless of declaration order; cycles, missing vars, unavailable roots, and side-effecting calls fail before the target starts. The first normal `assign` may replace a bootstrapped variable, after which normal duplicate-assignment rules apply. A successful `set` updates an existing bootstrap value and consumes that first-assign allowance. Final values appear through the normal `EXEC.VARS`/`CASE.VARS` context and result artifacts, subject to existing redaction rules; no second Debug-only namespace is created.
 
 Bootstrap values may use initialized execution identity, `EXEC.INPUT`, `EXEC.LOAD` when present, other `EXEC.VARS.<name>` entries, and stable project/source/target/template metadata. `EXEC.ACTIONS`, action-local `output`, and invocation-scoped metadata are not available. Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are blocked; safe pure built-ins use the normal ATT parser. Repeatable `--set` namespaces are `input.path=value`, `vars.path=value`, and Tool-only `arg.name=value`. Values are parsed as safe YAML; nested maps and numeric list indexes are supported where the destination accepts them. For example, `--set 'vars.refNo=${EXEC.INPUT.refNo}'` changes the raw definition before evaluation.
 
@@ -1450,7 +1464,7 @@ Selection evidence records only the testdata ID, source layer, record index, gen
 
 #### Initialize Template and Flow variables
 
-After the scheduler identity and unique EXEC.ID/EXEC.OUTPUT_DIR are ready, ATT evaluates each workload's `vars` tree before starting its Template or Flow. Exact `${...}` references preserve native types, mixed text becomes a string, `#{...}` uses the ordinary typed expression parser, and nested maps/lists are evaluated recursively. References between vars are declaration-order independent; missing vars and dependency cycles fail before the target starts. Each iteration owns its evaluated maps/lists, so concurrent users and workloads cannot share mutations. The first normal `assign` may replace a bootstrapped variable.
+After the scheduler identity and unique EXEC.ID/EXEC.OUTPUT_DIR are ready, ATT evaluates each workload's `vars` tree before starting its Template or Flow. Exact `${...}` references preserve native types, mixed text becomes a string, `#{...}` uses the ordinary typed expression parser, and nested maps/lists are evaluated recursively. References between vars are declaration-order independent; missing vars and dependency cycles fail before the target starts. Each iteration owns its evaluated maps/lists, so concurrent users and workloads cannot share mutations. The first normal `assign` may replace a bootstrapped variable; a successful `set` updates that value and consumes the first-assign allowance. Each iteration's sets remain isolated from every other iteration.
 
 Bootstrap expressions may use initialized `EXEC.RUN_ID`, `EXEC.ID`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.LOAD`, other `EXEC.VARS.<name>` values, and stable project/source/target/template metadata. `EXEC.ACTIONS`, action-local `output`, invocation-scoped metadata, and Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are unavailable. Only safe pure built-ins are permitted. Tool arguments remain separate from `vars`.
 

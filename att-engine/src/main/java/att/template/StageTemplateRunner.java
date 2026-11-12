@@ -97,7 +97,7 @@ public class StageTemplateRunner {
                     continue;
                 }
                 executionField = "render".equals(type) ? "payload" : "tool".equals(type) ? "call" : "db".equals(type) ? (action.query().isEmpty() ? "update" : "query")
-                        : "assert".equals(type) ? "expected" : "log".equals(type) ? "message" : "assign".equals(type) ? "expression" : "use";
+                        : "assert".equals(type) ? "expected" : "log".equals(type) ? "message" : ("assign".equals(type) || "set".equals(type)) ? "expression" : "use";
                 Map<String, Object> actionStart = new LinkedHashMap<String, Object>();
                 actionStart.put("stage", stageName);
                 actionStart.put("action", action.id());
@@ -111,6 +111,7 @@ public class StageTemplateRunner {
                 else if ("assert".equals(type)) expected = render(action.expected(), actionPlan == null ? null : actionPlan.expected(), context, log);
                 else if ("log".equals(type)) executeLog(action, context, log, output);
                 else if ("assign".equals(type)) executeAssign(action, context, log, output);
+                else if ("set".equals(type)) executeSet(action, context, log, output);
                 else if ("flow".equals(type)) {
                     FlowExecutionResult flowResult = executeFlow(stageName, action, actionPlan, context, log, output, node);
                     toolStatus = flowResult.status;
@@ -368,6 +369,17 @@ public class StageTemplateRunner {
         output.put("result", value);
         output.put("name", action.name());
         context.assignCaseVariable(action.name(), value);
+    }
+
+    private void executeSet(TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
+                            Map<String, Object> output) throws Exception {
+        // Validate existence before evaluating the expression, then publish only
+        // after evaluation succeeds so a failed expression cannot change state.
+        context.requireCaseVariablePresent(action.name());
+        Object value = templateEngine.evaluate(action.expression(), context, log);
+        context.setCaseVariable(action.name(), value);
+        output.put("result", value);
+        output.put("name", action.name());
     }
 
     private ResultStatus executeDb(String stageName, TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
