@@ -146,7 +146,7 @@ class PackageToolRegistryTest {
                 + "tools: [getAcDate.yaml]\n");
         tool(pkg, "sample/getAcDate.yaml",
                 "schemaVersion: att-tool/v1\nid: getAcDate\nname: Account date\n"
-                + "description: Read account date\ncommand: [./tools/date.sh]\n");
+                + "description: Read account date\ncommand: [./tools/date.sh]\nstdoutFormat: text\n");
         Path dispatcher = tool(pkg, "dispatch.sh", "#!/bin/sh\necho dispatch\n");
         Path member = tool(pkg, "date.sh", "#!/bin/sh\necho first\n");
         Path central = config();
