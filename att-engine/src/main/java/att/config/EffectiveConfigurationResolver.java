@@ -35,7 +35,7 @@ public final class EffectiveConfigurationResolver {
                     && !declared(globalDeclared,field.getKey()))field.setValue("runtime-default");
         }
         String identity = PackageConfig.sha256((globalDigest + "\n" + pkg.digest() + "\n" + global.environment()
-                + "\n" + PackageToolRegistry.revision(global.tools()) + "\n" + att.Version.PRODUCT + "\n" + att.Version.GIT_COMMIT + "\n" + att.validation.SchemaFiles.registryDigest() + "\n" + root.toAbsolutePath().normalize()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                + "\n" + PackageToolRegistry.revision(global.tools(), root) + "\n" + att.Version.PRODUCT + "\n" + att.Version.GIT_COMMIT + "\n" + att.validation.SchemaFiles.registryDigest() + "\n" + root.toAbsolutePath().normalize()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
         return new FrameworkConfig(global, pkg, new EffectiveExecutionConfig(identity, environmentOrigin, pkg.digest(), globalDigest, origins, diagnostics), legacyTestdata);
     }
     private static boolean declared(Map<?,?> source, String path) {
