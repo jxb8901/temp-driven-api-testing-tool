@@ -1,6 +1,6 @@
 # Package-owned Tools (ATT 4.2.10)
 
-ATT Tools belong to the **selected registered Package**, not shared Runtime Configuration. Create one YAML document per Tool under `<PACKAGE_ROOT>/tools/*.yaml`, with `schemaVersion: att-tool/v1`. This feature does not require Studio online source editing (#233).
+ATT Tools belong to the **selected registered Package**, not shared Runtime Configuration. Create standalone Tool YAML under `<PACKAGE_ROOT>/tools/*.yaml`, or grouped Tools under `tools/<group>/` with a fixed `tool-group.yaml` manifest. Tool descriptors use `att-tool/v1`; Group manifests use `att-tool-group/v3.0`. This feature does not require Studio online source editing (#233).
 
 ```yaml
 schemaVersion: att-tool/v1
@@ -41,7 +41,29 @@ Legacy `config/config.yaml: tools:` and `toolGroups:` **must be converted before
 4. Run the same command with `--write` after review. Update independent environment configuration files if your deployment uses them. Recheck relative script paths against the selected Package root and manually copy scripts as appropriate.
 5. Run Package validation, direct Tool Debug/RUN, and a LOAD smoke test; revalidate existing Job/Schedule revisions before reuse.
 
-The migration utility deliberately refuses unsupported Tool Group SSH bindings rather than dropping them. It preserves old dotted qualified names (such as `fpp.invokeApi`) as **Package-local IDs**, enabling gradual template upgrades. A dotted ID does not imply a shared Tool Group. Only `tools/*.yaml` descriptors are discovered; nested `tools/scripts/` is for scripts, not definitions.
+The migration utility converts each legacy Tool Group into **`tools/<group>/tool-group.yaml` plus an `att-tool/v1` YAML for each member**. Existing qualified calls (for example `fpp.invokeApi`) remain unchanged. Group `script` dispatcher argv are preserved in the manifest, not flattened into member command argv. Group `ssh.helper` and `selection` bindings remain logical references to Global SSHHelper; obsolete direct host/user/key SSH bindings require explicit manual migration. Discovery covers root standalone files and explicitly listed Group members; arbitrary recursive scanning is not supported.
+
+### Package Tool Group example
+
+```text
+packages/fpp/tools/
+  fpp/
+    tool-group.yaml            # att-tool-group/v3.0
+    invokeApi.yaml             # att-tool/v1
+    loghelper.yaml             # att-tool/v1
+  standaloneTool.yaml          # att-tool/v1
+```
+
+```yaml
+# tools/fpp/tool-group.yaml
+schemaVersion: att-tool-group/v3.0
+id: fpp
+name: FPP tools
+description: FPP Integration Tools
+tools: [invokeApi.yaml, loghelper.yaml]
+```
+
+`tools/fpp/invokeApi.yaml` declares `id: invokeApi`, so the public call remains `#{fpp.invokeApi(...)}`. Group ID is taken from the manifest, not the folder name. With optional `script`, command execution retains the old dispatcher argv + local Tool key + member argv behavior. Only the selected Package owns the group.
 
 ### Studio
 
