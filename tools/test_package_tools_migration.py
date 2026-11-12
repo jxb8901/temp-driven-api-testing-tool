@@ -83,6 +83,62 @@ class PackageToolMigrationTest(unittest.TestCase):
         self.assertTrue((self.a / "tools/echo.yaml").exists())
         self.assertFalse((self.a / "tools/x-disabled.yaml").exists())
 
+    def test_tool_group_migrates_to_folder_without_changing_caller_ids_or_dispatcher(self):
+        group_file = self.root / "config/tools/sample.yaml"
+        group_file.parent.mkdir(parents=True)
+        group_file.write_text(
+            "schemaVersion: att-tool-group/v2.9\n"
+            "id: sample\nname: Sample tools\ndescription: Sample group\n"
+            "script: [./tools/dispatch.sh]\n"
+            "tools:\n"
+            "  getAcDate:\n"
+            "    name: Account date\n    description: Date\n"
+            "    command: [./tools/date.sh]\n    stdoutFormat: text\n"
+            "  getSeq:\n"
+            "    name: Sequence\n    description: Sequence\n"
+            "    command: [./tools/seq.sh]\n    stdoutFormat: text\n",
+            encoding="utf-8")
+        self.config.write_text(
+            "schemaVersion: att-config/v2.13\n"
+            "toolGroups: [config/tools/sample.yaml]\n", encoding="utf-8")
+        dry = self.run_cli()
+        self.assertEqual(0, dry.returncode, dry.stderr)
+        self.assertIn("tools/sample/tool-group.yaml", dry.stdout)
+        self.assertFalse((self.a / "tools").exists())
+        result = self.run_cli("--write")
+        self.assertEqual(0, result.returncode, result.stderr)
+        folder = self.a / "tools/sample"
+        manifest = yaml.safe_load((folder / "tool-group.yaml").read_text(encoding="utf-8"))
+        self.assertEqual("att-tool-group/v3.0", manifest["schemaVersion"])
+        self.assertEqual("sample", manifest["id"])
+        self.assertEqual(["getAcDate.yaml", "getSeq.yaml"], manifest["tools"])
+        self.assertEqual(["./tools/dispatch.sh"], manifest["script"])
+        tool = yaml.safe_load((folder / "getAcDate.yaml").read_text(encoding="utf-8"))
+        self.assertEqual("getAcDate", tool["id"])
+        self.assertEqual(["./tools/date.sh"], tool["command"])
+        self.assertNotIn("script", tool)
+        self.assertNotIn("toolGroups", yaml.safe_load(self.config.read_text(encoding="utf-8")))
+
+    def test_tool_group_ssh_helper_binding_is_retained(self):
+        group_file = self.root / "config/tools/app.yaml"
+        group_file.parent.mkdir(parents=True)
+        group_file.write_text(
+            "schemaVersion: att-tool-group/v2.9\nid: app\n"
+            "name: App\ndescription: App tools\n"
+            "ssh: {helper: appserver, selection: {strategy: roundRobin}}\n"
+            "tools:\n"
+            "  status: {name: Status, description: Status, command: [echo, ok], stdoutFormat: text}\n",
+            encoding="utf-8")
+        self.config.write_text(
+            "schemaVersion: att-config/v2.13\n"
+            "toolGroups: [config/tools/app.yaml]\n", encoding="utf-8")
+        result = self.run_cli("--write")
+        self.assertEqual(0, result.returncode, result.stderr)
+        manifest = yaml.safe_load(
+            (self.a / "tools/app/tool-group.yaml").read_text(encoding="utf-8"))
+        self.assertEqual("appserver", manifest["ssh"]["helper"])
+        self.assertEqual("roundRobin", manifest["ssh"]["selection"]["strategy"])
+
     def test_unsupported_group_ssh_refuses_before_any_writes(self):
         group = self.root / "config/tools/legacy.yaml"
         group.parent.mkdir(parents=True)
