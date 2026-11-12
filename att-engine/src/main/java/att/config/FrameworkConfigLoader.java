@@ -405,11 +405,16 @@ public final class FrameworkConfigLoader {
                     + "Migrate Tools into the selected Package: standalone tools/*.yaml (att-tool/v1) or grouped tools/<folder>/tool-group.yaml (att-tool-group/v3.0) plus member att-tool/v1 files; "
                     + "remove tools and toolGroups from config/config.yaml. No global Tool fallback is provided.");
         Object profiles = raw.get("environments");
-        if (profiles instanceof Map) for (Object value : ((Map<?, ?>) profiles).values())
+        if (profiles instanceof Map) for (Map.Entry<?, ?> entry : ((Map<?, ?>) profiles).entrySet()) {
+            // x-* Environment keys are disabled metadata, not deployable profiles.
+            // Match resolveEnvironment() and the Package Tool migration preflight.
+            if (SchemaSupport.isDisabledKey(entry.getKey())) continue;
+            Object value = entry.getValue();
             if (value instanceof Map && (((Map<?, ?>) value).containsKey("tools")
                     || ((Map<?, ?>) value).containsKey("toolGroups")))
                 throw new IllegalArgumentException("Legacy Environment tools/toolGroups are unsupported; "
                         + "migrate Tool definitions into Package standalone tools/*.yaml or Group folder tool-group.yaml plus individual Tool YAML.");
+        }
     }
 
     static void addTools(Object configured, Map<String, ToolConfig> result, String groupId,
