@@ -1932,6 +1932,23 @@ Each `att-tool/v1` file defines one Package Tool. Global `tools` and `toolGroups
 
 An argument `type` declares the final resolved value contract for configured Tools: `string`, `integer`, `long`, `decimal`, `boolean`, `enum`, `bytes`, `map`, or `list`. Omitted `type` remains `any` for existing descriptors. Numeric and Boolean scalar types accept native values or trimmed numeric/`true`/`false` Strings; enum values must match one of `enumValues`; `bytes` accepts a byte array or converts a String to UTF-8. `string`, `map`, and `list` require that native value type. These checks run after the complete nested expression resolves, in validation when safely static and at runtime otherwise.
 
+#### Package-local Tool Groups (ATT 4.2.10)
+
+Standalone Tools use `tools/<id>.yaml` and `att-tool/v1`. Grouped Tools use a fixed `tools/<folder>/tool-group.yaml` manifest with **`att-tool-group/v3.0`**, which lists each `att-tool/v1` member explicitly (no recursive discovery):
+
+```yaml
+# packages/fpp/tools/fpp/tool-group.yaml
+schemaVersion: att-tool-group/v3.0
+id: fpp
+name: FPP Tools
+description: FPP integration commands
+tools: [invokeApi.yaml, loghelper.yaml]
+```
+
+The member `tools/fpp/invokeApi.yaml` contains `schemaVersion: att-tool/v1` and `id: invokeApi`; its caller remains `#{fpp.invokeApi(...)}`. The manifest's `id` owns the public prefix, independent of the folder's name. An optional `script` preserves historical dispatcher argv + member Tool ID + member command argv behavior. An optional `ssh: {helper: application}` binds an existing centrally configured SSHHelper and may specify selection. The manifest cannot embed direct host/credential topology. Missing/duplicate group members and ambiguous qualified identities fail validation.
+
+The selected registered Package owns Tool definitions; Shared Configuration continues to own DB/MQ/HTTP/SSH Helpers, not Tools or Tool Groups. For migration see [Package-owned Tools](guides/package-tools-migration.md).
+
 ### DBHelper
 
 DBHelper is a first-class JDBC resource, configured independently from Tools. Each descriptor uses `schemaVersion: att-dbhelper/v2.6` and a stable logical `id`; global `dbhelpers` references descriptor files.
@@ -3619,7 +3636,7 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | HTTPHelper | att-httphelper/v1.1 |
 | SSHHelper | att-sshhelper/v1.0 |
 | Package Tool | att-tool/v1 |
-| Legacy Tool group (migration only) | att-tool-group/v3.0 |
+| Package Tool Group | att-tool-group/v3.0 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
 | Template | att-template/v3.6 |
