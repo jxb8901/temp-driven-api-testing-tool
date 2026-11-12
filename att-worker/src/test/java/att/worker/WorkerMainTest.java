@@ -578,9 +578,12 @@ class WorkerMainTest {
         Files.createDirectories(root.resolve("tools/sample"));
         Files.copy(Paths.get("packages/default/tools/sample/tool-group.yaml"),root.resolve("tools/sample/tool-group.yaml"));
         Files.copy(Paths.get("packages/default/tools/sample/getAcDate.yaml"),root.resolve("tools/sample/getAcDate.yaml"));
+        Files.copy(Paths.get("packages/default/tools/sample/getSeq.yaml"),root.resolve("tools/sample/getSeq.yaml"));
         Files.copy(Paths.get("packages/default/tools/get_ac_date.sh"),root.resolve("tools/get_ac_date.sh"));
+        Files.copy(Paths.get("packages/default/tools/get_seq.sh"),root.resolve("tools/get_seq.sh"));
         Path dispatcher=root.resolve("tools/tool_group_dispatch.sh"); Files.copy(Paths.get("packages/default/tools/tool_group_dispatch.sh"),dispatcher);
         dispatcher.toFile().setExecutable(true,true); root.resolve("tools/get_ac_date.sh").toFile().setExecutable(true,true);
+        root.resolve("tools/get_seq.sh").toFile().setExecutable(true,true);
         Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.13\nenvironment: SIT\noutputDirectory: output\ntemplates: {root: templates}\ntestcase: {root: testcase}\n").getBytes(StandardCharsets.UTF_8));
         List<ExecutionEvent> directEvents=new ArrayList<ExecutionEvent>();
         RunResult direct=new DefaultAttService().run(new RunRequest(root,null,null,null,null,
