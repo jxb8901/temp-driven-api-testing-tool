@@ -99,10 +99,10 @@ class PackageToolRegistryTest {
     }
     @Test void groupedToolKeepsQualifiedIdentityAndTracksManifestRevision() throws Exception {
         Path pkg = temp.resolve("packages/fpp");
-        tool(pkg, "fpp/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\\nid: fpp\\n"
-                + "name: FPP tools\\ndescription: FPP group\\ntools: [invokeApi.yaml]\\n");
-        tool(pkg, "fpp/invokeApi.yaml", "schemaVersion: att-tool/v1\\nid: invokeApi\\n"
-                + "name: Invoke API\\ndescription: FPP integration\\ncall: \\"#{upper('ok')}\\"\\narguments: {}\\n");
+        tool(pkg, "fpp/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\nid: fpp\n"
+                + "name: FPP tools\ndescription: FPP group\ntools: [invokeApi.yaml]\n");
+        tool(pkg, "fpp/invokeApi.yaml", "schemaVersion: att-tool/v1\nid: invokeApi\n"
+                + "name: Invoke API\ndescription: FPP integration\ncall: \"#{upper('ok')}\"\narguments: {}\n");
         Path central = config();
         FrameworkConfig loaded = new FrameworkConfigLoader().load(central, temp, pkg, null);
         ToolConfig call = loaded.tool("fpp.invokeApi");
@@ -112,8 +112,8 @@ class PackageToolRegistryTest {
         assertEquals("invokeApi.yaml", call.sourceFile().getFileName().toString());
         assertNull(loaded.tool("invokeApi"));
         String before = loaded.effectiveConfiguration().identity();
-        tool(pkg, "fpp/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\\nid: fpp\\n"
-                + "name: FPP tools\\ndescription: Updated group\\ntools: [invokeApi.yaml]\\n");
+        tool(pkg, "fpp/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\nid: fpp\n"
+                + "name: FPP tools\ndescription: Updated group\ntools: [invokeApi.yaml]\n");
         String after = new FrameworkConfigLoader().load(central, temp, pkg, null)
                 .effectiveConfiguration().identity();
         assertNotEquals(before, after, "Group source changes must invalidate an accepted Tool revision");
@@ -121,14 +121,14 @@ class PackageToolRegistryTest {
 
     @Test void groupedDispatcherRetainsCommandAndGlobalSshBinding() throws Exception {
         Path pkg = temp.resolve("packages/dispatch");
-        tool(pkg, "sample/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\\nid: sample\\n"
-                + "name: Sample\\ndescription: Dispatcher\\n"
-                + "script: [./tools/dispatch.sh, --read-only]\\n"
-                + "ssh: {helper: appserver, selection: {strategy: roundRobin}}\\n"
-                + "tools: [getAcDate.yaml]\\n");
-        tool(pkg, "sample/getAcDate.yaml", "schemaVersion: att-tool/v1\\nid: getAcDate\\n"
-                + "name: Account date\\ndescription: Get date\\ncommand: [echo, ok]\\n"
-                + "stdoutFormat: text\\n");
+        tool(pkg, "sample/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\nid: sample\n"
+                + "name: Sample\ndescription: Dispatcher\n"
+                + "script: [./tools/dispatch.sh, --read-only]\n"
+                + "ssh: {helper: appserver, selection: {strategy: roundRobin}}\n"
+                + "tools: [getAcDate.yaml]\n");
+        tool(pkg, "sample/getAcDate.yaml", "schemaVersion: att-tool/v1\nid: getAcDate\n"
+                + "name: Account date\ndescription: Get date\ncommand: [echo, ok]\n"
+                + "stdoutFormat: text\n");
         att.TestSchemas.install(temp);
         ToolConfig value = PackageToolRegistry.load(pkg).get("sample.getAcDate");
         assertNotNull(value);
@@ -140,34 +140,34 @@ class PackageToolRegistryTest {
 
     @Test void invalidGroupMembershipAndCollisionsFailClosed() throws Exception {
         Path pkg = temp.resolve("packages/invalid-group");
-        tool(pkg, "first/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\\nid: payments\\n"
-                + "name: Payments\\ndescription: Group\\ntools: [missing.yaml]\\n");
+        tool(pkg, "first/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\nid: payments\n"
+                + "name: Payments\ndescription: Group\ntools: [missing.yaml]\n");
         att.TestSchemas.install(temp);
         assertThrows(Exception.class, () -> PackageToolRegistry.load(pkg));
-        tool(pkg, "first/missing.yaml", "schemaVersion: att-tool/v1\\nid: query\\n"
-                + "name: Query\\ndescription: Query\\ncall: \\"#{upper('X')}\\"\\n");
+        tool(pkg, "first/missing.yaml", "schemaVersion: att-tool/v1\nid: query\n"
+                + "name: Query\ndescription: Query\ncall: \"#{upper('X')}\"\n");
         assertNotNull(PackageToolRegistry.load(pkg).get("payments.query"));
-        tool(pkg, "second/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\\nid: payments\\n"
-                + "name: Duplicate\\ndescription: Duplicate ID\\ntools: [query.yaml]\\n");
-        tool(pkg, "second/query.yaml", "schemaVersion: att-tool/v1\\nid: query\\n"
-                + "name: Query\\ndescription: Query\\ncall: \\"#{upper('Y')}\\"\\n");
+        tool(pkg, "second/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\nid: payments\n"
+                + "name: Duplicate\ndescription: Duplicate ID\ntools: [query.yaml]\n");
+        tool(pkg, "second/query.yaml", "schemaVersion: att-tool/v1\nid: query\n"
+                + "name: Query\ndescription: Query\ncall: \"#{upper('Y')}\"\n");
         assertThrows(Exception.class, () -> PackageToolRegistry.load(pkg));
         Files.delete(pkg.resolve("tools/second/tool-group.yaml"));
-        tool(pkg, "first/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\\nid: payments\\n"
-                + "name: Payments\\ndescription: Group\\ntools: [missing.yaml, missing.yaml]\\n");
+        tool(pkg, "first/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\nid: payments\n"
+                + "name: Payments\ndescription: Group\ntools: [missing.yaml, missing.yaml]\n");
         assertThrows(Exception.class, () -> PackageToolRegistry.load(pkg));
     }
 
     @Test void unlistedGroupFilesAreNotDiscoveredAndRootFilesStayStandalone() throws Exception {
         Path pkg = temp.resolve("packages/mixed");
-        tool(pkg, "fpp/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\\nid: fpp\\n"
-                + "name: FPP\\ndescription: Group\\ntools: [invokeApi.yaml]\\n");
-        tool(pkg, "fpp/invokeApi.yaml", "schemaVersion: att-tool/v1\\nid: invokeApi\\n"
-                + "name: Invoke\\ndescription: Invoke\\ncall: \\"#{upper('A')}\\"\\n");
-        tool(pkg, "fpp/unlisted.yaml", "schemaVersion: att-tool/v1\\nid: hidden\\n"
-                + "name: Hidden\\ndescription: Not listed\\ncall: \\"#{upper('B')}\\"\\n");
-        tool(pkg, "standalone.yaml", "schemaVersion: att-tool/v1\\nid: standalone\\n"
-                + "name: Standalone\\ndescription: Standalone\\ncall: \\"#{upper('C')}\\"\\n");
+        tool(pkg, "fpp/tool-group.yaml", "schemaVersion: att-tool-group/v3.0\nid: fpp\n"
+                + "name: FPP\ndescription: Group\ntools: [invokeApi.yaml]\n");
+        tool(pkg, "fpp/invokeApi.yaml", "schemaVersion: att-tool/v1\nid: invokeApi\n"
+                + "name: Invoke\ndescription: Invoke\ncall: \"#{upper('A')}\"\n");
+        tool(pkg, "fpp/unlisted.yaml", "schemaVersion: att-tool/v1\nid: hidden\n"
+                + "name: Hidden\ndescription: Not listed\ncall: \"#{upper('B')}\"\n");
+        tool(pkg, "standalone.yaml", "schemaVersion: att-tool/v1\nid: standalone\n"
+                + "name: Standalone\ndescription: Standalone\ncall: \"#{upper('C')}\"\n");
         att.TestSchemas.install(temp);
         java.util.Map<String, ToolConfig> result = PackageToolRegistry.load(pkg);
         assertEquals(2, result.size());
