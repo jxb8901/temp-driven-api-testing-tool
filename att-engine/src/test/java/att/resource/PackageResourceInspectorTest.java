@@ -62,6 +62,37 @@ class PackageResourceInspectorTest {
         }
     }
 
+    @Test void acceptedJobRevisionBecomesStaleOnGroupedMemberOrDispatcherScriptEdit() throws Exception {
+        Path root = packageWithTemplate("group-script-admission", "PURE",
+                "description: Group script revision admission");
+        writeUtf8(root.resolve("tools/sample/tool-group.yaml"),
+                "schemaVersion: att-tool-group/v3.0\nid: sample\nname: Sample\n"
+                + "description: Script Group\nscript: [./tools/dispatch.sh]\n"
+                + "tools: [getAcDate.yaml]\n");
+        writeUtf8(root.resolve("tools/sample/getAcDate.yaml"),
+                "schemaVersion: att-tool/v1\nid: getAcDate\nname: Account date\n"
+                + "description: Date tool\ncommand: [./tools/date.sh]\nstdoutFormat: text\n");
+        Path dispatcher = writeUtf8(root.resolve("tools/dispatch.sh"), "#!/bin/sh\necho dispatcher\n");
+        Path member = writeUtf8(root.resolve("tools/date.sh"), "#!/bin/sh\necho first\n");
+        Path config = root.resolve("config/config.yaml");
+        try (PackageResourceInspector inspector = new PackageResourceInspector(root, config, "SIT",
+                Collections.<String>emptyList(), 65536, 262144, true)) {
+            String acceptedRevision = inspector.executionRevisionDigest();
+            inspector.verifyRevision(acceptedRevision);
+            writeUtf8(member, "#!/bin/sh\necho second\n");
+            assertThrows(PackageResourceInspector.StaleResourceCursorException.class,
+                    () -> inspector.verifyRevision(acceptedRevision),
+                    "An accepted Job cannot silently execute a modified Group member script");
+            String updatedRevision = inspector.executionRevisionDigest();
+            assertNotEquals(acceptedRevision, updatedRevision);
+            inspector.verifyRevision(updatedRevision);
+            writeUtf8(dispatcher, "#!/bin/sh\necho updated\n");
+            assertThrows(PackageResourceInspector.StaleResourceCursorException.class,
+                    () -> inspector.verifyRevision(updatedRevision),
+                    "A dispatcher edit must invalidate a previously accepted Job revision");
+        }
+    }
+
     @Test void listsConfiguredPackageResourcesWithLogicalIdsAndReferences() throws Exception {
         Map<String,Object> page=inspector().inspect("list",null,null,null,0,100);
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
