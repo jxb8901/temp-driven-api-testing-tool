@@ -4,10 +4,13 @@ Dry-run by default; preserves qualified group Tool calls and dispatcher semantic
 Requires PyYAML. No global runtime fallback is produced.
 """
 import argparse
+import os
 import pathlib
 import re
 import shlex
+import stat
 import sys
+import tempfile
 
 try:
     import yaml
@@ -26,6 +29,144 @@ def safe(root, name):
     if not target.is_relative_to(root.resolve()):
         raise ValueError("Descriptor path escapes runtime root: " + str(name))
     return target
+
+def validate_output_path(root, destination):
+    """Reject every symlink component and prove the planned output stays in its Package."""
+    root = pathlib.Path(root).resolve(strict=True)
+    destination = pathlib.Path(os.path.abspath(destination))
+    try:
+        relative = destination.relative_to(root)
+    except ValueError:
+        raise ValueError("Package Tool destination escapes selected Package: " + str(destination))
+    current = root
+    for part in relative.parts:
+        if part in ("", ".", ".."):
+            raise ValueError("Invalid Package Tool destination component: " + part)
+        current = current / part
+        if current.is_symlink():
+            raise ValueError("Refusing symlink in Package Tool destination path: " + str(current))
+        if current != destination and current.exists() and not current.is_dir():
+            raise ValueError("Package Tool destination parent is not a directory: " + str(current))
+    resolved = destination.resolve(strict=False)
+    if not resolved.is_relative_to(root):
+        raise ValueError("Package Tool destination escapes selected Package: " + str(destination))
+
+def ensure_output_parents(root, destination, created_directories):
+    """Create missing output directories one component at a time, rejecting symlinks."""
+    root = pathlib.Path(root).resolve(strict=True)
+    relative_parent = destination.parent.relative_to(root)
+    current = root
+    for part in relative_parent.parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError("Refusing symlink in Package Tool destination path: " + str(current))
+        if not current.exists():
+            current.mkdir()
+            created_directories.append(current)
+        elif not current.is_dir():
+            raise ValueError("Package Tool destination parent is not a directory: " + str(current))
+        validate_output_path(root, destination)
+
+def stage_text(destination, content, mode=None):
+    """Write complete content to a private temporary sibling before publishing it."""
+    descriptor, name = tempfile.mkstemp(prefix=".att-tool-migration-", suffix=".tmp",
+                                        dir=str(destination.parent))
+    staged = pathlib.Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if mode is not None:
+            os.chmod(staged, mode)
+        return staged
+    except BaseException:
+        try:
+            staged.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+def commit_staged_file(root, staged, destination, committed):
+    """Create a new destination exclusively, then copy a fully staged file into it."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(str(destination), flags, 0o666)
+    identity = os.fstat(descriptor)
+    committed.append((root, destination, identity.st_dev, identity.st_ino))
+    with os.fdopen(descriptor, "wb") as output, staged.open("rb") as source:
+        while True:
+            chunk = source.read(65536)
+            if not chunk:
+                break
+            output.write(chunk)
+        output.flush()
+        os.fsync(output.fileno())
+
+def write_migration(paths, config, converted_config, destination_roots):
+    """Stage all outputs, publish Package descriptors, then atomically replace Config.
+
+    On any pre-Config failure, remove only destination files created by this invocation;
+    the legacy Config remains untouched so the migration can be safely retried.
+    """
+    staged_outputs = []
+    committed = []
+    created_directories = []
+    staged_config = None
+    try:
+        for destination, content in paths:
+            root = destination_roots[destination]
+            validate_output_path(root, destination)
+            ensure_output_parents(root, destination, created_directories)
+            validate_output_path(root, destination)
+            staged = stage_text(destination, content)
+            staged_outputs.append((root, destination, staged))
+
+        config_mode = stat.S_IMODE(config.stat().st_mode)
+        staged_config = stage_text(config, converted_config, config_mode)
+
+        for root, destination, staged in staged_outputs:
+            validate_output_path(root, destination)
+            commit_staged_file(root, staged, destination, committed)
+
+        os.replace(str(staged_config), str(config))
+        staged_config = None
+    except BaseException as error:
+        rollback_errors = []
+        for root, destination, device, inode in reversed(committed):
+            try:
+                validate_output_path(root, destination)
+                current = destination.lstat()
+                if current.st_dev != device or current.st_ino != inode or stat.S_ISLNK(current.st_mode):
+                    rollback_errors.append("created destination changed before rollback: " + str(destination))
+                else:
+                    validate_output_path(root, destination)
+                    destination.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as rollback_error:
+                rollback_errors.append(str(rollback_error))
+        if rollback_errors:
+            raise OSError("Migration failed and rollback was incomplete: "
+                          + "; ".join(rollback_errors)) from error
+        raise
+    finally:
+        for _, _, staged in staged_outputs:
+            try:
+                staged.unlink()
+            except FileNotFoundError:
+                pass
+        if staged_config is not None:
+            try:
+                staged_config.unlink()
+            except FileNotFoundError:
+                pass
+        for directory in reversed(created_directories):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
 
 def remove_top_level(source, names):
     """Remove recognized top-level YAML mappings while preserving unrelated source.
@@ -194,6 +335,8 @@ def main():
     if len(set(target_paths)) != len(target_paths):
         raise ValueError("Duplicate migrated Tool or Group destination")
     for destination, content in paths:
+        root = destination_roots[destination]
+        validate_output_path(root, destination)
         if destination.exists():
             raise ValueError("Refusing to overwrite existing descriptor: " + str(destination))
         converted = yaml.safe_load(content)
@@ -223,10 +366,7 @@ def main():
     if not args.write:
         print("Review Tool names, script paths and package membership; rerun with --write.")
         return
-    for destination, content in paths:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(content, encoding="utf-8")
-    config.write_text(converted_config, encoding="utf-8")
+    write_migration(paths, config, converted_config, destination_roots)
     print("Wrote standalone Tool descriptors and Group manifests/member Tools; revalidate all Packages.")
 
 if __name__ == "__main__":

@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Safety and cutover regressions for the real Package Tool migration CLI."""
+import importlib.util
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import yaml
 
 SCRIPT = Path(__file__).resolve().parent / "migrate_package_tools.py"
+SPEC = importlib.util.spec_from_file_location("migrate_package_tools", SCRIPT)
+MIGRATOR = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MIGRATOR)
 
 
 class PackageToolMigrationTest(unittest.TestCase):
@@ -27,6 +32,80 @@ class PackageToolMigrationTest(unittest.TestCase):
         return subprocess.run([sys.executable, str(SCRIPT), "--config", str(self.config),
                                "--package", str(self.a), *options],
                               capture_output=True, text=True, check=False)
+
+    def make_symlink(self, target, link):
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest("directory symlinks are unavailable: " + str(error))
+
+    def test_symlinked_tools_directory_is_rejected_for_dry_run_and_write(self):
+        original = ("schemaVersion: att-config/v2.13\ntools:\n"
+                    "  alpha: {name: Alpha, description: Alpha, command: [echo]}\n")
+        self.config.write_text(original, encoding="utf-8")
+        outside = self.root / "outside-tools"
+        outside.mkdir()
+        self.make_symlink(outside, self.a / "tools")
+
+        for options in ((), ("--write",)):
+            result = self.run_cli(*options)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Refusing symlink in Package Tool destination path", result.stderr)
+            self.assertEqual(original, self.config.read_text(encoding="utf-8"))
+            self.assertEqual([], list(outside.iterdir()))
+
+    def test_symlinked_group_parent_is_rejected_for_dry_run_and_write(self):
+        group_file = self.root / "config/tools/sample.yaml"
+        group_file.parent.mkdir(parents=True)
+        group_file.write_text(
+            "schemaVersion: att-tool-group/v2.9\nid: sample\n"
+            "tools:\n  ping: {name: Ping, description: Ping, command: [echo]}\n",
+            encoding="utf-8")
+        original = "schemaVersion: att-config/v2.13\ntoolGroups: [config/tools/sample.yaml]\n"
+        self.config.write_text(original, encoding="utf-8")
+        tools = self.a / "tools"
+        tools.mkdir()
+        outside = self.root / "outside-group"
+        outside.mkdir()
+        self.make_symlink(outside, tools / "sample")
+
+        for options in ((), ("--write",)):
+            result = self.run_cli(*options)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Refusing symlink in Package Tool destination path", result.stderr)
+            self.assertEqual(original, self.config.read_text(encoding="utf-8"))
+            self.assertEqual([], list(outside.iterdir()))
+
+    def test_second_output_commit_failure_rolls_back_only_created_files(self):
+        original = ("schemaVersion: att-config/v2.13\ntools:\n"
+                    "  alpha: {name: Alpha, description: Alpha, command: [echo]}\n"
+                    "  echo: {name: Echo, description: Echo, command: [echo]}\n")
+        self.config.write_text(original, encoding="utf-8")
+        tools = self.a / "tools"
+        tools.mkdir()
+        keep = tools / "keep.txt"
+        keep.write_text("pre-existing", encoding="utf-8")
+        real_commit = MIGRATOR.commit_staged_file
+        committed = [0]
+
+        def fail_second(root, staged, destination, created):
+            committed[0] += 1
+            if committed[0] == 2:
+                raise OSError("injected failure on second output")
+            return real_commit(root, staged, destination, created)
+
+        arguments = [str(SCRIPT), "--config", str(self.config), "--package", str(self.a), "--write"]
+        with mock.patch.object(sys, "argv", arguments):
+            with mock.patch.object(MIGRATOR, "commit_staged_file", side_effect=fail_second):
+                with self.assertRaisesRegex(OSError, "injected failure on second output"):
+                    MIGRATOR.main()
+
+        self.assertEqual(2, committed[0])
+        self.assertEqual(original, self.config.read_text(encoding="utf-8"))
+        self.assertFalse((tools / "alpha.yaml").exists())
+        self.assertFalse((tools / "echo.yaml").exists())
+        self.assertEqual(["keep.txt"], sorted(path.name for path in tools.iterdir()))
+        self.assertEqual("pre-existing", keep.read_text(encoding="utf-8"))
 
     def test_empty_registries_require_explicit_cutover_even_without_definitions(self):
         original = "schemaVersion: att-config/v2.13\nenvironment: SIT\ntools: {}\ntoolGroups: []\n"
