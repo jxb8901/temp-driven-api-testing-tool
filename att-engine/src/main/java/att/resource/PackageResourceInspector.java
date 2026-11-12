@@ -1890,6 +1890,11 @@ public final class PackageResourceInspector implements AutoCloseable {
             resource.provenance.put("toolName", scrub(tool.name()));
             String toolConfigLocation = toolConfigLocation(tool);
             if (toolConfigLocation != null) resource.provenance.put("toolConfigLocation", toolConfigLocation);
+            String groupManifest = toolGroupManifestLocation(tool);
+            if (groupManifest != null) {
+                resource.provenance.put("toolGroupManifest", groupManifest);
+                indexFileIfPackage(index, packageRoot.resolve(groupManifest));
+            }
             Set<String> builtIns = new att.template.DefaultBuiltInProvider().names();
             List<String> callTargets = tool.callBacked() ? toolCalls(tool.call()) : Collections.<String>emptyList();
             boolean builtInCall = !callTargets.isEmpty();
@@ -2191,6 +2196,8 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("schemaVersion", att.Version.TOOL_SCHEMA);
         result.put("toolId", tool.key());
         result.put("groupId", tool.groupId().isEmpty() ? "Default" : tool.groupId());
+        String groupManifest = toolGroupManifestLocation(tool);
+        if (groupManifest != null) result.put("toolGroupManifest", groupManifest);
         result.put("name", tool.name());
         result.put("description", scrubDescription(tool.description()));
         result.put("executionKind", tool.commandBacked() ? "command" : "call");
@@ -2209,6 +2216,17 @@ public final class PackageResourceInspector implements AutoCloseable {
         }
         result.put("arguments", arguments);
         return safeMap(result);
+    }
+
+    private String toolGroupManifestLocation(ToolConfig tool) {
+        if (!tool.grouped() || tool.sourceFile() == null) return null;
+        try {
+            Path manifest = tool.sourceFile().getParent().resolve("tool-group.yaml");
+            if (!Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS)
+                    || Files.isSymbolicLink(manifest)) return null;
+            String logical = resources.fromInternalPath(manifest, PackageResourceResolver.Kind.FILE).logicalName();
+            return sensitiveSourcePath(logical) || sourceGlobDenied(logical) ? null : logical;
+        } catch (Exception unavailable) { return null; }
     }
 
     private String toolConfigLocation(ToolConfig tool) {
