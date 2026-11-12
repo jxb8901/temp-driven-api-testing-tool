@@ -605,7 +605,7 @@ Log 是一般 Case-log entry，沒有 user-authored severity；現行 v3.6 契�
 
 Action expression 使用一般 ATT expression engine。完整 ${...} 或 #{...} expression 保留結果型別；expression 放在一般字串內才會成為 String。請參閱[Expressions and Built-ins](reference.zh/expressions.md)。
 
-assign 會將 typed value 發布至 EXEC.VARS.<name> 一次。name 必須符合 [A-Za-z_][A-Za-z0-9_]*，且在 Case 中唯一。使用相同的 name 和 expression 欄位可透過 set 更新既有的頂層 EXEC.VARS 值；set 不會宣告不存在的變數。Expression 會讀取更新前的 Context 值，且只在成功評估後發布，並保留原生型別。兩種 Action 的 EXEC.VARS 都會跨 Stage 和巢狀 Flow 共用。set 更新 Debug/Load bootstrap 變數時會消耗首次 assign 的許可；之後的 assign 不可覆寫該更新。Action 執行期間可讀取 output.*，發布後可讀取 EXEC.ACTIONS.<id>.output.*。Flow 有暫時 Action namespace；EXEC.VARS 更新仍會保留給 caller。
+assign 會將 typed value 發布至 EXEC.VARS.<name> 一次。name 必須符合 [A-Za-z_][A-Za-z0-9_]*，且在 Case 中唯一。使用相同的 name 和 expression 欄位可透過 set 更新既有的頂層 EXEC.VARS 值；set 不會宣告不存在的變數。Expression 會讀取更新前的 Context 值，並只在評估及 assertion 成功後發布，保留原生型別。set 可使用共用 Action retry block：每次 attempt 都以尚未更新的變數評估；失敗 attempt 保留原值，只有 winning attempt 會發布一次。Attempt 狀態及 retry decision 保留在 output.attempts。兩種 Action 的 EXEC.VARS 都會跨 Stage 和巢狀 Flow 共用。set 更新 Debug/Load bootstrap 變數時會消耗首次 assign 的許可；之後的 assign 不可覆寫該更新。Action 執行期間可讀取 output.*，發布後可讀取 EXEC.ACTIONS.<id>.output.*。Flow 有暫時 Action namespace；EXEC.VARS 更新仍會保留給 caller。
 
 ~~~yaml
 initializeCounter:
@@ -653,7 +653,7 @@ String、Number、Boolean、null、Map、List 等值跨越 Action/Template/Flow 
 
 ### 共用 Retry 與 boolean condition
 
-Tool Action（包括可重試的 DB query/scalar call）共用 `retry` 契約。`maxAttempts`（2–10）、`intervalMs`（0–3600000）及非空 `retryOn`（ASSERTION/TIMEOUT）仍為必填；`when` 是可選的非空 Boolean expression String。Mutating DB update 及 SSH transfer 的既有 retry 限制維持不變。
+Tool Action、可重試的 DB query/scalar call 及 set Action 共用 `retry` 契約。`maxAttempts`（2–10）、`intervalMs`（0–3600000）及非空 `retryOn`（ASSERTION/TIMEOUT）仍為必填；`when` 是可選的非空 Boolean expression String。set 使用 `ASSERTION` retry 時必須有 Action `assert`；失敗 attempt 不會提交候選值至 EXEC.VARS。Mutating DB update 及 SSH transfer 的既有 retry 限制維持不變。
 
 ~~~yaml
 retry:

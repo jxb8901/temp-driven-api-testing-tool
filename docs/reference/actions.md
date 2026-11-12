@@ -175,7 +175,7 @@ When both message and value are supplied, Log emits the message, a newline, then
 
 Action expressions use the regular ATT expression engine. A complete ${...} or #{...} expression keeps its result type; embedding an expression in surrounding text produces a String. See [Expressions and Built-ins](expressions.md).
 
-assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Use set with the same name and expression fields to update an existing top-level EXEC.VARS value; set never declares a missing variable. Its expression reads the old Context value and publishes only after evaluation succeeds, preserving the native result type. Both Actions share EXEC.VARS across Stages and nested Flow calls. A set of a Debug/Load bootstrap variable consumes its first-assign allowance; a later assign cannot overwrite that update. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; EXEC.VARS updates remain visible to the caller.
+assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Use set with the same name and expression fields to update an existing top-level EXEC.VARS value; set never declares a missing variable. Its expression reads the old Context value and publishes only after evaluation and its assertion succeed, preserving the native result type. A set may use the common Action retry block: each attempt evaluates against the unchanged variable, failed attempts leave its old value intact, and only the winning attempt publishes once. Attempt status and retry decisions remain in output.attempts. Both Actions share EXEC.VARS across Stages and nested Flow calls. A set of a Debug/Load bootstrap variable consumes its first-assign allowance; a later assign cannot overwrite that update. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; EXEC.VARS updates remain visible to the caller.
 
 ~~~yaml
 initializeCounter:
@@ -223,7 +223,7 @@ Strings, numbers, booleans, null, maps and lists remain typed across Action/Temp
 
 ## Common Retry and boolean conditions
 
-Tool Actions, including retry-capable DB query/scalar calls, share the `retry` contract. `maxAttempts` (2–10), `intervalMs` (0–3600000) and a non-empty `retryOn` list (ASSERTION/TIMEOUT) remain required. `when` is an optional non-empty Boolean expression String. Existing restrictions on mutating DB updates and SSH transfers still apply.
+Tool Actions, retry-capable DB query/scalar calls, and set Actions share the `retry` contract. `maxAttempts` (2–10), `intervalMs` (0–3600000) and a non-empty `retryOn` list (ASSERTION/TIMEOUT) remain required. `when` is an optional non-empty Boolean expression String. `ASSERTION` retries for set require an Action `assert`; failed attempts never commit their candidate to EXEC.VARS. Existing restrictions on mutating DB updates and SSH transfers still apply.
 
 ~~~yaml
 retry:

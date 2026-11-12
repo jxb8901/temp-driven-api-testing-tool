@@ -1474,6 +1474,37 @@ class PackageValidatorTest {
         assertEquals("actions.assignAgain.name", error.field());
     }
 
+    @Test void validateSetSupportsTheCommonRetryContractAndRequiresAnAssertionForAssertionRetries() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String,ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod(
+                "validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+        Map<String,Object> assignment = map("type", "assign", "name", "counter", "expression", "#{0}");
+        Map<String,Object> retry = map("maxAttempts", 2, "intervalMs", 0,
+                "retryOn", Collections.singletonList("ASSERTION"));
+        TemplateAction setWithAssertion = new TemplateAction("retrySet", map("type", "set", "name", "counter",
+                "expression", "#{10}", "assert", "${output.result} == 10", "retry", retry), att.Version.TEMPLATE_SCHEMA);
+        StageTemplate valid = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("initialize", assignment, att.Version.TEMPLATE_SCHEMA), setWithAssertion),
+                att.Version.TEMPLATE_SCHEMA);
+        assertDoesNotThrow(() -> {
+            try { contract.invoke(validator, valid, config); }
+            catch (java.lang.reflect.InvocationTargetException error) { throw new RuntimeException(error.getCause()); }
+            catch (Exception error) { throw new RuntimeException(error); }
+        });
+
+        TemplateAction missingAssertion = new TemplateAction("retrySet", map("type", "set", "name", "counter",
+                "expression", "#{10}", "retry", retry), att.Version.TEMPLATE_SCHEMA);
+        StageTemplate invalid = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("initialize", assignment, att.Version.TEMPLATE_SCHEMA), missingAssertion),
+                att.Version.TEMPLATE_SCHEMA);
+        java.lang.reflect.InvocationTargetException thrown = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> contract.invoke(validator, invalid, config));
+        assertTrue(String.valueOf(thrown.getCause().getMessage()).contains("retryOn ASSERTION requires action assert"));
+    }
+
     private void assertExpandedCollision(java.lang.reflect.Method contract, PackageValidator validator,
                                          StageTemplate template, FrameworkConfig config) throws Exception {
         java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class,

@@ -685,11 +685,6 @@
                   },
                   {
                     "required": [
-                      "retry"
-                    ]
-                  },
-                  {
-                    "required": [
                       "timeoutMs"
                     ]
                   },

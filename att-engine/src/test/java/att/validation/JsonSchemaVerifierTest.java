@@ -55,6 +55,13 @@ class JsonSchemaVerifierTest {
                 "\"init\":{\"type\":\"assign\",\"name\":\"counter\",\"expression\":\"#{0}\"}," +
                 "\"increment\":{\"type\":\"set\",\"name\":\"counter\",\"expression\":\"#{${EXEC.VARS.counter} + 1}\"}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(templateSchema, template));
+        String retryTemplate = "{\"schemaVersion\":\"att-template/v3.6\",\"name\":\"T\",\"description\":\"x\",\"actions\":{" +
+                "\"init\":{\"type\":\"assign\",\"name\":\"counter\",\"expression\":\"#{0}\"}," +
+                "\"increment\":{\"type\":\"set\",\"name\":\"counter\",\"expression\":\"#{${EXEC.VARS.counter} + 1}\"," +
+                "\"assert\":\"${output.result} > 0\",\"retry\":{\"maxAttempts\":2,\"intervalMs\":0,\"retryOn\":[\"ASSERTION\",\"TIMEOUT\"]}}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(templateSchema, retryTemplate));
+        assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(templateSchema,
+                retryTemplate.replace("ASSERTION", "INVALID")));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(templateSchema,
                 template.replace("\"expression\":\"#{${EXEC.VARS.counter} + 1}\"", "\"call\":\"#{mutate()}\"")));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(templateSchema,
@@ -67,6 +74,14 @@ class JsonSchemaVerifierTest {
         String flow = "{\"schemaVersion\":\"att-flow/v3.6\",\"id\":\"common.update.v1\",\"name\":\"Update\",\"description\":\"x\",\"actions\":{" +
                 "\"increment\":{\"type\":\"set\",\"name\":\"counter\",\"expression\":\"#{${EXEC.VARS.counter} + 1}\"}}}";
         assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(flowSchema, flow));
+        String retryFlow = "{\"schemaVersion\":\"att-flow/v3.6\",\"id\":\"common.update.v1\",\"name\":\"Update\",\"description\":\"x\",\"actions\":{" +
+                "\"increment\":{\"type\":\"set\",\"name\":\"counter\",\"expression\":\"#{${EXEC.VARS.counter} + 1}\"," +
+                "\"assert\":\"${output.result} > 0\",\"retry\":{\"maxAttempts\":2,\"intervalMs\":0,\"retryOn\":[\"ASSERTION\",\"TIMEOUT\"]}}}}";
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(flowSchema, retryFlow));
+        assertDoesNotThrow(() -> JsonSchemaVerifier.verifyJson(templateSchema,
+                "{\"schemaVersion\":\"att-template/v3.6\",\"name\":\"Update\",\"description\":\"x\",\"actions\":{" +
+                        "\"increment\":{\"type\":\"set\",\"name\":\"counter\",\"expression\":\"#{${EXEC.VARS.counter} + 1}\"," +
+                        "\"assert\":\"${output.result} > 0\",\"retry\":{\"maxAttempts\":2,\"intervalMs\":0,\"retryOn\":[\"ASSERTION\",\"TIMEOUT\"]}}}}"));
         assertThrows(IllegalArgumentException.class, () -> JsonSchemaVerifier.verifyJson(flowSchema,
                 flow.replace(",\"expression\":\"#{${EXEC.VARS.counter} + 1}\"", "")));
     }

@@ -1121,7 +1121,17 @@ public final class PackageValidator {
                         "The same variable name is assigned more than once in template '" + template.name() + "'.",
                         null, "name", null, null, null, template.name(), action.id(),
                         "Use a unique Case-scoped variable name; assign does not overwrite.", null);
-                forbid(action, "output", "payload", "result", "call", "db", "query", "update", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
+                if ("assign".equals(type)) {
+                    forbid(action, "output", "payload", "result", "call", "db", "query", "update", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
+                } else {
+                    forbid(action, "output", "payload", "result", "call", "db", "query", "update", "expected", "actual", "message", "file", "level", "fields", "timeoutMs");
+                    if (!action.retry().isEmpty()) {
+                        for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(action.expression())) {
+                            validateDbRetryContract(action, call, config);
+                            validateSshRetryContract(action, call, config);
+                        }
+                    }
+                }
                 validateInlineExpressions(action.expression(), syntaxEngine, config);
                 validateStaticContextStructure(action.expression(), syntaxEngine, completedActions, false, action.id());
             }
@@ -2009,6 +2019,12 @@ public final class PackageValidator {
     }
 
     private void validateSshRetryContract(TemplateAction action, FrameworkConfig config) {
+        if (action.call().trim().isEmpty()) return;
+        validateSshRetryContract(action, callParser.parse(action.call()), config);
+    }
+
+    private void validateSshRetryContract(TemplateAction action, ToolCallParser.ParsedCall parsed,
+                                          FrameworkConfig config) {
         Map<String, Object> retry = action.retry();
         Object retryOn = retry.get("retryOn");
         if (!(retryOn instanceof Iterable)) return;
@@ -2020,7 +2036,6 @@ public final class PackageValidator {
             }
         }
         if (!retriesTimeout) return;
-        ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
         if (!parsed.name().startsWith("ssh.")) {
             ToolConfig tool = config.tool(parsed.name());
             if (tool == null || !tool.callBacked()) return;
@@ -2036,7 +2051,13 @@ public final class PackageValidator {
 
     private void validateDbRetryContract(TemplateAction action, FrameworkConfig config) {
         if (action.retry().isEmpty()) return;
-        ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
+        if (action.call().trim().isEmpty()) return;
+        validateDbRetryContract(action, callParser.parse(action.call()), config);
+    }
+
+    private void validateDbRetryContract(TemplateAction action, ToolCallParser.ParsedCall parsed,
+                                         FrameworkConfig config) {
+        if (action.retry().isEmpty()) return;
         if (!parsed.name().startsWith("db.")) {
             ToolConfig tool = config.tool(parsed.name());
             if (tool == null || !tool.callBacked()) return;
