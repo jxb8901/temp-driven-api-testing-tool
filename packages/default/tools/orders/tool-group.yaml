@@ -1,0 +1,9 @@
+schemaVersion: att-tool-group/v3.0
+id: orders
+name: Order database tools
+description: Typed, reusable DBHelper facade Tools for order operations
+tools:
+  - count.yaml
+  - find.yaml
+  - findByDate.yaml
+  - updateStatus.yaml
