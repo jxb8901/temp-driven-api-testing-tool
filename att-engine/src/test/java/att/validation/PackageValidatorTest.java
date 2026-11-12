@@ -45,6 +45,50 @@ class PackageValidatorTest {
                 String.valueOf(missing.getCause()));
     }
 
+    @Test void missingExtensionlessInterpreterMemberAndDispatcherFailValidation() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(
+                System.getProperty("os.name", "").toLowerCase().contains("win"),
+                "This regression uses a Unix shell interpreter");
+        Path root = Files.createDirectories(tempDir.resolve("extensionless"));
+        Path tools = Files.createDirectories(root.resolve("tools"));
+        Path group = Files.createDirectories(tools.resolve("sample"));
+        Files.write(group.resolve("tool-group.yaml"),
+                ("schemaVersion: att-tool-group/v3.0\nid: sample\nname: Sample\n"
+                 + "description: Group\nscript: [bash, ./tools/dispatch]\n"
+                 + "tools: [task.yaml]\n").getBytes("UTF-8"));
+        Files.write(group.resolve("task.yaml"),
+                ("schemaVersion: att-tool/v1\nid: task\nname: Task\n"
+                 + "description: Member\ncommand: [bash, ./tools/task]\n"
+                 + "stdoutFormat: text\n").getBytes("UTF-8"));
+        Path dispatcher = tools.resolve("dispatch");
+        Files.write(dispatcher, "#!/bin/sh\necho dispatch\n".getBytes("UTF-8"));
+        att.TestSchemas.install(root);
+        Path config = root.resolve("config/config.yaml");
+        Files.createDirectories(config.getParent());
+        Files.write(config, "schemaVersion: att-config/v2.13\n".getBytes("UTF-8"));
+        ToolConfig member = new FrameworkConfigLoader().load(config, root, root, null)
+                .tool("sample.task");
+        assertNotNull(member);
+        PackageValidator validator = new PackageValidator(root,
+                new FrameworkConfigLoader().load(config, root, root, null));
+        java.lang.reflect.Method validate = PackageValidator.class.getDeclaredMethod(
+                "validateToolExecutable", ToolConfig.class);
+        validate.setAccessible(true);
+        java.lang.reflect.InvocationTargetException missingMember = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> validate.invoke(validator, member));
+        assertTrue(String.valueOf(missingMember.getCause().getMessage()).contains("task"),
+                String.valueOf(missingMember.getCause()));
+        Files.write(tools.resolve("task"), "#!/bin/sh\necho task\n".getBytes("UTF-8"));
+        assertDoesNotThrow(() -> validate.invoke(validator, member));
+        Files.delete(dispatcher);
+        java.lang.reflect.InvocationTargetException missingDispatcher = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> validate.invoke(validator, member));
+        assertTrue(String.valueOf(missingDispatcher.getCause().getMessage()).contains("dispatch"),
+                String.valueOf(missingDispatcher.getCause()));
+    }
+
     @Test void retryConditionUsesCompletedAttemptScopeAndRejectsForbiddenCalls() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
                 Collections.<String, ToolConfig>emptyMap(), null, null);
