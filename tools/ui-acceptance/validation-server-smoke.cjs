@@ -50,6 +50,36 @@ async function main() {
     await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
     assert.deepEqual(await getJobIds(), beforeConfig, 'Config validation must not add a persisted Job');
 
+    await page.goto(`${origin}/tools/att/ui/index.html#/configuration/payments`);
+    await page.getByRole('heading', { name: 'Configuration', exact: true }).waitFor();
+    const sharedConfigResponsePromise = page.waitForResponse(response => response.request().method() === 'POST'
+      && new URL(response.url()).pathname.endsWith('/api/v1/validation'));
+    await page.getByRole('button', { name: 'Read-only validate Shared Config', exact: true }).click();
+    await page.getByRole('heading', { name: 'Validate', level: 1 }).waitFor();
+    await page.getByRole('button', { name: 'Run Validation', exact: true }).click();
+    const sharedConfigResponse = await sharedConfigResponsePromise;
+    assert.equal(sharedConfigResponse.status(), 200);
+    assert.deepEqual(await sharedConfigResponse.request().postDataJSON(), { command: 'validate', targetKind: 'config' },
+      'the Shared Configuration shortcut must validate global Config without inheriting a selected Package');
+    await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
+
+    await page.goto(`${origin}/tools/att/ui/index.html#/configuration/payments`);
+    await page.getByRole('button', { name: 'Read-only validate payments effective Config', exact: true }).waitFor();
+    const packageConfigResponsePromise = page.waitForResponse(response => response.request().method() === 'POST'
+      && new URL(response.url()).pathname.endsWith('/api/v1/validation'));
+    await page.getByRole('button', { name: 'Read-only validate payments effective Config', exact: true }).click();
+    await page.getByRole('heading', { name: 'Validate', level: 1 }).waitFor();
+    await page.waitForFunction(() => !document.querySelector('button[type="submit"]')?.disabled);
+    await page.getByRole('button', { name: 'Run Validation', exact: true }).click();
+    const packageConfigResponse = await packageConfigResponsePromise;
+    assert.equal(packageConfigResponse.status(), 200);
+    assert.deepEqual(await packageConfigResponse.request().postDataJSON(), {
+      command: 'validate', targetKind: 'config', packageId: 'payments',
+    }, 'Package-effective Config validation must use the explicitly selected Package and Server default Environment');
+    const packageConfigReport = await packageConfigResponse.json();
+    assert.equal(packageConfigReport.context.environment, 'SIT');
+    await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
+
     await page.goto(`${origin}/tools/att/ui/index.html#/packages/payments`);
     await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
     await page.getByRole('button', { name: 'Reference Flow' }).click();
@@ -75,8 +105,8 @@ async function main() {
     await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
     assert.deepEqual(await getJobIds(), beforeFlow, 'resource validation must not add a persisted Job');
     assert.deepEqual(otherWrites, [], 'the read-only UI flow must not POST drafts, jobs, or schedules');
-    assert.equal(validationRequests.length, 2);
-    process.stdout.write('Packaged-WAR validation checks passed under /tools/att: Server capability, explicit Config and Explorer Flow validation, att-validation/v1 reports, and no Job or draft writes.\n');
+    assert.equal(validationRequests.length, 4);
+    process.stdout.write('Packaged-WAR validation checks passed under /tools/att: Server capability, explicit global and Package-effective Config, Explorer Flow validation, att-validation/v1 reports, and no Job or draft writes.\n');
   } finally {
     await context.close();
     await browser.close();

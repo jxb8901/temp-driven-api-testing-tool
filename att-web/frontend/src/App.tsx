@@ -225,8 +225,12 @@ function ConfigurationRouteView({ route }: {
     navigation.navigate({ kind: 'package', packageId: route.packageId || '', resource });
   }, [navigation.navigate, route.packageId]);
   const onValidateConfiguration = useCallback(() => {
-    navigation.navigate({ kind: 'validation', scope: 'config', packageId: route.packageId || undefined,
-      ...(route.packageId ? { environment: selectedEnvironment } : {}) });
+    navigation.navigate({ kind: 'validation', scope: 'config' });
+  }, [navigation.navigate]);
+  const onValidatePackageConfiguration = useCallback(() => {
+    if (!route.packageId) return;
+    navigation.navigate({ kind: 'validation', scope: 'config', packageId: route.packageId,
+      ...(selectedEnvironment ? { environment: selectedEnvironment } : {}) });
   }, [navigation.navigate, route.packageId, selectedEnvironment]);
   return <>
     <nav className="configuration-scope" aria-label="Configuration ownership">
@@ -248,7 +252,10 @@ function ConfigurationRouteView({ route }: {
     onTabChange={onTabChange}
     onOpenResource={onOpenResource}
     onValidate={onValidateConfiguration}
-    validationLabel={workspace.uiLocale === 'zh-Hant' ? '唯讀驗證設定' : 'Read-only validate Config'}
+    validationLabel={workspace.uiLocale === 'zh-Hant' ? '唯讀驗證共用設定' : 'Read-only validate Shared Config'}
+    onValidatePackage={route.packageId ? onValidatePackageConfiguration : undefined}
+    packageValidationLabel={route.packageId ? (workspace.uiLocale === 'zh-Hant'
+      ? `唯讀驗證 ${route.packageId} 套件生效設定` : `Read-only validate ${route.packageId} effective Config`) : undefined}
   />}</>;
 }
 

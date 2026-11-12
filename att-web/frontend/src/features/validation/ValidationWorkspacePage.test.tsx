@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShellContext, type AppShellContextValue } from '../../AppShell';
 import type { AppRoute, ValidationRouteState } from '../../router';
-import type { ServerVersion } from '../../types';
+import type { AsyncState, PackageSummary, ServerVersion } from '../../types';
 import { ValidationWorkspacePage } from './ValidationWorkspacePage';
 import { safeValidationReportCopy } from './ValidationReport';
 import type { ValidationReportData, ValidationRequest } from './types';
@@ -34,13 +34,14 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi
 async function settle() { await act(async () => { for (let index = 0; index < 5; index++) await Promise.resolve(); }); }
 
 function renderWorkspace({ api, route = { kind: 'validation', scope: 'config' }, context = baseContext,
-  version = serverVersion, onRouteChange = vi.fn() }: {
+  version = serverVersion, onRouteChange = vi.fn(), packages = { status: 'ready', data: [] } }: {
   api: { validateResource(input: ValidationRequest, signal?: AbortSignal): Promise<ValidationReportData> };
   route?: ValidationRouteState; context?: AppShellContextValue; version?: ServerVersion;
   onRouteChange?: (route: AppRoute) => void;
+  packages?: AsyncState<PackageSummary[]>;
 }) {
   return root.render(<AppShellContext.Provider value={context}>
-    <ValidationWorkspacePage api={api as never} packages={{ status: 'ready', data: [] }} serverVersion={{ status: 'ready', data: version }}
+    <ValidationWorkspacePage api={api as never} packages={packages} serverVersion={{ status: 'ready', data: version }}
       route={route} onRouteChange={onRouteChange} />
   </AppShellContext.Provider>);
 }
@@ -65,6 +66,18 @@ describe('ValidationWorkspacePage', () => {
     expect(host.textContent).toContain('Validation report');
     expect(host.textContent).toContain('PASS');
     expect(host.textContent).not.toContain('/Users/jeffrey/hidden.yaml');
+  });
+
+  it('keeps global Config validation available when the Package catalog is unavailable', async () => {
+    const validateResource = vi.fn(async () => report);
+    await act(async () => renderWorkspace({ api: { validateResource }, packages: { status: 'error', error: new Error('catalog unavailable') } }));
+    await settle();
+    const submit = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    expect(submit.disabled).toBe(false);
+    await act(async () => { submit.click(); await Promise.resolve(); });
+    await settle();
+    expect(validateResource).toHaveBeenCalledWith({ targetKind: 'config' }, expect.any(AbortSignal));
+    expect(host.textContent).toContain('Validation report');
   });
 
   it('gates unsupported Server versions and aborts an in-flight result when the auth context changes', async () => {

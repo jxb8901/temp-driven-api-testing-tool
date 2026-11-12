@@ -182,8 +182,8 @@ export function ValidationWorkspacePage({ api, packages, serverVersion, route, o
   const targetOption = targetOptions.find(item => item.value === target);
   const resourceForReport = targetOption?.resource || route.resource;
   const targetRequired = isSelectedScope(scope);
-  const canRun = capabilitySupported && workspace.accessCapabilities.operate && packages.status === 'ready'
-    && (!needsPackage || knownPackage) && (!needsPackage || environmentStatus === 'ready')
+  const canRun = capabilitySupported && workspace.accessCapabilities.operate
+    && (!needsPackage || (packages.status === 'ready' && knownPackage)) && (!needsPackage || environmentStatus === 'ready')
     && environmentKnown && (!targetRequired || (Boolean(target) && (targetCatalogState === 'ready' || Boolean(route.target)))) && !requesting;
 
   function selectScope(value: ValidationScope) {

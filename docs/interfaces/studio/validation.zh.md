@@ -19,7 +19,7 @@
 
 Package 範圍 validation 使用 active Environment Profile。可明確選取一個 Environment，或保留 **Package default**。後者不會在 request 傳入 Environment，讓 Server 解析實際生效／預設 Environment。Server 回傳解析後名稱時，頁面會顯示該名稱。無法使用或未獲授權的 profile 不可視為已驗證。
 
-可從 Shared Configuration、Explorer resource 或可執行 LOAD Scenario 的上下文 action 開啟此工作區。Route 會保留範圍、Package、Environment 及所選 target，方便在目前已驗證 Studio context 中重新載入或分享。
+可從 Shared Configuration、Explorer resource 或可執行 LOAD Scenario 的上下文 action 開啟此工作區。Shared Configuration 提供全域 Runtime Config 驗證捷徑；選取 Package context 時，亦會提供該套件生效 Config 的獨立捷徑。Explorer 及 LOAD 捷徑會保留來源 Package、Environment 及所選 target，方便在目前已驗證 Studio context 中重新載入或分享。
 
 ## 執行與檢視
 

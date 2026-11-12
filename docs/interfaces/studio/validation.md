@@ -19,7 +19,7 @@ Select a scope, then select a registered Package when required. The Package sele
 
 Package-scoped validation uses an active Environment Profile. Choose one explicitly, or leave **Package default** selected. The request omits an Environment in the latter case, allowing Server to resolve its actual effective/default Environment. The page shows the resolved name when the Server returns it. An unavailable or unauthorized profile cannot be treated as validated.
 
-Context actions open this workspace from Shared Configuration, an Explorer resource, or an executable LOAD Scenario. The route retains scope, Package, Environment, and selected target so it can be refreshed or shared within the authenticated Studio context.
+Context actions open this workspace from Shared Configuration, an Explorer resource, or an executable LOAD Scenario. Shared Configuration offers separate shortcuts for global Runtime Config and, when a Package context is selected, that Package's effective Config. Explorer and LOAD shortcuts retain their originating Package, Environment, and selected target so they can be refreshed or shared within the authenticated Studio context.
 
 ## Run and review
 
