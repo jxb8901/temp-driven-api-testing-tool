@@ -68,13 +68,13 @@ class PackageResourceInspectorTest {
         Files.createDirectories(root.resolve("tools/sample"));
         writeUtf8(root.resolve("tools/sample/tool-group.yaml"),
                 "schemaVersion: att-tool-group/v3.0\nid: sample\nname: Sample\n"
-                + "description: Script Group\nscript: [./tools/dispatch.sh]\n"
+                + "description: Script Group\nscript: [bash, ./tools/dispatch]\n"
                 + "tools: [getAcDate.yaml]\n");
         writeUtf8(root.resolve("tools/sample/getAcDate.yaml"),
                 "schemaVersion: att-tool/v1\nid: getAcDate\nname: Account date\n"
-                + "description: Date tool\ncommand: [./tools/date.sh]\nstdoutFormat: text\n");
-        Path dispatcher = writeUtf8(root.resolve("tools/dispatch.sh"), "#!/bin/sh\necho dispatcher\n");
-        Path member = writeUtf8(root.resolve("tools/date.sh"), "#!/bin/sh\necho first\n");
+                + "description: Date tool\ncommand: [bash, ./tools/date]\nstdoutFormat: text\n");
+        Path dispatcher = writeUtf8(root.resolve("tools/dispatch"), "#!/bin/sh\necho dispatcher\n");
+        Path member = writeUtf8(root.resolve("tools/date"), "#!/bin/sh\necho first\n");
         Path config = root.resolve("config/config.yaml");
         try (PackageResourceInspector inspector = new PackageResourceInspector(root, config, "SIT",
                 Collections.<String>emptyList(), 65536, 262144, true)) {
