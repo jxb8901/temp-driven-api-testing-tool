@@ -139,6 +139,67 @@ class PackageToolMigrationTest(unittest.TestCase):
         self.assertEqual("appserver", manifest["ssh"]["helper"])
         self.assertEqual("roundRobin", manifest["ssh"]["selection"]["strategy"])
 
+    def test_env_scoped_tools_in_sit_and_uat_fail_before_any_write(self):
+        original = ("schemaVersion: att-config/v2.13\n"
+                    "environments:\n"
+                    "  SIT:\n    tools:\n      lookup: {name: Lookup, command: [echo]}\n"
+                    "  UAT:\n    toolGroups: [config/tools/uat.yaml]\n")
+        self.config.write_text(original, encoding="utf-8")
+        for options in ((), ("--write",)):
+            response = self.run_cli(*options)
+            self.assertNotEqual(0, response.returncode)
+            self.assertIn("environments.SIT", response.stderr)
+            self.assertIn("Environment-scoped legacy Tool", response.stderr)
+            self.assertEqual(original, self.config.read_text(encoding="utf-8"))
+            self.assertFalse((self.a / "tools").exists())
+        self.config.write_text(
+            "schemaVersion: att-config/v2.13\n"
+            "environments:\n  SIT: {}\n  UAT: {toolGroups: [config/tools/uat.yaml]}\n",
+            encoding="utf-8")
+        rejected = self.run_cli("--write")
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("environments.UAT", rejected.stderr)
+        self.assertFalse((self.a / "tools").exists())
+
+    def test_group_member_script_paths_are_checked_from_package_root(self):
+        group = self.root / "config/tools/sample.yaml"
+        group.parent.mkdir(parents=True)
+        group.write_text(
+            "schemaVersion: att-tool-group/v2.9\nid: sample\n"
+            "name: Sample\ndescription: Sample tools\n"
+            "script: [./tools/dispatcher.sh]\n"
+            "tools:\n"
+            "  getAcDate: {name: Date, description: Date tool, command: [./tools/date.sh]}\n",
+            encoding="utf-8")
+        self.config.write_text(
+            "schemaVersion: att-config/v2.13\n"
+            "toolGroups: [config/tools/sample.yaml]\n", encoding="utf-8")
+        scripts = self.a / "tools"
+        scripts.mkdir()
+        (scripts / "dispatcher.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (scripts / "date.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        dry = self.run_cli()
+        self.assertEqual(0, dry.returncode, dry.stderr)
+        self.assertNotIn("WARNING: review Package-local", dry.stdout)
+        (scripts / "date.sh").unlink()
+        missing = self.run_cli()
+        self.assertEqual(0, missing.returncode, missing.stderr)
+        self.assertIn("WARNING: review Package-local script path: ./tools/date.sh", missing.stdout)
+
+    def test_dependency_report_recognizes_db_mq_http_helper_calls(self):
+        self.config.write_text(
+            "schemaVersion: att-config/v2.13\n"
+            "tools:\n"
+            '  orders: {name: Orders, description: Query, call: "#{db.orders.query(sql=\\'select 1\\')}"}\n'
+            '  broker: {name: Broker, description: Request, call: "#{mq.fpp.publish(payload=\\'x\\')}"}\n'
+            '  api: {name: API, description: HTTP, call: "#{http.sut.get(url=\\'/\\')}"}\n',
+            encoding="utf-8")
+        dry = self.run_cli()
+        self.assertEqual(0, dry.returncode, dry.stderr)
+        self.assertIn("depends on global Helper(s): db.orders", dry.stdout)
+        self.assertIn("depends on global Helper(s): mq.fpp", dry.stdout)
+        self.assertIn("depends on global Helper(s): http.sut", dry.stdout)
+
     def test_unsupported_group_ssh_refuses_before_any_writes(self):
         group = self.root / "config/tools/legacy.yaml"
         group.parent.mkdir(parents=True)
