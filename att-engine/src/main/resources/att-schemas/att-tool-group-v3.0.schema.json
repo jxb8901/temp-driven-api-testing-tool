@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:tool-group:v3.0",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "description",
+    "tools"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "att-tool-group/v3.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*\\.yaml$"
+      }
+    },
+    "script": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "ssh": {
+      "type": "object",
+      "required": [
+        "helper"
+      ],
+      "properties": {
+        "helper": {
+          "type": "string",
+          "minLength": 1
+        },
+        "selection": {
+          "type": "object",
+          "required": [
+            "strategy"
+          ],
+          "properties": {
+            "strategy": {
+              "enum": [
+                "random",
+                "roundRobin",
+                "all"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false
+}
