@@ -1,6 +1,6 @@
 # Package 專屬 Tool（ATT 4.2.10）
 
-Tool 定義由**所選已註冊 Package** 擁有，不再屬於全域 Runtime Configuration。每個 Tool 以獨立的 `<PACKAGE_ROOT>/tools/*.yaml` 檔案表示，`schemaVersion: att-tool/v1`。此功能無須等待 #233 線上編輯功能。
+Tool 定義由**所選已註冊 Package** 擁有，不再屬於全域 Runtime Configuration。獨立 Tool 位於 `<PACKAGE_ROOT>/tools/*.yaml`；分組 Tool 位於 `tools/<group>/`，並由固定檔名 `tool-group.yaml` 的 Manifest 列出。Tool 定義使用 `att-tool/v1`，Group Manifest 使用 `att-tool-group/v3.0`。此功能無須等待 #233 線上編輯功能。
 
 ```yaml
 schemaVersion: att-tool/v1
@@ -26,7 +26,29 @@ Tool 的識別為 `(registeredPackageId, toolId)`，不同 Package 可使用相�
 4. 確認後加入 `--write` 寫入；使用獨立環境配置檔時亦需要另外遷移。工具對不支援的舊式 Tool Group SSH 設定會拒絕自動轉換。
 5. 重新執行 Package validation、RUN/DEBUG/LOAD 驗證，並重新驗證先前已接受的 Job/Schedule revision。
 
-為降低模板破壞性，舊有點號式呼叫名稱（例如 `fpp.invokeApi`）可保留為 **Package 本地 ID**；不代表跨 Package 共用。
+舊版 Tool Group 遷移成 **`tools/<group>/tool-group.yaml` + 多個 `att-tool/v1` 成員 YAML**，不再展平為點號命名的單一 Tool YAML。保留原本的呼叫名稱（例如 `fpp.invokeApi`）及 Group Dispatcher 的 argv 語義。Group `ssh.helper` 維持引用全域 SSHHelper；舊式 SSH host/user/key 必須先手動遷移。
+
+### Package Tool Group 示例
+
+```text
+packages/fpp/tools/
+  fpp/
+    tool-group.yaml            # att-tool-group/v3.0
+    invokeApi.yaml             # att-tool/v1
+    loghelper.yaml             # att-tool/v1
+  standaloneTool.yaml          # att-tool/v1
+```
+
+```yaml
+# tools/fpp/tool-group.yaml
+schemaVersion: att-tool-group/v3.0
+id: fpp
+name: FPP tools
+description: FPP integration tools
+tools: [invokeApi.yaml, loghelper.yaml]
+```
+
+`tools/fpp/invokeApi.yaml` 的 `id: invokeApi` 對外仍是 `#{fpp.invokeApi(...)}`。Group ID 由 Manifest 而非資料夾名稱定義，只有所選 Package 能解析。
 
 ### Studio
 
