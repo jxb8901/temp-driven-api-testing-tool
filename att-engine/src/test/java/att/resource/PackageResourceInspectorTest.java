@@ -65,6 +65,7 @@ class PackageResourceInspectorTest {
     @Test void acceptedJobRevisionBecomesStaleOnGroupedMemberOrDispatcherScriptEdit() throws Exception {
         Path root = packageWithTemplate("group-script-admission", "PURE",
                 "description: Group script revision admission");
+        Files.createDirectories(root.resolve("tools/sample"));
         writeUtf8(root.resolve("tools/sample/tool-group.yaml"),
                 "schemaVersion: att-tool-group/v3.0\nid: sample\nname: Sample\n"
                 + "description: Script Group\nscript: [./tools/dispatch.sh]\n"
