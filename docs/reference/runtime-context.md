@@ -14,7 +14,7 @@ Standalone Debug bootstrap values are mapped into these canonical roots: `inputs
 | EXEC.RUN_STARTED_AT | Enclosing run start time; ISO-8601 String. | All modes. |
 | EXEC.OUTPUT_DIR | Absolute execution workspace path. | After initialization; in Load it may be planned and not yet exist. |
 | EXEC.INPUT | Case/stage, Debug sidecar or Load workload input map. | All modes. Stage inputs temporarily overlay Case inputs. |
-| EXEC.VARS | Typed values published by assign. | All modes; empty before assignment. |
+| EXEC.VARS | Typed values created by assign or updated by set. | All modes; empty before assignment or bootstrap. |
 | EXEC.ACTIONS | Completed Actions in the active Template/Flow scope. | After an Action is published; Flow has a nested scope. |
 | EXEC.LOAD.MODEL | closed or arrivalRate. | Load only; available before ID generation. |
 | EXEC.LOAD.WORKLOAD_ID | Configured workload ID. | Load only; available before ID generation. |

@@ -28,12 +28,12 @@ Package 預設值、根目錄與 Testdata 改由 [Package Manifest](package-mani
 
 | 層級 | 來源 | 所管轄內容 |
 |---|---|---|
-| 共用 runtime configuration | `ATT_HOME/config/config.yaml` | 輸出/環境/runtime 默認值、package-relative Template 根、報告、XML 模式、全局 Tool、組路徑、Helper paths、可選 inline SSH |
+| 共用 runtime configuration | `ATT_HOME/config/config.yaml` | 輸出/環境/runtime 默認值、package-relative Template 根、報告、XML 模式、全局 DB/MQ/HTTP/SSH Helper paths 與連線設定 |
 | DB helper | `dbhelpers` 引用的獨立 YAML | 一個 JDBC 實例的連接、statement timeout、交易、result limit 與 evidence policy |
 | MQ helper | `mqhelpers` 引用的獨立 YAML | v1.2 IBM MQ logical group、instances、transport、response parsing、pool 與 evidence policy |
 | SSHHelper | `sshhelpers` 引用的獨立 YAML | 邏輯 SSH ID、實體 instances、defaults、selection 與 fan-out 上限 |
 | HTTPHelper | `httphelpers` 引用的獨立 YAML | 邏輯 HTTP ID、base URL、預設值、連線池、認證與 TLS |
-| Tool group | 配置的 YAML 路徑 | 組身份、可選 script/SSH、分組 Tool |
+| Package Tool / Tool Group | `<PACKAGE_ROOT>/tools/*.yaml` 和 `tools/<folder>/tool-group.yaml` | `att-tool/v1` 定義單一 Tool；`att-tool-group/v3.0` 明確列出 Group 成員，Helper 仍屬全局配置 |
 | Workbook | `<workbook>.yaml` | Excel 映射、Stage、Workbook 標簽 |
 | Template | `template.yaml` | Template 身份和有序 Action |
 | CLI | 命令選項 | 選擇、Run ID、輸出覆蓋、展示、CI 格式 |
@@ -42,18 +42,15 @@ Timeout/Retry precedence 與 eligibility 見 [Reliability](reliability-execution
 
 ## 使用 `X-` 忽略或停用 ATT 配置項
 
-在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 `tools`、environment profiles、Tool `arguments` declarations、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的 argument values：
+在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 environment profiles、Tool `arguments` declarations、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的 argument values：
 
 ```yaml
-schemaVersion: att-config/v2.13
-x-debug-note: "#{missing.tool()}"      # 忽略的配置字段
-tools:
-  x-temporary: not-a-tool               # 忽略的 Tool 條目
-  smoke:
-    name: Smoke check
-    description: Check the local setup
-    call: "#{upper('ok')}"
-    x-retry: 0                           # 忽略的可選 Tool 字段
+schemaVersion: att-tool/v1
+id: smoke
+name: Smoke check
+description: Check the local setup
+call: "#{upper('ok')}"
+x-retry: 0                    # 忽略的可選 Tool 欄位
 ```
 
 Action 和 evidence collector 也使用相同規則。停用的 Action 不會進入校驗或 runtime；停用的 collector 不會被呼叫，也不會加入 evidence。ATT 擁有的巢狀配置區塊中的 `x-` 字段同樣會被忽略：
@@ -91,17 +88,21 @@ Action -> logical helper ID -> selected config -> physical descriptor -> endpoin
 ATT_HOME/
 ├── config/
 │   ├── config.yaml
-│   ├── tools/*.yaml
 │   ├── dbhelpers/{sit,uat}/orders.yaml
 │   └── mqhelpers/{sit,uat}/payment.yaml
 └── packages/<id>/
     ├── package.yaml
     ├── testcase/
     ├── templates/
-    └── testdata/accounts.yaml
+    ├── testdata/accounts.yaml
+    └── tools/
+        ├── standaloneTool.yaml
+        └── fpp/
+            ├── tool-group.yaml
+            └── invokeApi.yaml
 ```
 
-common config 保留 run/execution/report 設置、`toolGroups` 和 global `tools` registry。Tool/Helper descriptors 從 `ATT_HOME/config/` 解析；Testdata descriptors 則從選取的 Package 解析。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
+common config 保留 run/execution/report 與全局 DB/MQ/HTTP/SSH Helpers。Tool 只由所選 Package 發現：根目錄 `tools/*.yaml` 為獨立 `att-tool/v1` Tool，而 `tools/<folder>/tool-group.yaml`（`att-tool-group/v3.0`）明確列出成員 YAML，公開名稱保持 `group.tool`。舊式全局 Tool 宣告必須明確遷移。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
 
 ```yaml
 # config/config.yaml
@@ -109,10 +110,6 @@ schemaVersion: att-config/v2.13
 environment: SIT                 # default；--env 会覆盖
 templates: {root: templates}
 testcase: {root: testcase}
-toolGroups:
-  - config/tools/sample.yaml
-  - config/tools/fpp.yaml
-  - config/tools/orders-db.yaml
 environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
@@ -122,7 +119,7 @@ environments:
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-可把 `config/environments/sit.yaml` 和 `config/environments/uat.yaml` 作為 common registry 的遷移來源，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。實際 package 不要把共用 registry 縮減成 `tools: {}` 或 `toolGroups: []`。
+SIT 與 UAT Config 只保留共用 Helper/Environment 綁定；`invokePaymentApi` 與 `sample.getAcDate` 改由所選 Package 提供。升級至 4.2.10 時必須明確遷移舊式全局 Tools。
 
 SIT 與 UAT 的 DBHelper 都保持 `id: orders`，只改變 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改變 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可復制例子見 [`examples/environments/README.md`](../../examples/environments/README.md)。
 
@@ -214,10 +211,8 @@ report:
   html: {caseLogInlineLimitBytes: 32768}
   junit: {caseLogEmbedThresholdBytes: 10240}
 xml: {namespaceMode: ignore}
-toolGroups: [config/tools/database.yaml]
 dbhelpers: [config/dbhelpers/orders.yaml]
 mqhelpers: [config/mqhelpers/orders.yaml]
-tools: {}
 environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
@@ -272,22 +267,19 @@ Run 和 Load 的 `--run-id <id>`，以及 standalone Debug 的 `--debug-id <id>`
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.6` YAML paths; normalized duplicates are rejected |
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.3` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
 | `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
 | `environments` | absent | Non-empty map of profile names; profiles may contain configured shared Resource lists; Package Testdata belongs to the Manifest |
 | `environments.<profile>.testdata` | deprecated | Temporary `packagePolicy.legacyTestdata` only; migrate to Manifest `testdata.environments` |
-| `ssh` | absent | Optional SSH target for inline global tools |
-| `tools` | `{}` | Map of reusable tool contracts |
 
 
 Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `ssh`, `tools`, `environments`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `environments`, `x-*` |
 | `environments.<profile>` | `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `testdata`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |

@@ -289,12 +289,14 @@ public final class FlowRegistry {
 
     private void validateActionShape(TemplateAction action, String flowId, boolean historical) {
         String type = action.type().toLowerCase(java.util.Locale.ROOT);
-        if (!java.util.Arrays.asList(historical ? "render" : "", "tool", "db", "assert", "log", "assign", "flow").contains(type)) throw new IllegalArgumentException("Unsupported Flow action type: " + type);
+        if (!java.util.Arrays.asList(historical ? "render" : "", "tool", "db", "assert", "log", "assign", historical ? "" : "set", "flow").contains(type)) throw new IllegalArgumentException("Unsupported Flow action type: " + type);
         if (action.raw().containsKey("with")) throw new IllegalArgumentException("Flow action with is not supported: " + flowId + "." + action.id());
         if ("flow".equals(type) && action.use().trim().isEmpty()) throw new IllegalArgumentException("Flow action use is required: " + flowId + "." + action.id());
         if (!"flow".equals(type) && action.raw().containsKey("use")) throw new IllegalArgumentException("use is valid only for Flow actions: " + flowId + "." + action.id());
         if ("tool".equals(type) && action.call().trim().isEmpty()) throw new IllegalArgumentException("Tool action call is required: " + flowId + "." + action.id());
         if ("assign".equals(type) && (action.name().trim().isEmpty() || action.expression().trim().isEmpty())) throw new IllegalArgumentException("Assign action name and expression are required: " + flowId + "." + action.id());
+        if ("set".equals(type) && (action.name().trim().isEmpty() || action.expression().trim().isEmpty())) throw new IllegalArgumentException("Set action name and expression are required: " + flowId + "." + action.id());
+        if ("set".equals(type) && !action.name().matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Set action name must match [A-Za-z_][A-Za-z0-9_]*: " + flowId + "." + action.id());
         if ("assert".equals(type) && action.assertion().trim().isEmpty()) throw new IllegalArgumentException("Assert action assert is required: " + flowId + "." + action.id());
     }
 

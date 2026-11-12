@@ -97,7 +97,7 @@ public class StageTemplateRunner {
                     continue;
                 }
                 executionField = "render".equals(type) ? "payload" : "tool".equals(type) ? "call" : "db".equals(type) ? (action.query().isEmpty() ? "update" : "query")
-                        : "assert".equals(type) ? "expected" : "log".equals(type) ? "message" : "assign".equals(type) ? "expression" : "use";
+                        : "assert".equals(type) ? "expected" : "log".equals(type) ? "message" : ("assign".equals(type) || "set".equals(type)) ? "expression" : "use";
                 Map<String, Object> actionStart = new LinkedHashMap<String, Object>();
                 actionStart.put("stage", stageName);
                 actionStart.put("action", action.id());
@@ -111,6 +111,7 @@ public class StageTemplateRunner {
                 else if ("assert".equals(type)) expected = render(action.expected(), actionPlan == null ? null : actionPlan.expected(), context, log);
                 else if ("log".equals(type)) executeLog(action, context, log, output);
                 else if ("assign".equals(type)) executeAssign(action, context, log, output);
+                else if ("set".equals(type)) toolStatus = executeSet(stageName, action, template, context, log, output);
                 else if ("flow".equals(type)) {
                     FlowExecutionResult flowResult = executeFlow(stageName, action, actionPlan, context, log, output, node);
                     toolStatus = flowResult.status;
@@ -368,6 +369,93 @@ public class StageTemplateRunner {
         output.put("result", value);
         output.put("name", action.name());
         context.assignCaseVariable(action.name(), value);
+    }
+
+    @SuppressWarnings("unchecked")
+    private ResultStatus executeSet(String stageName, TemplateAction action, StageTemplate template,
+                                    CaseRuntimeContext context, CaseExecutionLog log,
+                                    Map<String, Object> output) throws Exception {
+        context.requireCaseVariablePresent(action.name());
+        Map<String, Object> retry = action.retry();
+        int maxAttempts = integer(retry.get("maxAttempts"), 1);
+        java.util.Set<String> retryOn = strings(retry.get("retryOn"));
+        int intervalMs = integer(retry.get("intervalMs"), 0);
+        boolean retryEnabled = !retry.isEmpty();
+        List<Map<String, Object>> attempts = new ArrayList<Map<String, Object>>();
+        if (retryEnabled) output.put("attempts", attempts);
+
+        for (int number = 1; number <= maxAttempts; number++) {
+            if (retryEnabled) beginAttempt(output, number);
+            Map<String, Object> attempt = new LinkedHashMap<String, Object>();
+            attempt.put("attempt", Integer.valueOf(number));
+            try {
+                // Keep the candidate in Action-local output for assertion and retry.when,
+                // but do not update EXEC.VARS until this attempt wins.
+                Object value = templateEngine.evaluate(action.expression(), context, log);
+                output.put("result", value);
+                output.put("name", action.name());
+                context.setActionOutput(output);
+                boolean passed = evaluateAssertion(action, output, context, log);
+                attempt.put("status", passed ? "PASS" : "FAIL");
+                attempt.put("success", Boolean.valueOf(passed));
+                Object assertion = output.get("assertion");
+                if (assertion instanceof Map) {
+                    attempt.put("assertion", new LinkedHashMap<String, Object>((Map<String, Object>) assertion));
+                }
+                if (retryEnabled) attempts.add(attempt);
+                if (passed) {
+                    context.setCaseVariable(action.name(), value);
+                    output.put("status", "PASS");
+                    output.put("success", true);
+                    if (retryEnabled) output.put("winningAttempt", Integer.valueOf(number));
+                    return ResultStatus.PASS;
+                }
+                if (!shouldRetry(action, retryOn, "ASSERTION", number, maxAttempts,
+                        context, output, attempt, log)) {
+                    output.put("finalAttempt", Integer.valueOf(number));
+                    output.put("status", "FAIL");
+                    output.put("success", false);
+                    return ResultStatus.FAIL;
+                }
+                attempt.put("retryReason", "ASSERTION");
+                appendSetRetryEvent(log, stageName, action.id(), number, "ASSERTION");
+                waitBeforeRetry(intervalMs);
+            } catch (att.exec.ToolExecutionException error) {
+                String category = error.category();
+                attempt.put("category", category);
+                attempt.put("status", "TIMEOUT".equals(category) ? "TIMEOUT" : "ERROR");
+                attempt.put("success", false);
+                if (!"TIMEOUT".equals(category)) {
+                    if (retryEnabled) attempts.add(attempt);
+                    throw error;
+                }
+                Map<String, Object> diagnostic = detailed(error, template, action, "expression").toDiagnostic().toMap();
+                output.put("status", "TIMEOUT");
+                output.put("success", false);
+                output.put("diagnostic", diagnostic);
+                if (retryEnabled) attempts.add(attempt);
+                if (shouldRetry(action, retryOn, "TIMEOUT", number, maxAttempts,
+                        context, output, attempt, log)) {
+                    attempt.put("retryReason", "TIMEOUT");
+                    appendSetRetryEvent(log, stageName, action.id(), number, "TIMEOUT");
+                    waitBeforeRetry(intervalMs);
+                    continue;
+                }
+                output.put("finalAttempt", Integer.valueOf(number));
+                return ResultStatus.ERROR;
+            }
+        }
+        throw new IllegalStateException("Set action completed without a final attempt: " + action.id());
+    }
+
+    private void appendSetRetryEvent(CaseExecutionLog log, String stage, String action, int attempt,
+                                     String category) {
+        Map<String, Object> event = new LinkedHashMap<String, Object>();
+        event.put("stage", stage);
+        event.put("action", action);
+        event.put("attempt", Integer.valueOf(attempt));
+        event.put("category", category);
+        appendProgress(log, "ACTION RETRY", event);
     }
 
     private ResultStatus executeDb(String stageName, TemplateAction action, CaseRuntimeContext context, CaseExecutionLog log,
@@ -1221,10 +1309,12 @@ public class StageTemplateRunner {
         att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(error);
         if (typed == null && error instanceof att.exec.ToolExecutionException) {
             att.exec.ToolExecutionException tool = (att.exec.ToolExecutionException) error;
+            boolean setAction = "set".equalsIgnoreCase(action.type());
             typed = new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_EXECUTION,
-                    "Tool action '" + action.id() + "' failed", toolDetail(tool, error),
-                    null, "actions." + action.id() + ".call", null, null, null, template.name(), action.id(),
-                    "Inspect logical argv, executed argv, exitCode, stdout, stderr, rawOutput, and parser diagnostics in this action's evidence.", error);
+                    (setAction ? "Set action '" : "Tool action '") + action.id() + "' failed", toolDetail(tool, error),
+                    null, "actions." + action.id() + (setAction ? ".expression" : ".call"), null, null, null, template.name(), action.id(),
+                    setAction ? "Check expression evaluation and its safe Action evidence; the prior EXEC.VARS value is preserved." :
+                            "Inspect logical argv, executed argv, exitCode, stdout, stderr, rawOutput, and parser diagnostics in this action's evidence.", error);
         }
         if (typed == null) {
             String code = "tool".equalsIgnoreCase(action.type()) ? att.validation.DiagnosticCodes.TOOL_EXECUTION : att.validation.DiagnosticCodes.TEMPLATE_INVALID;

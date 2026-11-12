@@ -198,6 +198,14 @@ def check_or_write(path, data, check, errors):
     if check:
         if not ok:
             errors.append("%s: %s" % (path.relative_to(ROOT), why))
+            if path.is_file():
+                import difflib
+                actual_lines = path.read_text(encoding="utf-8").splitlines()
+                expected_lines = data.decode("utf-8").splitlines()
+                delta = list(difflib.unified_diff(actual_lines, expected_lines,
+                         fromfile="committed", tofile="generated", n=1))
+                for line in delta[:24]:
+                    print("    " + line, file=sys.stderr)
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)

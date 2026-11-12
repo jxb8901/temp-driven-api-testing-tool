@@ -150,16 +150,17 @@ public class ToolInvoker {
         config.requireExecutionConfig();
         if (tool == null) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.TOOL_INVALID,
-                    "Unknown configured tool '" + toolName + "'", "Available tools: " + String.join(", ", config.tools().keySet()),
+                    "Unknown Package Tool '" + toolName + "'", "Available Package Tools: " + String.join(", ", config.tools().keySet()),
                     null, "call", null, null, null, null, null,
-                    "Correct the case-sensitive qualified group.tool name or define it in the loaded configuration.", null);
+                    "Define an att-tool/v1 descriptor in the selected Package tools/ directory, or correct the Package-local Tool ID.", null);
         }
         if (tool.callBacked()) throw new IllegalStateException("call-backed Tool must be executed by the unified expression engine: " + toolName);
         String id = invocationId == null || invocationId.trim().isEmpty() ? context.nextInvocationId(toolName) : invocationId;
         Instant started = Instant.now();
         Map<String, Object> resolvedInput = att.template.ArgumentContracts.coerce(toolName, prepareInput(tool, input), tool);
 
-        List<String> logicalArgv = expandCommand(tool, resolvedInput);
+        ExpandedCommand expandedCommand = expandCommand(tool, resolvedInput);
+        List<String> logicalArgv = expandedCommand.argv;
         SshHelperConfig helper = tool.sshHelper().isEmpty() ? null
                 : (resolvedHelper == null ? config.sshHelper(tool.sshHelper()) : resolvedHelper);
         if (!tool.sshHelper().isEmpty() && helper == null) throw new IllegalStateException("Missing SSH helper: " + tool.sshHelper());
@@ -169,13 +170,14 @@ public class ToolInvoker {
             return invokeAll(id, toolName, tool, helper, strategy, resolvedInput, logicalArgv, timeoutMs, saveAs, overwrite, context, log, recordAction, started);
         String instance = helper == null ? "" : helper.select(strategy);
         SshConfig target = helper == null ? tool.ssh() : helper.instances().get(instance);
-        List<String> argv = target == null ? resolveLocalExecutable(logicalArgv) : logicalArgv;
+        List<String> argv = logicalArgv;
         String sshTransport = target == null ? "" : sshCommandRunner.transportName();
         CommandResult commandResult;
         CommandRunner.CapturePolicy capture = capturePolicy(context, id);
         Map<String, Object> invocation = null;
         try {
             if (target == null) {
+                argv = resolveLocalExecutable(tool, expandedCommand);
                 Files.createDirectories(context.commandWorkingDirectory());
                 commandResult = commandRunner.runWithCapture(argv, Duration.ofMillis(timeoutMs), context.commandWorkingDirectory(),
                         localToolEnvironment(context), capture);
@@ -769,9 +771,10 @@ public class ToolInvoker {
         return value == null || att.core.ValueNormalizer.normalize(String.valueOf(value)).isEmpty();
     }
 
-    private List<String> expandCommand(ToolConfig tool, Map<String, Object> input) throws Exception {
+    private ExpandedCommand expandCommand(ToolConfig tool, Map<String, Object> input) throws Exception {
         List<String> tokens = tool.commandArgv();
         List<String> argv = new ArrayList<String>();
+        List<String> sourceTokens = new ArrayList<String>();
         Map<String, Object> declaredValues = new LinkedHashMap<String, Object>();
         for (String key : tool.arguments().keySet()) declaredValues.put(key, commandScalar(input.get(key)));
         Map<String, Object> scopedValues = new LinkedHashMap<String, Object>(declaredValues);
@@ -780,6 +783,7 @@ public class ToolInvoker {
         toolScope.put("input", new LinkedHashMap<String, Object>(declaredValues));
         scopedValues.put("TOOL", toolScope);
         for (String token : tokens) {
+            try {
             ToolArgumentConfig exact = exactArgumentPlaceholder(tool, token);
             if (exact != null) {
                 Object value = input.get(exact.key());
@@ -811,24 +815,45 @@ public class ToolInvoker {
                 }
             }
             argv.add(commandExpressionEngine.renderScoped(token, scopedValues));
+            } finally {
+                while (sourceTokens.size() < argv.size()) sourceTokens.add(token);
+            }
         }
         if (!tool.groupScriptArgv().isEmpty()) {
             List<String> dispatched = new ArrayList<String>(tool.groupScriptArgv());
             dispatched.add(tool.localKey());
             dispatched.addAll(argv);
-            return dispatched;
+            return new ExpandedCommand(dispatched, sourceTokens);
         }
-        return argv;
+        return new ExpandedCommand(argv, sourceTokens);
     }
 
-    private List<String> resolveLocalExecutable(List<String> logicalArgv) {
-        List<String> executed = new ArrayList<String>(logicalArgv);
-        if (executed.isEmpty()) return executed;
-        String executable = executed.get(0);
-        if (executable.startsWith("./") || executable.startsWith("../")) {
-            executed.set(0, projectRoot.resolve(executable).normalize().toString());
+    private List<String> resolveLocalExecutable(ToolConfig tool, ExpandedCommand expanded) throws java.io.IOException {
+        List<String> executed = new ArrayList<String>(expanded.argv);
+        List<String> dispatcher = tool.groupScriptArgv();
+        int memberOffset = 0;
+        if (!dispatcher.isEmpty()) {
+            List<String> resolvedDispatcher = att.config.PackageToolScripts.resolveLocalScriptOperands(
+                    projectRoot, dispatcher, dispatcher);
+            for (int i = 0; i < resolvedDispatcher.size(); i++) executed.set(i, resolvedDispatcher.get(i));
+            // expandCommand inserts the qualified member key between dispatcher and member argv.
+            memberOffset = dispatcher.size() + 1;
         }
+        List<String> memberArgv = expanded.argv.subList(memberOffset, expanded.argv.size());
+        List<String> resolvedMember = att.config.PackageToolScripts.resolveLocalScriptOperands(
+                projectRoot, memberArgv, expanded.memberSourceTokens);
+        for (int i = 0; i < resolvedMember.size(); i++) executed.set(memberOffset + i, resolvedMember.get(i));
         return executed;
+    }
+
+    private static final class ExpandedCommand {
+        private final List<String> argv;
+        private final List<String> memberSourceTokens;
+
+        private ExpandedCommand(List<String> argv, List<String> memberSourceTokens) {
+            this.argv = argv;
+            this.memberSourceTokens = memberSourceTokens;
+        }
     }
 
     private String commandScalar(Object value) {

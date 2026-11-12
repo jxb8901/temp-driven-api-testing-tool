@@ -1,0 +1,7 @@
+schemaVersion: att-tool/v1
+id: getAcDate
+name: Get account date
+description: Return the current account date
+command: [./tools/get_ac_date.sh]
+stdoutFormat: text
+arguments: {}

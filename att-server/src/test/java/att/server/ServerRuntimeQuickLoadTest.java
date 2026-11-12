@@ -31,10 +31,12 @@ class ServerRuntimeQuickLoadTest {
         toolScript.toFile().setExecutable(true);
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n"
-                +"tools:\n  echo:\n    name: Echo\n    description: Echo typed Load values\n"
-                +"    command: [./tools/check-load-inputs.sh, \"${input.correlationId}\", \"${value}\"]\n    stdoutFormat: text\n"
-                +"    arguments:\n      correlationId: {name: Correlation ID, description: Correlation ID, required: false}\n"
-                +"      value: {name: Value, description: Value, required: true}\n");
+                );
+        Files.writeString(packageRoot.resolve("tools/echo.yaml"),"schemaVersion: att-tool/v1\nid: echo\nname: Echo\n"
+                +"description: Echo typed Load values\n"
+                +"command: [./tools/check-load-inputs.sh, \"\u0024{input.correlationId}\", \"\u0024{value}\"]\nstdoutFormat: text\n"
+                +"arguments:\n  correlationId: {name: Correlation ID, required: false}\n"
+                +"  value: {name: Value, required: true}\n");
         Files.writeString(templates.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: FORM\ndescription: Quick Load test\nactions:\n"
                 +"  log:\n    type: log\n    message: '${EXEC.INPUT.value}'\n");
         Path brokenFlow=Files.createDirectories(packageRoot.resolve("templates/flows/demo")).resolve("flow.yaml");
@@ -47,7 +49,7 @@ class ServerRuntimeQuickLoadTest {
         Path debugSidecar=templates.resolve("debug.yaml");
         Files.writeString(debugSidecar,"schemaVersion: att-debug/v1.2\ntestdata: [debug-data/debug.yaml]\ninputs: {value: default}\nvars: {reference: REF001}\n");
         byte[] originalSidecar=Files.readAllBytes(debugSidecar);
-        Path toolSidecar=Files.createDirectories(runtimeConfig.getParent().resolve("tools")).resolve("echo.debug.yaml");
+        Path toolSidecar=Files.createDirectories(packageRoot.resolve("tools/debug")).resolve("echo.yaml");
         Files.writeString(toolSidecar,"schemaVersion: att-debug/v1.2\ninputs: {correlationId: CORR-176}\narguments: {value: ARG-176}\n");
         byte[] originalToolSidecar=Files.readAllBytes(toolSidecar);
         Path loadPolicy=Files.createDirectories(packageRoot.resolve("load")).resolve("load.visualuser.yaml");

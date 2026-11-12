@@ -1,0 +1,15 @@
+schemaVersion: att-tool/v1
+id: selectCtxn
+name: Select CT records
+description: Query transaction records
+command: [./tools/select_ct_txn.sh, "${input.caseId}", "${input.txnRef}"]
+stdoutFormat: yaml
+arguments:
+  caseId:
+    name: Case ID
+    description: Full V2 Case ID
+    required: true
+  txnRef:
+    name: Transaction Reference
+    description: Optional transaction reference
+    required: false

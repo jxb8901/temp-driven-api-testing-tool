@@ -1,0 +1,15 @@
+schemaVersion: att-tool/v1
+id: invokePaymentApi
+name: Invoke Payment API
+description: Invoke the payment API with a rendered request document
+command: [./tools/invoke_payment_api.sh, "${input.requestText}", "${input.environment}"]
+stdoutFormat: xml
+arguments:
+  requestText:
+    name: Request Text
+    description: Rendered payment request document text
+    required: true
+  environment:
+    name: Environment
+    description: Target execution environment
+    required: true

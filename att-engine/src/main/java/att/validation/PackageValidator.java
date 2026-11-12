@@ -440,14 +440,15 @@ public final class PackageValidator {
                     "VALIDATE", projectRoot, projectRoot.resolve(".att-validation.log"));
             context.setProject(projectRoot);
             context.put("CASE.environment", config.environment());
-            for (String name : assignedCaseVariables) context.putValidationPlaceholder("EXEC.VARS." + name);
+            for (String name : assignedCaseVariables) context.noteValidationCaseVariableAssigned(name);
             context.beginStage(stage, template.name(), template.directory());
             att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(null);
             for (TemplateAction action : template.actions()) {
                 addContextMigrationWarningsForAction(diagnostics, engine, template, action,
                         MigrationPhase.PRE_PUBLICATION, context);
                 context.putValidationPlaceholder("EXEC.ACTIONS." + action.id() + ".output");
-                if ("assign".equalsIgnoreCase(action.type())) context.putValidationPlaceholder("EXEC.VARS." + action.name());
+                if ("assign".equalsIgnoreCase(action.type()) || "set".equalsIgnoreCase(action.type()))
+                    context.putValidationPlaceholder("EXEC.VARS." + action.name());
                 addContextMigrationWarningsForAction(diagnostics, engine, template, action,
                         MigrationPhase.POST_PUBLICATION, context);
             }
@@ -879,29 +880,58 @@ public final class PackageValidator {
                     att.config.SshHelperConfig helper = global.sshHelper(tool.sshHelper());
                     if (helper == null) throw new IllegalArgumentException("Unknown SSH helper: " + tool.sshHelper());
                     for (att.config.SshConfig target : helper.instances().values()) validateSshIdentity(tool, target);
-                    return;
+                    return; // Remote Tool executables are not local Package files.
                 }
                 validateSshIdentity(tool, tool.ssh());
                 return;
             }
-            java.util.List<String> command = tool.groupScriptArgv().isEmpty() ? tool.commandArgv() : tool.groupScriptArgv();
-            if (command.isEmpty()) throw new IllegalArgumentException("Tool command is blank: " + tool.key());
-            String first = command.get(0);
-            boolean skipShellExecutableCheck = windows && first.toLowerCase(java.util.Locale.ROOT).endsWith(".sh");
-            Path executable = java.nio.file.Paths.get(first);
-            boolean packageRelative = first.startsWith("./") || first.startsWith("../");
-            if (!executable.isAbsolute() && packageRelative) executable = projectRoot.resolve(executable).normalize();
-            else if (!executable.isAbsolute()) executable = findOnPath(first, !skipShellExecutableCheck);
-            Path canonicalProject = projectRoot.toRealPath();
-            Path canonicalExecutable = executable.toRealPath();
-            if (packageRelative && !canonicalExecutable.startsWith(canonicalProject)) throw new IllegalArgumentException("Package-local tool executable escapes package root: " + first);
-            if (Files.isSymbolicLink(executable) || !Files.isRegularFile(canonicalExecutable)) throw new IllegalArgumentException("Missing/unsafe tool executable: " + first);
-            if (skipShellExecutableCheck) {
-                skippedWindowsShellExecutableChecks.add(tool.key());
-                return;
+
+            java.util.List<String> dispatcher = tool.groupScriptArgv();
+            java.util.List<String> member = tool.commandArgv();
+            validateLocalToolExecutable(tool, dispatcher.isEmpty() ? member : dispatcher);
+
+            // The Group dispatcher is not a substitute for the member command.
+            // Check both when the member has an explicit Package-local executable.
+            if (!dispatcher.isEmpty() && !member.isEmpty()) {
+                String first = member.get(0);
+                if (first.startsWith("./") || first.startsWith("../") || first.startsWith("tools/"))
+                    validateLocalToolExecutable(tool, member);
             }
-            if (!Files.isExecutable(canonicalExecutable)) throw new IllegalArgumentException("Tool is not executable: " + first);
-        } catch (java.io.IOException e) { throw new IllegalArgumentException("Missing/unsafe tool executable for " + tool.key() + ": " + e.getMessage(), e); }
+            // Interpreted scripts can be in a later argument (bash tools/foo.sh).
+            // Track all bounded statically referenced Package script sources.
+            for (Path script : att.config.PackageToolScripts.referenced(projectRoot, tool)) {
+                if (!att.config.PackageToolScripts.isSafeRegularScript(projectRoot, script))
+                    throw new IllegalArgumentException("Missing Package Tool script dependency: "
+                            + projectRoot.toAbsolutePath().normalize().relativize(script));
+            }
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException("Missing/unsafe tool executable for "
+                    + tool.key() + ": " + e.getMessage(), e);
+        }
+    }
+
+    private void validateLocalToolExecutable(ToolConfig tool, java.util.List<String> command) throws java.io.IOException {
+        if (command.isEmpty()) throw new IllegalArgumentException("Tool command is blank: " + tool.key());
+        String first = command.get(0);
+        if (first.contains("${") || first.contains("#{") || first.contains("&{"))
+            return; // Dynamic argv remains subject to runtime resolution.
+        boolean skipShellExecutableCheck = windows && first.toLowerCase(java.util.Locale.ROOT).endsWith(".sh");
+        Path executable = java.nio.file.Paths.get(first);
+        boolean packageRelative = first.startsWith("./") || first.startsWith("../") || first.startsWith("tools/");
+        if (!executable.isAbsolute() && packageRelative) executable = projectRoot.resolve(executable).normalize();
+        else if (!executable.isAbsolute()) executable = findOnPath(first, !skipShellExecutableCheck);
+        Path canonicalProject = projectRoot.toRealPath();
+        Path canonicalExecutable = executable.toRealPath();
+        if (packageRelative && !canonicalExecutable.startsWith(canonicalProject))
+            throw new IllegalArgumentException("Package-local tool executable escapes package root: " + first);
+        if (Files.isSymbolicLink(executable) || !Files.isRegularFile(canonicalExecutable))
+            throw new IllegalArgumentException("Missing/unsafe tool executable: " + first);
+        if (skipShellExecutableCheck) {
+            skippedWindowsShellExecutableChecks.add(tool.key());
+            return;
+        }
+        if (!Files.isExecutable(canonicalExecutable))
+            throw new IllegalArgumentException("Tool is not executable: " + first);
     }
 
     private void validateSshIdentity(ToolConfig tool, att.config.SshConfig target) throws java.io.IOException {
@@ -1033,7 +1063,9 @@ public final class PackageValidator {
             if (action.id().contains(".")) throw new IllegalArgumentException("Action ID must not contain '.': " + action.id());
             if (!actionIds.add(action.id())) throw new IllegalArgumentException("Duplicate Action ID: " + action.id());
             String type = action.type().toLowerCase(java.util.Locale.ROOT);
-            if (!("render".equals(type) || "tool".equals(type) || "db".equals(type) || "assert".equals(type) || "log".equals(type) || "assign".equals(type) || "flow".equals(type))) throw new IllegalArgumentException("Unsupported action type: " + action.type());
+            if (!("render".equals(type) || "tool".equals(type) || "db".equals(type) || "assert".equals(type) || "log".equals(type) || "assign".equals(type) || "set".equals(type) || "flow".equals(type))) throw new IllegalArgumentException("Unsupported action type: " + action.type());
+            if ("set".equals(type) && !att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion()))
+                throw new IllegalArgumentException("Set actions require " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
             if ("db".equals(type) && att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())) {
                 throw new IllegalArgumentException("Action type 'db' is historical-only; use type: tool with a db.<helper>.query|scalar|update(...) call under " + att.Version.TEMPLATE_SCHEMA + ": " + action.id());
             }
@@ -1078,18 +1110,30 @@ public final class PackageValidator {
                 validateInlineExpressions(String.valueOf(action.value() == null ? "" : action.value()), syntaxEngine, config);
                 validateValueTreeSyntax(action.value(), syntaxEngine, config);
             }
-            if ("assign".equals(type)) {
-                require(action.name(), "name is required for assign action " + action.id());
-                require(action.expression(), "expression is required for assign action " + action.id());
-                if (!action.name().matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException("Assign name must match [A-Za-z_][A-Za-z0-9_]*: " + action.name());
-                if (!assignmentNames.add(action.name())) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
+            if ("assign".equals(type) || "set".equals(type)) {
+                String verb = "set".equals(type) ? "set" : "assign";
+                require(action.name(), "name is required for " + verb + " action " + action.id());
+                require(action.expression(), "expression is required for " + verb + " action " + action.id());
+                if (!action.name().matches("[A-Za-z_][A-Za-z0-9_]*")) throw new IllegalArgumentException(
+                        verb + " name must match [A-Za-z_][A-Za-z0-9_]*: " + action.name());
+                if ("assign".equals(type) && !assignmentNames.add(action.name())) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
                         "Duplicate EXEC.VARS assignment '${EXEC.VARS." + action.name() + "}'",
                         "The same variable name is assigned more than once in template '" + template.name() + "'.",
                         null, "name", null, null, null, template.name(), action.id(),
                         "Use a unique Case-scoped variable name; assign does not overwrite.", null);
-                forbid(action, "output", "payload", "result", "call", "db", "query", "update", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
+                if ("assign".equals(type)) {
+                    forbid(action, "output", "payload", "result", "call", "db", "query", "update", "expected", "actual", "message", "file", "level", "fields", "retry", "timeoutMs");
+                } else {
+                    forbid(action, "output", "payload", "result", "call", "db", "query", "update", "expected", "actual", "message", "file", "level", "fields", "timeoutMs");
+                    if (!action.retry().isEmpty()) {
+                        for (ToolCallParser.ParsedCall call : syntaxEngine.parseCalls(action.expression())) {
+                            validateDbRetryContract(action, call, config);
+                            validateSshRetryContract(action, call, config);
+                        }
+                    }
+                }
                 validateInlineExpressions(action.expression(), syntaxEngine, config);
-            validateStaticContextStructure(action.expression(), syntaxEngine, completedActions, false, action.id());
+                validateStaticContextStructure(action.expression(), syntaxEngine, completedActions, false, action.id());
             }
             if ("flow".equals(type)) {
                 if (!att.Version.TEMPLATE_SCHEMA.equals(template.schemaVersion())
@@ -1576,7 +1620,7 @@ public final class PackageValidator {
         context.put("CASE.environment", config.environment());
         context.setLegacyInputsView(legacyInputs);
         context.seedDebugVariables(debugVariables);
-        for (String name : assignedCaseVariables) context.putValidationPlaceholder("EXEC.VARS." + name);
+        for (String name : assignedCaseVariables) context.noteValidationCaseVariableAssigned(name);
         context.beginStage(stage, template.name(), template.directory());
         att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(new att.exec.ToolInvoker(projectRoot, config));
         Set<String> completedActions = new LinkedHashSet<String>();
@@ -1593,6 +1637,11 @@ public final class PackageValidator {
         for (TemplateAction action : template.actions()) {
             Path sourceFile = template.sourceFile();
             String sourceField = "actions." + action.id();
+            boolean setTargetPresent = false;
+            boolean setTargetBootstrap = false;
+            boolean setTargetUncertain = false;
+            boolean setConditional = !action.runWhen().trim().isEmpty();
+            boolean setConsumesBootstrap = false;
             try {
                 if (!actionIds.add(action.id())) throw new DiagnosticException(DiagnosticCodes.CONTEXT_INVALID,
                         "Duplicate expanded Action ID '" + action.id() + "'",
@@ -1623,6 +1672,28 @@ public final class PackageValidator {
                     for (ToolCallParser.ParsedCall call : engine.parseCalls(action.expression())) {
                         validateCallArguments(call, context, engine);
                     }
+                } else if ("set".equalsIgnoreCase(action.type())) {
+                    sourceField = "actions." + action.id() + ".name";
+                    setTargetPresent = context.hasCaseVariable(action.name());
+                    setTargetBootstrap = setTargetPresent && context.isBootstrapCaseVariable(action.name());
+                    setTargetUncertain = setTargetPresent && context.isValidationCaseVariableUncertain(action.name());
+                    if (!setTargetPresent) {
+                        if (context.inFlow()) {
+                            // A reusable Flow can be called with a caller-owned
+                            // bootstrap or prior assignment unknown here.
+                            context.markValidationCaseVariableUncertain(action.name());
+                            setTargetUncertain = true;
+                        } else if (!setConditional) {
+                            context.requireCaseVariablePresent(action.name());
+                        }
+                    }
+                    sourceField = "actions." + action.id() + ".expression";
+                    validateContextStructure(action.expression(), engine, context, testCase, completedActions, action.id());
+                    engine.renderValidationValues(action.expression(), context);
+                    for (ToolCallParser.ParsedCall call : engine.parseCalls(action.expression())) {
+                        validateCallArguments(call, context, engine);
+                    }
+                    setConsumesBootstrap = setTargetBootstrap && !setConditional && !context.inFlow();
                 }
 
                 sourceField = "actions." + action.id() + ".message";
@@ -1712,7 +1783,20 @@ public final class PackageValidator {
                 // This keeps validation-time shorthand resolution aligned with
                 // the runtime publication boundary.
                 context.putValidationPlaceholder("EXEC.ACTIONS." + action.id() + ".output");
-                if ("assign".equalsIgnoreCase(action.type())) context.putValidationPlaceholder("EXEC.VARS." + action.name());
+                if ("assign".equalsIgnoreCase(action.type())) {
+                    context.noteValidationCaseVariableAssigned(action.name());
+                } else if ("set".equalsIgnoreCase(action.type())) {
+                    if (setTargetPresent && setTargetBootstrap && (setConditional || context.inFlow())) {
+                        // A skipped/outer-skipped set does not consume a
+                        // bootstrap's first-assign allowance on every path.
+                        context.markValidationCaseVariableUncertain(action.name());
+                    } else if (setTargetPresent && !setTargetUncertain) {
+                        // Preserve the target's definite existence, but discard
+                        // its old type because the set expression publishes a
+                        // potentially different native value.
+                        context.publishValidationCaseVariable(action.name());
+                    }
+                }
 
                 sourceField = "actions." + action.id() + ".description";
                 validateContextStructure(action.description(), engine, context, testCase, afterCurrentAction, action.id());
@@ -1762,6 +1846,7 @@ public final class PackageValidator {
                 completedActions.add(action.id());
             }
             if ("assign".equalsIgnoreCase(action.type())) assignedCaseVariables.add(action.name());
+            if (setConsumesBootstrap) assignedCaseVariables.add(action.name());
         }
     }
 
@@ -1934,6 +2019,12 @@ public final class PackageValidator {
     }
 
     private void validateSshRetryContract(TemplateAction action, FrameworkConfig config) {
+        if (action.call().trim().isEmpty()) return;
+        validateSshRetryContract(action, callParser.parse(action.call()), config);
+    }
+
+    private void validateSshRetryContract(TemplateAction action, ToolCallParser.ParsedCall parsed,
+                                          FrameworkConfig config) {
         Map<String, Object> retry = action.retry();
         Object retryOn = retry.get("retryOn");
         if (!(retryOn instanceof Iterable)) return;
@@ -1945,7 +2036,6 @@ public final class PackageValidator {
             }
         }
         if (!retriesTimeout) return;
-        ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
         if (!parsed.name().startsWith("ssh.")) {
             ToolConfig tool = config.tool(parsed.name());
             if (tool == null || !tool.callBacked()) return;
@@ -1961,7 +2051,13 @@ public final class PackageValidator {
 
     private void validateDbRetryContract(TemplateAction action, FrameworkConfig config) {
         if (action.retry().isEmpty()) return;
-        ToolCallParser.ParsedCall parsed = callParser.parse(action.call());
+        if (action.call().trim().isEmpty()) return;
+        validateDbRetryContract(action, callParser.parse(action.call()), config);
+    }
+
+    private void validateDbRetryContract(TemplateAction action, ToolCallParser.ParsedCall parsed,
+                                         FrameworkConfig config) {
+        if (action.retry().isEmpty()) return;
         if (!parsed.name().startsWith("db.")) {
             ToolConfig tool = config.tool(parsed.name());
             if (tool == null || !tool.callBacked()) return;
@@ -2079,9 +2175,9 @@ public final class PackageValidator {
         if (tool == null) {
             String suggestion = nearestTool(toolName, config.tools().keySet());
             throw new DiagnosticException(DiagnosticCodes.TOOL_INVALID, "Unknown configured tool '" + toolName + "'",
-                    "The template call does not match any global or qualified group.tool name. Available tools: " + String.join(", ", config.tools().keySet()),
+                    "The template call does not match a Tool in the selected Package. Available Package Tools: " + String.join(", ", config.tools().keySet()),
                     null, "call", null, null, null, null, null,
-                    suggestion == null ? "Define the tool in config/tools or correct the qualified group.tool name." : "Use '#{" + suggestion + "(...)}' if that is the intended tool.", null);
+                    suggestion == null ? "Define a Package-local att-tool/v1 descriptor under tools/ or correct the Tool ID." : "Use '#{" + suggestion + "(...)}' if that is the intended tool.", null);
         }
         if (tool.callBacked() && isWriteFacade(tool) && !allowWriteFacade) {
             String target = callParser.parse(tool.call()).name();

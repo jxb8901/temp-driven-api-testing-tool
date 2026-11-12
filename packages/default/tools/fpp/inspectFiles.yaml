@@ -1,0 +1,19 @@
+schemaVersion: att-tool/v1
+id: inspectFiles
+name: Inspect matching files
+description: Return matching regular files, count, line counts, and an optional all-files line-count comparison
+command: [./tools/fpp_inspect_files.sh, "${input.directory}", "${input.pattern}", "${input.expectedLineCount}"]
+stdoutFormat: yaml
+arguments:
+  directory:
+    name: Directory
+    description: Directory to inspect without recursion
+    required: true
+  pattern:
+    name: Filename Pattern
+    description: Filename glob evaluated only within the directory
+    required: true
+  expectedLineCount:
+    name: Expected Line Count
+    description: Optional non-negative line count which every matched file must have
+    required: false

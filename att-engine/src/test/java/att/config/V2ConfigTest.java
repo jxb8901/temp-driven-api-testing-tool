@@ -31,6 +31,7 @@ class V2ConfigTest {
     void acceptsDelimitOnlyOnFinalArgumentAndRejectsArgv() throws Exception {
         Path valid = tempDir.resolve("valid.yaml");
         Files.write(valid, ("schemaVersion: att-config/v2.11\ntools:\n  grep:\n    name: Grep\n    description: Search log text\n    command: grep ${TOOL.input.keywords}\n    stdoutFormat: text\n    arguments:\n      file:\n        name: File\n        description: Input file\n        required: true\n      keywords:\n        name: Keywords\n        description: Search values\n        required: true\n        delimit: ','\n").getBytes("UTF-8"));
+        att.TestPackageTools.migrate(valid,tempDir);
         FrameworkConfig config = new FrameworkConfigLoader().load(valid);
         assertEquals(",", config.tool("grep").arguments().get("keywords").delimit());
 

@@ -1,7 +1,7 @@
-# ATT v4.2.9 reference manual
+# ATT v4.2.10 reference manual
 
 Author: Jeffrey + ChatGPT
-Version: 4.2.9
+Version: 4.2.10
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -101,7 +101,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [API paths](#api-paths)
 - [CLI reference](#cli-reference)
   - [Choose a command](#choose-a-command)
-  - [Availability in ATT 4.2.9](#availability-in-att-429)
+  - [Availability in ATT 4.2.10](#availability-in-att-4210)
   - [Build a source checkout](#build-a-source-checkout)
   - [Find syntax, options, and examples by task](#find-syntax-options-and-examples-by-task)
   - [Use ATT Server from the CLI](#use-att-server-from-the-cli)
@@ -164,7 +164,7 @@ Testcase
   `-- ordered Stage
         `-- Template
               |-- Action
-              |     |-- file-content expression / assert / log / assign
+              |     |-- file-content expression / assert / log / assign / set
               |     |-- Tool
               |     `-- DB
               `-- Flow -> ordered Actions
@@ -438,7 +438,8 @@ This page defines the active ATT action contract. Templates use att-template/v3.
 | tool | call | Invokes a configured Tool, built-in or helper call and preserves the native typed result. DB query/scalar/update calls are ordinary Tool calls. |
 | assert | assert | Evaluates a boolean condition and records PASS or FAIL. expected and actual are optional diagnostic values. |
 | log | message or value | Formats a typed value for the Case log. Its fields are message, value and format. |
-| assign | name and expression | Publishes the expression's typed result below EXEC.VARS. |
+| assign | name and expression | Publishes the expression's typed result below EXEC.VARS once. |
+| set | name and expression | Replaces an existing top-level EXEC.VARS value with the expression's typed result. |
 | flow | use | Runs a registered Flow in a nested Action scope and restores the caller's scope on return. |
 
 Actions run in YAML order. Where supported, an action may also define id, description, onFailure and runWhen. Action IDs are unique within their scope. Type-specific invalid fields fail validation. Action result, Log file and Log fields are not part of the current action contract.
@@ -603,7 +604,20 @@ When both message and value are supplied, Log emits the message, a newline, then
 
 Action expressions use the regular ATT expression engine. A complete ${...} or #{...} expression keeps its result type; embedding an expression in surrounding text produces a String. See [Expressions and Built-ins](reference/expressions.md).
 
-assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Values assigned in one Stage are available to later Stages. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; publish values to EXEC.VARS when the caller needs them after the Flow returns.
+assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Use set with the same name and expression fields to update an existing top-level EXEC.VARS value; set never declares a missing variable. Its expression reads the old Context value and publishes only after evaluation and its assertion succeed, preserving the native result type. A set may use the common Action retry block: each attempt evaluates against the unchanged variable, failed attempts leave its old value intact, and only the winning attempt publishes once. Attempt status and retry decisions remain in output.attempts. Both Actions share EXEC.VARS across Stages and nested Flow calls. A set of a Debug/Load bootstrap variable consumes its first-assign allowance; a later assign cannot overwrite that update. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; EXEC.VARS updates remain visible to the caller.
+
+~~~yaml
+initializeCounter:
+  type: assign
+  name: counter
+  expression: "#{0}"
+incrementCounter:
+  type: set
+  name: counter
+  expression: "#{${EXEC.VARS.counter} + 1}"
+~~~
+
+The example leaves `EXEC.VARS.counter` as a typed number. A skipped or failed set leaves its previous value unchanged.
 
 ### Resource output evidence
 
@@ -638,7 +652,7 @@ Strings, numbers, booleans, null, maps and lists remain typed across Action/Temp
 
 ### Common Retry and boolean conditions
 
-Tool Actions, including retry-capable DB query/scalar calls, share the `retry` contract. `maxAttempts` (2–10), `intervalMs` (0–3600000) and a non-empty `retryOn` list (ASSERTION/TIMEOUT) remain required. `when` is an optional non-empty Boolean expression String. Existing restrictions on mutating DB updates and SSH transfers still apply.
+Tool Actions, retry-capable DB query/scalar calls, and set Actions share the `retry` contract. `maxAttempts` (2–10), `intervalMs` (0–3600000) and a non-empty `retryOn` list (ASSERTION/TIMEOUT) remain required. `when` is an optional non-empty Boolean expression String. `ASSERTION` retries for set require an Action `assert`; failed attempts never commit their candidate to EXEC.VARS. Existing restrictions on mutating DB updates and SSH transfers still apply.
 
 ~~~yaml
 retry:
@@ -672,7 +686,7 @@ Standalone Debug bootstrap values are mapped into these canonical roots: `inputs
 | EXEC.RUN_STARTED_AT | Enclosing run start time; ISO-8601 String. | All modes. |
 | EXEC.OUTPUT_DIR | Absolute execution workspace path. | After initialization; in Load it may be planned and not yet exist. |
 | EXEC.INPUT | Case/stage, Debug sidecar or Load workload input map. | All modes. Stage inputs temporarily overlay Case inputs. |
-| EXEC.VARS | Typed values published by assign. | All modes; empty before assignment. |
+| EXEC.VARS | Typed values created by assign or updated by set. | All modes; empty before assignment or bootstrap. |
 | EXEC.ACTIONS | Completed Actions in the active Template/Flow scope. | After an Action is published; Flow has a nested scope. |
 | EXEC.LOAD.MODEL | closed or arrivalRate. | Load only; available before ID generation. |
 | EXEC.LOAD.WORKLOAD_ID | Configured workload ID. | Load only; available before ID generation. |
@@ -750,7 +764,7 @@ assert: "#{${EXEC.INPUT.amount} > 0}"
 description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 ~~~
 
-Use the expression form supported by each field. File-content content, Action descriptions/assertions, Log message/value, assign expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](reference/actions.md).
+Use the expression form supported by each field. File-content content, Action descriptions/assertions, Log message/value, assign/set expressions and Tool calls use the ordinary runtime model. A Log value can recursively contain typed expressions; see [Actions and Typed Values](reference/actions.md).
 
 ### File-content expressions
 
@@ -956,9 +970,9 @@ All adapters resolve the environment, construct canonical Context, validate the 
 
 ### Unified RUN and schedules
 
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.2.10 -->
 
-ATT 4.2.9 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+ATT 4.2.10 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
 
 The released Local CLI keeps its interface-specific compatibility boundary: its run verb selects workbook Cases, and standalone debug runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. This shared RUN model does not mean the proposed vNext CLI grammar is released; see the [Planned vNext page](interfaces/cli/vnext-proposed.md).
 
@@ -1047,7 +1061,7 @@ Every active local `USER` or authenticated container principal in `server.author
 
 #### Migrate existing clients
 
-| Existing interface | Mapping in 4.2.9 |
+| Existing interface | Mapping in 4.2.10 |
 |---|---|
 | CLI `validate`, `run`, `report` | Existing validation, Case RUN and report commands remain valid |
 | CLI `--suite`, `--suite-dir`, `--case`, `--tag`, `--rerun-failed` | Existing selectors retain their behavior; Server batches use `selection` |
@@ -1056,7 +1070,7 @@ Every active local `USER` or authenticated container principal in `server.author
 | `/load-schedules`, legacy `jobType:load/debug` | Shared scheduler compatibility routes; existing definitions remain readable |
 | `/jobs/...`, saved Studio job/result links | Existing shared history, cancellation, events and results routes |
 
-No legacy endpoint is removed in 4.2.9. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.6; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
+No legacy endpoint is removed in 4.2.10. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.6; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
 
 Schedule persistence adds JSON fields in the existing H2 tables, leaving legacy LOAD rows unchanged. Before downgrade, stop scheduling, export new definitions, remove RUN/one-time definitions and restore the pre-upgrade database backup. An older scheduler must not interpret a new RUN definition as LOAD. Retained job artifacts remain separate from database metadata.
 
@@ -1087,9 +1101,9 @@ Schedule creation uses its normal validated draft contract. Debug remains `optio
 
 ### Run mode
 
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.2.10 -->
 
-The ATT 4.2.9 Local CLI run command is a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](reference/execution-modes/unified-run.md).
+The ATT 4.2.10 Local CLI run command is a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](reference/execution-modes/unified-run.md).
 
 ```sh
 ./att.sh run --all
@@ -1174,7 +1188,7 @@ For collector failures whose safe projection hides details, local runs can opt i
 
 This flag is accepted only by standalone `debug`. ATT prints a warning before execution, preserves configured-secret redaction, and includes `failureDetailMode: local-unsafe` in the result. It does not dump raw inputs, argv, request bodies, or Context values. The default remains `safe-default`; `load --debug`, Run, Validate, and Snapshot cannot enable the override.
 
-`vars` values use the shared expression engine: an exact `${EXEC.INPUT.amount}` preserves its native type, interpolated text becomes a string, and `#{...}` preserves the expression result type. Maps and lists recurse; map keys remain literal. Vars may reference other vars regardless of declaration order; cycles, missing vars, unavailable roots, and side-effecting calls fail before the target starts. The first normal `assign` may replace a bootstrapped variable, after which normal duplicate-assignment rules apply. Final values appear through the normal `EXEC.VARS`/`CASE.VARS` context and result artifacts, subject to existing redaction rules; no second Debug-only namespace is created.
+`vars` values use the shared expression engine: an exact `${EXEC.INPUT.amount}` preserves its native type, interpolated text becomes a string, and `#{...}` preserves the expression result type. Maps and lists recurse; map keys remain literal. Vars may reference other vars regardless of declaration order; cycles, missing vars, unavailable roots, and side-effecting calls fail before the target starts. The first normal `assign` may replace a bootstrapped variable, after which normal duplicate-assignment rules apply. A successful `set` updates an existing bootstrap value and consumes that first-assign allowance. Final values appear through the normal `EXEC.VARS`/`CASE.VARS` context and result artifacts, subject to existing redaction rules; no second Debug-only namespace is created.
 
 Bootstrap values may use initialized execution identity, `EXEC.INPUT`, `EXEC.LOAD` when present, other `EXEC.VARS.<name>` entries, and stable project/source/target/template metadata. `EXEC.ACTIONS`, action-local `output`, and invocation-scoped metadata are not available. Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are blocked; safe pure built-ins use the normal ATT parser. Repeatable `--set` namespaces are `input.path=value`, `vars.path=value`, and Tool-only `arg.name=value`. Values are parsed as safe YAML; nested maps and numeric list indexes are supported where the destination accepts them. For example, `--set 'vars.refNo=${EXEC.INPUT.refNo}'` changes the raw definition before evaluation.
 
@@ -1450,7 +1464,7 @@ Selection evidence records only the testdata ID, source layer, record index, gen
 
 #### Initialize Template and Flow variables
 
-After the scheduler identity and unique EXEC.ID/EXEC.OUTPUT_DIR are ready, ATT evaluates each workload's `vars` tree before starting its Template or Flow. Exact `${...}` references preserve native types, mixed text becomes a string, `#{...}` uses the ordinary typed expression parser, and nested maps/lists are evaluated recursively. References between vars are declaration-order independent; missing vars and dependency cycles fail before the target starts. Each iteration owns its evaluated maps/lists, so concurrent users and workloads cannot share mutations. The first normal `assign` may replace a bootstrapped variable.
+After the scheduler identity and unique EXEC.ID/EXEC.OUTPUT_DIR are ready, ATT evaluates each workload's `vars` tree before starting its Template or Flow. Exact `${...}` references preserve native types, mixed text becomes a string, `#{...}` uses the ordinary typed expression parser, and nested maps/lists are evaluated recursively. References between vars are declaration-order independent; missing vars and dependency cycles fail before the target starts. Each iteration owns its evaluated maps/lists, so concurrent users and workloads cannot share mutations. The first normal `assign` may replace a bootstrapped variable; a successful `set` updates that value and consumes the first-assign allowance. Each iteration's sets remain isolated from every other iteration.
 
 Bootstrap expressions may use initialized `EXEC.RUN_ID`, `EXEC.ID`, `EXEC.OUTPUT_DIR`, `EXEC.INPUT`, `EXEC.LOAD`, other `EXEC.VARS.<name>` values, and stable project/source/target/template metadata. `EXEC.ACTIONS`, action-local `output`, invocation-scoped metadata, and Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are unavailable. Only safe pure built-ins are permitted. Tool arguments remain separate from `vars`.
 
@@ -1711,18 +1725,20 @@ Load scenarios may set evidence.resources.output to inherit (default) or none. n
 
 ### Tool
 
-A Tool is a named external or framework-native capability. A descriptor selects exactly one backend: command or call.
+A Tool is a named capability owned by the selected Package. Each `tools/*.yaml` file defines one `att-tool/v1` descriptor with exactly one command or call backend. DB/MQ/HTTP/SSH Helpers and their bindings remain global.
 
 #### Command-backed Tool
 
 A command Tool declares stdoutFormat to parse external stdout into the typed result:
 
 ~~~yaml
-tools:
-  queryOrder:
-    command: [./tools/query-order.sh]
-    stdoutFormat: json
-    arguments: {}
+schemaVersion: att-tool/v1
+id: queryOrder
+name: queryOrder
+description: Package Tool queryOrder
+command: [./tools/query-order.sh]
+stdoutFormat: json
+arguments: {}
 ~~~
 
 stdoutFormat accepts text, json, yaml or xml. It is ingress parsing: ATT parses stdout once and publishes the typed value at output.result. It does not control human-readable logging or file output. Exit code, bounded stdout/stderr preview and streamed process artifacts remain evidence.
@@ -1732,14 +1748,14 @@ stdoutFormat accepts text, json, yaml or xml. It is ingress parsing: ATT parses 
 A call-backed Tool invokes a built-in or supported native DB/MQ/HTTP/SSH operation. Its native typed return value is output.result. Call-backed descriptors do not declare stdoutFormat.
 
 ~~~yaml
-tools:
-  queryOrder:
-    call: "#{db.orders.query(sql='select id from orders where id=:id', parameters={id: ${input.orderId}})}"
-    arguments:
-      orderId:
-        name: Order ID
-        description: Order key
-        required: true
+schemaVersion: att-tool/v1
+id: queryOrder
+call: "#{db.orders.query(sql='select id from orders where id=:id', parameters={id: ${input.orderId}})}"
+arguments:
+  orderId:
+    name: Order ID
+    description: Order key
+    required: true
 ~~~
 
 Tool invocation has no result.format/path/overwrite contract. File persistence is explicit to an API that defines it; human-readable presentation belongs to Log or configured evidence output. HTTP/MQ parsing is owned by those transport boundaries.
@@ -1761,24 +1777,24 @@ A configured Tool `command` also has its own restricted Context. It may referenc
 For example:
 
 ```yaml
-tools:
-  invokePaymentApi:
-    name: Invoke Payment API
-    description: Invoke a file-content payment request
-    command:
-      - ./tools/invoke_payment_api.sh
-      - "${input.requestText}"
-      - "${input.environment}"
-    stdoutFormat: json
-    arguments:
-      requestText:
-        name: Request Body
-        description: Request body String
-        required: true
-      environment:
-        name: Environment
-        description: Target environment
-        required: true
+schemaVersion: att-tool/v1
+id: invokePaymentApi
+name: Invoke Payment API
+description: Invoke a file-content payment request
+command:
+  - ./tools/invoke_payment_api.sh
+  - "${input.requestText}"
+  - "${input.environment}"
+stdoutFormat: json
+arguments:
+  requestText:
+    name: Request Body
+    description: Request body String
+    required: true
+  environment:
+    name: Environment
+    description: Target environment
+    required: true
 ```
 
 The action call is the boundary between the general Runtime Context and this restricted Tool-input Context:
@@ -1820,21 +1836,21 @@ Quotes inside a Tool call belong to the ATT expression grammar; they are not she
 The following configured Tool keeps each declared input as one argv value:
 
 ```yaml
-tools:
-  writeAudit:
-    name: Write audit
-    description: Write one audit message for one source file
-    command: [./tools/write_audit.sh, "${input.message}", "${input.sourceFile}"]
-    stdoutFormat: yaml
-    arguments:
-      message:
-        name: Message
-        description: Exact audit message
-        required: true
-      sourceFile:
-        name: Source file
-        description: File associated with the message
-        required: true
+schemaVersion: att-tool/v1
+id: writeAudit
+name: Write audit
+description: Write one audit message for one source file
+command: [./tools/write_audit.sh, "${input.message}", "${input.sourceFile}"]
+stdoutFormat: yaml
+arguments:
+  message:
+    name: Message
+    description: Exact audit message
+    required: true
+  sourceFile:
+    name: Source file
+    description: File associated with the message
+    required: true
 ```
 
 Use a YAML block scalar when a call contains several quote layers:
@@ -1898,7 +1914,7 @@ Configured Tool calls are not available inside `command`:
 #{anotherConfiguredTool(value=${requestText})}
 ```
 
-This is rejected during configuration loading. Expanding one Tool's command cannot invoke another Tool or recursively invoke itself. An unknown, misspelled, differently cased, or undeclared `${...}` argument reference is also a validation error. For a standalone global Tool, the executable token is static and cannot itself contain `${...}` or `#{...}`.
+This is rejected during configuration loading. Expanding one Tool's command cannot invoke another Tool or recursively invoke itself. An unknown, misspelled, differently cased, or undeclared `${...}` argument reference is also a validation error. For a Package Tool, the executable token is static and cannot itself contain `${...}` or `#{...}`.
 
 If an argument declares a non-empty `argName`, its placeholder must appear exactly once and occupy one complete command token:
 
@@ -1920,15 +1936,32 @@ Call-backed expressions use the declared `arguments` map and preserve typed valu
 
 #### Inline Tool descriptor fields
 
-Global `tools` and Tool-group `tools` entries use the same Tool contract:
+Each `att-tool/v1` file defines one Package Tool. Global `tools` and `toolGroups` are no longer accepted:
 
 | Object | Allowed properties |
 |---|---|
-| `tools.<key>` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
-| call-backed `tools.<key>.cache` | required `scope: case|db` |
+| `att-tool/v1` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
+| call-backed `att-tool/v1.cache` | required `scope: case|db` |
 | `arguments.<key>` | `name`, `description`, `required`, optional `type`, `enumValues` (required only for `type: enum`), `argName`, `argNameMode`, `delimit`, `x-*` |
 
 An argument `type` declares the final resolved value contract for configured Tools: `string`, `integer`, `long`, `decimal`, `boolean`, `enum`, `bytes`, `map`, or `list`. Omitted `type` remains `any` for existing descriptors. Numeric and Boolean scalar types accept native values or trimmed numeric/`true`/`false` Strings; enum values must match one of `enumValues`; `bytes` accepts a byte array or converts a String to UTF-8. `string`, `map`, and `list` require that native value type. These checks run after the complete nested expression resolves, in validation when safely static and at runtime otherwise.
+
+#### Package-local Tool Groups (ATT 4.2.10)
+
+Standalone Tools use `tools/<id>.yaml` and `att-tool/v1`. Grouped Tools use a fixed `tools/<folder>/tool-group.yaml` manifest with **`att-tool-group/v3.0`**, which lists each `att-tool/v1` member explicitly (no recursive discovery):
+
+```yaml
+# packages/fpp/tools/fpp/tool-group.yaml
+schemaVersion: att-tool-group/v3.0
+id: fpp
+name: FPP Tools
+description: FPP integration commands
+tools: [invokeApi.yaml, loghelper.yaml]
+```
+
+The member `tools/fpp/invokeApi.yaml` contains `schemaVersion: att-tool/v1` and `id: invokeApi`; its caller remains `#{fpp.invokeApi(...)}`. The manifest's `id` owns the public prefix, independent of the folder's name. An optional `script` preserves historical dispatcher argv + member Tool ID + member command argv behavior. An optional `ssh: {helper: application}` binds an existing centrally configured SSHHelper and may specify selection. The manifest cannot embed direct host/credential topology. Missing/duplicate group members and ambiguous qualified identities fail validation.
+
+The selected registered Package owns Tool definitions; Shared Configuration continues to own DB/MQ/HTTP/SSH Helpers, not Tools or Tool Groups. For migration see [Package-owned Tools](guides/package-tools-migration.md).
 
 ### DBHelper
 
@@ -2320,13 +2353,12 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.13`. Current packages use config v2.13 and Tool Group v2.9. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
+Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.13`. Current packages use config v2.13 and Tool Group v3.0. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
 
 ```yaml
 # config/config.yaml
 schemaVersion: att-config/v2.13
 environment: SIT
-toolGroups: [config/tools/application.yaml]
 environments:
   SIT:
     sshhelpers: [config/sshhelpers/sit/application.yaml]
@@ -2347,23 +2379,26 @@ instances:
 ```
 
 ```yaml
-# config/tools/application.yaml
-schemaVersion: att-tool-group/v2.9
+# packages/<id>/tools/app/tool-group.yaml
+schemaVersion: att-tool-group/v3.0
 id: app
 name: Application tools
 description: Remote application inspection
 ssh:
   helper: application
   selection: {strategy: all} # optional group override
-tools:
-  status:
-    name: Status
-    description: Print service status
-    command: [systemctl, is-active, example.service]
-    result: {format: text}
+tools: [status.yaml]
+
+# packages/<id>/tools/app/status.yaml (separate file)
+schemaVersion: att-tool/v1
+id: status
+name: Status
+description: Print service status
+command: [systemctl, is-active, example.service]
+stdoutFormat: text
 ```
 
-The unchanged Action calls `app.status`. Set `APP_SSH_KEY` to a readable private-key **path** in the local/CI secret environment, then validate both profiles: `./att.sh validate --config config/config.yaml --env SIT --package` and the equivalent UAT command. An exact `${ENV:NAME}` identity-file reference is resolved at load time; a missing/empty variable is rejected without revealing its value. A Tool group uses either direct SSH (`host`, `user`, optional `port`/`identityFile`) or logical SSH (`helper`, optional `selection`), never both. Call-backed Tools may target the native SSH Resource Helper call when it is the primary `type: tool` operation. The active Tool Group schema is v2.9. Command-backed Tools declare stdout parsing with `stdoutFormat` (`text|json|yaml|xml`); call-backed Tools preserve their native result type. Superseded config and group schemas are migration references only. SSH Resource Helper calls publish only `META.SSHHELPER.id` and `.type`; endpoint, user, identity file and credentials remain private. Resource calls have no Action- or per-call strategy override; selection remains helper configuration.
+The unchanged Action calls `app.status`. Set `APP_SSH_KEY` to a readable private-key **path** in the local/CI secret environment, then validate both profiles: `./att.sh validate --config config/config.yaml --env SIT --package` and the equivalent UAT command. An exact `${ENV:NAME}` identity-file reference is resolved at load time; a missing/empty variable is rejected without revealing its value. A Package-local Tool Group supports only a logical global SSHHelper binding (`helper` with optional `selection`); legacy direct host/user/key declarations must migrate to Global SSHHelper descriptors. Call-backed Tools may target the native SSH Resource Helper call when it is the primary `type: tool` operation. The active Tool Group schema is v3.0. Command-backed Tools declare stdout parsing with `stdoutFormat` (`text|json|yaml|xml`); call-backed Tools preserve their native result type. Superseded config and group schemas are migration references only. SSH Resource Helper calls publish only `META.SSHHELPER.id` and `.type`; endpoint, user, identity file and credentials remain private. Resource calls have no Action- or per-call strategy override; selection remains helper configuration.
 
 Strategy precedence is group override then helper default. For native Resource Helper calls, one instance works without a strategy (`single`), multiple instances require `random` or `roundRobin`, and `all` is rejected rather than silently selecting one host. For command-backed Tool routing, `random` selects one uniformly, `roundRobin` selects one via a thread-safe cyclic counter, and explicit `all` executes every listed instance once with bounded parallelism. **Command-backed `all` has side effects on every host**: use only commands safe across the entire group. There is no implicit fan-out, cross-host retry, or failover. If an author configures an Action timeout retry, the whole `all` invocation is repeated, not just one host. Each host gets the Action/Tool/global timeout; interruption cancels active OpenSSH processes or Java SSH sessions. Both transports receive the same normalized host/user/port/key. OpenSSH is preferred; mwiede/jsch fallback retains strict host-key verification and the limitations in [SSH diagnostics](reference/appendices/limits-defaults.md).
 
@@ -2371,7 +2406,7 @@ For a single selected host, parsed `output.result` remains the legacy scalar/obj
 
 Environment-supplied identity paths are redacted from argv, transport stderr (including streamed Case-log diagnostics), and exception evidence for both single-host and `all` execution. This no-recording guarantee applies to ATT metadata and transport diagnostics; parsed business stdout remains unchanged, so commands must not print secret paths.
 
-Migration: leave direct SSH unchanged if one physical target suffices. To migrate, move its host/user/port/key into a helper descriptor, bind that descriptor per environment, upgrade the group to v2.9, replace physical `ssh` with `ssh: {helper: application}`, and validate each environment. Actions stay unchanged. Inventory discovery, per-Action host override, distributed transactions, cross-host failover and orchestration are out of scope.
+Migration: move legacy Group host/user/port/key into a central SSHHelper descriptor, bind it per environment, and replace the legacy group file with Package `tools/app/tool-group.yaml` (`att-tool-group/v3.0`) plus `att-tool/v1` members using `ssh: {helper: application}`. Validate each Environment. Actions stay unchanged. Inventory discovery, per-Action host override, distributed transactions, cross-host failover and orchestration are out of scope.
 
 `stat(remotePath='/srv/app/result.xml')` uses SFTP lstat and returns typed `{path, exists}` plus `type: file|directory|other`, file `size`, and available ISO `modifiedAt`. A missing path is normal `exists: false`; permission/auth/transport errors still fail. `mkdirs(remotePath='/srv/app/archive')` creates parents, succeeds for an existing directory, and rejects a non-directory. `move(sourcePath='/srv/app/out.xml', targetPath='/srv/app/archive/out.xml', overwrite=false)` renames on the same selected host; source must exist and replacing a target requires explicit overwrite. It does not stage bytes locally. Explicit overwrite removes an existing matching regular file or empty directory before SFTP rename, so it also works on servers without rename-overwrite support. Non-empty directories, special files, and mismatched types are rejected. Replacement is not atomic: a removal failure preserves both paths; a later rename failure leaves the source in place and may leave the target absent. `delete(remotePath='/srv/app/tmp.xml', missingOk=false)` supports regular files and empty directories; missingOk is explicit, and non-empty directories, recursive arguments, and wildcard/backslash paths are rejected. All operations accept named arguments and optional `timeoutMs`, sharing selection, concurrency, deadlines, host verification, redacted identity, and Run/Debug/Load execution. Filesystem errors use `SSH_STAT_ERROR`, `SSH_MKDIRS_ERROR`, `SSH_MOVE_ERROR`, or `SSH_DELETE_ERROR`. There is no remote copy API; use explicit `execute(command='cp /srv/app/a /srv/app/b')` when needed. File-content expressions use `&{...}`; ATT manages local output.
 
@@ -2474,8 +2509,8 @@ The authenticated `/api/v1/configuration/{declared|effective|compare|files|sourc
 
 | Layer | Source | Owns |
 |---|---|---|
-| Shared runtime | `ATT_HOME/config/config.yaml` | output/environment/runtime defaults, reports, XML mode, global tools, group paths, DB/MQ/HTTP/SSHHelper paths, optional legacy inline SSH |
-| Tool group | `ATT_HOME/config/` YAML path | group identity, optional script/SSH, grouped tools |
+| Shared runtime | `ATT_HOME/config/config.yaml` | output/environment/runtime defaults, reports, XML mode, DB/MQ/HTTP/SSHHelper paths and central connection settings |
+| Package Tool / Tool Group | `<PACKAGE_ROOT>/tools/*.yaml` and `tools/<folder>/tool-group.yaml` | Standalone `att-tool/v1` Tools or explicitly listed `att-tool/v1` group members under `att-tool-group/v3.0`; Helpers remain global |
 | DB/MQ/SSH/HTTP helper | configured YAML under `ATT_HOME/config/` | logical resource identity, endpoint, connection, pool, timeout, and evidence policy |
 | Package Testdata | package-relative `testdata/` path | Package Manifest inventory selected by the effective Environment |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
@@ -2486,18 +2521,15 @@ The authenticated `/api/v1/configuration/{declared|effective|compare|files|sourc
 
 ### Ignore or disable ATT-owned configuration with `x-`
 
-Prefix an optional ATT-owned field or an entry in an ATT-owned keyed collection with the exact lowercase `x-` to make it behave as absent. This applies to current config objects and keyed collections such as `tools`, environment profiles, Tool `arguments` declarations, `actions`, Action `evidence` collectors, report columns, and Debug Tool overrides. The YAML must still parse, but ATT does not schema-check, resolve, discover, evaluate, instantiate, execute, or publish a disabled entry. For a keyed collection, use this on the key. This does not disable or rename argument values supplied when invoking a Tool:
+Prefix an optional ATT-owned field or an entry in an ATT-owned keyed collection with the exact lowercase `x-` to make it behave as absent. This applies to current config objects and keyed collections such as environment profiles, Tool `arguments` declarations, `actions`, Action `evidence` collectors, report columns, and Debug Tool overrides. The YAML must still parse, but ATT does not schema-check, resolve, discover, evaluate, instantiate, execute, or publish a disabled entry. For a keyed collection, use this on the key. This does not disable or rename argument values supplied when invoking a Tool:
 
 ```yaml
-schemaVersion: att-config/v2.13
-x-debug-note: "#{missing.tool()}"      # ignored config field
-tools:
-  x-temporary: not-a-tool               # ignored Tool entry
-  smoke:
-    name: Smoke check
-    description: Check the local setup
-    call: "#{upper('ok')}"
-    x-retry: 0                           # ignored optional Tool field
+schemaVersion: att-tool/v1
+id: smoke
+name: Smoke check
+description: Check the local setup
+call: "#{upper('ok')}"
+x-retry: 0                    # ignored optional Tool field
 ```
 
 The same rule applies to Actions and evidence collectors. A disabled Action is absent from validation and runtime; a disabled collector is not called or included in evidence. Nested `x-` fields in ATT-owned blocks are also ignored:
@@ -2535,17 +2567,21 @@ The shared configuration and Package resources have separate roots:
 ATT_HOME/
 ├── config/
 │   ├── config.yaml
-│   ├── tools/*.yaml
 │   ├── dbhelpers/{sit,uat}/orders.yaml
 │   └── mqhelpers/{sit,uat}/payment.yaml
 └── packages/<id>/
     ├── package.yaml
     ├── testcase/
     ├── templates/
-    └── testdata/accounts.yaml
+    ├── testdata/accounts.yaml
+    └── tools/
+        ├── standaloneTool.yaml
+        └── fpp/
+            ├── tool-group.yaml
+            └── invokeApi.yaml
 ```
 
-The common config keeps run/execution/report settings, `toolGroups`, and the global `tools` registry. Tool/helper descriptors are resolved under `ATT_HOME/config/`; Testdata descriptors are resolved under the selected Package. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
+The common config keeps run/execution/report settings and global DB/MQ/HTTP/SSH Helpers. Tools belong exclusively to the selected Package: root-level `tools/*.yaml` files are standalone `att-tool/v1` definitions, while `tools/<folder>/tool-group.yaml` (`att-tool-group/v3.0`) explicitly lists grouped `att-tool/v1` members and preserves qualified `group.tool` calls. Global Tool declarations produce migration errors. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
 
 ```yaml
 # config/config.yaml
@@ -2553,10 +2589,6 @@ schemaVersion: att-config/v2.13
 environment: SIT                 # default profile; --env overrides it
 templates: {root: templates}
 testcase: {root: testcase}
-toolGroups:
-  - config/tools/sample.yaml
-  - config/tools/fpp.yaml
-  - config/tools/orders-db.yaml
 environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
@@ -2566,7 +2598,7 @@ environments:
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-Use the executable complete configs in `config/environments/sit.yaml` and `config/environments/uat.yaml` as the migration source for the common registry, including `invokePaymentApi` and the `sample.getAcDate` tool used by `examples/load/closed-smoke.yaml`. Do not replace that shared registry with `tools: {}` or `toolGroups: []` in a real package.
+The executable SIT and UAT configs retain common Helper and Environment bindings. `invokePaymentApi` and `sample.getAcDate` now live in the selected Package; legacy global Tools require explicit migration before running ATT 4.2.10.
 
 The SIT and UAT DBHelper descriptors both use `id: orders`, while their JDBC URL and other physical connection details differ. The MQHelper descriptors both use `id: payment`, while host, queue manager, port, and channel differ. A complete descriptor pair, including pool settings and safe evidence policy, is in [`examples/environments/README.md`](../examples/environments/README.md).
 
@@ -2656,10 +2688,8 @@ report:
   html: {caseLogInlineLimitBytes: 32768}
   junit: {caseLogEmbedThresholdBytes: 10240}
 xml: {namespaceMode: ignore}
-toolGroups: [config/tools/database.yaml]
 dbhelpers: [config/dbhelpers/orders.yaml]
 mqhelpers: [config/mqhelpers/orders.yaml]
-tools: {}
 environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
@@ -2716,22 +2746,19 @@ Run and Load accept `--run-id <id>` as a literal override. Standalone Debug acce
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.6` YAML paths; normalized duplicates are rejected |
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.3` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
 | `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
 | `environments` | absent | Non-empty map of profile names; profiles may contain configured shared resource lists; Package Testdata belongs to the Manifest |
 | `environments.<profile>.testdata` | deprecated | Temporary `packagePolicy.legacyTestdata` only; migrate to Manifest `testdata.environments` |
-| `ssh` | absent | Optional SSH target for inline global tools |
-| `tools` | `{}` | Map of reusable tool contracts |
 
 
 Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `ssh`, `tools`, `environments`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `environments`, `x-*` |
 | `environments.<profile>` | `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `testdata`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
@@ -2981,7 +3008,7 @@ Source revision conflicts return `409`; denied source access or Environment poli
 
 ## CLI reference
 
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.2.10 -->
 
 
 ### Choose a command
@@ -3001,11 +3028,11 @@ Source revision conflicts return `409`; denied source access or Environment poli
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
-The commands in this table are the ATT 4.2.9 CLI. The separate vNext proposal is not part of this release.
+The commands in this table are the ATT 4.2.10 CLI. The separate vNext proposal is not part of this release.
 
-### Availability in ATT 4.2.9
+### Availability in ATT 4.2.10
 
-This Reference describes the CLI shipped with ATT 4.2.9. The vNext grammar is a separate [Planned proposal](interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
+This Reference describes the CLI shipped with ATT 4.2.10. The vNext grammar is a separate [Planned proposal](interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
 
 ### Build a source checkout
 
@@ -3536,7 +3563,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.2.9",
+  "attVersion": "4.2.10",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -3575,7 +3602,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` runs the release gate, regenerates the modular Markdown Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven and Python 3. It outputs `att-4.2.9-local.tar.gz` for the CLI, `att-4.2.9-server.tar.gz` for the WAR and deployment guides, and `att-4.2.9-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
+`build.sh` runs the release gate, regenerates the modular Markdown Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven and Python 3. It outputs `att-4.2.10-local.tar.gz` for the CLI, `att-4.2.10-server.tar.gz` for the WAR and deployment guides, and `att-4.2.10-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
 
 ### Runtime dependencies
 
@@ -3626,7 +3653,8 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | MQHelper | att-mqhelper/v1.3 |
 | HTTPHelper | att-httphelper/v1.1 |
 | SSHHelper | att-sshhelper/v1.0 |
-| Tool group | att-tool-group/v2.9 |
+| Package Tool | att-tool/v1 |
+| Package Tool Group | att-tool-group/v3.0 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
 | Template | att-template/v3.6 |
@@ -3808,7 +3836,7 @@ Unexpected internal failures such as `NullPointerException`, `ClassCastException
 
 #### Why does `att.bat` ask for Maven, or why does a `.sh` Tool fail on windows?
 
-In a binary release, `att.bat` finds the versioned runtime JAR, such as `lib\att-local-4.2.9.jar`, and only requires Java 8+. Keep one `att-local-<version>.jar` in each `ATT_HOME/lib` so the launcher selects an unambiguous runtime. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
+In a binary release, `att.bat` finds the versioned runtime JAR, such as `lib\att-local-4.2.10.jar`, and only requires Java 8+. Keep one `att-local-<version>.jar` in each `ATT_HOME/lib` so the launcher selects an unambiguous runtime. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
 
 The launcher makes ATT itself cross-platform; it cannot translate external tool executables. Configure a Windows-compatible `.bat`, `.cmd`, PowerShell script (with an explicit `powershell`/`pwsh` argv), or native executable instead of a POSIX-only `.sh` command. PATH validation follows Windows `PATHEXT`, so names such as `pwsh` can resolve `pwsh.exe`. Keep argument contracts and stdout output formats identical when maintaining platform variants.
 

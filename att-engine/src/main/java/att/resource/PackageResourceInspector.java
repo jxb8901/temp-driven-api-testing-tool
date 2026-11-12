@@ -814,7 +814,27 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private SourceReferenceDiscovery discoverSourceFileReferences(Resource parent, Object projectedYaml) {
         SourceReferenceDiscovery discovery = new SourceReferenceDiscovery();
-        if (parent == null || parent.yamlSource == null || !("template".equals(parent.type) || "flow".equals(parent.type))) return discovery;
+        if (parent == null || parent.yamlSource == null) return discovery;
+        if ("tool".equals(parent.type)) {
+            if (!sourceAllowed(parent)) return discovery;
+            Object manifestPath = parent.provenance.get("toolGroupManifest");
+            if (!(manifestPath instanceof String) || ((String) manifestPath).trim().isEmpty()) return discovery;
+            try {
+                PackageResourceResolver.PackageResource target = resources.resolvePackageRelative(
+                        (String) manifestPath, PackageResourceResolver.Kind.FILE);
+                String logical = target.logicalName();
+                if (!packageSourceAllowed(logical, target.canonicalPath()) || deniedSourcePath(logical)
+                        || !referencedTextPathAllowed(logical) || Files.size(target.canonicalPath()) > maxSourceBytes
+                        || !isUtf8Text(target.canonicalPath())) {
+                    discovery.unavailable = true;
+                    return discovery;
+                }
+                String id = sourceReferenceId(parent.resourceId, logical);
+                discovery.references.put(id, new SourceFileReference(id, logical, target.canonicalPath()));
+            } catch (Exception unavailable) { discovery.unavailable = true; }
+            return discovery;
+        }
+        if (!("template".equals(parent.type) || "flow".equals(parent.type))) return discovery;
         FileExpressionResolver resolver = new FileExpressionResolver(packageRoot);
         collectSourceFileReferences(parent, projectedYaml, resolver, discovery);
         return discovery;
@@ -1713,8 +1733,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             } else if ("tool".equals(resource.type)) {
                 ToolConfig tool = config.tools().get(resource.logicalId);
                 if (tool == null) continue;
-                String group = tool.groupId().isEmpty() ? tool.localKey() : tool.groupId();
-                indexDebugSidecar(index, runtimeConfigRoot.resolve("config/tools").resolve(group + ".debug.yaml"));
+                indexDebugSidecar(index, packageRoot.resolve("tools/debug").resolve(tool.key() + ".yaml"));
             }
         }
     }
@@ -1771,6 +1790,9 @@ public final class PackageResourceInspector implements AutoCloseable {
                 ? config.testcasesRoot() : packageRoot.resolve(config.testcasesRoot());
         addWatchRoot(templatesRoot, roots);
         addWatchRoot(casesRoot, roots);
+        Path toolDirectory = packageRoot.resolve("tools");
+        if (Files.isDirectory(toolDirectory, LinkOption.NOFOLLOW_LINKS)) addWatchRoot(toolDirectory, roots);
+        else roots.direct.add(packageRoot);
         for (ToolConfig tool : config.tools().values()) {
             if (tool.sourceFile() == null) continue;
             try {
@@ -1883,10 +1905,16 @@ public final class PackageResourceInspector implements AutoCloseable {
             resource.description = scrub(tool.description());
             resource.state = "ready";
             resource.definition = toolDefinition(tool);
+            resource.yamlSource = tool.sourceFile();
             resource.provenance.put("toolGroupId", scrub(tool.groupId().isEmpty() ? "Default" : tool.groupId()));
             resource.provenance.put("toolName", scrub(tool.name()));
             String toolConfigLocation = toolConfigLocation(tool);
             if (toolConfigLocation != null) resource.provenance.put("toolConfigLocation", toolConfigLocation);
+            String groupManifest = toolGroupManifestLocation(tool);
+            if (groupManifest != null) {
+                resource.provenance.put("toolGroupManifest", groupManifest);
+                indexFileIfPackage(index, packageRoot.resolve(groupManifest));
+            }
             Set<String> builtIns = new att.template.DefaultBuiltInProvider().names();
             List<String> callTargets = tool.callBacked() ? toolCalls(tool.call()) : Collections.<String>emptyList();
             boolean builtInCall = !callTargets.isEmpty();
@@ -1899,7 +1927,8 @@ public final class PackageResourceInspector implements AutoCloseable {
                 }
             }
             Path script = permittedScript(resource, tool);
-            resource.sourceKind = script != null || resource.textSourceCandidate != null ? "script-backed"
+            resource.sourceKind = resource.yamlSource != null ? "package-tool-descriptor"
+                    : script != null || resource.textSourceCandidate != null ? "script-backed"
                     : builtInCall ? "built-in-virtual" : tool.callBacked() ? "call-backed" : "configured-command";
             resource.provenance.put("toolSourceKind", resource.sourceKind);
             if (script != null) {
@@ -1907,6 +1936,16 @@ public final class PackageResourceInspector implements AutoCloseable {
                 indexFileIfPackage(index, script);
             }
             if (tool.sourceFile() != null) indexFileIfPackage(index, tool.sourceFile());
+            // Both the dispatcher and the member script must participate in the
+            // Inspector's watched-file closure (rather than only the first source).
+            try {
+                for (Path dependency : att.config.PackageToolScripts.referenced(packageRoot, tool))
+                    indexFileIfPackage(index, dependency);
+            } catch (java.io.IOException unsafe) {
+                resource.diagnostics.add(diagnostic("ATT-RESOURCE-TOOL-SCRIPT-INVALID",
+                        "Package Tool has an invalid local script dependency"));
+                resource.state = "invalid";
+            }
             index.toolAliases.put(alias("tool", key), resource);
             index.add(resource);
         }
@@ -2184,8 +2223,11 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private Map<String, Object> toolDefinition(ToolConfig tool) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("schemaVersion", att.Version.TOOL_SCHEMA);
         result.put("toolId", tool.key());
         result.put("groupId", tool.groupId().isEmpty() ? "Default" : tool.groupId());
+        String groupManifest = toolGroupManifestLocation(tool);
+        if (groupManifest != null) result.put("toolGroupManifest", groupManifest);
         result.put("name", tool.name());
         result.put("description", scrubDescription(tool.description()));
         result.put("executionKind", tool.commandBacked() ? "command" : "call");
@@ -2206,10 +2248,22 @@ public final class PackageResourceInspector implements AutoCloseable {
         return safeMap(result);
     }
 
+    private String toolGroupManifestLocation(ToolConfig tool) {
+        if (!tool.grouped() || tool.sourceFile() == null) return null;
+        try {
+            Path manifest = tool.sourceFile().getParent().resolve("tool-group.yaml");
+            if (!Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS)
+                    || Files.isSymbolicLink(manifest)) return null;
+            String logical = resources.fromInternalPath(manifest, PackageResourceResolver.Kind.FILE).logicalName();
+            return sensitiveSourcePath(logical) || sourceGlobDenied(logical) ? null : logical;
+        } catch (Exception unavailable) { return null; }
+    }
+
     private String toolConfigLocation(ToolConfig tool) {
         try {
-            Path source = tool.sourceFile() == null ? RuntimeConfigPath.resolve(configPath, packageRoot) : tool.sourceFile();
-            String logical = configResources.fromInternalPath(source, PackageResourceResolver.Kind.FILE).logicalName();
+            Path source = tool.sourceFile();
+            if (source == null) return null;
+            String logical = resources.fromInternalPath(source, PackageResourceResolver.Kind.FILE).logicalName();
             return sensitiveSourcePath(logical) || sourceGlobDenied(logical) ? null : logical;
         } catch (Exception unavailable) { return null; }
     }
@@ -2450,11 +2504,13 @@ public final class PackageResourceInspector implements AutoCloseable {
     private boolean sourceAllowed(Resource resource) {
         try {
             if (!sourceBrowsingEnabled || resource == null || resource.yamlSource == null) return false;
-            if (!("template".equals(resource.type) || "flow".equals(resource.type))) return false;
+            if (!("template".equals(resource.type) || "flow".equals(resource.type) || "tool".equals(resource.type))) return false;
             PackageResourceResolver.PackageResource resolved = resources.fromInternalPath(resource.yamlSource, PackageResourceResolver.Kind.FILE);
             String logical = resolved.logicalName();
             String lower = logical.toLowerCase(Locale.ROOT);
-            if (!(lower.endsWith("/template.yaml") || lower.endsWith("/flow.yaml"))) return false;
+            boolean packageTool = "tool".equals(resource.type) && (lower.matches("tools/[^/]+\\.yaml")
+                    || lower.matches("tools/[^/]+/[^/]+\\.yaml"));
+            if (!packageTool && !(lower.endsWith("/template.yaml") || lower.endsWith("/flow.yaml"))) return false;
             if (deniedSourcePath(logical)) return false;
             if (!packageSourceAllowed(logical,resolved.canonicalPath())) return false;
             long size = Files.size(resolved.canonicalPath());
@@ -2472,7 +2528,7 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private String sourceUnavailableReason(Resource resource) {
-        if (resource != null && "tool".equals(resource.type)
+        if (resource != null && "tool".equals(resource.type) && resource.yamlSource == null
                 && resource.textSource == null && resource.textSourceCandidate == null) return "no-standalone-source";
         if (!sourceBrowsingEnabled) return "source-disabled";
         if (resource != null && resource.textSource != null) return textSourceReason(resource,resource.textSource);
@@ -2483,7 +2539,7 @@ public final class PackageResourceInspector implements AutoCloseable {
             if (!Files.exists(resource.yamlSource, LinkOption.NOFOLLOW_LINKS)) return "missing";
             String logical = resources.fromInternalPath(resource.yamlSource, PackageResourceResolver.Kind.FILE).logicalName();
             if (sensitiveSourcePath(logical)) return "sensitive-path";
-            if (!("template".equals(resource.type) || "flow".equals(resource.type))) return "visibility-policy";
+            if (!("template".equals(resource.type) || "flow".equals(resource.type) || "tool".equals(resource.type))) return "visibility-policy";
             if (!packageSourceAllowed(logical,resource.yamlSource)) return sourceDisabledOrDenied(logical);
             if (Files.size(resource.yamlSource) > maxSourceBytes) return "size-limit";
             if (!Files.isRegularFile(resource.yamlSource, LinkOption.NOFOLLOW_LINKS)) return "forbidden";

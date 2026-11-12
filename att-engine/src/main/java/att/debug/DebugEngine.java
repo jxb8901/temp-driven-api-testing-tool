@@ -819,8 +819,7 @@ public final class DebugEngine {
         }
         ToolConfig tool = findTool(id);
         if (tool == null) throw debugError("Unknown Tool '" + id + "'", "Define the Tool before creating its debug.yaml sidecar.");
-        String group = tool.groupId().isEmpty() ? tool.localKey() : tool.groupId();
-        return RuntimeConfigPath.root(runtimeConfigPath).resolve("config/tools").resolve(group + ".debug.yaml");
+        return projectRoot.resolve("tools/debug").resolve(tool.key() + ".yaml");
     }
 
     private Path safeAutoInput(String type, String id) throws Exception {
@@ -828,10 +827,6 @@ public final class DebugEngine {
         if (Files.isSymbolicLink(candidate))
             throw debugError("Debug input sidecar must not be a symbolic link", "Use a regular package-local debug.yaml file.");
         try {
-            if ("tool".equals(type)) {
-                Path configRoot = RuntimeConfigPath.root(runtimeConfigPath);
-                return new att.resource.PackageResourceResolver(configRoot).internalCandidate(candidate);
-            }
             return new att.resource.PackageResourceResolver(projectRoot).internalCandidate(candidate);
         } catch (IllegalArgumentException unsafe) {
             throw debugError("Debug input sidecar is outside the package root or unavailable",

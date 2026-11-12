@@ -536,13 +536,13 @@ class PackageConfigurationInspectorTest {
 
     @Test void stopsBeforeOpeningDescriptorBeyondTheConfiguredFileLimit() throws Exception {
         Path root = packageRoot("descriptor-limit");
-        StringBuilder config = new StringBuilder("schemaVersion: att-config/v2.12\nenvironment: SIT\ntoolGroups:\n");
+        StringBuilder config = new StringBuilder("schemaVersion: att-config/v2.13\nenvironment: SIT\ndbhelpers:\n");
         for (int i = 0; i < 512; i++) {
-            String name = "config/group-" + i + ".yaml";
+            String name = "config/dbhelpers/group-" + i + ".yaml";
             Files.createFile(root.resolve(name));
             config.append("  - ").append(name).append('\n');
         }
-        config.append("  - config/must-not-be-opened.yaml\n");
+        config.append("  - config/dbhelpers/must-not-be-opened.yaml\n");
         write(root.resolve("config/config.yaml"), config.toString());
         assertThrows(PackageConfigurationInspector.ConfigurationLimitException.class,
                 () -> inspector(root).inspect("effective", "SIT", null));

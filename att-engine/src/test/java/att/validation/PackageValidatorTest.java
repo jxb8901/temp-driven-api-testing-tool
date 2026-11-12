@@ -13,6 +13,82 @@ import static org.junit.jupiter.api.Assertions.*;
 class PackageValidatorTest {
     @TempDir Path tempDir;
 
+    @Test void groupedToolValidationRejectsMissingMemberScriptDespitePresentDispatcher() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("grouped"));
+        Path tools = Files.createDirectories(root.resolve("tools"));
+        Path group = Files.createDirectories(tools.resolve("sample"));
+        Files.write(group.resolve("tool-group.yaml"),
+                ("schemaVersion: att-tool-group/v3.0\nid: sample\nname: Sample\n"
+                 + "description: Group\nscript: [./tools/dispatcher.sh]\n"
+                 + "tools: [getAcDate.yaml]\n").getBytes("UTF-8"));
+        Files.write(group.resolve("getAcDate.yaml"),
+                ("schemaVersion: att-tool/v1\nid: getAcDate\nname: Date\n"
+                 + "description: Date tool\ncommand: [./tools/missing-date.sh]\nstdoutFormat: text\n").getBytes("UTF-8"));
+        Path dispatcher = tools.resolve("dispatcher.sh");
+        Files.write(dispatcher, "#!/bin/sh\necho dispatch\n".getBytes("UTF-8"));
+        dispatcher.toFile().setExecutable(true);
+        att.TestSchemas.install(root);
+        Path config = root.resolve("config/config.yaml");
+        Files.createDirectories(config.getParent());
+        Files.write(config, "schemaVersion: att-config/v2.13\n".getBytes("UTF-8"));
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(config, root, root, null);
+        ToolConfig member = loaded.tool("sample.getAcDate");
+        assertNotNull(member);
+        PackageValidator validator = new PackageValidator(root, loaded);
+        java.lang.reflect.Method method = PackageValidator.class.getDeclaredMethod(
+                "validateToolExecutable", ToolConfig.class);
+        method.setAccessible(true);
+        java.lang.reflect.InvocationTargetException missing =
+                assertThrows(java.lang.reflect.InvocationTargetException.class,
+                        () -> method.invoke(validator, member));
+        assertTrue(String.valueOf(missing.getCause().getMessage()).contains("missing-date.sh"),
+                String.valueOf(missing.getCause()));
+    }
+
+    @Test void missingExtensionlessInterpreterMemberAndDispatcherFailValidation() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(
+                System.getProperty("os.name", "").toLowerCase().contains("win"),
+                "This regression uses a Unix shell interpreter");
+        Path root = Files.createDirectories(tempDir.resolve("extensionless"));
+        Path tools = Files.createDirectories(root.resolve("tools"));
+        Path group = Files.createDirectories(tools.resolve("sample"));
+        Files.write(group.resolve("tool-group.yaml"),
+                ("schemaVersion: att-tool-group/v3.0\nid: sample\nname: Sample\n"
+                 + "description: Group\nscript: [bash, ./tools/dispatch]\n"
+                 + "tools: [task.yaml]\n").getBytes("UTF-8"));
+        Files.write(group.resolve("task.yaml"),
+                ("schemaVersion: att-tool/v1\nid: task\nname: Task\n"
+                 + "description: Member\ncommand: [bash, ./tools/task]\n"
+                 + "stdoutFormat: text\n").getBytes("UTF-8"));
+        Path dispatcher = tools.resolve("dispatch");
+        Files.write(dispatcher, "#!/bin/sh\necho dispatch\n".getBytes("UTF-8"));
+        att.TestSchemas.install(root);
+        Path config = root.resolve("config/config.yaml");
+        Files.createDirectories(config.getParent());
+        Files.write(config, "schemaVersion: att-config/v2.13\n".getBytes("UTF-8"));
+        ToolConfig member = new FrameworkConfigLoader().load(config, root, root, null)
+                .tool("sample.task");
+        assertNotNull(member);
+        PackageValidator validator = new PackageValidator(root,
+                new FrameworkConfigLoader().load(config, root, root, null));
+        java.lang.reflect.Method validate = PackageValidator.class.getDeclaredMethod(
+                "validateToolExecutable", ToolConfig.class);
+        validate.setAccessible(true);
+        java.lang.reflect.InvocationTargetException missingMember = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> validate.invoke(validator, member));
+        assertTrue(String.valueOf(missingMember.getCause().getMessage()).contains("task"),
+                String.valueOf(missingMember.getCause()));
+        Files.write(tools.resolve("task"), "#!/bin/sh\necho task\n".getBytes("UTF-8"));
+        assertDoesNotThrow(() -> validate.invoke(validator, member));
+        Files.delete(dispatcher);
+        java.lang.reflect.InvocationTargetException missingDispatcher = assertThrows(
+                java.lang.reflect.InvocationTargetException.class,
+                () -> validate.invoke(validator, member));
+        assertTrue(String.valueOf(missingDispatcher.getCause().getMessage()).contains("dispatch"),
+                String.valueOf(missingDispatcher.getCause()));
+    }
+
     @Test void retryConditionUsesCompletedAttemptScopeAndRejectsForbiddenCalls() throws Exception {
         FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
                 Collections.<String, ToolConfig>emptyMap(), null, null);
@@ -211,9 +287,9 @@ class PackageValidatorTest {
         Map<String, Path> sidecars = new LinkedHashMap<String, Path>();
         sidecars.put("template", tempDir.resolve("templates/T/debug.yaml"));
         sidecars.put("flow", tempDir.resolve("templates/flows/g/e/debug.yaml"));
-        sidecars.put("plain tool", tempDir.resolve("config/tools/plain.debug.yaml"));
-        sidecars.put("grouped tool", tempDir.resolve("config/tools/g.debug.yaml"));
-        for (Path sidecar : sidecars.values()) Files.write(sidecar, historical.getBytes("UTF-8"));
+        sidecars.put("plain tool", tempDir.resolve("tools/debug/plain.yaml"));
+        sidecars.put("grouped tool", tempDir.resolve("tools/debug/g.named.yaml"));
+        for (Path sidecar : sidecars.values()) { Files.createDirectories(sidecar.getParent()); Files.write(sidecar, historical.getBytes("UTF-8")); }
 
         PackageValidator.ValidationSummary summary = new PackageValidator(tempDir, config)
                 .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
@@ -241,7 +317,7 @@ class PackageValidatorTest {
         PackageValidator.ValidationSummary optional = new PackageValidator(tempDir, config)
                 .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
         assertFalse(optional.diagnostics.stream().anyMatch(item -> item.code().equals(DiagnosticCodes.DEBUG_INVALID)
-                && item.message().contains("config/tools/g.debug.yaml")));
+                && item.message().contains("tools/debug/g.named.yaml")));
     }
 
     @Test void projectFileCallsFollowNormalToolAndHelperValidation() throws Exception {
@@ -1313,6 +1389,120 @@ class PackageValidatorTest {
         java.lang.reflect.InvocationTargetException error = assertThrows(java.lang.reflect.InvocationTargetException.class,
                 () -> contract.invoke(validator, template, config));
         assertTrue(String.valueOf(error.getCause().getMessage()).contains("Duplicate EXEC.VARS assignment"));
+    }
+
+    @Test void validateSetOrderingAllowsConditionalAndCallerProvidedFlowTargets() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String,ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues",
+                StageTemplate.class, att.core.TestCase.class, att.core.StageCaseData.class,
+                FrameworkConfig.class, Path.class, Set.class);
+        values.setAccessible(true);
+        att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "T", Collections.<String,Object>emptyMap());
+        att.core.TestCase testCase = new att.core.TestCase(2, "book", "sheet", "TC1", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
+        Path caseFile = tempDir.resolve("cases.xlsx");
+
+        StageTemplate missing = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("tooEarly", map("type", "set", "name", "counter", "expression", "1", "onFailure", "continue"), att.Version.TEMPLATE_SCHEMA),
+                new TemplateAction("assignLater", map("type", "assign", "name", "counter", "expression", "1"), att.Version.TEMPLATE_SCHEMA)),
+                att.Version.TEMPLATE_SCHEMA);
+        java.lang.reflect.InvocationTargetException early = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> values.invoke(validator, missing, testCase, stage, config, caseFile, new LinkedHashSet<String>()));
+        DiagnosticException missingVariable = DiagnosticException.find(early.getCause());
+        assertNotNull(missingVariable);
+        assertEquals(DiagnosticCodes.CONTEXT_INVALID, missingVariable.code());
+        assertEquals("actions.tooEarly.name", missingVariable.field());
+
+        StageTemplate conditional = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("maybe", map("type", "set", "name", "counter", "expression", "1", "runWhen", "false"), att.Version.TEMPLATE_SCHEMA),
+                new TemplateAction("assignAfterSkip", map("type", "assign", "name", "counter", "expression", "1"), att.Version.TEMPLATE_SCHEMA)),
+                att.Version.TEMPLATE_SCHEMA);
+        assertDoesNotThrow(() -> {
+            try { values.invoke(validator, conditional, testCase, stage, config, caseFile, new LinkedHashSet<String>()); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+            catch (Exception e) { throw new RuntimeException(e); }
+        });
+
+        Path flowDirectory = tempDir.resolve("templates/flows/caller-counter");
+        Files.createDirectories(flowDirectory);
+        Files.write(flowDirectory.resolve("flow.yaml"), ("schemaVersion: att-flow/v3.6\nid: common.caller-counter.v1\n"
+                + "name: Caller counter\ndescription: Update a caller value\nactions:\n"
+                + "  increment: {type: set, name: counter, expression: '#{${EXEC.VARS.counter} + 1}'}\n")
+                .getBytes("UTF-8"));
+        java.lang.reflect.Field registryField = PackageValidator.class.getDeclaredField("flows");
+        registryField.setAccessible(true);
+        registryField.set(validator, new att.flow.FlowRegistry(tempDir, tempDir.resolve("templates")));
+        Map<String,Object> flowCall = map("type", "flow", "use", "common.caller-counter.v1", "runWhen", "false");
+        StageTemplate caller = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("update", flowCall, att.Version.TEMPLATE_SCHEMA),
+                new TemplateAction("assignAfterFlow", map("type", "assign", "name", "counter", "expression", "2"), att.Version.TEMPLATE_SCHEMA)), att.Version.TEMPLATE_SCHEMA);
+        java.lang.reflect.Method bootstrapValues = PackageValidator.class.getDeclaredMethod("validateTemplateValues",
+                StageTemplate.class, att.core.TestCase.class, att.core.StageCaseData.class,
+                FrameworkConfig.class, Path.class, Set.class, String.class, Map.class, Map.class);
+        bootstrapValues.setAccessible(true);
+        assertDoesNotThrow(() -> {
+            try { bootstrapValues.invoke(validator, caller, testCase, stage, config, caseFile,
+                    new LinkedHashSet<String>(), "debug", null, Collections.<String,Object>singletonMap("counter", 0)); }
+            catch (java.lang.reflect.InvocationTargetException e) { throw new RuntimeException(e.getCause()); }
+            catch (Exception e) { throw new RuntimeException(e); }
+        });
+    }
+
+    @Test void validateSetConsumesBootstrapAssignAllowanceButDoesNotReplaceDuplicateAssignGuard() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String,ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method values = PackageValidator.class.getDeclaredMethod("validateTemplateValues",
+                StageTemplate.class, att.core.TestCase.class, att.core.StageCaseData.class,
+                FrameworkConfig.class, Path.class, Set.class, String.class, Map.class, Map.class);
+        values.setAccessible(true);
+        att.core.StageCaseData stage = new att.core.StageCaseData("invoke", "T", Collections.<String,Object>emptyMap());
+        att.core.TestCase testCase = new att.core.TestCase(2, "book", "sheet", "TC1", Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(), Collections.singletonMap("invoke", stage), null);
+        StageTemplate template = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("setValue", map("type", "set", "name", "counter", "expression", "2"), att.Version.TEMPLATE_SCHEMA),
+                new TemplateAction("assignAgain", map("type", "assign", "name", "counter", "expression", "3"), att.Version.TEMPLATE_SCHEMA)),
+                att.Version.TEMPLATE_SCHEMA);
+        java.lang.reflect.InvocationTargetException duplicate = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> values.invoke(validator, template, testCase, stage, config, tempDir.resolve("cases.xlsx"),
+                        new LinkedHashSet<String>(), "debug", null, Collections.<String,Object>singletonMap("counter", 1)));
+        DiagnosticException error = DiagnosticException.find(duplicate.getCause());
+        assertNotNull(error);
+        assertEquals(DiagnosticCodes.CONTEXT_INVALID, error.code());
+        assertEquals("actions.assignAgain.name", error.field());
+    }
+
+    @Test void validateSetSupportsTheCommonRetryContractAndRequiresAnAssertionForAssertionRetries() throws Exception {
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 1000, tempDir,
+                Collections.<String,ToolConfig>emptyMap(), null, null);
+        PackageValidator validator = new PackageValidator(tempDir, config);
+        java.lang.reflect.Method contract = PackageValidator.class.getDeclaredMethod(
+                "validateTemplate", StageTemplate.class, FrameworkConfig.class);
+        contract.setAccessible(true);
+        Map<String,Object> assignment = map("type", "assign", "name", "counter", "expression", "#{0}");
+        Map<String,Object> retry = map("maxAttempts", 2, "intervalMs", 0,
+                "retryOn", Collections.singletonList("ASSERTION"));
+        TemplateAction setWithAssertion = new TemplateAction("retrySet", map("type", "set", "name", "counter",
+                "expression", "#{10}", "assert", "${output.result} == 10", "retry", retry), att.Version.TEMPLATE_SCHEMA);
+        StageTemplate valid = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("initialize", assignment, att.Version.TEMPLATE_SCHEMA), setWithAssertion),
+                att.Version.TEMPLATE_SCHEMA);
+        assertDoesNotThrow(() -> {
+            try { contract.invoke(validator, valid, config); }
+            catch (java.lang.reflect.InvocationTargetException error) { throw new RuntimeException(error.getCause()); }
+            catch (Exception error) { throw new RuntimeException(error); }
+        });
+
+        TemplateAction missingAssertion = new TemplateAction("retrySet", map("type", "set", "name", "counter",
+                "expression", "#{10}", "retry", retry), att.Version.TEMPLATE_SCHEMA);
+        StageTemplate invalid = new StageTemplate("T", tempDir, Arrays.asList(
+                new TemplateAction("initialize", assignment, att.Version.TEMPLATE_SCHEMA), missingAssertion),
+                att.Version.TEMPLATE_SCHEMA);
+        java.lang.reflect.InvocationTargetException thrown = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> contract.invoke(validator, invalid, config));
+        assertTrue(String.valueOf(thrown.getCause().getMessage()).contains("retryOn ASSERTION requires action assert"));
     }
 
     private void assertExpandedCollision(java.lang.reflect.Method contract, PackageValidator validator,

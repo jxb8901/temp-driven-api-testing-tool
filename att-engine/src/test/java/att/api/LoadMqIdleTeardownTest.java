@@ -32,7 +32,7 @@ class LoadMqIdleTeardownTest {
         writeHelper(root, "toeaimq", "hk02", 1);
         Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.11\n"
                 + "outputDirectory: output\nenvironment: SIT\ntemplates: {root: templates}\n"
-                + "testcase: {root: testcase}\ntools: {}\n"
+                + "testcase: {root: testcase}\n"
                 + "mqhelpers: [config/mqhelpers/fromeaimqhk.yaml, config/mqhelpers/fromeaimqcb.yaml, config/mqhelpers/toeaimq.yaml]\n")
                 .getBytes("UTF-8"));
         Files.write(root.resolve("templates/SIMPLE/template.yaml"), ("schemaVersion: att-template/v3.4\n"

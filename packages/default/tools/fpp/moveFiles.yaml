@@ -1,0 +1,23 @@
+schemaVersion: att-tool/v1
+id: moveFiles
+name: Move matching files
+description: Move regular files matching one filename glob between directories after collision preflight
+command: [./tools/fpp_move_files.sh, "${input.sourceDirectory}", "${input.pattern}", "${input.targetDirectory}", "${input.overwrite}"]
+stdoutFormat: yaml
+arguments:
+  sourceDirectory:
+    name: Source Directory
+    description: Directory containing the prepared input files
+    required: true
+  pattern:
+    name: Filename Pattern
+    description: Filename glob evaluated only within the source directory
+    required: true
+  targetDirectory:
+    name: Target Directory
+    description: Destination directory
+    required: true
+  overwrite:
+    name: Overwrite
+    description: true to replace existing target files; false to reject every collision
+    required: true

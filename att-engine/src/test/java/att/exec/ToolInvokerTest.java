@@ -284,6 +284,89 @@ class ToolInvokerTest {
         assertNotNull(((Map<?,?>)((Map<?,?>)result.invocation().get("TOOL")).get("database")).get("select"));
     }
 
+    @Test void rebasesPackageLocalExecutableAndInterpreterScriptForLocalExecution() throws Exception {
+        Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("value",
+                new ToolArgumentConfig("value", "Value", "Value", true, ""));
+        ToolConfig standalone = new ToolConfig("sendPayment", "sendPayment", "", "Send Payment", "Package script",
+                Arrays.asList("tools/scripts/send-payment.sh", "${value}"), Collections.<String>emptyList(),
+                "text", arguments, null);
+        ToolConfig interpreted = new ToolConfig("runTask", "runTask", "", "Run Task", "Extensionless script",
+                Arrays.asList("bash", "-e", "./tools/task", "${value}"), Collections.<String>emptyList(),
+                "text", arguments, null);
+        Map<String, ToolConfig> tools = new LinkedHashMap<String, ToolConfig>();
+        tools.put(standalone.key(), standalone);
+        tools.put(interpreted.key(), interpreted);
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir,
+                tools, null, null);
+        CapturingRunner runner = new CapturingRunner();
+        ToolInvoker invoker = new ToolInvoker(tempDir, config, runner);
+        CaseRuntimeContext context = context();
+        context.setCommandWorkingDirectory(tempDir.resolve("load/run/executions/iteration-1"));
+
+        ToolInvocationResult direct = invoker.invokeAttempt("direct", "sendPayment",
+                Collections.<String, Object>singletonMap("value", "RUN"), context,
+                new CaseExecutionLog(tempDir.resolve("direct.log")), 1000L);
+        assertEquals(Arrays.asList(tempDir.resolve("tools/scripts/send-payment.sh").toString(), "RUN"), runner.argv);
+        assertEquals(Arrays.asList("tools/scripts/send-payment.sh", "RUN"), direct.invocation().get("logicalArgv"));
+        assertEquals(context.commandWorkingDirectory(), runner.workingDirectory);
+
+        ToolInvocationResult script = invoker.invokeAttempt("script", "runTask",
+                Collections.<String, Object>singletonMap("value", "DEBUG"), context,
+                new CaseExecutionLog(tempDir.resolve("script.log")), 1000L);
+        assertEquals(Arrays.asList("bash", "-e", tempDir.resolve("tools/task").toString(), "DEBUG"), runner.argv);
+        assertEquals(Arrays.asList("bash", "-e", "./tools/task", "DEBUG"), script.invocation().get("logicalArgv"));
+    }
+
+    @Test void resolvesGroupDispatcherAndMemberWithoutTouchingRuntimeArguments() throws Exception {
+        Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("value",
+                new ToolArgumentConfig("value", "Value", "Value", true, ""));
+        ToolConfig grouped = new ToolConfig("payments.send", "send", "payments", "Send", "Send payment",
+                Arrays.asList("tools/scripts/member.sh", "${value}"), Arrays.asList("bash", "./tools/dispatch"),
+                "text", arguments, null);
+        FrameworkConfig config = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir,
+                Collections.singletonMap(grouped.key(), grouped), null, null);
+        CapturingRunner runner = new CapturingRunner();
+        CaseRuntimeContext context = context();
+        context.setCommandWorkingDirectory(tempDir.resolve("workspace"));
+
+        new ToolInvoker(tempDir, config, runner).invokeAttempt("grouped", grouped.key(),
+                Collections.<String, Object>singletonMap("value", "LOAD"), context,
+                new CaseExecutionLog(tempDir.resolve("grouped.log")), 1000L);
+
+        assertEquals(Arrays.asList("bash", tempDir.resolve("tools/dispatch").toString(), "send",
+                tempDir.resolve("tools/scripts/member.sh").toString(), "LOAD"), runner.argv);
+    }
+
+    @Test void doesNotRebaseDynamicInterpreterOperandOrRemoteSshArgv() throws Exception {
+        Map<String, ToolArgumentConfig> arguments = Collections.singletonMap("script",
+                new ToolArgumentConfig("script", "Script", "Runtime script argument", true, ""));
+        ToolConfig local = new ToolConfig("dynamic", "dynamic", "", "Dynamic", "Dynamic script path",
+                Arrays.asList("bash", "${script}"), Collections.<String>emptyList(), "text", arguments, null);
+        FrameworkConfig localConfig = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir,
+                Collections.singletonMap(local.key(), local), null, null);
+        CapturingRunner localRunner = new CapturingRunner();
+        new ToolInvoker(tempDir, localConfig, localRunner).invokeAttempt("dynamic", local.key(),
+                Collections.<String, Object>singletonMap("script", "tools/runtime-script.sh"), context(),
+                new CaseExecutionLog(tempDir.resolve("dynamic.log")), 1000L);
+        assertEquals(Arrays.asList("bash", "tools/runtime-script.sh"), localRunner.argv);
+
+        SshConfig ssh = new SshConfig("tools.example", "att", 2222, "");
+        ToolConfig remote = new ToolConfig("remote.run", "run", "remote", "Remote", "Remote script",
+                Arrays.asList("bash", "./tools/task"), Collections.<String>emptyList(), "text",
+                Collections.<String, ToolArgumentConfig>emptyMap(), ssh);
+        FrameworkConfig remoteConfig = new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir,
+                Collections.singletonMap(remote.key(), remote), null, null);
+        CapturingRunner remoteRunner = new CapturingRunner();
+        SshCommandRunner sshRunner = new SshCommandRunner(remoteRunner, () -> true,
+                (target, command, timeout, root) -> { throw new AssertionError("Java fallback must not run"); }, System.err);
+        ToolInvocationResult result = new ToolInvoker(tempDir, remoteConfig, remoteRunner, sshRunner).invokeAttempt(
+                "remote", remote.key(), Collections.<String, Object>emptyMap(), context(),
+                new CaseExecutionLog(tempDir.resolve("remote.log")), 1000L);
+        assertEquals(Arrays.asList("bash", "./tools/task"), result.invocation().get("logicalArgv"));
+        assertTrue(remoteRunner.argv.toString().contains("./tools/task"), remoteRunner.argv.toString());
+        assertFalse(remoteRunner.argv.toString().contains(tempDir.resolve("tools/task").toString()), remoteRunner.argv.toString());
+    }
+
     @Test void wrapsLogicalArgvForSshWithSafeRemoteQuoting() throws Exception {
         Map<String,ToolArgumentConfig> arguments = new LinkedHashMap<String,ToolArgumentConfig>();
         arguments.put("value", new ToolArgumentConfig("value", "Value", "Value", true, "", "--value"));

@@ -131,8 +131,8 @@ class DebugEngineTest {
                 + "    details:\n      message: 'temporary credential is violet-123'\n"
                 + "  values: ['array secret one', '[REDACTED]']\n  overrideValue: original\n"
                 + "vars: {orderId: ORD-PRIVATE-123}\n").getBytes(StandardCharsets.UTF_8));
-        Path tools = Files.createDirectories(project.resolve("config/tools"));
-        Files.write(tools.resolve("echo.debug.yaml"), ("schemaVersion: att-debug/v1.2\n"
+        Path tools = Files.createDirectories(project.resolve("tools/debug"));
+        Files.write(tools.resolve("echo.yaml"), ("schemaVersion: att-debug/v1.2\n"
                 + "arguments: {value: 'tool argument secret: private-tool-value'}\n").getBytes(StandardCharsets.UTF_8));
         Map<String, ToolArgumentConfig> args = Collections.singletonMap("value",
                 new ToolArgumentConfig("value", "Value", "Value", true, ""));
@@ -277,10 +277,9 @@ class DebugEngineTest {
                 java.util.Arrays.asList("/bin/echo", "${value}"), Collections.<String>emptyList(), "txt", arguments, null);
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.singletonMap("group.echo", grouped), null, null);
-        Files.createDirectories(project.resolve("config/tools"));
-        Files.write(project.resolve("config/tools/group.debug.yaml"), (
-                "schemaVersion: att-debug/v1.2\narguments: {value: from-root}\n"
-                        + "tools:\n  echo:\n    arguments: {value: from-group}\n")
+        Files.createDirectories(project.resolve("tools/debug"));
+        Files.write(project.resolve("tools/debug/group.echo.yaml"), (
+                "schemaVersion: att-debug/v1.2\narguments: {value: from-group}\n")
                 .getBytes(StandardCharsets.UTF_8));
 
         DebugEngine.Result withoutOverride = run(project, config, "tool", "group.echo");
@@ -305,8 +304,8 @@ class DebugEngineTest {
                 java.util.Arrays.asList("/bin/echo", "${value}"), Collections.<String>emptyList(), "txt", arguments, null);
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.singletonMap(tool.key(), tool), null, null);
-        Files.createDirectories(project.resolve("config/tools"));
-        Files.write(project.resolve("config/tools/group.debug.yaml"), ("schemaVersion: att-debug/v1.2\n"
+        Files.createDirectories(project.resolve("tools/debug"));
+        Files.write(project.resolve("tools/debug/group.x-disabled.yaml"), ("schemaVersion: att-debug/v1.2\n"
                 + "arguments: {value: from-root}\ntools:\n  x-disabled:\n    arguments: {value: from-disabled-override}\n"
                 + "  x-malformed: [not, a, tool override]\n").getBytes(StandardCharsets.UTF_8));
 
@@ -718,8 +717,8 @@ class DebugEngineTest {
                 "schemaVersion: att-debug/v1.2\ncase:\n  value: sidecar\n  caseId: EVIL\n  outputDirectory: EVIL\n  VARS: EVIL\n  STAGES: EVIL\n" ).getBytes(StandardCharsets.UTF_8));
         Files.write(project.resolve("templates/flows/debug/echo/debug.yaml"), (
                 "schemaVersion: att-debug/v1.2\ninputs:\n  message: hello\n" ).getBytes(StandardCharsets.UTF_8));
-        Files.createDirectories(project.resolve("config/tools"));
-        Files.write(project.resolve("config/tools/echo.debug.yaml"), (
+        Files.createDirectories(project.resolve("tools/debug"));
+        Files.write(project.resolve("tools/debug/echo.yaml"), (
                 "schemaVersion: att-debug/v1.2\narguments:\n  value: hello-tool\n" ).getBytes(StandardCharsets.UTF_8));
         return project;
     }

@@ -1,0 +1,14 @@
+schemaVersion: att-tool/v1
+id: updateStatus
+name: Update order status
+description: Update one order; callable only as the primary call of a tool Action
+call: "#{db.orders.update(sql='update orders set status = ? where order_id = ?', params=[${input.status}, ${input.orderId}])}"
+arguments:
+  orderId:
+    name: Order ID
+    description: Order to update
+    required: true
+  status:
+    name: Status
+    description: New order status
+    required: true

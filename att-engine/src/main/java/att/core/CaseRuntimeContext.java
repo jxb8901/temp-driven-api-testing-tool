@@ -75,6 +75,8 @@ public final class CaseRuntimeContext {
     private Map<String, Object> bootstrapVariableDefinitions = Collections.emptyMap();
     /** Bootstrap names may be replaced by the first normal assign. */
     private final java.util.Set<String> bootstrapSeededVariableNames = new java.util.LinkedHashSet<String>();
+    /** Validation-only names whose EXEC.VARS existence/assign allowance depends on caller control flow. */
+    private final java.util.Set<String> validationUncertainVariableNames = new java.util.LinkedHashSet<String>();
     /** ATT-owned diagnostics, deliberately excluded from the expression Context. */
     private final Map<String, Object> diagnosticsNode = new LinkedHashMap<String, Object>();
     /** Public uppercase load identity published below EXEC.LOAD. */
@@ -997,13 +999,65 @@ public final class CaseRuntimeContext {
     public void requireCaseVariableAvailable(String name) {
         validateCaseVariableName(name);
         Map<String, Object> variables = varsNode;
-        if (variables.containsKey(name) && !bootstrapSeededVariableNames.contains(name)) {
+        if (variables.containsKey(name) && !bootstrapSeededVariableNames.contains(name)
+                && !validationUncertainVariableNames.contains(name)) {
             throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
                     "Duplicate EXEC.VARS assignment '${EXEC.VARS." + name + "}'",
                     "The variable was already assigned earlier in this Test Case.", null, "name",
                     null, null, null, null, null,
                     "Use a unique name; assign does not overwrite scoped variables.", null);
         }
+    }
+
+    /** Fails unless the named top-level EXEC.VARS entry already exists. */
+    public void requireCaseVariablePresent(String name) {
+        validateCaseVariableName(name);
+        if (!varsNode.containsKey(name)) {
+            throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
+                    "EXEC.VARS variable '${EXEC.VARS." + name + "}' is not initialized",
+                    "set can update only an existing top-level EXEC.VARS variable.", null, "name",
+                    null, null, null, null, null,
+                    "Use an assign Action first or define this name in the execution bootstrap vars.", null);
+        }
+    }
+
+    /** Whether the variable exists in this Context (including validation placeholders). */
+    public boolean hasCaseVariable(String name) {
+        validateCaseVariableName(name);
+        return varsNode.containsKey(name);
+    }
+
+    /** True when a variable was seeded by Debug/Load bootstrap and has not been replaced. */
+    public boolean isBootstrapCaseVariable(String name) {
+        validateCaseVariableName(name);
+        return bootstrapSeededVariableNames.contains(name);
+    }
+
+    /** True only for validation placeholders whose caller-provided existence is unknown. */
+    public boolean isValidationCaseVariableUncertain(String name) {
+        validateCaseVariableName(name);
+        return validationUncertainVariableNames.contains(name);
+    }
+
+    /** Publishes a validation-only value after a statically known assignment. */
+    public void publishValidationCaseVariable(String name) {
+        validateCaseVariableName(name);
+        varsNode.put(name, DEFERRED_VALIDATION_VALUE);
+        bootstrapSeededVariableNames.remove(name);
+        validationUncertainVariableNames.remove(name);
+    }
+
+    /** Publishes a validation-only value after an assignment Action has completed. */
+    public void noteValidationCaseVariableAssigned(String name) {
+        publishValidationCaseVariable(name);
+    }
+
+    /** Records a set whose target availability or bootstrap allowance depends on its caller. */
+    public void markValidationCaseVariableUncertain(String name) {
+        validateCaseVariableName(name);
+        if (!varsNode.containsKey(name)) putValidationPlaceholder("EXEC.VARS." + name);
+        bootstrapSeededVariableNames.remove(name);
+        validationUncertainVariableNames.add(name);
     }
 
     private static void validateCaseVariableName(String name) {
@@ -1021,6 +1075,15 @@ public final class CaseRuntimeContext {
         Map<String, Object> variables = varsNode;
         variables.put(name, value);
         bootstrapSeededVariableNames.remove(name);
+        validationUncertainVariableNames.remove(name);
+    }
+
+    /** Updates an existing top-level EXEC.VARS value after the caller has evaluated it. */
+    public void setCaseVariable(String name, Object value) {
+        requireCaseVariablePresent(name);
+        varsNode.put(name, value);
+        bootstrapSeededVariableNames.remove(name);
+        validationUncertainVariableNames.remove(name);
     }
 
     @SuppressWarnings("unchecked")

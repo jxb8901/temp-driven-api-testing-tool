@@ -1,6 +1,7 @@
 package att.resource;
 
 import att.config.PackageConfig;
+import att.config.PackageToolScripts;
 import att.config.RuntimeConfigPath;
 import att.config.SchemaSupport;
 import att.config.YamlSupport;
@@ -58,6 +59,62 @@ final class PackageSourceRevision {
         binding(digest, root, candidate.templatesRoot());
         binding(digest, root, candidate.testcaseRoot());
         for (Path dependency : business) file(digest, root, dependency, bytes);
+        Path toolRoot = root.resolve("tools");
+        text(digest, "tools/");
+        if (Files.exists(toolRoot, LinkOption.NOFOLLOW_LINKS)) {
+            if (Files.isSymbolicLink(toolRoot) || !Files.isDirectory(toolRoot, LinkOption.NOFOLLOW_LINKS))
+                throw new IOException("Unsafe Package tools/ directory");
+            // Include selected Group manifests and their explicit members in the source revision.
+            // Do not recursively discover incidental YAML under tools/scripts/.
+            Set<Path> descriptors = new TreeSet<Path>();
+            try (java.util.stream.Stream<Path> stream = Files.list(toolRoot)) {
+                for (Path entry : (Iterable<Path>) stream::iterator) {
+                    if (Files.isSymbolicLink(entry)) throw new IOException("Unsafe Package Tool entry");
+                    if (Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)
+                            && entry.getFileName().toString().endsWith(".yaml")) descriptors.add(entry);
+                    if (!Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS)) continue;
+                    Path manifest = entry.resolve("tool-group.yaml");
+                    if (!Files.exists(manifest, LinkOption.NOFOLLOW_LINKS)) continue;
+                    descriptors.add(manifest);
+                    Object parsed = YamlSupport.load(manifest);
+                    if (!(parsed instanceof Map) || !(((Map<?, ?>) parsed).get("tools") instanceof List))
+                        throw new IOException("Invalid Package Tool Group manifest: " + manifest);
+                    for (Object member : (List<?>) ((Map<?, ?>) parsed).get("tools")) {
+                        if (!(member instanceof String) || !((String) member).matches("[A-Za-z_][A-Za-z0-9_.-]*[.]yaml")
+                                || ((String) member).contains(".."))
+                            throw new IOException("Invalid Package Tool Group member path");
+                        descriptors.add(entry.resolve((String) member));
+                    }
+                }
+            }
+            if (descriptors.size() + business.size() + shared.size() > MAX_DEPENDENCIES)
+                throw limit("dependency count");
+            for (Path descriptor : descriptors) file(digest, root, descriptor, bytes);
+            // A queued/prewarmed Job must become stale on script changes even if
+            // the tool YAML and group manifest remain byte-for-byte unchanged.
+            Set<Path> scripts = new TreeSet<Path>();
+            for (Path descriptor : descriptors) {
+                if (!Files.isRegularFile(descriptor, LinkOption.NOFOLLOW_LINKS)) continue;
+                Object authored = YamlSupport.load(descriptor);
+                if (!(authored instanceof Map)) continue;
+                Map<?, ?> fields = (Map<?, ?>) authored;
+                scripts.addAll(PackageToolScripts.referencedArgv(root, fields.get("script")));
+                scripts.addAll(PackageToolScripts.referencedArgv(root, fields.get("command")));
+                if (scripts.size() + descriptors.size() + business.size() + shared.size() > MAX_DEPENDENCIES)
+                    throw limit("dependency count");
+            }
+            text(digest, "tool-scripts/");
+            for (Path script : scripts) {
+                if (PackageToolScripts.isSafeRegularScript(root, script)) {
+                    file(digest, root, script, bytes);
+                } else {
+                    // A symlink or unavailable path must never be followed while
+                    // hashing. Record its logical identity and a stable marker.
+                    text(digest, root.relativize(script).toString().replace('\\', '/'));
+                    text(digest, "unavailable-tool-script");
+                }
+            }
+        }
         text(digest, att.validation.SchemaFiles.registryDigest());
         StringBuilder result = new StringBuilder();
         for (byte value : digest.digest()) result.append(String.format("%02x", value & 255));
@@ -65,7 +122,7 @@ final class PackageSourceRevision {
     }
 
     private static void imports(Map<?, ?> source, Path runtime, Set<Path> paths) throws IOException {
-        for (String field : new String[]{"toolGroups", "dbhelpers", "mqhelpers", "httphelpers", "sshhelpers"}) {
+        for (String field : new String[]{"dbhelpers", "mqhelpers", "httphelpers", "sshhelpers"}) {
             Object configured = source.get(field);
             if (!(configured instanceof Iterable)) continue; // The configuration loader diagnoses invalid contracts.
             for (Object item : (Iterable<?>) configured) {

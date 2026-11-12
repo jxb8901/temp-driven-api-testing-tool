@@ -14,7 +14,7 @@ assert: "#{${EXEC.INPUT.amount} > 0}"
 description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 ~~~
 
-依各欄位支援的形式使用 expression。File-content 內容、Action description/assert、Log message/value、assign expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](actions.md)。
+依各欄位支援的形式使用 expression。File-content 內容、Action description/assert、Log message/value、assign/set expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](actions.md)。
 
 ## File-content expression
 

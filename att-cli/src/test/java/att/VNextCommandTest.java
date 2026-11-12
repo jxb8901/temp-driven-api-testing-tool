@@ -68,7 +68,7 @@ class VNextCommandTest {
         Path script=pkg.resolve("record-tool.sh");
         Files.createDirectories(config.getParent());Files.createDirectories(pkg.resolve("templates"));
         Files.createDirectories(pkg.resolve("testcase"));Files.createDirectories(pkg.resolve("tools"));
-        Files.createDirectories(home.resolve("config/tools"));
+        Files.createDirectories(pkg.resolve("tools/debug"));
         TestSchemas.install(home);
         Files.write(script,("#!/bin/sh\nprintf invoked >> '"+marker.toString()+"'\nprintf 'ok\n'\n").getBytes(StandardCharsets.UTF_8));
         Files.setPosixFilePermissions(script,java.util.EnumSet.of(
@@ -76,11 +76,11 @@ class VNextCommandTest {
                 java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
                 java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE));
         Files.write(config,("schemaVersion: att-config/v2.13\noutputDirectory: output\nenvironment: SIT\n"
-                +"templates: {root: templates}\ntestcase: {root: testcase}\ntools:\n  recording:\n"
-                +"    name: Recording tool\n    description: Records a Tool invocation\n"
-                +"    command: [\"./record-tool.sh\"]\n"
-                +"    stdoutFormat: text\n    arguments: {}\n").getBytes(StandardCharsets.UTF_8));
-        Files.write(home.resolve("config/tools/recording.debug.yaml"),
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(pkg.resolve("tools/recording.yaml"),("schemaVersion: att-tool/v1\nid: recording\n"
+                +"name: Recording tool\ndescription: Records a Tool invocation\n"
+                +"command: [\"./record-tool.sh\"]\nstdoutFormat: text\narguments: {}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(pkg.resolve("tools/debug/recording.yaml"),
                 "schemaVersion: att-debug/v1.2\narguments: {}\n".getBytes(StandardCharsets.UTF_8));
 
         att.api.DebugResult control=new att.api.DefaultAttService().debug(new att.api.DebugRequest(pkg,config,null,null,

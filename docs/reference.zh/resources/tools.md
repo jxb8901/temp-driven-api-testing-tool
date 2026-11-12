@@ -1,17 +1,19 @@
 # Tool
 
-Tool 是具名的 external 或 framework-native capability。Descriptor 必須二選一使用 command 或 call。
+Tool 是所選 Package 專屬的具名 external 或 framework-native capability。每個 `tools/*.yaml` 檔案包含一份 `att-tool/v1` descriptor，且必須二選一使用 command 或 call。全局 DB/MQ/HTTP/SSH Helpers 仍由 Runtime Config 管理。
 
 ## Command-backed Tool
 
 Command Tool 使用 stdoutFormat 將外部 stdout 解析為型別化結果：
 
 ~~~yaml
-tools:
-  queryOrder:
-    command: [./tools/query-order.sh]
-    stdoutFormat: json
-    arguments: {}
+schemaVersion: att-tool/v1
+id: queryOrder
+name: queryOrder
+description: Package Tool queryOrder
+command: [./tools/query-order.sh]
+stdoutFormat: json
+arguments: {}
 ~~~
 
 stdoutFormat 支援 text、json、yaml、xml。ATT 只解析一次 stdout，再將 typed value 發布於 output.result。此欄位不控制人類可讀日誌或檔案輸出。Exit code、有界 stdout/stderr preview 和 process artifacts 都屬於 evidence。
@@ -21,14 +23,14 @@ stdoutFormat 支援 text、json、yaml、xml。ATT 只解析一次 stdout，再�
 Call-backed Tool 呼叫 built-in 或支援的原生 DB/MQ/HTTP/SSH operation，其 native typed return value 發布於 output.result。Call-backed descriptor 不宣告 stdoutFormat。
 
 ~~~yaml
-tools:
-  queryOrder:
-    call: "#{db.orders.query(sql='select id from orders where id=:id', parameters={id: ${input.orderId}})}"
-    arguments:
-      orderId:
-        name: Order ID
-        description: Order key
-        required: true
+schemaVersion: att-tool/v1
+id: queryOrder
+call: "#{db.orders.query(sql='select id from orders where id=:id', parameters={id: ${input.orderId}})}"
+arguments:
+  orderId:
+    name: Order ID
+    description: Order key
+    required: true
 ~~~
 
 Tool invocation 沒有 result.format/path/overwrite 契約。檔案持久化只由明確定義該 API 的 resource 負責；人類可讀表示屬於 Log 或配置的 evidence output。HTTP/MQ/SSH parsing 或 transfer 由各自 transport boundary 管理。
@@ -52,24 +54,24 @@ Tool 的 `command` 也擁有獨立的受限 Context，只能引用該 Tool `argu
 例如：
 
 ```yaml
-tools:
-  invokePaymentApi:
-    name: Invoke Payment API
-    description: Invoke a file-content payment request
-    command:
-      - ./tools/invoke_payment_api.sh
-      - "${input.requestText}"
-      - "${input.environment}"
-    stdoutFormat: json
-    arguments:
-      requestText:
-        name: Request Body
-        description: Request body String
-        required: true
-      environment:
-        name: Environment
-        description: Target environment
-        required: true
+schemaVersion: att-tool/v1
+id: invokePaymentApi
+name: Invoke Payment API
+description: Invoke a file-content payment request
+command:
+  - ./tools/invoke_payment_api.sh
+  - "${input.requestText}"
+  - "${input.environment}"
+stdoutFormat: json
+arguments:
+  requestText:
+    name: Request Body
+    description: Request body String
+    required: true
+  environment:
+    name: Environment
+    description: Target environment
+    required: true
 ```
 
 每個 YAML command list item 在 interpolation 後仍是一個 atomic argv；值中含空格、引號或類似 shell 的字符也不會再次分詞。ATT 不會啟動本地 shell。
@@ -81,21 +83,21 @@ Tool call 內的引號屬於 ATT expression grammar，並不是 shell quote。�
 以下 Tool 會把每個輸入保持為一個 argv：
 
 ```yaml
-tools:
-  writeAudit:
-    name: Write audit
-    description: Write one audit message for one source file
-    command: [./tools/write_audit.sh, "${input.message}", "${input.sourceFile}"]
-    stdoutFormat: yaml
-    arguments:
-      message:
-        name: Message
-        description: Exact audit message
-        required: true
-      sourceFile:
-        name: Source file
-        description: File associated with the message
-        required: true
+schemaVersion: att-tool/v1
+id: writeAudit
+name: Write audit
+description: Write one audit message for one source file
+command: [./tools/write_audit.sh, "${input.message}", "${input.sourceFile}"]
+stdoutFormat: yaml
+arguments:
+  message:
+    name: Message
+    description: Exact audit message
+    required: true
+  sourceFile:
+    name: Source file
+    description: File associated with the message
+    required: true
 ```
 
 當 call 同時包含多層引號時，建議使用 YAML block scalar：
@@ -149,12 +151,27 @@ Call-backed Tool 使用相同的聲明參數理念，但保留 typed value，並
 
 ## Inline Tool descriptor fields
 
-Global `tools` and Tool-group `tools` entries use the same Tool contract:
+每份 `att-tool/v1` 只定義一個 Package Tool，不使用 Global `tools` 或 `toolGroups`:
 
 | Object | Allowed properties |
 |---|---|
-| `tools.<key>` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
-| call-backed `tools.<key>.cache` | required `scope: case|db` |
+| `att-tool/v1` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
+| call-backed `att-tool/v1.cache` | required `scope: case|db` |
 | `arguments.<key>` | `name`, `description`, `required`, optional `type`, `enumValues`（僅 `type: enum` 時必須），`argName`、`argNameMode`、`delimit`、`x-*` |
 
 `type` 宣告 configured Tool 完整解析後的值 contract，可用 `any`、`string`、`integer`、`long`、`decimal`、`boolean`、`enum`、`bytes`、`map` 或 `list`。未填 `type` 時仍按 `any` 處理，維持舊 descriptor 行為。數值和 Boolean scalar 接受原生值或去除前後空白的數字／`true`／`false` 字串；enum 必須符合其中一個 `enumValues`；`bytes` 接受 byte array 或 UTF-8 String。`string`、`map` 和 `list` 要求原生值型別吻合。這些檢查在巢狀 expression 完整解析後執行；靜態安全可求值的內容會在 validation 檢查，其餘在 runtime 檢查。
+
+## Package-local Tool Group（ATT 4.2.10）
+
+Standalone Tool 使用 `tools/<id>.yaml` 與 `att-tool/v1`；Grouped Tools 則由固定名稱 `tools/<folder>/tool-group.yaml`（`att-tool-group/v3.0`）明確列出每個 `att-tool/v1` 成員，不遞迴掃描。
+
+```yaml
+# packages/fpp/tools/fpp/tool-group.yaml
+schemaVersion: att-tool-group/v3.0
+id: fpp
+name: FPP Tools
+description: FPP integration commands
+tools: [invokeApi.yaml, loghelper.yaml]
+```
+
+`tools/fpp/invokeApi.yaml` 的 `id: invokeApi` 對外仍是 `#{fpp.invokeApi(...)}`。公開前綴來自 Manifest 的 `id`，不是目錄名稱。可選 `script` 保留 Group Dispatcher + 成員 ID + 成員命令 argv 順序。可選 `ssh: {helper: application}` 綁定 Global SSHHelper，不容許在 Manifest 定義主機或憑證。缺失／重複成員和歧義 qualified ID 會阻止驗證。Tool 屬所選 Package；Helper 繼續屬於全域配置。

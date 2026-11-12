@@ -76,9 +76,12 @@ class WindowsLauncherTest {
         Path simple = templates.resolve("SIMPLE");
         Files.createDirectories(simple);
         Path config = temp.resolve("config.yaml");
-        Files.write(config, ("schemaVersion: att-config/v2.13\nenvironment: SIT\noutputDirectory: output\ntools:\n"
-                + "  smoke:\n    name: Launcher smoke\n    description: Verify source-tree Tool execution\n"
-                + "    command: [cmd.exe, /c, echo, launcher-smoke]\n    stdoutFormat: text\n    arguments: {}\n")
+        Files.write(config, ("schemaVersion: att-config/v2.13\nenvironment: SIT\noutputDirectory: output\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(temp.resolve("tools"));
+        Files.write(temp.resolve("tools/smoke.yaml"), ("schemaVersion: att-tool/v1\nid: smoke\n"
+                + "name: Launcher smoke\ndescription: Verify Package Tool execution\n"
+                + "command: [cmd.exe, /c, echo, launcher-smoke]\nstdoutFormat: text\narguments: {}\n")
                 .getBytes(StandardCharsets.UTF_8));
         writePackageManifest(temp);
         Files.write(simple.resolve("template.yaml"), ("schemaVersion: att-template/v3.4\nname: SIMPLE\n"

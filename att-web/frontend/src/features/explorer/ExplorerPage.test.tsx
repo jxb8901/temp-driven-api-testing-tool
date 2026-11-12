@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExplorerPage } from './ExplorerPage';
 import { SourceViewer, sourceViewerLimits } from './SourceViewer';
+import { ResourceTree } from './ResourceTree';
 import { ConfigurationExplorer } from './ConfigurationExplorer';
 import { TypedSidecarForm } from './TypedSidecarForm';
 import { inspectionCache } from '../../inspectionCache';
@@ -255,15 +256,33 @@ describe('Explorer source viewer', () => {
         provenance: { toolGroupId: 'billing', toolName: 'Lookup' } }),
     }} />);
     expect(container.textContent).toContain('No standalone source file');
-    expect(container.textContent).toContain('Tool Group: billing');
-    expect(container.textContent).toContain('Tool: Lookup');
-    expect(container.textContent).toContain('Call-backed Tools use their configured provider');
+    expect(container.textContent).toContain('Package-local Tool: lookup');
+    expect(container.textContent).toContain('Name: Lookup');
+    expect(container.textContent).not.toContain('Tool Group:');
     expect(container.textContent).not.toContain('Source is not available for this resource');
 
     await render(<SourceViewer api={api} identity={identity} available={false} active resource={{
       ...resource('tool', 'lookup', { sourceAvailable: false, sourceReason: 'not-allowlisted', sourceKind: 'script-backed' }),
     }} />);
     expect(container.textContent).toContain('Source exists but access is denied');
+  });
+
+  it('opens the Group manifest through the Tool resource safe-source reference', async () => {
+    const referenceId = 'e'.repeat(64);
+    const openReference = vi.fn();
+    const manifestPath = 'tools/billing/tool-group.yaml';
+    const api = apiWith({ getSafeSource: vi.fn(async () => ({
+      available: true, text: 'schemaVersion: att-tool/v1\nid: lookup\n', format: 'yaml', logicalPath: 'tools/billing/lookup.yaml',
+      fileReferences: [{ referenceId, logicalPath: manifestPath, available: true }],
+    })) });
+    await render(<SourceViewer api={api} identity={{ packageId: 'payments', type: 'tool', resourceId: 'billing.lookup' }} available active
+      resource={resource('tool', 'billing.lookup', { logicalId: 'billing.lookup', provenance: { toolGroupId: 'billing', toolName: 'Lookup', toolGroupManifest: manifestPath } })}
+      onFileReference={openReference} />);
+
+    click(button('Open Group manifest source'));
+    expect(openReference).toHaveBeenCalledWith(manifestPath, 'tools/billing/lookup.yaml', {
+      type: 'tool', resourceId: 'billing.lookup', referenceId, returnTab: 'source',
+    });
   });
 
   it('opens Action file dependencies through the safe Package viewer from Visual and Dependencies', async () => {
@@ -345,6 +364,30 @@ describe('Explorer source viewer', () => {
     await render(<SourceViewer api={api} identity={{ packageId: 'p', type: 'template', resourceId: 'r' }} available active />);
     expect(container.textContent).toContain('Source exceeds the viewer limit.');
     expect(container.querySelector('.att-code-editor pre')?.textContent?.length).toBeLessThanOrEqual(sourceViewerLimits.maxCharacters);
+  });
+});
+
+describe('Tool Group navigation', () => {
+  it('shows grouped members inside a collapsible Package-local folder', async () => {
+    const onSelect = vi.fn();
+    const items = [
+      resource('tool', 'billing.lookup', { logicalId: 'billing.lookup', provenance: { toolGroupId: 'billing', toolGroupManifest: 'tools/folder/tool-group.yaml' } }),
+      resource('tool', 'billing.count', { logicalId: 'billing.count', provenance: { toolGroupId: 'billing', toolGroupManifest: 'tools/folder/tool-group.yaml' } }),
+      resource('tool', 'Default.lookup', { logicalId: 'Default.lookup', provenance: { toolGroupId: 'Default', toolGroupManifest: 'tools/compat/tool-group.yaml' } }),
+      resource('tool', 'standalone', { provenance: { toolGroupId: 'Default' } }),
+    ];
+    await render(<ResourceTree items={items} selectedKey="" loading={false} sortKey="name" direction="asc"
+      onSortChange={() => {}} onSelect={onSelect} onLoadMore={() => {}} />);
+    expect(container.querySelector('button[aria-expanded="true"]')?.textContent).toContain('billing');
+    expect(container.textContent).toContain('billing.lookup');
+    expect(container.textContent).toContain('billing.count');
+    expect(container.textContent).toContain('standalone');
+
+    click(container.querySelector<HTMLButtonElement>('button[aria-expanded="true"]')!);
+    expect(container.querySelector('button[aria-expanded="false"]')?.textContent).toContain('billing');
+    expect(container.textContent).not.toContain('billing.lookup');
+    expect(container.textContent).not.toContain('billing.count');
+    expect(container.textContent).toContain('Column sorting applies to matching resources before pagination');
   });
 });
 

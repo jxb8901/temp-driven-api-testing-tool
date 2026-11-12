@@ -28,8 +28,8 @@ The authenticated `/api/v1/configuration/{declared|effective|compare|files|sourc
 
 | Layer | Source | Owns |
 |---|---|---|
-| Shared runtime | `ATT_HOME/config/config.yaml` | output/environment/runtime defaults, reports, XML mode, global tools, group paths, DB/MQ/HTTP/SSHHelper paths, optional legacy inline SSH |
-| Tool group | `ATT_HOME/config/` YAML path | group identity, optional script/SSH, grouped tools |
+| Shared runtime | `ATT_HOME/config/config.yaml` | output/environment/runtime defaults, reports, XML mode, DB/MQ/HTTP/SSHHelper paths and central connection settings |
+| Package Tool / Tool Group | `<PACKAGE_ROOT>/tools/*.yaml` and `tools/<folder>/tool-group.yaml` | Standalone `att-tool/v1` Tools or explicitly listed `att-tool/v1` group members under `att-tool-group/v3.0`; Helpers remain global |
 | DB/MQ/SSH/HTTP helper | configured YAML under `ATT_HOME/config/` | logical resource identity, endpoint, connection, pool, timeout, and evidence policy |
 | Package Testdata | package-relative `testdata/` path | Package Manifest inventory selected by the effective Environment |
 | Workbook | `<workbook>.yaml` | Excel mapping, stages, workbook labels |
@@ -40,18 +40,15 @@ The authenticated `/api/v1/configuration/{declared|effective|compare|files|sourc
 
 ## Ignore or disable ATT-owned configuration with `x-`
 
-Prefix an optional ATT-owned field or an entry in an ATT-owned keyed collection with the exact lowercase `x-` to make it behave as absent. This applies to current config objects and keyed collections such as `tools`, environment profiles, Tool `arguments` declarations, `actions`, Action `evidence` collectors, report columns, and Debug Tool overrides. The YAML must still parse, but ATT does not schema-check, resolve, discover, evaluate, instantiate, execute, or publish a disabled entry. For a keyed collection, use this on the key. This does not disable or rename argument values supplied when invoking a Tool:
+Prefix an optional ATT-owned field or an entry in an ATT-owned keyed collection with the exact lowercase `x-` to make it behave as absent. This applies to current config objects and keyed collections such as environment profiles, Tool `arguments` declarations, `actions`, Action `evidence` collectors, report columns, and Debug Tool overrides. The YAML must still parse, but ATT does not schema-check, resolve, discover, evaluate, instantiate, execute, or publish a disabled entry. For a keyed collection, use this on the key. This does not disable or rename argument values supplied when invoking a Tool:
 
 ```yaml
-schemaVersion: att-config/v2.13
-x-debug-note: "#{missing.tool()}"      # ignored config field
-tools:
-  x-temporary: not-a-tool               # ignored Tool entry
-  smoke:
-    name: Smoke check
-    description: Check the local setup
-    call: "#{upper('ok')}"
-    x-retry: 0                           # ignored optional Tool field
+schemaVersion: att-tool/v1
+id: smoke
+name: Smoke check
+description: Check the local setup
+call: "#{upper('ok')}"
+x-retry: 0                    # ignored optional Tool field
 ```
 
 The same rule applies to Actions and evidence collectors. A disabled Action is absent from validation and runtime; a disabled collector is not called or included in evidence. Nested `x-` fields in ATT-owned blocks are also ignored:
@@ -89,17 +86,21 @@ The shared configuration and Package resources have separate roots:
 ATT_HOME/
 ├── config/
 │   ├── config.yaml
-│   ├── tools/*.yaml
 │   ├── dbhelpers/{sit,uat}/orders.yaml
 │   └── mqhelpers/{sit,uat}/payment.yaml
 └── packages/<id>/
     ├── package.yaml
     ├── testcase/
     ├── templates/
-    └── testdata/accounts.yaml
+    ├── testdata/accounts.yaml
+    └── tools/
+        ├── standaloneTool.yaml
+        └── fpp/
+            ├── tool-group.yaml
+            └── invokeApi.yaml
 ```
 
-The common config keeps run/execution/report settings, `toolGroups`, and the global `tools` registry. Tool/helper descriptors are resolved under `ATT_HOME/config/`; Testdata descriptors are resolved under the selected Package. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
+The common config keeps run/execution/report settings and global DB/MQ/HTTP/SSH Helpers. Tools belong exclusively to the selected Package: root-level `tools/*.yaml` files are standalone `att-tool/v1` definitions, while `tools/<folder>/tool-group.yaml` (`att-tool-group/v3.0`) explicitly lists grouped `att-tool/v1` members and preserves qualified `group.tool` calls. Global Tool declarations produce migration errors. The profile layer contains typed DB/MQ/SSH/HTTP descriptor lists. This profile example shows DB/MQ bindings:
 
 ```yaml
 # config/config.yaml
@@ -107,10 +108,6 @@ schemaVersion: att-config/v2.13
 environment: SIT                 # default profile; --env overrides it
 templates: {root: templates}
 testcase: {root: testcase}
-toolGroups:
-  - config/tools/sample.yaml
-  - config/tools/fpp.yaml
-  - config/tools/orders-db.yaml
 environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
@@ -120,7 +117,7 @@ environments:
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-Use the executable complete configs in `config/environments/sit.yaml` and `config/environments/uat.yaml` as the migration source for the common registry, including `invokePaymentApi` and the `sample.getAcDate` tool used by `examples/load/closed-smoke.yaml`. Do not replace that shared registry with `tools: {}` or `toolGroups: []` in a real package.
+The executable SIT and UAT configs retain common Helper and Environment bindings. `invokePaymentApi` and `sample.getAcDate` now live in the selected Package; legacy global Tools require explicit migration before running ATT 4.2.10.
 
 The SIT and UAT DBHelper descriptors both use `id: orders`, while their JDBC URL and other physical connection details differ. The MQHelper descriptors both use `id: payment`, while host, queue manager, port, and channel differ. A complete descriptor pair, including pool settings and safe evidence policy, is in [`examples/environments/README.md`](../../examples/environments/README.md).
 
@@ -210,10 +207,8 @@ report:
   html: {caseLogInlineLimitBytes: 32768}
   junit: {caseLogEmbedThresholdBytes: 10240}
 xml: {namespaceMode: ignore}
-toolGroups: [config/tools/database.yaml]
 dbhelpers: [config/dbhelpers/orders.yaml]
 mqhelpers: [config/mqhelpers/orders.yaml]
-tools: {}
 environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
@@ -270,22 +265,19 @@ Run and Load accept `--run-id <id>` as a literal override. Standalone Debug acce
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.6` YAML paths; normalized duplicates are rejected |
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.3` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
 | `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
 | `environments` | absent | Non-empty map of profile names; profiles may contain configured shared resource lists; Package Testdata belongs to the Manifest |
 | `environments.<profile>.testdata` | deprecated | Temporary `packagePolicy.legacyTestdata` only; migrate to Manifest `testdata.environments` |
-| `ssh` | absent | Optional SSH target for inline global tools |
-| `tools` | `{}` | Map of reusable tool contracts |
 
 
 Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `ssh`, `tools`, `environments`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `environments`, `x-*` |
 | `environments.<profile>` | `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `testdata`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |

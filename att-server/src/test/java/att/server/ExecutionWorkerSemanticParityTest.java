@@ -108,9 +108,9 @@ class ExecutionWorkerSemanticParityTest {
         Path runtimeConfig=temp.resolve("lifecycle-runtime/config/config.yaml");
         Files.createDirectories(runtimeConfig.getParent());
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
-                +"templates: {root: templates}\ntestcase: {root: testcase}\n"
-                +"tools:\n  hold:\n    name: Hold\n    description: Hold the Worker for lifecycle parity checks\n"
-                +"    command: [./tools/hold.sh]\n    stdoutFormat: text\n    arguments: {}\n");
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
+        Files.writeString(tools.resolve("hold.yaml"),"schemaVersion: att-tool/v1\nid: hold\nname: Hold\n"
+                +"description: Hold the Worker for lifecycle parity checks\ncommand: [./tools/hold.sh]\nstdoutFormat: text\narguments: {}\n");
         Path libs=Files.createDirectories(temp.resolve("lifecycle-libs"));
         for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
             ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));

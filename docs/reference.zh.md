@@ -1,7 +1,7 @@
-# ATT v4.2.9 使用手冊與參考
+# ATT v4.2.10 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.2.9
+Version: 4.2.10
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -101,7 +101,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [API paths](#api-paths)
 - [CLI 參考](#cli-參考)
   - [選擇命令](#選擇命令)
-  - [ATT 4.2.9 的可用性](#att-429-的可用性)
+  - [ATT 4.2.10 的可用性](#att-4210-的可用性)
   - [編譯 source checkout](#編譯-source-checkout)
   - [按任務查閱語法、option 和範例](#按任務查閱語法option-和範例)
   - [透過 CLI 使用 ATT Server](#透過-cli-使用-att-server)
@@ -164,7 +164,7 @@ Testcase
   `-- ordered Stage
         `-- Template
               |-- Action
-              |     |-- file-content expression / assert / log / assign
+              |     |-- file-content expression / assert / log / assign / set
               |     |-- Tool
               |     `-- DB
               `-- Flow -> ordered Actions
@@ -438,7 +438,8 @@ ATT 不會拼接父子標簽。表頭匹配會移除空格、製表符、換行�
 | tool | call | 呼叫已配置 Tool、built-in 或 helper，保留原生型別化結果；DB query/scalar/update 也是普通 Tool call。 |
 | assert | assert | 評估布林條件並記錄 PASS 或 FAIL。expected、actual 是可選診斷值。 |
 | log | message 或 value | 將型別化值格式化後寫入 Case 日誌。欄位為 message、value、format。 |
-| assign | name、expression | 將 expression 的型別化結果發布至 EXEC.VARS。 |
+| assign | name、expression | 將 expression 的型別化結果發布至 EXEC.VARS 一次。 |
+| set | name、expression | 以 expression 的型別化結果取代既有的頂層 EXEC.VARS 值。 |
 | flow | use | 在巢狀 Action scope 執行已註冊 Flow，返回時還原 caller scope。 |
 
 Actions 按 YAML 順序執行。依類型允許時，也可定義 id、description、onFailure、runWhen。Action ID 在 scope 內必須唯一。類型不支援的欄位會在 validation 失敗。共用 Action result、Log file 與 Log fields 不屬於現行契約。
@@ -604,7 +605,20 @@ Log 是一般 Case-log entry，沒有 user-authored severity；現行 v3.6 契�
 
 Action expression 使用一般 ATT expression engine。完整 ${...} 或 #{...} expression 保留結果型別；expression 放在一般字串內才會成為 String。請參閱[Expressions and Built-ins](reference.zh/expressions.md)。
 
-assign 會將 typed value 發布至 EXEC.VARS.<name> 一次。name 必須符合 [A-Za-z_][A-Za-z0-9_]*，且在 Case 中唯一。一個 Stage 指派的值可供後續 Stage 使用。Action 執行期間可讀取 output.*，發布後可讀取 EXEC.ACTIONS.<id>.output.*。Flow 有暫時 Action namespace；若 caller 在 Flow 返回後仍需要該值，請發布到 EXEC.VARS。
+assign 會將 typed value 發布至 EXEC.VARS.<name> 一次。name 必須符合 [A-Za-z_][A-Za-z0-9_]*，且在 Case 中唯一。使用相同的 name 和 expression 欄位可透過 set 更新既有的頂層 EXEC.VARS 值；set 不會宣告不存在的變數。Expression 會讀取更新前的 Context 值，並只在評估及 assertion 成功後發布，保留原生型別。set 可使用共用 Action retry block：每次 attempt 都以尚未更新的變數評估；失敗 attempt 保留原值，只有 winning attempt 會發布一次。Attempt 狀態及 retry decision 保留在 output.attempts。兩種 Action 的 EXEC.VARS 都會跨 Stage 和巢狀 Flow 共用。set 更新 Debug/Load bootstrap 變數時會消耗首次 assign 的許可；之後的 assign 不可覆寫該更新。Action 執行期間可讀取 output.*，發布後可讀取 EXEC.ACTIONS.<id>.output.*。Flow 有暫時 Action namespace；EXEC.VARS 更新仍會保留給 caller。
+
+~~~yaml
+initializeCounter:
+  type: assign
+  name: counter
+  expression: "#{0}"
+incrementCounter:
+  type: set
+  name: counter
+  expression: "#{${EXEC.VARS.counter} + 1}"
+~~~
+
+此範例會讓 `EXEC.VARS.counter` 保持型別化數字。set 若遭略過或評估失敗，原有值會維持不變。
 
 ### Resource output Evidence
 
@@ -639,7 +653,7 @@ String、Number、Boolean、null、Map、List 等值跨越 Action/Template/Flow 
 
 ### 共用 Retry 與 boolean condition
 
-Tool Action（包括可重試的 DB query/scalar call）共用 `retry` 契約。`maxAttempts`（2–10）、`intervalMs`（0–3600000）及非空 `retryOn`（ASSERTION/TIMEOUT）仍為必填；`when` 是可選的非空 Boolean expression String。Mutating DB update 及 SSH transfer 的既有 retry 限制維持不變。
+Tool Action、可重試的 DB query/scalar call 及 set Action 共用 `retry` 契約。`maxAttempts`（2–10）、`intervalMs`（0–3600000）及非空 `retryOn`（ASSERTION/TIMEOUT）仍為必填；`when` 是可選的非空 Boolean expression String。set 使用 `ASSERTION` retry 時必須有 Action `assert`；失敗 attempt 不會提交候選值至 EXEC.VARS。Mutating DB update 及 SSH transfer 的既有 retry 限制維持不變。
 
 ~~~yaml
 retry:
@@ -673,7 +687,7 @@ Standalone Debug bootstrap value 會映射到這些 canonical root：`inputs` �
 | EXEC.RUN_STARTED_AT | 外層 run 開始時間；ISO-8601 String。 | 三種模式均可用。 |
 | EXEC.OUTPUT_DIR | execution workspace 絕對路徑。 | 初始化後可用；Load 中可能先有 planned path，尚未實際建立。 |
 | EXEC.INPUT | Case/stage、Debug sidecar 或 Load workload input map。 | 三種模式均可用；Stage input 暫時 overlay Case input。 |
-| EXEC.VARS | assign 發布的型別化值。 | 三種模式均可用；指派前為空。 |
+| EXEC.VARS | assign 建立或 set 更新的型別化值。 | 三種模式均可用；assign 或 bootstrap 前為空。 |
 | EXEC.ACTIONS | active Template/Flow scope 已完成的 Actions。 | 發布 Action 後可用；Flow 有巢狀 scope。 |
 | EXEC.LOAD.MODEL | closed 或 arrivalRate。 | 僅 Load；ID 產生前可用。 |
 | EXEC.LOAD.WORKLOAD_ID | 配置的 workload ID。 | 僅 Load；ID 產生前可用。 |
@@ -751,7 +765,7 @@ assert: "#{${EXEC.INPUT.amount} > 0}"
 description: "case=${META.SOURCE.caseId}; value=#{upper(${EXEC.INPUT.name})}"
 ~~~
 
-依各欄位支援的形式使用 expression。File-content 內容、Action description/assert、Log message/value、assign expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](reference.zh/actions.md)。
+依各欄位支援的形式使用 expression。File-content 內容、Action description/assert、Log message/value、assign/set expression 和 Tool call 使用一般 runtime model。Log value 可遞迴包含 typed expressions，詳見[Action 與型別化值](reference.zh/actions.md)。
 
 ### File-content expression
 
@@ -938,9 +952,9 @@ RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型�
 
 ### 統一 RUN 與排程
 
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.2.10 -->
 
-ATT 4.2.9 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+ATT 4.2.10 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
 
 已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](interfaces/cli/vnext-proposed.zh.md)。
 
@@ -1027,7 +1041,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 
 #### 遷移既有用戶端
 
-| 既有介面 | 4.2.9 對應 |
+| 既有介面 | 4.2.10 對應 |
 |---|---|
 | CLI `validate`、`run`、`report` | 保留驗證、Case RUN、報告命令 |
 | CLI `--suite`、`--suite-dir`、`--case`、`--tag`、`--rerun-failed` | 保留選取行為；Server 批次使用 `selection` |
@@ -1036,7 +1050,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 | `/load-schedules`、`jobType:load/debug` | 共用 scheduler 相容路徑，保留既有定義 |
 | `/jobs/...`、既有 Studio 工作/結果連結 | 保留共用 history、取消、事件與結果路徑 |
 
-4.2.9 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.6；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
+4.2.10 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.6；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
 
 持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
 
@@ -1067,9 +1081,9 @@ Schedule 使用一般已驗證 draft 合約。RUN Debug 仍使用 `options.debug
 
 ### Run 模式
 
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.2.10 -->
 
-ATT 4.2.9 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
+ATT 4.2.10 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
 
 ```sh
 ./att.sh run --all
@@ -1154,7 +1168,7 @@ Descriptor path 相對於 package root，並使用一般 `att-testdata/v1.0` 格
 
 此 flag 僅供 standalone `debug` 使用。ATT 會在執行前顯示警告，保留 configured-secret redaction，並在 result 寫入 `failureDetailMode: local-unsafe`。它不會 dump raw inputs、argv、request body 或 Context values。預設仍為 `safe-default`；Run、Validate、Snapshot 及 `load --debug` 不能啟用此 override。
 
-`vars` 使用共用 expression engine：完整 `${EXEC.INPUT.amount}` 保留原生型別；混合文字會成為字串；`#{...}` 保留 expression result 型別。Map/list 會遞迴處理，map key 維持字面值。Vars 可按任意順序相依；循環、缺少 var、不可用 root 及 side-effecting call 會在 target 開始前失敗。第一次正常 `assign` 可以取代 bootstrap variable，之後仍遵守一般 duplicate-assignment rules。Final values 會使用既有 canonical `EXEC.VARS`/`CASE.VARS` context 及 result artifacts，並套用既有 redaction policy；不會建立第二個 Debug-only namespace。
+`vars` 使用共用 expression engine：完整 `${EXEC.INPUT.amount}` 保留原生型別；混合文字會成為字串；`#{...}` 保留 expression result 型別。Map/list 會遞迴處理，map key 維持字面值。Vars 可按任意順序相依；循環、缺少 var、不可用 root 及 side-effecting call 會在 target 開始前失敗。第一次正常 `assign` 可以取代 bootstrap variable，之後仍遵守一般 duplicate-assignment rules。成功的 `set` 會更新既有 bootstrap 值並消耗首次 assign 許可。Final values 會使用既有 canonical `EXEC.VARS`/`CASE.VARS` context 及 result artifacts，並套用既有 redaction policy；不會建立第二個 Debug-only namespace。
 
 Bootstrap value 可使用已初始化 execution identity、`EXEC.INPUT`、有提供時的 `EXEC.LOAD`、其他 `EXEC.VARS.<name>`，以及穩定 project/source/target/template metadata。`EXEC.ACTIONS`、action-local `output`、invocation-scoped metadata 不可用。Tool/DB/MQ/HTTP/SSH/process/filesystem 或 stateful calls 會被拒絕；安全純 built-in 使用 ATT 一般 parser。可重複使用 `--set input.path=value`、`--set vars.path=value`，以及僅限 Tool 的 `--set arg.name=value`。值以 safe YAML 解析；可用巢狀 map 及數字 list index。例：`--set 'vars.refNo=${EXEC.INPUT.refNo}'` 會在 evaluation 前修改原始定義。
 
@@ -1455,7 +1469,7 @@ Selection evidence 只記錄 testdata ID、來源 layer、record index、適用�
 
 #### 初始化 Template 和 Flow variables
 
-Scheduler identity 及唯一 EXEC.ID/EXEC.OUTPUT_DIR 初始化完成後，ATT 會在 Template 或 Flow 開始前評估 workload 的 vars tree。完整 `${...}` reference 保留原生型別，混合文字會轉成字串，`#{...}` 使用一般 typed expression parser，巢狀 map/list 會遞迴評估。Vars 之間的依賴不受宣告順序影響；缺少變數或循環會在 target 開始前失敗。每個 iteration 都有獨立 map/list，因此併發 user/workload 不會共用可變值。第一次一般 `assign` 可取代 bootstrap variable。
+Scheduler identity 及唯一 EXEC.ID/EXEC.OUTPUT_DIR 初始化完成後，ATT 會在 Template 或 Flow 開始前評估 workload 的 vars tree。完整 `${...}` reference 保留原生型別，混合文字會轉成字串，`#{...}` 使用一般 typed expression parser，巢狀 map/list 會遞迴評估。Vars 之間的依賴不受宣告順序影響；缺少變數或循環會在 target 開始前失敗。每個 iteration 都有獨立 map/list，因此併發 user/workload 不會共用可變值。第一次一般 `assign` 可取代 bootstrap variable；成功的 `set` 會更新該值並消耗首次 assign 許可。各 iteration 的 set 不會影響其他 iteration。
 
 Bootstrap expression 可使用已初始化的 `EXEC.RUN_ID`、`EXEC.ID`、`EXEC.OUTPUT_DIR`、`EXEC.INPUT`、`EXEC.LOAD`、其他 `EXEC.VARS.<name>`，以及穩定的 project/source/target/template metadata。`EXEC.ACTIONS`、action-local `output`、invocation-scoped metadata，以及 Tool/DB/MQ/HTTP/SSH/process/filesystem 或 stateful calls 不可用。只允許安全的純 built-in。Tool arguments 與 vars 是不同 contract。
 
@@ -1681,18 +1695,20 @@ Load scenario 可將 evidence.resources.output 設為 inherit（預設）或 non
 
 ### Tool
 
-Tool 是具名的 external 或 framework-native capability。Descriptor 必須二選一使用 command 或 call。
+Tool 是所選 Package 專屬的具名 external 或 framework-native capability。每個 `tools/*.yaml` 檔案包含一份 `att-tool/v1` descriptor，且必須二選一使用 command 或 call。全局 DB/MQ/HTTP/SSH Helpers 仍由 Runtime Config 管理。
 
 #### Command-backed Tool
 
 Command Tool 使用 stdoutFormat 將外部 stdout 解析為型別化結果：
 
 ~~~yaml
-tools:
-  queryOrder:
-    command: [./tools/query-order.sh]
-    stdoutFormat: json
-    arguments: {}
+schemaVersion: att-tool/v1
+id: queryOrder
+name: queryOrder
+description: Package Tool queryOrder
+command: [./tools/query-order.sh]
+stdoutFormat: json
+arguments: {}
 ~~~
 
 stdoutFormat 支援 text、json、yaml、xml。ATT 只解析一次 stdout，再將 typed value 發布於 output.result。此欄位不控制人類可讀日誌或檔案輸出。Exit code、有界 stdout/stderr preview 和 process artifacts 都屬於 evidence。
@@ -1702,14 +1718,14 @@ stdoutFormat 支援 text、json、yaml、xml。ATT 只解析一次 stdout，再�
 Call-backed Tool 呼叫 built-in 或支援的原生 DB/MQ/HTTP/SSH operation，其 native typed return value 發布於 output.result。Call-backed descriptor 不宣告 stdoutFormat。
 
 ~~~yaml
-tools:
-  queryOrder:
-    call: "#{db.orders.query(sql='select id from orders where id=:id', parameters={id: ${input.orderId}})}"
-    arguments:
-      orderId:
-        name: Order ID
-        description: Order key
-        required: true
+schemaVersion: att-tool/v1
+id: queryOrder
+call: "#{db.orders.query(sql='select id from orders where id=:id', parameters={id: ${input.orderId}})}"
+arguments:
+  orderId:
+    name: Order ID
+    description: Order key
+    required: true
 ~~~
 
 Tool invocation 沒有 result.format/path/overwrite 契約。檔案持久化只由明確定義該 API 的 resource 負責；人類可讀表示屬於 Log 或配置的 evidence output。HTTP/MQ/SSH parsing 或 transfer 由各自 transport boundary 管理。
@@ -1733,24 +1749,24 @@ Tool 的 `command` 也擁有獨立的受限 Context，只能引用該 Tool `argu
 例如：
 
 ```yaml
-tools:
-  invokePaymentApi:
-    name: Invoke Payment API
-    description: Invoke a file-content payment request
-    command:
-      - ./tools/invoke_payment_api.sh
-      - "${input.requestText}"
-      - "${input.environment}"
-    stdoutFormat: json
-    arguments:
-      requestText:
-        name: Request Body
-        description: Request body String
-        required: true
-      environment:
-        name: Environment
-        description: Target environment
-        required: true
+schemaVersion: att-tool/v1
+id: invokePaymentApi
+name: Invoke Payment API
+description: Invoke a file-content payment request
+command:
+  - ./tools/invoke_payment_api.sh
+  - "${input.requestText}"
+  - "${input.environment}"
+stdoutFormat: json
+arguments:
+  requestText:
+    name: Request Body
+    description: Request body String
+    required: true
+  environment:
+    name: Environment
+    description: Target environment
+    required: true
 ```
 
 每個 YAML command list item 在 interpolation 後仍是一個 atomic argv；值中含空格、引號或類似 shell 的字符也不會再次分詞。ATT 不會啟動本地 shell。
@@ -1762,21 +1778,21 @@ Tool call 內的引號屬於 ATT expression grammar，並不是 shell quote。�
 以下 Tool 會把每個輸入保持為一個 argv：
 
 ```yaml
-tools:
-  writeAudit:
-    name: Write audit
-    description: Write one audit message for one source file
-    command: [./tools/write_audit.sh, "${input.message}", "${input.sourceFile}"]
-    stdoutFormat: yaml
-    arguments:
-      message:
-        name: Message
-        description: Exact audit message
-        required: true
-      sourceFile:
-        name: Source file
-        description: File associated with the message
-        required: true
+schemaVersion: att-tool/v1
+id: writeAudit
+name: Write audit
+description: Write one audit message for one source file
+command: [./tools/write_audit.sh, "${input.message}", "${input.sourceFile}"]
+stdoutFormat: yaml
+arguments:
+  message:
+    name: Message
+    description: Exact audit message
+    required: true
+  sourceFile:
+    name: Source file
+    description: File associated with the message
+    required: true
 ```
 
 當 call 同時包含多層引號時，建議使用 YAML block scalar：
@@ -1830,15 +1846,30 @@ Call-backed Tool 使用相同的聲明參數理念，但保留 typed value，並
 
 #### Inline Tool descriptor fields
 
-Global `tools` and Tool-group `tools` entries use the same Tool contract:
+每份 `att-tool/v1` 只定義一個 Package Tool，不使用 Global `tools` 或 `toolGroups`:
 
 | Object | Allowed properties |
 |---|---|
-| `tools.<key>` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
-| call-backed `tools.<key>.cache` | required `scope: case|db` |
+| `att-tool/v1` | `name`, `description`, exactly one of `command`/`call`, optional `arguments`; command Tools require `stdoutFormat`, call-backed Tools may use `cache`; `x-*` |
+| call-backed `att-tool/v1.cache` | required `scope: case|db` |
 | `arguments.<key>` | `name`, `description`, `required`, optional `type`, `enumValues`（僅 `type: enum` 時必須），`argName`、`argNameMode`、`delimit`、`x-*` |
 
 `type` 宣告 configured Tool 完整解析後的值 contract，可用 `any`、`string`、`integer`、`long`、`decimal`、`boolean`、`enum`、`bytes`、`map` 或 `list`。未填 `type` 時仍按 `any` 處理，維持舊 descriptor 行為。數值和 Boolean scalar 接受原生值或去除前後空白的數字／`true`／`false` 字串；enum 必須符合其中一個 `enumValues`；`bytes` 接受 byte array 或 UTF-8 String。`string`、`map` 和 `list` 要求原生值型別吻合。這些檢查在巢狀 expression 完整解析後執行；靜態安全可求值的內容會在 validation 檢查，其餘在 runtime 檢查。
+
+#### Package-local Tool Group（ATT 4.2.10）
+
+Standalone Tool 使用 `tools/<id>.yaml` 與 `att-tool/v1`；Grouped Tools 則由固定名稱 `tools/<folder>/tool-group.yaml`（`att-tool-group/v3.0`）明確列出每個 `att-tool/v1` 成員，不遞迴掃描。
+
+```yaml
+# packages/fpp/tools/fpp/tool-group.yaml
+schemaVersion: att-tool-group/v3.0
+id: fpp
+name: FPP Tools
+description: FPP integration commands
+tools: [invokeApi.yaml, loghelper.yaml]
+```
+
+`tools/fpp/invokeApi.yaml` 的 `id: invokeApi` 對外仍是 `#{fpp.invokeApi(...)}`。公開前綴來自 Manifest 的 `id`，不是目錄名稱。可選 `script` 保留 Group Dispatcher + 成員 ID + 成員命令 argv 順序。可選 `ssh: {helper: application}` 綁定 Global SSHHelper，不容許在 Manifest 定義主機或憑證。缺失／重複成員和歧義 qualified ID 會阻止驗證。Tool 屬所選 Package；Helper 繼續屬於全域配置。
 
 ### DBHelper
 
@@ -2238,13 +2269,12 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-在 `att-config/v2.13` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.13 與 Tool Group v2.9。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
+在 `att-config/v2.13` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.13 與 Tool Group v3.0。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
 
 ```yaml
 # config/config.yaml
 schemaVersion: att-config/v2.13
 environment: SIT
-toolGroups: [config/tools/application.yaml]
 environments:
   SIT:
     sshhelpers: [config/sshhelpers/sit/application.yaml]
@@ -2265,23 +2295,26 @@ instances:
 ```
 
 ```yaml
-# config/tools/application.yaml
-schemaVersion: att-tool-group/v2.9
+# packages/<id>/tools/app/tool-group.yaml
+schemaVersion: att-tool-group/v3.0
 id: app
 name: Application tools
 description: Remote application inspection
 ssh:
   helper: application
   selection: {strategy: all} # 可選 group override
-tools:
-  status:
-    name: Status
-    description: Print service status
-    command: [systemctl, is-active, example.service]
-    result: {format: text}
+tools: [status.yaml]
+
+# packages/<id>/tools/app/status.yaml（獨立檔案）
+schemaVersion: att-tool/v1
+id: status
+name: Status
+description: Print service status
+command: [systemctl, is-active, example.service]
+stdoutFormat: text
 ```
 
-Action 仍呼叫 `app.status`。先在本機／CI secret environment 把 `APP_SSH_KEY` 設為可讀私鑰的**路徑**，再分別以 `./att.sh validate --config config/config.yaml --env SIT --package` 及 UAT 驗證。完整 `${ENV:NAME}` identityFile reference 在載入時解析；缺失／空值會報錯而不揭露值。Tool group 的 `ssh` 只能是直接目標（`host`、`user`、可選 `port`／`identityFile`）或邏輯目標（`helper`、可選 `selection`），不可混用。Call-backed Tool 可在 primary `type: tool` operation 中呼叫 native SSH Resource Helper。現行 Tool Group schema 為 v2.9。Command-backed Tool 使用 `stdoutFormat`（`text|json|yaml|xml`）設定 stdout parsing；call-backed Tool 保留 native result type。舊 config/group schema 僅供 migration reference。SSH Resource Helper call 只發布 `META.SSHHELPER.id` 與 `.type`；endpoint、user、identity file、credentials 仍保持私有。Resource call 沒有 Action／per-call strategy override；selection 由 helper configuration 決定。
+Action 仍呼叫 `app.status`。先在本機／CI secret environment 把 `APP_SSH_KEY` 設為可讀私鑰的**路徑**，再分別以 `./att.sh validate --config config/config.yaml --env SIT --package` 及 UAT 驗證。完整 `${ENV:NAME}` identityFile reference 在載入時解析；缺失／空值會報錯而不揭露值。Package-local Tool Group 的 `ssh` 僅能引用全域 SSHHelper（`helper`、可選 `selection`）；舊式直接 host/user/key 設定必須搬至全域 SSHHelper。Call-backed Tool 可在 primary `type: tool` operation 中呼叫 native SSH Resource Helper。現行 Tool Group schema 為 v3.0。Command-backed Tool 使用 `stdoutFormat`（`text|json|yaml|xml`）設定 stdout parsing；call-backed Tool 保留 native result type。舊 config/group schema 僅供 migration reference。SSH Resource Helper call 只發布 `META.SSHHELPER.id` 與 `.type`；endpoint、user、identity file、credentials 仍保持私有。Resource call 沒有 Action／per-call strategy override；selection 由 helper configuration 決定。
 
 Strategy 優先序：group override，再到 helper 預設。Native Resource Helper call 中，單 instance 不需 strategy（`single`）；多 instance 只支援 `random` 或 `roundRobin`，`all` 會被拒絕，不會靜默選一臺。Command-backed Tool routing 才支援 `all`：`random` 均勻選一臺，`roundRobin` 以 thread-safe 循環計數器選一臺，明確的 `all` 在並發上限內對每臺各執行一次。**Command-backed `all` 會在每臺主機產生副作用**；只用於整組執行均安全的命令。不會隱式 fan-out、跨主機重試或 failover。若作者設定 Action timeout retry，整個 `all` 呼叫會重做，並非只重試某臺。每臺依 Action／Tool／全域 timeout 執行；中斷會取消正在執行的 OpenSSH process 或 Java SSH session。兩種 transport 使用同一組標準化 host/user/port/key。優先 OpenSSH；mwiede/jsch fallback 仍嚴格驗證 host key，限制見 SSH 診斷章。
 
@@ -2289,7 +2322,7 @@ Strategy 優先序：group override，再到 helper 預設。Native Resource Hel
 
 單主機及 `all` 執行都會在 argv、transport stderr（包括串流寫入的 Case log 診斷）及 exception evidence 遮蔽環境提供的私鑰路徑。上述不記錄保證適用於 ATT metadata 和 transport 診斷；解析後的業務 stdout 不變，因此命令不可輸出私鑰路徑。
 
-遷移：若一個實體目標已足夠，直接 SSH 可維持原狀。否則把 host/user/port/key 搬到 helper descriptor，在每個環境綁定，將 group 升到 v2.9，以 `ssh: {helper: application}` 取代實體 `ssh`，逐一驗證環境。Action 不需重寫。Inventory discovery、Action 層指定主機、分散式交易、跨主機 failover 與 orchestration 均不在此 schema 範圍。
+遷移：把舊 Tool Group 的 host/user/port/key 搬到全域 SSHHelper，在各環境綁定，再建立 Package `tools/app/tool-group.yaml`（`att-tool-group/v3.0`）與 `att-tool/v1` 成員，使用 `ssh: {helper: application}`，逐一驗證環境。Action 不需重寫。Inventory discovery、Action 層指定主機、分散式交易、跨主機 failover 與 orchestration 均不在此 schema 範圍。
 
 `stat(remotePath='/srv/app/result.xml')` 透過 SFTP lstat 回傳 typed `{path, exists}`，存在時包含 `type: file|directory|other`、file `size` 與可用的 ISO `modifiedAt`；missing path 是正常 `exists: false`，permission/auth/transport error 仍失敗。`mkdirs(remotePath='/srv/app/archive')` 建立 parents，已有 directory 時冪等，遇到 non-directory 時失敗。`move(sourcePath='/srv/app/out.xml', targetPath='/srv/app/archive/out.xml', overwrite=false)` 在同一選定 host 上 rename，source 必須存在，已有 target 需明確允許 overwrite；不下載／上傳。明確 overwrite 會先移除已有且型別相同的 regular file 或 empty directory，再執行 SFTP rename，因此不依賴 server 的 rename-overwrite extension。Non-empty directory、special file 或型別不符會拒絕。Replacement 不是 atomic：移除失敗時保留兩個 path；之後 rename 失敗則 source 仍在，target 可能不存在。`delete(remotePath='/srv/app/tmp.xml', missingOk=false)` 支援 regular file 和 empty directory，missingOk 必須明確開啟；non-empty directory、recursive 參數、wildcard／backslash path 都拒絕。所有 operation 只接受具名參數及可選 `timeoutMs`，沿用 selection／concurrency／deadline／host verification／redacted identity／Run-Debug-Load execution。Filesystem operation error 使用 `SSH_STAT_ERROR`／`SSH_MKDIRS_ERROR`／`SSH_MOVE_ERROR`／`SSH_DELETE_ERROR`。沒有 remote copy API；需要 copy 時明確使用 `execute(command='cp /srv/app/a /srv/app/b')`。File-content expression 使用 `&{...}`，local output 由 ATT 管理。
 
@@ -2391,12 +2424,12 @@ Package 預設值、根目錄與 Testdata 改由 [Package Manifest](reference.zh
 
 | 層級 | 來源 | 所管轄內容 |
 |---|---|---|
-| 共用 runtime configuration | `ATT_HOME/config/config.yaml` | 輸出/環境/runtime 默認值、package-relative Template 根、報告、XML 模式、全局 Tool、組路徑、Helper paths、可選 inline SSH |
+| 共用 runtime configuration | `ATT_HOME/config/config.yaml` | 輸出/環境/runtime 默認值、package-relative Template 根、報告、XML 模式、全局 DB/MQ/HTTP/SSH Helper paths 與連線設定 |
 | DB helper | `dbhelpers` 引用的獨立 YAML | 一個 JDBC 實例的連接、statement timeout、交易、result limit 與 evidence policy |
 | MQ helper | `mqhelpers` 引用的獨立 YAML | v1.2 IBM MQ logical group、instances、transport、response parsing、pool 與 evidence policy |
 | SSHHelper | `sshhelpers` 引用的獨立 YAML | 邏輯 SSH ID、實體 instances、defaults、selection 與 fan-out 上限 |
 | HTTPHelper | `httphelpers` 引用的獨立 YAML | 邏輯 HTTP ID、base URL、預設值、連線池、認證與 TLS |
-| Tool group | 配置的 YAML 路徑 | 組身份、可選 script/SSH、分組 Tool |
+| Package Tool / Tool Group | `<PACKAGE_ROOT>/tools/*.yaml` 和 `tools/<folder>/tool-group.yaml` | `att-tool/v1` 定義單一 Tool；`att-tool-group/v3.0` 明確列出 Group 成員，Helper 仍屬全局配置 |
 | Workbook | `<workbook>.yaml` | Excel 映射、Stage、Workbook 標簽 |
 | Template | `template.yaml` | Template 身份和有序 Action |
 | CLI | 命令選項 | 選擇、Run ID、輸出覆蓋、展示、CI 格式 |
@@ -2405,18 +2438,15 @@ Timeout/Retry precedence 與 eligibility 見 [Reliability](reference.zh/reliabil
 
 ### 使用 `X-` 忽略或停用 ATT 配置項
 
-在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 `tools`、environment profiles、Tool `arguments` declarations、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的 argument values：
+在可選的 ATT 配置字段，或 ATT 擁有的 keyed collection 條目名稱前加上完全小寫的 `x-`，該項便會視為不存在。適用於現行配置物件和 keyed collection，例如 environment profiles、Tool `arguments` declarations、`actions`、Action `evidence` collectors、report columns 及 Debug Tool overrides。YAML 本身仍須能解析；但 ATT 不會對停用項進行模式校驗、解析引用、探索依賴、求值、建立物件、執行或發布。對 keyed collection，請加在 key 上。此規則不會停用或改名 Tool 呼叫時傳入的 argument values：
 
 ```yaml
-schemaVersion: att-config/v2.13
-x-debug-note: "#{missing.tool()}"      # 忽略的配置字段
-tools:
-  x-temporary: not-a-tool               # 忽略的 Tool 條目
-  smoke:
-    name: Smoke check
-    description: Check the local setup
-    call: "#{upper('ok')}"
-    x-retry: 0                           # 忽略的可選 Tool 字段
+schemaVersion: att-tool/v1
+id: smoke
+name: Smoke check
+description: Check the local setup
+call: "#{upper('ok')}"
+x-retry: 0                    # 忽略的可選 Tool 欄位
 ```
 
 Action 和 evidence collector 也使用相同規則。停用的 Action 不會進入校驗或 runtime；停用的 collector 不會被呼叫，也不會加入 evidence。ATT 擁有的巢狀配置區塊中的 `x-` 字段同樣會被忽略：
@@ -2454,17 +2484,21 @@ Action -> logical helper ID -> selected config -> physical descriptor -> endpoin
 ATT_HOME/
 ├── config/
 │   ├── config.yaml
-│   ├── tools/*.yaml
 │   ├── dbhelpers/{sit,uat}/orders.yaml
 │   └── mqhelpers/{sit,uat}/payment.yaml
 └── packages/<id>/
     ├── package.yaml
     ├── testcase/
     ├── templates/
-    └── testdata/accounts.yaml
+    ├── testdata/accounts.yaml
+    └── tools/
+        ├── standaloneTool.yaml
+        └── fpp/
+            ├── tool-group.yaml
+            └── invokeApi.yaml
 ```
 
-common config 保留 run/execution/report 設置、`toolGroups` 和 global `tools` registry。Tool/Helper descriptors 從 `ATT_HOME/config/` 解析；Testdata descriptors 則從選取的 Package 解析。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
+common config 保留 run/execution/report 與全局 DB/MQ/HTTP/SSH Helpers。Tool 只由所選 Package 發現：根目錄 `tools/*.yaml` 為獨立 `att-tool/v1` Tool，而 `tools/<folder>/tool-group.yaml`（`att-tool-group/v3.0`）明確列出成員 YAML，公開名稱保持 `group.tool`。舊式全局 Tool 宣告必須明確遷移。Profile 層可配置 typed DB/MQ/SSH/HTTP descriptor lists；以下以 DB/MQ 示範：
 
 ```yaml
 # config/config.yaml
@@ -2472,10 +2506,6 @@ schemaVersion: att-config/v2.13
 environment: SIT                 # default；--env 会覆盖
 templates: {root: templates}
 testcase: {root: testcase}
-toolGroups:
-  - config/tools/sample.yaml
-  - config/tools/fpp.yaml
-  - config/tools/orders-db.yaml
 environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
@@ -2485,7 +2515,7 @@ environments:
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-可把 `config/environments/sit.yaml` 和 `config/environments/uat.yaml` 作為 common registry 的遷移來源，包括 `invokePaymentApi` 以及 `examples/load/closed-smoke.yaml` 使用的 `sample.getAcDate`。實際 package 不要把共用 registry 縮減成 `tools: {}` 或 `toolGroups: []`。
+SIT 與 UAT Config 只保留共用 Helper/Environment 綁定；`invokePaymentApi` 與 `sample.getAcDate` 改由所選 Package 提供。升級至 4.2.10 時必須明確遷移舊式全局 Tools。
 
 SIT 與 UAT 的 DBHelper 都保持 `id: orders`，只改變 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改變 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可復制例子見 [`examples/environments/README.md`](../examples/environments/README.md)。
 
@@ -2577,10 +2607,8 @@ report:
   html: {caseLogInlineLimitBytes: 32768}
   junit: {caseLogEmbedThresholdBytes: 10240}
 xml: {namespaceMode: ignore}
-toolGroups: [config/tools/database.yaml]
 dbhelpers: [config/dbhelpers/orders.yaml]
 mqhelpers: [config/mqhelpers/orders.yaml]
-tools: {}
 environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
@@ -2635,22 +2663,19 @@ Run 和 Load 的 `--run-id <id>`，以及 standalone Debug 的 `--debug-id <id>`
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `toolGroups` | `[]` | Unique safe package-relative tool-group YAML paths |
 | `dbhelpers` | `[]` | Unique package-contained `att-dbhelper/v2.6` YAML paths; normalized duplicates are rejected |
 | `mqhelpers` | `[]` | Unique package-contained `att-mqhelper/v1.3` YAML paths; normalized duplicates are rejected |
 | `sshhelpers` | `[]` | Unique package-contained `att-sshhelper/v1.0` YAML paths |
 | `httphelpers` | `[]` | Unique package-contained `att-httphelper/v1.1` YAML paths |
 | `environments` | absent | Non-empty map of profile names; profiles may contain configured shared Resource lists; Package Testdata belongs to the Manifest |
 | `environments.<profile>.testdata` | deprecated | Temporary `packagePolicy.legacyTestdata` only; migrate to Manifest `testdata.environments` |
-| `ssh` | absent | Optional SSH target for inline global tools |
-| `tools` | `{}` | Map of reusable tool contracts |
 
 
 Allowed global object properties are:
 
 | Object | Allowed properties |
 |---|---|
-| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `toolGroups`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `ssh`, `tools`, `environments`, `x-*` |
+| root | `schemaVersion`, `outputDirectory`, `environment`, `timeoutMs`, `caseLog`, `templates`, `testcase`, `run`, `execution`, `report`, `xml`, `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `environments`, `x-*` |
 | `environments.<profile>` | `dbhelpers`, `mqhelpers`, `sshhelpers`, `httphelpers`, `testdata`, `x-*` |
 | `caseLog` | `yamlAnchors`, `x-*` |
 | `templates` | `root`, `x-*` |
@@ -2882,7 +2907,7 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 
 ## CLI 參考
 
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.2.10 -->
 
 
 ### 選擇命令
@@ -2902,11 +2927,11 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
-上表列出 ATT 4.2.9 CLI command。獨立的 vNext proposal 尚未包含在此 release。
+上表列出 ATT 4.2.10 CLI command。獨立的 vNext proposal 尚未包含在此 release。
 
-### ATT 4.2.9 的可用性
+### ATT 4.2.10 的可用性
 
-本 Reference 說明 ATT 4.2.9 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
+本 Reference 說明 ATT 4.2.10 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
 
 ### 編譯 source checkout
 
@@ -3411,7 +3436,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.2.9",
+  "attVersion": "4.2.10",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -3450,7 +3475,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.9-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.9-server.tar.gz`，以及 source archive `att-4.2.9-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
+`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.10-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.10-server.tar.gz`，以及 source archive `att-4.2.10-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
 
 ### Runtime dependencies
 
@@ -3501,7 +3526,8 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | MQHelper | att-mqhelper/v1.3 |
 | HTTPHelper | att-httphelper/v1.1 |
 | SSHHelper | att-sshhelper/v1.0 |
-| Tool group | att-tool-group/v2.9 |
+| Package Tool | att-tool/v1 |
+| Package Tool Group | att-tool-group/v3.0 |
 | Workbook sidecar | att-sidecar/v2.2 |
 | Testcase snapshot | att-testcases/v2.4 |
 | Template | att-template/v3.6 |
@@ -3681,7 +3707,7 @@ Timeout range、evidence sample bound、result limit、pool size 等 operational
 
 #### 為什麼 `Att.bat` 會要求 Maven，或者為什麼 `.sh` Tool 在 windows 上失敗？
 
-在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.9.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
+在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.10.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
 
 啟動器讓 ATT 自身跨平臺；它無法翻譯外部 Tool 可執行文件。請為 Windows 配置 `.bat`、`.cmd`、PowerShell 腳本（需要顯式 `powershell`/`pwsh` argv）或原生可執行文件，而不是 POSIX-only `.sh`。PATH 校驗遵循 Windows `PATHEXT`，因此如 `pwsh` 這類名稱可解析為 `pwsh.exe`。維護多平臺版本時，請保持參數契約和 stdout 輸出格式一致。
 

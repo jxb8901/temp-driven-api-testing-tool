@@ -14,7 +14,7 @@ Standalone Debug bootstrap value 會映射到這些 canonical root：`inputs` �
 | EXEC.RUN_STARTED_AT | 外層 run 開始時間；ISO-8601 String。 | 三種模式均可用。 |
 | EXEC.OUTPUT_DIR | execution workspace 絕對路徑。 | 初始化後可用；Load 中可能先有 planned path，尚未實際建立。 |
 | EXEC.INPUT | Case/stage、Debug sidecar 或 Load workload input map。 | 三種模式均可用；Stage input 暫時 overlay Case input。 |
-| EXEC.VARS | assign 發布的型別化值。 | 三種模式均可用；指派前為空。 |
+| EXEC.VARS | assign 建立或 set 更新的型別化值。 | 三種模式均可用；assign 或 bootstrap 前為空。 |
 | EXEC.ACTIONS | active Template/Flow scope 已完成的 Actions。 | 發布 Action 後可用；Flow 有巢狀 scope。 |
 | EXEC.LOAD.MODEL | closed 或 arrivalRate。 | 僅 Load；ID 產生前可用。 |
 | EXEC.LOAD.WORKLOAD_ID | 配置的 workload ID。 | 僅 Load；ID 產生前可用。 |

@@ -85,7 +85,6 @@ public final class PackageConfigurationSnapshots {
 
     private Set<Path> dependencies(PackageResourceResolver resolver,Path config,Map<?,?> raw,String environment,boolean shared) {
         Set<Path> paths=new TreeSet<Path>();paths.add(config);
-        addPaths(resolver,paths,raw.get("toolGroups"),false);
         Map<?,?> profile=Collections.emptyMap();
         String selected=environment==null&&raw.get("environment") instanceof String?((String)raw.get("environment")).trim():environment;
         if(raw.get("environments") instanceof Map)for(Map.Entry<?,?> item:((Map<?,?>)raw.get("environments")).entrySet())

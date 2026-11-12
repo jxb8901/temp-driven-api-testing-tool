@@ -87,6 +87,7 @@
             "assert",
             "log",
             "assign",
+            "set",
             "flow"
           ]
         },
@@ -604,6 +605,92 @@
                   {
                     "required": [
                       "timeoutMs"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "evidence"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "value"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "format"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "set"
+                }
+              },
+              "required": [
+                "type",
+                "name",
+                "expression"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "payload"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "call"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "db"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "query"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "update"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "expected"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "actual"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "message"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "level"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "timeoutMs"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "use"
                     ]
                   },
                   {

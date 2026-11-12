@@ -90,14 +90,18 @@ class PackageDocumentationGeneratorTest {
         Files.createDirectories(tempDir.resolve("testcase"));
         Files.createDirectories(tempDir.resolve("templates/VERIFY"));
         Files.write(tempDir.resolve("templates/VERIFY/template.yaml"), (
-                "schemaVersion: att-template/v3.4\n" +
+                "schemaVersion: att-template/v3.6\n" +
                 "name: VERIFY\n" +
                 "description: Verify expected status\n" +
                 "actions:\n" +
                 "  buildReference:\n" +
                 "    type: assign\n" +
                 "    name: reference\n" +
-                "    expression: \"#{echo(${CASE.caseId})}\"\n" +
+                "    expression: \"${CASE.caseId}\"\n" +
+                "  publishWithSet:\n" +
+                "    type: set\n" +
+                "    name: reference\n" +
+                "    expression: \"#{echo(${EXEC.VARS.reference})}\"\n" +
                 "  check:\n" +
                 "    type: assert\n" +
                 "    description: Check ${CASE.caseId}\n" +

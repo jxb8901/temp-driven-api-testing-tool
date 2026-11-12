@@ -1,0 +1,12 @@
+schemaVersion: att-tool/v1
+id: count
+name: Count orders
+description: Return one typed scalar order count
+call: "#{db.orders.scalar(sql='select count(*) as ORDER_COUNT from orders where customer_id = ?', params=[${input.customerId}])}"
+cache:
+  scope: db
+arguments:
+  customerId:
+    name: Customer ID
+    description: Customer whose orders are counted
+    required: true

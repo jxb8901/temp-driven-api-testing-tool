@@ -63,10 +63,13 @@ class PrewarmedWorkerTest {
         Files.createDirectories(root.resolve("templates/ENV"));
         String java=Paths.get(System.getProperty("java.home"),"bin","java").toString();
         String cp=System.getProperty("java.class.path");
-        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.12\nenvironment: SIT\n"
-                +"testcase: {root: testcase}\ntemplates: {root: templates}\ntools:\n  env:\n"
-                +"    name: Environment fixture\n    description: Assigned environment\n    command: ["+quote(java)+", '-cp', "+quote(cp)+", 'att.worker.PrewarmEnvironmentFixture', "+quote(root.resolve("business-started").toString())+"]\n"
-                +"    stdoutFormat: text\n    arguments: {}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("config/config.yaml"),("schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n").getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(root.resolve("tools"));
+        Files.write(root.resolve("tools/env.yaml"),("schemaVersion: att-tool/v1\nid: env\n"
+                +"name: Environment fixture\ndescription: Assigned environment\n"
+                +"command: ["+quote(java)+", '-cp', "+quote(cp)+", 'att.worker.PrewarmEnvironmentFixture', "+quote(root.resolve("business-started").toString())+"]\n"
+                +"stdoutFormat: text\narguments: {}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/ENV/template.yaml"),("schemaVersion: att-template/v3.6\nname: ENV\ndescription: Environment fixture\nactions:\n"
                 +"  call:\n    type: tool\n    call: \"#{env()}\"\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/ENV/debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n".getBytes(StandardCharsets.UTF_8));
