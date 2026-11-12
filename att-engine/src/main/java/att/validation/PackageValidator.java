@@ -879,29 +879,58 @@ public final class PackageValidator {
                     att.config.SshHelperConfig helper = global.sshHelper(tool.sshHelper());
                     if (helper == null) throw new IllegalArgumentException("Unknown SSH helper: " + tool.sshHelper());
                     for (att.config.SshConfig target : helper.instances().values()) validateSshIdentity(tool, target);
-                    return;
+                    return; // Remote Tool executables are not local Package files.
                 }
                 validateSshIdentity(tool, tool.ssh());
                 return;
             }
-            java.util.List<String> command = tool.groupScriptArgv().isEmpty() ? tool.commandArgv() : tool.groupScriptArgv();
-            if (command.isEmpty()) throw new IllegalArgumentException("Tool command is blank: " + tool.key());
-            String first = command.get(0);
-            boolean skipShellExecutableCheck = windows && first.toLowerCase(java.util.Locale.ROOT).endsWith(".sh");
-            Path executable = java.nio.file.Paths.get(first);
-            boolean packageRelative = first.startsWith("./") || first.startsWith("../");
-            if (!executable.isAbsolute() && packageRelative) executable = projectRoot.resolve(executable).normalize();
-            else if (!executable.isAbsolute()) executable = findOnPath(first, !skipShellExecutableCheck);
-            Path canonicalProject = projectRoot.toRealPath();
-            Path canonicalExecutable = executable.toRealPath();
-            if (packageRelative && !canonicalExecutable.startsWith(canonicalProject)) throw new IllegalArgumentException("Package-local tool executable escapes package root: " + first);
-            if (Files.isSymbolicLink(executable) || !Files.isRegularFile(canonicalExecutable)) throw new IllegalArgumentException("Missing/unsafe tool executable: " + first);
-            if (skipShellExecutableCheck) {
-                skippedWindowsShellExecutableChecks.add(tool.key());
-                return;
+
+            java.util.List<String> dispatcher = tool.groupScriptArgv();
+            java.util.List<String> member = tool.commandArgv();
+            validateLocalToolExecutable(tool, dispatcher.isEmpty() ? member : dispatcher);
+
+            // The Group dispatcher is not a substitute for the member command.
+            // Check both when the member has an explicit Package-local executable.
+            if (!dispatcher.isEmpty() && !member.isEmpty()) {
+                String first = member.get(0);
+                if (first.startsWith("./") || first.startsWith("../") || first.startsWith("tools/"))
+                    validateLocalToolExecutable(tool, member);
             }
-            if (!Files.isExecutable(canonicalExecutable)) throw new IllegalArgumentException("Tool is not executable: " + first);
-        } catch (java.io.IOException e) { throw new IllegalArgumentException("Missing/unsafe tool executable for " + tool.key() + ": " + e.getMessage(), e); }
+            // Interpreted scripts can be in a later argument (bash tools/foo.sh).
+            // Track all bounded statically referenced Package script sources.
+            for (Path script : att.config.PackageToolScripts.referenced(projectRoot, tool)) {
+                if (!Files.isRegularFile(script, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                    throw new IllegalArgumentException("Missing Package Tool script dependency: "
+                            + projectRoot.toAbsolutePath().normalize().relativize(script));
+            }
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException("Missing/unsafe tool executable for "
+                    + tool.key() + ": " + e.getMessage(), e);
+        }
+    }
+
+    private void validateLocalToolExecutable(ToolConfig tool, java.util.List<String> command) throws java.io.IOException {
+        if (command.isEmpty()) throw new IllegalArgumentException("Tool command is blank: " + tool.key());
+        String first = command.get(0);
+        if (first.contains("${") || first.contains("#{") || first.contains("&{"))
+            return; // Dynamic argv remains subject to runtime resolution.
+        boolean skipShellExecutableCheck = windows && first.toLowerCase(java.util.Locale.ROOT).endsWith(".sh");
+        Path executable = java.nio.file.Paths.get(first);
+        boolean packageRelative = first.startsWith("./") || first.startsWith("../") || first.startsWith("tools/");
+        if (!executable.isAbsolute() && packageRelative) executable = projectRoot.resolve(executable).normalize();
+        else if (!executable.isAbsolute()) executable = findOnPath(first, !skipShellExecutableCheck);
+        Path canonicalProject = projectRoot.toRealPath();
+        Path canonicalExecutable = executable.toRealPath();
+        if (packageRelative && !canonicalExecutable.startsWith(canonicalProject))
+            throw new IllegalArgumentException("Package-local tool executable escapes package root: " + first);
+        if (Files.isSymbolicLink(executable) || !Files.isRegularFile(canonicalExecutable))
+            throw new IllegalArgumentException("Missing/unsafe tool executable: " + first);
+        if (skipShellExecutableCheck) {
+            skippedWindowsShellExecutableChecks.add(tool.key());
+            return;
+        }
+        if (!Files.isExecutable(canonicalExecutable))
+            throw new IllegalArgumentException("Tool is not executable: " + first);
     }
 
     private void validateSshIdentity(ToolConfig tool, att.config.SshConfig target) throws java.io.IOException {
