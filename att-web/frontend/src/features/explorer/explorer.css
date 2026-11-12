@@ -107,6 +107,9 @@
 .att-explorer-detail-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .75rem; }
 .att-explorer-table thead { position: sticky; inset-block-start: 0; background: var(--att-color-surface, #fff); z-index: 1; }
 .att-explorer-table tbody tr[aria-selected="true"] { background: color-mix(in srgb, var(--att-color-primary, #0866c6) 10%, var(--att-color-surface, #fff)); }
+.att-explorer-tool-group { background: color-mix(in srgb, var(--att-color-primary, #0866c6) 5%, var(--att-color-surface, #fff)); font-weight: 650; }
+.att-explorer-tool-group .att-explorer-resource-name { padding-inline-start: .25rem !important; }
+.att-explorer-group-member .att-explorer-resource-name { padding-inline-start: 1.6rem !important; }
 .att-explorer-sort { width: 100%; text-align: left; border: 0 !important; background: transparent !important; padding: .2rem !important; font-weight: 700; }
 .att-explorer-resource-name { width: 100%; text-align: left; border: 0 !important; background: transparent !important; padding: .15rem !important; overflow-wrap: anywhere; }
 .att-explorer-tree { display: grid; gap: var(--att-space-2, .5rem); border-block: 1px solid var(--att-color-border, #cbd5e1); padding-block: var(--att-space-2, .5rem); }

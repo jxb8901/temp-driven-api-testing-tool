@@ -103,6 +103,12 @@ export function SourceViewer({ api, identity, available, active, resource, onFil
   const openReference = (reference: SafeSourceFileReference, origin?: string) => {
     if (reference.available === false) return;
     const sourceOrigin = projection?.logicalPath || origin;
+    if (identity.type === 'tool') {
+      onFileReference?.(reference.logicalPath, sourceOrigin, {
+        type: identity.type, resourceId: identity.resourceId, referenceId: reference.referenceId, returnTab: 'source',
+      });
+      return;
+    }
     if (identity.type === 'template' || identity.type === 'flow')
       onFileReference?.(reference.logicalPath, sourceOrigin, { type: identity.type, resourceId: identity.resourceId, referenceId: reference.referenceId, returnTab: 'source' });
     else onFileReference?.(reference.logicalPath, sourceOrigin);
@@ -131,7 +137,17 @@ export function SourceViewer({ api, identity, available, active, resource, onFil
       <p>Name: {String(toolProvenance.toolName || resource?.name || resource?.logicalId || identity.resourceId)}</p>
       <p>Source kind: {String(resource?.sourceKind || toolProvenance.toolSourceKind || 'configured Tool')}</p>
       {typeof toolProvenance.toolConfigLocation === 'string' && <p>Tool config: <code>{toolProvenance.toolConfigLocation}</code></p>}
-      {typeof toolProvenance.toolGroupManifest === 'string' && <p>Tool Group manifest: <code>{toolProvenance.toolGroupManifest}</code></p>}
+      {typeof toolProvenance.toolGroupManifest === 'string' && <div className="att-tool-group-source-link">
+        <p>Tool Group manifest: <code>{toolProvenance.toolGroupManifest}</code></p>
+        {(() => {
+          const manifest = projection?.fileReferences?.find(reference => reference.logicalPath === toolProvenance.toolGroupManifest);
+          if (manifest?.available !== false && manifest)
+            return <button type="button" onClick={() => openReference(manifest, projection?.logicalPath)}>Open Group manifest source</button>;
+          if (projection?.fileReferencesUnavailable)
+            return <p role="status">Group manifest source is unavailable under the Package source policy.</p>;
+          return <p role="status">Load the Tool source projection to check Group manifest availability.</p>;
+        })()}
+      </div>}
       {resource?.sourceKind === 'package-tool-descriptor' && <p>Source is the Package-owned att-tool/v1 descriptor; global Helpers remain centrally configured.</p>}
       {resource?.sourceKind === 'built-in-virtual' && <p>This Tool uses a built-in or virtual provider and has no standalone source file.</p>}
     </section>}
