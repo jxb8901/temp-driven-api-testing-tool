@@ -175,7 +175,7 @@ public final class FrameworkConfigLoader {
                     ? HelperDiscoveryLoader.load("http", map.get("httphelpers"), runtimeConfigRoot, references,
                             new HttpHelperConfigLoader(references)::load)
                     : Collections.<String, HttpHelperConfig>emptyMap();
-            // Package Tool definitions are discovered solely from packages/<id>/tools/*.yaml.
+            // Package Tool definitions are discovered solely from selected Package standalone files and grouped tool-group.yaml manifests.
             // Global DB/MQ/HTTP/SSH Helpers remain centrally configured.
             Map<String, DbHelperConfig> dbHelpers = (v29 || v28 || v27 || v26 || v25)
                     ? HelperDiscoveryLoader.load("db", map.get("dbhelpers"), runtimeConfigRoot, references,
@@ -402,14 +402,14 @@ public final class FrameworkConfigLoader {
     private static void rejectLegacyGlobalTools(Map<?, ?> raw) {
         if (raw.containsKey("tools") || raw.containsKey("toolGroups"))
             throw new IllegalArgumentException("Legacy global tools/toolGroups are unsupported in ATT 4.2.10. "
-                    + "Migrate each Tool into the selected Package's tools/*.yaml with schemaVersion: att-tool/v1; "
+                    + "Migrate Tools into the selected Package: standalone tools/*.yaml (att-tool/v1) or grouped tools/<folder>/tool-group.yaml (att-tool-group/v3.0) plus member att-tool/v1 files; "
                     + "remove tools and toolGroups from config/config.yaml. No global Tool fallback is provided.");
         Object profiles = raw.get("environments");
         if (profiles instanceof Map) for (Object value : ((Map<?, ?>) profiles).values())
             if (value instanceof Map && (((Map<?, ?>) value).containsKey("tools")
                     || ((Map<?, ?>) value).containsKey("toolGroups")))
                 throw new IllegalArgumentException("Legacy Environment tools/toolGroups are unsupported; "
-                        + "migrate Tool definitions into Package tools/*.yaml.");
+                        + "migrate Tool definitions into Package standalone tools/*.yaml or Group folder tool-group.yaml plus individual Tool YAML.");
     }
 
     static void addTools(Object configured, Map<String, ToolConfig> result, String groupId,
@@ -713,12 +713,12 @@ public final class FrameworkConfigLoader {
             Map<?, ?> group = yaml(file, "Tool group");
             att.testdata.TestdataSyntax.rejectDirectReferences(group, "Tool group " + file.getFileName());
             String version = String.valueOf(group.get("schemaVersion"));
-            boolean v29 = Version.TOOL_GROUP_SCHEMA.equals(version);
+            boolean v29 = Version.LEGACY_TOOL_GROUP_V29_SCHEMA.equals(version);
             boolean v28 = v29;
             boolean v27 = false;
             boolean v26 = false;
             if (!v29) throw new IllegalArgumentException("Unsupported tool group schemaVersion '" + version
-                    + "'; ATT 4.1.0 supports only " + Version.TOOL_GROUP_SCHEMA
+                    + "'; ATT 4.1.0 supports only " + Version.LEGACY_TOOL_GROUP_V29_SCHEMA
                     + ". Migrate command Tool parsing to stdoutFormat and see docs/reference/appendices/migrations.md.");
             Path schema = schema(projectRoot, "att-tool-group-v2.9.schema.json");
             att.validation.SchemaMigrationGuidance.verify(schema, schema, group, version, Version.TOOL_GROUP_SCHEMA);
