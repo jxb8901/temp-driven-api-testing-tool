@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "att-sut-metrics-source/v1",
+  "id": "prom-main",
+  "name": "Main Prometheus",
+  "url": "https://prometheus.example.internal",
+  "apiPath": "/api/v1/query_range",
+  "tls": { "verify": true },
+  "auth": { "mode": "NONE" },
+  "readers": ["load-observer"],
+  "readRoles": [],
+  "allowedTenants": ["production"],
+  "defaultTenant": "production",
+  "limits": {
+    "connectTimeoutMs": 5000,
+    "requestTimeoutMs": 10000,
+    "maxRangeSeconds": 93600,
+    "maxQueriesPerJob": 256,
+    "maxSamplesPerQuery": 100000,
+    "maxSamplesPerJob": 1500000,
+    "maxSeriesPerJob": 64,
+    "maxTargets": 64,
+    "maxMetrics": 64
+  }
+}

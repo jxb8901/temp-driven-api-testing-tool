@@ -8,6 +8,9 @@
 .att-job-provenance summary { cursor: pointer; }
 @media (max-width: 620px) { .att-jobs-page .att-query-filter-panel, .att-jobs-page .att-query-results-panel { padding: var(--att-space-3); } .att-jobs-page .att-jobs-filter-grid:not(.att-jobs-more-filters) { grid-template-columns: minmax(0, 1fr); } }
 .att-sut-metrics-panel > h2 { margin-top: 0; }
+.att-sut-metrics-filters { display: flex; flex-wrap: wrap; gap: .75rem 1rem; margin: 1rem 0; }
+.att-sut-metrics-filters label { display: grid; gap: .25rem; min-width: 12rem; }
+.att-sut-metrics-filters select { min-height: 40px; padding: .45rem .6rem; }
 .att-sut-metrics-status { display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; margin: 1rem 0; }
 .att-sut-metrics-status > div { min-width: 10rem; }
 .att-sut-metrics-status dt { color: var(--att-muted, #5f6873); font-size: .8rem; }
@@ -18,8 +21,12 @@
 .att-sut-metric-card header p, .att-sut-metric-coverage { color: var(--att-muted, #5f6873); font-size: .875rem; margin: .35rem 0 0; }
 .att-sut-metric-query-status { border: 1px solid currentColor; border-radius: 1rem; font-size: .75rem; padding: .1rem .55rem; white-space: nowrap; }
 .att-sut-metric-query-status-ready { color: #14713b; }
-.att-sut-metric-query-status-no_data, .att-sut-metric-query-status-unavailable { color: #7a4e00; }
+.att-sut-metric-query-status-no_data, .att-sut-metric-query-status-unavailable, .att-sut-metric-query-status-stale { color: #7a4e00; }
 .att-sut-metric-query-status-failed { color: #a12222; }
+.att-sut-metric-summary { display: flex; flex-wrap: wrap; gap: .4rem 1.5rem; margin: .75rem 0 0; }
+.att-sut-metric-summary > div { min-width: 7rem; }
+.att-sut-metric-summary dt { color: var(--att-muted, #5f6873); font-size: .8rem; }
+.att-sut-metric-summary dd { font-weight: 600; margin: .15rem 0 0; }
 .att-sut-metric-chart { display: block; height: auto; margin-top: .75rem; max-height: 15rem; width: 100%; }
 .att-sut-metric-chart text { fill: currentColor; font-size: 10px; }
 .att-sut-metric-grid { fill: none; stroke: var(--att-border, #ccd2d9); stroke-dasharray: 3 4; stroke-width: 1; }

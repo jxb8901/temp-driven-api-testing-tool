@@ -45,3 +45,26 @@ Select **New Schedule** (`#/schedules/new`) or **Edit** (`#/schedules/<id>/edit`
 After validating a Load Template composition, select **Save Scenario** and enter a name. Saving creates a private Server record; it does not start a Job, create a Schedule, or write a Package file. In **Load testing → Scenarios**, use **Saved scenarios** to search, reopen, duplicate, validate, or delete your records. Template compositions reopen in the Load Template builder; API-authored scenario definitions reopen in the Advanced Load editor. Editing and saving creates a new revision, including subsequent saves in the same builder. A conflicting revision requires reloading the record. After saving, return to the library and validate the saved revision before running or scheduling. The review dialog offers **Export YAML** only when the validated preview is explicitly unredacted.
 
 Validation is temporary. Validate the saved revision again before choosing **Run** or **Schedule**. A Schedule stores its own validated snapshot; later edits or deletion of the saved record do not change that Schedule. Saving is unavailable for definitions containing protected authored or resolved values. Remove those values or use an approved reference.
+
+## SUT Metrics
+
+System administrators manage Prometheus Data Sources and versioned Metrics Profiles in **Settings → SUT Metrics administration**. Add a Data Source first, then save base profiles, any derived profiles, and composite profiles. A source stores its HTTPS endpoint, fixed query path, TLS policy, optional secret reference, reader scope, tenant allowlist, and collection limits. Secret material is read from the Server environment as `ATT_SECRET_<NAME>` and is never returned by the API.
+
+HTTPS Data Source hosts must exactly match a comma-separated entry in the Server's `ATT_SUT_METRICS_ALLOWED_HOSTS` environment variable. Entries are exact host names or IP addresses; wildcards and URL paths are not accepted. HTTP is available only for loopback Prometheus during local development. The Server disables redirects and proxy use. Pair the hostname allowlist with deployment network egress rules that constrain DNS-resolved destination IPs.
+
+An optional root-level `observability` object in `att-load/v1.9` binds registered profiles to a LOAD scenario. A binding may supply targets and parameters when the profile allows those overrides. Prometheus URLs, credentials, and arbitrary PromQL are not accepted from the scenario. For example:
+
+~~~yaml
+observability:
+  schemaVersion: att-load-observability/v1
+  collections:
+    - profile: profile-platform
+  collection: { mode: post-run, before: 5m, after: 2m, step: 30s }
+  livePreview: { enabled: true, refreshInterval: 30s, defaultRange: 15m }
+~~~
+
+The optional **SUT Metrics** tab in LOAD Job Details shows source, target, profile, coverage, sample freshness, and min/average/max values. While a LOAD Job is running, the tab requests a bounded snapshot-only preview every 30 seconds. Choose a target, profile, and a range from 5 minutes to 4 hours. Polling stops while another Job tab is selected or the browser document is hidden. After LOAD completes, the tab reads checksummed sidecars from the separate `jobs/<JOB_ID>/sut-metrics/` directory; it does not edit the sealed LOAD report or artifact archive. Post-run collection uses actual LOAD start/finish timestamps, adds the configured before/after windows, and splits long ranges into requests of at most six hours. The total collection window is limited to 26 hours. Post-run range choices filter samples relative to the collection end time, including for old Jobs.
+
+Collection states are `PENDING`, `COLLECTING`, `READY`, `PARTIAL`, `UNAVAILABLE`, and `FAILED`; live metric statuses also distinguish `STALE`, `NO_DATA`, and unavailable queries. None of these states changes the LOAD result or verdict. This phase does not overlay SUT values on TPS or latency and does not evaluate SUT thresholds.
+
+The complete source, base, derived, composite, and scenario examples are in [`examples/load/sut-metrics/`](../../../examples/load/sut-metrics/). Register the source and profiles in Settings before using the scenario; replace its package-owned Template target with a target available in your package.

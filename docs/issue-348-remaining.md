@@ -1,62 +1,46 @@
-# Issue #348 handoff: remaining work
+# Issue #348 Phase 1 status
 
-This branch is an implementation checkpoint for Phase 1. It contains the Server-owned SUT Metrics path, the optional `att-load-observability/v1` LOAD binding, a Job Details SUT Metrics tab, and admin catalog screens. It is **not a complete acceptance sign-off**: the SUT Metrics-specific test matrix and bilingual user/design documentation are still outstanding.
+This branch contains the Server-owned SUT Metrics path, optional `att-load-observability/v1` binding, Settings catalog screens, LOAD Job Details tab, bilingual user documentation, and examples. This is an implementation checkpoint, not a complete acceptance sign-off: API/integration coverage and several UI lifecycle cases remain open.
 
-## Checklist by completion status
+## Completed in this checkpoint
 
-### Completed at implementation level
+- Rebased PR #357 onto current `master` and updated the PR base to `master`.
+- Added exact HTTPS host matching through the Server `ATT_SUT_METRICS_ALLOWED_HOSTS` environment variable. HTTP remains loopback-only; redirects and proxies are disabled.
+- Fixed direct base-profile target binding and scenario parameter precedence. Stable query IDs now include source ID, profile path, target ID, and metric ID. Resolved profile/source target and metric limits are enforced.
+- Preserved actual LOAD execution timestamps separately from the expanded Prometheus collection window.
+- Stopped post-run requests once per-source or per-Job sample/artifact budgets are reached, and mark unissued queries in collection diagnostics.
+- Bounded collector, preview, and response-body executor queues; mapped capacity rejection to HTTP 503 and live-request deadline expiry to HTTP 504.
+- Added target/profile/range selection, stale live-sample status, min/average/max summaries, and query metadata for the SUT Metrics tab.
+- Added checksummed sidecar provenance fields and kept SUT evidence in the sibling `sut-metrics/` directory.
+- Added five Java service tests and three SUT Metrics UI regression tests. Added English and Traditional Chinese documentation plus source, base/derived/composite profile, and scenario examples.
 
-- Added versioned schemas/catalog entries for the LOAD observability binding, sources, profiles, immutable snapshots, collection manifests, and series artifacts.
-- Added the optional binding to `att-load/v1.9`; scenarios without the binding remain compatible.
-- Added Server-owned source/profile catalog APIs and UI, job snapshot resolution, on-demand preview, and post-run collection on a separate artifact path.
-- Added a separate LOAD Job Details SUT Metrics tab. The existing Metrics tab remains unchanged, and no TPS/latency overlay is included.
-- Kept SUT collection status separate from the LOAD execution verdict and report manifest/archive.
+## Acceptance still open
 
-### Partially completed acceptance areas
-
-- Data Source security/configuration, profile composition/override behavior, scenario compatibility, Prometheus collection, Live Preview, and the Job Details tab have implementation coverage described below, but do not yet have the dedicated SUT Metrics acceptance tests needed to close those criteria.
-- Secret references are snapshot-bound by name while secret values are resolved at request time; endpoint DNS/IP and egress destinations are not constrained by an application allowlist.
-
-### Not completed
-
-- SUT Metrics unit and integration tests, including two viewers, unprivileged/hidden-tab behavior, HTTP failure and timeout handling, sidecar checksums/status transitions, and a 25-hour-equivalent budgeted run.
-- Frontend tests dedicated to SUT Metrics states, visibility cancellation, live-to-post-run transition, and pagination. The existing Job Details tab test was updated for the added tab.
-- English and Traditional Chinese observability documentation and example source/profile/scenario files.
-- Configurable DNS/IP or egress allowlisting for administrator-configured Prometheus endpoints.
+- API integration tests for system-admin-only catalog writes, reader authorization, role/tenant restrictions, secret headers, concurrent viewers sharing a live-preview flight, and HTTP failure/timeout/response-size handling.
+- Collection tests for checksum tampering, unavailable/partial transitions, failed sidecars, timeouts, and a total-budget exhaustion across multiple successful metric queries.
+- UI tests for live-to-post-run transition, all server collection states, hidden Job tab cancellation, post-run filter paging, and API filtering across pages.
+- The hostname allowlist does not pin DNS resolution to the checked IP. Deployments still need network egress rules that restrict resolved destination IPs. Do not treat a hostname allowlist alone as a complete DNS-rebinding defense.
+- Snapshot secret references are pinned by name, while secret values are resolved from `ATT_SECRET_*` for each request. Rotating a secret during a long collection may change the credential material mid-Job.
 
 ## Acceptance coverage
 
-| #348 area | Status | Current implementation and remaining work |
+| #348 area | Status | Evidence and remaining work |
 | --- | --- | --- |
-| Admin-managed Prometheus Data Sources | Partial | Admin-only CRUD and test routes, Settings UI, TLS verification/custom CA reference, bearer/basic secret references, role/reader visibility, tenants, timeouts, and query/sample/range limits are implemented. Secret values are read from `ATT_SECRET_*` environment variables and are not returned. Add an explicit deployment egress/DNS policy for administrator-configured endpoints and authorization tests. |
-| Base, derived, and composite Metrics Profiles | Partial | Versioned profile records, typed parameters, label-safe PromQL substitution, single-parent `extends`, multi-profile `includes`, DAG/cycle and expansion-budget checks, target/source/parameter overrides, catalog persistence, and preview resolution are implemented. Add unit tests for graph errors, duplicate resolution, parameter escaping, permissions, and override rules. |
-| LOAD scenario binding and schema | Partial | `att-load-observability/v1` is optional under `att-load/v1.9`; the Advanced LOAD editor preserves it and legacy scenarios without it remain valid. Schema definitions are registered in both schema catalogs. Verify legacy migration and current-schema round trips with explicit tests. |
-| Post-run `query_range` collection | Partial | Collection uses the Worker execution window when available, segments long windows, writes outside `output/` and the sealed ZIP, uses separate PENDING/COLLECTING/READY/PARTIAL/UNAVAILABLE/FAILED state, and checksums series sidecars. The code has no dedicated test for a 25-hour-equivalent run, HTTP failures, timeouts, sample/query budgets, or the sealed-report non-mutation guarantee. |
-| Running Live Preview | Partial | The on-demand API is snapshot-bound, defaults to 15 minutes and 30-second steps, coalesces identical requests, caches briefly without persistence, and is polled only while the tab is active and the document is visible. Add tests for two viewers, hidden-tab cancellation, authorization/visibility, and transition to post-run data. |
-| Job Details SUT Metrics tab | Partial | A separate LOAD-only tab and series view are implemented. The existing Metrics panel is unchanged and no TPS/latency overlay is added. Add frontend tests for enabled/disabled/partial/failed states, pagination, hidden tab behavior, and status transition. |
-| Security, tests, docs, and examples | Partial | API routes require an authenticated authorized reader, catalog writes/testing require system administration, end-user scenarios cannot submit source URLs or credentials, HTTP is restricted to loopback, redirects/proxies are disabled, and secret values are not serialized. No SUT Metrics-specific Java or frontend tests, bilingual user docs, or example source/profile/scenario files have been added yet. |
-
-## Known issues and test gaps
-
-- Add service unit tests using a loopback Prometheus fixture for Data Source validation, profile DAG resolution/cycles, injection-safe parameters, auth/tenant headers, timeout/response bounds, snapshot immutability, sidecar checksums, and status transitions.
-- Add API integration tests for admin-only catalog mutation, unprivileged users, source/profile visibility, and two authorized viewers sharing a live-preview flight.
-- Add a 25-hour-equivalent post-run test that verifies segmentation, query/sample budgets, actual LOAD timestamps, and collection status independence from the execution verdict.
-- Add frontend tests for the new SUT Metrics tab, hidden-document/tab cancellation, no requests while hidden, live-to-post-run transition, and load-more paging.
-- The Data Source endpoint is admin-managed and cannot be supplied by an end user, but there is no configurable egress allowlist or DNS/IP resolution policy. Deployments should constrain Server egress to approved Prometheus services; consider a configurable allowlist for a follow-up.
-- Job snapshots pin endpoint, TLS/auth references, tenant, and limits. Secret values themselves are intentionally not persisted; the referenced environment variable is resolved when each request runs, so rotating a secret during a long collection can change the credential material mid-job.
-- Add English and Traditional Chinese user documentation and sample Prometheus Data Source, base/derived/composite profiles, and LOAD scenario bindings.
+| Admin-managed Prometheus Data Sources | Partial | Admin CRUD/test routes, TLS, auth secret references, reader/role visibility, tenants, bounded limits, loopback HTTP, and exact HTTPS host allowlist are implemented. Add API authorization/header/timeout tests and deployment IP-level egress policy. |
+| Base, derived, and composite Metrics Profiles | Partial | Typed parameters, safe interpolation, DAG validation, override rules, expansion budgets, and immutable profile snapshots are implemented. Service tests cover direct base binding, scenario-over-target parameter precedence, source-scoped IDs, and allowlist validation. Add DAG-cycle, duplicate resolution, and broader permissions tests. |
+| LOAD scenario binding and schema | Partial | Optional root-level `observability` remains compatible with scenarios that omit it. Both schema catalogs contain the binding. Add explicit legacy/current schema round-trip and schedule snapshot tests. |
+| Post-run `query_range` collection | Partial | Uses actual Worker execution times, segments at six hours, writes checksummed provenance-rich sidecars separately from reports/archive, and stops at sample budgets. Tests cover a 25-hour window, five segments, timestamp preservation, report/archive bytes, checksum, and early budget stop. Add injected source failures, checksum tampering, and state-transition tests. |
+| Running Live Preview | Partial | Snapshot-only, bounded range/step, request coalescing/cache, visibility-aware polling, and target/profile/range selection are implemented. UI tests cover stale summary rendering and hidden-document abort. Add concurrent-viewer and live-to-post-run API tests, plus explicit timeout/capacity integration tests. |
+| Job Details SUT Metrics tab | Partial | Dedicated LOAD-only tab shows query status, coverage, freshness and min/average/max. UI tests cover filters, stale status, statistics, and document-hidden cancellation. Add disabled/partial/failed transitions, hidden-tab cleanup, pagination, and post-run filtering tests. |
+| Security, docs, and examples | Partial | Scenario input cannot supply endpoint URLs or credentials; responses are private/no-store; secret values are not serialized; HTTPS hosts must exactly match the Server allowlist. Bilingual docs and example files are present. IP-level DNS/egress enforcement remains deployment-owned. |
 
 ## Explicitly deferred
 
 Do not implement #349 TPS/latency overlays or correlation, #350 background collection/Grafana/offline report, or #351 SUT threshold verdicts in this phase.
 
-## Verification run for this checkpoint
+## Local verification
 
-Verified with `JAVA_HOME=/home/box/opt/jdks/java17`:
-
-- `mvn -pl att-server -am -DskipTests compile` — passed; server compiled with Java 17 and Java 8 modules retained their Java 8 target. The Maven frontend build, TypeScript check, and bundle budget check also passed.
-- `mvn -pl att-worker,att-engine,att-server -am -Dtest=LoadScenarioTest,ApiServletIntegratedLimitsTest,ServerRuntimeLoadTerminalResultTest -Datt.skipFrontendUnitTests=true -Dsurefire.failIfNoSpecifiedTests=false test` — passed. 55 tests passed: 33 LOAD scenario tests, 10 API integrated limits tests, and 12 LOAD terminal-result tests. Worker Java 8 sources and tests compiled in the reactor.
-- `npm test` — passed: 47 files and 447 tests. The existing Job Details tab expectation was updated to include the new SUT Metrics tab. A prior run during the Maven `npm ci` step saw incomplete dependencies, and the first stable run exposed one pre-existing Quick Load timing failure; the final full rerun passed.
-- `git diff --check` — passed before final commit.
-
-No new SUT Metrics-specific test classes were added in this checkpoint; see the test gaps above. The integration and service coverage listed there remains required before claiming full #348 acceptance.
+- `mvn -pl att-server -am -DskipTests compile` — passed; this includes Java compilation, frontend TypeScript build, static assets, and bundle budget.
+- `mvn -pl att-server -am -Dtest=SutMetricsServiceTest -Datt.skipFrontendUnitTests=true -Dsurefire.failIfNoSpecifiedTests=false test` — passed, 5 tests. The fixture uses loopback HTTP and requires socket access. The reactor also built the frontend, type-checked it, and passed the bundle budget.
+- `npm test -- src/features/load/JobsPage.test.tsx` — passed, 63 tests including the three new SUT Metrics tests.
+- Full Java integration suites and the complete frontend suite have not been rerun on this implementation head.

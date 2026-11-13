@@ -11,7 +11,7 @@ import { memo, Profiler, useEffect, useMemo, useRef, useState, type KeyboardEven
 import './load.css';
 import './JobsPage.css';
 import { JobArtifacts } from './JobArtifacts';
-import type { JobArtifactOverview, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps, LoadJobsApi, LoadLiveProgressPoint, LoadLiveProgressSnapshot, SutMetricItem, SutMetricsJobResponse, SutMetricsLiveResponse } from './types';
+import type { JobArtifactOverview, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps, LoadJobsApi, LoadLiveProgressPoint, LoadLiveProgressSnapshot, SutMetricItem, SutMetricQueryMetadata, SutMetricsJobResponse, SutMetricsLiveResponse } from './types';
 import { JobConsoleView } from './JobConsoleView';
 import { useJobConsole } from './JobConsoleContext';
 import { useJobEventStatus, useJobEventStream, type JobStreamConnection } from './useJobEventStream';
@@ -1018,6 +1018,11 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
   const [loading, setLoading] = useState(false);
   const [moreLoading, setMoreLoading] = useState(false);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [targetFilter, setTargetFilter] = useState('');
+  const [profileFilter, setProfileFilter] = useState('');
+  const [liveRange, setLiveRange] = useState('15m');
+  const [collectionRange, setCollectionRange] = useState('all');
+  const [queryDefinitions, setQueryDefinitions] = useState<SutMetricQueryMetadata[]>([]);
   const requestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -1036,15 +1041,15 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
         if (activeLoad) {
           const fetchLive = api.getJobSutMetricsLive;
           if (!fetchLive) throw new Error('This Server client does not support SUT Metrics live preview.');
-          const value = await fetchLive(jobId, { range: '15m', step: '30s', signal: controller.signal });
+          const value = await fetchLive(jobId, { range: liveRange, step: '30s', targetId: targetFilter || undefined, profilePath: profileFilter || undefined, signal: controller.signal });
           if (disposed || controller.signal.aborted) return;
-          setResponse(value); setNextOffset(null); schedule(30_000);
+          setResponse(value); setQueryDefinitions(value.queries || []); setNextOffset(null); schedule(30_000);
         } else {
           const fetchCollection = api.getJobSutMetrics;
           if (!fetchCollection) throw new Error('This Server client does not support SUT Metrics collection.');
-          const value = await fetchCollection(jobId, { offset: 0, limit: 4, signal: controller.signal });
+          const value = await fetchCollection(jobId, { offset: 0, limit: 4, targetId: targetFilter || undefined, profilePath: profileFilter || undefined, signal: controller.signal });
           if (disposed || controller.signal.aborted) return;
-          setResponse(value); setNextOffset(typeof value.nextOffset === 'number' ? value.nextOffset : null);
+          setResponse(value); setQueryDefinitions(value.collection?.queries || []); setNextOffset(typeof value.nextOffset === 'number' ? value.nextOffset : null);
           if (['PENDING', 'COLLECTING'].includes(String(value.state || value.collection?.state))) schedule(5_000);
         }
       } catch (failure) {
@@ -1070,13 +1075,13 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
       requestRef.current?.abort(); requestRef.current = null;
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [api, jobId, activeLoad, hidden]);
+  }, [api, jobId, activeLoad, hidden, targetFilter, profileFilter, liveRange]);
 
   async function loadMore() {
     if (nextOffset === null || !api.getJobSutMetrics || moreLoading || hidden) return;
     const controller = new AbortController(); requestRef.current = controller; setMoreLoading(true);
     try {
-      const page = await api.getJobSutMetrics(jobId, { offset: nextOffset, limit: 4, signal: controller.signal });
+      const page = await api.getJobSutMetrics(jobId, { offset: nextOffset, limit: 4, targetId: targetFilter || undefined, profilePath: profileFilter || undefined, signal: controller.signal });
       if (controller.signal.aborted) return;
       setResponse(current => current ? { ...page, items: [...(current.items || []), ...(page.items || [])] } : page);
       setNextOffset(typeof page.nextOffset === 'number' ? page.nextOffset : null);
@@ -1096,10 +1101,24 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
   const freshness = (response as SutMetricsLiveResponse | null)?.sourceQueryTime || collection?.updatedAt || collection?.createdAt;
   const sampleCount = (response as SutMetricsLiveResponse | null)?.sampleCount;
   const diagnostics = collection?.diagnostics || [];
+  const queries = queryDefinitions.length ? queryDefinitions : activeLoad
+    ? ((response as SutMetricsLiveResponse | null)?.queries || [])
+    : (collection?.queries || []);
+  const targets = [...new Set(queries.map(query => query.targetId).filter(Boolean))].sort();
+  const profiles = [...new Set(queries.map(query => query.profilePath || query.profile || '').filter(Boolean))].sort();
+  const selectedRange = activeLoad ? liveRange : collectionRange;
+  const rangeOptions = activeLoad
+    ? [['5m', 'Last 5 minutes'], ['15m', 'Last 15 minutes'], ['30m', 'Last 30 minutes'], ['1h', 'Last hour'], ['4h', 'Last 4 hours']]
+    : [['all', 'Entire collection'], ['15m', 'Last 15 minutes'], ['1h', 'Last hour'], ['6h', 'Last 6 hours'], ['12h', 'Last 12 hours'], ['24h', 'Last 24 hours']];
 
   return <section className="att-job-panel att-sut-metrics-panel" role="tabpanel" id="job-panel-sutMetrics" aria-labelledby="job-tab-sutMetrics" hidden={hidden} tabIndex={0}>
     <h2>SUT Metrics</h2>
     <p className="att-help">Prometheus metrics for the selected system under test. Live preview is read-only, refreshed every 30 seconds, and does not affect the LOAD verdict.</p>
+    {queries.length > 0 && <div className="att-sut-metrics-filters" aria-label="SUT Metrics filters">
+      <label>Target<select value={targetFilter} onChange={event => setTargetFilter(event.target.value)}><option value="">All targets</option>{targets.map(target => <option key={target} value={target}>{target}</option>)}</select></label>
+      <label>Profile<select value={profileFilter} onChange={event => setProfileFilter(event.target.value)}><option value="">All profiles</option>{profiles.map(profile => <option key={profile} value={profile}>{profile}</option>)}</select></label>
+      <label>Range<select value={selectedRange} onChange={event => activeLoad ? setLiveRange(event.target.value) : setCollectionRange(event.target.value)}>{rangeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+    </div>}
     {error && <p role="alert" className="att-inline-error">{error}</p>}
     <dl className="att-sut-metrics-status">
       <div><dt>Collection state</dt><dd>{state}</dd></div>
@@ -1116,42 +1135,61 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
     {state === 'PARTIAL' && <p role="status">Some metrics are available; other queries returned no data or could not be collected.</p>}
     {state === 'NO_DATA' && <p role="status">No SUT samples are available yet for this time window.</p>}
     {state === 'READY' && !items.length && <p role="status">Collection is ready, but no metric series are present in this page.</p>}
-    {items.map((item, index) => <SutMetricCard item={item} key={`${item.id || item.queryId || item.metricId}-${item.targetId}-${index}`} />)}
+    {items.map((item, index) => <SutMetricCard item={item} range={activeLoad ? liveRange : collectionRange} rangeEnd={windowEnd} key={`${item.id || item.queryId || item.metricId}-${item.targetId}-${index}`} />)}
     {diagnostics.length > 0 && <details><summary>Collection diagnostics ({diagnostics.length})</summary><ul>{diagnostics.slice(0, 20).map((item, index) => <li key={`${item.code}-${index}`}>{item.code || 'Collection issue'}: {item.message || 'No additional detail.'}</li>)}</ul></details>}
     {nextOffset !== null && <button type="button" onClick={() => void loadMore()} disabled={moreLoading}>{moreLoading ? 'Loading…' : 'Load more SUT metric series'}</button>}
     {loading && !response && <p role="status" aria-busy="true">Loading SUT Metrics…</p>}
   </section>;
 });
 
-const SutMetricCard = memo(function SutMetricCard({ item }: { item: SutMetricItem }) {
-  const paths = (item.series || []).slice(0, 8).map((series, index) => {
-    const points = series.samples.slice(-800);
+const SutMetricCard = memo(function SutMetricCard({ item, range, rangeEnd }: { item: SutMetricItem; range: string; rangeEnd?: string }) {
+  const rangeSeconds: Record<string, number> = { '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '6h': 21600, '12h': 43200, '24h': 86400 };
+  const parsedRangeEnd = rangeEnd ? Date.parse(rangeEnd) : Number.NaN;
+  const rangeAnchor = Number.isFinite(parsedRangeEnd) ? parsedRangeEnd : Date.now();
+  const cutoff = range === 'all' ? null : rangeAnchor - (rangeSeconds[range] || 900) * 1000;
+  const visibleSeries = (item.series || []).slice(0, 8).map(series => ({
+    ...series,
+    samples: (series.samples || []).filter(point => cutoff === null || point.timestampEpochMs >= cutoff).slice(-800),
+  }));
+  const visiblePoints = visibleSeries.flatMap(series => series.samples);
+  const values = visiblePoints.map(point => point.value);
+  const minimum = values.length ? Math.min(...values) : 0, maximum = values.length ? Math.max(...values) : 1;
+  const average = values.length ? values.reduce((total, value) => total + value, 0) / values.length : null;
+  const span = maximum - minimum || 1;
+  const paths = visibleSeries.map((series, index) => {
+    const points = series.samples;
     if (!points.length) return null;
-    const values = points.map(point => point.value), minimum = Math.min(...values), maximum = Math.max(...values);
-    const span = maximum - minimum || 1;
     const path = points.map((point, position) => {
       const x = points.length < 2 ? 0 : position * 800 / (points.length - 1);
       const y = 190 - ((point.value - minimum) / span) * 170;
       return `${position ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ');
-    return { path, index, minimum, maximum };
+    return { path, index };
   }).filter((value): value is NonNullable<typeof value> => value !== null);
-  const count = (item.series || []).reduce((total, series) => total + series.samples.length, 0);
+  const count = visiblePoints.length;
   const coverage = item.coverage || item.series?.[0]?.coverage || {};
+  const firstVisible = visiblePoints[0]?.timestamp || coverage.firstSampleAt;
+  const latestVisible = visiblePoints[visiblePoints.length - 1]?.timestamp || coverage.lastSampleAt;
   const status = item.queryStatus || (count ? 'READY' : 'NO_DATA');
   return <article className="att-sut-metric-card">
-    <header><div><h3>{item.title || item.metricId}</h3><p>{item.category || 'SUT'} · {item.targetType || 'target'} {item.targetId} · {item.unit}</p></div>
+    <header><div><h3>{item.title || item.metricId}</h3><p>{item.category || 'SUT'} · {item.targetType || 'target'} {item.targetId} · {item.unit}{item.profilePath ? ` · ${item.profilePath}` : ''}</p></div>
       <span className={`att-sut-metric-query-status att-sut-metric-query-status-${status.toLowerCase()}`}>{status}</span></header>
     {item.error && <p role="status">{item.error}</p>}
+    {status === 'STALE' && <p role="status">The latest sample is older than the live freshness window.</p>}
     {!count && status !== 'UNAVAILABLE' && <p role="status">No samples were returned for this metric and time window.</p>}
     {status === 'UNAVAILABLE' && <p role="status">This metric query is unavailable.</p>}
     {paths.length > 0 && <svg className="att-sut-metric-chart" role="img" aria-label={`${item.title} for ${item.targetId}`} viewBox="0 0 820 220">
       <path d="M0 190 H800 M0 105 H800 M0 20 H800" className="att-sut-metric-grid" />
       {paths.map(line => <path key={line.index} d={line.path} className={`att-sut-metric-line att-sut-metric-line-${line.index % 8}`} />)}
-      <text x="4" y="214">{dateTime(String(coverage.firstSampleAt || ''))}</text><text x="800" y="214" textAnchor="end">{dateTime(String(coverage.lastSampleAt || ''))}</text>
+      <text x="4" y="214">{dateTime(String(firstVisible || ''))}</text><text x="800" y="214" textAnchor="end">{dateTime(String(latestVisible || ''))}</text>
     </svg>}
-    <p className="att-sut-metric-coverage">{count} samples across {(item.series || []).length} series · source {item.sourceName || item.sourceId || 'registered Prometheus'}
-      {coverage.firstSampleAt != null && <> · first {dateTime(String(coverage.firstSampleAt))}</>}{coverage.lastSampleAt != null && <> · latest {dateTime(String(coverage.lastSampleAt))}</>}</p>
+    {count > 0 && <dl className="att-sut-metric-summary">
+      <div><dt>Min</dt><dd>{METRIC_NUMBER_FORMATTER.format(minimum)} {item.unit}</dd></div>
+      <div><dt>Avg</dt><dd>{METRIC_NUMBER_FORMATTER.format(average!)} {item.unit}</dd></div>
+      <div><dt>Max</dt><dd>{METRIC_NUMBER_FORMATTER.format(maximum)} {item.unit}</dd></div>
+    </dl>}
+    <p className="att-sut-metric-coverage">{count} samples across {visibleSeries.filter(series => series.samples.length > 0).length} series · source {item.sourceName || item.sourceId || 'registered Prometheus'}
+      {firstVisible != null && <> · first {dateTime(String(firstVisible))}</>}{latestVisible != null && <> · latest {dateTime(String(latestVisible))}</>}</p>
   </article>;
 });
 

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "profile-platform",
+  "name": "Combined platform overview",
+  "kind": "composite",
+  "category": "custom",
+  "includes": [
+    { "profile": "profile-jvm-prod", "alias": "jvm" },
+    { "profile": "profile-app", "alias": "application" }
+  ]
+}

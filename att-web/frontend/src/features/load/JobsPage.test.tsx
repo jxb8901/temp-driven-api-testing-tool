@@ -2,9 +2,9 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ArtifactsPanel, BucketTable, JobOverview, JobsPage, MetricsPanel, TimeSeriesChart, downsampleMetricPoints, CHART_DISPLAY_POINT_THRESHOLD, type MetricBucket, type MetricSeries } from './JobsPage';
+import { ArtifactsPanel, BucketTable, JobOverview, JobsPage, MetricsPanel, SutMetricsPanel, TimeSeriesChart, downsampleMetricPoints, CHART_DISPLAY_POINT_THRESHOLD, type MetricBucket, type MetricSeries } from './JobsPage';
 import { JobArtifacts } from './JobArtifacts';
-import type { JobEventHandlers, JobResultResponse, JobStatus, JobView, LoadJobsApi } from './types';
+import type { JobEventHandlers, JobResultResponse, JobStatus, JobView, LoadJobsApi, SutMetricsJobResponse, SutMetricsLiveResponse } from './types';
 
 const sampleJob: JobView = {
   jobId: 'JOB-204', command: 'load', packageId: 'payments', principal: 'qa', status: 'RUNNING',
@@ -531,6 +531,107 @@ describe('JobsPage React feature', () => {
     expect(host.querySelector('#job-panel-live pre.att-console')?.textContent).toContain('[RUN] worker ready');
     expect(host.querySelector('#job-panel-live pre.att-console')?.innerHTML).not.toContain('<');
     expect(host.querySelector('#job-panel-live')?.textContent).toContain('connected');
+  });
+
+  it('shows SUT metric filters, stale freshness, and unit-aware min/average/max summaries', async () => {
+    const now = Date.now();
+    const response: SutMetricsLiveResponse = {
+      schemaVersion: 'att-sut-metrics-live/v1', state: 'READY', sampleCount: 3,
+      sourceQueryTime: new Date(now).toISOString(), windowStart: new Date(now - 60_000).toISOString(), windowEnd: new Date(now).toISOString(),
+      queries: [
+        { id: 'q1', profile: 'profile-jvm', profilePath: 'profile-platform/jvm/profile-jvm', targetId: 'sut-1', metricId: 'heap', title: 'Heap used', unit: 'bytes' },
+        { id: 'q2', profile: 'profile-app', profilePath: 'profile-platform/application/profile-app', targetId: 'db-1', metricId: 'active', title: 'Active requests', unit: 'count' },
+      ],
+      items: [{ id: 'q1', profile: 'profile-jvm', profilePath: 'profile-platform/jvm/profile-jvm', metricId: 'heap', title: 'Heap used',
+        category: 'jvm', targetId: 'sut-1', targetType: 'application', sourceName: 'Prometheus', unit: 'bytes', queryStatus: 'STALE',
+        coverage: { firstSampleAt: new Date(now - 20_000).toISOString(), lastSampleAt: new Date(now).toISOString() },
+        series: [{ labels: { instance: 'sut-1' }, samples: [1, 3, 5].map((value, index) => ({ timestamp: new Date(now - (2 - index) * 10_000).toISOString(), timestampEpochMs: now - (2 - index) * 10_000, value })) }] }],
+    };
+    const getLive = vi.fn(async (_jobId: string, _input?: { range?: string; step?: string; targetId?: string; profilePath?: string; signal?: AbortSignal }) => response);
+    const api = makeApi({ getJobResult: vi.fn(async () => ({ job: { jobId: 'JOB-204', command: 'load', status: 'RUNNING' }, result: null })), getJobSutMetricsLive: getLive });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    expect(getLive).not.toHaveBeenCalled();
+    await click(host.querySelector('#job-tab-sutMetrics')!);
+    await advance();
+
+    const panel = host.querySelector('#job-panel-sutMetrics')!;
+    expect(getLive).toHaveBeenCalledWith('JOB-204', expect.objectContaining({ range: '15m', step: '30s' }));
+    expect(panel.textContent).toContain('STALE');
+    expect(panel.textContent).toContain('The latest sample is older than the live freshness window.');
+    expect(panel.textContent).toContain('Min1 bytes');
+    expect(panel.textContent).toContain('Avg3 bytes');
+    expect(panel.textContent).toContain('Max5 bytes');
+
+    const selects = [...panel.querySelectorAll('select')];
+    expect(selects).toHaveLength(3);
+    expect([...selects[0]!.options].map(option => option.value)).toEqual(['', 'db-1', 'sut-1']);
+    expect([...selects[1]!.options].map(option => option.value)).toContain('profile-platform/jvm/profile-jvm');
+    await act(async () => {
+      selects[0]!.value = 'sut-1';
+      selects[0]!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await advance();
+    const profileSelect = host.querySelectorAll('#job-panel-sutMetrics select')[1] as HTMLSelectElement;
+    await act(async () => {
+      profileSelect.value = 'profile-platform/jvm/profile-jvm';
+      profileSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await advance();
+    const rangeSelect = host.querySelectorAll('#job-panel-sutMetrics select')[2] as HTMLSelectElement;
+    await act(async () => {
+      rangeSelect.value = '1h';
+      rangeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await advance();
+    expect(getLive).toHaveBeenLastCalledWith('JOB-204', expect.objectContaining({
+      targetId: 'sut-1', profilePath: 'profile-platform/jvm/profile-jvm', range: '1h', step: '30s',
+    }));
+  });
+
+  it('aborts a live SUT Metrics request and does not poll while the document is hidden', async () => {
+    const pending = deferred<SutMetricsLiveResponse>();
+    let signal: AbortSignal | undefined;
+    const getLive = vi.fn((_jobId: string, input?: { range?: string; step?: string; targetId?: string; profilePath?: string; signal?: AbortSignal }) => {
+      signal = input?.signal;
+      return pending.promise;
+    });
+    const api = makeApi({ getJobResult: vi.fn(async () => ({ job: { jobId: 'JOB-204', command: 'load', status: 'RUNNING' }, result: null })), getJobSutMetricsLive: getLive });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await advance();
+    await click(host.querySelector('#job-tab-sutMetrics')!);
+    expect(getLive).toHaveBeenCalledTimes(1);
+    expect(signal?.aborted).toBe(false);
+
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await Promise.resolve(); });
+    expect(signal?.aborted).toBe(true);
+    await advance(60_000);
+    expect(getLive).toHaveBeenCalledTimes(1);
+  });
+
+  it('anchors post-run range filters to the collection end time', async () => {
+    const windowEnd = Date.parse('2026-10-13T12:00:00.000Z');
+    const response: SutMetricsJobResponse = {
+      state: 'READY', collection: { state: 'READY', windowStart: new Date(windowEnd - 3600_000).toISOString(), windowEnd: new Date(windowEnd).toISOString(),
+        queries: [{ id: 'q1', profile: 'profile-jvm', profilePath: 'profile-jvm', targetId: 'sut-1', metricId: 'heap', title: 'Heap used', unit: 'bytes' }] },
+      items: [{ id: 'q1', profile: 'profile-jvm', profilePath: 'profile-jvm', metricId: 'heap', title: 'Heap used', targetId: 'sut-1', unit: 'bytes', queryStatus: 'READY',
+        series: [{ labels: { instance: 'sut-1' }, samples: [{ timestamp: new Date(windowEnd - 10 * 60_000).toISOString(), timestampEpochMs: windowEnd - 10 * 60_000, value: 5 }] }] }],
+    };
+    const getMetrics = vi.fn(async () => response);
+    const api = makeApi({ getJobSutMetrics: getMetrics });
+    await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={false} hidden={false} />));
+    await advance();
+    const panel = host.querySelector('#job-panel-sutMetrics')!;
+    const rangeSelect = panel.querySelectorAll('select')[2] as HTMLSelectElement;
+    await act(async () => {
+      rangeSelect.value = '15m';
+      rangeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(panel.textContent).toContain('Min5 bytes');
+    expect(panel.textContent).toContain('1 samples across 1 series');
+    expect(getMetrics).toHaveBeenCalledTimes(1);
   });
 
   it('shows sampled live LOAD progress in Results and Metrics without terminal archive wording', async () => {

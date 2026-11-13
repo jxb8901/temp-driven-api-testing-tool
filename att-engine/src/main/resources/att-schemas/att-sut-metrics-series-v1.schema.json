@@ -6,8 +6,15 @@
   "required": [
     "schemaVersion",
     "queryId",
+    "profile",
+    "profilePath",
+    "sourceId",
+    "sourceName",
     "metricId",
+    "title",
+    "category",
     "targetId",
+    "targetType",
     "unit",
     "series"
   ],
@@ -19,12 +26,19 @@
     "queryId": {
       "type": "string"
     },
+    "profile": { "type": "string" },
+    "profilePath": { "type": "string" },
+    "sourceId": { "type": "string" },
+    "sourceName": { "type": "string" },
     "metricId": {
       "type": "string"
     },
+    "title": { "type": "string" },
+    "category": { "type": "string" },
     "targetId": {
       "type": "string"
     },
+    "targetType": { "type": "string" },
     "unit": {
       "type": "string"
     },

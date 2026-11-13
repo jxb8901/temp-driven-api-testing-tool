@@ -1333,7 +1333,7 @@ final class ServerRuntime implements AutoCloseable {
         return sutMetrics.previewResolution(observability,principal,admin);
     }
     Map<String,Object> sutMetricsJob(String id,String principal,boolean admin,String range,String step,String targetId,
-                                     int offset,int limit,String queryId,boolean live) throws Exception {
+                                     String profilePath,int offset,int limit,String queryId,boolean live) throws Exception {
         Map<String,Object> row=store.get(id);
         if(row==null||!"load".equals(row.get("command")))throw new NotFoundException();
         Map<String,Object> snapshot=sutMetrics.snapshotForJob(id);
@@ -1341,10 +1341,10 @@ final class ServerRuntime implements AutoCloseable {
         sutMetrics.authorizeSnapshot(snapshot,principal,admin);
         if(live) {
             Instant started=liveLoadStart(id,row);
-            Map<String,Object> preview=sutMetrics.livePreview(id,principal,admin,started,range,step,targetId);
+            Map<String,Object> preview=sutMetrics.livePreview(id,principal,admin,started,range,step,targetId,profilePath);
             return preview;
         }
-        Map<String,Object> page=sutMetrics.readCollectionPage(id,offset,limit,queryId);
+        Map<String,Object> page=sutMetrics.readCollectionPage(id,offset,limit,queryId,targetId,profilePath);
         Map<String,Object> response=new LinkedHashMap<>();response.put("schemaVersion","att-sut-metrics-job/v1");
         response.put("state",page.get("manifest") instanceof Map<?,?> manifest?manifest.get("state"):"PENDING");
         response.put("jobId",id);response.put("snapshotId",snapshot.get("snapshotId"));

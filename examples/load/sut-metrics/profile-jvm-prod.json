@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "profile-jvm-prod",
+  "name": "Production JVM profile",
+  "kind": "derived",
+  "category": "jvm",
+  "extends": "profile-jvm",
+  "parameters": { "instance": "payments-api-prod:8080" }
+}

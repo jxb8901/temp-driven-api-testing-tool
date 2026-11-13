@@ -131,10 +131,14 @@ public final class ApiServlet extends HttpServlet {
                 try {admin=systemAdminCapability(req,principal);}
                 catch(Exception unavailable){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return;}
                 boolean live=path.endsWith("/live"),series=path.endsWith("/series");
+                try {
                 Map<String,Object> response=runtime.sutMetricsJob(id,principal,admin,req.getParameter("range"),req.getParameter("step"),
-                        req.getParameter("targetId"),parseOffset(req.getParameter("offset")),parseConfigurationLimit(req.getParameter("limit")),
+                        req.getParameter("targetId"),req.getParameter("profilePath"),parseOffset(req.getParameter("offset")),parseConfigurationLimit(req.getParameter("limit")),
                         series?req.getParameter("queryId"):null,live);
                 response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;
+            } catch(SutMetricsService.CapacityException full){error(res,503,"ATT-SUT-METRICS-CAPACITY","SUT Metrics capacity is full; retry shortly",requestId);return;
+              } catch(SutMetricsService.SutMetricsTimeoutException timeout){error(res,504,"ATT-SUT-METRICS-TIMEOUT","SUT Metrics source query timed out",requestId);return;
+            }
             }
             if(path.matches("/jobs/[^/]+/artifacts/status")) {
                 Map<String,Object> response=ServerRuntime.JSON.convertValue(runtime.artifactOverview(segment(path,2)),Map.class);
@@ -221,7 +225,9 @@ public final class ApiServlet extends HttpServlet {
                 Map<String,Object> value=ServerRuntime.JSON.convertValue(input,Map.class);
                 Map<String,Object> saved=path.endsWith("/sources")?runtime.saveSutMetricSource(value):runtime.saveSutMetricProfile(value);
                 saved.put("requestId",requestId);json(res,201,saved);return;
-            } catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+            } catch(SutMetricsService.CapacityException full){error(res,503,"ATT-SUT-METRICS-CAPACITY","SUT Metrics capacity is full; retry shortly",requestId);}
+              catch(SutMetricsService.SutMetricsTimeoutException timeout){error(res,504,"ATT-SUT-METRICS-TIMEOUT","SUT Metrics source query timed out",requestId);}
+              catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
               catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","SUT Metrics administration could not be completed",requestId);getServletContext().log("SUT Metrics administration failed id="+requestId,failure);}
             return;
         }
@@ -235,6 +241,8 @@ public final class ApiServlet extends HttpServlet {
                 Map<String,Object> preview=runtime.previewSutMetrics(ServerRuntime.JSON.convertValue(input.path("observability"),Map.class),authorizationPrincipal,admin);
                 preview.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,preview);return;
             } catch(ServerRuntime.NotFoundException denied){error(res,404,"ATT-SERVER-NOT-FOUND","SUT Metrics resource was not found",requestId);}
+              catch(SutMetricsService.CapacityException full){error(res,503,"ATT-SUT-METRICS-CAPACITY","SUT Metrics capacity is full; retry shortly",requestId);}
+              catch(SutMetricsService.SutMetricsTimeoutException timeout){error(res,504,"ATT-SUT-METRICS-TIMEOUT","SUT Metrics source query timed out",requestId);}
               catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
               catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","SUT Metrics resolution could not be completed",requestId);}
             return;

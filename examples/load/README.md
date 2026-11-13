@@ -120,3 +120,9 @@ Closed workload 使用 load.users 及必填 duration，可配置 execution.think
 ~~~
 
 同一 scenario 的 workloads 必須使用相同 model 與 phase timing envelope。Multi-workload 是多個固定 target 各自 pacing，不會在 target 間隨機切換。CLI load-model overrides 僅適用單一 workload；多 workload 時請修改 YAML。完整欄位、threshold、CLI option 與報告契約見[Load Mode](../../docs/reference/execution-modes/load.md)。
+
+## SUT Metrics
+
+`sut-metrics/` contains an optional Prometheus Data Source, base/derived/composite Metrics Profiles, and a LOAD scenario binding. Register `source.json`, then `profile-jvm.json`, `profile-jvm-prod.json`, `profile-app.json`, and `profile-platform.json` in **Settings → SUT Metrics administration**. The source URL is an example: configure the exact hostname in the Server's `ATT_SUT_METRICS_ALLOWED_HOSTS`, and replace it with your Prometheus service. The scenario also uses the package-owned placeholder Template target `PAYMENTS_HEALTH`; replace it with a Template available in your package.
+
+`scenario.yaml` demonstrates the root-level optional `observability` binding. It does not contain an endpoint, credential, or secret value. See the [Studio Load testing SUT Metrics section](../../docs/interfaces/studio/load-testing.md#sut-metrics) and [繁體中文說明](../../docs/interfaces/studio/load-testing.zh.md#sut-metrics).

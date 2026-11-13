@@ -43,12 +43,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -75,26 +76,26 @@ final class SutMetricsService implements AutoCloseable {
     private static final Pattern SAFE_NUMBER = Pattern.compile("-?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)");
     private final ObjectMapper json = ServerRuntime.JSON;
     private final Path dataDir, jobsRoot, catalogPath;
+    private final Set<String> allowedPrometheusHosts;
     private final Object catalogLock = new Object();
     private Map<String, Map<String, Object>> sources = new LinkedHashMap<>();
     private Map<String, Map<String, Object>> profiles = new LinkedHashMap<>();
-    private final ExecutorService collectors = Executors.newFixedThreadPool(2, r -> {
-        Thread thread = new Thread(r, "att-sut-metrics-collector"); thread.setDaemon(true); return thread;
-    });
-    private final ExecutorService previews = Executors.newFixedThreadPool(4, r -> {
-        Thread thread = new Thread(r, "att-sut-metrics-preview"); thread.setDaemon(true); return thread;
-    });
-    private final ExecutorService bodyReaders = Executors.newFixedThreadPool(4, r -> {
-        Thread thread = new Thread(r, "att-sut-metrics-response"); thread.setDaemon(true); return thread;
-    });
+    private final ExecutorService collectors = boundedExecutor(2, 64, "att-sut-metrics-collector");
+    private final ExecutorService previews = boundedExecutor(4, 16, "att-sut-metrics-preview");
+    private final ExecutorService bodyReaders = boundedExecutor(4, 16, "att-sut-metrics-response");
     private final ConcurrentHashMap<String, CompletableFuture<Map<String, Object>>> previewFlights = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, CacheEntry> previewCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, HttpClient> clients = new ConcurrentHashMap<>();
 
     SutMetricsService(Path dataDir) throws Exception {
+        this(dataDir, configuredAllowedPrometheusHosts());
+    }
+
+    SutMetricsService(Path dataDir, Set<String> allowedPrometheusHosts) throws Exception {
         this.dataDir = dataDir.toAbsolutePath().normalize();
         this.jobsRoot = this.dataDir.resolve("jobs");
         this.catalogPath = this.dataDir.resolve("sut-metrics-catalog.json");
+        this.allowedPrometheusHosts = normalizeAllowedHosts(allowedPrometheusHosts);
         loadCatalog();
     }
 
@@ -119,7 +120,7 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     Map<String, Object> upsertSource(Map<String, Object> submitted) throws Exception {
-        Map<String, Object> source = validateSource(submitted);
+        Map<String, Object> source = validateSource(submitted, true);
         synchronized (catalogLock) {
             Map<String, Map<String, Object>> prior = sources;
             Map<String, Map<String, Object>> updated = deepMap(prior);
@@ -203,6 +204,8 @@ final class SutMetricsService implements AutoCloseable {
         Set<String> duplicateTargetMetric = new HashSet<>();
         Set<String> targets = new LinkedHashSet<>();
         Set<String> metricIds = new LinkedHashSet<>();
+        Map<String, Set<String>> sourceTargets = new LinkedHashMap<>();
+        Map<String, Set<String>> sourceMetrics = new LinkedHashMap<>();
         int bindingIndex = 0;
         synchronized (catalogLock) {
             for (Object rawBinding : collectionList) {
@@ -223,14 +226,27 @@ final class SutMetricsService implements AutoCloseable {
             }
         }
         for (Map<String, Object> query : expanded) {
-            String targetKey = String.valueOf(query.get("sourceId")) + "\u0000" + String.valueOf(query.get("targetId"));
+            String sourceId = String.valueOf(query.get("sourceId"));
+            String profilePath = String.valueOf(query.get("profilePath"));
+            String targetId = String.valueOf(query.get("targetId"));
+            String targetKey = sourceId + "\u0000" + profilePath + "\u0000" + targetId;
             String metricId = String.valueOf(query.get("metricId"));
             if (!duplicateTargetMetric.add(targetKey + "\u0000" + metricId))
-                throw new IllegalArgumentException("Duplicate metric id " + metricId + " resolves within target " + query.get("targetId") + ".");
-            targets.add(targetKey); metricIds.add(String.valueOf(query.get("id")));
+                throw new IllegalArgumentException("Duplicate metric id " + metricId + " resolves within target " + targetId + ".");
+            targets.add(sourceId + "\u0000" + targetId);
+            metricIds.add(sourceId + "\u0000" + profilePath + "\u0000" + metricId);
+            sourceTargets.computeIfAbsent(sourceId, ignored -> new LinkedHashSet<>()).add(targetId);
+            sourceMetrics.computeIfAbsent(sourceId, ignored -> new LinkedHashSet<>()).add(profilePath + "\u0000" + metricId);
         }
         if (expanded.size() > MAX_EXPANDED_QUERIES || targets.size() > MAX_EXPANDED_TARGETS || metricIds.size() > MAX_EXPANDED_METRICS)
             throw new IllegalArgumentException("Resolved Metrics Profile exceeds the 64 metrics, 64 targets, or 256 query budget.");
+        for (String sourceId : pinnedSources.keySet()) {
+            Map<String, Object> source = pinnedSources.get(sourceId);
+            if (sourceTargets.getOrDefault(sourceId, Set.of()).size() > sourceInt(source, "maxTargets"))
+                throw new IllegalArgumentException("Resolved profile exceeds the Data Source target limit.");
+            if (sourceMetrics.getOrDefault(sourceId, Set.of()).size() > sourceInt(source, "maxMetrics"))
+                throw new IllegalArgumentException("Resolved profile exceeds the Data Source metric limit.");
+        }
         long before = durationSeconds(String.valueOf(collection.containsKey("before") ? collection.get("before") : "5m"), "observability.collection.before");
         long after = durationSeconds(String.valueOf(collection.containsKey("after") ? collection.get("after") : "2m"), "observability.collection.after");
         String step = String.valueOf(collection.getOrDefault("step", "30s"));
@@ -303,12 +319,15 @@ final class SutMetricsService implements AutoCloseable {
         return json.convertValue(value, Map.class);
     }
 
-    Map<String, Object> readCollectionPage(String jobId, int offset, int limit, String queryId) throws Exception {
+    Map<String, Object> readCollectionPage(String jobId, int offset, int limit, String queryId,
+                                          String targetId, String profilePath) throws Exception {
         Map<String, Object> manifest = collectionStatus(jobId);
         String state = String.valueOf(manifest.get("state"));
         if (!Set.of("READY", "PARTIAL").contains(state)) return fields("manifest", manifest, "items", List.of(), "nextOffset", null);
         List<Map<String, Object>> all = listOfMaps(manifest.get("files"));
         if (queryId != null && !queryId.isBlank()) all.removeIf(item -> !queryId.equals(item.get("queryId")));
+        if (targetId != null && !targetId.isBlank()) all.removeIf(item -> !targetId.equals(item.get("targetId")));
+        if (profilePath != null && !profilePath.isBlank()) all.removeIf(item -> !profilePath.equals(item.get("profilePath")));
         int from = Math.max(0, Math.min(offset, all.size())), to = Math.min(all.size(), from + Math.max(1, Math.min(limit, 16)));
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> fileEntry : all.subList(from, to)) rows.add(readSeriesFile(jobId, fileEntry));
@@ -316,35 +335,50 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     Map<String, Object> livePreview(String jobId, String principal, boolean admin, Instant startedAt,
-                                    String range, String step, String targetId) throws Exception {
+                                    String range, String step, String targetId, String profilePath) throws Exception {
         Map<String, Object> snapshot = snapshotForJob(jobId);
         if (snapshot == null) return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "DISABLED", "items", List.of());
         authorizeSnapshot(snapshot, principal, admin);
         List<Map<String, Object>> all = listOfMaps(snapshot.get("queries"));
         Instant now = Instant.now();
         if (startedAt == null) return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "PENDING",
-                "snapshotId", snapshot.get("snapshotId"), "items", List.of(), "message", "Live metrics begin when LOAD execution starts.");
+                "snapshotId", snapshot.get("snapshotId"), "queries", queryMetadata(snapshot), "items", List.of(), "message", "Live metrics begin when LOAD execution starts.");
         if (!Boolean.TRUE.equals(objectOrEmpty(snapshot.get("livePreview")).get("enabled")))
             return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "DISABLED", "snapshotId", snapshot.get("snapshotId"), "items", List.of());
         long rangeSeconds = durationSeconds(range == null ? "15m" : range, "range");
         long stepSeconds = durationSeconds(step == null ? "30s" : step, "step");
         if (rangeSeconds < 60 || rangeSeconds > 4L * 60 * 60 || stepSeconds < 15 || stepSeconds > 300)
             throw new IllegalArgumentException("Live range must be 1m to 4h and step must be 15s to 5m.");
+        if (targetId != null && !targetId.isBlank() && all.stream().noneMatch(query -> targetId.equals(query.get("targetId"))))
+            throw new IllegalArgumentException("The selected SUT target is not part of this Job snapshot.");
+        if (profilePath != null && !profilePath.isBlank() && all.stream().noneMatch(query -> profilePath.equals(query.get("profilePath"))))
+            throw new IllegalArgumentException("The selected Metrics Profile is not part of this Job snapshot.");
         if (targetId != null && !targetId.isBlank()) all.removeIf(query -> !targetId.equals(query.get("targetId")));
-        if (all.isEmpty()) throw new IllegalArgumentException("The selected SUT target is not part of this Job snapshot.");
+        if (profilePath != null && !profilePath.isBlank()) all.removeIf(query -> !profilePath.equals(query.get("profilePath")));
+        if (all.isEmpty()) return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "NO_DATA",
+                "snapshotId", snapshot.get("snapshotId"), "queries", queryMetadata(snapshot), "items", List.of(),
+                "windowStart", startedAt.isAfter(now.minusSeconds(rangeSeconds)) ? startedAt.toString() : now.minusSeconds(rangeSeconds).toString(),
+                "windowEnd", now.toString());
         if (all.size() > 64) throw new IllegalArgumentException("Live preview exceeds the 64-query request budget.");
         Instant start = startedAt.isAfter(now.minusSeconds(rangeSeconds)) ? startedAt : now.minusSeconds(rangeSeconds);
         if (!start.isBefore(now)) return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "NO_DATA",
-                "snapshotId", snapshot.get("snapshotId"), "items", List.of(), "windowStart", start.toString(), "windowEnd", now.toString());
+                "snapshotId", snapshot.get("snapshotId"), "queries", queryMetadata(snapshot), "items", List.of(), "windowStart", start.toString(), "windowEnd", now.toString());
         queryRequestBudgets(snapshot, all, Duration.between(start, now).getSeconds());
         long roundedEnd = (now.getEpochSecond() / stepSeconds) * stepSeconds;
-        String key = String.valueOf(snapshot.get("snapshotId")) + ":" + start.getEpochSecond() + ":" + roundedEnd + ":" + stepSeconds + ":" + (targetId == null ? "*" : targetId);
+        String key = String.valueOf(snapshot.get("snapshotId")) + ":" + start.getEpochSecond() + ":" + roundedEnd + ":" + stepSeconds + ":"
+                + (targetId == null ? "*" : targetId) + ":" + (profilePath == null ? "*" : profilePath);
         Map<String, Object> cached = cachedPreview(key);
         if (cached != null) return cached;
-        CompletableFuture<Map<String, Object>> flight = previewFlights.computeIfAbsent(key, ignored -> CompletableFuture.supplyAsync(() -> {
-            try { return collectPreview(snapshot, all, start, Instant.ofEpochSecond(roundedEnd), stepSeconds); }
-            catch (Exception failure) { throw new java.util.concurrent.CompletionException(failure); }
-        }, previews));
+        CompletableFuture<Map<String, Object>> flight;
+        try {
+            flight = previewFlights.computeIfAbsent(key, ignored -> CompletableFuture.supplyAsync(() -> {
+                try { return collectPreview(snapshot, all, start, Instant.ofEpochSecond(roundedEnd), stepSeconds); }
+                catch (Exception failure) { throw new java.util.concurrent.CompletionException(failure); }
+            }, previews));
+        } catch (java.util.concurrent.RejectedExecutionException full) {
+            throw new CapacityException("Live SUT Metrics capacity is full; retry shortly.");
+        }
+        flight.whenComplete((value, failure) -> previewFlights.remove(key, flight));
         try {
             Map<String, Object> result = flight.get(35, TimeUnit.SECONDS);
             previewCache.put(key, new CacheEntry(System.nanoTime() + TimeUnit.SECONDS.toNanos(5), result));
@@ -355,7 +389,7 @@ final class SutMetricsService implements AutoCloseable {
             if (cause instanceof Exception exception) throw exception;
             throw new IllegalStateException("Live SUT Metrics query failed.", cause);
         } catch (java.util.concurrent.TimeoutException timeout) {
-            throw new IllegalArgumentException("Live SUT Metrics query timed out; retry after the current request completes.");
+            throw new SutMetricsTimeoutException("Live SUT Metrics query exceeded its time limit.");
         } finally { if (flight.isDone()) previewFlights.remove(key, flight); }
     }
 
@@ -363,7 +397,7 @@ final class SutMetricsService implements AutoCloseable {
         try {
             Map<String, Object> snapshot = snapshotForJob(jobId);
             if (snapshot == null) return;
-            if (startedAt == null || finishedAt == null || !finishedAt.isAfter(startedAt)) {
+        if (startedAt == null || finishedAt == null || !finishedAt.isAfter(startedAt)) {
                 updateState(jobId, "UNAVAILABLE", "A trustworthy LOAD execution window was not available.", List.of());
                 return;
             }
@@ -377,7 +411,7 @@ final class SutMetricsService implements AutoCloseable {
                     "startedAt", startedAt.toString(), "finishedAt", finishedAt.toString(), "windowStart", start.toString(),
                     "windowEnd", end.toString(), "step", objectOrEmpty(snapshot.get("collection")).get("step"),
                     "queries", queryMetadata(snapshot), "files", List.of(), "diagnostics", List.of()));
-            collectors.execute(() -> collectPostRun(jobId, snapshot, start, end));
+            collectors.execute(() -> collectPostRun(jobId, snapshot, startedAt, finishedAt, start, end));
         } catch (java.util.concurrent.RejectedExecutionException full) {
             try { updateState(jobId, "FAILED", "Post-run collection capacity is full; no collection worker was available.", List.of()); }
             catch (Exception ignored) { }
@@ -395,7 +429,8 @@ final class SutMetricsService implements AutoCloseable {
         }
     }
 
-    private void collectPostRun(String jobId, Map<String, Object> snapshot, Instant start, Instant end) {
+    private void collectPostRun(String jobId, Map<String, Object> snapshot, Instant executionStartedAt,
+                                Instant executionFinishedAt, Instant start, Instant end) {
         List<Map<String, Object>> fileEntries = new ArrayList<>();
         List<Map<String, Object>> diagnostics = new ArrayList<>();
         long totalBytes = 0, totalSamples = 0, queriesSucceeded = 0, queriesFailed = 0, queriesEmpty = 0;
@@ -413,24 +448,39 @@ final class SutMetricsService implements AutoCloseable {
                             durationSeconds(String.valueOf(objectOrEmpty(snapshot.get("collection")).get("step")), "step"));
                     List<Map<String, Object>> series = listOfMaps(value.get("series"));
                     int sampleCount = ((Number) value.get("sampleCount")).intValue();
-                    if (series.isEmpty()) queriesEmpty++;
-                    else queriesSucceeded++;
-                    totalSamples += sampleCount;
-                    long sourceSamples = sourceSampleCounts.merge(String.valueOf(query.get("sourceId")), (long) sampleCount, Long::sum);
-                    if (sourceSamples > sourceInt(source, "maxSamplesPerJob")) throw new IllegalArgumentException("The Data Source per-Job sample budget was exceeded.");
-                    if (totalSamples > MAX_JOB_SAMPLES) throw new IllegalArgumentException("The per-Job sample budget was exceeded.");
+                    String sourceId = String.valueOf(query.get("sourceId"));
+                    long sourceSamples = sourceSampleCounts.getOrDefault(sourceId, 0L) + sampleCount;
+                    long jobSamples = totalSamples + sampleCount;
+                    if (sourceSamples > sourceInt(source, "maxSamplesPerJob")) throw new CollectionBudgetExceededException("The Data Source per-Job sample budget was exceeded.");
+                    if (jobSamples > MAX_JOB_SAMPLES) throw new CollectionBudgetExceededException("The per-Job sample budget was exceeded.");
                     byte[] bytes = json.writeValueAsBytes(fields("schemaVersion", SERIES_SCHEMA, "queryId", query.get("id"),
-                            "metricId", query.get("metricId"), "targetId", query.get("targetId"),
-                            "unit", query.get("unit"), "series", series));
+                            "profile", query.get("profile"), "profilePath", query.get("profilePath"),
+                            "sourceId", query.get("sourceId"), "sourceName", query.get("sourceName"),
+                            "metricId", query.get("metricId"), "title", query.get("title"),
+                            "category", query.get("category"), "targetId", query.get("targetId"),
+                            "targetType", query.get("targetType"), "unit", query.get("unit"), "series", series));
                     if (bytes.length > MAX_SERIES_FILE_BYTES || totalBytes > MAX_JOB_COLLECTION_BYTES - bytes.length)
-                        throw new IllegalArgumentException("The per-Job SUT Metrics artifact budget was exceeded.");
+                        throw new CollectionBudgetExceededException("The per-Job SUT Metrics artifact budget was exceeded.");
                     String name = String.format(Locale.ROOT, "series-%04d.json", index);
                     Path path = directory.resolve(name); atomicBytes(path, bytes); totalBytes += bytes.length;
+                    totalSamples = jobSamples; sourceSampleCounts.put(sourceId, sourceSamples);
+                    if (series.isEmpty()) queriesEmpty++;
+                    else queriesSucceeded++;
                     fileEntries.add(fields("queryId", query.get("id"), "metricId", query.get("metricId"), "title", query.get("title"),
-                            "category", query.get("category"), "targetId", query.get("targetId"), "targetType", query.get("targetType"),
+                            "profile", query.get("profile"), "profilePath", query.get("profilePath"), "category", query.get("category"),
+                            "targetId", query.get("targetId"), "targetType", query.get("targetType"),
                             "sourceId", query.get("sourceId"), "unit", query.get("unit"), "path", name,
                             "lengthBytes", bytes.length, "sha256", sha256(bytes), "sampleCount", sampleCount,
                             "seriesCount", series.size(), "coverage", value.get("coverage"), "queryStatus", series.isEmpty() ? "NO_DATA" : "READY"));
+                } catch (CollectionBudgetExceededException budget) {
+                    queriesFailed++;
+                    diagnostics.add(fields("queryId", query.get("id"), "code", "QUERY_BUDGET_EXCEEDED", "message", safeFailureMessage(budget)));
+                    for (int skipped = index + 1; skipped < queries.size(); skipped++) {
+                        queriesFailed++;
+                        diagnostics.add(fields("queryId", queries.get(skipped).get("id"), "code", "QUERY_NOT_COLLECTED",
+                                "message", "Collection stopped after a configured Job budget was reached."));
+                    }
+                    break;
                 } catch (Exception failure) {
                     queriesFailed++;
                     diagnostics.add(fields("queryId", query.get("id"), "code", safeFailureCode(failure),
@@ -441,7 +491,7 @@ final class SutMetricsService implements AutoCloseable {
                     : queriesSucceeded == 0 ? "UNAVAILABLE" : queriesEmpty > 0 ? "PARTIAL" : "READY";
             Map<String, Object> manifest = fields("schemaVersion", COLLECTION_SCHEMA, "state", state,
                     "complete", "READY".equals(state), "jobId", jobId, "snapshotId", snapshot.get("snapshotId"),
-                    "startedAt", start.toString(), "finishedAt", end.toString(), "windowStart", start.toString(),
+                    "startedAt", executionStartedAt.toString(), "finishedAt", executionFinishedAt.toString(), "windowStart", start.toString(),
                     "windowEnd", end.toString(), "step", objectOrEmpty(snapshot.get("collection")).get("step"),
                     "coverage", fields("queryCount", queries.size(), "successfulQueries", queriesSucceeded,
                             "emptyQueries", queriesEmpty, "failedQueries", queriesFailed, "sampleCount", totalSamples,
@@ -457,26 +507,55 @@ final class SutMetricsService implements AutoCloseable {
     private Map<String, Object> collectPreview(Map<String, Object> snapshot, List<Map<String, Object>> queries,
                                                Instant start, Instant end, long stepSeconds) throws Exception {
         List<Map<String, Object>> items = new ArrayList<>(); int failures = 0; long samples = 0;
-        for (Map<String, Object> query : queries) {
+        for (int index = 0; index < queries.size(); index++) {
+            Map<String, Object> query = queries.get(index);
             try {
                 Map<String, Object> source = snapshotSource(snapshot, String.valueOf(query.get("sourceId")));
                 Map<String, Object> collected = collectQuery(source, query, start, end, stepSeconds);
-                List<Map<String, Object>> series = listOfMaps(collected.get("series")); samples += ((Number) collected.get("sampleCount")).longValue();
-                if (samples > MAX_LIVE_PREVIEW_SAMPLES) throw new IllegalArgumentException("The live preview sample budget was exceeded.");
+                List<Map<String, Object>> series = listOfMaps(collected.get("series"));
+                long querySamples = ((Number) collected.get("sampleCount")).longValue();
+                if (samples + querySamples > MAX_LIVE_PREVIEW_SAMPLES) throw new CollectionBudgetExceededException("The live preview sample budget was exceeded.");
+                samples += querySamples;
+                String queryStatus = series.isEmpty() ? "NO_DATA" : isStale(collected, Instant.now(), stepSeconds) ? "STALE" : "READY";
                 items.add(fields("id", query.get("id"), "metricId", query.get("metricId"), "title", query.get("title"),
+                        "profile", query.get("profile"), "profilePath", query.get("profilePath"),
                         "category", query.get("category"), "targetId", query.get("targetId"), "targetType", query.get("targetType"),
                         "sourceId", query.get("sourceId"), "sourceName", query.get("sourceName"), "unit", query.get("unit"),
-                        "series", series, "coverage", collected.get("coverage"), "queryStatus", series.isEmpty() ? "NO_DATA" : "READY"));
+                        "series", series, "coverage", collected.get("coverage"), "queryStatus", queryStatus));
+            } catch (CollectionBudgetExceededException budget) {
+                failures++;
+                items.add(fields("id", query.get("id"), "metricId", query.get("metricId"), "title", query.get("title"),
+                        "profile", query.get("profile"), "profilePath", query.get("profilePath"), "targetId", query.get("targetId"),
+                        "unit", query.get("unit"), "series", List.of(), "queryStatus", "UNAVAILABLE", "error", safeFailureMessage(budget)));
+                for (int skipped = index + 1; skipped < queries.size(); skipped++) {
+                    Map<String, Object> remaining = queries.get(skipped); failures++;
+                    items.add(fields("id", remaining.get("id"), "metricId", remaining.get("metricId"), "title", remaining.get("title"),
+                            "profile", remaining.get("profile"), "profilePath", remaining.get("profilePath"), "targetId", remaining.get("targetId"),
+                            "unit", remaining.get("unit"), "series", List.of(), "queryStatus", "UNAVAILABLE",
+                            "error", "Live preview stopped after its sample budget was reached."));
+                }
+                break;
+            } catch (CapacityException full) {
+                throw full;
             } catch (Exception failure) {
                 failures++;
                 items.add(fields("id", query.get("id"), "metricId", query.get("metricId"), "title", query.get("title"),
-                        "targetId", query.get("targetId"), "unit", query.get("unit"), "series", List.of(),
+                        "profile", query.get("profile"), "profilePath", query.get("profilePath"), "targetId", query.get("targetId"),
+                        "unit", query.get("unit"), "series", List.of(),
                         "queryStatus", "UNAVAILABLE", "error", safeFailureMessage(failure)));
             }
         }
         return fields("schemaVersion", "att-sut-metrics-live/v1", "state", failures == 0 ? "READY" : failures == queries.size() ? "UNAVAILABLE" : "PARTIAL",
                 "snapshotId", snapshot.get("snapshotId"), "windowStart", start.toString(), "windowEnd", end.toString(),
-                "stepSeconds", stepSeconds, "sampleCount", samples, "sourceQueryTime", Instant.now().toString(), "items", items);
+                "stepSeconds", stepSeconds, "sampleCount", samples, "sourceQueryTime", Instant.now().toString(),
+                "queries", queryMetadata(snapshot), "items", items);
+    }
+
+    private static boolean isStale(Map<String, Object> collected, Instant now, long stepSeconds) {
+        String latest = nullableText(objectOrEmpty(collected.get("coverage")).get("lastSampleAt"));
+        if (latest == null) return false;
+        try { return Instant.parse(latest).isBefore(now.minusSeconds(Math.max(90, stepSeconds * 2))); }
+        catch (RuntimeException invalid) { return false; }
     }
 
     private Map<String, Object> collectQuery(Map<String, Object> source, Map<String, Object> query, Instant start, Instant end, long stepSeconds) throws Exception {
@@ -555,7 +634,12 @@ final class SutMetricsService implements AutoCloseable {
         HttpResponse<InputStream> response = client(source).send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
         byte[] body;
         InputStream responseBody = response.body();
-        Future<byte[]> bodyRead = bodyReaders.submit(() -> readBounded(responseBody, sourceInt(source, "maxResponseBytes")));
+        Future<byte[]> bodyRead;
+        try { bodyRead = bodyReaders.submit(() -> readBounded(responseBody, sourceInt(source, "maxResponseBytes"))); }
+        catch (java.util.concurrent.RejectedExecutionException full) {
+            try { responseBody.close(); } catch (Exception ignored) { }
+            throw new CapacityException("Prometheus response-read capacity is full; retry shortly.");
+        }
         try { body = bodyRead.get(sourceInt(source, "requestTimeoutMs"), TimeUnit.MILLISECONDS); }
         catch (TimeoutException timeout) {
             bodyRead.cancel(true);
@@ -603,6 +687,7 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private HttpClient client(Map<String, Object> source) throws Exception {
+        enforceAllowedPrometheusUri(URI.create(String.valueOf(source.get("url"))));
         String key = String.valueOf(source.get("id")) + ":" + String.valueOf(source.get("url")) + ":" + String.valueOf(objectOrEmpty(source.get("tls")).get("caSecretRef"));
         HttpClient cached = clients.get(key); if (cached != null) return cached;
         HttpClient.Builder builder = HttpClient.newBuilder().connectTimeout(Duration.ofMillis(sourceInt(source, "connectTimeoutMs")))
@@ -708,10 +793,6 @@ final class SutMetricsService implements AutoCloseable {
         List<Map<String, Object>> targetBindings = listOfMaps(binding.get("targets"));
         if (targetBindings.isEmpty()) targetBindings = listOfMaps(profile.get("targets"));
         if (targetBindings.isEmpty()) throw new IllegalArgumentException("Profile " + profileId + " has no target bindings.");
-        if (binding.containsKey("targets") && !bool(profile.get("allowTargetOverride")) && "base".equals(profile.get("kind")) && !binding.equals(profile)) {
-            // Base profiles are directly bindable by a scenario. Derived profiles declare whether targets can be replaced.
-            if (profile.containsKey("allowTargetOverride")) throw new IllegalArgumentException("Target replacement is not allowed for profile " + profileId + ".");
-        }
         if (targetBindings.size() > sourceInt(source, "maxTargets")) throw new IllegalArgumentException("Profile exceeds the Data Source target limit.");
         Map<String, Object> definitions = objectOrEmpty(profile.get("params"));
         Map<String, Object> defaults = objectOrEmpty(profile.get("parameters"));
@@ -727,8 +808,8 @@ final class SutMetricsService implements AutoCloseable {
                 Map<String, Object> definition = object(entry.getValue(), "parameter " + entry.getKey());
                 Object value = definition.get("default");
                 if (defaults.containsKey(entry.getKey())) value = defaults.get(entry.getKey());
-                if (overrides.containsKey(entry.getKey())) value = overrides.get(entry.getKey());
                 if (targetParams.containsKey(entry.getKey())) value = targetParams.get(entry.getKey());
+                if (overrides.containsKey(entry.getKey())) value = overrides.get(entry.getKey());
                 if (value == null && bool(definition.get("required"))) throw new IllegalArgumentException("Required profile parameter " + entry.getKey() + " is missing for target " + targetId + ".");
                 if (value != null) parameters.put(entry.getKey(), validateParameter(entry.getKey(), definition, value));
             }
@@ -738,7 +819,7 @@ final class SutMetricsService implements AutoCloseable {
                 throw new IllegalArgumentException("One or more required profile parameters are missing.");
             for (Map<String, Object> metric : listOfMaps(profile.get("metrics"))) {
                 String query = interpolate(String.valueOf(metric.get("query")), definitions, parameters);
-                String stableId = profilePath + "/" + targetId + "/" + metric.get("id");
+                String stableId = sourceId + "/" + profilePath + "/" + targetId + "/" + metric.get("id");
                 Map<String, Object> row = fields("id", stableId, "profile", profileId, "profilePath", profilePath,
                         "sourceId", sourceId, "sourceName", source.get("name"), "tenant", tenant,
                         "targetId", targetId, "targetType", target.getOrDefault("type", profile.getOrDefault("category", "")),
@@ -767,7 +848,7 @@ final class SutMetricsService implements AutoCloseable {
         return result;
     }
 
-    private Map<String, Object> validateSource(Map<String, Object> input) {
+    private Map<String, Object> validateSource(Map<String, Object> input, boolean enforceEgressAllowlist) {
         rejectUnknown(input, Set.of("schemaVersion", "id", "name", "url", "apiPath", "tls", "auth", "readers", "readRoles", "allowedTenants", "defaultTenant", "limits"), "Data Source");
         if (input.containsKey("schemaVersion") && !"att-sut-metrics-source/v1".equals(input.get("schemaVersion")))
             throw new IllegalArgumentException("Data Source schemaVersion must be att-sut-metrics-source/v1.");
@@ -780,6 +861,7 @@ final class SutMetricsService implements AutoCloseable {
                 || uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null || uri.getPort() > 65535
                 || uri.getPath() != null && List.of(uri.getPath().split("/")).contains(".."))
             throw new IllegalArgumentException("Data Source URL must be HTTPS (or loopback HTTP for local Prometheus) without user info, query, fragment, or parent path.");
+        if (enforceEgressAllowlist) enforceAllowedPrometheusUri(uri);
         String apiPath = String.valueOf(input.getOrDefault("apiPath", "/api/v1/query_range"));
         if (!apiPath.startsWith("/") || apiPath.contains("..") || apiPath.contains("?") || apiPath.contains("#") || apiPath.length() > 256)
             throw new IllegalArgumentException("Data Source apiPath must be a fixed safe absolute path.");
@@ -1068,7 +1150,7 @@ final class SutMetricsService implements AutoCloseable {
             for (JsonNode item : root.path("sources")) {
                 Map<String, Object> raw = json.convertValue(item, Map.class);
                 Object createdAt = raw.remove("createdAt");
-                Map<String, Object> value = validateSource(raw);
+                Map<String, Object> value = validateSource(raw, false);
                 if (loadedSources.putIfAbsent(String.valueOf(value.get("id")), value) != null)
                     throw new IllegalArgumentException("SUT Metrics catalog contains a duplicate Data Source id.");
                 if (createdAt instanceof String) value.put("createdAt", createdAt);
@@ -1287,6 +1369,41 @@ final class SutMetricsService implements AutoCloseable {
     private static int boundedInt(Object raw, int defaultValue, int minimum, int maximum) { if (raw == null) return defaultValue; if (!(raw instanceof Number number)) throw new IllegalArgumentException("Limit values must be integers."); int value = number.intValue(); if (number.doubleValue() != value || value < minimum || value > maximum) throw new IllegalArgumentException("Limit value is outside its supported range."); return value; }
     private static int sourceInt(Map<String, Object> source, String name) { return ((Number) objectOrEmpty(source.get("limits")).get(name)).intValue(); }
     private static boolean isLoopbackHost(String host) { return host != null && Set.of("localhost", "127.0.0.1", "::1", "[::1]").contains(host.toLowerCase(Locale.ROOT)); }
+    private void enforceAllowedPrometheusUri(URI uri) {
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        if ("http".equals(scheme) && isLoopbackHost(uri.getHost())) return;
+        if ("https".equals(scheme) && allowedPrometheusHosts.contains(normalizeHost(uri.getHost()))) return;
+        throw new IllegalArgumentException("Prometheus host is not in the Server ATT_SUT_METRICS_ALLOWED_HOSTS exact-host allowlist.");
+    }
+    private static Set<String> configuredAllowedPrometheusHosts() {
+        String raw = System.getenv("ATT_SUT_METRICS_ALLOWED_HOSTS");
+        if (raw == null || raw.isBlank()) return Set.of();
+        Set<String> hosts = new LinkedHashSet<>();
+        for (String part : raw.split(",")) {
+            String host = part.trim();
+            if (host.isEmpty() || host.contains("*") || host.contains("/") || host.contains("@") || host.contains("?"))
+                throw new IllegalArgumentException("ATT_SUT_METRICS_ALLOWED_HOSTS must contain exact host names or IP addresses separated by commas.");
+            hosts.add(normalizeHost(host));
+        }
+        return Set.copyOf(hosts);
+    }
+    private static Set<String> normalizeAllowedHosts(Set<String> hosts) {
+        if (hosts == null || hosts.isEmpty()) return Set.of();
+        Set<String> normalized = new LinkedHashSet<>();
+        for (String host : hosts) {
+            if (host == null || host.isBlank() || host.contains("*") || host.contains("/") || host.contains("@") || host.contains("?"))
+                throw new IllegalArgumentException("Prometheus host allowlist entries must be exact host names or IP addresses.");
+            normalized.add(normalizeHost(host));
+        }
+        return Set.copyOf(normalized);
+    }
+    private static String normalizeHost(String host) {
+        if (host == null) return "";
+        String value = host.trim().toLowerCase(Locale.ROOT);
+        if (value.startsWith("[") && value.endsWith("]")) value = value.substring(1, value.length() - 1);
+        while (value.endsWith(".")) value = value.substring(0, value.length() - 1);
+        return value;
+    }
     private static void validateSecretRef(String ref) { if (!SECRET_REF.matcher(ref).matches()) throw new IllegalArgumentException("Secret references must be uppercase environment variable names."); }
     private static String secret(String ref) { validateSecretRef(ref); String value = System.getenv("ATT_SECRET_" + ref); if (value == null || value.isBlank()) throw new IllegalArgumentException("A configured Server secret reference is unavailable."); return value; }
     private static String enc(String value) { return URLEncoder.encode(value, StandardCharsets.UTF_8); }
@@ -1314,6 +1431,11 @@ final class SutMetricsService implements AutoCloseable {
         return copy;
     }
     private static Map<String, Object> fields(Object... values) { Map<String, Object> result = new LinkedHashMap<>(); for (int i = 0; i < values.length; i += 2) result.put((String) values[i], values[i + 1]); return result; }
+    private static ExecutorService boundedExecutor(int threads, int queued, String name) {
+        return new ThreadPoolExecutor(threads, threads, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(queued), task -> {
+            Thread thread = new Thread(task, name); thread.setDaemon(true); return thread;
+        }, new ThreadPoolExecutor.AbortPolicy());
+    }
     private void atomicJson(Path path, Object value) throws Exception { atomicBytes(path, json.writerWithDefaultPrettyPrinter().writeValueAsBytes(value)); }
     private void atomicBytes(Path path, byte[] bytes) throws Exception {
         Files.createDirectories(path.getParent()); Path temporary = Files.createTempFile(path.getParent(), ".sut-metrics-", ".tmp");
@@ -1333,5 +1455,10 @@ final class SutMetricsService implements AutoCloseable {
     private void trimPreviewCache() { if (previewCache.size() > 128) previewCache.entrySet().removeIf(entry -> System.nanoTime() >= entry.getValue().expiresAtNanos); if (previewCache.size() > 128) previewCache.clear(); }
 
     @Override public void close() { collectors.shutdownNow(); previews.shutdownNow(); bodyReaders.shutdownNow(); previewFlights.clear(); previewCache.clear(); clients.clear(); }
+    static final class CapacityException extends RuntimeException { CapacityException(String message) { super(message); } }
+    static final class SutMetricsTimeoutException extends RuntimeException { SutMetricsTimeoutException(String message) { super(message); } }
+    private static final class CollectionBudgetExceededException extends IllegalArgumentException {
+        CollectionBudgetExceededException(String message) { super(message); }
+    }
     private record CacheEntry(long expiresAtNanos, Map<String, Object> value) { }
 }

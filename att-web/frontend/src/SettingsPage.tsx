@@ -171,7 +171,7 @@ function SutMetricsAdminPanel() {
 
   return <section className="panel att-settings-section att-sut-metrics-admin" aria-labelledby="sut-metrics-admin-title">
     <div className="att-settings-section-heading"><div><h2 id="sut-metrics-admin-title">SUT Metrics administration</h2>
-      <p className="att-settings-help">Register Prometheus endpoints and versioned metrics profiles. Endpoints and secret references are Server managed; secret values are read from ATT_SECRET_* environment variables and are never returned by the API.</p></div></div>
+      <p className="att-settings-help">Register Prometheus endpoints and versioned metrics profiles. HTTPS hosts must exactly match ATT_SUT_METRICS_ALLOWED_HOSTS; HTTP is limited to loopback. Secret values are read from ATT_SECRET_* environment variables and are never returned by the API.</p></div></div>
     {message && <p role="status" aria-live="polite">{message}</p>}
     <section aria-labelledby="sut-sources-title"><h3 id="sut-sources-title">Prometheus Data Sources</h3>
       <ul className="att-sut-catalog-list">{sources.map(source => <li key={String(source.id)}><strong>{String(source.name || source.id)}</strong> <code>{String(source.id)}</code>
