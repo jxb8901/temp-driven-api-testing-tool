@@ -112,6 +112,30 @@ describe('ValidationWorkspacePage', () => {
     expect(safe).not.toContain('serverPath');
   });
 
+  it('copies safe logical resource locations and structured coordinates without excerpts or absolute paths', () => {
+    const safe = safeValidationReportCopy({ ...report, diagnostics: [
+      { code: 'ATT-TEMPLATE-INVALID', severity: 'ERROR', message: 'Invalid Template',
+        file: 'templates/STUDIO_INVALID/template.yaml', template: 'STUDIO_INVALID',
+        source: { file: 'templates/STUDIO_INVALID/template.yaml', line: 7, column: 3,
+          excerpt: 'password=violet-123 from /opt/att/private.yaml', privateField: 'must not be copied' } },
+      { code: 'ATT-PRIVATE-PATH', severity: 'ERROR', message: 'Private location',
+        file: '/opt/att/packages/payments/template.yaml', template: 'C:\\private\\secret-template',
+        source: { file: '/opt/att/packages/payments/template.yaml', line: 2 } },
+    ] });
+    const diagnostics = JSON.parse(safe).diagnostics;
+    expect(diagnostics[0]).toMatchObject({
+      file: 'templates/STUDIO_INVALID/template.yaml', template: 'STUDIO_INVALID',
+      source: { file: 'templates/STUDIO_INVALID/template.yaml', line: 7, column: 3 },
+    });
+    expect(diagnostics[0].source).not.toHaveProperty('excerpt');
+    expect(diagnostics[0].source).not.toHaveProperty('privateField');
+    expect(diagnostics[1]).toMatchObject({ file: '[REDACTED_PATH]', template: '[REDACTED_PATH]',
+      source: { file: '[REDACTED_PATH]', line: 2 } });
+    expect(safe).not.toContain('violet-123');
+    expect(safe).not.toContain('/opt/att/packages');
+    expect(safe).not.toContain('secret-template');
+  });
+
   it('resolves Package diagnostics through the authorized catalog before offering resource navigation', async () => {
     const packageReport: ValidationReportData = { ...report, scope: 'PACKAGE', diagnostics: [{
       code: 'ATT-TEMPLATE-INVALID', severity: 'ERROR', message: 'Template could not be validated',

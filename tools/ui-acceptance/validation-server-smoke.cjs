@@ -151,6 +151,35 @@ async function main() {
     await page.getByRole('heading', { name: 'Resource details', exact: true }).waitFor();
     assert.deepEqual(await getJobIds(), beforeInvalidTemplate, 'selected-resource validation must not add a persisted Job');
 
+    const brokenClosureCatalogResponse = await page.request.get(`${origin}/tools/att/api/v1/packages/payments/resources?type=template&query=STUDIO_BROKEN_CLOSURE&limit=100`);
+    assert.equal(brokenClosureCatalogResponse.status(), 200);
+    const brokenClosureCatalog = await brokenClosureCatalogResponse.json();
+    const brokenClosure = (brokenClosureCatalog.items || []).find(item => item.logicalId === 'STUDIO_BROKEN_CLOSURE');
+    assert.ok(brokenClosure, 'the authorized catalog should expose the valid Template with a missing Flow');
+    assert.equal(brokenClosure.state, 'ready', 'metadata inspection must remain separate from static validation');
+    assert.equal(brokenClosure.executionReadiness.state, 'dependency-unresolved');
+    const brokenClosureRoute = new URLSearchParams({ scope: 'template', package: 'payments', environment: 'SIT',
+      target: brokenClosure.resourceId, resourceType: 'template', resourceId: brokenClosure.resourceId,
+      resourceLogicalId: brokenClosure.logicalId });
+    await page.goto(`${origin}/tools/att/ui/index.html#/validate?${brokenClosureRoute.toString()}`);
+    await page.getByRole('heading', { name: 'Validate', level: 1 }).waitFor();
+    await page.waitForFunction(() => !document.querySelector('button[type="submit"]')?.disabled);
+    const beforeBrokenClosure = await getJobIds();
+    const brokenClosureResponsePromise = page.waitForResponse(response => response.request().method() === 'POST'
+      && new URL(response.url()).pathname.endsWith('/api/v1/validation'));
+    await page.getByRole('button', { name: 'Run Validation', exact: true }).click();
+    const brokenClosureResponse = await brokenClosureResponsePromise;
+    assert.equal(brokenClosureResponse.status(), 200);
+    const brokenClosureReport = await brokenClosureResponse.json();
+    assert.equal(brokenClosureReport.overallStatus, 'INVALID', JSON.stringify(brokenClosureReport));
+    assert.equal(brokenClosureReport.exitCode, 2, JSON.stringify(brokenClosureReport));
+    assert.ok((brokenClosureReport.diagnostics || []).some(item => item.code === 'ATT-RESOURCE-REFERENCE-UNRESOLVED'
+      && item.severity === 'ERROR'), JSON.stringify(brokenClosureReport));
+    await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
+    assert.equal(await page.locator('.att-validation-error').count(), 0, 'a missing dependency must render as INVALID, not a broken report');
+    assert.equal((await page.locator('.att-validation-status strong').textContent())?.trim(), 'INVALID');
+    assert.deepEqual(await getJobIds(), beforeBrokenClosure, 'dependency-closure validation must not add a persisted Job');
+
     const packageRoute = new URLSearchParams({ scope: 'package', package: 'payments', environment: 'SIT' });
     await page.goto(`${origin}/tools/att/ui/index.html#/validate?${packageRoute.toString()}`);
     await page.getByRole('heading', { name: 'Validate', level: 1 }).waitFor();
@@ -177,8 +206,8 @@ async function main() {
     assert.deepEqual(await getJobIds(), beforePackageValidation, 'Package validation must not add a persisted Job');
 
     assert.deepEqual(otherWrites, [], 'the read-only UI flow must not POST drafts, jobs, or schedules');
-    assert.equal(validationRequests.length, 6);
-    process.stdout.write('Packaged-WAR validation checks passed under /tools/att: real Config and Flow reports, invalid selected Template diagnostics, Package-wide authorized source navigation, and no Job or draft writes.\n');
+    assert.equal(validationRequests.length, 7);
+    process.stdout.write('Packaged-WAR validation checks passed under /tools/att: real Config and Flow reports, invalid resource and dependency-closure diagnostics, Package-wide authorized source navigation, and no Job or draft writes.\n');
   } finally {
     await context.close();
     await browser.close();

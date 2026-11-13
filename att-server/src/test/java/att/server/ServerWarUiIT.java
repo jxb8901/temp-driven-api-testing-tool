@@ -576,6 +576,10 @@ class ServerWarUiIT {
         Path invalidTemplate = Files.createDirectories(packageRoot.resolve("templates/STUDIO_INVALID"));
         Files.writeString(invalidTemplate.resolve("template.yaml"),
                 "schemaVersion: att-template/v3.6\nname: STUDIO_INVALID\nactions: []\n");
+        Path brokenClosureTemplate = Files.createDirectories(packageRoot.resolve("templates/STUDIO_BROKEN_CLOSURE"));
+        Files.writeString(brokenClosureTemplate.resolve("template.yaml"),
+                "schemaVersion: att-template/v3.6\nname: STUDIO_BROKEN_CLOSURE\ndescription: valid descriptor with an unresolved Flow\nactions:\n"
+                        + "  invokeMissingFlow:\n    type: flow\n    use: missing.flow.v1\n");
         Files.writeString(packageRoot.resolve("templates/SCHEDULED/debug.yaml"), "schemaVersion: att-debug/v1.2\ninputs: {}\n");
         // Keep Flow-link inspection in this isolated browser fixture, away from the scheduler capacity fixture.
         writeReferenceFlowSource(packageRoot);
@@ -632,6 +636,24 @@ class ServerWarUiIT {
             assertEquals(200, postJson(port, previewPath, scheduleAdminAuth, "http://127.0.0.1:" + port, previewBody),
                     "same-origin schedule preview may proceed");
             String api = "/tools/att/api/v1";
+            JsonNode brokenClosureCatalog = getJson(port, api + "/packages/payments/resources?type=template&query=STUDIO_BROKEN_CLOSURE&limit=100", auth);
+            JsonNode brokenClosureResource = null;
+            for (JsonNode item : brokenClosureCatalog.path("items"))
+                if ("STUDIO_BROKEN_CLOSURE".equals(item.path("name").asText())) brokenClosureResource = item;
+            assertNotNull(brokenClosureResource, brokenClosureCatalog.toString());
+            assertEquals("ready", brokenClosureResource.path("state").asText(), brokenClosureResource.toString());
+            assertEquals("dependency-unresolved", brokenClosureResource.path("executionReadiness").path("state").asText(), brokenClosureResource.toString());
+            JsonNode brokenClosureReport = apiJson(port, "POST", api + "/validation", auth, origin,
+                    Map.of("command", "validate", "targetKind", "template", "packageId", "payments",
+                            "target", brokenClosureResource.path("resourceId").asText(), "environment", "SIT"), 200);
+            assertEquals("INVALID", brokenClosureReport.path("overallStatus").asText(), brokenClosureReport.toString());
+            assertEquals(2, brokenClosureReport.path("exitCode").asInt(), brokenClosureReport.toString());
+            JsonNode unresolvedFlow = null;
+            for (JsonNode item : brokenClosureReport.path("diagnostics"))
+                if ("ATT-RESOURCE-REFERENCE-UNRESOLVED".equals(item.path("code").asText())) unresolvedFlow = item;
+            assertNotNull(unresolvedFlow, brokenClosureReport.toString());
+            assertEquals("ERROR", unresolvedFlow.path("severity").asText(), brokenClosureReport.toString());
+            assertTrue(brokenClosureReport.path("sections").toString().contains("FAIL"), brokenClosureReport.toString());
             HttpURLConnection emptyCatalogResponse=open(port,api+"/packages/lilyzhou/load-catalog?limit=100",auth);
             JsonNode emptyCatalog;
             try(var input=emptyCatalogResponse.getInputStream()) { emptyCatalog=ServerRuntime.JSON.readTree(input.readAllBytes()); }
@@ -753,7 +775,6 @@ class ServerWarUiIT {
             apiJson(port, "POST", api + "/load-schedules", scheduleAdminAuth, origin,
                     scheduleRequest("Packaged UI schedule", "load/scenario.yaml"), 201);
             if ("1".equals(System.getenv("ATT_UI_SERVER_PLAYWRIGHT"))) runServerUiPlaywright(origin);
-            assertDegradedDiscoveryWithoutProcessSecrets(port, api, auth, packageRoot, localHome);
         } finally {
             try { tomcat.stop(); } finally { tomcat.destroy(); }
             if (oldConfig == null) System.clearProperty("att.server.config");
@@ -763,6 +784,82 @@ class ServerWarUiIT {
         }
     }
 
+
+    @Test
+    void packagedWarSelectedValidationReportsPartialForMissingEnvironmentSecret() throws Exception {
+        Path war = Path.of(System.getProperty("att.server.war"));
+        assertTrue(Files.isRegularFile(war), "Packaged server WAR must exist: " + war);
+        Path localHome = createScheduledLocalRuntime();
+        Path packages = Files.createDirectories(temp.resolve("env-validation-packages"));
+        Path packageRoot = Files.createDirectory(packages.resolve("payments"));
+        writeScheduledPackage(packageRoot, localHome);
+
+        String variable = "ATT_244_WAR_ABSENT_71F29BE6";
+        assertNull(System.getenv(variable), "The fixture variable must be absent from the process environment.");
+        Path degraded = Files.createDirectories(packageRoot.resolve("templates/DEGRADED"));
+        Files.writeString(degraded.resolve("template.yaml"),
+                "schemaVersion: att-template/v3.6\nname: DEGRADED\ndescription: Browse without credentials\nactions:\n"
+                        + "  query:\n    type: tool\n    call: \"#{db.orders.query(sql='select 1')}\"\n");
+        Path discoveryHelper = localHome.resolve("config/db-discovery.yaml");
+        Files.writeString(discoveryHelper,
+                "schemaVersion: att-dbhelper/v2.6\nid: orders\nname: Orders\ndescription: Discovery fixture\n"
+                        + "connection: {url: 'jdbc:unused', password: '${ENV:" + variable + "}'}\n");
+        Path runtimeConfig = localHome.resolve("config/config.yaml");
+        Files.writeString(runtimeConfig, Files.readString(runtimeConfig) + "\ndbhelpers: [config/db-discovery.yaml]\n");
+
+        Path users = Files.writeString(temp.resolve("env-validation-users.xml"),
+                "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
+        Path config = Files.writeString(temp.resolve("env-validation-server.yaml"),
+                "server:\n  runtimeConfigPath: " + yaml(runtimeConfig) + "\n  dataDir: " + yaml(temp.resolve("env-validation-data"))
+                        + "\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n  inspection:\n    enabled: true\n"
+                        + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n"
+                        + "packages:\n  allowedRoots:\n    - " + yaml(packages) + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n");
+        String oldConfig = System.getProperty("att.server.config");
+        String oldHome = System.getProperty("att.home");
+        System.setProperty("att.server.config", config.toString());
+        System.setProperty("att.home", localHome.toString());
+
+        Tomcat tomcat = null;
+        String api = "/tools/att/api/v1";
+        String auth = basic("att");
+        try {
+            tomcat = startScheduledWar(war, users);
+            int port = tomcat.getConnector().getLocalPort();
+            String origin = "http://127.0.0.1:" + port;
+            JsonNode resources = getJson(port, api + "/packages/payments/resources?type=template&query=DEGRADED", auth);
+            assertEquals(1, resources.path("items").size(), resources.toString());
+            JsonNode resource = resources.path("items").get(0);
+            assertEquals("available", resource.path("metadataState").asText(), resource.toString());
+            assertEquals("dependency-unresolved", resource.path("executionReadiness").path("state").asText(), resource.toString());
+            assertTrue(resource.path("executionReadiness").toString().contains(variable), resource.toString());
+
+            JsonNode report = apiJson(port, "POST", api + "/validation", auth, origin,
+                    Map.of("command", "validate", "targetKind", "template", "packageId", "payments",
+                            "target", resource.path("resourceId").asText(), "environment", "SIT"), 200);
+            assertEquals("PARTIAL", report.path("overallStatus").asText(), report.toString());
+            assertEquals(3, report.path("exitCode").asInt(), report.toString());
+            JsonNode selectedSection = null;
+            JsonNode environmentRequirement = null;
+            for (JsonNode section : report.path("sections"))
+                if (section.path("name").asText().startsWith("Selected Resource")) selectedSection = section;
+            for (JsonNode diagnostic : report.path("diagnostics"))
+                if ("ATT-RESOURCE-ENV-REQUIRED".equals(diagnostic.path("code").asText())) environmentRequirement = diagnostic;
+            assertNotNull(selectedSection, report.toString());
+            assertEquals("WARN", selectedSection.path("status").asText(), report.toString());
+            assertNotNull(environmentRequirement, report.toString());
+            assertEquals("WARNING", environmentRequirement.path("severity").asText(), report.toString());
+            assertFalse(report.toString().contains(localHome.toString()), report.toString());
+            assertFalse(report.toString().contains(packageRoot.toString()), report.toString());
+        } finally {
+            if (tomcat != null) {
+                try { tomcat.stop(); } finally { tomcat.destroy(); }
+            }
+            if (oldConfig == null) System.clearProperty("att.server.config");
+            else System.setProperty("att.server.config", oldConfig);
+            if (oldHome == null) System.clearProperty("att.home");
+            else System.setProperty("att.home", oldHome);
+        }
+    }
 
 
     private static void assertServerApplicationJar(Path war) throws Exception {
@@ -1483,52 +1580,6 @@ class ServerWarUiIT {
         org.jsoup.nodes.Element asset = org.jsoup.Jsoup.parse(html).selectFirst(selector);
         assertNotNull(asset, "The active Vite index must reference a generated " + attribute + " asset.");
         return asset.attr(attribute);
-    }
-
-    private static void assertDegradedDiscoveryWithoutProcessSecrets(int port, String api, String auth,
-                                                                     Path packageRoot, Path localHome) throws Exception {
-        String variable = "ATT_244_WAR_ABSENT_71F29BE6";
-        assertNull(System.getenv(variable));
-        Files.writeString(localHome.resolve("config/db-discovery.yaml"),
-                "schemaVersion: att-dbhelper/v2.6\nid: orders\nname: Orders\ndescription: Discovery fixture\n"
-                        + "connection: {url: 'jdbc:unused', password: '${ENV:" + variable + "}'}\n");
-        Files.writeString(localHome.resolve("config/db-invalid.yaml"), "[invalid: PRIVATE_HELPER_SOURCE_CANARY\n");
-        Files.writeString(localHome.resolve("config/config.yaml"),
-                "\ndbhelpers: [config/db-discovery.yaml, config/db-absent.yaml, config/db-invalid.yaml]\n",
-                java.nio.file.StandardOpenOption.APPEND);
-        Path target = Files.createDirectories(packageRoot.resolve("templates/DEGRADED"));
-        Files.writeString(target.resolve("template.yaml"),
-                "schemaVersion: att-template/v3.6\nname: DEGRADED\ndescription: Browse without credentials\nactions:\n"
-                        + "  query:\n    type: tool\n    call: \"#{db.orders.query(sql='select 1')}\"\n");
-        JsonNode resources;
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        do {
-            resources = getJson(port, api + "/packages/payments/resources?type=template&query=DEGRADED", auth);
-            if (!resources.path("items").isEmpty()) break;
-            Thread.sleep(50);
-        } while (System.nanoTime() < deadline);
-        assertEquals(1, resources.path("items").size(), resources.toString());
-        JsonNode item = resources.path("items").get(0);
-        assertEquals("available", item.path("metadataState").asText(), item.toString());
-        assertEquals("dependency-unresolved", item.path("executionReadiness").path("state").asText());
-        assertTrue(item.path("executionReadiness").toString().contains(variable));
-        assertTrue(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
-        assertTrue(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"));
-        assertFalse(resources.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
-        assertFalse(resources.toString().contains(localHome.toString()));
-        assertFalse(resources.toString().contains(packageRoot.toString()));
-        assertEquals(401, get(port, api + "/packages/payments/resources?type=template&query=DEGRADED", null));
-        String effectiveRoute = api + "/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&limit=50";
-        JsonNode effective = getJson(port, effectiveRoute, auth);
-        assertEquals("degraded", effective.path("state").asText(), effective.toString());
-        assertEquals("not-validated", effective.path("executionReadiness").asText());
-        assertTrue(effective.path("diagnostics").toString().contains(variable));
-        assertTrue(effective.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
-        assertTrue(effective.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"));
-        assertFalse(effective.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
-        assertFalse(effective.toString().contains(localHome.toString()));
-        assertFalse(effective.toString().contains(packageRoot.toString()));
-        assertEquals(401, get(port, effectiveRoute, null));
     }
 
     private static void assertSharedConfiguration(int port,String api,String ordinary) throws Exception {

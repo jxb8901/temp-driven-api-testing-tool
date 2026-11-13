@@ -62,12 +62,39 @@ function safeDiagnosticText(value: string): string {
     .replace(/(?:[A-Za-z]:[\\/]|\/(?:Users|home|private|tmp|var)\/)[^\s"'<>]*/g, '[REDACTED_PATH]');
 }
 
-function safeDiagnostic(diagnostic: ValidationDiagnostic): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const key of ['code', 'severity', 'message', 'source', 'field', 'suggestion', 'resourceType', 'resourceId', 'target'] as const) {
+function safeDiagnosticLocation(value: unknown): string {
+  if (typeof value !== 'string' || !value || value.length > 1000 || /[\u0000-\u001f\u007f]/.test(value)) return '';
+  const normalized = value.replace(/\\/g, '/');
+  if (normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)
+      || normalized.split('/').some(part => part === '.' || part === '..')) return '[REDACTED_PATH]';
+  return safeDiagnosticText(value);
+}
+
+function safeDiagnosticSource(value: ValidationDiagnostic['source']): string | Record<string, string | number> | undefined {
+  if (typeof value === 'string') return safeDiagnosticLocation(value) || undefined;
+  if (!value || typeof value !== 'object') return undefined;
+  const source: Record<string, string | number> = {};
+  const file = safeDiagnosticLocation(value.file);
+  if (file) source.file = file;
+  for (const key of ['line', 'column', 'endLine', 'endColumn'] as const) {
+    const coordinate = value[key];
+    if (typeof coordinate === 'number' && Number.isSafeInteger(coordinate) && coordinate > 0) source[key] = coordinate;
+  }
+  return Object.keys(source).length ? source : undefined;
+}
+
+function safeDiagnostic(diagnostic: ValidationDiagnostic): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of ['code', 'severity', 'message', 'field', 'suggestion', 'resourceType', 'resourceId', 'target'] as const) {
     const value = field(diagnostic[key]);
     if (value) result[key] = safeDiagnosticText(value);
   }
+  const file = safeDiagnosticLocation(diagnostic.file);
+  if (file) result.file = file;
+  const template = safeDiagnosticLocation(diagnostic.template);
+  if (template) result.template = template;
+  const source = safeDiagnosticSource(diagnostic.source);
+  if (source !== undefined) result.source = source;
   return result;
 }
 

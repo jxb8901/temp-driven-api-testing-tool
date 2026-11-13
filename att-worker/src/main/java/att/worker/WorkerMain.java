@@ -605,6 +605,7 @@ public final class WorkerMain {
             return validationResult(report,request);
         }
         att.server.api.AttValidationReport.Section selected=report.addSection("Selected Resource / dependency closure",request.inspectionPath,"PASS");
+        String validationStep="resource inspection";
         try {
             att.resource.PackageResourceInspector inspector=resourceInspector(packageRoot,configPath,request);
             try {
@@ -612,26 +613,69 @@ public final class WorkerMain {
                 if("load".equals(scope)) details=inspector.validateLoadScenarioFile(request.inspectionPath);
                 else details=inspector.inspect("detail",request.inspectionType,request.inspectionResourceId,null,0,1);
                 Object resource=details.get("resource");
-                if(!"load".equals(scope)&&(!(resource instanceof Map)||!"ready".equalsIgnoreCase(String.valueOf(((Map<?,?>)resource).get("state")))))
+                Map<?,?> identity=resource instanceof Map?(Map<?,?>)resource:Collections.emptyMap();
+                if(!"load".equals(scope)&&(!(resource instanceof Map)||!"ready".equalsIgnoreCase(String.valueOf(identity.get("state")))))
                     selected.status("FAIL");
+                att.api.ValidateResult staticValidation=null;
+                if(!"load".equals(scope)) {
+                    validationStep="static validation";
+                    String resourceId=identity.get("logicalId") instanceof String?(String)identity.get("logicalId"):request.inspectionResourceId;
+                    staticValidation=new att.api.DefaultAttService().validateSelectedResource(
+                            new att.api.ValidateRequest(packageRoot,configPath,request.environment,Collections.<Path>emptyList(),null,
+                                    Collections.<String>emptySet(),Collections.<String>emptySet(),Collections.<String>emptySet(),false,"selected-resource"),
+                            request.inspectionType,resourceId);
+                    if(staticValidation.exitCode()==2)selected.status("FAIL");
+                }
                 Object diagnostics=details.get("diagnostics");
                 if(diagnostics instanceof List)for(Object item:(List<?>)diagnostics)if(item instanceof Map) {
                     Map<String,Object> normalized=normalizeValidationDiagnostic((Map<?,?>)item,
                             "FAIL".equals(selected.status())?"ERROR":"WARNING");
                     if(!"load".equals(scope)&&resource instanceof Map) {
-                        Map<?,?> identity=(Map<?,?>)resource;
                         if(identity.get("type") instanceof String)normalized.putIfAbsent("resourceType",identity.get("type"));
                         if(identity.get("resourceId") instanceof String)normalized.putIfAbsent("resourceId",identity.get("resourceId"));
                         if(identity.get("logicalId") instanceof String)normalized.putIfAbsent("logicalId",identity.get("logicalId"));
                     }
                     selected.diagnostic(normalized);
                 }
+                if(staticValidation!=null)for(att.validation.Diagnostic item:staticValidation.diagnostics()) {
+                    Map<String,Object> normalized=new LinkedHashMap<String,Object>(item.toMap());
+                    if(identity.get("type") instanceof String)normalized.put("resourceType",identity.get("type"));
+                    if(identity.get("resourceId") instanceof String)normalized.put("resourceId",identity.get("resourceId"));
+                    if(identity.get("logicalId") instanceof String)normalized.put("logicalId",identity.get("logicalId"));
+                    selected.diagnostic(normalized);
+                }
+                if(!"load".equals(scope)&&"dependency-unresolved".equals(String.valueOf(identity.get("executionReadiness") instanceof Map
+                        ?((Map<?,?>)identity.get("executionReadiness")).get("state"):""))) {
+                    Object readiness=identity.get("executionReadiness");
+                    Object readinessDiagnostics=readiness instanceof Map?((Map<?,?>)readiness).get("diagnostics"):null;
+                    boolean hadReadinessDiagnostic=readinessDiagnostics instanceof List&&!((List<?>)readinessDiagnostics).isEmpty();
+                    if(staticValidation!=null&&staticValidation.exitCode()==0) {
+                        selected.status("WARN");report.incomplete();
+                    }
+                    if(readinessDiagnostics instanceof List)for(Object item:(List<?>)readinessDiagnostics)if(item instanceof Map) {
+                        Map<String,Object> normalized=normalizeValidationDiagnostic((Map<?,?>)item,"WARNING");
+                        if(identity.get("type") instanceof String)normalized.putIfAbsent("resourceType",identity.get("type"));
+                        if(identity.get("resourceId") instanceof String)normalized.putIfAbsent("resourceId",identity.get("resourceId"));
+                        if(identity.get("logicalId") instanceof String)normalized.putIfAbsent("logicalId",identity.get("logicalId"));
+                        selected.diagnostic(normalized);
+                    }
+                    if(staticValidation!=null&&staticValidation.exitCode()==0&&!hadReadinessDiagnostic) {
+                        Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-DEPENDENCY-UNVERIFIED");
+                        diagnostic.put("severity","WARNING");diagnostic.put("message","Static validation passed, but part of the selected dependency graph is not execution-ready in this Environment");
+                        if(identity.get("type") instanceof String)diagnostic.put("resourceType",identity.get("type"));
+                        if(identity.get("resourceId") instanceof String)diagnostic.put("resourceId",identity.get("resourceId"));
+                        if(identity.get("logicalId") instanceof String)diagnostic.put("logicalId",identity.get("logicalId"));
+                        selected.diagnostic(diagnostic);
+                    }
+                }
             } finally {inspector.close();}
         } catch(Exception invalid) {
             selected.status("FAIL");
             Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-TARGET-INVALID");
             diagnostic.put("severity","ERROR");diagnostic.put("source",request.inspectionPath==null?"target":request.inspectionPath);
-            diagnostic.put("field","target");diagnostic.put("message",DiagnosticSanitizer.redactText(invalid.getMessage()==null?"Selected target is invalid":invalid.getMessage()));
+            String detail=invalid.getMessage()==null?invalid.getClass().getSimpleName():invalid.getMessage();
+            diagnostic.put("field","target");diagnostic.put("message",DiagnosticSanitizer.redactText(
+                    "Selected target validation failed during "+validationStep+": "+detail));
             selected.diagnostic(diagnostic);
         }
         if(report.exitCode()==0&&"FAIL".equals(selected.status()))report.exitCode(2);
@@ -657,7 +701,12 @@ public final class WorkerMain {
             code="ATT-VALIDATION-DIAGNOSTIC";result.put("code",code);
         }
         Object severity=result.get("severity");
-        if(!(severity instanceof String)||((String)severity).trim().isEmpty())result.put("severity",fallbackSeverity);
+        if(severity instanceof String) {
+            String normalized=((String)severity).trim().toUpperCase(java.util.Locale.ROOT);
+            if("ERROR".equals(normalized)||"WARN".equals(normalized)||"WARNING".equals(normalized)||"INFO".equals(normalized))
+                result.put("severity",normalized);
+            else result.put("severity",fallbackSeverity);
+        } else result.put("severity",fallbackSeverity);
         Object message=result.get("message");
         if(!(message instanceof String)||((String)message).trim().isEmpty()) {
             Object summary=result.get("summary"),detail=result.get("detail");
