@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:att:schema:sut-metrics-manifest-integrity:v1",
-  "title": "ATT SUT Metrics manifest transition integrity record",
+  "title": "ATT embedded SUT Metrics manifest transition integrity history",
   "type": "object",
   "required": ["schemaVersion", "jobId", "snapshotId", "snapshotSha256", "entries"],
   "additionalProperties": false,

@@ -20,9 +20,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -477,6 +480,87 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void manifestPublicationSurvivesRestartImmediatelyAfterItsAtomicRename() throws Exception {
+        Path data = temp.resolve("manifest-atomic-recovery");
+        AtomicBoolean interruptAfterNextPublication = new AtomicBoolean();
+        try (PrometheusFixture fixture = new PrometheusFixture(1)) {
+            try (SutMetricsService service = new SutMetricsService(data, Set.of(), ignored -> null, path -> {
+                if ("manifest.json".equals(path.getFileName().toString())
+                        && interruptAfterNextPublication.compareAndSet(true, false))
+                    throw new IllegalStateException("simulated process stop after atomic manifest rename");
+            })) {
+                service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+                service.upsertProfile(baseProfile("base", 1, false));
+                service.writeSnapshot(JOB_ID, service.resolveScenario(scenario(List.of(binding("prom", null)), "1m", "1m", "15s"), "alice"));
+                Map<String, Object> collecting = service.collectionStatus(JOB_ID);
+                collecting.put("state", "COLLECTING");
+                collecting.put("complete", Boolean.FALSE);
+                interruptAfterNextPublication.set(true);
+                Path directory = data.resolve("jobs").resolve(JOB_ID).resolve("sut-metrics");
+                assertThrows(IllegalStateException.class, () -> service.writeManifest(directory, collecting));
+            }
+
+            Path directory = data.resolve("jobs").resolve(JOB_ID).resolve("sut-metrics");
+            assertTrue(ServerRuntime.JSON.readTree(Files.readAllBytes(directory.resolve("manifest.json"))).has("_integrity"));
+            assertFalse(Files.exists(directory.resolve("manifest-integrity.json")),
+                    "Manifest state and integrity history must publish in one atomic file.");
+            try (SutMetricsService recovered = new SutMetricsService(data)) {
+                Map<String, Object> status = recovered.collectionStatus(JOB_ID);
+                assertEquals("FAILED", status.get("state"), "Restart must recover COLLECTING rather than report false READY evidence.");
+                assertEquals("SERVER_RESTART_INTERRUPTED", maps(status.get("diagnostics")).get(0).get("code"));
+            }
+        }
+    }
+
+    @Test void manifestWritesForDistinctJobsDoNotBlockEachOther() throws Exception {
+        String firstJob = JOB_ID, secondJob = "J0000000000000002";
+        Path data = temp.resolve("independent-job-manifests");
+        AtomicBoolean gatePublications = new AtomicBoolean();
+        CountDownLatch bothPublished = new CountDownLatch(2), releasePublications = new CountDownLatch(1);
+        try (PrometheusFixture fixture = new PrometheusFixture(1);
+             SutMetricsService service = new SutMetricsService(data, Set.of(), ignored -> null, path -> {
+                 if (!gatePublications.get() || !"manifest.json".equals(path.getFileName().toString())) return;
+                 bothPublished.countDown();
+                 try {
+                     if (!releasePublications.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("test publication gate timed out");
+                 } catch (InterruptedException interrupted) {
+                     Thread.currentThread().interrupt();
+                     throw new IllegalStateException("test publication gate was interrupted", interrupted);
+                 }
+             })) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            Map<String, Object> snapshot = service.resolveScenario(scenario(List.of(binding("prom", null)), "1m", "1m", "15s"), "alice");
+            service.writeSnapshot(firstJob, snapshot);
+            service.writeSnapshot(secondJob, snapshot);
+            Map<String, Object> first = service.collectionStatus(firstJob), second = service.collectionStatus(secondJob);
+            first.put("state", "COLLECTING"); first.put("complete", Boolean.FALSE);
+            second.put("state", "COLLECTING"); second.put("complete", Boolean.FALSE);
+            ExecutorService writes = Executors.newFixedThreadPool(2);
+            gatePublications.set(true);
+            try {
+                Future<?> firstWrite = writes.submit(() -> {
+                    service.writeManifest(data.resolve("jobs").resolve(firstJob).resolve("sut-metrics"), first);
+                    return null;
+                });
+                Future<?> secondWrite = writes.submit(() -> {
+                    service.writeManifest(data.resolve("jobs").resolve(secondJob).resolve("sut-metrics"), second);
+                    return null;
+                });
+                assertTrue(bothPublished.await(5, TimeUnit.SECONDS), "Distinct Job manifests should publish without a service-wide lock.");
+                releasePublications.countDown();
+                firstWrite.get(5, TimeUnit.SECONDS);
+                secondWrite.get(5, TimeUnit.SECONDS);
+            } finally {
+                releasePublications.countDown();
+                gatePublications.set(false);
+                writes.shutdownNow();
+            }
+            assertEquals("COLLECTING", service.collectionStatus(firstJob).get("state"));
+            assertEquals("COLLECTING", service.collectionStatus(secondJob).get("state"));
+        }
+    }
+
     @Test void sampledSeriesWithoutAnAfterBufferSampleIsPartialNotReady() throws Exception {
         try (PrometheusFixture fixture = new PrometheusFixture(2); SutMetricsService service = new SutMetricsService(temp)) {
             service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
@@ -489,6 +573,27 @@ class SutMetricsServiceTest {
             assertEquals("PARTIAL", manifest.get("state"));
             Map<String, Object> file = maps(manifest.get("files")).get(0);
             assertEquals("PARTIAL", file.get("queryStatus"));
+            assertEquals("POST_BUFFER_NOT_OBSERVED", maps(manifest.get("diagnostics")).get(0).get("code"));
+        }
+    }
+
+    @Test void earlyPostFinishSampleWithMissingAfterBufferTailIsPartial() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(raw -> sampleAtWindowEndOffsetResponse(raw, 300));
+             SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            service.writeSnapshot(JOB_ID, service.resolveScenario(scenario(List.of(binding("prom", null)), "1m", "1h", "15s"), "alice"));
+            Instant finishedAt = Instant.now().minusSeconds(7200);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(30), finishedAt);
+
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("PARTIAL", manifest.get("state"));
+            Map<String, Object> file = maps(manifest.get("files")).get(0);
+            assertEquals("PARTIAL", file.get("queryStatus"));
+            assertTrue(Instant.parse(String.valueOf(object(file.get("coverage")).get("lastSampleAt"))).isAfter(finishedAt));
+            Map<String, Object> sidecar = ServerRuntime.JSON.readValue(Files.readAllBytes(temp.resolve("jobs").resolve(JOB_ID)
+                    .resolve("sut-metrics").resolve(String.valueOf(file.get("path")))), Map.class);
+            assertEquals("STALE", object(object(sidecar.get("observation")).get("availability")).get("freshness"));
             assertEquals("POST_BUFFER_NOT_OBSERVED", maps(manifest.get("diagnostics")).get(0).get("code"));
         }
     }
@@ -672,6 +777,13 @@ class SutMetricsServiceTest {
 
     private static String atWindowEndResponse(String raw) {
         long timestamp = Instant.parse(queryParameter(raw, "end")).toEpochMilli();
+        return "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":["
+                + "{\"metric\":{\"instance\":\"sut-1\"},\"values\":[["
+                + String.format(Locale.ROOT, "%.3f", timestamp / 1000.0) + ",\"1.0\"]]}]}}";
+    }
+
+    private static String sampleAtWindowEndOffsetResponse(String raw, long secondsBeforeEnd) {
+        long timestamp = Instant.parse(queryParameter(raw, "end")).minusSeconds(secondsBeforeEnd).toEpochMilli();
         return "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":["
                 + "{\"metric\":{\"instance\":\"sut-1\"},\"values\":[["
                 + String.format(Locale.ROOT, "%.3f", timestamp / 1000.0) + ",\"1.0\"]]}]}}";

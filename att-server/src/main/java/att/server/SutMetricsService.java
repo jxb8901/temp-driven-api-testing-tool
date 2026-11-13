@@ -43,6 +43,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -53,6 +54,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -64,6 +66,7 @@ final class SutMetricsService implements AutoCloseable {
     static final String SERIES_SCHEMA = "att-sut-metrics-series/v1";
     static final String OBSERVATION_SCHEMA = "att-sut-metrics-observation/v1";
     static final String MANIFEST_INTEGRITY_SCHEMA = "att-sut-metrics-manifest-integrity/v1";
+    private static final String MANIFEST_INTEGRITY_FIELD = "_integrity";
     static final int MAX_SOURCES = 64, MAX_PROFILES = 256;
     static final int MAX_SCHEDULED_COLLECTIONS = 128, MAX_MANIFEST_TRANSITIONS = 16;
     static final long MAX_MANIFEST_BYTES = 8L * 1024 * 1024;
@@ -85,8 +88,9 @@ final class SutMetricsService implements AutoCloseable {
     private final Path dataDir, jobsRoot, catalogPath;
     private final Set<String> allowedPrometheusHosts;
     private final Function<String, String> secretResolver;
+    private final Consumer<Path> afterManifestPublication;
     private final Object catalogLock = new Object();
-    private final Object manifestLock = new Object();
+    private final ConcurrentHashMap<String, ManifestWriteLock> manifestWriteLocks = new ConcurrentHashMap<>();
     private Map<String, Map<String, Object>> sources = new LinkedHashMap<>();
     private Map<String, Map<String, Object>> profiles = new LinkedHashMap<>();
     private final ExecutorService collectors = boundedExecutor(2, 64, "att-sut-metrics-collector");
@@ -111,11 +115,17 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     SutMetricsService(Path dataDir, Set<String> allowedPrometheusHosts, Function<String, String> secretResolver) throws Exception {
+        this(dataDir, allowedPrometheusHosts, secretResolver, ignored -> { });
+    }
+
+    SutMetricsService(Path dataDir, Set<String> allowedPrometheusHosts, Function<String, String> secretResolver,
+                      Consumer<Path> afterManifestPublication) throws Exception {
         this.dataDir = dataDir.toAbsolutePath().normalize();
         this.jobsRoot = this.dataDir.resolve("jobs");
         this.catalogPath = this.dataDir.resolve("sut-metrics-catalog.json");
         this.allowedPrometheusHosts = normalizeAllowedHosts(allowedPrometheusHosts);
         this.secretResolver = java.util.Objects.requireNonNull(secretResolver, "secretResolver");
+        this.afterManifestPublication = java.util.Objects.requireNonNull(afterManifestPublication, "afterManifestPublication");
         loadCatalog();
         recoverInterruptedCollections();
     }
@@ -339,12 +349,6 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     Map<String, Object> collectionStatus(String jobId) throws Exception {
-        synchronized (manifestLock) {
-            return readCollectionStatus(jobId);
-        }
-    }
-
-    private Map<String, Object> readCollectionStatus(String jobId) throws Exception {
         SnapshotEnvelope envelope = snapshotEnvelope(jobId);
         if (envelope == null) return fields("schemaVersion", COLLECTION_SCHEMA, "state", "DISABLED", "complete", Boolean.TRUE,
                 "jobId", jobId, "queries", List.of(), "files", List.of());
@@ -361,8 +365,8 @@ final class SutMetricsService implements AutoCloseable {
             throw new IllegalStateException("The SUT Metrics companion manifest exceeds its read limit.");
         byte[] bytes = Files.readAllBytes(manifest);
         Map<String, Object> value = json.readValue(bytes, Map.class);
-        validateManifest(value, jobId, envelope.snapshot());
         verifyManifestIntegrity(directory, bytes, value, envelope, true);
+        validateManifest(value, jobId, envelope.snapshot());
         return value;
     }
 
@@ -618,6 +622,16 @@ final class SutMetricsService implements AutoCloseable {
         } catch (RuntimeException invalid) { return "UNKNOWN"; }
     }
 
+    private static boolean coversPostRunBuffer(String lastSampleAt, Instant executionFinishedAt,
+                                               Instant queryEnd, long stepSeconds) {
+        if (lastSampleAt == null) return false;
+        try {
+            Instant latest = Instant.parse(lastSampleAt);
+            return latest.isAfter(executionFinishedAt)
+                    && !latest.isBefore(queryEnd.minusSeconds(Math.max(stepSeconds * 2, 30)));
+        } catch (RuntimeException invalid) { return false; }
+    }
+
     private void collectPostRun(String jobId, Map<String, Object> snapshot, Instant executionStartedAt,
                                 Instant executionFinishedAt, Instant start, Instant end, Instant eligibleAt,
                                 List<Map<String, Object>> phaseWindows) {
@@ -642,8 +656,8 @@ final class SutMetricsService implements AutoCloseable {
                     int sampleCount = ((Number) value.get("sampleCount")).intValue();
                     Map<String, Object> coverage = object(value.get("coverage"), "coverage");
                     String lastSampleAt = nullableText(coverage.get("lastSampleAt"));
-                    boolean afterObserved = afterSeconds == 0 || lastSampleAt != null
-                            && Instant.parse(lastSampleAt).isAfter(executionFinishedAt);
+                    boolean afterObserved = afterSeconds == 0
+                            || coversPostRunBuffer(lastSampleAt, executionFinishedAt, end, stepSeconds);
                     boolean queryPartial = sampleCount > 0 && !afterObserved;
                     String sourceId = String.valueOf(query.get("sourceId"));
                     long sourceSamples = sourceSampleCounts.getOrDefault(sourceId, 0L) + sampleCount;
@@ -653,7 +667,7 @@ final class SutMetricsService implements AutoCloseable {
                     String queryStatus = series.isEmpty() ? "NO_DATA" : queryPartial ? "PARTIAL" : "READY";
                     List<Map<String, Object>> queryDiagnostics = queryPartial
                             ? List.of(fields("code", "POST_BUFFER_NOT_OBSERVED",
-                                    "message", "No usable sample was observed after LOAD completion within the configured post-run buffer."))
+                                    "message", "The latest usable sample does not cover the configured post-run buffer within a two-step or 30-second freshness tolerance."))
                             : List.of();
                     Map<String, Object> observation = fields("schemaVersion", OBSERVATION_SCHEMA,
                             "kind", "sampled-time-series", "effectiveBindingId", query.get("id"),
@@ -1372,8 +1386,21 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     void writeManifest(Path directory, Map<String, Object> manifest) throws Exception {
-        synchronized (manifestLock) {
+        String jobId = directory.getParent().getFileName().toString();
+        ManifestWriteLock lock = manifestWriteLocks.compute(jobId, (key, existing) -> {
+            ManifestWriteLock selected = existing == null ? new ManifestWriteLock() : existing;
+            selected.users++;
+            return selected;
+        });
+        lock.lock.lock();
+        try {
             writeManifestLocked(directory, manifest);
+        } finally {
+            lock.lock.unlock();
+            manifestWriteLocks.compute(jobId, (key, current) -> {
+                if (current != lock) return current;
+                return --lock.users == 0 ? null : lock;
+            });
         }
     }
 
@@ -1387,6 +1414,7 @@ final class SutMetricsService implements AutoCloseable {
         next.put("snapshotId", envelope.snapshot().get("snapshotId"));
         next.put("updatedAt", next.getOrDefault("updatedAt", Instant.now().toString()));
         validateManifest(next, jobId, envelope.snapshot());
+        next.remove(MANIFEST_INTEGRITY_FIELD);
         byte[] nextBytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(next);
         Path manifestPath = directory.resolve("manifest.json"), integrityPath = directory.resolve("manifest-integrity.json");
         List<Map<String, Object>> entries = new ArrayList<>();
@@ -1415,8 +1443,14 @@ final class SutMetricsService implements AutoCloseable {
         entries.add(entry);
         Map<String, Object> integrity = fields("schemaVersion", MANIFEST_INTEGRITY_SCHEMA, "jobId", jobId,
                 "snapshotId", envelope.snapshot().get("snapshotId"), "snapshotSha256", envelope.snapshotSha256(), "entries", entries);
-        atomicJson(integrityPath, integrity);
-        atomicBytes(manifestPath, nextBytes);
+        Map<String, Object> publication = new LinkedHashMap<>(next);
+        publication.put(MANIFEST_INTEGRITY_FIELD, integrity);
+        byte[] publicationBytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(publication);
+        if (publicationBytes.length > MAX_MANIFEST_BYTES)
+            throw new IllegalStateException("The SUT Metrics companion manifest exceeds its publication limit.");
+        atomicBytes(manifestPath, publicationBytes);
+        afterManifestPublication.accept(manifestPath);
+        Files.deleteIfExists(integrityPath);
     }
 
     private void validateManifest(Map<String, Object> manifest, String jobId, Map<String, Object> snapshot) {
@@ -1470,33 +1504,53 @@ final class SutMetricsService implements AutoCloseable {
                                                                boolean allowBootstrap) throws Exception {
         String jobId = String.valueOf(manifest.get("jobId"));
         String snapshotId = String.valueOf(envelope.snapshot().get("snapshotId"));
-        Path historyPath = directory.resolve("manifest-integrity.json");
-        if (!Files.exists(historyPath, LinkOption.NOFOLLOW_LINKS)) {
-            String manifestDigest = sha256(manifestBytes);
-            if (envelope.initialManifestSha256() != null && !envelope.initialManifestSha256().equals(manifestDigest))
-                throw new IllegalStateException("The SUT Metrics manifest does not match its immutable integrity anchor.");
-            if (!allowBootstrap) throw new IllegalStateException("The SUT Metrics manifest integrity record is missing.");
-            List<Map<String, Object>> initial = List.of(manifestIntegrityEntry(1,
-                    manifestIntegrityRoot(jobId, envelope.snapshotSha256()), manifestDigest, manifest, jobId, snapshotId));
-            atomicJson(historyPath, fields("schemaVersion", MANIFEST_INTEGRITY_SCHEMA, "jobId", jobId,
-                    "snapshotId", snapshotId, "snapshotSha256", envelope.snapshotSha256(), "entries", initial));
-            return new ArrayList<>(initial);
+        if (manifest.containsKey(MANIFEST_INTEGRITY_FIELD)) {
+            Object rawIntegrity = manifest.remove(MANIFEST_INTEGRITY_FIELD);
+            Map<String, Object> integrity = object(rawIntegrity, "manifest integrity record");
+            if (!MANIFEST_INTEGRITY_SCHEMA.equals(integrity.get("schemaVersion"))
+                    || !jobId.equals(integrity.get("jobId")) || !snapshotId.equals(integrity.get("snapshotId"))
+                    || !envelope.snapshotSha256().equals(integrity.get("snapshotSha256")))
+                throw new IllegalStateException("The SUT Metrics manifest integrity record identity is invalid.");
+            Object rawEntries = integrity.get("entries");
+            if (!(rawEntries instanceof List<?> list))
+                throw new IllegalStateException("The SUT Metrics manifest integrity history is missing.");
+            byte[] manifestPayload = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(manifest);
+            return verifyManifestIntegrityEntries(list, sha256(manifestPayload), manifest, jobId, snapshotId, envelope.snapshotSha256());
         }
-        if (Files.isSymbolicLink(historyPath) || !Files.isRegularFile(historyPath, LinkOption.NOFOLLOW_LINKS)
-                || Files.size(historyPath) > 128 * 1024)
-            throw new IllegalStateException("The SUT Metrics manifest integrity record is not a bounded regular file.");
-        JsonNode history = json.readTree(historyPath.toFile());
-        JsonNode rawEntries = history.path("entries");
-        if (!MANIFEST_INTEGRITY_SCHEMA.equals(history.path("schemaVersion").asText())
-                || !jobId.equals(history.path("jobId").asText()) || !snapshotId.equals(history.path("snapshotId").asText())
-                || !envelope.snapshotSha256().equals(history.path("snapshotSha256").asText())
-                || !rawEntries.isArray() || rawEntries.isEmpty() || rawEntries.size() > MAX_MANIFEST_TRANSITIONS)
-            throw new IllegalStateException("The SUT Metrics manifest integrity record identity or size is invalid.");
+
+        Path historyPath = directory.resolve("manifest-integrity.json");
+        if (Files.exists(historyPath, LinkOption.NOFOLLOW_LINKS)) {
+            if (Files.isSymbolicLink(historyPath) || !Files.isRegularFile(historyPath, LinkOption.NOFOLLOW_LINKS)
+                    || Files.size(historyPath) > 128 * 1024)
+                throw new IllegalStateException("The legacy SUT Metrics manifest integrity record is not a bounded regular file.");
+            Map<String, Object> history = json.readValue(historyPath.toFile(), Map.class);
+            if (!MANIFEST_INTEGRITY_SCHEMA.equals(history.get("schemaVersion"))
+                    || !jobId.equals(history.get("jobId")) || !snapshotId.equals(history.get("snapshotId"))
+                    || !envelope.snapshotSha256().equals(history.get("snapshotSha256"))
+                    || !(history.get("entries") instanceof List<?> entries))
+                throw new IllegalStateException("The legacy SUT Metrics manifest integrity record identity or size is invalid.");
+            return verifyManifestIntegrityEntries(entries, sha256(manifestBytes), manifest, jobId, snapshotId, envelope.snapshotSha256());
+        }
+
+        String manifestDigest = sha256(manifestBytes);
+        if (envelope.initialManifestSha256() != null && !envelope.initialManifestSha256().equals(manifestDigest))
+            throw new IllegalStateException("The SUT Metrics manifest does not match its immutable integrity anchor.");
+        if (!allowBootstrap) throw new IllegalStateException("The SUT Metrics manifest integrity record is missing.");
+        return List.of(manifestIntegrityEntry(1, manifestIntegrityRoot(jobId, envelope.snapshotSha256()),
+                manifestDigest, manifest, jobId, snapshotId));
+    }
+
+    private List<Map<String, Object>> verifyManifestIntegrityEntries(List<?> rawEntries, String manifestDigest,
+                                                                      Map<String, Object> manifest, String jobId,
+                                                                      String snapshotId, String snapshotSha256) throws Exception {
+        if (rawEntries.isEmpty() || rawEntries.size() > MAX_MANIFEST_TRANSITIONS)
+            throw new IllegalStateException("The SUT Metrics manifest integrity history exceeds its size limit.");
         List<Map<String, Object>> entries = new ArrayList<>();
-        String previous = manifestIntegrityRoot(jobId, envelope.snapshotSha256());
+        String previous = manifestIntegrityRoot(jobId, snapshotSha256);
         for (int index = 0; index < rawEntries.size(); index++) {
-            Map<String, Object> entry = json.convertValue(rawEntries.get(index), Map.class);
-            if (!Integer.valueOf(index + 1).equals(((Number) entry.getOrDefault("sequence", -1)).intValue())
+            Map<String, Object> entry = object(rawEntries.get(index), "manifest integrity entry");
+            Object sequence = entry.get("sequence");
+            if (!(sequence instanceof Number number) || number.intValue() != index + 1
                     || !previous.equals(entry.get("previousSha256")) || !jobId.equals(entry.get("jobId"))
                     || !snapshotId.equals(entry.get("snapshotId")) || !Set.of("PENDING", "COLLECTING", "READY", "PARTIAL", "UNAVAILABLE", "FAILED").contains(entry.get("state"))
                     || !(entry.get("manifestSha256") instanceof String digest) || !digest.matches("[a-f0-9]{64}"))
@@ -1509,7 +1563,7 @@ final class SutMetricsService implements AutoCloseable {
             entries.add(entry);
         }
         Map<String, Object> last = entries.get(entries.size() - 1);
-        if (!sha256(manifestBytes).equals(last.get("manifestSha256")) || !manifest.get("state").equals(last.get("state")))
+        if (!manifestDigest.equals(last.get("manifestSha256")) || !manifest.get("state").equals(last.get("state")))
             throw new IllegalStateException("The SUT Metrics manifest does not match its durable integrity record.");
         return entries;
     }
@@ -1816,6 +1870,10 @@ final class SutMetricsService implements AutoCloseable {
     @Override public void close() { collectionScheduler.shutdownNow(); collectors.shutdownNow(); previews.shutdownNow(); bodyReaders.shutdownNow(); scheduledCollections.clear(); previewFlights.clear(); previewCache.clear(); clients.clear(); }
     static final class CapacityException extends RuntimeException { CapacityException(String message) { super(message); } }
     static final class SutMetricsTimeoutException extends RuntimeException { SutMetricsTimeoutException(String message) { super(message); } }
+    private static final class ManifestWriteLock {
+        final ReentrantLock lock = new ReentrantLock();
+        int users;
+    }
     private static final class CollectionBudgetExceededException extends IllegalArgumentException {
         CollectionBudgetExceededException(String message) { super(message); }
     }

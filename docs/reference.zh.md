@@ -3539,7 +3539,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | SUT Metrics Profile | att-sut-metrics-profile/v1 |
 | SUT Metrics Job snapshot | att-sut-metrics-snapshot/v1 |
 | SUT Metrics collection manifest | att-sut-metrics-manifest/v1 |
-| SUT Metrics manifest integrity history | att-sut-metrics-manifest-integrity/v1 |
+| 同一檔案內的 SUT Metrics Manifest 完整性歷程 | att-sut-metrics-manifest-integrity/v1 |
 | SUT Metrics normalized observation | att-sut-metrics-observation/v1 |
 | SUT Metrics series sidecar | att-sut-metrics-series/v1 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |

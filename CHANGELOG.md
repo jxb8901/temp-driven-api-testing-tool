@@ -10,8 +10,8 @@
 - Preserve live SUT Metrics cache coalescing, chronological coverage, explicit empty-result status, and timestamp-scaled chart gaps (#348).
 - Align #348 with the simplified two-form profile model: base profiles own only metric definitions and typed parameters; source/tenant/target bindings belong to direct Scenario bindings or one-level composite presets. Reject `extends`, derived profiles, nested composites, and incomplete preset bindings.
 - Publish the #348 provider-neutral `att-sut-metrics-observation/v1` contract with pinned source/profile/target revisions, UTC execution/phase/query windows, coverage, gaps, availability, and safe provenance.
-- Keep post-run metrics PENDING through the configured after-buffer and one query-step ingestion grace, mark missing post-run samples PARTIAL, and integrity-chain each Job-bound manifest transition.
-- Serialize Job-bound manifest reads with integrity-record publication to prevent transient verification failures during collection.
+- Keep post-run metrics PENDING through the configured after-buffer and one query-step ingestion grace; mark missing or stale-tail coverage PARTIAL using a two-step/30-second tolerance, and atomically publish each snapshot-anchored manifest integrity transition with its manifest.
+- Serialize manifest writes per Job while keeping reads independent across Jobs.
 
 # Changelog
 
