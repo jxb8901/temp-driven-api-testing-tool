@@ -86,6 +86,7 @@ final class SutMetricsService implements AutoCloseable {
     private final Set<String> allowedPrometheusHosts;
     private final Function<String, String> secretResolver;
     private final Object catalogLock = new Object();
+    private final Object manifestLock = new Object();
     private Map<String, Map<String, Object>> sources = new LinkedHashMap<>();
     private Map<String, Map<String, Object>> profiles = new LinkedHashMap<>();
     private final ExecutorService collectors = boundedExecutor(2, 64, "att-sut-metrics-collector");
@@ -338,6 +339,12 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     Map<String, Object> collectionStatus(String jobId) throws Exception {
+        synchronized (manifestLock) {
+            return readCollectionStatus(jobId);
+        }
+    }
+
+    private Map<String, Object> readCollectionStatus(String jobId) throws Exception {
         SnapshotEnvelope envelope = snapshotEnvelope(jobId);
         if (envelope == null) return fields("schemaVersion", COLLECTION_SCHEMA, "state", "DISABLED", "complete", Boolean.TRUE,
                 "jobId", jobId, "queries", List.of(), "files", List.of());
@@ -1365,6 +1372,12 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     void writeManifest(Path directory, Map<String, Object> manifest) throws Exception {
+        synchronized (manifestLock) {
+            writeManifestLocked(directory, manifest);
+        }
+    }
+
+    private void writeManifestLocked(Path directory, Map<String, Object> manifest) throws Exception {
         String jobId = directory.getParent().getFileName().toString();
         SnapshotEnvelope envelope = snapshotEnvelope(jobId);
         if (envelope == null) throw new IllegalStateException("The SUT Metrics Job snapshot is missing for manifest publication.");
