@@ -615,7 +615,17 @@ public final class WorkerMain {
                 if(!"load".equals(scope)&&(!(resource instanceof Map)||!"ready".equalsIgnoreCase(String.valueOf(((Map<?,?>)resource).get("state")))))
                     selected.status("FAIL");
                 Object diagnostics=details.get("diagnostics");
-                if(diagnostics instanceof List)for(Object item:(List<?>)diagnostics)if(item instanceof Map)selected.diagnostic((Map<String,Object>)item);
+                if(diagnostics instanceof List)for(Object item:(List<?>)diagnostics)if(item instanceof Map) {
+                    Map<String,Object> normalized=normalizeValidationDiagnostic((Map<?,?>)item,
+                            "FAIL".equals(selected.status())?"ERROR":"WARNING");
+                    if(!"load".equals(scope)&&resource instanceof Map) {
+                        Map<?,?> identity=(Map<?,?>)resource;
+                        if(identity.get("type") instanceof String)normalized.putIfAbsent("resourceType",identity.get("type"));
+                        if(identity.get("resourceId") instanceof String)normalized.putIfAbsent("resourceId",identity.get("resourceId"));
+                        if(identity.get("logicalId") instanceof String)normalized.putIfAbsent("logicalId",identity.get("logicalId"));
+                    }
+                    selected.diagnostic(normalized);
+                }
             } finally {inspector.close();}
         } catch(Exception invalid) {
             selected.status("FAIL");
@@ -636,6 +646,26 @@ public final class WorkerMain {
 
     private static void addValidationDiagnostics(att.server.api.AttValidationReport.Section section,List<att.validation.Diagnostic> diagnostics) {
         for(att.validation.Diagnostic diagnostic:diagnostics)section.diagnostic(diagnostic.toMap());
+    }
+
+    private static Map<String,Object> normalizeValidationDiagnostic(Map<?,?> source,String fallbackSeverity) {
+        Map<String,Object> result=new LinkedHashMap<String,Object>();
+        for(Map.Entry<?,?> entry:source.entrySet())if(entry.getKey() instanceof String)
+            result.put((String)entry.getKey(),entry.getValue());
+        Object code=result.get("code");
+        if(!(code instanceof String)||((String)code).trim().isEmpty()) {
+            code="ATT-VALIDATION-DIAGNOSTIC";result.put("code",code);
+        }
+        Object severity=result.get("severity");
+        if(!(severity instanceof String)||((String)severity).trim().isEmpty())result.put("severity",fallbackSeverity);
+        Object message=result.get("message");
+        if(!(message instanceof String)||((String)message).trim().isEmpty()) {
+            Object summary=result.get("summary"),detail=result.get("detail");
+            String value=summary instanceof String&&!((String)summary).trim().isEmpty()?(String)summary
+                    :detail instanceof String&&!((String)detail).trim().isEmpty()?(String)detail:String.valueOf(code);
+            result.put("message",value);
+        }
+        return result;
     }
 
     private void verifyRevision(Path root,Path config,WorkerRequest request) throws Exception {

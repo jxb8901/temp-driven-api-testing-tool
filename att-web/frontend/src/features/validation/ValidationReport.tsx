@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { ResourceRoute, ValidationScope } from '../../router';
+import type { ResourceType } from '../explorer/types';
 import type { UiLocale } from '../../uiLocale';
 import type { ValidationDiagnostic, ValidationReportData, ValidationSection } from './types';
 import './validation.css';
@@ -7,21 +8,51 @@ import './validation.css';
 function text(en: string, zh: string, locale: UiLocale): string { return locale === 'zh-Hant' ? zh : en; }
 function field(value: unknown): string { return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : ''; }
 function resourceOf(diagnostic: ValidationDiagnostic): string {
-  return field(diagnostic.resourceId) || field(diagnostic.target) || field(diagnostic.resource);
+  return field(diagnostic.resourceId) || field(diagnostic.target) || field(diagnostic.resource) || field(diagnostic.template);
 }
-function sourceOf(diagnostic: ValidationDiagnostic): string { return field(diagnostic.source) || field(diagnostic.path); }
-const RESOURCE_TYPES = new Set(['case', 'template', 'flow', 'tool']);
-export function diagnosticResourceIdentity(diagnostic: ValidationDiagnostic): ResourceRoute | undefined {
+function sourceOf(diagnostic: ValidationDiagnostic): string {
+  const source = diagnostic.source && typeof diagnostic.source === 'object' ? diagnostic.source.file : undefined;
+  return field(diagnostic.source) || field(diagnostic.file) || field(diagnostic.path) || field(source);
+}
+const RESOURCE_TYPES = new Set<ResourceType>(['case', 'template', 'flow', 'tool']);
+export interface DiagnosticResourceLookup {
+  type: ResourceType | 'all';
+  value: string;
+  match: 'resourceId' | 'logicalIdOrName' | 'sourcePath';
+}
+
+function safeLookupValue(value: unknown): string {
+  return typeof value === 'string' && value.trim() === value && value.length > 0
+    && value.length <= 512 && !/[\u0000-\u001f\u007f]/.test(value) ? value : '';
+}
+
+function safePackageSourcePath(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 200 || !value || /[\\\u0000-\u001f\u007f]/.test(value)
+      || value.startsWith('/') || /^[A-Za-z]:/.test(value)) return '';
+  const parts = value.split('/');
+  return parts.every(part => part && part !== '.' && part !== '..') ? value : '';
+}
+
+export function diagnosticResourceLookups(diagnostic: ValidationDiagnostic): DiagnosticResourceLookup[] {
   const type = field(diagnostic.resourceType).toLowerCase();
-  const resourceId = typeof diagnostic.resourceId === 'string' ? diagnostic.resourceId
-    : typeof diagnostic.target === 'string' ? diagnostic.target : '';
-  if (!RESOURCE_TYPES.has(type) || !resourceId || resourceId.length > 512 || /[\u0000-\u001f\u007f]/.test(resourceId)) return undefined;
-  const logicalId = typeof diagnostic.logicalId === 'string' && diagnostic.logicalId.length <= 512
-    && !/[\u0000-\u001f\u007f]/.test(diagnostic.logicalId) ? diagnostic.logicalId : undefined;
-  return { type, resourceId, ...(logicalId ? { logicalId } : {}) };
+  const resourceId = safeLookupValue(diagnostic.resourceId) || safeLookupValue(diagnostic.target);
+  if (RESOURCE_TYPES.has(type as ResourceType) && resourceId) return [{
+    type: type as ResourceType, value: resourceId, match: 'resourceId',
+  }];
+
+  const lookups: DiagnosticResourceLookup[] = [];
+  const template = safeLookupValue(diagnostic.template);
+  if (template) lookups.push({ type: 'template', value: template, match: 'logicalIdOrName' });
+  const flowId = safeLookupValue(diagnostic.context?.flowId);
+  if (flowId) lookups.push({ type: 'flow', value: flowId, match: 'logicalIdOrName' });
+  const source = diagnostic.source && typeof diagnostic.source === 'object' ? diagnostic.source.file : undefined;
+  const sourcePath = safePackageSourcePath(diagnostic.file) || safePackageSourcePath(source);
+  if (sourcePath) lookups.push({ type: 'all', value: sourcePath, match: 'sourcePath' });
+  return lookups.filter((lookup, index) => lookups.findIndex(candidate => candidate.type === lookup.type
+    && candidate.match === lookup.match && candidate.value === lookup.value) === index);
 }
-export function diagnosticResourceKey(resource: Pick<ResourceRoute, 'type' | 'resourceId'>): string {
-  return `${resource.type}\u0000${resource.resourceId}`;
+export function diagnosticResourceKey(lookup: DiagnosticResourceLookup): string {
+  return `${lookup.type}\u0000${lookup.match}\u0000${lookup.value}`;
 }
 function safeDiagnosticText(value: string): string {
   return value.slice(0, 4000)
@@ -192,8 +223,11 @@ export function ValidationReport({ report, scope, packageId, environment, effect
         <label>{text('Search diagnostics', '搜尋診斷', locale)}<input type="search" aria-label={text('Search diagnostics', '搜尋診斷', locale)} value={search} onChange={event => setSearch(event.currentTarget.value)} /></label>
       </div>
       {filtered.length ? <ul className="att-validation-diagnostic-list">{filtered.map((diagnostic, index) => {
-        const identity = diagnosticResourceIdentity(diagnostic);
-        const authorizedResource = identity ? diagnosticResourceRoutes[diagnosticResourceKey(identity)] : undefined;
+        const routes = diagnosticResourceLookups(diagnostic).map(lookup => diagnosticResourceRoutes[diagnosticResourceKey(lookup)])
+          .filter((route): route is ResourceRoute => Boolean(route));
+        const uniqueRoutes = routes.filter((route, routeIndex) => routes.findIndex(candidate => candidate.type === route.type
+          && candidate.resourceId === route.resourceId) === routeIndex);
+        const authorizedResource = uniqueRoutes.length === 1 ? uniqueRoutes[0] : undefined;
         return <li key={`${diagnostic.code}:${index}`}>
         <strong>{safeDiagnosticText(diagnostic.severity)} · {safeDiagnosticText(diagnostic.code)}</strong><p>{safeDiagnosticText(diagnostic.message)}</p>
         {diagnostic.field && <small>{text('Field', '欄位', locale)}: {safeDiagnosticText(diagnostic.field)}</small>}

@@ -3,8 +3,7 @@ import { AppShellContext } from '../../AppShell';
 import type { ResourceRoute, ValidationRouteState, ValidationScope } from '../../router';
 import type { api } from '../../api';
 import type { AsyncState, ApiError, PackageSummary, ServerVersion } from '../../types';
-import type { ResourceType } from '../explorer/types';
-import { diagnosticResourceIdentity, diagnosticResourceKey, ValidationReport } from './ValidationReport';
+import { diagnosticResourceKey, diagnosticResourceLookups, ValidationReport } from './ValidationReport';
 import type { ValidationRequest, ValidationReportData } from './types';
 import './validation.css';
 
@@ -251,11 +250,12 @@ export function ValidationWorkspacePage({ api, packages, serverVersion, route, o
     setDiagnosticResources({ key: diagnosticResolutionKey, routes: {} });
     if (!report || !packageId) return () => controller.abort();
 
-    const identities = new Map<string, ResourceRoute>();
+    const identities = new Map<string, ReturnType<typeof diagnosticResourceLookups>[number]>();
     for (const diagnostic of report.diagnostics || []) {
-      const identity = diagnosticResourceIdentity(diagnostic);
-      if (!identity) continue;
-      identities.set(diagnosticResourceKey(identity), identity);
+      for (const lookup of diagnosticResourceLookups(diagnostic)) {
+        identities.set(diagnosticResourceKey(lookup), lookup);
+        if (identities.size >= 32) break;
+      }
       if (identities.size >= 32) break;
     }
     if (!identities.size) return () => controller.abort();
@@ -270,9 +270,15 @@ export function ValidationWorkspacePage({ api, packages, serverVersion, route, o
         const [key, identity] = candidates[index];
         try {
           const page = await api.listResources(packageId, {
-            type: identity.type as ResourceType, query: identity.resourceId, limit: 100,
+            type: identity.type, query: identity.value, limit: 100,
           }, controller.signal);
-          const match = page.items.find(item => item.type === identity.type && item.resourceId === identity.resourceId);
+          const matches = page.items.filter(item => {
+            if (identity.type !== 'all' && item.type !== identity.type) return false;
+            if (identity.match === 'resourceId') return item.resourceId === identity.value;
+            if (identity.match === 'logicalIdOrName') return item.logicalId === identity.value || item.name === identity.value;
+            return item.sourcePath === identity.value;
+          });
+          const match = page.total === page.items.length && matches.length === 1 ? matches[0] : undefined;
           if (match) routes[key] = { type: match.type, resourceId: match.resourceId,
             ...(match.logicalId ? { logicalId: match.logicalId } : {}) };
         } catch {

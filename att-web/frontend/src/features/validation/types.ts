@@ -8,7 +8,10 @@ export interface ValidationDiagnostic {
   code: string;
   severity: 'ERROR' | 'WARN' | 'WARNING' | 'INFO' | string;
   message: string;
-  source?: string;
+  source?: string | { file?: string; line?: number; column?: number; [key: string]: unknown };
+  file?: string;
+  template?: string;
+  context?: { flowId?: string; [key: string]: unknown };
   field?: string;
   suggestion?: string;
   resourceId?: string;

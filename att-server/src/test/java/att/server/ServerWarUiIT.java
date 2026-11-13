@@ -573,6 +573,9 @@ class ServerWarUiIT {
         Path packages = Files.createDirectories(temp.resolve("packages"));
         Path packageRoot = Files.createDirectories(packages.resolve("payments"));
         writeScheduledPackage(packageRoot, localHome);
+        Path invalidTemplate = Files.createDirectories(packageRoot.resolve("templates/STUDIO_INVALID"));
+        Files.writeString(invalidTemplate.resolve("template.yaml"),
+                "schemaVersion: att-template/v3.6\nname: STUDIO_INVALID\nactions: []\n");
         Files.writeString(packageRoot.resolve("templates/SCHEDULED/debug.yaml"), "schemaVersion: att-debug/v1.2\ninputs: {}\n");
         // Keep Flow-link inspection in this isolated browser fixture, away from the scheduler capacity fixture.
         writeReferenceFlowSource(packageRoot);

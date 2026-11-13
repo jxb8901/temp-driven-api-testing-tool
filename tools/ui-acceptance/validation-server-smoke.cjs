@@ -113,9 +113,72 @@ async function main() {
     });
     await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
     assert.deepEqual(await getJobIds(), beforeFlow, 'resource validation must not add a persisted Job');
+
+    const invalidCatalogResponse = await page.request.get(`${origin}/tools/att/api/v1/packages/payments/resources?type=template&query=STUDIO_INVALID&limit=100`);
+    assert.equal(invalidCatalogResponse.status(), 200);
+    const invalidCatalog = await invalidCatalogResponse.json();
+    const invalidTemplate = (invalidCatalog.items || []).find(item => item.logicalId === 'STUDIO_INVALID');
+    assert.ok(invalidTemplate, 'the real authorized catalog must expose the invalid Template fixture');
+    assert.equal(invalidTemplate.state, 'invalid');
+
+    const selectedTarget = new URLSearchParams({ scope: 'template', package: 'payments', environment: 'SIT',
+      target: invalidTemplate.resourceId, resourceType: 'template', resourceId: invalidTemplate.resourceId,
+      resourceLogicalId: invalidTemplate.logicalId });
+    await page.goto(`${origin}/tools/att/ui/index.html#/validate?${selectedTarget.toString()}`);
+    await page.getByRole('heading', { name: 'Validate', level: 1 }).waitFor();
+    await page.waitForFunction(() => !document.querySelector('button[type="submit"]')?.disabled);
+    const beforeInvalidTemplate = await getJobIds();
+    const invalidTemplateResponsePromise = page.waitForResponse(response => response.request().method() === 'POST'
+      && new URL(response.url()).pathname.endsWith('/api/v1/validation'));
+    await page.getByRole('button', { name: 'Run Validation', exact: true }).click();
+    const invalidTemplateResponse = await invalidTemplateResponsePromise;
+    assert.equal(invalidTemplateResponse.status(), 200);
+    assert.deepEqual(await invalidTemplateResponse.request().postDataJSON(), {
+      command: 'validate', targetKind: 'template', packageId: 'payments', target: invalidTemplate.resourceId, environment: 'SIT',
+    });
+    const invalidTemplateReport = await invalidTemplateResponse.json();
+    assert.equal(invalidTemplateReport.overallStatus, 'INVALID');
+    const selectedDiagnostic = (invalidTemplateReport.diagnostics || []).find(item => item.code === 'ATT-RESOURCE-TEMPLATE-INVALID');
+    assert.ok(selectedDiagnostic, JSON.stringify(invalidTemplateReport));
+    assert.equal(selectedDiagnostic.severity, 'ERROR');
+    assert.equal(typeof selectedDiagnostic.message, 'string');
+    await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
+    assert.equal(await page.locator('.att-validation-error').count(), 0, 'an INVALID resource report must render instead of failing report parsing');
+    assert.ok((await page.locator('.att-validation-diagnostic-list').textContent()).includes('Template definition is invalid'));
+    const selectedResourceLink = page.getByRole('button', { name: 'Open authorized resource', exact: true }).first();
+    await selectedResourceLink.waitFor();
+    await selectedResourceLink.click();
+    await page.getByRole('heading', { name: 'Resource details', exact: true }).waitFor();
+    assert.deepEqual(await getJobIds(), beforeInvalidTemplate, 'selected-resource validation must not add a persisted Job');
+
+    const packageRoute = new URLSearchParams({ scope: 'package', package: 'payments', environment: 'SIT' });
+    await page.goto(`${origin}/tools/att/ui/index.html#/validate?${packageRoute.toString()}`);
+    await page.getByRole('heading', { name: 'Validate', level: 1 }).waitFor();
+    await page.waitForFunction(() => !document.querySelector('button[type="submit"]')?.disabled);
+    const beforePackageValidation = await getJobIds();
+    const packageValidationResponsePromise = page.waitForResponse(response => response.request().method() === 'POST'
+      && new URL(response.url()).pathname.endsWith('/api/v1/validation'));
+    await page.getByRole('button', { name: 'Run Validation', exact: true }).click();
+    const packageValidationResponse = await packageValidationResponsePromise;
+    assert.equal(packageValidationResponse.status(), 200);
+    assert.deepEqual(await packageValidationResponse.request().postDataJSON(), {
+      command: 'validate', targetKind: 'package', packageId: 'payments', environment: 'SIT',
+    });
+    const packageReport = await packageValidationResponse.json();
+    assert.equal(packageReport.overallStatus, 'INVALID');
+    const packageDiagnostic = (packageReport.diagnostics || []).find(item => item.file === 'templates/STUDIO_INVALID/template.yaml');
+    assert.ok(packageDiagnostic, JSON.stringify(packageReport));
+    assert.equal(packageDiagnostic.template, 'STUDIO_INVALID');
+    await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
+    const packageResourceLink = page.getByRole('button', { name: 'Open authorized resource', exact: true }).first();
+    await packageResourceLink.waitFor();
+    await packageResourceLink.click();
+    await page.getByRole('heading', { name: 'Resource details', exact: true }).waitFor();
+    assert.deepEqual(await getJobIds(), beforePackageValidation, 'Package validation must not add a persisted Job');
+
     assert.deepEqual(otherWrites, [], 'the read-only UI flow must not POST drafts, jobs, or schedules');
-    assert.equal(validationRequests.length, 4);
-    process.stdout.write('Packaged-WAR validation checks passed under /tools/att: Server capability, explicit global and Package-effective Config, Explorer Flow validation, att-validation/v1 reports, and no Job or draft writes.\n');
+    assert.equal(validationRequests.length, 6);
+    process.stdout.write('Packaged-WAR validation checks passed under /tools/att: real Config and Flow reports, invalid selected Template diagnostics, Package-wide authorized source navigation, and no Job or draft writes.\n');
   } finally {
     await context.close();
     await browser.close();

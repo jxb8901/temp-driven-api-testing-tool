@@ -142,6 +142,37 @@ describe('ValidationWorkspacePage', () => {
     expect(onOpenResource).toHaveBeenCalledWith('payments', { type: 'template', resourceId: 'template-42', logicalId: 'checkout' }, 'SIT');
   });
 
+  it('maps ordinary Package validation diagnostics through exact authorized source and logical identity matches', async () => {
+    const packageReport: ValidationReportData = { ...report, scope: 'PACKAGE', diagnostics: [{
+      code: 'ATT-TEMPLATE-INVALID', severity: 'ERROR', message: 'Invalid template descriptor',
+      file: 'templates/STUDIO_INVALID/template.yaml', template: 'STUDIO_INVALID',
+    }] };
+    const validateResource = vi.fn(async () => packageReport);
+    const resource = { type: 'template' as const, resourceId: 'template-encoded-42', logicalId: 'STUDIO_INVALID',
+      name: 'STUDIO_INVALID', sourcePath: 'templates/STUDIO_INVALID/template.yaml' };
+    const listResources = vi.fn(async () => ({ items: [resource], total: 1 }));
+    const onOpenResource = vi.fn();
+    const api = {
+      validateResource, listResources,
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getPackageManifest: vi.fn(async () => ({ environment: 'SIT' })),
+    };
+    await act(async () => renderWorkspace({ api, route: { kind: 'validation', scope: 'package', packageId: 'payments' },
+      packages: { status: 'ready', data: [{ packageId: 'payments', name: 'Payments' } as PackageSummary] }, onOpenResource }));
+    await settle();
+    await act(async () => { host.querySelector<HTMLButtonElement>('button[type="submit"]')!.click(); await Promise.resolve(); });
+    await settle();
+
+    expect(listResources).toHaveBeenCalledWith('payments', expect.objectContaining({ type: 'template', query: 'STUDIO_INVALID', limit: 100 }), expect.any(AbortSignal));
+    expect(listResources).toHaveBeenCalledWith('payments', expect.objectContaining({ type: 'all', query: 'templates/STUDIO_INVALID/template.yaml', limit: 100 }), expect.any(AbortSignal));
+    expect(host.textContent).toContain('templates/STUDIO_INVALID/template.yaml');
+    const openButton = [...host.querySelectorAll<HTMLButtonElement>('.att-validation-diagnostic-list button')]
+      .find(button => button.textContent?.includes('Open authorized resource'));
+    expect(openButton).toBeDefined();
+    await act(async () => openButton!.click());
+    expect(onOpenResource).toHaveBeenCalledWith('payments', { type: 'template', resourceId: 'template-encoded-42', logicalId: 'STUDIO_INVALID' }, 'SIT');
+  });
+
   it('keeps path-only and catalog-denied Package diagnostics as plain text and redacts displayed and copied secrets', async () => {
     const secret = 'eyJabc123';
     const packageReport: ValidationReportData = { ...report, scope: 'PACKAGE', diagnostics: [
