@@ -132,6 +132,36 @@ class PackageResourceInspectorTest {
                 ()->inspector.inspect("list","template",null,null,1,1,"stale-revision"));
     }
 
+    @Test void invalidTemplateDescriptorsRemainInTheAuthorizedSourceCatalogAndCanBeSearchedByPath() throws Exception {
+        Path root=packageWithTemplate("invalid-template-source-search","VALID","description: harmless");
+        Path invalid=Files.createDirectories(root.resolve("templates/STUDIO_INVALID")).resolve("template.yaml");
+        writeUtf8(invalid,"schemaVersion: att-template/v3.6\nname: STUDIO_INVALID\nactions: []\n");
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,root.resolve("config/config.yaml"),"SIT",
+                Collections.singletonList("templates/STUDIO_INVALID/template.yaml"),65536,262144)) {
+            @SuppressWarnings("unchecked") Map<String,Object> page=inspector.inspect("list",null,null,
+                    "templates/STUDIO_INVALID/template.yaml",0,100);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");
+            assertEquals(1,items.size(),page.toString());
+            assertEquals("STUDIO_INVALID",items.get(0).get("logicalId"));
+            assertEquals("invalid",items.get(0).get("state"));
+            assertEquals("templates/STUDIO_INVALID/template.yaml",items.get(0).get("sourcePath"));
+            assertEquals(Boolean.TRUE,items.get(0).get("sourceAvailable"));
+            @SuppressWarnings("unchecked") Map<String,Object> byId=inspector.inspect("list","template",null,
+                    String.valueOf(items.get(0).get("resourceId")),0,100);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> idMatches=(List<Map<String,Object>>)byId.get("items");
+            assertEquals(1,idMatches.size(),byId.toString());
+            assertEquals(items.get(0).get("resourceId"),idMatches.get(0).get("resourceId"));
+        }
+        try(PackageResourceInspector denied=new PackageResourceInspector(root,root.resolve("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,false,true,"allowlist-only",
+                Collections.singletonList("templates/STUDIO_INVALID/template.yaml"),true,
+                Collections.<String>emptyList(),Collections.<String>emptyList())) {
+            @SuppressWarnings("unchecked") Map<String,Object> page=denied.inspect("list",null,null,
+                    "templates/STUDIO_INVALID/template.yaml",0,100);
+            assertEquals(0,page.get("total"),page.toString());
+        }
+    }
+
     @Test void preservesAuthorizedYamlSourceBytesAndPublishesDeduplicatedActionFileDependencies() throws Exception {
         Path root=packageWithTemplate("lossless-source-and-action-files","FORMAT","description: harmless");
         Path descriptor=root.resolve("templates/FORMAT/template.yaml");

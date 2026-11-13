@@ -13,6 +13,27 @@ import static org.junit.jupiter.api.Assertions.*;
 class PackageValidatorTest {
     @TempDir Path tempDir;
 
+    @Test void selectedResourceValidationRejectsAValidTemplateWithAnUnresolvedFlow() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("selected-resource"));
+        Path config = Files.createDirectories(root.resolve("config")).resolve("config.yaml");
+        Files.createDirectories(root.resolve("testcase"));
+        Path template = Files.createDirectories(root.resolve("templates/BROKEN"));
+        Files.createDirectories(root.resolve("tools"));
+        att.TestSchemas.install(root);
+        Files.write(config, "schemaVersion: att-config/v2.13\noutputDirectory: output\ntemplates: {root: templates}\ntestcase: {root: testcase}\n"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(template.resolve("template.yaml"), ("schemaVersion: att-template/v3.6\nname: BROKEN\ndescription: valid descriptor with broken closure\nactions:\n"
+                + "  invokeMissingFlow:\n    type: flow\n    use: missing.flow.v1\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(config, root, root, "SIT");
+        PackageValidator.ValidationSummary result = new PackageValidator(root, loaded, config)
+                .validateSelectedResource("template", "BROKEN");
+
+        assertFalse(result.valid(), result.diagnostics.toString());
+        assertTrue(result.diagnostics.stream().anyMatch(item -> item.severity() == Diagnostic.Severity.ERROR
+                && item.file() != null && item.file().endsWith("templates/BROKEN/template.yaml")), result.diagnostics.toString());
+    }
+
     @Test void groupedToolValidationRejectsMissingMemberScriptDespitePresentDispatcher() throws Exception {
         Path root = Files.createDirectories(tempDir.resolve("grouped"));
         Path tools = Files.createDirectories(root.resolve("tools"));

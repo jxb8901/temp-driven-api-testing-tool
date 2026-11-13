@@ -39,12 +39,13 @@ function safeCatalogDiagnostics(value: unknown): ServerDiagnostic[] {
 }
 
 export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEnabled, environment, catalogState: initialCatalogState, onEnvironmentChange,
-  onNewLoad, onQuickLoad, onJobAccepted, onSchedule, onOpenDetail }: {
+  onNewLoad, onQuickLoad, onJobAccepted, onSchedule, onOpenDetail, onOpenValidation }: {
   api: CatalogApi; packages: AsyncState<PackageOption[]>; inlineLoadEnabled: boolean; schedulingEnabled: boolean;
   environment: string; catalogState?: LoadCatalogRouteState; onEnvironmentChange(value: string): void; onNewLoad(packageId?: string): void;
   onQuickLoad(packageId: string, template: LoadCatalogItem, environment: string): void; onJobAccepted(jobId: string): void;
   onOpenJob(jobId: string): void; onSchedule(intent: ScheduleIntent): void;
   onOpenDetail(item: LoadCatalogItem, environment: string, returnTo: string): void;
+  onOpenValidation?(item: LoadCatalogItem, environment: string): void;
 }) {
   const workspace = useContext(AppShellContext);
   const [savedScope] = useState(() => { try { return JSON.parse(sessionStorage.getItem('att.catalog.scope') || '{}') as {mode?: string; packageId?: string; environment?: string}; } catch { return {}; } });
@@ -407,10 +408,11 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
           {item.diagnostic && <div className="att-load-catalog-invalid-summary"><p className="att-inline-error" role="status">{item.diagnostic}{item.requestId ? ` Request ID: ${item.requestId}` : ''}</p>
             <button className="button button-quiet" type="button" onClick={() => showSource(item)}>View details</button></div>}
           {item.diagnostics?.length ? <CatalogDiagnostics items={item.diagnostics} onViewDetails={() => showSource(item)} /> : null}
-          <CatalogActionControls item={item} actionKey={actionKey} environmentDraft={environmentDraft}
+          <CatalogActionControls item={item} actionKey={actionKey} environmentDraft={environmentDraft} locale={workspace?.uiLocale || 'en'}
             environmentProfilesState={environmentProfilesState} inlineLoadEnabled={inlineLoadEnabled}
             schedulingEnabled={schedulingEnabled} environmentNotApplicable={environmentNotApplicable}
             getDisabledReasons={disabledReasons} onValidate={() => void validateItem(item)}
+            onOpenValidation={onOpenValidation ? () => onOpenValidation(item, environmentDraft) : undefined}
             onValidateTemplate={() => void validateTemplate(item)} onRunNow={() => void runNow(item)}
             onSchedule={() => onSchedule({ packageId: item.packageId, environment: environmentDraft || undefined,
               draftId: item.scheduleDraftId!, previewYaml: item.schedulePreviewYaml, expiresAt: item.scheduleDraftExpiresAt, executionType: 'load' })}
@@ -431,17 +433,22 @@ export function LoadCatalogPage({ api, packages, inlineLoadEnabled, schedulingEn
   </div>;
 }
 
-function CatalogActionControls({ item, actionKey, environmentDraft, environmentProfilesState, inlineLoadEnabled,
-  schedulingEnabled, environmentNotApplicable, getDisabledReasons, onValidate, onValidateTemplate, onRunNow,
+function CatalogActionControls({ item, actionKey, environmentDraft, environmentProfilesState, inlineLoadEnabled, locale,
+  schedulingEnabled, environmentNotApplicable, getDisabledReasons, onValidate, onOpenValidation, onValidateTemplate, onRunNow,
   onSchedule, onQuickLoad, onView }: {
   item: LoadCatalogItem; actionKey: string; environmentDraft: string;
+  locale: 'en' | 'zh-Hant';
   environmentProfilesState: 'loading' | 'ready' | 'error'; inlineLoadEnabled: boolean; schedulingEnabled: boolean;
   environmentNotApplicable(item: LoadCatalogItem): boolean; getDisabledReasons(item: LoadCatalogItem): string[];
-  onValidate(): void; onValidateTemplate(): void; onRunNow(): void; onSchedule(): void; onQuickLoad(): void; onView(): void;
+  onValidate(): void; onOpenValidation?(): void; onValidateTemplate(): void; onRunNow(): void; onSchedule(): void; onQuickLoad(): void; onView(): void;
 }): React.JSX.Element {
   const reasons = getDisabledReasons(item);
+  const readOnlyValidationLabel = locale === 'zh-Hant' ? '唯讀驗證' : 'Read-only validate';
   return <>
     <div className="att-load-catalog-actions">
+      {item.kind === 'scenario' && onOpenValidation && <button className="button button-quiet" type="button"
+        aria-label={`${readOnlyValidationLabel} ${item.path} · ${environmentDraft || (locale === 'zh-Hant' ? '套件預設值' : 'Package default')}`}
+        onClick={onOpenValidation}>{readOnlyValidationLabel}</button>}
       {item.kind === 'scenario' && <button className="button button-quiet" type="button" aria-label={`Validate ${item.path} for ${environmentDraft || 'Package default'}`}
         disabled={Boolean(actionKey) || environmentNotApplicable(item) || Boolean(environmentDraft && environmentProfilesState !== 'ready')}
         onClick={onValidate}>{actionKey === `validate:${item.resourceId}` ? 'Validating…' : 'Validate'}</button>}

@@ -20,6 +20,7 @@ import type {
   SchedulePreviewInput,
 } from './features/schedules/types';
 import { normalizeSchedule, scheduleTransport } from './features/schedules/types';
+import type { ValidationReportData, ValidationRequest } from './features/validation/types';
 
 export interface ServerJobStorageMetrics {
   enabled?: boolean;
@@ -66,6 +67,41 @@ function isJobActionOutcome(value: unknown): value is { jobId: string; outcome: 
   return Boolean(value && typeof value === 'object'
     && typeof (value as { jobId?: unknown }).jobId === 'string'
     && typeof (value as { outcome?: unknown }).outcome === 'string');
+}
+
+function isValidationReport(value: unknown): value is ValidationReportData {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const report = value as Partial<ValidationReportData>;
+  const counts = report.counts;
+  const isObject = (item: unknown): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item));
+  const isDiagnostic = (item: unknown): boolean => isObject(item)
+    && typeof item.code === 'string' && typeof item.severity === 'string' && typeof item.message === 'string';
+  const isSection = (item: unknown): boolean => isObject(item)
+    && typeof item.name === 'string' && typeof item.status === 'string'
+    && (item.source === undefined || typeof item.source === 'string')
+    && (item.diagnostics === undefined || (Array.isArray(item.diagnostics) && item.diagnostics.every(isDiagnostic)))
+    && (item.sections === undefined || (Array.isArray(item.sections) && item.sections.every(isSection)));
+  return report.schemaVersion === 'att-validation/v1'
+    // Server enum names are serialized in uppercase while the CLI/client contract
+    // also contains lowercase scope names. Accept both forms at this boundary.
+    && typeof report.scope === 'string'
+    && ['config', 'config_package', 'package', 'case', 'suite', 'template', 'flow', 'tool', 'load', 'selected', 'cases', 'all']
+      .includes(report.scope.toLowerCase())
+    && (report.backend === 'SERVER' || report.backend === 'LOCAL')
+    && Array.isArray(report.sections) && report.sections.every(isSection)
+    && Array.isArray(report.diagnostics) && report.diagnostics.every(isDiagnostic)
+    && Boolean(counts && ['pass', 'fail', 'warn', 'skip', 'errors', 'warnings'].every(key => Number.isInteger(counts[key as keyof typeof counts]) && (counts[key as keyof typeof counts] as number) >= 0))
+    && (report.overallStatus === 'PASS' || report.overallStatus === 'INVALID' || report.overallStatus === 'PARTIAL')
+    && typeof report.complete === 'boolean'
+    && Number.isInteger(report.exitCode) && Number(report.exitCode) >= 0 && Number(report.exitCode) <= 4
+    && (report.context === undefined || isObject(report.context))
+    && (report.requestId === undefined || typeof report.requestId === 'string');
+}
+
+function requireValidationReport(value: unknown): ValidationReportData {
+  if (!isValidationReport(value)) throw new ApiError('The ATT Server returned an unsupported or incomplete att-validation/v1 report.', { status: 0 });
+  // Keep the UI and copied report stable regardless of Server enum casing.
+  return { ...value, scope: value.scope.toLowerCase() };
 }
 
 /** Same-origin JSON transport shared by the Server UI feature modules. */
@@ -271,6 +307,10 @@ export const api = {
   },
   getPackages(signal?: AbortSignal): Promise<ApiEnvelope<PackageSummary>> {
     return request<ApiEnvelope<PackageSummary>>('packages', { signal });
+  },
+  async validateResource(input: ValidationRequest, signal?: AbortSignal): Promise<ValidationReportData> {
+    const report = await postJson<unknown>('validation', { command: 'validate', ...input }, signal);
+    return requireValidationReport(report);
   },
   getJobs(signal?: AbortSignal): Promise<ApiEnvelope<JobSummary>> {
     return request<ApiEnvelope<JobSummary>>('jobs', { signal });

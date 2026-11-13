@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.2.10 -->
 
 # Studio navigation
 
@@ -15,6 +15,8 @@ ATT Server bundles a static browser console at `<Tomcat context path>/ui/`, for 
 *These are static UI-shell baseline captures; the displayed version badge belongs to the screenshot baseline.*
 
 The console lists configured logical package IDs and recent persisted jobs. Select a package to submit Run, Debug, Load, or Validate requests, then open a job to follow progress, inspect terminal results and safe diagnostics, cancel an active job, or download logical artifacts. Inputs for package resources are logical paths relative to the selected package. The UI never accepts or displays `PACKAGE_ROOT` or Server storage paths. The Artifacts tab shows archive status, reports and bounded text previews from the verified ZIP. **Download Artifacts (.zip)** is the only download action; HTML reports open in an isolated viewer. See [artifact publication and recovery](../../reference/results-reports-evidence.md#att-server-job-artifact-publication). Direct job links such as `/ui/jobs/J10045` redirect to the canonical hash route, which reloads the job from the public API and SSE.
+
+The **Validate** workspace at `#/validate` provides synchronous, read-only checks for shared/effective Config, registered Packages, selected Explorer resources and executable LOAD Scenarios. It uses `POST /api/v1/validation` only after the user selects **Run Validation**; the separate RUN/LOAD draft and Job workflows keep their existing behavior. Studio enables the action only when `/version` advertises `validationApiVersion: "att-validation/v1"`. See [Read-only validation](validation.md).
 
 The browser uses only the public same-origin `/api/v1` REST and SSE contract. REST requests and native `EventSource` use the browser's container-managed authentication. SSE reconnects use the browser's standard `Last-Event-ID` behavior; refreshing a job view reloads job state and retained events from the Server. Closing the browser tab does not cancel the job. Cancellation requires confirmation and the UI waits for the Server's terminal status.
 

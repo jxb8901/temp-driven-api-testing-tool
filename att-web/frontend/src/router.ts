@@ -18,6 +18,16 @@ export interface LoadCatalogRouteState {
   scrollY?: number;
 }
 
+export type ValidationScope = 'config' | 'package' | 'case' | 'suite' | 'template' | 'flow' | 'tool' | 'load';
+export interface ValidationRouteState {
+  kind: 'validation';
+  scope?: ValidationScope;
+  packageId?: string;
+  environment?: string;
+  target?: string;
+  resource?: ResourceRoute;
+}
+
 export type ConfigurationTab = 'source' | 'declared' | 'effective' | 'compare';
 export interface ResourceSourceReferenceRoute {
   type: 'case' | 'template' | 'flow' | 'tool'; resourceId: string; referenceId: string;
@@ -28,6 +38,7 @@ export interface ResourceSourceReferenceRoute {
 export type AppRoute =
   | { kind: 'dashboard' }
   | { kind: 'monitoring' }
+  | ValidationRouteState
   | { kind: 'packages' }
   | { kind: 'package'; packageId: string; resource?: ResourceRoute; view?: 'testdata' | 'source-file'; environment?: string; testdataDescriptorId?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; returnTo?: string }
   | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; configurationReferenceId?: string; tab?: ConfigurationTab; view?: 'package-manifest' }
@@ -82,6 +93,24 @@ export function parseRoute(hash: string): AppRoute {
   }
   if (parts.length === 0) return { kind: 'dashboard' };
   if (parts[0] === 'monitoring' && parts.length === 1) return { kind: 'monitoring' };
+  if (parts[0] === 'validate' && parts.length === 1) {
+    const rawScope = query.get('scope');
+    const scope = rawScope && ['config', 'package', 'case', 'suite', 'template', 'flow', 'tool', 'load'].includes(rawScope)
+      ? rawScope as ValidationScope : undefined;
+    const packageId = safeRouteValue(query.get('package'), 512);
+    const environment = query.has('environment') ? safeRouteValue(query.get('environment'), 512) ?? '' : undefined;
+    const rawTarget = query.get('target');
+    const target = scope === 'suite' || scope === 'load' ? safePackageLogicalPath(rawTarget)
+      : safeRouteValue(rawTarget, 512);
+    const resourceType = query.get('resourceType');
+    const resourceId = safeRouteValue(query.get('resourceId'), 512);
+    const resource = resourceType && ['case', 'template', 'flow', 'tool'].includes(resourceType) && resourceId
+      ? { type: resourceType, resourceId, ...(safeRouteValue(query.get('resourceLogicalId'), 512)
+        ? { logicalId: safeRouteValue(query.get('resourceLogicalId'), 512)! } : {}) }
+      : undefined;
+    return { kind: 'validation', ...(scope ? { scope } : {}), ...(packageId ? { packageId } : {}),
+      ...(environment !== undefined ? { environment } : {}), ...(target ? { target } : {}), ...(resource ? { resource } : {}) };
+  }
   if (parts[0] === 'packages' && parts.length === 1) return { kind: 'packages' };
   if (parts[0] === 'packages' && parts[1]) {
     if (parts.length === 3 && parts[2] === 'testdata') return {
@@ -225,6 +254,19 @@ export function formatRoute(route: AppRoute): string {
   switch (route.kind) {
     case 'dashboard': return '#/';
     case 'monitoring': return '#/monitoring';
+    case 'validation': {
+      const query = new URLSearchParams();
+      if (route.scope) query.set('scope', route.scope);
+      if (route.packageId) query.set('package', route.packageId);
+      if (route.environment !== undefined) query.set('environment', route.environment);
+      if (route.target) query.set('target', route.target);
+      if (route.resource && ['case', 'template', 'flow', 'tool'].includes(route.resource.type)) {
+        query.set('resourceType', route.resource.type);
+        query.set('resourceId', route.resource.resourceId);
+        if (route.resource.logicalId) query.set('resourceLogicalId', route.resource.logicalId);
+      }
+      return '#/validate' + (query.size ? '?' + query.toString() : '');
+    }
     case 'run': {
       const root=route.packageId?'#/run/'+encodeURIComponent(route.packageId):'#/run';
       const target=route.target?'/'+encodeURIComponent(route.target.type)+'/'+encodeURIComponent(route.target.resourceId):'';

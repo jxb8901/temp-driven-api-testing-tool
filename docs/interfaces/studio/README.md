@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.2.10 -->
 
 # ATT Studio interfaces
 
@@ -10,6 +10,7 @@ ATT Studio is the browser interface to the registered Packages and Server lifecy
 
 - [Navigation and package selection](navigation.md)
 - [Explorer, resource inspection and functional execution](explorer-run.md)
+- [Read-only validation](validation.md)
 - [Load Testing](load-testing.md)
 - [Jobs and Results](jobs-and-results.md)
 - [Schedules](schedules.md)

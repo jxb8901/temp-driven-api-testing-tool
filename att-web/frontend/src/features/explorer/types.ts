@@ -1,3 +1,5 @@
+import type { ResourceRoute, ValidationScope } from '../../router';
+
 export type ResourceType = 'case' | 'template' | 'flow' | 'tool';
 export type DebugResourceType = Exclude<ResourceType, 'case'>;
 export type JsonPrimitive = string | number | boolean | null;
@@ -300,6 +302,7 @@ export interface ExplorerPageProps {
   principalLabel?: string;
   onResourceRouteChange: (route: (Omit<ResourceIdentity, 'packageId'> & { logicalId?: string; tab?: 'definition' | 'source' | 'relations'; actionId?: string }) | null) => void;
   onRunTarget?: (target: { type: string; resourceId: string; logicalId?: string }) => void;
+  onValidateTarget?: (scope: Extract<ValidationScope, 'case' | 'suite' | 'template' | 'flow' | 'tool'>, target: string, resource?: ResourceRoute) => void;
   onRunBatch?: () => void;
   onJobAccepted: (jobId: string) => void;
   onPrincipalLabelChange?: (label: string) => void;

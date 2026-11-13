@@ -343,7 +343,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         List<Resource> matches = new ArrayList<Resource>();
         for (Resource resource : index.ordered) {
             if (type != null && !type.equals(resource.type)) continue;
-            if (!needle.isEmpty() && !resource.matches(needle)) continue;
+            if (!needle.isEmpty() && !resource.matches(needle) && !matchesSourcePath(resource, needle)) continue;
             matches.add(resource);
         }
         final boolean reverse = "desc".equals(direction);
@@ -367,6 +367,15 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("diagnostics", index.diagnostics);
         result.put("revisionDigest", index.revisionDigest);
         return bounded(result);
+    }
+
+    /** Source-path search only includes descriptors the current catalog policy allows the caller to open. */
+    private boolean matchesSourcePath(Resource resource, String query) {
+        if (resource == null || resource.yamlSource == null || !sourceAllowed(resource)) return false;
+        try {
+            String path = resources.fromInternalPath(resource.yamlSource, PackageResourceResolver.Kind.FILE).logicalName();
+            return path.toLowerCase(Locale.ROOT).contains(query);
+        } catch (Exception denied) { return false; }
     }
 
     private static String sortValue(Resource resource, String sort) {
@@ -1830,8 +1839,10 @@ public final class PackageResourceInspector implements AutoCloseable {
                 Path descriptor = templatesRoot.resolve(relative).resolve("template.yaml");
                 StageTemplate template;
                 Resource resource = new Resource("template", resourceId("template", relative), relative);
+                index.templateAliases.put(alias("template", relative), resource);
                 try {
                     descriptor = resources.fromInternalPath(descriptor, PackageResourceResolver.Kind.FILE).canonicalPath();
+                    resource.yamlSource = descriptor;
                     indexFile(index, descriptor);
                     template = loader.load(relative);
                     resource.name = template.name();
@@ -1867,7 +1878,13 @@ public final class PackageResourceInspector implements AutoCloseable {
             for (String id : registry.ids()) {
                 if (index.ordered.size() >= MAX_RESOURCES) throw new ResourceLimitException("resourceInspector.maxResources", MAX_RESOURCES, index.ordered.size() + 1L);
                 Resource resource = new Resource("flow", resourceId("flow", id), id);
+                index.flowAliases.put(alias("flow", id), resource);
                 try {
+                    Path indexedDescriptor = registry.descriptorPath(id);
+                    if (indexedDescriptor != null) {
+                        resource.yamlSource = resources.fromInternalPath(indexedDescriptor, PackageResourceResolver.Kind.FILE).canonicalPath();
+                        indexFile(index, resource.yamlSource);
+                    }
                     FlowDefinition flow = registry.get(id);
                     Path descriptor = resources.fromInternalPath(
                             flow.directory().resolve("flow.yaml"), PackageResourceResolver.Kind.FILE).canonicalPath();
@@ -1878,7 +1895,6 @@ public final class PackageResourceInspector implements AutoCloseable {
                     resource.yamlSource = descriptor;
                     resource.definition = sourceYamlMap(yamlMap(descriptor),resources.fromInternalPath(descriptor,PackageResourceResolver.Kind.FILE).logicalName());
                     indexReferencedSources(index, resource);
-                    index.flowAliases.put(alias("flow", id), resource);
                     index.flowAliases.put(alias("flow", flow.name()), resource);
                     addActions(index, resource, flow.actions());
                 } catch (Exception error) {
@@ -3271,7 +3287,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         }
 
         boolean matches(String query) {
-            if (contains(logicalId, query) || contains(name, query) || contains(description, query)) return true;
+            if (contains(resourceId, query) || contains(logicalId, query) || contains(name, query) || contains(description, query)) return true;
             for (String tag : tags) if (contains(tag, query)) return true;
             return false;
         }

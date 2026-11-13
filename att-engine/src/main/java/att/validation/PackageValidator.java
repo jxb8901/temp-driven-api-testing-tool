@@ -121,6 +121,46 @@ public final class PackageValidator {
         }
     }
 
+    /** Validates one selected Template, Flow, or Tool with the normal static validation rules. */
+    public ValidationSummary validateSelectedResource(String type, String id) {
+        skippedWindowsShellExecutableChecks.clear();
+        List<Diagnostic> diagnostics = new ArrayList<Diagnostic>();
+        Path source = null;
+        String normalizedType = type == null ? "" : type.toLowerCase(java.util.Locale.ROOT);
+        String code = "tool".equals(normalizedType) ? DiagnosticCodes.TOOL_INVALID : DiagnosticCodes.TEMPLATE_INVALID;
+        try {
+            if (id == null || id.trim().isEmpty()) throw new IllegalArgumentException("Selected resource ID is required");
+            if ("tool".equals(normalizedType)) {
+                ToolConfig tool = global.tool(id);
+                if (tool == null) throw new IllegalArgumentException("No Tool has this ID: " + id);
+                source = tool.sourceFile();
+                if (tool.callBacked()) validateCallBackedDefinition(tool, global);
+                else validateToolExecutable(tool);
+            } else if ("template".equals(normalizedType) || "flow".equals(normalizedType)) {
+                StageTemplateLoader loader = new StageTemplateLoader(projectRoot, global.templatesRoot(), false);
+                flows = new att.flow.FlowRegistry(projectRoot, global.templatesRoot(), false);
+                StageTemplate target;
+                if ("template".equals(normalizedType)) {
+                    target = loader.loadSelected(id);
+                } else {
+                    att.flow.FlowDefinition flow = flows.get(id);
+                    if (flow == null) throw new IllegalArgumentException("No Flow has this ID: " + id);
+                    source = flow.directory().resolve("flow.yaml");
+                    target = new StageTemplate(flow.name(), flow.directory(), flow.actions(),
+                            flow.templateSchemaVersion(), source);
+                }
+                source = target.sourceFile();
+                validateTemplate(target, global);
+                validateReferencedToolsClosure(target, global, new LinkedHashSet<String>());
+            } else {
+                throw new IllegalArgumentException("Unsupported selected resource type: " + type);
+            }
+        } catch (Exception invalid) {
+            diagnostics.add(diagnostic(code, invalid, source));
+        }
+        return new ValidationSummary("selected-resource", 0, 0, 1, global.tools().size(), diagnostics);
+    }
+
     public ValidationSummary validate(ExecutionOptions options) throws Exception {
         skippedWindowsShellExecutableChecks.clear();
         try {

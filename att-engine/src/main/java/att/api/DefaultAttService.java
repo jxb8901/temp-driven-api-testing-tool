@@ -170,6 +170,17 @@ public final class DefaultAttService implements AttService {
                 RuntimeConfigPath.resolve(request.configPath(), request.packageRoot())).validate(opts);
         return new ValidateResult(null,result.valid()?"PASS":"INVALID",result.valid()?0:2,elapsed(started),result.diagnostics,Collections.<String,String>emptyMap(),withConfiguration(validationMap(result),cfg));
     }
+    /** Validates a selected resource and its static Template/Flow/Tool dependency closure. */
+    public ValidateResult validateSelectedResource(ValidateRequest request, String type, String id) throws Exception {
+        long started=System.nanoTime();
+        Path resolvedConfig=RuntimeConfigPath.resolve(request.configPath(), request.packageRoot());
+        FrameworkConfig cfg=new FrameworkConfigLoader().loadDiscovery(resolvedConfig,
+                RuntimeConfigPath.root(resolvedConfig),request.packageRoot(),request.environment());
+        PackageValidator.ValidationSummary result=new PackageValidator(request.packageRoot(),cfg,
+                resolvedConfig).validateSelectedResource(type,id);
+        return new ValidateResult(null,result.valid()?"PASS":"INVALID",result.valid()?0:2,elapsed(started),result.diagnostics,
+                Collections.<String,String>emptyMap(),withConfiguration(validationMap(result),cfg));
+    }
     @Override public SnapshotResult snapshot(SnapshotRequest request) throws Exception {
         long started=System.nanoTime();
         ExecutionOptions opts=options(request,"snapshot",request.suites(),request.suiteDirectory(),request.caseIds(),Collections.<String>emptySet(),Collections.<String>emptySet(),request.all(),false,false,false,"selected",null,null,null,false,null,null,null,null,null,null,null,null,null,null,Collections.<String>emptyList());

@@ -538,11 +538,13 @@ def check_vnext_cli_contract():
 
 def check_server_validation_api_contract():
     servlet_path = ROOT / "att-server/src/main/java/att/server/ApiServlet.java"
+    server_api_path = ROOT / "att-server-api/src/main/java/att/server/api/ServerApi.java"
     runtime_path = ROOT / "att-server/src/main/java/att/server/ServerRuntime.java"
     dto_path = ROOT / "att-server-api/src/main/java/att/server/api/AttValidationReport.java"
     schema_path = SCHEMAS / "att-validation-v1.schema.json"
     test_path = ROOT / "att-server/src/test/java/att/server/AuthenticationIntegrationTest.java"
     servlet = read(servlet_path)
+    server_api = read(server_api_path)
     runtime = read(runtime_path)
     dto = read(dto_path)
     tests = read(test_path)
@@ -584,10 +586,9 @@ def check_server_validation_api_contract():
             continue
         text = read(path)
         marker = re.search(r"<!-- att-doc-status: ([^>]+) -->", text[:1500])
-        if (not marker or "planned" not in marker.group(1)
-                or "release=unreleased" not in marker.group(1)
-                or "issue=287" not in marker.group(1)):
-            fail("%s must remain Planned until issue #287 is released" %
+        if (not marker or "current" not in marker.group(1)
+                or "release=4.2.10" not in marker.group(1)):
+            fail("%s must document the released ATT 4.2.10 validation API" %
                  path.relative_to(ROOT))
         allowed_line = re.search(r"(?m)^%s\s*(.*)$" % re.escape(label), text)
         if not allowed_line:
@@ -607,7 +608,7 @@ def check_server_validation_api_contract():
         if "att-validation-v1.schema.json" not in text:
             fail("%s does not link the att-validation/v1 JSON Schema" %
                  path.relative_to(ROOT))
-        for status in ("200", "400", "401", "403", "404", "413", "415", "500", "503", "504"):
+        for status in ("200", "400", "401", "403", "404", "409", "413", "415", "500", "503", "504"):
             if tick + status + tick not in text:
                 fail("%s does not document HTTP status %s" %
                      (path.relative_to(ROOT), status))
@@ -619,7 +620,9 @@ def check_server_validation_api_contract():
              sorted(required_response_fields - dto_fields))
     if schema.get("properties", {}).get("schemaVersion", {}).get("const") != "att-validation/v1":
         fail("att-validation/v1 schema version changed without updating the API contract gate")
-    if "att-validation/v1" not in dto or 'report.put("requestId",requestId)' not in servlet:
+    if ("VALIDATION_REPORT_VERSION = \"att-validation/v1\"" not in server_api
+            or "ServerApi.VALIDATION_REPORT_VERSION" not in dto
+            or 'report.put("requestId",requestId)' not in servlet):
         fail("Server validation response no longer uses att-validation/v1 with requestId")
 
     for rel in ("interfaces/server-api/v1.md", "interfaces/server-api/v1.zh.md"):
@@ -633,13 +636,13 @@ def check_server_validation_api_contract():
             fail("%s is missing its Current route table" % current.relative_to(ROOT))
             continue
         route_table = text.split(header, 1)[1].split("\n\n", 1)[0]
-        if "/validation" in route_table or "/jobs/validate" not in route_table:
-            fail("%s must keep /validation out of Current routes and document /jobs/validate" %
+        if "/validation" not in route_table or "/jobs/validate" not in route_table:
+            fail("%s must list both synchronous /validation and Job-creating /jobs/validate" %
                  current.relative_to(ROOT))
 
     for rel, link in (
-            ("interfaces/server-api/README.md", "[Validation API (planned, #287)](validation.md)"),
-            ("interfaces/server-api/README.zh.md", "[規劃中的 Validation API（#287）](validation.zh.md)")):
+            ("interfaces/server-api/README.md", "[Validation API](validation.md)"),
+            ("interfaces/server-api/README.zh.md", "[Validation API](validation.zh.md)")):
         nav = DOCS / rel
         if not nav.is_file() or link not in read(nav):
             fail("Server API navigation is missing the Planned validation link: docs/%s" % rel)
@@ -651,6 +654,10 @@ def check_server_validation_api_contract():
     if (not test_block or '"att-validation/v1"' not in test_block
             or 'validation.path("backend")' not in test_block):
         fail("AuthenticationIntegrationTest must assert the Server validation report contract")
+    if ('version.path("validationApiVersion")' not in tests
+            or 'validation.has("draftId")' not in test_block
+            or "must not create a persisted Job" not in test_block):
+        fail("AuthenticationIntegrationTest must verify the version capability and no-Job validation behavior")
     if ",200);" not in test_block:
         fail("AuthenticationIntegrationTest must verify a successful POST /validation response")
     for status in ("400", "401", "403"):

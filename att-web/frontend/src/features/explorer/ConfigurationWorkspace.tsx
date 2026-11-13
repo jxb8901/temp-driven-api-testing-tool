@@ -19,6 +19,10 @@ interface ConfigurationWorkspaceProps {
   onFileChange(filePath?: string, origin?: string, reference?: ResourceSourceReference, configurationReferenceId?: string): void;
   onTabChange(tab: WorkspaceTab): void;
   onOpenResource(resource: { type: string; resourceId: string }): void;
+  onValidate?(): void;
+  validationLabel?: string;
+  onValidatePackage?(): void;
+  packageValidationLabel?: string;
   canRevealAdminFields?: boolean;
 }
 interface DirectoryState { items: ConfigurationFileNode[]; loading: boolean; error: string; truncated?: boolean; nextOffset?: number | null }
@@ -33,7 +37,7 @@ function errorText(error: unknown, action: string): string {
   if (status) return `${action} failed (HTTP ${status}).`;
   return `Could not ${action}. Check the connection and retry.`;
 }
-export function ConfigurationWorkspace({ api, packageId, environment, filePath, fileOrigin, sourceReference, configurationReferenceId, tab, onEnvironmentChange, onFileChange, onTabChange, onOpenResource, canRevealAdminFields = false }: ConfigurationWorkspaceProps) {
+export function ConfigurationWorkspace({ api, packageId, environment, filePath, fileOrigin, sourceReference, configurationReferenceId, tab, onEnvironmentChange, onFileChange, onTabChange, onOpenResource, onValidate, validationLabel, onValidatePackage, packageValidationLabel, canRevealAdminFields = false }: ConfigurationWorkspaceProps) {
   const inspectionRefresh = useInspectionRefresh(true);
   const [declared, setDeclared] = useState<Awaited<ReturnType<ExplorerApi['getDeclaredConfiguration']>> | null>(null);
   const [directoryMap, setDirectoryMap] = useState<Record<string, DirectoryState>>({});
@@ -217,6 +221,8 @@ export function ConfigurationWorkspace({ api, packageId, environment, filePath, 
     <header className="att-configuration-page-heading">
       <div><p className="eyebrow">Shared Runtime Configuration</p><h1>Configuration</h1><p>Inspect centrally managed runtime configuration safely. This view is read-only.</p></div>
       <div className="att-configuration-context">
+        {onValidate && <button className="button button-quiet" type="button" onClick={onValidate}>{validationLabel || 'Read-only validate Shared Config'}</button>}
+        {onValidatePackage && <button className="button button-quiet" type="button" onClick={onValidatePackage}>{packageValidationLabel || `Read-only validate ${packageId} effective Config`}</button>}
         <label>Environment<select aria-label="Configuration environment" value={environment} onChange={event => onEnvironmentChange(event.currentTarget.value)}>
           <option value="">Runtime default</option>{profiles.map(item => <option key={item.name} value={item.name}>{item.name}{item.default ? ' · default' : ''}</option>)}
         </select></label>

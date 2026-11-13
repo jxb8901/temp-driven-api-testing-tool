@@ -60,7 +60,7 @@ public final class AttValidationReport {
     public boolean hasFailures() { for(Section section:sections)if(section.hasFailures())return true;return false; }
     public String overallStatus() { return hasFailures()?"INVALID":complete?"PASS":"PARTIAL"; }
     public Map<String,Object> toMap() {
-        Map<String,Object> out=new LinkedHashMap<String,Object>();out.put("schemaVersion","att-validation/v1");out.put("scope",scope);out.put("backend",backend);
+        Map<String,Object> out=new LinkedHashMap<String,Object>();out.put("schemaVersion",ServerApi.VALIDATION_REPORT_VERSION);out.put("scope",scope);out.put("backend",backend);
         List<Map<String,Object>> values=new ArrayList<Map<String,Object>>();for(Section section:sections)values.add(section.toMap());out.put("sections",values);
         if(!context.isEmpty())out.put("context",new LinkedHashMap<String,Object>(context));
         List<Map<String,Object>> diagnostics=new ArrayList<Map<String,Object>>();for(Section section:sections)section.collectDiagnostics(diagnostics);out.put("diagnostics",diagnostics);

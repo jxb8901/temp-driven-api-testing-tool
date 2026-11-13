@@ -1,16 +1,18 @@
-<!-- att-doc-status: planned release=unreleased issue=287 -->
+<!-- att-doc-status: current release=4.2.10 -->
 
-# Proposed Server Validation API
+# Server Validation API
 
-> **規劃中，尚未發佈。** 此擬議 route 不屬於 ATT 4.2.10。現行 path-based validation 請使用 [REST API v1](v1.zh.md) 的 `POST /api/v1/jobs/validate`；該 endpoint 會提交非同步 Job。
+`POST /api/v1/validation` 會同步執行 Server 端既有 validator，並回傳 `att-validation/v1` report。Studio 透過此有界唯讀 route 驗證 Server Runtime Config、已註冊 Package 或單一所選 resource，不會建立 execution draft 或 Job。Server 是 validation、authorization、生效設定及 resource revision 的唯一權威來源。
 
-## Endpoint
+## Endpoint 與 capability
 
 | 方法 | 路徑 | 結果 |
 |---|---|---|
-| `POST` | `/api/v1/validation` | 同步、唯讀的 `att-validation/v1` report；不會建立 Job。 |
+| `POST` | `/api/v1/validation` | 同步回傳 `att-validation/v1` report；不建立 Job。 |
 
-此 endpoint 透過有界的 inspection Worker 執行 Server-side validation，不會提交 RUN/LOAD Job 或執行業務 I/O。
+支援此 route 及 report contract 的 Server 會在 `GET /api/v1/version` 宣告 `validationApiVersion: "att-validation/v1"`。Studio 會先檢查此 marker，再啟用 **Read-only validation**。若 marker 不存在或版本不同，代表 Server build 沒有宣告所需 capability。
+
+此 route 會透過有界 inspection Worker 呼叫既有 Server validator。它不會執行 business action、提交 RUN/LOAD 工作、建立或保存 draft、建立 Schedule 或保存 snapshot。在 Studio 取消時會中止 browser request 並丟棄較晚回傳的結果；Server 仍會套用已設定的 validation 時間及資源上限。
 
 ## Request
 
@@ -20,16 +22,14 @@
 
 | 欄位 | Contract |
 |---|---|
-| `command` | 必填，且必須是 `validate`。 |
-| `targetKind` | 選填；預設為 `config`。支援 `config`、`package`、`case`、`suite`、`template`、`flow`、`tool` 及 `load`。 |
-| `target` | `case`、`suite`、`template`、`flow`、`tool` 及 `load` 必填。Case/Resource 使用邏輯 ID；Suite/Load 使用 Package-relative path。`config` 和 `package` 不接受此欄位。 |
-| `packageId` | `package` 和選中目標 scope 必填。`config` 可省略；提供時必須是已註冊 Package。 |
-| `environment` | 選填的 Environment Profile，供 Package scope validation 使用；Server 會套用已設定的 allow policy。 |
-| `all` | 選填 boolean。設為 `true` 時驗證整個安裝範圍；不得與 `targetKind`、`target`、`packageId` 或 `environment` 同時提供。 |
+| `command` | 必填，必須是 `validate`。 |
+| `targetKind` | 選填，預設為 `config`。支援 `config`、`package`、`case`、`suite`、`template`、`flow`、`tool` 及 `load` 範圍。 |
+| `target` | 選定 resource 範圍必填。Case 使用 logical Case ID；Suite 及 LOAD 使用 package-relative path；Template、Flow 及 Tool 使用 Server 的 canonical package-local resource ID。`config` 及 `package` 不接受此欄位。 |
+| `packageId` | `package` 及選定 resource 範圍必填。`config` 可選；提供時會選取該已註冊 Package 的生效 Config。不提供則驗證 Server Runtime Config。 |
+| `environment` | Package 範圍的 active Environment Profile，選填。省略時由 Server 解析 Package 的 effective/default Environment，並放入 report context。Server 會套用設定的授權政策。 |
+| `all` | 選填 boolean。設為 `true` 會驗證整個安裝範圍。不可與 `targetKind`、`target`、`packageId` 或 `environment` 同時提供；此範圍需要 system-administrator 權限，Studio 不會提供此功能。 |
 
-Runtime Config 由 Server 管理。Client 不可傳送 Config 檔案路徑或其他任意欄位。省略 `packageId` 的 Config check 會檢查 Server Runtime Config；提供已註冊 `packageId` 時，則檢查該 Package 的有效 Config。Package 和選中目標檢查需要已註冊的 Package ID。
-
-以下範例檢查 `payments` Package 在 `SIT` 的有效 Config：
+範例：驗證 `payments` 在 `SIT` 的生效 Config：
 
 ```json
 {
@@ -40,38 +40,39 @@ Runtime Config 由 Server 管理。Client 不可傳送 Config 檔案路徑或其
 }
 ```
 
-整個安裝範圍的 request 為 `{"command":"validate","all":true}`，不得指定 Package、target 或 Environment。
+全安裝驗證 request 為 `{"command":"validate","all":true}`，不可指定 Package、target 或 Environment。
 
 ## Response
 
-完成 validation 後會回傳 HTTP `200`；即使 report 記錄 validation failure，HTTP 狀態仍為 200。JSON report 遵循 [att-validation/v1 schema](../../../schemas/att-validation-v1.schema.json)，並包括：
+驗證完成後會回傳 HTTP `200`，即使 report 記錄失敗亦然。JSON response 遵循 [att-validation/v1 schema](../../../schemas/att-validation-v1.schema.json)，包含：
 
-| 欄位 | 說明 |
+| 欄位 | 意義 |
 |---|---|
-| `schemaVersion` | 固定值 `att-validation/v1`。 |
-| `scope`、`backend` | 請求 scope 及 `SERVER`。 |
-| `sections`、`diagnostics` | 階層式狀態區段及攤平後的診斷。 |
+| `schemaVersion` | 固定為 `att-validation/v1`。 |
+| `scope`、`backend` | 所選範圍及 `SERVER`。 |
+| `sections`、`diagnostics` | 階層式檢查項目及攤平後的 findings。 |
 | `counts` | `pass`、`fail`、`warn`、`skip`、`errors` 及 `warnings` 數量。 |
-| `overallStatus`、`complete`、`exitCode` | 整體 `PASS`、`INVALID` 或 `PARTIAL`；完整性；與 CLI 相容的結果代碼。 |
-| `context` | 選填 validation context。 |
+| `overallStatus`、`complete`、`exitCode` | `PASS`、`INVALID` 或 `PARTIAL`；完整性；與 CLI 相容的結果代碼。不完整 report 不代表通過。 |
+| `context` | 選填的安全 validation context；適用時包含解析後的 Package 及 Environment identity。 |
 | `requestId` | Server request identifier，供追蹤使用。 |
 
-Validation finding 會放在 report body；HTTP `200` 不代表所有區段均通過。回應不會附上 Job ID。
+Validation finding 會放在 report body；HTTP `200` 不代表所有檢查均通過。Response 不會回傳 Job ID 或 draft ID。
 
-## Authorization and errors
+## Authorization 與錯誤
 
-每個 request 都需要已驗證的 Server principal。一般 scope 需要操作權限（設定中的 Server operator role 或 active local USER account）；`all: true` 需要系統管理員能力。Endpoint 亦會套用 Server 的 Origin/CSRF policy 及 request/inspection response 大小限制。
+每個 request 都需要已驗證的 Server principal。範圍檢查需要操作權限（設定中的 Server operator role 或 active local USER account）；`all: true` 需要 system-administrator capability。Endpoint 會套用 Server 的 Origin/CSRF policy、request 大小限制、inspection Worker 容量及 response 大小限制。Server 會逐次檢查 Package 及 Environment access。
 
-| HTTP 狀態 | 說明 |
+| HTTP 狀態 | 意義 |
 |---|---|
 | `400` | JSON 格式錯誤、不支援的欄位或無效 validation plan。 |
-| `401` | 需要驗證身份。 |
-| `403` | Operator／系統管理員權限或 Environment authorization 被拒絕。 |
-| `404` | 找不到已註冊 Package 或選中 validation target。 |
-| `413` | Request 或 report 超出大小限制。 |
+| `401` | 需要身份驗證或 session 已失效。 |
+| `403` | Operator/system-administrator 權限或 Environment authorization 被拒絕。 |
+| `404` | 找不到已註冊 Package 或所選 validation target。 |
+| `409` | Source revision 已變更或 request 被判定為過期。 |
+| `413` | Request 或 report 超出已設定大小限制。 |
 | `415` | Request 不是 JSON。 |
 | `500` | 已淨化的 validation failure；不會回傳 Server stack trace。 |
 | `503` | Inspection Worker 容量已滿。 |
-| `504` | 唯讀 validation 超過時間限制。 |
+| `504` | 唯讀 validation 超過時限。 |
 
-這些 route 和行為在 #287 發佈並完成 API contract 核實前均屬 Planned。
+Studio 範圍選擇、上下文入口、report 檢視及取消行為請參閱 [Studio Read-only validation](../studio/validation.zh.md)。

@@ -88,6 +88,8 @@ public final class FlowRegistry {
         Collections.sort(result);
         return Collections.unmodifiableList(result);
     }
+    /** Returns the indexed descriptor for a discovered ID without compiling it. */
+    public Path descriptorPath(String id) { return descriptors.get(id); }
     public int size() { return byId.size(); }
     public int parsedCount() { return parsedCount; }
 

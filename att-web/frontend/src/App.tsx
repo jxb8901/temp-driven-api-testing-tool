@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState } 
 import { api } from './api';
 import { AppShell, useAppShellContext } from './AppShell';
 import { DashboardPage } from './DashboardPage';
-import { formatRoute, useNavigationGuard, useRouteState, type AppRoute } from './router';
+import { formatRoute, useNavigationGuard, useRouteState, type AppRoute, type ResourceRoute, type ValidationRouteState, type ValidationScope } from './router';
 import { appReducer, initialAppState, latestServerJobWindow, serverCapabilities } from './state';
 import { RunPage } from './features/run/RunPage';
 // explorer.css stays eager: TypedSidecarForm and ConfigurationExplorer use it
@@ -13,6 +13,7 @@ import type { ExplorerPageProps, ResourceSourceReference } from './features/expl
 const LoadPage = lazy(() => import('./features/load/LoadPage').then(module => ({ default: module.LoadPage })));
 const JobsPage = lazy(() => import('./features/load/JobsPage').then(module => ({ default: module.JobsPage })));
 const MonitoringPage = lazy(() => import('./features/monitoring/MonitoringPage').then(module => ({ default: module.MonitoringPage })));
+const ValidationWorkspacePage = lazy(() => import('./features/validation/ValidationWorkspacePage').then(module => ({ default: module.ValidationWorkspacePage })));
 const QuickLoadPage = lazy(() => import('./features/load/QuickLoadPage').then(module => ({ default: module.QuickLoadPage })));
 const LoadCatalogPage = lazy(() => import('./features/load/LoadCatalogPage').then(module => ({ default: module.LoadCatalogPage })));
 const LoadResourceDetailPage = lazy(() => import('./features/load/LoadResourceDetailPage').then(module => ({ default: module.LoadResourceDetailPage })));
@@ -85,6 +86,9 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
   const onRunBatch = useCallback(() => {
     navigation.navigate({ kind: 'run', packageId, environment, batch: true });
   }, [navigation.navigate, packageId, environment]);
+  const onValidateTarget = useCallback((scope: ValidationScope, target: string, resource?: ResourceRoute) => {
+    navigation.navigate({ kind: 'validation', scope, packageId, environment, target, resource });
+  }, [navigation.navigate, packageId, environment]);
   const onScheduleDebug = useCallback<NonNullable<ExplorerPageProps['onScheduleDebug']>>((input) => {
     return onSchedule(input);
   }, [onSchedule]);
@@ -116,6 +120,7 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
     onResourceRouteChange={onResourceRouteChange}
     onJobAccepted={onJobAccepted}
     onRunTarget={target => onRunTarget({ packageId, ...target })}
+    onValidateTarget={(scope, target, resource) => onValidateTarget(scope, target, resource)}
     onRunBatch={onRunBatch}
     onOpenQuickLoad={inlineLoadEnabled ? onOpenQuickLoad : undefined}
     onScheduleDebug={schedulingEnabled ? onScheduleDebug : undefined}
@@ -219,6 +224,14 @@ function ConfigurationRouteView({ route }: {
   const onOpenResource = useCallback((resource: { type: string; resourceId: string }) => {
     navigation.navigate({ kind: 'package', packageId: route.packageId || '', resource });
   }, [navigation.navigate, route.packageId]);
+  const onValidateConfiguration = useCallback(() => {
+    navigation.navigate({ kind: 'validation', scope: 'config' });
+  }, [navigation.navigate]);
+  const onValidatePackageConfiguration = useCallback(() => {
+    if (!route.packageId) return;
+    navigation.navigate({ kind: 'validation', scope: 'config', packageId: route.packageId,
+      ...(selectedEnvironment ? { environment: selectedEnvironment } : {}) });
+  }, [navigation.navigate, route.packageId, selectedEnvironment]);
   return <>
     <nav className="configuration-scope" aria-label="Configuration ownership">
       <button type="button" aria-pressed={showManifest} disabled={!route.packageId} onClick={() => navigation.navigate({ ...route, view: 'package-manifest' })}>Package Configuration</button>
@@ -238,6 +251,11 @@ function ConfigurationRouteView({ route }: {
     onFileChange={onFileChange}
     onTabChange={onTabChange}
     onOpenResource={onOpenResource}
+    onValidate={onValidateConfiguration}
+    validationLabel={workspace.uiLocale === 'zh-Hant' ? '唯讀驗證共用設定' : 'Read-only validate Shared Config'}
+    onValidatePackage={route.packageId ? onValidatePackageConfiguration : undefined}
+    packageValidationLabel={route.packageId ? (workspace.uiLocale === 'zh-Hant'
+      ? `唯讀驗證 ${route.packageId} 套件生效設定` : `Read-only validate ${route.packageId} effective Config`) : undefined}
   />}</>;
 }
 
@@ -493,6 +511,13 @@ export default function App() {
     content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'monitoring') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Monitoring…</div>}><MonitoringPage /></Suspense>;
+  } else if (navigation.route.kind === 'validation') {
+    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation workspace…</div>}>
+      <ValidationWorkspacePage api={api} packages={state.packages}
+        serverVersion={state.serverVersion}
+        route={navigation.route as ValidationRouteState} onRouteChange={route => navigation.navigate(route)}
+        onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
+    </Suspense>;
   } else if (navigation.route.kind === 'run') {
     content = <RunPage key={`${navigation.route.packageId || ''}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.environment || ''}:${navigation.route.batch ? 'batch' : ''}:${navigation.route.replaySourceJobId || ''}:${navigation.route.replayDraftId || ''}`}
       packageId={runPackageId} initialTarget={navigation.route.target} initialBatchMode={navigation.route.batch} initialEnvironment={runEnvironment}
@@ -577,7 +602,9 @@ export default function App() {
           onOpenJob={onJobChange}
           onSchedule={onSchedule}
           onOpenDetail={(item, environment, returnTo) => navigation.navigate({ kind: 'load-resource', packageId: item.packageId,
-            resourceId: item.resourceId, environment, returnTo })} /></LoadTestingPage></Suspense>;
+            resourceId: item.resourceId, environment, returnTo })}
+          onOpenValidation={(item, environment) => navigation.navigate({ kind: 'validation', scope: 'load',
+            packageId: item.packageId, environment, target: item.path })} /></LoadTestingPage></Suspense>;
   }
 
   return (

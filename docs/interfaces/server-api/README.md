@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.2.10 -->
 
 # ATT Server API
 
@@ -11,6 +11,6 @@ The public Server API is versioned under /api/v1. These pages route readers by t
 | Validate RUN, Debug and LOAD inputs and submit work | [Execution APIs](execution.md) |
 | Read events, SSE, results and cancellation behavior | [Jobs and Events](jobs-and-events.md) |
 | Create, review or operate Schedules | [Schedules API](schedules.md) |
-| Read the proposed synchronous validation contract | [Validation API (planned, #287)](validation.md) |
+| Run bounded synchronous validation without creating a Job | [Validation API](validation.md) |
 
 Tomcat deployment, Server configuration and authentication operations are documented under [Operations](../../operations/server-deployment.md).

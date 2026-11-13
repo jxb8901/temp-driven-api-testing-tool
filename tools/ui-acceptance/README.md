@@ -29,6 +29,14 @@ The fixture prefers the packaged Maven UI, then `att-web/frontend/dist`, and fal
 
 The issue-216 integration check also runs Playwright against the packaged WAR while `ServerWarUiIT` has authenticated stock Tomcat mounted at the non-root `/tools/att` context. It uses the real API without route interception to open a Flow's server-projected XML reference in Package Explorer, inspect allowed and withheld configuration sources, verify that Testdata is owned by the Package route and absent from Shared Runtime Configuration, preview generated Testdata, and open Quick Load at a tablet viewport. CI installs this harness and its browsers before Maven, then sets `ATT_UI_SERVER_PLAYWRIGHT=1` for `mvn clean verify`. To run it locally, install the harness and browser dependencies as above, then run `ATT_UI_SERVER_PLAYWRIGHT=1 mvn -B -ntp clean verify` from the repository root.
 
+The #355 validation checks run as part of that same authenticated packaged-WAR flow, plus a fixture-driven browser/accessibility smoke:
+
+```sh
+npm run smoke:validation
+```
+
+The packaged check uses the real `/tools/att/api/v1/validation` route to explicitly validate Config and a Flow selected in Explorer, verifies the advertised `att-validation/v1` capability and report, and confirms that neither action creates a Job or posts to a draft or schedule route. The fixture smoke also covers capability gating, abort behavior, report redaction/copy, filters, command-palette keyboard access, axe, dark theme, and a 390-pixel layout. These checks do not constitute a production-scale load test.
+
 The #236/#243 packaged archive check uses `ServerWarUiIT#packagedWarPublishesRunAndMultiWorkloadLoadArchives` and `artifact-archive-smoke.cjs`. Real RUN and multi-workload LOAD jobs produce the fixtures. The Java test compares every published ZIP entry with the authorized preview response, validates extracted relative-link targets, checks cross-USER access and denied identities, and waits for loose-output cleanup. With `ATT_UI_SERVER_PLAYWRIGHT=1`, the browser opens Studio as another USER, downloads the same finalized ZIP, checks the read-only text viewer and opaque-origin report iframe, follows online report links with back/forward, and opens extracted reports over `file://` with HTTP(S) requests blocked. Offline navigation, self-contained styles and built-in RUN search controls must work without ATT Server access. This check does not prove arbitrary detached-process containment or all failure/concurrency cases.
 
 Run the Scheduled Load workflow and accessibility check with:
