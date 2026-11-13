@@ -444,7 +444,7 @@ class ApiServletIntegratedLimitsTest {
         Path jobDir=runtime.config.dataDir.resolve("jobs").resolve(id);
         Files.createDirectories(jobDir.resolve("output"));
         Job job=new Job(id,"load","p",owner,new WorkerRequest(),new JobEvents(jobDir.resolve("events.jsonl"),100));
-        job.status="RUNNING";job.startedAt=Instant.now();job.loadProgress=Map.of("elapsedMs",300_000L);
+        job.status="RUNNING";job.startedAt=Instant.now();job.loadProgress=Map.of("capturedAt",Instant.now().toString(),"elapsedMs",300_000L);
         runtime.store.insert(job,"{}");runtime.jobs.put(id,job);runtime.sutMetrics.writeSnapshot(id,snapshot);
     }
 

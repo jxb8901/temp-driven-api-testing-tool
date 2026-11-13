@@ -1379,8 +1379,14 @@ final class ServerRuntime implements AutoCloseable {
     private Instant liveLoadStart(String id,Map<String,Object> row) {
         Job active=jobs.get(id);
         if(active!=null&&active.terminal())return null;
-        if(active!=null&&active.loadProgress!=null&&active.loadProgress.get("elapsedMs") instanceof Number elapsed&&elapsed.longValue()>=0)
-            return clock.instant().minusMillis(elapsed.longValue());
+        if(active!=null&&active.loadProgress!=null&&active.loadProgress.get("elapsedMs") instanceof Number elapsed&&elapsed.longValue()>=0) {
+            Object capturedAt=active.loadProgress.get("capturedAt");
+            if(capturedAt instanceof String timestamp) {
+                try { return Instant.parse(timestamp).minusMillis(elapsed.longValue()); }
+                catch(RuntimeException ignored) { }
+            }
+            if(active.startedAt!=null)return active.startedAt;
+        }
         if(active!=null&&!active.terminal())return null;
         try {
             String result=String.valueOf(row.get("resultJson"));JsonNode root=JSON.readTree(result);

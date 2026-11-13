@@ -442,10 +442,14 @@ final class SutMetricsService implements AutoCloseable {
                 "snapshotId", snapshot.get("snapshotId"), "queries", queryMetadata(snapshot), "items", List.of(),
                 "windowStart", startedAt.toString(), "windowEnd", now.toString(), "stepSeconds", stepSeconds);
         Instant bucketStart = end.minusSeconds(rangeSeconds);
-        Instant start = startedAt.isAfter(bucketStart) ? startedAt : bucketStart;
-        if (!start.isBefore(end) || ceilEpochSecond(start) >= end.getEpochSecond()) return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "NO_DATA",
+        Instant requestedStart = startedAt.isAfter(bucketStart) ? startedAt : bucketStart;
+        long queryStartEpochSecond = ceilEpochSecond(requestedStart);
+        if (!requestedStart.isBefore(end) || queryStartEpochSecond >= end.getEpochSecond()) return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "NO_DATA",
                 "snapshotId", snapshot.get("snapshotId"), "queries", queryMetadata(snapshot), "items", List.of(),
-                "windowStart", start.toString(), "windowEnd", end.toString(), "stepSeconds", stepSeconds);
+                "windowStart", requestedStart.toString(), "windowEnd", end.toString(), "stepSeconds", stepSeconds);
+        // Use the exact second sent to query_range as the window/cache boundary so sub-second
+        // progress timestamp jitter cannot split otherwise identical viewer requests.
+        Instant start = Instant.ofEpochSecond(queryStartEpochSecond);
         if (all.isEmpty()) return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "NO_DATA",
                 "snapshotId", snapshot.get("snapshotId"), "queries", queryMetadata(snapshot), "items", List.of(),
                 "windowStart", start.toString(), "windowEnd", end.toString(), "stepSeconds", stepSeconds);
@@ -460,16 +464,17 @@ final class SutMetricsService implements AutoCloseable {
             flight = previewFlights.computeIfAbsent(key, ignored -> CompletableFuture.supplyAsync(() -> {
                 try { return collectPreview(snapshot, all, start, end, stepSeconds); }
                 catch (Exception failure) { throw new java.util.concurrent.CompletionException(failure); }
-            }, previews));
+            }, previews).thenApply(result -> {
+                previewCache.put(key, new CacheEntry(System.nanoTime() + TimeUnit.SECONDS.toNanos(5), result));
+                trimPreviewCache();
+                return result;
+            }));
         } catch (java.util.concurrent.RejectedExecutionException full) {
             throw new CapacityException("Live SUT Metrics capacity is full; retry shortly.");
         }
         flight.whenComplete((value, failure) -> previewFlights.remove(key, flight));
         try {
-            Map<String, Object> result = flight.get(35, TimeUnit.SECONDS);
-            previewCache.put(key, new CacheEntry(System.nanoTime() + TimeUnit.SECONDS.toNanos(5), result));
-            trimPreviewCache();
-            return result;
+            return flight.get(35, TimeUnit.SECONDS);
         } catch (java.util.concurrent.ExecutionException failure) {
             Throwable cause = failure.getCause() == null ? failure : failure.getCause();
             if (cause instanceof Exception exception) throw exception;
