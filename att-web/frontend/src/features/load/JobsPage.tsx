@@ -11,7 +11,7 @@ import { memo, Profiler, useEffect, useMemo, useRef, useState, type KeyboardEven
 import './load.css';
 import './JobsPage.css';
 import { JobArtifacts } from './JobArtifacts';
-import type { JobArtifactOverview, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps, LoadJobsApi, LoadLiveProgressPoint, LoadLiveProgressSnapshot } from './types';
+import type { JobArtifactOverview, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps, LoadJobsApi, LoadLiveProgressPoint, LoadLiveProgressSnapshot, SutMetricItem, SutMetricsJobResponse, SutMetricsLiveResponse } from './types';
 import { JobConsoleView } from './JobConsoleView';
 import { useJobConsole } from './JobConsoleContext';
 import { useJobEventStatus, useJobEventStream, type JobStreamConnection } from './useJobEventStream';
@@ -23,7 +23,7 @@ const MAX_BUCKET_ROWS = 4096;
 const BUCKET_PAGE_SIZE = 100;
 
 type LoadState = 'loading' | 'refreshing' | 'ready' | 'error';
-type JobTab = 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics';
+type JobTab = 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics';
 const tabs: Array<{ id: JobTab; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'live', label: 'Live Output' },
@@ -31,6 +31,7 @@ const tabs: Array<{ id: JobTab; label: string }> = [
   { id: 'results', label: 'Results' },
   { id: 'artifacts', label: 'Artifacts' },
   { id: 'metrics', label: 'Metrics' },
+  { id: 'sutMetrics', label: 'SUT Metrics' },
 ];
 
 function toError(value: unknown, fallback: string): Error {
@@ -1009,6 +1010,151 @@ export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, me
   </section>;
 });
 
+export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activeLoad, hidden }: {
+  api: LoadJobsApi; jobId: string; activeLoad: boolean; hidden: boolean;
+}) {
+  const [response, setResponse] = useState<SutMetricsJobResponse | SutMetricsLiveResponse | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [moreLoading, setMoreLoading] = useState(false);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const requestRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (hidden) return;
+    let disposed = false;
+    let timer: number | undefined;
+    const schedule = (delay: number) => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      if (!disposed && !document.hidden) timer = window.setTimeout(() => void poll(), delay);
+    };
+    const poll = async () => {
+      if (disposed || document.hidden) return;
+      const controller = new AbortController(); requestRef.current = controller;
+      setLoading(current => current || !response); setError('');
+      try {
+        if (activeLoad) {
+          const fetchLive = api.getJobSutMetricsLive;
+          if (!fetchLive) throw new Error('This Server client does not support SUT Metrics live preview.');
+          const value = await fetchLive(jobId, { range: '15m', step: '30s', signal: controller.signal });
+          if (disposed || controller.signal.aborted) return;
+          setResponse(value); setNextOffset(null); schedule(30_000);
+        } else {
+          const fetchCollection = api.getJobSutMetrics;
+          if (!fetchCollection) throw new Error('This Server client does not support SUT Metrics collection.');
+          const value = await fetchCollection(jobId, { offset: 0, limit: 4, signal: controller.signal });
+          if (disposed || controller.signal.aborted) return;
+          setResponse(value); setNextOffset(typeof value.nextOffset === 'number' ? value.nextOffset : null);
+          if (['PENDING', 'COLLECTING'].includes(String(value.state || value.collection?.state))) schedule(5_000);
+        }
+      } catch (failure) {
+        if (disposed || controller.signal.aborted) return;
+        setError(failure instanceof Error ? failure.message : 'SUT Metrics could not be loaded.');
+        schedule(activeLoad ? 30_000 : 10_000);
+      } finally {
+        if (!disposed && !controller.signal.aborted) setLoading(false);
+        if (requestRef.current === controller) requestRef.current = null;
+      }
+    };
+    const visibility = () => {
+      if (document.hidden) {
+        if (timer !== undefined) window.clearTimeout(timer);
+        requestRef.current?.abort();
+      } else void poll();
+    };
+    setResponse(null); setNextOffset(null); setError(''); setLoading(true);
+    document.addEventListener('visibilitychange', visibility);
+    if (!document.hidden) void poll();
+    return () => {
+      disposed = true; if (timer !== undefined) window.clearTimeout(timer);
+      requestRef.current?.abort(); requestRef.current = null;
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, [api, jobId, activeLoad, hidden]);
+
+  async function loadMore() {
+    if (nextOffset === null || !api.getJobSutMetrics || moreLoading || hidden) return;
+    const controller = new AbortController(); requestRef.current = controller; setMoreLoading(true);
+    try {
+      const page = await api.getJobSutMetrics(jobId, { offset: nextOffset, limit: 4, signal: controller.signal });
+      if (controller.signal.aborted) return;
+      setResponse(current => current ? { ...page, items: [...(current.items || []), ...(page.items || [])] } : page);
+      setNextOffset(typeof page.nextOffset === 'number' ? page.nextOffset : null);
+    } catch (failure) {
+      if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'More SUT Metrics could not be loaded.');
+    } finally {
+      if (requestRef.current === controller) requestRef.current = null;
+      setMoreLoading(false);
+    }
+  }
+
+  const state = String(response?.state || (response as SutMetricsJobResponse | null)?.collection?.state || (loading ? 'PENDING' : 'UNKNOWN'));
+  const collection = (response as SutMetricsJobResponse | null)?.collection;
+  const items = response?.items || [];
+  const windowStart = (response as SutMetricsLiveResponse | null)?.windowStart || collection?.windowStart;
+  const windowEnd = (response as SutMetricsLiveResponse | null)?.windowEnd || collection?.windowEnd;
+  const freshness = (response as SutMetricsLiveResponse | null)?.sourceQueryTime || collection?.updatedAt || collection?.createdAt;
+  const sampleCount = (response as SutMetricsLiveResponse | null)?.sampleCount;
+  const diagnostics = collection?.diagnostics || [];
+
+  return <section className="att-job-panel att-sut-metrics-panel" role="tabpanel" id="job-panel-sutMetrics" aria-labelledby="job-tab-sutMetrics" hidden={hidden} tabIndex={0}>
+    <h2>SUT Metrics</h2>
+    <p className="att-help">Prometheus metrics for the selected system under test. Live preview is read-only, refreshed every 30 seconds, and does not affect the LOAD verdict.</p>
+    {error && <p role="alert" className="att-inline-error">{error}</p>}
+    <dl className="att-sut-metrics-status">
+      <div><dt>Collection state</dt><dd>{state}</dd></div>
+      {windowStart && <div><dt>Coverage start</dt><dd>{dateTime(windowStart)}</dd></div>}
+      {windowEnd && <div><dt>Coverage end</dt><dd>{dateTime(windowEnd)}</dd></div>}
+      {freshness && <div><dt>Last source query</dt><dd>{dateTime(freshness)}</dd></div>}
+      {sampleCount !== undefined && <div><dt>Samples in preview</dt><dd>{METRIC_NUMBER_FORMATTER.format(sampleCount)}</dd></div>}
+    </dl>
+    {state === 'DISABLED' && <p role="status">SUT Metrics are not configured for this LOAD Job.</p>}
+    {state === 'PENDING' && <p role="status" aria-busy={loading}>SUT Metrics are waiting for LOAD execution or the post-run collection worker.</p>}
+    {state === 'COLLECTING' && <p role="status" aria-busy="true">Prometheus post-run collection is in progress. The LOAD execution result is independent of this status.</p>}
+    {state === 'UNAVAILABLE' && <p role="status">Prometheus did not return any SUT metric samples for this window.</p>}
+    {state === 'FAILED' && <p role="alert">SUT Metrics collection failed. The LOAD execution verdict is unchanged.</p>}
+    {state === 'PARTIAL' && <p role="status">Some metrics are available; other queries returned no data or could not be collected.</p>}
+    {state === 'NO_DATA' && <p role="status">No SUT samples are available yet for this time window.</p>}
+    {state === 'READY' && !items.length && <p role="status">Collection is ready, but no metric series are present in this page.</p>}
+    {items.map((item, index) => <SutMetricCard item={item} key={`${item.id || item.queryId || item.metricId}-${item.targetId}-${index}`} />)}
+    {diagnostics.length > 0 && <details><summary>Collection diagnostics ({diagnostics.length})</summary><ul>{diagnostics.slice(0, 20).map((item, index) => <li key={`${item.code}-${index}`}>{item.code || 'Collection issue'}: {item.message || 'No additional detail.'}</li>)}</ul></details>}
+    {nextOffset !== null && <button type="button" onClick={() => void loadMore()} disabled={moreLoading}>{moreLoading ? 'Loading…' : 'Load more SUT metric series'}</button>}
+    {loading && !response && <p role="status" aria-busy="true">Loading SUT Metrics…</p>}
+  </section>;
+});
+
+const SutMetricCard = memo(function SutMetricCard({ item }: { item: SutMetricItem }) {
+  const paths = (item.series || []).slice(0, 8).map((series, index) => {
+    const points = series.samples.slice(-800);
+    if (!points.length) return null;
+    const values = points.map(point => point.value), minimum = Math.min(...values), maximum = Math.max(...values);
+    const span = maximum - minimum || 1;
+    const path = points.map((point, position) => {
+      const x = points.length < 2 ? 0 : position * 800 / (points.length - 1);
+      const y = 190 - ((point.value - minimum) / span) * 170;
+      return `${position ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    return { path, index, minimum, maximum };
+  }).filter((value): value is NonNullable<typeof value> => value !== null);
+  const count = (item.series || []).reduce((total, series) => total + series.samples.length, 0);
+  const coverage = item.coverage || item.series?.[0]?.coverage || {};
+  const status = item.queryStatus || (count ? 'READY' : 'NO_DATA');
+  return <article className="att-sut-metric-card">
+    <header><div><h3>{item.title || item.metricId}</h3><p>{item.category || 'SUT'} · {item.targetType || 'target'} {item.targetId} · {item.unit}</p></div>
+      <span className={`att-sut-metric-query-status att-sut-metric-query-status-${status.toLowerCase()}`}>{status}</span></header>
+    {item.error && <p role="status">{item.error}</p>}
+    {!count && status !== 'UNAVAILABLE' && <p role="status">No samples were returned for this metric and time window.</p>}
+    {status === 'UNAVAILABLE' && <p role="status">This metric query is unavailable.</p>}
+    {paths.length > 0 && <svg className="att-sut-metric-chart" role="img" aria-label={`${item.title} for ${item.targetId}`} viewBox="0 0 820 220">
+      <path d="M0 190 H800 M0 105 H800 M0 20 H800" className="att-sut-metric-grid" />
+      {paths.map(line => <path key={line.index} d={line.path} className={`att-sut-metric-line att-sut-metric-line-${line.index % 8}`} />)}
+      <text x="4" y="214">{dateTime(String(coverage.firstSampleAt || ''))}</text><text x="800" y="214" textAnchor="end">{dateTime(String(coverage.lastSampleAt || ''))}</text>
+    </svg>}
+    <p className="att-sut-metric-coverage">{count} samples across {(item.series || []).length} series · source {item.sourceName || item.sourceId || 'registered Prometheus'}
+      {coverage.firstSampleAt != null && <> · first {dateTime(String(coverage.firstSampleAt))}</>}{coverage.lastSampleAt != null && <> · latest {dateTime(String(coverage.lastSampleAt))}</>}</p>
+  </article>;
+});
+
 export function JobsPage(props: JobsFeatureProps) {
   return props.jobId ? <JobDetail key={props.jobId} {...props} jobId={props.jobId} /> : <JobsList {...props} />;
 }
@@ -1136,6 +1282,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
   const jobStatus = selectedStatus;
   const canCancel = Boolean(job && ['QUEUED', 'PREPARING', 'RUNNING'].includes(jobStatus));
   const isLoadResult = job?.command === 'load' || loadTerminalSummary(result) !== null;
+  const visibleTabs = isLoadResult ? tabs : tabs.filter(tab => tab.id !== 'sutMetrics');
   const report = useLoadArchiveSummary(api, jobId, isLoadResult && !activeLoad && (activeTab === 'results' || activeTab === 'metrics'),
     activeTab === 'results' || activeTab === 'metrics', activeTab === 'metrics');
   const archiveOverview = useJobArtifactOverview(api, jobId, isLoadResult && !activeLoad && activeTab === 'overview', detailRefresh);
@@ -1150,16 +1297,16 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
   const charts = useMemo(() => metricSeries(buckets), [buckets]);
 
   function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const index = tabs.findIndex(tab => tab.id === activeTab);
+    const index = visibleTabs.findIndex(tab => tab.id === activeTab);
     let next = index;
-    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
-    else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+    if (event.key === 'ArrowRight') next = (index + 1) % visibleTabs.length;
+    else if (event.key === 'ArrowLeft') next = (index + visibleTabs.length - 1) % visibleTabs.length;
     else if (event.key === 'Home') next = 0;
-    else if (event.key === 'End') next = tabs.length - 1;
+    else if (event.key === 'End') next = visibleTabs.length - 1;
     else return;
     event.preventDefault();
-    setActiveTab(tabs[next].id);
-    document.getElementById(`job-tab-${tabs[next].id}`)?.focus();
+    setActiveTab(visibleTabs[next].id);
+    document.getElementById(`job-tab-${visibleTabs[next].id}`)?.focus();
   }
 
   return <div className={`page-content att-job-detail${standalone ? " att-standalone-job-details" : ""}`} aria-labelledby="job-title">
@@ -1183,7 +1330,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
     {cancelState === 'pending' && <p role="status" aria-live="polite">Cancellation request sent; waiting for the Server status update.</p>}
 
     <div className="att-job-tabs" role="tablist" aria-label={`Job ${jobId} sections`} onKeyDown={onTabKeyDown}>
-      {tabs.map(tab => <button key={tab.id} type="button" role="tab" id={`job-tab-${tab.id}`} aria-controls={`job-panel-${tab.id}`} aria-selected={activeTab === tab.id} tabIndex={activeTab === tab.id ? 0 : -1} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
+      {visibleTabs.map(tab => <button key={tab.id} type="button" role="tab" id={`job-tab-${tab.id}`} aria-controls={`job-panel-${tab.id}`} aria-selected={activeTab === tab.id} tabIndex={activeTab === tab.id ? 0 : -1} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
     </div>
     <JobOverview job={job} status={jobStatus} statusText={statusSnapshot.text} jobState={jobState} result={result}
       reportAvailability={archiveOverview.loading ? 'loading' : report.availability} reportMessage={report.error}
@@ -1225,6 +1372,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
       reportAvailability={report.availability} reportError={report.error} onRetryReport={report.retry} reportDetailsLoaded={Boolean(report.detailMetrics)}
       buckets={buckets} charts={charts} hidden={activeTab !== 'metrics'} activeLoad={activeLoad} liveProgress={liveProgress}
       liveHistory={job?.loadProgressHistory || []} liveTrend={job?.loadProgressTrend || []} streamHistory={eventStream.liveProgressHistory} checkpointHistory={eventStream.checkpointHistory} streamConnection={eventStream.connection} now={clockNow} terminalResultAvailable={payloadTerminal && Boolean(result?.result)} />
+    {isLoadResult && <SutMetricsPanel api={api} jobId={jobId} activeLoad={activeLoad} hidden={activeTab !== 'sutMetrics'} />}
   </div>;
 }
 

@@ -11,6 +11,7 @@ import type {
   JobAccepted as LoadJobAccepted, JobArtifact, JobEventHandlers, JobResultResponse,
   JobSummary as LoadJobSummary, JobView, LoadDraftInput, LoadDraftResponse, LoadModel,
   LoadPolicyResponse, LoadTargetType, QuickLoadFormResponse, SubmitLoadDraftInput, TargetResource, LoadCatalogPage, LoadCatalogDetail,
+  SutMetricsJobResponse, SutMetricsLiveResponse,
 } from './features/load/types';
 import type { RunDefinition } from './features/run/RunPage';
 import { contextRelativeReturnTo } from './contextPaths';
@@ -286,6 +287,30 @@ export const api = {
   }> {
     return request('auth/capabilities', { signal });
   },
+  listSutMetricSources(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> }> {
+    return request('sut-metrics/sources', { signal });
+  },
+  listSutMetricProfiles(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> }> {
+    return request('sut-metrics/profiles', { signal });
+  },
+  saveSutMetricSource(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/sources', input);
+  },
+  deleteSutMetricSource(id: string): Promise<Record<string, unknown>> {
+    return request('admin/sut-metrics/sources/' + encodeURIComponent(id), { method: 'DELETE' });
+  },
+  testSutMetricSource(id: string): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/sources/' + encodeURIComponent(id) + '/test', {});
+  },
+  saveSutMetricProfile(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/profiles', input);
+  },
+  deleteSutMetricProfile(id: string): Promise<Record<string, unknown>> {
+    return request('admin/sut-metrics/profiles/' + encodeURIComponent(id), { method: 'DELETE' });
+  },
+  previewSutMetricBinding(observability: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/profiles/preview', { observability });
+  },
   logout(): Promise<{ loggedOut: boolean }> {
     return request('auth/logout', { method: 'POST', body: '{}' });
   },
@@ -422,6 +447,12 @@ export const api = {
   },
   getJobResult(jobId: string, signal?: AbortSignal): Promise<JobResultResponse> {
     return request<JobResultResponse>('jobs/' + encodeURIComponent(jobId) + '/result', { signal });
+  },
+  getJobSutMetrics(jobId: string, input: { offset?: number; limit?: number; queryId?: string; signal?: AbortSignal } = {}): Promise<SutMetricsJobResponse> {
+    return request<SutMetricsJobResponse>('jobs/' + encodeURIComponent(jobId) + '/sut-metrics' + queryString({ offset: input.offset, limit: input.limit, queryId: input.queryId }), { signal: input.signal });
+  },
+  getJobSutMetricsLive(jobId: string, input: { range?: string; step?: string; targetId?: string; signal?: AbortSignal } = {}): Promise<SutMetricsLiveResponse> {
+    return request<SutMetricsLiveResponse>('jobs/' + encodeURIComponent(jobId) + '/sut-metrics/live' + queryString({ range: input.range || '15m', step: input.step || '30s', targetId: input.targetId }), { signal: input.signal });
   },
   async getJobArtifacts(jobId: string, signal?: AbortSignal): Promise<JobArtifact[]> {
     const envelope = await request<ApiEnvelope<JobArtifact>>('jobs/' + encodeURIComponent(jobId) + '/artifacts', { signal });

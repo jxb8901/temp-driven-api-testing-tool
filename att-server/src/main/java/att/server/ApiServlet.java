@@ -82,6 +82,15 @@ public final class ApiServlet extends HttpServlet {
                 res.setHeader("Cache-Control","no-store");json(res,200,runtime.monitoringJobJournal(id));return;
             }
             if("/metrics".equals(path)){if(!requireSystemAdmin(req,res,requestId))return;Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
+            if("/sut-metrics/sources".equals(path)||"/sut-metrics/profiles".equals(path)) {
+                boolean admin,operator;
+                try {admin=systemAdminCapability(req,principal);operator=operatorCapability(req,principal);}
+                catch(Exception unavailable){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return;}
+                if(!requireSutMetricsReadAccess(req,res,requestId,principal))return;
+                res.setHeader("Cache-Control","private, no-store");
+                Map<String,Object> response="/sut-metrics/sources".equals(path)?runtime.sutMetricSources(principal,admin):runtime.sutMetricProfiles(principal,admin);
+                response.put("requestId",requestId);json(res,200,response);return;
+            }
             if(!requireOperator(req,res,requestId))return;
             if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,principal);return;}
             if(path.matches("/packages/[^/]+/load-templates")) {
@@ -116,6 +125,17 @@ public final class ApiServlet extends HttpServlet {
                 res.setHeader("Cache-Control","no-store");json(res,200,response);return;
             }
             if(path.startsWith("/jobs/"))runtime.requireJobOwner(segment(path,2),principal);
+            if(path.matches("/jobs/[^/]+/sut-metrics(?:/live|/series)?")) {
+                if(!requireSutMetricsReadAccess(req,res,requestId,principal))return;
+                String id=segment(path,2);boolean admin;
+                try {admin=systemAdminCapability(req,principal);}
+                catch(Exception unavailable){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return;}
+                boolean live=path.endsWith("/live"),series=path.endsWith("/series");
+                Map<String,Object> response=runtime.sutMetricsJob(id,principal,admin,req.getParameter("range"),req.getParameter("step"),
+                        req.getParameter("targetId"),parseOffset(req.getParameter("offset")),parseConfigurationLimit(req.getParameter("limit")),
+                        series?req.getParameter("queryId"):null,live);
+                response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;
+            }
             if(path.matches("/jobs/[^/]+/artifacts/status")) {
                 Map<String,Object> response=ServerRuntime.JSON.convertValue(runtime.artifactOverview(segment(path,2)),Map.class);
                 response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;
@@ -185,6 +205,40 @@ public final class ApiServlet extends HttpServlet {
         String requestId=requestId(req,res),path=path(req);String authorizationPrincipal=principal(req);
         if(path.startsWith("/auth/")){authPost(req,res,path,requestId);return;}
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+        if(path.matches("/admin/sut-metrics/(?:sources|profiles|sources/[^/]+/test|profiles/preview)")) {
+            if(!requireSystemAdmin(req,res,requestId))return;
+            if(!checkOrigin(req,res,requestId,false))return;
+            try {
+                if(path.matches("/admin/sut-metrics/sources/[^/]+/test")) {
+                    Map<String,Object> tested=runtime.testSutMetricSource(segment(path,4));tested.put("requestId",requestId);json(res,200,tested);return;
+                }
+                JsonNode input=readSutMetricsBody(req);
+                if(path.endsWith("/profiles/preview")) {
+                    if(!input.path("observability").isObject())throw new IllegalArgumentException("observability must be an object.");
+                    Map<String,Object> preview=runtime.previewSutMetrics(ServerRuntime.JSON.convertValue(input.path("observability"),Map.class),authorizationPrincipal,true);
+                    preview.put("requestId",requestId);res.setHeader("Cache-Control","no-store");json(res,200,preview);return;
+                }
+                Map<String,Object> value=ServerRuntime.JSON.convertValue(input,Map.class);
+                Map<String,Object> saved=path.endsWith("/sources")?runtime.saveSutMetricSource(value):runtime.saveSutMetricProfile(value);
+                saved.put("requestId",requestId);json(res,201,saved);return;
+            } catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+              catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","SUT Metrics administration could not be completed",requestId);getServletContext().log("SUT Metrics administration failed id="+requestId,failure);}
+            return;
+        }
+        if("/sut-metrics/preview".equals(path)) {
+            if(!requireSutMetricsReadAccess(req,res,requestId,authorizationPrincipal))return;
+            if(!checkOrigin(req,res,requestId,false))return;
+            try {
+                JsonNode input=readSutMetricsBody(req);
+                if(!input.path("observability").isObject())throw new IllegalArgumentException("observability must be an object.");
+                boolean admin=systemAdminCapability(req,authorizationPrincipal);
+                Map<String,Object> preview=runtime.previewSutMetrics(ServerRuntime.JSON.convertValue(input.path("observability"),Map.class),authorizationPrincipal,admin);
+                preview.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,preview);return;
+            } catch(ServerRuntime.NotFoundException denied){error(res,404,"ATT-SERVER-NOT-FOUND","SUT Metrics resource was not found",requestId);}
+              catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+              catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","SUT Metrics resolution could not be completed",requestId);}
+            return;
+        }
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
         if("/validation".equals(path)){validationPost(req,res,requestId,authorizationPrincipal);return;}
         if(!requireOperator(req,res,requestId))return;
@@ -245,7 +299,7 @@ public final class ApiServlet extends HttpServlet {
             if(createRunDraft){Map<String,Object> draft=runtime.createRunDraft(input,identity.authorizationPrincipal());draft.put("requestId",requestId);json(res,201,draft);return;}
             if(createDebugDraft){DebugDraft draft=ServerRuntime.JSON.convertValue(runtime.createDebugDraft(input,identity.authorizationPrincipal()),DebugDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
             if(createQuickLoadDraft){LoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createQuickLoadDraft(input,identity.authorizationPrincipal()),LoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
-            if(createAdvancedLoadDraft){LoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createAdvancedLoadDraft(input,identity.authorizationPrincipal()),LoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
+            if(createAdvancedLoadDraft){boolean administrator=systemAdminCapability(req,identity.authorizationPrincipal());LoadDraft draft=ServerRuntime.JSON.convertValue(runtime.createAdvancedLoadDraft(input,identity.authorizationPrincipal(),administrator),LoadDraft.class);draft.requestId=requestId;json(res,201,draft);return;}
             JsonNode workerInput=RequestIdentity.withoutSubmittedPrincipal(input);
             if("run".equals(command)&&input.has("draftId")){
                 Map<String,Object> job=runtime.submitRunDraft(input,identity.authorizationPrincipal(),identity.persistedPrincipal());job.put("requestId",requestId);res.setHeader("Location",req.getContextPath()+"/api/v1/jobs/"+job.get("jobId"));json(res,202,job);return;
@@ -303,6 +357,18 @@ public final class ApiServlet extends HttpServlet {
         String requestId=requestId(req,res),path=path(req),principal=principal(req);
         if(path.startsWith("/auth/")){authDelete(req,res,path,requestId);return;}
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+        if(path.matches("/admin/sut-metrics/(?:sources|profiles)/[^/]+")) {
+            if(!requireSystemAdmin(req,res,requestId))return;
+            if(!checkOrigin(req,res,requestId,false))return;
+            try {
+                String id=segment(path,4);
+                Map<String,Object> deleted=path.startsWith("/admin/sut-metrics/sources/")
+                        ?runtime.deleteSutMetricSource(id):runtime.deleteSutMetricProfile(id);
+                deleted.put("requestId",requestId);json(res,200,deleted);
+            } catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+              catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","SUT Metrics administration could not be completed",requestId);getServletContext().log("SUT Metrics deletion failed id="+requestId,failure);}
+            return;
+        }
         if(loadSchedulePath(path)){scheduleDelete(req,res,path,requestId,principal);return;}
         if(!requireOperator(req,res,requestId))return;
         if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,principal);return;}
@@ -442,6 +508,19 @@ public final class ApiServlet extends HttpServlet {
             error(res,403,"ATT-SERVER-FORBIDDEN","Monitoring access is required",requestId);return false;
         } catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return false;}
     }
+    private boolean requireSutMetricsReadAccess(HttpServletRequest req,HttpServletResponse res,String requestId,String login)throws IOException {
+        if(login==null||RequestIdentity.ANONYMOUS.equals(login)){
+            error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return false;
+        }
+        try {
+            if(systemAdminCapability(req,login)||operatorCapability(req,login))return true;
+            if(runtime.auth.local(runtime.config)) {
+                Map<String,Object> user=runtime.store.authUser(login);
+                if(user!=null&&Boolean.TRUE.equals(user.get("active"))&&"USER".equals(user.get("role")))return true;
+            }
+            error(res,403,"ATT-SERVER-FORBIDDEN","SUT Metrics access is not authorized",requestId);return false;
+        } catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return false;}
+    }
     private boolean requireOperator(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
         if(!runtime.config.scheduling.enabled&&loadSchedulePath(path(req))) {error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return false;}
         String login=principal(req);
@@ -464,6 +543,17 @@ public final class ApiServlet extends HttpServlet {
         return !req.isUserInRole(runtime.config.authorization.adminRole)&&req.isUserInRole(runtime.config.authorization.userRole);
     }
     private JsonNode authBody(HttpServletRequest req)throws IOException {byte[] bytes=req.getInputStream().readNBytes(Math.min(runtime.config.maxRequestBytes,65536)+1);if(bytes.length>Math.min(runtime.config.maxRequestBytes,65536))throw new IllegalArgumentException("Authentication request body is too large");try{return ServerRuntime.JSON.readTree(bytes);}catch(JsonProcessingException e){throw new IllegalArgumentException("Request body is not valid JSON");}}
+    private JsonNode readSutMetricsBody(HttpServletRequest req)throws IOException {
+        if(!isJson(req.getContentType()))throw new IllegalArgumentException("Content-Type must be application/json");
+        int limit=Math.min(runtime.config.maxRequestBytes,1024*1024);
+        byte[] bytes=req.getInputStream().readNBytes(limit+1);
+        if(bytes.length>limit)throw new IllegalArgumentException("SUT Metrics request body exceeds 1 MiB");
+        try {
+            JsonNode body=ServerRuntime.JSON.readTree(bytes);
+            if(body==null||!body.isObject())throw new IllegalArgumentException("A JSON object is required");
+            return body;
+        } catch(JsonProcessingException malformed){throw new IllegalArgumentException("Request body is not valid JSON");}
+    }
     private static String text(JsonNode body,String name){JsonNode value=body.get(name);if(value==null||!value.isTextual())throw new IllegalArgumentException(name+" must be text");return value.asText();}
     private static boolean secureLocalAuthTransport(HttpServletRequest req){if(req.isSecure())return true;try{return java.net.InetAddress.getByName(req.getRemoteAddr()).isLoopbackAddress();}catch(Exception invalid){return false;}}
     private static boolean containsPasswordSubmission(String path) {

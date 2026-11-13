@@ -120,7 +120,7 @@ export function makeScenario(
   model: LoadModel,
   timing: TimingDraft,
   workloads: WorkloadDraft[],
-  advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string },
+  advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string; observability?: string },
   options: { clearWorkloadTimingOverrides?: boolean } = {},
 ): JsonObject {
   const scenario: JsonObject = { ...policy, schemaVersion: String(policy.schemaVersion || 'att-load/v1.9') };
@@ -205,10 +205,15 @@ export function makeScenario(
   if (!Array.isArray(testdata) || testdata.some(item => typeof item !== 'string')) throw new Error('Scenario Testdata must be an array of package-relative paths.');
   const thresholds = parseObjectJson(advanced.thresholds, 'Aggregate thresholds');
   const evidence = parseObjectJson(advanced.evidence, 'Evidence settings');
+  const observability = parseObjectJson(advanced.observability || '{}', 'SUT Metrics observability');
   if (Object.keys(execution).length) scenario.execution = execution; else delete scenario.execution;
   if (testdata.length) scenario.testdata = testdata; else delete scenario.testdata;
   if (Object.keys(thresholds).length) scenario.thresholds = thresholds; else delete scenario.thresholds;
   if (Object.keys(evidence).length) scenario.evidence = evidence; else delete scenario.evidence;
+  if (Object.keys(observability).length) {
+    scenario.observability = observability;
+    scenario.schemaVersion = 'att-load/v1.9';
+  } else delete scenario.observability;
   if (evidence.maxFailureSamples != null || evidence.maxSuccessSamples != null
       || evidence.quotaScope != null || evidence.defaults != null) scenario.schemaVersion = 'att-load/v1.9';
   if (advanced.seed.trim()) {
@@ -231,7 +236,7 @@ export function initialTiming(policy: JsonObject): TimingDraft {
   };
 }
 
-export function retainedScenarioToEditor(value: unknown): { model: LoadModel; timing: TimingDraft; workloads: WorkloadDraft[]; advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string }; diagnostics: ServerDiagnostic[] } {
+export function retainedScenarioToEditor(value: unknown): { model: LoadModel; timing: TimingDraft; workloads: WorkloadDraft[]; advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string; observability: string }; diagnostics: ServerDiagnostic[] } {
   const scenario=asObject(value),rootLoad=asObject(scenario.load),rows=Array.isArray(scenario.workloads)?scenario.workloads:[];
   if(!rows.length)throw new Error('The retained LOAD draft has no workloads.');
   const targetDiagnostics:ServerDiagnostic[]=[];
@@ -270,7 +275,8 @@ export function retainedScenarioToEditor(value: unknown): { model: LoadModel; ti
     };
   });
   const advanced={execution:JSON.stringify(asObject(scenario.execution),null,2),testdata:JSON.stringify(Array.isArray(scenario.testdata)?scenario.testdata:[],null,2),
-    thresholds:JSON.stringify(asObject(scenario.thresholds),null,2),evidence:JSON.stringify(asObject(scenario.evidence),null,2),seed:scenario.seed==null?'':String(scenario.seed)};
+    thresholds:JSON.stringify(asObject(scenario.thresholds),null,2),evidence:JSON.stringify(asObject(scenario.evidence),null,2),seed:scenario.seed==null?'':String(scenario.seed),
+    observability:JSON.stringify(asObject(scenario.observability),null,2)};
   return {model,timing,workloads,advanced,diagnostics:targetDiagnostics};
 }
 
@@ -300,7 +306,8 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const [timing, setTiming] = useState<TimingDraft>({ warmup: '', rampUp: '', duration: '', rampDown: '' });
   const effectiveEnvelopeMs = timing.duration.trim() ? effectiveLoadEnvelopeMs([timing.rampUp, timing.warmup, timing.duration, timing.rampDown]) : null;
   const [workloads, setWorkloads] = useState<WorkloadDraft[]>([]);
-  const [advanced, setAdvanced] = useState({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '' });
+  const [advanced, setAdvanced] = useState({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '', observability: '{}' });
+  const [sutMetricsProfiles, setSutMetricsProfiles] = useState<Array<Record<string, unknown>>>([]);
   const [draft, setDraft] = useState<import('./types').LoadDraftResponse | null>(null);
   const [draftState, setDraftState] = useState<'idle' | 'validating' | 'valid' | 'error' | 'submitting'>('idle');
   const [confirmationPending, setConfirmationPending] = useState(false);
@@ -336,6 +343,14 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const savedSeeded = useRef(false);
   const replayEnvironmentOrigin = useRef('');
   const replayPackageDefaultEnvironment = useRef('');
+  useEffect(() => {
+    if (!api.listSutMetricProfiles) return;
+    const controller = new AbortController();
+    api.listSutMetricProfiles(controller.signal).then(value => {
+      if (!controller.signal.aborted) setSutMetricsProfiles(value.items || []);
+    }).catch(() => { if (!controller.signal.aborted) setSutMetricsProfiles([]); });
+    return () => controller.abort();
+  }, [api]);
   useEffect(()=>{
     const release=navigation.registerUnsavedChanges(Boolean((replaySourceJobId&&replayDirty)||(savedScenario&&savedDirty)),replaySourceJobId?'Edited Job replay settings':'Saved scenario edits');
     releaseReplayNavigationGuard.current=release;
@@ -380,7 +395,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       setPolicy(null);
       setWorkloads([]);
       setTiming({ warmup: '', rampUp: '', duration: '', rampDown: '' });
-      setAdvanced({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '' });
+      setAdvanced({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '', observability: '{}' });
     }
     if (!selectedPackage) {
       setServerLimits(null);
@@ -415,6 +430,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
             thresholds: JSON.stringify(asObject(nextPolicy.thresholds), null, 2),
             evidence: JSON.stringify(asObject(nextPolicy.evidence), null, 2),
             seed: nextPolicy.seed == null ? '' : String(nextPolicy.seed),
+            observability: '{}',
           });
         }
       })
@@ -773,7 +789,10 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
             </label>
             <JsonObjectField label="Root execution defaults" value={advanced.execution} onChange={value => updateAdvanced('execution', value)} />
             <JsonArrayField label="Package-relative Testdata paths" value={advanced.testdata} onChange={value => updateAdvanced('testdata', value)} />
+            <JsonObjectField label="SUT Metrics observability binding (att-load-observability/v1)" value={advanced.observability} onChange={value => updateAdvanced('observability', value)} />
           </div>
+          <p className="att-help">Bind only registered Metrics Profile IDs. Prometheus URLs and credentials are configured by a Server administrator and cannot be submitted in a scenario.</p>
+          {sutMetricsProfiles.length > 0 && <details><summary>Profiles available to this account ({sutMetricsProfiles.length})</summary><ul>{sutMetricsProfiles.map(profile => <li key={String(profile.id)}><code>{String(profile.id)}</code> · {String(profile.kind)} / {String(profile.category)} · {String(profile.name || profile.id)}</li>)}</ul></details>}
           {rawScenarioJson && <details><summary>Current complete scenario JSON</summary><CodeEditor value={rawScenarioJson} language="json" label="Complete scenario JSON" readOnly /></details>}
         </details>
       </section>

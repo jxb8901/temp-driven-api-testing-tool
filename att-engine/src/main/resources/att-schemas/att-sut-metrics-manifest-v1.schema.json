@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:sut-metrics-manifest:v1",
+  "title": "ATT companion SUT Metrics collection manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "state",
+    "complete",
+    "jobId",
+    "files",
+    "queries"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": {
+      "const": "att-sut-metrics-manifest/v1"
+    },
+    "state": {
+      "enum": [
+        "DISABLED",
+        "PENDING",
+        "COLLECTING",
+        "READY",
+        "PARTIAL",
+        "UNAVAILABLE",
+        "FAILED"
+      ]
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "jobId": {
+      "type": "string",
+      "pattern": "^J[A-F0-9]{16}$"
+    },
+    "snapshotId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "windowStart": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "windowEnd": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "required": [
+          "queryId",
+          "path",
+          "lengthBytes",
+          "sha256"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "queryId": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^series-[0-9]{4}\\.json$"
+          },
+          "lengthBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      }
+    },
+    "queries": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

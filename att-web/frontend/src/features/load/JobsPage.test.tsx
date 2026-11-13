@@ -491,7 +491,7 @@ describe('JobsPage React feature', () => {
 
     const tabs = [
       ['Overview', 'overview'], ['Live Output', 'live'], ['Events', 'events'],
-      ['Results', 'results'], ['Artifacts', 'artifacts'], ['Metrics', 'metrics'],
+      ['Results', 'results'], ['Artifacts', 'artifacts'], ['Metrics', 'metrics'], ['SUT Metrics', 'sutMetrics'],
     ];
     expect([...host.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toEqual(tabs.map(([label]) => label));
     for (const [, id] of tabs) {

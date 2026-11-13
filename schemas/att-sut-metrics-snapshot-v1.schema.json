@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:sut-metrics-snapshot:v1",
+  "title": "Immutable ATT Job SUT Metrics snapshot",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "snapshotId",
+    "createdAt",
+    "collection",
+    "livePreview",
+    "provenance",
+    "queries",
+    "sources",
+    "budgets"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": {
+      "const": "att-sut-metrics-snapshot/v1"
+    },
+    "snapshotId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "collection": {
+      "type": "object"
+    },
+    "livePreview": {
+      "type": "object"
+    },
+    "provenance": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "queries": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object"
+      }
+    },
+    "sources": {
+      "type": "object",
+      "maxProperties": 64,
+      "additionalProperties": {
+        "type": "object"
+      }
+    },
+    "budgets": {
+      "type": "object"
+    }
+  }
+}

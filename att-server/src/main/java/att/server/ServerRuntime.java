@@ -84,6 +84,7 @@ final class ServerRuntime implements AutoCloseable {
     final JobStore store;
     private final LoadProgressPersistence loadProgressPersistence;
     final AuthService auth;
+    final SutMetricsService sutMetrics;
     final ThreadPoolExecutor workers,streams,inspectors;
     private final ThreadPoolExecutor eventCompactions=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(1024),r->{Thread t=new Thread(r,"att-server-event-compactor");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
     private final ThreadPoolExecutor eventNotifications=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(4096),r->{Thread t=new Thread(r,"att-server-event-dispatch");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -188,7 +189,9 @@ final class ServerRuntime implements AutoCloseable {
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher,
                   LoadProgressPersistence loadProgressPersistence) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;try{this.auth=new AuthService(config,store);}catch(Exception failed){store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;
+        try{this.sutMetrics=new SutMetricsService(config.dataDir);}catch(Exception failed){store.close();throw failed;}
+        try{this.auth=new AuthService(config,store);}catch(Exception failed){sutMetrics.close();store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         manifestPublisher=new PackageManifestPublisher(config.dataDir,config.packageConfiguration,clock,
                 this::manifestEditableRoot,this::validateManifestCandidate,
                 (actor,action,packageId,detail)->store.audit(actor,action,null,packageId,detail));
@@ -675,8 +678,16 @@ final class ServerRuntime implements AutoCloseable {
         if(admissionSlots.availablePermits()==0){queueCapacityRejections.incrementAndGet();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
         if(!serverIssuedDraft&&(input.has("draftId")||input.has("inlineDebugInput")||input.has("inlineLoadScenario")
                 ||input.has("expectedRevisionDigest")||input.has("expectedSchemaRegistryDigest")||input.has("draftResourceId")
-                ||input.has("configurationProvenance")||input.has("registeredPackageId")))
+                ||input.has("configurationProvenance")||input.has("registeredPackageId")||input.has("sutMetricsSnapshot")))
             throw new IllegalArgumentException("Inline execution fields require a server-issued draft");
+        Map<String,Object> submittedSutSnapshot=null;
+        if(input.has("sutMetricsSnapshot")) {
+            if(!serverIssuedDraft||!"load".equals(command)||!input.path("sutMetricsSnapshot").isObject())
+                throw new IllegalArgumentException("SUT Metrics snapshots are server-issued Job metadata.");
+            submittedSutSnapshot=JSON.convertValue(input.path("sutMetricsSnapshot"),Map.class);
+            if(!SutMetricsService.SNAPSHOT_SCHEMA.equals(submittedSutSnapshot.get("schemaVersion")))
+                throw new IllegalArgumentException("Unsupported SUT Metrics snapshot schema.");
+        }
         if(serverIssuedDraft&&"load".equals(command)) {
             if(!scheduleIssued&&!fileBackedReplay)requireInlineLoadEnabled();
             JsonNode scenarioNode=input.get("inlineLoadScenario");
@@ -693,6 +704,7 @@ final class ServerRuntime implements AutoCloseable {
         if(root==null)throw new IllegalArgumentException("Unknown packageId");
         validatePackageRoot(root);
         ObjectNode pinned=((ObjectNode)input).deepCopy();
+        pinned.remove("sutMetricsSnapshot");
         String requestedEnvironment=optionalText(input,"environment");
         Map<String,Object> configuration;
         if(serverIssuedDraft&&input.path("configurationProvenance").isObject()) {
@@ -756,6 +768,30 @@ final class ServerRuntime implements AutoCloseable {
                 throw new JobConflictException("ATT-SERVER-REPLAY-DRAFT-STALE","The Package changed after replay validation. Your edits are still available; validate them again.");
             }
         }
+        Map<String,Object> sutSnapshot=null;
+        if(loadAdmission) {
+            String observationPrincipal=principal;
+            if(scheduleOccurrenceId!=null&&replayOwner!=null&&!replayOwner.isBlank())observationPrincipal=replayOwner;
+            if(submittedSutSnapshot!=null) {
+                sutMetrics.authorizeSnapshot(submittedSutSnapshot,observationPrincipal,sutAdminPrincipal(observationPrincipal));
+                sutSnapshot=submittedSutSnapshot;
+            } else {
+                Map<String,Object> scenario=null;
+                if(request.inlineLoadScenario!=null)scenario=JSON.convertValue(request.inlineLoadScenario,Map.class);
+                else if(executionSpec!=null) {
+                    JsonNode retainedScenario=JobExecutionSpec.parse(executionSpec).definition().path("scenario");
+                    if(retainedScenario.isObject())scenario=JSON.convertValue(retainedScenario,Map.class);
+                }
+                if(scenario==null&&request.scenario!=null) {
+                    LoadSchedule source=new LoadSchedule();source.packageId=packageId;source.environment=request.environment;source.scenario=request.scenario;
+                    scenario=readScheduledScenario(root,source.scenario);
+                }
+                Object rawObservability=scenario==null?null:scenario.get("observability");
+                if(rawObservability instanceof Map<?,?>)
+                    sutSnapshot=sutMetrics.resolveScenario(JSON.convertValue(rawObservability,Map.class),observationPrincipal,sutAdminPrincipal(observationPrincipal));
+                else if(rawObservability!=null)throw new IllegalArgumentException("scenario.observability must be an object.");
+            }
+        }
         if(loadAdmission&&!loadSlots.tryAcquire()){loadCapacityRejections.incrementAndGet();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
         if(!admissionSlots.tryAcquire()){if(loadAdmission)loadSlots.release();queueCapacityRejections.incrementAndGet();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
         AdmissionLease lease=new AdmissionLease(admissionSlots,loadAdmission?loadSlots:null);
@@ -763,6 +799,7 @@ final class ServerRuntime implements AutoCloseable {
         try {
             id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();request.jobId=id;
             jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
+            if(sutSnapshot!=null)sutMetrics.writeSnapshot(id,sutSnapshot);
             JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob,config.maxEventJournalBytes,
                     config.maxEventJournalMemoryBytes,eventCompactions,eventNotifications,this::recordCompactionFailure);
             Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
@@ -1279,6 +1316,75 @@ final class ServerRuntime implements AutoCloseable {
         if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
         if(store.get(id)==null)throw new NotFoundException();
         if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
+    }
+    private boolean sutAdminPrincipal(String principal) {
+        if(!"local".equals(config.authMode)||principal==null)return false;
+        try {Map<String,Object> user=store.authUser(principal);return user!=null&&Boolean.TRUE.equals(user.get("active"))&&"ADMIN".equals(user.get("role"));}
+        catch(Exception unavailable){return false;}
+    }
+    Map<String,Object> sutMetricSources(String principal,boolean admin) { return sutMetrics.listSources(principal,admin); }
+    Map<String,Object> sutMetricProfiles(String principal,boolean admin) { return sutMetrics.listProfiles(principal,admin); }
+    Map<String,Object> saveSutMetricSource(Map<String,Object> value) throws Exception { return sutMetrics.upsertSource(value); }
+    Map<String,Object> saveSutMetricProfile(Map<String,Object> value) throws Exception { return sutMetrics.upsertProfile(value); }
+    Map<String,Object> deleteSutMetricSource(String id) throws Exception { return sutMetrics.deleteSource(id); }
+    Map<String,Object> deleteSutMetricProfile(String id) throws Exception { return sutMetrics.deleteProfile(id); }
+    Map<String,Object> testSutMetricSource(String id) throws Exception { return sutMetrics.testSource(id); }
+    Map<String,Object> previewSutMetrics(Map<String,Object> observability,String principal,boolean admin) {
+        return sutMetrics.previewResolution(observability,principal,admin);
+    }
+    Map<String,Object> sutMetricsJob(String id,String principal,boolean admin,String range,String step,String targetId,
+                                     int offset,int limit,String queryId,boolean live) throws Exception {
+        Map<String,Object> row=store.get(id);
+        if(row==null||!"load".equals(row.get("command")))throw new NotFoundException();
+        Map<String,Object> snapshot=sutMetrics.snapshotForJob(id);
+        if(snapshot==null)return sutFields("schemaVersion",SutMetricsService.COLLECTION_SCHEMA,"state","DISABLED","jobId",id,"items",List.of());
+        sutMetrics.authorizeSnapshot(snapshot,principal,admin);
+        if(live) {
+            Instant started=liveLoadStart(id,row);
+            Map<String,Object> preview=sutMetrics.livePreview(id,principal,admin,started,range,step,targetId);
+            return preview;
+        }
+        Map<String,Object> page=sutMetrics.readCollectionPage(id,offset,limit,queryId);
+        Map<String,Object> response=new LinkedHashMap<>();response.put("schemaVersion","att-sut-metrics-job/v1");
+        response.put("state",page.get("manifest") instanceof Map<?,?> manifest?manifest.get("state"):"PENDING");
+        response.put("jobId",id);response.put("snapshotId",snapshot.get("snapshotId"));
+        response.put("livePreview",snapshot.get("livePreview"));response.put("collection",page.get("manifest"));
+        response.put("items",page.get("items"));response.put("nextOffset",page.get("nextOffset"));return response;
+    }
+    private Instant liveLoadStart(String id,Map<String,Object> row) {
+        Job active=jobs.get(id);
+        if(active!=null&&active.loadProgress!=null&&active.loadProgress.get("elapsedMs") instanceof Number elapsed&&elapsed.longValue()>=0)
+            return clock.instant().minusMillis(elapsed.longValue());
+        if(active!=null&&!active.terminal())return null;
+        try {
+            String result=String.valueOf(row.get("resultJson"));JsonNode root=JSON.readTree(result);
+            JsonNode summary=root.path("summary"),execution=summary.path("execution");
+            Instant start=parseInstant(execution.path("startedAt").asText(null));
+            if(start!=null)return start;
+            start=parseInstant(summary.path("startedAt").asText(null));if(start!=null)return start;
+        } catch(Exception ignored) { }
+        if(active!=null&&active.loadProgress!=null&&active.finishedAt!=null&&active.loadProgress.get("elapsedMs") instanceof Number elapsed&&elapsed.longValue()>0)
+            return active.finishedAt.minusMillis(elapsed.longValue());
+        return null;
+    }
+    private static Instant parseInstant(String value) { try {return value==null?null:Instant.parse(value);}catch(Exception invalid){return null;} }
+    private Instant[] loadExecutionWindow(Job job) {
+        Instant start=null,end=null;
+        try {
+            JsonNode root=JSON.readTree(job.resultJson==null?"{}":job.resultJson),summary=root.path("summary"),execution=summary.path("execution");
+            start=parseInstant(execution.path("startedAt").asText(null));end=parseInstant(execution.path("endedAt").asText(null));
+            if(start==null)start=parseInstant(summary.path("startedAt").asText(null));
+            if(end==null)end=parseInstant(summary.path("endedAt").asText(null));
+        } catch(Exception ignored) { }
+        if(start==null&&job.loadProgress!=null&&job.finishedAt!=null&&job.loadProgress.get("elapsedMs") instanceof Number elapsed&&elapsed.longValue()>0)
+            start=job.finishedAt.minusMillis(elapsed.longValue());
+        if(end==null)end=job.finishedAt;
+        return new Instant[]{start,end};
+    }
+    private static Map<String,Object> sutFields(Object... values) {
+        Map<String,Object> result=new LinkedHashMap<>();
+        for(int i=0;i<values.length;i+=2)result.put((String)values[i],values[i+1]);
+        return result;
     }
     List<Map<String,Object>> jobsFor(String principal,String search) throws Exception {
         return jobsFor(principal,search,false);
@@ -1872,9 +1978,15 @@ final class ServerRuntime implements AutoCloseable {
         return quickLoadDraftView(draft);
     }
     Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal) throws Exception {
-        return createAdvancedLoadDraft(input,principal,null);
+        return createAdvancedLoadDraft(input,principal,null,false);
+    }
+    Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal,boolean administrator) throws Exception {
+        return createAdvancedLoadDraft(input,principal,null,administrator);
     }
     private Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal,Map<String,Object> approvedConfiguration) throws Exception {
+        return createAdvancedLoadDraft(input,principal,approvedConfiguration,false);
+    }
+    private Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal,Map<String,Object> approvedConfiguration,boolean administrator) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
@@ -1898,9 +2010,13 @@ final class ServerRuntime implements AutoCloseable {
             throw new IllegalStateException("Load validation Worker returned an invalid response");
         @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
         enforceInlineLoadLimits(scenario);
+        Map<String,Object> sutSnapshot=null;
+        Object rawObservability=scenario.get("observability");
+        if(rawObservability instanceof Map<?,?>)sutSnapshot=sutMetrics.resolveScenario(JSON.convertValue(rawObservability,Map.class),principal,administrator||sutAdminPrincipal(principal));
+        else if(rawObservability!=null)throw new IllegalArgumentException("scenario.observability must be an object.");
         AdvancedLoadDraftState draft=new AdvancedLoadDraftState("A"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
                 principal,packageId,environment,(String)rawModel,(String)rawDigest,scenario,((Boolean)rawSensitive).booleanValue(),inspected,
-                clock.instant().plusMillis(DRAFT_TTL_MILLIS), scenarioInput, input.has("templateComposition"), ((Boolean)rawAuthoredSensitive).booleanValue());
+                sutSnapshot,clock.instant().plusMillis(DRAFT_TTL_MILLIS), scenarioInput, input.has("templateComposition"), ((Boolean)rawAuthoredSensitive).booleanValue());
         synchronized(draftLock) {
             expireDrafts();
             checkDraftCapacity(principal);
@@ -2326,6 +2442,7 @@ final class ServerRuntime implements AutoCloseable {
             internal.set("configurationProvenance",JSON.valueToTree(retainedConfiguration(draft.preview)));
             internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
             internal.put("loadModel",draft.model);internal.set("inlineLoadScenario",JSON.valueToTree(draft.scenario));
+            if(draft.sutMetricsSnapshot!=null)internal.set("sutMetricsSnapshot",JSON.valueToTree(draft.sutMetricsSnapshot));
             internal.put("expectedRevisionDigest",draft.revisionDigest);
             applyInspectionPolicy(internal,draft.packageId);
             requireLiveDraft(draft.expiresAt);
@@ -2604,6 +2721,7 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
         view.put("configuration",draft.preview.get("configuration"));view.put("environment",draft.environment);view.put("model",draft.model);view.put("revisionDigest",draft.revisionDigest);
         view.put("preview",draft.preview.get("preview"));view.put("previewYaml",draft.preview.get("previewYaml"));
+        if(draft.sutMetricsSnapshot!=null)view.put("sutMetrics",sutMetrics.previewSnapshot(draft.sutMetricsSnapshot));
         view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));view.put("diagnostics",Collections.emptyList());
         view.put("expiresAt",draft.expiresAt.toString());return view;
     }
@@ -4527,6 +4645,10 @@ final class ServerRuntime implements AutoCloseable {
                 store.update(j);
             }
         }
+        if("load".equals(j.command)) {
+            Instant[] window=loadExecutionWindow(j);
+            sutMetrics.jobFinished(j.id,window[0],window[1]);
+        }
     }
     private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}
     private Map<String,Object> append(Job j,String type,Map<String,?> data) throws Exception {
@@ -5408,6 +5530,7 @@ final class ServerRuntime implements AutoCloseable {
         eventNotifications.shutdown();terminateExecutor(eventNotifications,"event notifications");
         eventCompactions.shutdown();terminateExecutor(eventCompactions,"event compactions");
         synchronized(terminalEventCacheLock){terminalEventCache.clear();terminalEventCacheWeight=0L;}
+        sutMetrics.close();
         try {store.close();}catch(Exception failed){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).log(java.util.logging.Level.WARNING,"ATT database cleanup failed",failed);}
     }
     static void terminateExecutor(java.util.concurrent.ExecutorService executor,String name) {
@@ -5539,7 +5662,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     private static final class AdvancedLoadDraftState {
         final String id,principal,packageId,environment,model,revisionDigest;
-        final Map<String,Object> scenario,preview;
+        final Map<String,Object> scenario,preview,sutMetricsSnapshot;
         final boolean containsSensitiveValues,containsSensitiveAuthoredValues,templateComposition;
         final Map<String,Object> authored;
         final Instant expiresAt;
@@ -5547,10 +5670,11 @@ final class ServerRuntime implements AutoCloseable {
         String savedScenarioId,savedScenarioOwner;
         long savedScenarioRevision;
         AdvancedLoadDraftState(String id,String principal,String packageId,String environment,String model,
-                               String revisionDigest,Map<String,Object> scenario,boolean containsSensitiveValues,Map<String,Object> preview,
+                               String revisionDigest,Map<String,Object> scenario,boolean containsSensitiveValues,Map<String,Object> preview,Map<String,Object> sutMetricsSnapshot,
                                Instant expiresAt,Map<String,Object> authored,boolean templateComposition,boolean containsSensitiveAuthoredValues) {
             this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
             this.model=model;this.revisionDigest=revisionDigest;this.scenario=deepMap(scenario);
+            this.sutMetricsSnapshot=sutMetricsSnapshot==null?null:deepMap(sutMetricsSnapshot);
             this.containsSensitiveValues=containsSensitiveValues;this.preview=deepMap(preview);this.expiresAt=expiresAt;
             this.authored=deepMap(authored);this.templateComposition=templateComposition;this.containsSensitiveAuthoredValues=containsSensitiveAuthoredValues;
         }

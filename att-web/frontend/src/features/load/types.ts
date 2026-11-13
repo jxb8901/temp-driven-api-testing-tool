@@ -244,6 +244,28 @@ export interface JobResultResponse {
   diagnostic?: Record<string, unknown> | null;
 }
 
+export interface SutMetricPoint { timestamp: string; timestampEpochMs: number; value: number }
+export interface SutMetricSeries { labels: Record<string, string>; samples: SutMetricPoint[]; coverage?: Record<string, unknown> }
+export interface SutMetricItem {
+  id?: string; queryId?: string; metricId: string; title: string; category?: string; targetId: string; targetType?: string;
+  sourceId?: string; sourceName?: string; unit: string; queryStatus?: string; series?: SutMetricSeries[];
+  coverage?: Record<string, unknown>; error?: string;
+}
+export interface SutMetricsManifest {
+  schemaVersion?: string; state?: string; complete?: boolean; createdAt?: string; updatedAt?: string;
+  windowStart?: string; windowEnd?: string; step?: string; coverage?: Record<string, unknown>;
+  diagnostics?: Array<{ code?: string; message?: string }>; files?: Array<Record<string, unknown>>;
+}
+export interface SutMetricsJobResponse {
+  schemaVersion?: string; state?: string; jobId?: string; snapshotId?: string;
+  collection?: SutMetricsManifest | null; livePreview?: Record<string, unknown>;
+  items?: SutMetricItem[]; nextOffset?: number | null;
+}
+export interface SutMetricsLiveResponse {
+  schemaVersion?: string; state?: string; snapshotId?: string; windowStart?: string; windowEnd?: string;
+  sourceQueryTime?: string; sampleCount?: number; message?: string; items?: SutMetricItem[];
+}
+
 export interface JobArtifact {
   path: string;
   sha256?: string;
@@ -340,6 +362,7 @@ export interface LoadJobsApi {
   rerunJob?(jobId: string, intentId: string, sourcePolicy?: 'current' | 'strict'): Promise<{ jobId: string }>;
 
   listLoadCatalog?(packageId: string, input?: { query?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<LoadCatalogPage>;
+  listSutMetricProfiles?(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> }>;
   getLoadCatalogDetail?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<LoadCatalogDetail>;
   getLoadSource?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<{ available: boolean; logicalPath?: string; text?: string; redacted?: boolean; reason?: string }>;
   submitLoadScenario?(input: { packageId: string; scenario: string; environment?: string }): Promise<JobAccepted>;
@@ -359,6 +382,8 @@ export interface LoadJobsApi {
   listJobs(input?: { principal?: string; pinnedOnly?: boolean; signal?: AbortSignal }): Promise<JobSummary[]>;
   getJob(jobId: string, signal?: AbortSignal): Promise<JobView>;
   getJobResult(jobId: string, signal?: AbortSignal): Promise<JobResultResponse>;
+  getJobSutMetrics?(jobId: string, input?: { offset?: number; limit?: number; queryId?: string; signal?: AbortSignal }): Promise<SutMetricsJobResponse>;
+  getJobSutMetricsLive?(jobId: string, input?: { range?: string; step?: string; targetId?: string; signal?: AbortSignal }): Promise<SutMetricsLiveResponse>;
   getJobArtifacts(jobId: string, signal?: AbortSignal): Promise<JobArtifact[]>;
   getJobArtifactArchive?(jobId: string, offset?: number, signal?: AbortSignal): Promise<JobArtifactArchive>;
   getJobArtifactOverview?(jobId: string, signal?: AbortSignal): Promise<JobArtifactOverview>;
@@ -407,8 +432,8 @@ export interface LoadFeatureProps {
 }
 
 export interface JobsFeatureProps {
-  initialTab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics';
-  onTabChange?(tab: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics'): void;
+  initialTab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics';
+  onTabChange?(tab: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics'): void;
   standalone?: boolean;
   executionType?: 'load';
   schedulingEnabled?: boolean;

@@ -40,6 +40,9 @@
     },
     "execution": {
       "$ref": "#/$defs/rootExecution"
+    },
+    "observability": {
+      "$ref": "#/$defs/observability"
     }
   },
   "allOf": [
@@ -731,6 +734,123 @@
         "^x-": {}
       },
       "additionalProperties": false
+    },
+    "observability": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "collections"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "att-load-observability/v1"
+        },
+        "collections": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/observabilityBinding"
+          }
+        },
+        "collection": {
+          "$ref": "#/$defs/observabilityCollection"
+        },
+        "livePreview": {
+          "$ref": "#/$defs/observabilityLivePreview"
+        }
+      }
+    },
+    "observabilityBinding": {
+      "type": "object",
+      "required": [
+        "profile"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "tenant": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "targetIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number"
+            ]
+          }
+        }
+      }
+    },
+    "observabilityCollection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "post-run"
+        },
+        "step": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(ms|s|m|h|d|w|y)$"
+        },
+        "before": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(ms|s|m|h|d|w|y)$"
+        },
+        "after": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(ms|s|m|h|d|w|y)$"
+        }
+      }
+    },
+    "observabilityLivePreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "refreshInterval": {
+          "const": "30s"
+        },
+        "defaultRange": {
+          "const": "15m"
+        }
+      }
     }
   },
   "patternProperties": {
