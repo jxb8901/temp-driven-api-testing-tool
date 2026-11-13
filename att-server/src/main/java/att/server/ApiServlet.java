@@ -58,6 +58,9 @@ public final class ApiServlet extends HttpServlet {
     }
     @Override protected void doGet(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String path=path(req);String requestId=requestId(req,res);
+        if(path.equals("/sut-metrics/sources")||path.equals("/sut-metrics/profiles")
+                ||path.matches("/jobs/[^/]+/sut-metrics(?:/.*)?"))
+            res.setHeader("Cache-Control","private, no-store");
         try {
             if(path.startsWith("/auth/")){authGet(req,res,path,requestId);return;}
             if("/health".equals(path)){json(res,200,Map.of("status","UP","version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
@@ -126,6 +129,7 @@ public final class ApiServlet extends HttpServlet {
             }
             if(path.startsWith("/jobs/"))runtime.requireJobOwner(segment(path,2),principal);
             if(path.matches("/jobs/[^/]+/sut-metrics(?:/live|/series)?")) {
+                res.setHeader("Cache-Control","private, no-store");
                 if(!requireSutMetricsReadAccess(req,res,requestId,principal))return;
                 String id=segment(path,2);boolean admin;
                 try {admin=systemAdminCapability(req,principal);}
@@ -207,6 +211,8 @@ public final class ApiServlet extends HttpServlet {
     }
     @Override protected void doPost(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req);String authorizationPrincipal=principal(req);
+        if(path.startsWith("/admin/sut-metrics/")||"/sut-metrics/preview".equals(path))
+            res.setHeader("Cache-Control","private, no-store");
         if(path.startsWith("/auth/")){authPost(req,res,path,requestId);return;}
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(path.matches("/admin/sut-metrics/(?:sources|profiles|sources/[^/]+/test|profiles/preview)")) {
@@ -227,6 +233,7 @@ public final class ApiServlet extends HttpServlet {
                 saved.put("requestId",requestId);json(res,201,saved);return;
             } catch(SutMetricsService.CapacityException full){error(res,503,"ATT-SUT-METRICS-CAPACITY","SUT Metrics capacity is full; retry shortly",requestId);}
               catch(SutMetricsService.SutMetricsTimeoutException timeout){error(res,504,"ATT-SUT-METRICS-TIMEOUT","SUT Metrics source query timed out",requestId);}
+              catch(SutMetricsRequestTooLargeException oversized){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","SUT Metrics request exceeds the configured size limit",requestId);}
               catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
               catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","SUT Metrics administration could not be completed",requestId);getServletContext().log("SUT Metrics administration failed id="+requestId,failure);}
             return;
@@ -243,6 +250,7 @@ public final class ApiServlet extends HttpServlet {
             } catch(ServerRuntime.NotFoundException denied){error(res,404,"ATT-SERVER-NOT-FOUND","SUT Metrics resource was not found",requestId);}
               catch(SutMetricsService.CapacityException full){error(res,503,"ATT-SUT-METRICS-CAPACITY","SUT Metrics capacity is full; retry shortly",requestId);}
               catch(SutMetricsService.SutMetricsTimeoutException timeout){error(res,504,"ATT-SUT-METRICS-TIMEOUT","SUT Metrics source query timed out",requestId);}
+              catch(SutMetricsRequestTooLargeException oversized){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","SUT Metrics request exceeds the configured size limit",requestId);}
               catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
               catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","SUT Metrics resolution could not be completed",requestId);}
             return;
@@ -363,6 +371,7 @@ public final class ApiServlet extends HttpServlet {
     }
     @Override protected void doDelete(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req),principal=principal(req);
+        if(path.startsWith("/admin/sut-metrics/"))res.setHeader("Cache-Control","private, no-store");
         if(path.startsWith("/auth/")){authDelete(req,res,path,requestId);return;}
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(path.matches("/admin/sut-metrics/(?:sources|profiles)/[^/]+")) {
@@ -555,7 +564,7 @@ public final class ApiServlet extends HttpServlet {
         if(!isJson(req.getContentType()))throw new IllegalArgumentException("Content-Type must be application/json");
         int limit=Math.min(runtime.config.maxRequestBytes,1024*1024);
         byte[] bytes=req.getInputStream().readNBytes(limit+1);
-        if(bytes.length>limit)throw new IllegalArgumentException("SUT Metrics request body exceeds 1 MiB");
+        if(bytes.length>limit)throw new SutMetricsRequestTooLargeException();
         try {
             JsonNode body=ServerRuntime.JSON.readTree(bytes);
             if(body==null||!body.isObject())throw new IllegalArgumentException("A JSON object is required");
@@ -946,6 +955,9 @@ public final class ApiServlet extends HttpServlet {
                     "request validation","Fetch the next bounded page.",null);
         }
     }
+    private static final class SutMetricsRequestTooLargeException extends IllegalArgumentException {
+        SutMetricsRequestTooLargeException(){super("SUT Metrics request exceeds the configured size limit");}
+    }
     private static boolean parseOptionalBoolean(String raw,String name){if(raw==null||raw.isEmpty())return false;if("true".equalsIgnoreCase(raw))return true;if("false".equalsIgnoreCase(raw))return false;throw new IllegalArgumentException(name+" must be true or false");}
     private static String principalSearch(HttpServletRequest req){String value=req.getParameter("principal");if(value==null)return null;value=value.strip();if(value.codePointCount(0,value.length())>120)throw new IllegalArgumentException("principal search must be at most 120 characters");for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))throw new IllegalArgumentException("principal search contains an invalid character");return value.isEmpty()?null:value;}
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
@@ -1049,6 +1061,8 @@ public final class ApiServlet extends HttpServlet {
                 limitName="server.inspection.capacity";remediation="Retry after active package inspections release capacity.";
             }else if("ATT-SERVER-STREAM-CAPACITY".equals(code)){
                 limitName="server.sse.observers";remediation="Retry after an event-stream observer disconnects.";
+            }else if("ATT-SUT-METRICS-CAPACITY".equals(code)){
+                limitName="server.sutMetrics.livePreviewCapacity";remediation="Retry after active SUT Metrics preview queries release capacity.";
             }else return null;
             return att.server.api.LimitDiagnostic.create(code,summary,limitName,null,null,"server.admission",
                     att.server.api.LimitOutcome.SUBMISSION_REJECTED,"admission",remediation,null);

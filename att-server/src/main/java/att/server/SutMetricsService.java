@@ -43,6 +43,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Function;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -69,6 +70,7 @@ final class SutMetricsService implements AutoCloseable {
     static final long MAX_LIVE_PREVIEW_SAMPLES = 100_000L;
     static final int MAX_SERIES_FILE_BYTES = 2 * 1024 * 1024;
     private static final Pattern ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,79}");
+    private static final Pattern JOB_ID = Pattern.compile("J[0-9A-F]{16}");
     private static final Pattern PARAM = Pattern.compile("[A-Za-z][A-Za-z0-9_]{0,63}");
     private static final Pattern SECRET_REF = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
     private static final Pattern DURATION = Pattern.compile("([1-9][0-9]*)(ms|s|m|h|d|w|y)");
@@ -77,6 +79,7 @@ final class SutMetricsService implements AutoCloseable {
     private final ObjectMapper json = ServerRuntime.JSON;
     private final Path dataDir, jobsRoot, catalogPath;
     private final Set<String> allowedPrometheusHosts;
+    private final Function<String, String> secretResolver;
     private final Object catalogLock = new Object();
     private Map<String, Map<String, Object>> sources = new LinkedHashMap<>();
     private Map<String, Map<String, Object>> profiles = new LinkedHashMap<>();
@@ -91,12 +94,22 @@ final class SutMetricsService implements AutoCloseable {
         this(dataDir, configuredAllowedPrometheusHosts());
     }
 
+    SutMetricsService(Path dataDir, Function<String, String> secretResolver) throws Exception {
+        this(dataDir, configuredAllowedPrometheusHosts(), secretResolver);
+    }
+
     SutMetricsService(Path dataDir, Set<String> allowedPrometheusHosts) throws Exception {
+        this(dataDir, allowedPrometheusHosts, ref -> System.getenv("ATT_SECRET_" + ref));
+    }
+
+    SutMetricsService(Path dataDir, Set<String> allowedPrometheusHosts, Function<String, String> secretResolver) throws Exception {
         this.dataDir = dataDir.toAbsolutePath().normalize();
         this.jobsRoot = this.dataDir.resolve("jobs");
         this.catalogPath = this.dataDir.resolve("sut-metrics-catalog.json");
         this.allowedPrometheusHosts = normalizeAllowedHosts(allowedPrometheusHosts);
+        this.secretResolver = java.util.Objects.requireNonNull(secretResolver, "secretResolver");
         loadCatalog();
+        recoverInterruptedCollections();
     }
 
     Map<String, Object> listSources(String principal, boolean admin) {
@@ -317,6 +330,74 @@ final class SutMetricsService implements AutoCloseable {
         JsonNode value = json.readTree(manifest.toFile());
         if (!COLLECTION_SCHEMA.equals(value.path("schemaVersion").asText())) throw new IllegalStateException("Unsupported SUT Metrics manifest schema.");
         return json.convertValue(value, Map.class);
+    }
+
+    List<String> pendingCollectionJobIds() throws Exception {
+        if (!Files.isDirectory(jobsRoot, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(jobsRoot)) return List.of();
+        List<String> pending = new ArrayList<>();
+        try (var jobDirectories = Files.newDirectoryStream(jobsRoot)) {
+            for (Path jobDirectory : jobDirectories) {
+                String jobId = jobDirectory.getFileName().toString();
+                if (!JOB_ID.matcher(jobId).matches() || !Files.isDirectory(jobDirectory, LinkOption.NOFOLLOW_LINKS)
+                        || Files.isSymbolicLink(jobDirectory)) continue;
+                Path metricsDirectory = jobDirectory.resolve("sut-metrics");
+                if (!Files.isDirectory(metricsDirectory, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(metricsDirectory)) continue;
+                Path snapshot = metricsDirectory.resolve("snapshot.json");
+                if (!Files.isRegularFile(snapshot, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(snapshot)) continue;
+                Path manifest = metricsDirectory.resolve("manifest.json");
+                if (!Files.exists(manifest, LinkOption.NOFOLLOW_LINKS)) { pending.add(jobId); continue; }
+                if (!Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(manifest)
+                        || Files.size(manifest) > 8L * 1024 * 1024) continue;
+                try {
+                    JsonNode value = json.readTree(manifest.toFile());
+                    if (COLLECTION_SCHEMA.equals(value.path("schemaVersion").asText())
+                            && "PENDING".equals(value.path("state").asText())) pending.add(jobId);
+                } catch (Exception malformed) { /* Preserve the corrupt manifest for the normal integrity error path. */ }
+            }
+        }
+        pending.sort(String::compareTo);
+        return pending;
+    }
+
+    private void recoverInterruptedCollections() throws Exception {
+        if (!Files.isDirectory(jobsRoot, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(jobsRoot)) return;
+        try (var jobDirectories = Files.newDirectoryStream(jobsRoot)) {
+            for (Path jobDirectory : jobDirectories) {
+                if (!JOB_ID.matcher(jobDirectory.getFileName().toString()).matches()
+                        || !Files.isDirectory(jobDirectory, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(jobDirectory)) continue;
+                Path directory = jobDirectory.resolve("sut-metrics");
+                if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(directory)) continue;
+                Path file = directory.resolve("manifest.json");
+                if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(file)
+                        || Files.size(file) > 8L * 1024 * 1024) continue;
+                JsonNode value;
+                try { value = json.readTree(file.toFile()); }
+                catch (Exception malformed) { continue; }
+                if (!COLLECTION_SCHEMA.equals(value.path("schemaVersion").asText())
+                        || !"COLLECTING".equals(value.path("state").asText())) continue;
+
+                Map<String, Object> manifest = json.convertValue(value, Map.class);
+                List<Map<String, Object>> diagnostics = new ArrayList<>(listOfMaps(manifest.get("diagnostics")));
+                diagnostics.add(fields("code", "SERVER_RESTART_INTERRUPTED",
+                        "message", "The Server restarted before SUT Metrics collection completed."));
+                List<Map<String, Object>> published = listOfMaps(manifest.get("files"));
+                Set<String> publishedPaths = new HashSet<>();
+                for (Map<String, Object> item : published) if (item.get("path") instanceof String path) publishedPaths.add(path);
+                manifest.put("state", published.isEmpty() ? "FAILED" : "PARTIAL");
+                manifest.put("complete", Boolean.FALSE);
+                manifest.put("diagnostics", diagnostics);
+                writeManifest(directory, manifest);
+
+                try (var seriesFiles = Files.newDirectoryStream(directory, "series-*.json")) {
+                    for (Path seriesFile : seriesFiles) {
+                        if (!publishedPaths.contains(seriesFile.getFileName().toString())
+                                && seriesFile.getFileName().toString().matches("series-[0-9]{4}\\.json")
+                                && Files.isRegularFile(seriesFile, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(seriesFile))
+                            Files.deleteIfExists(seriesFile);
+                    }
+                }
+            }
+        }
     }
 
     Map<String, Object> readCollectionPage(String jobId, int offset, int limit, String queryId,
@@ -716,7 +797,7 @@ final class SutMetricsService implements AutoCloseable {
         SSLContext context = SSLContext.getInstance("TLS"); context.init(null, factoryTrust.getTrustManagers(), new SecureRandom()); return context;
     }
 
-    private static void addAuthentication(HttpRequest.Builder builder, Map<String, Object> source) {
+    private void addAuthentication(HttpRequest.Builder builder, Map<String, Object> source) {
         Map<String, Object> auth = objectOrEmpty(source.get("auth")); String mode = String.valueOf(auth.getOrDefault("mode", "NONE"));
         if ("BEARER".equals(mode)) builder.header("Authorization", "Bearer " + secret(String.valueOf(auth.get("secretRef"))));
         else if ("BASIC".equals(mode)) builder.header("Authorization", "Basic " + Base64.getEncoder().encodeToString(secret(String.valueOf(auth.get("secretRef"))).getBytes(StandardCharsets.UTF_8)));
@@ -1423,7 +1504,7 @@ final class SutMetricsService implements AutoCloseable {
         return value;
     }
     private static void validateSecretRef(String ref) { if (!SECRET_REF.matcher(ref).matches()) throw new IllegalArgumentException("Secret references must be uppercase environment variable names."); }
-    private static String secret(String ref) { validateSecretRef(ref); String value = System.getenv("ATT_SECRET_" + ref); if (value == null || value.isBlank()) throw new IllegalArgumentException("A configured Server secret reference is unavailable."); return value; }
+    private String secret(String ref) { validateSecretRef(ref); String value = secretResolver.apply(ref); if (value == null || value.isBlank()) throw new IllegalArgumentException("A configured Server secret reference is unavailable."); return value; }
     private static String enc(String value) { return URLEncoder.encode(value, StandardCharsets.UTF_8); }
     private static byte[] readBounded(InputStream input, int maximum) throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(maximum, 8192)); byte[] buffer = new byte[8192]; int count, total = 0;
@@ -1433,6 +1514,7 @@ final class SutMetricsService implements AutoCloseable {
     private static String safeFailureCode(Exception failure) {
         String message = failure.getMessage() == null ? "" : failure.getMessage().toLowerCase(Locale.ROOT);
         if (message.contains("timeout") || failure instanceof java.net.http.HttpTimeoutException) return "PROMETHEUS_TIMEOUT";
+        if (message.contains("response exceeds its configured byte limit")) return "PROMETHEUS_RESPONSE_TOO_LARGE";
         if (message.contains("too many") || message.contains("budget") || message.contains("limit")) return "QUERY_BUDGET_EXCEEDED";
         if (message.contains("http ")) return "PROMETHEUS_HTTP_ERROR";
         return "PROMETHEUS_UNAVAILABLE";

@@ -2,6 +2,8 @@ package att.server;
 
 import att.server.api.WorkerRequest;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletConfig;
 import jakarta.servlet.ServletContext;
@@ -18,6 +20,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,8 +28,18 @@ import java.security.Principal;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -181,6 +194,260 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void sutMetricsRoutesEnforceAdminWritesBoundBodiesAndFilterSourcesForReaders() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("sut-metrics-route-packages"));
+        createPackage(packages.resolve("p"));
+        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"sut-metrics-route-data",DEFAULT_INSPECTION_TIMEOUT_MS,
+                null,workerLibraries("sut-metrics-route-libs"),true)) {
+            ApiServlet servlet=servlet(runtime);
+            String userRole=runtime.config.authorization.userRole;
+            String adminRole=runtime.config.authorization.adminRole;
+            byte[] source=ServerRuntime.JSON.writeValueAsBytes(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom",
+                    "name","Local Prometheus","url","http://127.0.0.1:9090","auth",Map.of("mode","BEARER","secretRef","PROM_TOKEN"),
+                    "readers",List.of("alice"),"readRoles",List.of(),"allowedTenants",List.of("tenant-a"),"defaultTenant","tenant-a"));
+
+            Captured anonymousRead=invokeAs(servlet,"GET","/sut-metrics/sources",Collections.emptyMap(),new byte[0],null,Set.of());
+            assertEquals(401,anonymousRead.status);
+            assertEquals("private, no-store",anonymousRead.headers.get("Cache-Control"));
+            Captured readerWrite=invokeAs(servlet,"POST","/admin/sut-metrics/sources",Collections.emptyMap(),source,"alice",Set.of(userRole));
+            assertEquals(403,readerWrite.status);
+            assertEquals("private, no-store",readerWrite.headers.get("Cache-Control"));
+
+            byte[] oversized=new byte[1025];
+            Captured oversizedWrite=invokeAs(servlet,"POST","/admin/sut-metrics/sources",Collections.emptyMap(),oversized,"admin",Set.of(adminRole));
+            JsonNode diagnostic=ServerRuntime.JSON.readTree(oversizedWrite.body()).path("diagnostics").path(0);
+            assertEquals(413,oversizedWrite.status);
+            assertEquals("ATT-SERVER-REQUEST-TOO-LARGE",diagnostic.path("code").asText());
+            assertEquals("server.maxRequestBytes",diagnostic.path("limitName").asText());
+            assertEquals("private, no-store",oversizedWrite.headers.get("Cache-Control"));
+
+            Captured adminWrite=invokeAs(servlet,"POST","/admin/sut-metrics/sources",Collections.emptyMap(),source,"admin",Set.of(adminRole));
+            assertEquals(201,adminWrite.status,new String(adminWrite.body(),StandardCharsets.UTF_8));
+            Captured readerList=invokeAs(servlet,"GET","/sut-metrics/sources",Collections.emptyMap(),new byte[0],"alice",Set.of(userRole));
+            JsonNode readerItem=ServerRuntime.JSON.readTree(readerList.body()).path("items").path(0);
+            assertEquals(200,readerList.status);
+            assertEquals("private, no-store",readerList.headers.get("Cache-Control"));
+            assertEquals("Local Prometheus",readerItem.path("name").asText());
+            assertTrue(readerItem.path("authConfigured").asBoolean());
+            assertFalse(readerItem.has("url"),readerItem.toString());
+            assertFalse(readerList.bodyText().contains("PROM_TOKEN"),readerList.bodyText());
+
+            byte[] roleSource=ServerRuntime.JSON.writeValueAsBytes(Map.of("schemaVersion","att-sut-metrics-source/v1","id","role-prom",
+                    "name","Role-readable Prometheus","url","http://127.0.0.1:9091","auth",Map.of("mode","NONE"),
+                    "readers",List.of(),"readRoles",List.of("USER"),"allowedTenants",List.of()));
+            Captured roleWrite=invokeAs(servlet,"POST","/admin/sut-metrics/sources",Collections.emptyMap(),roleSource,"admin",Set.of(adminRole));
+            assertEquals(201,roleWrite.status,new String(roleWrite.body(),StandardCharsets.UTF_8));
+
+            Captured otherReader=invokeAs(servlet,"GET","/sut-metrics/sources",Collections.emptyMap(),new byte[0],"bob",Set.of(userRole));
+            JsonNode roleItem=ServerRuntime.JSON.readTree(otherReader.body()).path("items").path(0);
+            assertEquals(200,otherReader.status);
+            assertEquals(1,ServerRuntime.JSON.readTree(otherReader.body()).path("items").size());
+            assertEquals("role-prom",roleItem.path("id").asText());
+            Captured adminList=invokeAs(servlet,"GET","/sut-metrics/sources",Collections.emptyMap(),new byte[0],"admin",Set.of(adminRole));
+            JsonNode adminItem=ServerRuntime.JSON.readTree(adminList.body()).path("items").path(0);
+            assertEquals("http://127.0.0.1:9090",adminItem.path("url").asText());
+            assertEquals("PROM_TOKEN",adminItem.path("auth").path("secretRef").asText());
+
+            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
+                    "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
+                            "kind","gauge","query","up")),"targets",List.of(Map.of("id","default-target","type","app"))));
+            Map<String,Object> wrongTenant=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
+                    "source","prom","tenant","tenant-b","targets",List.of(Map.of("id","sut-1","type","app")))),
+                    "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"));
+            byte[] previewBody=ServerRuntime.JSON.writeValueAsBytes(Map.of("observability",wrongTenant));
+            Captured tenantDenied=invokeAs(servlet,"POST","/admin/sut-metrics/profiles/preview",Collections.emptyMap(),previewBody,"admin",Set.of(adminRole));
+            assertEquals(400,tenantDenied.status,new String(tenantDenied.body(),StandardCharsets.UTF_8));
+            assertEquals("private, no-store",tenantDenied.headers.get("Cache-Control"));
+            assertTrue(tenantDenied.bodyText().contains("tenant"),tenantDenied.bodyText());
+        }
+    }
+
+    @Test void sutMetricsJobRouteRequiresJobOwnershipAndAuthorizedSourceReaders() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("sut-metrics-job-packages"));
+        createPackage(packages.resolve("p"));
+        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"sut-metrics-job-data",DEFAULT_INSPECTION_TIMEOUT_MS,
+                null,workerLibraries("sut-metrics-job-libs"),true)) {
+            runtime.sutMetrics.upsertSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Prometheus",
+                    "url","http://127.0.0.1:9090","readers",List.of("alice"),"readRoles",List.of(),"allowedTenants",List.of("tenant-a"),
+                    "defaultTenant","tenant-a"));
+            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
+                    "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
+                            "kind","gauge","query","up")),"targets",List.of(Map.of("id","default-target","type","app"))));
+            Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
+                    "source","prom","tenant","tenant-a","targets",List.of(Map.of("id","sut-1","type","app")))),
+                    "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"),"livePreview",Map.of("enabled",true));
+            Map<String,Object> snapshot=runtime.sutMetrics.resolveScenario(scenario,"alice",false);
+            seedLoadJob(runtime,"J0000000000000711","alice",snapshot);
+            seedLoadJob(runtime,"J0000000000000712","bob",snapshot);
+
+            ApiServlet servlet=servlet(runtime);
+            Captured otherOwner=invokeAs(servlet,"GET","/jobs/J0000000000000711/sut-metrics",Collections.emptyMap(),new byte[0],"bob",Set.of(runtime.config.authorization.userRole));
+            Captured unauthorizedSource=invokeAs(servlet,"GET","/jobs/J0000000000000712/sut-metrics",Collections.emptyMap(),new byte[0],"bob",Set.of(runtime.config.authorization.userRole));
+            Captured owner=invokeAs(servlet,"GET","/jobs/J0000000000000711/sut-metrics",Collections.emptyMap(),new byte[0],"alice",Set.of(runtime.config.authorization.userRole));
+
+            assertEquals(404,otherOwner.status,"Job ownership is checked before reading its SUT Metrics snapshot.");
+            assertEquals("private, no-store",otherOwner.headers.get("Cache-Control"));
+            assertEquals(404,unauthorizedSource.status,"Owning a Job does not grant access to a Data Source the caller cannot read.");
+            assertEquals("private, no-store",unauthorizedSource.headers.get("Cache-Control"));
+            assertEquals(200,owner.status,new String(owner.body(),StandardCharsets.UTF_8));
+            assertEquals("PENDING",ServerRuntime.JSON.readTree(owner.body()).path("state").asText());
+            assertEquals("private, no-store",owner.headers.get("Cache-Control"));
+        }
+    }
+
+    @Test void sutMetricsLiveRouteUsesPinnedTenantAndReturnsBoundedTimeoutAndResponseFailures() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("sut-metrics-live-api-packages"));
+        createPackage(packages.resolve("p"));
+        Map<String,Map<String,Object>> cases=Map.of(
+                "ready",Map.of(),
+                "timeout",Map.of("requestTimeoutMs",250),
+                "response-limit",Map.of("maxResponseBytes",1024));
+        for(Map.Entry<String,Map<String,Object>> entry:cases.entrySet()) {
+            String name=entry.getKey();boolean delay="timeout".equals(name);int responseBytes="response-limit".equals(name)?2048:0;
+            try(ApiPrometheusFixture fixture=new ApiPrometheusFixture(delay?700:0,responseBytes);
+                ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"sut-metrics-live-api-"+name,DEFAULT_INSPECTION_TIMEOUT_MS,
+                        null,workerLibraries("sut-metrics-live-api-"+name+"-libs"),true)) {
+                runtime.sutMetrics.upsertSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Prometheus",
+                        "url",fixture.url(),"readers",List.of(),"readRoles",List.of("USER"),"allowedTenants",List.of("tenant-a"),
+                        "defaultTenant","tenant-a","limits",entry.getValue()));
+                runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
+                        "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
+                                "kind","gauge","query","up")),"targets",List.of(Map.of("id","default-target","type","app"))));
+                Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
+                        "source","prom","tenant","tenant-a","targets",List.of(Map.of("id","sut-1","type","app")))),
+                        "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"),"livePreview",Map.of("enabled",true));
+                Map<String,Object> snapshot=runtime.sutMetrics.resolveScenario(scenario,"alice",false);
+                seedRunningLoadJob(runtime,"J0000000000000721","alice",snapshot);
+
+                Captured result=invokeAs(servlet(runtime),"GET","/jobs/J0000000000000721/sut-metrics/live",
+                        Map.of("range","15m","step","30s"),new byte[0],"alice",Set.of(runtime.config.authorization.userRole));
+                JsonNode response=ServerRuntime.JSON.readTree(result.body());
+                assertEquals(200,result.status,new String(result.body(),StandardCharsets.UTF_8));
+                assertEquals("ready".equals(name)?"READY":"UNAVAILABLE",response.path("state").asText(),response.toString());
+                assertEquals(1,fixture.requests.get());
+                assertEquals("tenant-a",fixture.tenant.get());
+                assertEquals("up",fixture.query.get());
+                assertEquals("private, no-store",result.headers.get("Cache-Control"));
+                assertFalse(result.bodyText().contains(fixture.url()),result.bodyText());
+                if(!"ready".equals(name)) {
+                    JsonNode item=response.path("items").path(0);
+                    assertEquals("UNAVAILABLE",item.path("queryStatus").asText(),item.toString());
+                    assertTrue(item.path("error").asText().toLowerCase().contains("timeout")
+                            || item.path("error").asText().toLowerCase().contains("timed out")
+                            || item.path("error").asText().toLowerCase().contains("limit"),item.toString());
+                }
+            }
+        }
+    }
+
+    @Test void sutMetricsLiveRouteCoalescesConcurrentViewersAndForwardsBearerSecretWithoutLeakingIt() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("sut-metrics-live-auth-packages"));
+        createPackage(packages.resolve("p"));
+        try(ApiPrometheusFixture fixture=new ApiPrometheusFixture(800,0);
+            ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"sut-metrics-live-auth-data",DEFAULT_INSPECTION_TIMEOUT_MS,
+                    null,workerLibraries("sut-metrics-live-auth-libs"),true,ref->"PROM_TOKEN".equals(ref)?"api-test-token":"wrong-ref")) {
+            runtime.sutMetrics.upsertSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Authenticated Prometheus",
+                    "url",fixture.url(),"auth",Map.of("mode","BEARER","secretRef","PROM_TOKEN"),"readers",List.of("alice"),
+                    "readRoles",List.of("USER"),"allowedTenants",List.of("tenant-a"),"defaultTenant","tenant-a"));
+            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
+                    "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
+                            "kind","gauge","query","up")),"targets",List.of(Map.of("id","default-target","type","app"))));
+            Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
+                    "source","prom","tenant","tenant-a","targets",List.of(Map.of("id","sut-1","type","app")))),
+                    "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"),"livePreview",Map.of("enabled",true));
+            Map<String,Object> snapshot=runtime.sutMetrics.resolveScenario(scenario,"alice",false);
+            seedRunningLoadJob(runtime,"J0000000000000722","alice",snapshot);
+            ApiServlet api=servlet(runtime);
+
+            while(Instant.now().getEpochSecond()%30<3||Instant.now().getEpochSecond()%30>27)Thread.sleep(20);
+            ExecutorService viewers=Executors.newFixedThreadPool(2);
+            CountDownLatch start=new CountDownLatch(1);
+            try {
+                Future<Captured> first=viewers.submit(()->{start.await();return invokeAs(api,"GET","/jobs/J0000000000000722/sut-metrics/live",
+                        Map.of("range","15m","step","30s"),new byte[0],"alice",Set.of(runtime.config.authorization.userRole));});
+                Future<Captured> second=viewers.submit(()->{start.await();return invokeAs(api,"GET","/jobs/J0000000000000722/sut-metrics/live",
+                        Map.of("range","15m","step","30s"),new byte[0],"alice",Set.of(runtime.config.authorization.userRole));});
+                start.countDown();
+                Captured firstResponse=first.get(5,TimeUnit.SECONDS),secondResponse=second.get(5,TimeUnit.SECONDS);
+                assertEquals(200,firstResponse.status,firstResponse.bodyText());assertEquals(200,secondResponse.status,secondResponse.bodyText());
+                assertEquals("READY",ServerRuntime.JSON.readTree(firstResponse.body()).path("state").asText());
+                assertEquals("READY",ServerRuntime.JSON.readTree(secondResponse.body()).path("state").asText());
+                assertEquals(1,fixture.requests.get(),"Concurrent viewers through the Server route share one Prometheus request.");
+                assertEquals("Bearer api-test-token",fixture.authorization.get());
+                assertEquals("tenant-a",fixture.tenant.get());
+                assertFalse(firstResponse.bodyText().contains("api-test-token"));
+                assertFalse(secondResponse.bodyText().contains("api-test-token"));
+                assertFalse(runtime.sutMetrics.listSources("alice",false).toString().contains("api-test-token"));
+            } finally {viewers.shutdownNow();viewers.awaitTermination(5,TimeUnit.SECONDS);}
+        }
+    }
+
+    @Test void sutMetricsLiveRouteReturns503WhenBoundedPreviewCapacityIsSaturated() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("sut-metrics-live-capacity-packages"));
+        createPackage(packages.resolve("p"));
+        try(ApiPrometheusFixture fixture=new ApiPrometheusFixture(10000,0);
+            ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"sut-metrics-live-capacity-data",DEFAULT_INSPECTION_TIMEOUT_MS,
+                    null,workerLibraries("sut-metrics-live-capacity-libs"),true,ref->null)) {
+            runtime.sutMetrics.upsertSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Prometheus",
+                    "url",fixture.url(),"readers",List.of("alice"),"readRoles",List.of("USER"),"limits",Map.of("requestTimeoutMs",60000)));
+            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
+                    "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
+                            "kind","gauge","query","up")),"targets",List.of(Map.of("id","default-target","type","app"))));
+            List<Map<String,Object>> targets=new java.util.ArrayList<>();
+            for(int index=0;index<21;index++)targets.add(Map.of("id","sut-"+index,"type","app"));
+            Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
+                    "source","prom","targets",targets)),"collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"),
+                    "livePreview",Map.of("enabled",true));
+            Map<String,Object> snapshot=runtime.sutMetrics.resolveScenario(scenario,"alice",false);
+            seedRunningLoadJob(runtime,"J0000000000000723","alice",snapshot);
+            ApiServlet api=servlet(runtime);
+            ExecutorService viewers=Executors.newFixedThreadPool(21);
+            ExecutorCompletionService<Captured> completed=new ExecutorCompletionService<>(viewers);
+            CountDownLatch start=new CountDownLatch(1);
+            try {
+                for(int index=0;index<4;index++) {
+                    String target="sut-"+index;
+                    completed.submit(()->{start.await();return invokeAs(api,"GET","/jobs/J0000000000000723/sut-metrics/live",
+                            Map.of("range","15m","step","30s","targetId",target),new byte[0],"alice",Set.of(runtime.config.authorization.userRole));});
+                }
+                start.countDown();
+                long sourceDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+                while(fixture.requests.get()<4&&System.nanoTime()<sourceDeadline)Thread.sleep(10);
+                assertEquals(4,fixture.requests.get(),"The four active preview workers must be held at the source before filling the queue.");
+                for(int index=4;index<21;index++) {
+                    String target="sut-"+index;
+                    completed.submit(()->invokeAs(api,"GET","/jobs/J0000000000000723/sut-metrics/live",
+                            Map.of("range","15m","step","30s","targetId",target),new byte[0],"alice",Set.of(runtime.config.authorization.userRole)));
+                }
+                Future<Captured> rejected=completed.poll(5,TimeUnit.SECONDS);
+                Captured saturated=rejected==null?null:rejected.get(5,TimeUnit.SECONDS);
+                assertNotNull(saturated,"A request should be rejected as soon as all bounded preview slots are occupied.");
+                JsonNode diagnostic=ServerRuntime.JSON.readTree(saturated.body()).path("diagnostics").path(0);
+                assertEquals(503,saturated.status,saturated.bodyText());
+                assertEquals("ATT-SUT-METRICS-CAPACITY",diagnostic.path("code").asText());
+                assertEquals("private, no-store",saturated.headers.get("Cache-Control"));
+                assertEquals(4,fixture.requests.get(),"Only the fixed-size live-preview worker pool may reach Prometheus while saturated.");
+            } finally {viewers.shutdownNow();viewers.awaitTermination(5,TimeUnit.SECONDS);}
+        }
+    }
+
+    private void seedLoadJob(ServerRuntime runtime,String id,String owner,Map<String,Object> snapshot) throws Exception {
+        Path jobDir=runtime.config.dataDir.resolve("jobs").resolve(id);
+        Files.createDirectories(jobDir.resolve("output"));
+        Job job=new Job(id,"load","p",owner,new WorkerRequest(),new JobEvents(jobDir.resolve("events.jsonl"),100));
+        job.status="PASS";job.exitCode=0;job.finishedAt=Instant.now();
+        runtime.store.insert(job,"{}");
+        runtime.sutMetrics.writeSnapshot(id,snapshot);
+    }
+
+    private void seedRunningLoadJob(ServerRuntime runtime,String id,String owner,Map<String,Object> snapshot) throws Exception {
+        Path jobDir=runtime.config.dataDir.resolve("jobs").resolve(id);
+        Files.createDirectories(jobDir.resolve("output"));
+        Job job=new Job(id,"load","p",owner,new WorkerRequest(),new JobEvents(jobDir.resolve("events.jsonl"),100));
+        job.status="RUNNING";job.startedAt=Instant.now();job.loadProgress=Map.of("elapsedMs",300_000L);
+        runtime.store.insert(job,"{}");runtime.jobs.put(id,job);runtime.sutMetrics.writeSnapshot(id,snapshot);
+    }
+
     @Test void inspectionDeadlineFlowsThroughTheServletAs504WithAContractDiagnostic() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("timeout-packages"));
         createPackage(packages.resolve("p"));
@@ -299,6 +566,18 @@ class ApiServletIntegratedLimitsTest {
 
     private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
                                   ServerRuntime.WorkerProcessLauncher launcher,Path libs) throws Exception {
+        return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,false);
+    }
+
+    private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
+                                  ServerRuntime.WorkerProcessLauncher launcher,Path libs,boolean authenticationRequired) throws Exception {
+        return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,authenticationRequired,
+                ref->System.getenv("ATT_SECRET_"+ref));
+    }
+
+    private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
+                                  ServerRuntime.WorkerProcessLauncher launcher,Path libs,boolean authenticationRequired,
+                                  java.util.function.Function<String,String> secretResolver) throws Exception {
         Path yaml=temp.resolve(dataName+".yaml");
         StringBuilder entries=new StringBuilder();
         try(java.util.stream.Stream<Path> children=Files.list(packages)) {
@@ -307,12 +586,14 @@ class ApiServletIntegratedLimitsTest {
         }
         String config="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve(dataName))
                 +"\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
-                +"\n  maxRequestBytes: 1024\n  authenticationRequired: false\n  authorization:\n    allowAnonymousOperations: true\n"
+                +"\n  maxRequestBytes: 1024\n  authenticationRequired: "+authenticationRequired+"\n  authorization:\n    allowAnonymousOperations: "+(!authenticationRequired)+"\n"
                 +"  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 0\n    timeoutMs: "+timeout
                 +"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 0\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(packages)
                 +"\n  entries:\n"+entries;
         ServerConfig serverConfig=ServerConfig.load(Files.writeString(yaml,config));
-        return new ServerRuntime(serverConfig,libs.toString(),launcher==null?ProcessBuilder::start:launcher);
+        return new ServerRuntime(serverConfig,libs.toString(),launcher==null?ProcessBuilder::start:launcher,
+                java.time.Clock.systemUTC(),(output,archive,validator)->ArtifactArchive.build(output,archive,validator,serverConfig.archiveCompression),
+                null,secretResolver);
     }
 
     private Path createPackage(Path root) throws Exception {
@@ -348,6 +629,11 @@ class ApiServletIntegratedLimitsTest {
     }
 
     private Captured invoke(ApiServlet servlet,String method,String path,Map<String,String> parameters,byte[] body) throws Exception {
+        return invokeAs(servlet,method,path,parameters,body,"alice",null);
+    }
+
+    private Captured invokeAs(ApiServlet servlet,String method,String path,Map<String,String> parameters,byte[] body,
+                              String login,Set<String> roles) throws Exception {
         ServletContext context=servlet.getServletContext();
         HttpServletRequest request=proxy(HttpServletRequest.class,(self,called,args)->{
             switch(called.getName()) {
@@ -358,8 +644,8 @@ class ApiServletIntegratedLimitsTest {
                 case "getParameter": return parameters.get(args[0]);
                 case "getHeader": return "X-Request-ID".equals(args[0])?"limits-test":null;
                 case "getContentType": return "application/json";
-                case "getUserPrincipal": return (Principal)()->"alice";
-                case "isUserInRole": return runtimeRole(servlet,args[0]);
+                case "getUserPrincipal": return login==null?null:(Principal)()->login;
+                case "isUserInRole": return roles==null?runtimeRole(servlet,args[0]):roles.contains(args[0]);
                 case "getInputStream": return input(body);
                 case "getRemoteAddr": return "127.0.0.1";
                 default: return defaultValue(called.getReturnType());
@@ -440,5 +726,39 @@ class ApiServletIntegratedLimitsTest {
             @Override public void write(byte[] bytes,int offset,int length){output.write(bytes,offset,length);}
         };
         byte[] body(){return output.toByteArray();}
+        String bodyText(){return new String(body(),StandardCharsets.UTF_8);}
+    }
+
+    private static final class ApiPrometheusFixture implements AutoCloseable {
+        final AtomicInteger requests=new AtomicInteger();
+        final AtomicReference<String> tenant=new AtomicReference<>(),query=new AtomicReference<>(),authorization=new AtomicReference<>();
+        private final HttpServer server;
+        private final ExecutorService executor=Executors.newCachedThreadPool();
+        private final long delayMs;
+        private final int responseBytes;
+        ApiPrometheusFixture(long delayMs,int responseBytes) throws Exception {
+            this.delayMs=delayMs;this.responseBytes=responseBytes;
+            server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);server.setExecutor(executor);
+            server.createContext("/api/v1/query_range",this::respond);server.start();
+        }
+        String url(){return "http://127.0.0.1:"+server.getAddress().getPort();}
+        private void respond(HttpExchange exchange) {
+            requests.incrementAndGet();tenant.set(exchange.getRequestHeaders().getFirst("X-Scope-OrgID"));
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            String raw=exchange.getRequestURI().getRawQuery();
+            query.set(java.util.Arrays.stream(raw.split("&")).filter(part->part.startsWith("query="))
+                    .map(part->java.net.URLDecoder.decode(part.substring("query=".length()),StandardCharsets.UTF_8)).findFirst().orElse(""));
+            try {
+                if(delayMs>0)Thread.sleep(delayMs);
+                long timestamp=Instant.now().getEpochSecond()-1;
+                byte[] body=responseBytes>0?new byte[responseBytes]:
+                        ("{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{\"instance\":\"sut-1\"},\"values\":[["
+                                +timestamp+",\"1.0\"]]}]}}").getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(200,body.length);
+                exchange.getResponseBody().write(body);
+            } catch(Exception ignored) { }
+            finally {exchange.close();}
+        }
+        @Override public void close(){server.stop(0);executor.shutdownNow();}
     }
 }

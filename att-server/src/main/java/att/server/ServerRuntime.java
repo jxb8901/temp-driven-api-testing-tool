@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -188,9 +189,14 @@ final class ServerRuntime implements AutoCloseable {
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher,
                   LoadProgressPersistence loadProgressPersistence) throws Exception {
+        this(config,workerLibs,processLauncher,clock,artifactPublisher,loadProgressPersistence,
+                ref->System.getenv("ATT_SECRET_"+ref));
+    }
+    ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher,
+                  LoadProgressPersistence loadProgressPersistence,Function<String,String> secretResolver) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
         this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;
-        try{this.sutMetrics=new SutMetricsService(config.dataDir);}catch(Exception failed){store.close();throw failed;}
+        try{this.sutMetrics=new SutMetricsService(config.dataDir,secretResolver);}catch(Exception failed){store.close();throw failed;}
         try{this.auth=new AuthService(config,store);}catch(Exception failed){sutMetrics.close();store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         manifestPublisher=new PackageManifestPublisher(config.dataDir,config.packageConfiguration,clock,
                 this::manifestEditableRoot,this::validateManifestCandidate,
@@ -256,6 +262,13 @@ final class ServerRuntime implements AutoCloseable {
             String summary="Job was interrupted by Server restart and was not rerun";
             events.append("diagnostic",Map.of("code","ATT-SERVER-INTERRUPTED","summary",summary,"console",publishConsole(att.console.ExecutionConsoleFormatter.diagnostic(mode,"ATT-SERVER-INTERRUPTED",summary))));
             events.append("result",Map.of("jobId",id,"status","ERROR","console",publishConsole(att.console.ExecutionConsoleFormatter.lifecycle(mode,id,"ERROR",null))));
+        }
+        for(String id:sutMetrics.pendingCollectionJobIds()) {
+            Map<String,Object> row=store.get(id);
+            if(row==null||!"load".equals(row.get("command"))
+                    ||!Set.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status")))continue;
+            Instant[] window=loadExecutionWindow(row);
+            sutMetrics.jobFinished(id,window[0],window[1]);
         }
     }
     /** Capture only validator-approved data; never serialize WorkerRequest or inspection previews. */
@@ -1382,16 +1395,23 @@ final class ServerRuntime implements AutoCloseable {
     }
     private static Instant parseInstant(String value) { try {return value==null?null:Instant.parse(value);}catch(Exception invalid){return null;} }
     private Instant[] loadExecutionWindow(Job job) {
+        return loadExecutionWindow(job.resultJson,job.loadProgress,job.finishedAt);
+    }
+    private Instant[] loadExecutionWindow(Map<String,Object> row) {
+        Map<String,Object> progress=row.get("loadProgress") instanceof Map<?,?> value?JSON.convertValue(value,Map.class):null;
+        return loadExecutionWindow(row.get("resultJson") instanceof String value?value:null,progress,parseInstant(String.valueOf(row.get("finishedAt"))));
+    }
+    private Instant[] loadExecutionWindow(String resultJson,Map<String,Object> loadProgress,Instant finishedAt) {
         Instant start=null,end=null;
         try {
-            JsonNode root=JSON.readTree(job.resultJson==null?"{}":job.resultJson),summary=root.path("summary"),execution=summary.path("execution");
+            JsonNode root=JSON.readTree(resultJson==null?"{}":resultJson),summary=root.path("summary"),execution=summary.path("execution");
             start=parseInstant(execution.path("startedAt").asText(null));end=parseInstant(execution.path("endedAt").asText(null));
             if(start==null)start=parseInstant(summary.path("startedAt").asText(null));
             if(end==null)end=parseInstant(summary.path("endedAt").asText(null));
         } catch(Exception ignored) { }
-        if(start==null&&job.loadProgress!=null&&job.finishedAt!=null&&job.loadProgress.get("elapsedMs") instanceof Number elapsed&&elapsed.longValue()>0)
-            start=job.finishedAt.minusMillis(elapsed.longValue());
-        if(end==null)end=job.finishedAt;
+        if(start==null&&loadProgress!=null&&finishedAt!=null&&loadProgress.get("elapsedMs") instanceof Number elapsed&&elapsed.longValue()>0)
+            start=finishedAt.minusMillis(elapsed.longValue());
+        if(end==null)end=finishedAt;
         return new Instant[]{start,end};
     }
     private static Map<String,Object> sutFields(Object... values) {

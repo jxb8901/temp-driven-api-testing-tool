@@ -632,6 +632,94 @@ describe('JobsPage React feature', () => {
     expect(getMetrics).toHaveBeenCalledTimes(1);
   });
 
+  it('renders each post-run collection lifecycle state independently from the LOAD outcome', async () => {
+    const cases: Array<[string, string]> = [
+      ['DISABLED', 'SUT Metrics are not configured for this LOAD Job.'],
+      ['PENDING', 'SUT Metrics are waiting for LOAD execution or the post-run collection worker.'],
+      ['COLLECTING', 'Prometheus post-run collection is in progress.'],
+      ['READY', 'Collection is ready, but no metric series are present in this page.'],
+      ['PARTIAL', 'Some metrics are available; other queries returned no data or could not be collected.'],
+      ['UNAVAILABLE', 'Prometheus did not return any SUT metric samples for this window.'],
+      ['FAILED', 'SUT Metrics collection failed. The LOAD execution verdict is unchanged.'],
+    ];
+    const getMetrics = vi.fn(async (jobId: string): Promise<SutMetricsJobResponse> => {
+      const state = jobId.replace('JOB-', '');
+      return { state, collection: { state, queries: [], diagnostics: state === 'FAILED' ? [{ code: 'PROMETHEUS_TIMEOUT', message: 'Query timed out.' }] : [] }, items: [] };
+    });
+    const api = makeApi({ getJobSutMetrics: getMetrics });
+
+    for (const [state, message] of cases) {
+      await act(async () => root.render(<SutMetricsPanel api={api} jobId={`JOB-${state}`} activeLoad={false} hidden={false} />));
+      await advance();
+      const panel = host.querySelector('#job-panel-sutMetrics')!;
+      expect(panel.textContent).toContain(state);
+      expect(panel.textContent).toContain(message);
+      expect(panel.textContent).not.toContain('LOAD failed');
+    }
+    expect(host.querySelector('#job-panel-sutMetrics [role="alert"]')?.textContent).toContain('SUT Metrics collection failed');
+    expect(host.querySelector('#job-panel-sutMetrics details')?.textContent).toContain('PROMETHEUS_TIMEOUT');
+  });
+
+  it('cancels SUT Metrics reads when its Job Details tab is hidden and resumes when reopened', async () => {
+    const pending = deferred<SutMetricsLiveResponse>();
+    const signals: AbortSignal[] = [];
+    const getLive = vi.fn((_jobId: string, input?: { range?: string; step?: string; targetId?: string; profilePath?: string; signal?: AbortSignal }) => {
+      if (input?.signal) signals.push(input.signal);
+      return pending.promise;
+    });
+    const api = makeApi({ getJobSutMetricsLive: getLive });
+    await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={true} hidden={false} />));
+    await advance();
+    expect(getLive).toHaveBeenCalledTimes(1);
+    expect(signals[0]?.aborted).toBe(false);
+
+    await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={true} hidden={true} />));
+    expect(signals[0]?.aborted).toBe(true);
+    await advance(60_000);
+    expect(getLive).toHaveBeenCalledTimes(1);
+
+    await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={true} hidden={false} />));
+    await advance();
+    expect(getLive).toHaveBeenCalledTimes(2);
+    expect(signals[1]?.aborted).toBe(false);
+  });
+
+  it('loads SUT metric sidecar pages and sends target filters back to the Server', async () => {
+    const queries = Array.from({ length: 5 }, (_, index) => ({
+      id: `q${index + 1}`, profile: 'base', profilePath: 'base', targetId: index === 4 ? 'sut-2' : 'sut-1',
+      metricId: `metric-${index + 1}`, title: `Metric ${index + 1}`, unit: 'count',
+    }));
+    const item = (query: typeof queries[number]) => ({
+      ...query, queryStatus: 'READY', series: [{ labels: { instance: query.targetId }, samples: [
+        { timestamp: new Date(earlyBucket).toISOString(), timestampEpochMs: earlyBucket, value: 1 },
+      ] }],
+    });
+    const firstPage: SutMetricsJobResponse = { state: 'READY', collection: { state: 'READY', queries }, items: queries.slice(0, 4).map(item), nextOffset: 4 };
+    const secondPage: SutMetricsJobResponse = { state: 'READY', collection: { state: 'READY', queries }, items: [item(queries[4]!)], nextOffset: null };
+    const filtered: SutMetricsJobResponse = { ...secondPage, items: [item(queries[4]!)] };
+    const getMetrics = vi.fn(async (_jobId: string, input?: { offset?: number; limit?: number; targetId?: string; profilePath?: string; signal?: AbortSignal }) =>
+      input?.targetId === 'sut-2' ? filtered : input?.offset === 4 ? secondPage : firstPage);
+    const api = makeApi({ getJobSutMetrics: getMetrics });
+    await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={false} hidden={false} />));
+    await advance();
+    expect(getMetrics).toHaveBeenCalledWith('JOB-204', expect.objectContaining({ offset: 0, limit: 4 }));
+
+    await click([...host.querySelectorAll('#job-panel-sutMetrics button')].find(button => button.textContent?.includes('Load more'))!);
+    await advance();
+    expect(getMetrics).toHaveBeenLastCalledWith('JOB-204', expect.objectContaining({ offset: 4, limit: 4 }));
+    expect(host.querySelectorAll('#job-panel-sutMetrics article.att-sut-metric-card')).toHaveLength(5);
+
+    const target = host.querySelector('#job-panel-sutMetrics select') as HTMLSelectElement;
+    await act(async () => {
+      target.value = 'sut-2';
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await advance();
+    expect(getMetrics).toHaveBeenLastCalledWith('JOB-204', expect.objectContaining({ offset: 0, limit: 4, targetId: 'sut-2' }));
+    expect(host.querySelectorAll('#job-panel-sutMetrics article.att-sut-metric-card')).toHaveLength(1);
+    expect(host.querySelector('#job-panel-sutMetrics')?.textContent).toContain('Metric 5');
+  });
+
   it('resumes live preview when the selected Job changes after another Job ended', async () => {
     const getLive = vi.fn(async (jobId: string): Promise<SutMetricsLiveResponse> => ({
       schemaVersion: 'att-sut-metrics-live/v1', state: jobId === 'JOB-204' ? 'ENDED' : 'READY', items: [],
