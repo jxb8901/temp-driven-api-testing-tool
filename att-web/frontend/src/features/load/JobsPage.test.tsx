@@ -639,6 +639,7 @@ describe('JobsPage React feature', () => {
       ['COLLECTING', 'Prometheus post-run collection is in progress.'],
       ['READY', 'Collection is ready, but no metric series are present in this page.'],
       ['PARTIAL', 'Some metrics are available; other queries returned no data or could not be collected.'],
+      ['NO_DATA', 'No SUT samples are available yet for this time window.'],
       ['UNAVAILABLE', 'Prometheus did not return any SUT metric samples for this window.'],
       ['FAILED', 'SUT Metrics collection failed. The LOAD execution verdict is unchanged.'],
     ];
@@ -759,6 +760,41 @@ describe('JobsPage React feature', () => {
     expect(panel.textContent).toContain('Min5 bytes');
     expect(panel.textContent).toContain('1 samples across 1 series');
     expect(getMetrics).toHaveBeenCalledTimes(1);
+  });
+
+  it('plots multiple SUT series on one timestamp scale and leaves scrape gaps visible', async () => {
+    const windowStart = Date.parse('2026-11-13T10:00:00.000Z');
+    const windowEnd = Date.parse('2026-11-13T11:00:00.000Z');
+    const firstMinute = windowStart + 60_000;
+    const latest = windowEnd - 60_000;
+    const query = { id: 'q1', profile: 'profile-jvm', profilePath: 'profile-jvm', targetId: 'sut-1', metricId: 'heap', title: 'Heap used', unit: 'bytes' };
+    const response: SutMetricsJobResponse = {
+      state: 'READY',
+      collection: { state: 'READY', windowStart: new Date(windowStart).toISOString(), windowEnd: new Date(windowEnd).toISOString(), step: '1m', queries: [query] },
+      items: [{ ...query, queryStatus: 'READY', coverage: { windowStart: new Date(windowStart).toISOString(), windowEnd: new Date(windowEnd).toISOString() }, series: [
+        { labels: { instance: 'a' }, samples: [
+          { timestamp: new Date(latest).toISOString(), timestampEpochMs: latest, value: 3 },
+          { timestamp: new Date(firstMinute).toISOString(), timestampEpochMs: firstMinute, value: 2 },
+          { timestamp: new Date(windowStart).toISOString(), timestampEpochMs: windowStart, value: 1 },
+        ] },
+        { labels: { instance: 'z' }, samples: [
+          { timestamp: new Date(latest).toISOString(), timestampEpochMs: latest, value: 4 },
+          { timestamp: new Date(windowStart).toISOString(), timestampEpochMs: windowStart, value: 2 },
+        ] },
+      ] }],
+    };
+    const api = makeApi({ getJobSutMetrics: vi.fn(async () => response) });
+    await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={false} hidden={false} />));
+    await advance();
+
+    const chart = host.querySelector('#job-panel-sutMetrics svg.att-sut-metric-chart')!;
+    const lines = chart.querySelectorAll('path.att-sut-metric-line');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]?.getAttribute('d')).toMatch(/^M0\.0,[\d.]+ L13\.3,[\d.]+ M786\.7,[\d.]+$/);
+    expect(lines[1]?.getAttribute('d')).toMatch(/^M0\.0,[\d.]+ M786\.7,[\d.]+$/);
+    const expectedLatestLabel = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(latest);
+    expect(chart.querySelector('text[text-anchor="end"]')?.textContent).toBe(expectedLatestLabel);
+    expect(host.querySelector('#job-panel-sutMetrics .att-sut-metric-coverage')?.textContent).toContain(`latest ${expectedLatestLabel}`);
   });
 
   it('shows sampled live LOAD progress in Results and Metrics without terminal archive wording', async () => {

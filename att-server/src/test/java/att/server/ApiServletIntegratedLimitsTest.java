@@ -359,7 +359,7 @@ class ApiServletIntegratedLimitsTest {
             seedRunningLoadJob(runtime,"J0000000000000722","alice",snapshot);
             ApiServlet api=servlet(runtime);
 
-            while(Instant.now().getEpochSecond()%30<3||Instant.now().getEpochSecond()%30>27)Thread.sleep(20);
+            while(Instant.now().getEpochSecond()%30<8||Instant.now().getEpochSecond()%30>21)Thread.sleep(20);
             ExecutorService viewers=Executors.newFixedThreadPool(2);
             CountDownLatch start=new CountDownLatch(1);
             try {

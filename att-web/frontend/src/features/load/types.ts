@@ -268,7 +268,7 @@ export interface SutMetricsJobResponse {
 }
 export interface SutMetricsLiveResponse {
   schemaVersion?: string; state?: string; snapshotId?: string; windowStart?: string; windowEnd?: string;
-  sourceQueryTime?: string; sampleCount?: number; message?: string; queries?: SutMetricQueryMetadata[]; items?: SutMetricItem[];
+  sourceQueryTime?: string; sampleCount?: number; stepSeconds?: number; message?: string; queries?: SutMetricQueryMetadata[]; items?: SutMetricItem[];
 }
 
 export interface JobArtifact {

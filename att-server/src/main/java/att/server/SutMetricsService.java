@@ -436,24 +436,29 @@ final class SutMetricsService implements AutoCloseable {
             throw new IllegalArgumentException("The selected Metrics Profile is not part of this Job snapshot.");
         if (targetId != null && !targetId.isBlank()) all.removeIf(query -> !targetId.equals(query.get("targetId")));
         if (profilePath != null && !profilePath.isBlank()) all.removeIf(query -> !profilePath.equals(query.get("profilePath")));
+        long roundedEnd = (now.getEpochSecond() / stepSeconds) * stepSeconds;
+        Instant end = Instant.ofEpochSecond(roundedEnd);
+        if (!startedAt.isBefore(end)) return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "NO_DATA",
+                "snapshotId", snapshot.get("snapshotId"), "queries", queryMetadata(snapshot), "items", List.of(),
+                "windowStart", startedAt.toString(), "windowEnd", now.toString(), "stepSeconds", stepSeconds);
+        Instant bucketStart = end.minusSeconds(rangeSeconds);
+        Instant start = startedAt.isAfter(bucketStart) ? startedAt : bucketStart;
+        if (!start.isBefore(end) || ceilEpochSecond(start) >= end.getEpochSecond()) return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "NO_DATA",
+                "snapshotId", snapshot.get("snapshotId"), "queries", queryMetadata(snapshot), "items", List.of(),
+                "windowStart", start.toString(), "windowEnd", end.toString(), "stepSeconds", stepSeconds);
         if (all.isEmpty()) return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "NO_DATA",
                 "snapshotId", snapshot.get("snapshotId"), "queries", queryMetadata(snapshot), "items", List.of(),
-                "windowStart", startedAt.isAfter(now.minusSeconds(rangeSeconds)) ? startedAt.toString() : now.minusSeconds(rangeSeconds).toString(),
-                "windowEnd", now.toString());
+                "windowStart", start.toString(), "windowEnd", end.toString(), "stepSeconds", stepSeconds);
         if (all.size() > 64) throw new IllegalArgumentException("Live preview exceeds the 64-query request budget.");
-        Instant start = startedAt.isAfter(now.minusSeconds(rangeSeconds)) ? startedAt : now.minusSeconds(rangeSeconds);
-        if (!start.isBefore(now)) return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "NO_DATA",
-                "snapshotId", snapshot.get("snapshotId"), "queries", queryMetadata(snapshot), "items", List.of(), "windowStart", start.toString(), "windowEnd", now.toString());
-        queryRequestBudgets(snapshot, all, Duration.between(start, now).getSeconds());
-        long roundedEnd = (now.getEpochSecond() / stepSeconds) * stepSeconds;
-        String key = String.valueOf(snapshot.get("snapshotId")) + ":" + start.getEpochSecond() + ":" + roundedEnd + ":" + stepSeconds + ":"
+        queryRequestBudgets(snapshot, all, Duration.between(start, end).getSeconds());
+        String key = String.valueOf(snapshot.get("snapshotId")) + ":" + start + ":" + end + ":" + stepSeconds + ":"
                 + (targetId == null ? "*" : targetId) + ":" + (profilePath == null ? "*" : profilePath);
         Map<String, Object> cached = cachedPreview(key);
         if (cached != null) return cached;
         CompletableFuture<Map<String, Object>> flight;
         try {
             flight = previewFlights.computeIfAbsent(key, ignored -> CompletableFuture.supplyAsync(() -> {
-                try { return collectPreview(snapshot, all, start, Instant.ofEpochSecond(roundedEnd), stepSeconds); }
+                try { return collectPreview(snapshot, all, start, end, stepSeconds); }
                 catch (Exception failure) { throw new java.util.concurrent.CompletionException(failure); }
             }, previews));
         } catch (java.util.concurrent.RejectedExecutionException full) {
@@ -587,7 +592,7 @@ final class SutMetricsService implements AutoCloseable {
 
     private Map<String, Object> collectPreview(Map<String, Object> snapshot, List<Map<String, Object>> queries,
                                                Instant start, Instant end, long stepSeconds) throws Exception {
-        List<Map<String, Object>> items = new ArrayList<>(); int failures = 0; long samples = 0;
+        List<Map<String, Object>> items = new ArrayList<>(); int failures = 0, noData = 0; long samples = 0;
         for (int index = 0; index < queries.size(); index++) {
             Map<String, Object> query = queries.get(index);
             try {
@@ -597,7 +602,8 @@ final class SutMetricsService implements AutoCloseable {
                 long querySamples = ((Number) collected.get("sampleCount")).longValue();
                 if (samples + querySamples > MAX_LIVE_PREVIEW_SAMPLES) throw new CollectionBudgetExceededException("The live preview sample budget was exceeded.");
                 samples += querySamples;
-                String queryStatus = series.isEmpty() ? "NO_DATA" : isStale(collected, Instant.now(), stepSeconds) ? "STALE" : "READY";
+                if (querySamples == 0) noData++;
+                String queryStatus = querySamples == 0 ? "NO_DATA" : isStale(collected, Instant.now(), stepSeconds) ? "STALE" : "READY";
                 items.add(fields("id", query.get("id"), "metricId", query.get("metricId"), "title", query.get("title"),
                         "profile", query.get("profile"), "profilePath", query.get("profilePath"),
                         "category", query.get("category"), "targetId", query.get("targetId"), "targetType", query.get("targetType"),
@@ -626,7 +632,10 @@ final class SutMetricsService implements AutoCloseable {
                         "queryStatus", "UNAVAILABLE", "error", safeFailureMessage(failure)));
             }
         }
-        return fields("schemaVersion", "att-sut-metrics-live/v1", "state", failures == 0 ? "READY" : failures == queries.size() ? "UNAVAILABLE" : "PARTIAL",
+        String state = failures == 0 && samples == 0 ? "NO_DATA"
+                : failures == queries.size() ? "UNAVAILABLE"
+                : failures > 0 || noData > 0 ? "PARTIAL" : "READY";
+        return fields("schemaVersion", "att-sut-metrics-live/v1", "state", state,
                 "snapshotId", snapshot.get("snapshotId"), "windowStart", start.toString(), "windowEnd", end.toString(),
                 "stepSeconds", stepSeconds, "sampleCount", samples, "sourceQueryTime", Instant.now().toString(),
                 "queries", queryMetadata(snapshot), "items", items);
@@ -643,7 +652,7 @@ final class SutMetricsService implements AutoCloseable {
         long window = Duration.between(start, end).getSeconds();
         enforceSourceQueryBudget(source, 1, window);
         TreeMap<String, TreeMap<Long, Double>> byLabels = new TreeMap<>();
-        long segmentStart = start.getEpochSecond();
+        long segmentStart = ceilEpochSecond(start);
         int segmentCount = 0;
         while (segmentStart < end.getEpochSecond()) {
             long segmentEnd = Math.min(end.getEpochSecond(), segmentStart + MAX_SEGMENT_SECONDS);
@@ -659,10 +668,13 @@ final class SutMetricsService implements AutoCloseable {
             if (segmentCount > 32) throw new IllegalArgumentException("The segmented query budget was exceeded.");
         }
         List<Map<String, Object>> series = new ArrayList<>(); long samples = 0;
+        Long firstSampleEpochMs = null, lastSampleEpochMs = null;
         for (Map.Entry<String, TreeMap<Long, Double>> row : byLabels.entrySet()) {
             List<Map<String, Object>> points = new ArrayList<>();
             for (Map.Entry<Long, Double> point : row.getValue().entrySet()) {
                 points.add(fields("timestamp", Instant.ofEpochMilli(point.getKey()).toString(), "timestampEpochMs", point.getKey(), "value", point.getValue()));
+                firstSampleEpochMs = firstSampleEpochMs == null ? point.getKey() : Math.min(firstSampleEpochMs, point.getKey());
+                lastSampleEpochMs = lastSampleEpochMs == null ? point.getKey() : Math.max(lastSampleEpochMs, point.getKey());
                 samples++;
             }
             Instant first = points.isEmpty() ? null : Instant.parse(String.valueOf(points.get(0).get("timestamp")));
@@ -674,7 +686,9 @@ final class SutMetricsService implements AutoCloseable {
         if (samples > sourceInt(source, "maxSamplesPerQuery")) throw new IllegalArgumentException("The Data Source per-query sample budget was exceeded.");
         return fields("series", series, "sampleCount", samples,
                 "coverage", fields("sampleCount", samples, "seriesCount", series.size(),
-                        "firstSampleAt", firstSample(series), "lastSampleAt", lastSample(series), "windowStart", start.toString(), "windowEnd", end.toString()));
+                        "firstSampleAt", firstSampleEpochMs == null ? null : Instant.ofEpochMilli(firstSampleEpochMs).toString(),
+                        "lastSampleAt", lastSampleEpochMs == null ? null : Instant.ofEpochMilli(lastSampleEpochMs).toString(),
+                        "windowStart", start.toString(), "windowEnd", end.toString()));
     }
 
     private Map<String, Integer> queryRequestBudgets(Map<String, Object> snapshot, List<Map<String, Object>> queries, long windowSeconds) {
@@ -700,6 +714,10 @@ final class SutMetricsService implements AutoCloseable {
     private static int segmentCount(long windowSeconds) {
         if (windowSeconds <= 0) throw new IllegalArgumentException("The collection range must be positive.");
         return Math.toIntExact((windowSeconds + MAX_SEGMENT_SECONDS - 1) / MAX_SEGMENT_SECONDS);
+    }
+
+    private static long ceilEpochSecond(Instant instant) {
+        return instant.getEpochSecond() + (instant.getNano() == 0 ? 0 : 1);
     }
 
     private List<Map<String, Object>> queryRange(Map<String, Object> source, String query, Instant start, Instant end, Duration step, String tenant) throws Exception {
@@ -1549,8 +1567,6 @@ final class SutMetricsService implements AutoCloseable {
     private static String sha256(Path path) throws Exception { try (InputStream input = Files.newInputStream(path)) { MessageDigest digest = MessageDigest.getInstance("SHA-256"); byte[] buffer = new byte[8192]; int read; while ((read = input.read(buffer)) >= 0) if (read > 0) digest.update(buffer, 0, read); return hex(digest.digest()); } }
     private static String sha256(byte[] bytes) { try { return hex(MessageDigest.getInstance("SHA-256").digest(bytes)); } catch (Exception impossible) { throw new IllegalStateException(impossible); } }
     private static String hex(byte[] bytes) { StringBuilder out = new StringBuilder(bytes.length * 2); for (byte value : bytes) out.append(String.format(Locale.ROOT, "%02x", value & 0xff)); return out.toString(); }
-    private static String firstSample(List<Map<String, Object>> series) { for (Map<String, Object> row : series) { List<Map<String, Object>> points = listOfMaps(row.get("samples")); if (!points.isEmpty()) return String.valueOf(points.get(0).get("timestamp")); } return null; }
-    private static String lastSample(List<Map<String, Object>> series) { for (int i = series.size() - 1; i >= 0; i--) { List<Map<String, Object>> points = listOfMaps(series.get(i).get("samples")); if (!points.isEmpty()) return String.valueOf(points.get(points.size() - 1).get("timestamp")); } return null; }
     private Map<String, Object> cachedPreview(String key) { CacheEntry entry = previewCache.get(key); if (entry == null) return null; if (System.nanoTime() >= entry.expiresAtNanos) { previewCache.remove(key, entry); return null; } return entry.value; }
     private void trimPreviewCache() { if (previewCache.size() > 128) previewCache.entrySet().removeIf(entry -> System.nanoTime() >= entry.getValue().expiresAtNanos); if (previewCache.size() > 128) previewCache.clear(); }
 

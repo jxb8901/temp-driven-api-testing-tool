@@ -19,12 +19,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -147,6 +147,41 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void livePreviewReturnsNoDataWhenPrometheusSuccessfullyReturnsEmptyResults() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(0); SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(profileWithQueries("up"));
+            Map<String, Object> configured = scenario(List.of(binding("prom", null)), "1m", "1m", "15s");
+            configured.put("livePreview", Map.of("enabled", true));
+            service.writeSnapshot(JOB_ID, service.resolveScenario(configured, "alice", false));
+
+            Map<String, Object> preview = service.livePreview(JOB_ID, "alice", false, Instant.now().minusSeconds(300),
+                    "15m", "30s", null, null);
+
+            assertEquals(1, fixture.requests.get(), "The Prometheus endpoint must return a successful empty result.");
+            assertEquals("NO_DATA", preview.get("state"));
+            assertEquals("NO_DATA", maps(preview.get("items")).get(0).get("queryStatus"));
+        }
+    }
+
+    @Test void livePreviewMarksMixedPopulatedAndEmptyPrometheusQueriesPartial() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(1, Map.of("up", 1, "down", 0));
+             SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(profileWithQueries("up", "down"));
+            Map<String, Object> configured = scenario(List.of(binding("prom", null)), "1m", "1m", "15s");
+            configured.put("livePreview", Map.of("enabled", true));
+            service.writeSnapshot(JOB_ID, service.resolveScenario(configured, "alice", false));
+
+            Map<String, Object> preview = service.livePreview(JOB_ID, "alice", false, Instant.now().minusSeconds(300),
+                    "15m", "30s", null, null);
+
+            assertEquals("PARTIAL", preview.get("state"));
+            assertEquals(List.of("STALE", "NO_DATA"), maps(preview.get("items")).stream()
+                    .map(item -> item.get("queryStatus")).toList());
+        }
+    }
+
     @Test void authenticatedSourceResolvesBearerSecretWithoutExposingItInViewsOrPreview() throws Exception {
         try (PrometheusFixture fixture = new PrometheusFixture(1);
              SutMetricsService service = new SutMetricsService(temp, Set.of(), ref -> {
@@ -172,7 +207,7 @@ class SutMetricsServiceTest {
         }
     }
 
-    @Test void concurrentLiveViewersShareOneInFlightPrometheusRequest() throws Exception {
+    @Test void staggeredLiveViewersShareOnePrometheusRequestForTheSameWindowBucket() throws Exception {
         try(PrometheusFixture fixture=new PrometheusFixture(1,200,600,0,Map.of());
             SutMetricsService service=new SutMetricsService(temp)) {
             service.upsertSource(source("prom",fixture.url(),List.of("alice"),Map.of()));
@@ -181,19 +216,60 @@ class SutMetricsServiceTest {
             configured.put("livePreview",Map.of("enabled",true));
             service.writeSnapshot(JOB_ID,service.resolveScenario(configured,"alice",false));
 
-            while(Instant.now().getEpochSecond()%30<3||Instant.now().getEpochSecond()%30>27)Thread.sleep(20);
-            Instant startedAt=Instant.now().minusSeconds(800);
-            ExecutorService viewers=Executors.newFixedThreadPool(2);
-            CountDownLatch start=new CountDownLatch(1);
-            try {
-                List<java.util.concurrent.Future<Map<String,Object>>> requests=List.of(
-                        viewers.submit(()->{start.await();return service.livePreview(JOB_ID,"alice",false,startedAt,"15m","30s",null,null);}),
-                        viewers.submit(()->{start.await();return service.livePreview(JOB_ID,"alice",false,startedAt,"15m","30s",null,null);}));
-                start.countDown();
-                assertEquals("READY",requests.get(0).get(5,TimeUnit.SECONDS).get("state"));
-                assertEquals("READY",requests.get(1).get(5,TimeUnit.SECONDS).get("state"));
-                assertEquals(1,fixture.requests.get(),"The active flight is shared instead of issuing a second Prometheus request.");
-            } finally {viewers.shutdownNow();viewers.awaitTermination(5,TimeUnit.SECONDS);}
+            while(Instant.now().getEpochSecond()%30<8||Instant.now().getEpochSecond()%30>21)Thread.sleep(20);
+            Instant startedAt=Instant.now().minusSeconds(3600);
+            Map<String,Object> first=service.livePreview(JOB_ID,"alice",false,startedAt,"15m","30s",null,null);
+            Thread.sleep(1000);
+            Map<String,Object> second=service.livePreview(JOB_ID,"alice",false,startedAt,"15m","30s",null,null);
+            assertEquals("READY",first.get("state"));
+            assertEquals("READY",second.get("state"));
+            assertEquals(first.get("windowStart"),second.get("windowStart"));
+            assertEquals(first.get("windowEnd"),second.get("windowEnd"));
+            assertEquals(1,fixture.requests.get(),"Viewers polling the same old-Job window bucket share the cached result.");
+        }
+    }
+
+    @Test void livePreviewRoundsFractionalStartUpWithoutQueryingBeforeLoadExecution() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(1); SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(profileWithQueries("up"));
+            Map<String, Object> configured = scenario(List.of(binding("prom", null)), "1m", "1m", "15s");
+            configured.put("livePreview", Map.of("enabled", true));
+            service.writeSnapshot(JOB_ID, service.resolveScenario(configured, "alice", false));
+            Instant startedAt = Instant.now().minusSeconds(600);
+
+            service.livePreview(JOB_ID, "alice", false, startedAt, "15m", "30s", null, null);
+
+            long expectedQueryStart = startedAt.getEpochSecond() + (startedAt.getNano() == 0 ? 0 : 1);
+            assertEquals(Instant.ofEpochSecond(expectedQueryStart).toString(), fixture.queryStart.get());
+            assertFalse(Instant.parse(fixture.queryStart.get()).isBefore(startedAt));
+        }
+    }
+
+    @Test void livePreviewCoverageUsesChronologicalExtremaAcrossLabelSortedSeries() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(raw -> {
+                 long end = Instant.parse(queryParameter(raw, "end")).getEpochSecond();
+                 String newer = String.format(Locale.ROOT, "%.3f", (double) end - 10);
+                 String older = String.format(Locale.ROOT, "%.3f", (double) end - 100);
+                 return "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":["
+                         + "{\"metric\":{\"instance\":\"a\"},\"values\":[[" + newer + ",\"3.0\"]]},"
+                         + "{\"metric\":{\"instance\":\"z\"},\"values\":[[" + older + ",\"1.0\"]]}]}}";
+             }); SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(profileWithQueries("up"));
+            Map<String, Object> configured = scenario(List.of(binding("prom", null)), "1m", "1m", "15s");
+            configured.put("livePreview", Map.of("enabled", true));
+            service.writeSnapshot(JOB_ID, service.resolveScenario(configured, "alice", false));
+
+            Map<String, Object> preview = service.livePreview(JOB_ID, "alice", false, Instant.now().minusSeconds(600),
+                    "15m", "30s", null, null);
+            Map<String, Object> item = maps(preview.get("items")).get(0);
+            Map<String, Object> coverage = object(item.get("coverage"));
+            Instant windowEnd = Instant.parse(String.valueOf(preview.get("windowEnd")));
+
+            assertEquals(windowEnd.minusSeconds(100).toString(), coverage.get("firstSampleAt"));
+            assertEquals(windowEnd.minusSeconds(10).toString(), coverage.get("lastSampleAt"));
+            assertEquals("READY", item.get("queryStatus"), "The latest timestamp is fresh even though label z sorts after label a.");
         }
     }
 
@@ -455,27 +531,46 @@ class SutMetricsServiceTest {
         return result;
     }
 
+    private static String queryParameter(String raw, String name) {
+        return java.util.Arrays.stream(raw.split("&"))
+                .filter(part -> part.startsWith(name + "="))
+                .map(part -> URLDecoder.decode(part.substring((name + "=").length()), StandardCharsets.UTF_8))
+                .findFirst().orElseThrow();
+    }
+
     private static final class PrometheusFixture implements AutoCloseable {
         final AtomicInteger requests = new AtomicInteger();
         final AtomicReference<String> authorization = new AtomicReference<>();
+        final AtomicReference<String> queryStart = new AtomicReference<>();
         private final HttpServer server;
         private final ExecutorService executor = Executors.newCachedThreadPool();
         private final int defaultSamples,responseStatus,responseBytes;
         private final long responseDelayMs;
         private final Map<String,Integer> responseSamplesByQuery;
+        private final Function<String, String> responseBodyFactory;
 
         PrometheusFixture(int samplesPerResponse) throws Exception {
-            this(samplesPerResponse,200,0,0,Map.of());
+            this(samplesPerResponse,200,0,0,Map.of(),null);
         }
 
         PrometheusFixture(int samplesPerResponse,Map<String,Integer> responseSamplesByQuery) throws Exception {
-            this(samplesPerResponse,200,0,0,responseSamplesByQuery);
+            this(samplesPerResponse,200,0,0,responseSamplesByQuery,null);
         }
 
         PrometheusFixture(int samplesPerResponse,int responseStatus,long responseDelayMs,int responseBytes,
                           Map<String,Integer> responseSamplesByQuery) throws Exception {
+            this(samplesPerResponse,responseStatus,responseDelayMs,responseBytes,responseSamplesByQuery,null);
+        }
+
+        PrometheusFixture(Function<String, String> responseBodyFactory) throws Exception {
+            this(0,200,0,0,Map.of(),responseBodyFactory);
+        }
+
+        private PrometheusFixture(int samplesPerResponse,int responseStatus,long responseDelayMs,int responseBytes,
+                                  Map<String,Integer> responseSamplesByQuery, Function<String, String> responseBodyFactory) throws Exception {
             this.defaultSamples=samplesPerResponse;this.responseStatus=responseStatus;this.responseDelayMs=responseDelayMs;
             this.responseBytes=responseBytes;this.responseSamplesByQuery=Map.copyOf(responseSamplesByQuery);
+            this.responseBodyFactory=responseBodyFactory;
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.setExecutor(executor);
             server.createContext("/api/v1/query_range", exchange -> respond(exchange, samplesPerResponse));
@@ -490,6 +585,7 @@ class SutMetricsServiceTest {
             try {
                 if(responseDelayMs>0)Thread.sleep(responseDelayMs);
                 String raw = exchange.getRequestURI().getRawQuery();
+                queryStart.set(queryParameter(raw, "start"));
                 String query=java.util.Arrays.stream(raw.split("&"))
                         .filter(part->part.startsWith("query="))
                         .map(part->URLDecoder.decode(part.substring("query=".length()),StandardCharsets.UTF_8))
@@ -506,10 +602,11 @@ class SutMetricsServiceTest {
                     values.append('[').append(String.format(Locale.ROOT, "%.3f", (double) (start + index + 1)))
                             .append(",\"").append(index + 1).append(".0\"]");
                 }
-                byte[] body=responseBytes>0?new byte[responseBytes]:
-                        ("{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":"+
-                        (sampleCount==0?"[]":"[{\"metric\":{\"instance\":\"sut-1\"},\"values\":["+values+"]}]")+"}}")
-                                .getBytes(StandardCharsets.UTF_8);
+                String response=responseBodyFactory==null
+                        ? "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":"+
+                                (sampleCount==0?"[]":"[{\"metric\":{\"instance\":\"sut-1\"},\"values\":["+values+"]}]")+"}}"
+                        : responseBodyFactory.apply(raw);
+                byte[] body=responseBytes>0?new byte[responseBytes]:response.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", "application/json");
                 exchange.sendResponseHeaders(responseStatus, body.length);
                 exchange.getResponseBody().write(body);

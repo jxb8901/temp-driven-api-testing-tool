@@ -7,6 +7,7 @@
 - Add the Studio Read-only Validate workspace for shared/effective Config, registered Packages, Explorer resources, and executable LOAD Scenarios; advertise the `att-validation/v1` Server capability and report contract (#355).
 - Add Server-managed Prometheus sources and reusable SUT Metrics profiles to LOAD Jobs, with immutable per-Job snapshots, bounded post-run sidecars, on-demand live preview, and a dedicated Job Details tab (#348).
 - Return the configured 413 size-limit response for oversized SUT Metrics requests and enforce Admin-only catalog writes.
+- Preserve live SUT Metrics cache coalescing, chronological coverage, explicit empty-result status, and timestamp-scaled chart gaps (#348).
 
 # Changelog
 

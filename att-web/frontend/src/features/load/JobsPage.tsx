@@ -1139,21 +1139,53 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
     {state === 'PARTIAL' && <p role="status">Some metrics are available; other queries returned no data or could not be collected.</p>}
     {state === 'NO_DATA' && <p role="status">No SUT samples are available yet for this time window.</p>}
     {state === 'READY' && !items.length && <p role="status">Collection is ready, but no metric series are present in this page.</p>}
-    {items.map((item, index) => <SutMetricCard item={item} range={showLive ? liveRange : collectionRange} rangeEnd={windowEnd} key={`${item.id || item.queryId || item.metricId}-${item.targetId}-${index}`} />)}
+    {items.map((item, index) => <SutMetricCard item={item} range={showLive ? liveRange : collectionRange}
+      rangeStart={windowStart} rangeEnd={windowEnd}
+      stepMilliseconds={showLive
+        ? Math.max(1, Number((response as SutMetricsLiveResponse | null)?.stepSeconds || 30)) * 1000
+        : metricStepMilliseconds(collection?.step)}
+      key={`${item.id || item.queryId || item.metricId}-${item.targetId}-${index}`} />)}
     {diagnostics.length > 0 && <details><summary>Collection diagnostics ({diagnostics.length})</summary><ul>{diagnostics.slice(0, 20).map((item, index) => <li key={`${item.code}-${index}`}>{item.code || 'Collection issue'}: {item.message || 'No additional detail.'}</li>)}</ul></details>}
     {nextOffset !== null && <button type="button" onClick={() => void loadMore()} disabled={moreLoading}>{moreLoading ? 'Loading…' : 'Load more SUT metric series'}</button>}
     {loading && !response && <p role="status" aria-busy="true">Loading SUT Metrics…</p>}
   </section>;
 });
 
-const SutMetricCard = memo(function SutMetricCard({ item, range, rangeEnd }: { item: SutMetricItem; range: string; rangeEnd?: string }) {
+function metricStepMilliseconds(step?: string): number {
+  const match = /^([1-9][0-9]*)(ms|s|m|h|d|w|y)$/.exec(step || '');
+  if (!match) return 30_000;
+  const multiplier: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000, y: 31_536_000_000 };
+  return Number(match[1]) * multiplier[match[2]!]!;
+}
+
+function metricPointTime(point: { timestamp: string; timestampEpochMs: number }): number {
+  return Number.isFinite(point.timestampEpochMs) ? point.timestampEpochMs : Date.parse(point.timestamp);
+}
+
+const SutMetricCard = memo(function SutMetricCard({ item, range, rangeStart, rangeEnd, stepMilliseconds }: {
+  item: SutMetricItem; range: string; rangeStart?: string; rangeEnd?: string; stepMilliseconds: number;
+}) {
   const rangeSeconds: Record<string, number> = { '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '6h': 21600, '12h': 43200, '24h': 86400 };
   const parsedRangeEnd = rangeEnd ? Date.parse(rangeEnd) : Number.NaN;
-  const rangeAnchor = Number.isFinite(parsedRangeEnd) ? parsedRangeEnd : Date.now();
-  const cutoff = range === 'all' ? null : rangeAnchor - (rangeSeconds[range] || 900) * 1000;
+  const coverage = item.coverage || item.series?.[0]?.coverage || {};
+  const pointTimes = (item.series || []).slice(0, 8).flatMap(series => (series.samples || []).map(metricPointTime).filter(Number.isFinite));
+  const earliestPoint = pointTimes.length ? Math.min(...pointTimes) : Number.NaN;
+  const latestPoint = pointTimes.length ? Math.max(...pointTimes) : Number.NaN;
+  const parsedRangeStart = rangeStart ? Date.parse(rangeStart) : Number.NaN;
+  const coverageStart = typeof coverage.windowStart === 'string' ? Date.parse(coverage.windowStart) : Number.NaN;
+  const coverageEnd = typeof coverage.windowEnd === 'string' ? Date.parse(coverage.windowEnd) : Number.NaN;
+  const rangeAnchor = Number.isFinite(parsedRangeEnd) ? parsedRangeEnd : Number.isFinite(coverageEnd) ? coverageEnd : latestPoint;
+  const coverageAnchor = Number.isFinite(parsedRangeStart) ? parsedRangeStart : Number.isFinite(coverageStart) ? coverageStart : earliestPoint;
+  const selectedStart = range === 'all' ? coverageAnchor : rangeAnchor - (rangeSeconds[range] || 900) * 1000;
+  const domainStart = Math.max(Number.isFinite(coverageAnchor) ? coverageAnchor : selectedStart, selectedStart);
+  const domainEnd = rangeAnchor;
+  const domainSpan = Math.max(1, domainEnd - domainStart);
   const visibleSeries = (item.series || []).slice(0, 8).map(series => ({
     ...series,
-    samples: (series.samples || []).filter(point => cutoff === null || point.timestampEpochMs >= cutoff).slice(-800),
+    samples: (series.samples || []).filter(point => {
+      const timestamp = metricPointTime(point);
+      return Number.isFinite(timestamp) && timestamp >= domainStart && timestamp <= domainEnd;
+    }).sort((left, right) => metricPointTime(left) - metricPointTime(right)).slice(-800),
   }));
   const visiblePoints = visibleSeries.flatMap(series => series.samples);
   const values = visiblePoints.map(point => point.value);
@@ -1163,17 +1195,21 @@ const SutMetricCard = memo(function SutMetricCard({ item, range, rangeEnd }: { i
   const paths = visibleSeries.map((series, index) => {
     const points = series.samples;
     if (!points.length) return null;
-    const path = points.map((point, position) => {
-      const x = points.length < 2 ? 0 : position * 800 / (points.length - 1);
+    let previousTimestamp: number | null = null;
+    const path = points.map(point => {
+      const timestamp = metricPointTime(point);
+      const x = Math.max(0, Math.min(800, (timestamp - domainStart) / domainSpan * 800));
       const y = 190 - ((point.value - minimum) / span) * 170;
-      return `${position ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+      const command = previousTimestamp === null || timestamp - previousTimestamp > stepMilliseconds * 1.5 ? 'M' : 'L';
+      previousTimestamp = timestamp;
+      return `${command}${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ');
     return { path, index };
   }).filter((value): value is NonNullable<typeof value> => value !== null);
   const count = visiblePoints.length;
-  const coverage = item.coverage || item.series?.[0]?.coverage || {};
-  const firstVisible = visiblePoints[0]?.timestamp || coverage.firstSampleAt;
-  const latestVisible = visiblePoints[visiblePoints.length - 1]?.timestamp || coverage.lastSampleAt;
+  const chronologicalPoints = [...visiblePoints].sort((left, right) => metricPointTime(left) - metricPointTime(right));
+  const firstVisible = chronologicalPoints[0]?.timestamp || coverage.firstSampleAt;
+  const latestVisible = chronologicalPoints[chronologicalPoints.length - 1]?.timestamp || coverage.lastSampleAt;
   const status = item.queryStatus || (count ? 'READY' : 'NO_DATA');
   return <article className="att-sut-metric-card">
     <header><div><h3>{item.title || item.metricId}</h3><p>{item.category || 'SUT'} · {item.targetType || 'target'} {item.targetId} · {item.unit}{item.profilePath ? ` · ${item.profilePath}` : ''}</p></div>
