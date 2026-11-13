@@ -786,6 +786,60 @@ class ServerWarUiIT {
 
 
     @Test
+    void packagedWarReloadsDegradedHelperDiscoveryWithoutLeakingPrivateSources() throws Exception {
+        Path war = Path.of(System.getProperty("att.server.war"));
+        assertTrue(Files.isRegularFile(war), "Packaged server WAR must exist: " + war);
+        Path localHome = createScheduledLocalRuntime();
+        Path packages = Files.createDirectories(temp.resolve("degraded-helper-packages"));
+        Path packageRoot = Files.createDirectory(packages.resolve("payments"));
+        writeScheduledPackage(packageRoot, localHome);
+        Path users = Files.writeString(temp.resolve("degraded-helper-users.xml"),
+                "<tomcat-users><role rolename=\"ATT_USER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/></tomcat-users>");
+        Path config = Files.writeString(temp.resolve("degraded-helper-server.yaml"),
+                "server:\n  runtimeConfigPath: " + yaml(localHome.resolve("config/config.yaml")) + "\n  dataDir: " + yaml(temp.resolve("degraded-helper-data"))
+                        + "\n  authenticationRequired: true\n  inspection:\n    enabled: true\n"
+                        + "workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n"
+                        + "packages:\n  allowedRoots:\n    - " + yaml(packages) + "\n  entries:\n    payments: " + yaml(packageRoot) + "\n");
+        String oldConfig = System.getProperty("att.server.config");
+        String oldHome = System.getProperty("att.home");
+        System.setProperty("att.server.config", config.toString());
+        System.setProperty("att.home", localHome.toString());
+
+        Tomcat tomcat = null;
+        String api = "/tools/att/api/v1";
+        String auth = basic("att");
+        try {
+            tomcat = startScheduledWar(war, users);
+            int port = tomcat.getConnector().getLocalPort();
+            String resourceRoute = api + "/packages/payments/resources?type=template&query=DEGRADED";
+            HttpURLConnection baselineResponse = open(port, resourceRoute, auth);
+            String baselineRevision;
+            JsonNode baseline;
+            try (var input = baselineResponse.getInputStream()) {
+                assertEquals(200, baselineResponse.getResponseCode(), resourceRoute);
+                baselineRevision = baselineResponse.getHeaderField("X-ATT-Inspection-Revision");
+                baseline = ServerRuntime.JSON.readTree(input.readAllBytes());
+            } finally {
+                baselineResponse.disconnect();
+            }
+            assertEquals(0, baseline.path("items").size(), baseline.toString());
+            assertNotNull(baselineRevision);
+            assertEquals(401, get(port, resourceRoute, null), "The Resource Catalog remains authenticated during reload.");
+
+            assertDegradedDiscoveryWithoutProcessSecrets(port, api, auth, packageRoot, localHome, baselineRevision);
+        } finally {
+            if (tomcat != null) {
+                try { tomcat.stop(); } finally { tomcat.destroy(); }
+            }
+            if (oldConfig == null) System.clearProperty("att.server.config");
+            else System.setProperty("att.server.config", oldConfig);
+            if (oldHome == null) System.clearProperty("att.home");
+            else System.setProperty("att.home", oldHome);
+        }
+    }
+
+
+    @Test
     void packagedWarSelectedValidationReportsPartialForMissingEnvironmentSecret() throws Exception {
         Path war = Path.of(System.getProperty("att.server.war"));
         assertTrue(Files.isRegularFile(war), "Packaged server WAR must exist: " + war);
@@ -1580,6 +1634,71 @@ class ServerWarUiIT {
         org.jsoup.nodes.Element asset = org.jsoup.Jsoup.parse(html).selectFirst(selector);
         assertNotNull(asset, "The active Vite index must reference a generated " + attribute + " asset.");
         return asset.attr(attribute);
+    }
+
+    private static void assertDegradedDiscoveryWithoutProcessSecrets(int port, String api, String auth,
+                                                                     Path packageRoot, Path localHome,
+                                                                     String baselineRevision) throws Exception {
+        String variable = "ATT_244_WAR_ABSENT_71F29BE6";
+        assertNull(System.getenv(variable), "The fixture Environment variable must be absent from the process.");
+        Files.writeString(localHome.resolve("config/db-discovery.yaml"),
+                "schemaVersion: att-dbhelper/v2.6\nid: orders\nname: Orders\ndescription: Discovery fixture\n"
+                        + "connection: {url: 'jdbc:unused', password: '${ENV:" + variable + "}'}\n");
+        Files.writeString(localHome.resolve("config/db-invalid.yaml"), "[invalid: PRIVATE_HELPER_SOURCE_CANARY\n");
+        Files.writeString(localHome.resolve("config/config.yaml"),
+                "\ndbhelpers: [config/db-discovery.yaml, config/db-absent.yaml, config/db-invalid.yaml]\n",
+                java.nio.file.StandardOpenOption.APPEND);
+        Path target = Files.createDirectories(packageRoot.resolve("templates/DEGRADED"));
+        Files.writeString(target.resolve("template.yaml"),
+                "schemaVersion: att-template/v3.6\nname: DEGRADED\ndescription: Browse without credentials\nactions:\n"
+                        + "  query:\n    type: tool\n    call: \"#{db.orders.query(sql='select 1')}\"\n");
+
+        String resourceRoute = api + "/packages/payments/resources?type=template&query=DEGRADED";
+        JsonNode resources = null;
+        String refreshedRevision = null;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        do {
+            HttpURLConnection response = open(port, resourceRoute, auth);
+            try {
+                assertEquals(200, response.getResponseCode(), resourceRoute);
+                refreshedRevision = response.getHeaderField("X-ATT-Inspection-Revision");
+                try (var input = response.getInputStream()) {
+                    resources = ServerRuntime.JSON.readTree(input.readAllBytes());
+                }
+            } finally {
+                response.disconnect();
+            }
+            boolean helperDiagnosticsReady = resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE")
+                    && resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID");
+            if (!resources.path("items").isEmpty() && helperDiagnosticsReady) break;
+            Thread.sleep(50);
+        } while (System.nanoTime() < deadline);
+
+        assertEquals(1, resources.path("items").size(), resources.toString());
+        JsonNode item = resources.path("items").get(0);
+        assertEquals("available", item.path("metadataState").asText(), item.toString());
+        assertEquals("dependency-unresolved", item.path("executionReadiness").path("state").asText(), item.toString());
+        assertTrue(item.path("executionReadiness").toString().contains(variable), item.toString());
+        assertTrue(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"), resources.toString());
+        assertTrue(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"), resources.toString());
+        assertNotEquals(baselineRevision, refreshedRevision,
+                "The running Server must invalidate its inspection cache after the helper configuration changes.");
+        assertFalse(resources.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
+        assertFalse(resources.toString().contains(localHome.toString()));
+        assertFalse(resources.toString().contains(packageRoot.toString()));
+        assertEquals(401, get(port, resourceRoute, null), "The refreshed Resource Catalog remains authenticated.");
+
+        String effectiveRoute = api + "/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&limit=50";
+        JsonNode effective = getJson(port, effectiveRoute, auth);
+        assertEquals("degraded", effective.path("state").asText(), effective.toString());
+        assertEquals("not-validated", effective.path("executionReadiness").asText());
+        assertTrue(effective.path("diagnostics").toString().contains(variable));
+        assertTrue(effective.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
+        assertTrue(effective.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"));
+        assertFalse(effective.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
+        assertFalse(effective.toString().contains(localHome.toString()));
+        assertFalse(effective.toString().contains(packageRoot.toString()));
+        assertEquals(401, get(port, effectiveRoute, null), "The effective Configuration API remains authenticated.");
     }
 
     private static void assertSharedConfiguration(int port,String api,String ordinary) throws Exception {
