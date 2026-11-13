@@ -229,7 +229,7 @@ final class SutMetricsService implements AutoCloseable {
             String sourceId = String.valueOf(query.get("sourceId"));
             String profilePath = String.valueOf(query.get("profilePath"));
             String targetId = String.valueOf(query.get("targetId"));
-            String targetKey = sourceId + "\u0000" + profilePath + "\u0000" + targetId;
+            String targetKey = sourceId + "\u0000" + targetId;
             String metricId = String.valueOf(query.get("metricId"));
             if (!duplicateTargetMetric.add(targetKey + "\u0000" + metricId))
                 throw new IllegalArgumentException("Duplicate metric id " + metricId + " resolves within target " + targetId + ".");
@@ -762,12 +762,24 @@ final class SutMetricsService implements AutoCloseable {
             Map<String, Object> inherited = new LinkedHashMap<>(profile);
             inherited.remove("id"); inherited.remove("kind"); inherited.remove("extends"); inherited.remove("description"); inherited.remove("category");
             inherited.remove("overridableParams"); inherited.remove("allowTargetOverride"); inherited.remove("allowSourceOverride");
-            Map<String, Object> merged = mergeBindings(inherited, binding, bool(profile.get("allowTargetOverride")), bool(profile.get("allowSourceOverride")));
+            Map<String, Object> profileParameters = new LinkedHashMap<>(objectOrEmpty(profile.get("parameters")));
+            profileParameters.putAll(objectOrEmpty(binding.get("__derivedProfileParameters")));
+            Map<String, Object> scenarioParameters = binding.containsKey("__scenarioParameters")
+                    ? objectOrEmpty(binding.get("__scenarioParameters")) : objectOrEmpty(binding.get("parameters"));
             if (binding.containsKey("parameters")) {
                 Set<String> allowed = stringSet(profile.get("overridableParams"), "overridableParams");
-                for (String name : objectOrEmpty(binding.get("parameters")).keySet()) if (!allowed.contains(name))
+                for (String name : scenarioParameters.keySet()) if (!allowed.contains(name))
                     throw new IllegalArgumentException("Scenario override is not allowed for parameter " + name + " on " + profileId + ".");
             }
+            inherited.remove("parameters");
+            Map<String, Object> callerBinding = new LinkedHashMap<>(binding);
+            callerBinding.keySet().removeIf(key -> key.startsWith("__"));
+            callerBinding.put("parameters", scenarioParameters);
+            Map<String, Object> merged = mergeBindings(inherited, callerBinding,
+                    bool(profile.get("allowTargetOverride")), bool(profile.get("allowSourceOverride")));
+            merged.put("__derivedProfileParameters", profileParameters);
+            merged.put("__scenarioParameters", scenarioParameters);
+            merged.put("__derivedBinding", Boolean.TRUE);
             expand(parent, merged, profilePath + "/" + profileId, stack, queries, provenance, principal, admin, effectiveTargets, depth + 1);
         } else {
             bindBase(profile, binding, profilePath, queries, provenance, principal, admin, effectiveTargets);
@@ -796,9 +808,12 @@ final class SutMetricsService implements AutoCloseable {
         if (targetBindings.size() > sourceInt(source, "maxTargets")) throw new IllegalArgumentException("Profile exceeds the Data Source target limit.");
         Map<String, Object> definitions = objectOrEmpty(profile.get("params"));
         Map<String, Object> defaults = objectOrEmpty(profile.get("parameters"));
-        Map<String, Object> overrides = objectOrEmpty(binding.get("parameters"));
+        Map<String, Object> derivedDefaults = objectOrEmpty(binding.get("__derivedProfileParameters"));
+        Map<String, Object> overrides = binding.containsKey("__scenarioParameters")
+                ? objectOrEmpty(binding.get("__scenarioParameters")) : objectOrEmpty(binding.get("parameters"));
         Set<String> overridable = stringSet(profile.get("overridableParams"), "overridableParams");
-        for (String name : overrides.keySet()) if (!overridable.contains(name)) throw new IllegalArgumentException("Scenario override is not allowed for parameter " + name + " on " + profileId + ".");
+        if (!bool(binding.get("__derivedBinding"))) for (String name : overrides.keySet()) if (!overridable.contains(name))
+            throw new IllegalArgumentException("Scenario override is not allowed for parameter " + name + " on " + profileId + ".");
         for (Map<String, Object> target : targetBindings) {
             String targetId = targetId(target);
             if (!selectedTargets.isEmpty() && !selectedTargets.contains(targetId) && !selectedTargets.contains(profilePath + "/" + targetId)) continue;
@@ -808,6 +823,7 @@ final class SutMetricsService implements AutoCloseable {
                 Map<String, Object> definition = object(entry.getValue(), "parameter " + entry.getKey());
                 Object value = definition.get("default");
                 if (defaults.containsKey(entry.getKey())) value = defaults.get(entry.getKey());
+                if (derivedDefaults.containsKey(entry.getKey())) value = derivedDefaults.get(entry.getKey());
                 if (targetParams.containsKey(entry.getKey())) value = targetParams.get(entry.getKey());
                 if (overrides.containsKey(entry.getKey())) value = overrides.get(entry.getKey());
                 if (value == null && bool(definition.get("required"))) throw new IllegalArgumentException("Required profile parameter " + entry.getKey() + " is missing for target " + targetId + ".");
@@ -815,6 +831,8 @@ final class SutMetricsService implements AutoCloseable {
             }
             for (String name : targetParams.keySet()) if (!definitions.containsKey(name)) throw new IllegalArgumentException("Unknown profile parameter " + name + " on target " + targetId + ".");
             for (String name : defaults.keySet()) if (!definitions.containsKey(name)) throw new IllegalArgumentException("Unknown default profile parameter " + name + ".");
+            for (String name : derivedDefaults.keySet()) if (!definitions.containsKey(name)) throw new IllegalArgumentException("Unknown derived profile parameter " + name + ".");
+            for (String name : overrides.keySet()) if (!definitions.containsKey(name)) throw new IllegalArgumentException("Unknown scenario profile parameter " + name + ".");
             if (parameters.size() != definitions.size() && definitions.values().stream().anyMatch(value -> bool(objectOrEmpty(value).get("required")) && !parameters.containsKey(definitionName(definitions, value))))
                 throw new IllegalArgumentException("One or more required profile parameters are missing.");
             for (Map<String, Object> metric : listOfMaps(profile.get("metrics"))) {

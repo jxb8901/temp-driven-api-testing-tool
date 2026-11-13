@@ -423,6 +423,8 @@ final class ServerRuntime implements AutoCloseable {
             String packageId=required(definition,"packageId"),environment=optionalText(definition,"environment");
             if("strict".equals(sourcePolicy))verifyStrictReplayRevision(packageId,environment,spec.revision());
             boolean run="run".equals(definition.path("executionType").asText());
+            Map<String,Object> sourceSutSnapshot="load".equals(definition.path("executionType").asText())?sutMetrics.snapshotForJob(id):null;
+            if(sourceSutSnapshot!=null)sutMetrics.authorizeSnapshot(sourceSutSnapshot,principal,sutAdminPrincipal(principal));
             Map<String,Object> draft=null;String validationCode=null;List<Map<String,Object>> diagnostics=Collections.emptyList();
             try {
                 if(run)draft=createRunDraft(definition,principal,true,null);
@@ -438,8 +440,9 @@ final class ServerRuntime implements AutoCloseable {
                     CatalogLoadDraftState retained=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,environment,path,validated.revisionDigest,validated.model,validated.scenario,null,configuration,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
                     synchronized(draftLock){expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(retained.id,retained);}
                     draft=catalogLoadDraftView(retained);
+                    if(sourceSutSnapshot!=null)draft.put("sutMetrics",sutMetrics.previewSnapshot(sourceSutSnapshot));
                 } else {
-                    ObjectNode input=definition.deepCopy();input.remove("executionType");draft=createAdvancedLoadDraft(input,principal,null);
+                    ObjectNode input=definition.deepCopy();input.remove("executionType");draft=createAdvancedLoadDraft(input,principal,null,false,sourceSutSnapshot);
                     JsonNode normalized=JSON.valueToTree(draft.get("scenario"));if(normalized.isObject())definition.set("scenario",normalized);
                 }
             } catch(ReplayInputMissingException missing){validationCode="ATT-SERVER-REPLAY-INPUT-MISSING";diagnostics=List.of(replayDiagnostic(validationCode,"inputs",missing.getMessage()));}
@@ -613,6 +616,11 @@ final class ServerRuntime implements AutoCloseable {
                 input.set("inlineLoadScenario",JSON.valueToTree(draft==null?catalog.scenario:draft.scenario));input.put("expectedRevisionDigest",review.selectedRevision);
                 if(draft==null&&catalog.resourceId!=null)input.put("scenario",catalog.resourceId);
                 input.set("configurationProvenance",JSON.valueToTree(review.configuration));
+                Map<String,Object> sutSnapshot=draft==null?sutMetrics.snapshotForJob(id):draft.sutMetricsSnapshot;
+                if(sutSnapshot!=null) {
+                    sutMetrics.authorizeSnapshot(sutSnapshot,principal,sutAdminPrincipal(principal));
+                    input.set("sutMetricsSnapshot",JSON.valueToTree(sutSnapshot));
+                }
             }
             input.put("expectedRevisionDigest",review.selectedRevision);
             input.set("configurationProvenance",JSON.valueToTree(review.configuration));
@@ -1340,7 +1348,11 @@ final class ServerRuntime implements AutoCloseable {
         if(snapshot==null)return sutFields("schemaVersion",SutMetricsService.COLLECTION_SCHEMA,"state","DISABLED","jobId",id,"items",List.of());
         sutMetrics.authorizeSnapshot(snapshot,principal,admin);
         if(live) {
+            if(terminal(id))return sutFields("schemaVersion","att-sut-metrics-live/v1","state","ENDED","jobId",id,
+                    "snapshotId",snapshot.get("snapshotId"),"items",List.of(),"message","LOAD has ended; use the post-run collection.");
             Instant started=liveLoadStart(id,row);
+            if(terminal(id))return sutFields("schemaVersion","att-sut-metrics-live/v1","state","ENDED","jobId",id,
+                    "snapshotId",snapshot.get("snapshotId"),"items",List.of(),"message","LOAD has ended; use the post-run collection.");
             Map<String,Object> preview=sutMetrics.livePreview(id,principal,admin,started,range,step,targetId,profilePath);
             return preview;
         }
@@ -1353,6 +1365,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     private Instant liveLoadStart(String id,Map<String,Object> row) {
         Job active=jobs.get(id);
+        if(active!=null&&active.terminal())return null;
         if(active!=null&&active.loadProgress!=null&&active.loadProgress.get("elapsedMs") instanceof Number elapsed&&elapsed.longValue()>=0)
             return clock.instant().minusMillis(elapsed.longValue());
         if(active!=null&&!active.terminal())return null;
@@ -1987,6 +2000,10 @@ final class ServerRuntime implements AutoCloseable {
         return createAdvancedLoadDraft(input,principal,approvedConfiguration,false);
     }
     private Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal,Map<String,Object> approvedConfiguration,boolean administrator) throws Exception {
+        return createAdvancedLoadDraft(input,principal,approvedConfiguration,administrator,null);
+    }
+    private Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal,Map<String,Object> approvedConfiguration,
+                                                       boolean administrator,Map<String,Object> pinnedSutSnapshot) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
@@ -2012,8 +2029,14 @@ final class ServerRuntime implements AutoCloseable {
         enforceInlineLoadLimits(scenario);
         Map<String,Object> sutSnapshot=null;
         Object rawObservability=scenario.get("observability");
-        if(rawObservability instanceof Map<?,?>)sutSnapshot=sutMetrics.resolveScenario(JSON.convertValue(rawObservability,Map.class),principal,administrator||sutAdminPrincipal(principal));
+        if(rawObservability instanceof Map<?,?>) {
+            if(pinnedSutSnapshot!=null) {
+                sutMetrics.authorizeSnapshot(pinnedSutSnapshot,principal,administrator||sutAdminPrincipal(principal));
+                sutSnapshot=pinnedSutSnapshot;
+            } else sutSnapshot=sutMetrics.resolveScenario(JSON.convertValue(rawObservability,Map.class),principal,administrator||sutAdminPrincipal(principal));
+        }
         else if(rawObservability!=null)throw new IllegalArgumentException("scenario.observability must be an object.");
+        else if(pinnedSutSnapshot!=null)throw new IllegalArgumentException("The retained SUT Metrics snapshot does not match the replayed scenario.");
         AdvancedLoadDraftState draft=new AdvancedLoadDraftState("A"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
                 principal,packageId,environment,(String)rawModel,(String)rawDigest,scenario,((Boolean)rawSensitive).booleanValue(),inspected,
                 sutSnapshot,clock.instant().plusMillis(DRAFT_TTL_MILLIS), scenarioInput, input.has("templateComposition"), ((Boolean)rawAuthoredSensitive).booleanValue());

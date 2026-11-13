@@ -50,6 +50,23 @@ class LoadScenarioTest {
         assertEquals(2,policy.maxSuccessSamples());assertEquals(3,policy.maxFailureSamples());
     }
 
+    @Test void observabilityBindingSurvivesScenarioNormalizationAndComposition() throws Exception {
+        Path project=project();
+        Map<String,Object> observability=mapOf("schemaVersion","att-load-observability/v1",
+                "collections",List.of(mapOf("profile","profile-sit")),
+                "collection",mapOf("mode","post-run","before","5m","after","2m","step","30s"),
+                "livePreview",mapOf("enabled",true,"refreshInterval","30s","defaultRange","15m"));
+        Map<String,Object> policy=mapOf("schemaVersion","att-load/v1.9","observability",observability);
+        List<Map<String,Object>> workloads=List.of(mapOf("id","smoke","target",mapOf("type","template","id","LOAD_TEMPLATE"),
+                "load",mapOf("users",1,"duration","1s")));
+        Map<String,Object> composed=new LoadScenarioBuilder(new LoadScenarioLoader(project)).composeScenario(policy,workloads);
+        LoadScenario scenario=new LoadScenarioLoader(project).loadInline(composed);
+
+        assertEquals(observability,scenario.observability());
+        assertEquals(observability,scenario.toMap().get("observability"));
+        assertFalse(scenario.toSummaryMap().containsKey("observability"),"SUT bindings stay out of the report summary projection.");
+    }
+
     @Test void independentQuotasBoundRealEvidenceUnderBothConcurrentSchedulers() throws Exception {
         for(boolean arrival:new boolean[]{false,true}) {
             Path project=project();

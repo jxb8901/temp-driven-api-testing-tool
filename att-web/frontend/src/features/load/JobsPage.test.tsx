@@ -610,6 +610,45 @@ describe('JobsPage React feature', () => {
     expect(getLive).toHaveBeenCalledTimes(1);
   });
 
+  it('switches from live preview to the post-run collection when the server reports LOAD ended', async () => {
+    const getLive = vi.fn(async (): Promise<SutMetricsLiveResponse> => ({
+      schemaVersion: 'att-sut-metrics-live/v1', state: 'ENDED', message: 'LOAD has ended; use the post-run collection.', items: [],
+    }));
+    const getMetrics = vi.fn(async (): Promise<SutMetricsJobResponse> => ({
+      state: 'READY', collection: { state: 'READY', queries: [
+        { id: 'q1', profile: 'base', profilePath: 'base', targetId: 'sut-1', metricId: 'cpu', title: 'CPU', unit: 'percent' },
+      ] }, items: [],
+    }));
+    const api = makeApi({ getJobSutMetricsLive: getLive, getJobSutMetrics: getMetrics });
+    await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={true} hidden={false} />));
+    await advance();
+
+    expect(getLive).toHaveBeenCalledTimes(1);
+    expect(getMetrics).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('#job-panel-sutMetrics')?.textContent).toContain('READY');
+    expect([...host.querySelectorAll('#job-panel-sutMetrics select')[2]!.querySelectorAll('option')].map(option => (option as HTMLOptionElement).value)).toContain('all');
+    await advance(60_000);
+    expect(getLive).toHaveBeenCalledTimes(1);
+    expect(getMetrics).toHaveBeenCalledTimes(1);
+  });
+
+  it('resumes live preview when the selected Job changes after another Job ended', async () => {
+    const getLive = vi.fn(async (jobId: string): Promise<SutMetricsLiveResponse> => ({
+      schemaVersion: 'att-sut-metrics-live/v1', state: jobId === 'JOB-204' ? 'ENDED' : 'READY', items: [],
+    }));
+    const getMetrics = vi.fn(async (): Promise<SutMetricsJobResponse> => ({ state: 'READY', items: [] }));
+    const api = makeApi({ getJobSutMetricsLive: getLive, getJobSutMetrics: getMetrics });
+    await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={true} hidden={false} />));
+    await advance();
+    expect(getLive).toHaveBeenCalledTimes(1);
+    expect(getMetrics).toHaveBeenCalledTimes(1);
+
+    await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-205" activeLoad={true} hidden={false} />));
+    await advance();
+    expect(getLive).toHaveBeenCalledTimes(2);
+    expect(getLive).toHaveBeenLastCalledWith('JOB-205', expect.anything());
+  });
+
   it('anchors post-run range filters to the collection end time', async () => {
     const windowEnd = Date.parse('2026-10-13T12:00:00.000Z');
     const response: SutMetricsJobResponse = {

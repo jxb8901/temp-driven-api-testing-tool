@@ -1023,6 +1023,7 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
   const [liveRange, setLiveRange] = useState('15m');
   const [collectionRange, setCollectionRange] = useState('all');
   const [queryDefinitions, setQueryDefinitions] = useState<SutMetricQueryMetadata[]>([]);
+  const [liveEndedJobId, setLiveEndedJobId] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -1035,14 +1036,16 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
     };
     const poll = async () => {
       if (disposed || document.hidden) return;
+      const useLive = activeLoad && liveEndedJobId !== jobId;
       const controller = new AbortController(); requestRef.current = controller;
       setLoading(current => current || !response); setError('');
       try {
-        if (activeLoad) {
+        if (useLive) {
           const fetchLive = api.getJobSutMetricsLive;
           if (!fetchLive) throw new Error('This Server client does not support SUT Metrics live preview.');
           const value = await fetchLive(jobId, { range: liveRange, step: '30s', targetId: targetFilter || undefined, profilePath: profileFilter || undefined, signal: controller.signal });
           if (disposed || controller.signal.aborted) return;
+          if (value.state === 'ENDED') { setLiveEndedJobId(jobId); return; }
           setResponse(value); setQueryDefinitions(value.queries || []); setNextOffset(null); schedule(30_000);
         } else {
           const fetchCollection = api.getJobSutMetrics;
@@ -1055,7 +1058,7 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
       } catch (failure) {
         if (disposed || controller.signal.aborted) return;
         setError(failure instanceof Error ? failure.message : 'SUT Metrics could not be loaded.');
-        schedule(activeLoad ? 30_000 : 10_000);
+        schedule(useLive ? 30_000 : 10_000);
       } finally {
         if (!disposed && !controller.signal.aborted) setLoading(false);
         if (requestRef.current === controller) requestRef.current = null;
@@ -1075,7 +1078,7 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
       requestRef.current?.abort(); requestRef.current = null;
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [api, jobId, activeLoad, hidden, targetFilter, profileFilter, liveRange]);
+  }, [api, jobId, activeLoad, liveEndedJobId, hidden, targetFilter, profileFilter, liveRange]);
 
   async function loadMore() {
     if (nextOffset === null || !api.getJobSutMetrics || moreLoading || hidden) return;
@@ -1101,13 +1104,14 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
   const freshness = (response as SutMetricsLiveResponse | null)?.sourceQueryTime || collection?.updatedAt || collection?.createdAt;
   const sampleCount = (response as SutMetricsLiveResponse | null)?.sampleCount;
   const diagnostics = collection?.diagnostics || [];
-  const queries = queryDefinitions.length ? queryDefinitions : activeLoad
+  const showLive = activeLoad && liveEndedJobId !== jobId;
+  const queries = queryDefinitions.length ? queryDefinitions : showLive
     ? ((response as SutMetricsLiveResponse | null)?.queries || [])
     : (collection?.queries || []);
   const targets = [...new Set(queries.map(query => query.targetId).filter(Boolean))].sort();
   const profiles = [...new Set(queries.map(query => query.profilePath || query.profile || '').filter(Boolean))].sort();
-  const selectedRange = activeLoad ? liveRange : collectionRange;
-  const rangeOptions = activeLoad
+  const selectedRange = showLive ? liveRange : collectionRange;
+  const rangeOptions = showLive
     ? [['5m', 'Last 5 minutes'], ['15m', 'Last 15 minutes'], ['30m', 'Last 30 minutes'], ['1h', 'Last hour'], ['4h', 'Last 4 hours']]
     : [['all', 'Entire collection'], ['15m', 'Last 15 minutes'], ['1h', 'Last hour'], ['6h', 'Last 6 hours'], ['12h', 'Last 12 hours'], ['24h', 'Last 24 hours']];
 
@@ -1117,7 +1121,7 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
     {queries.length > 0 && <div className="att-sut-metrics-filters" aria-label="SUT Metrics filters">
       <label>Target<select value={targetFilter} onChange={event => setTargetFilter(event.target.value)}><option value="">All targets</option>{targets.map(target => <option key={target} value={target}>{target}</option>)}</select></label>
       <label>Profile<select value={profileFilter} onChange={event => setProfileFilter(event.target.value)}><option value="">All profiles</option>{profiles.map(profile => <option key={profile} value={profile}>{profile}</option>)}</select></label>
-      <label>Range<select value={selectedRange} onChange={event => activeLoad ? setLiveRange(event.target.value) : setCollectionRange(event.target.value)}>{rangeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <label>Range<select value={selectedRange} onChange={event => showLive ? setLiveRange(event.target.value) : setCollectionRange(event.target.value)}>{rangeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
     </div>}
     {error && <p role="alert" className="att-inline-error">{error}</p>}
     <dl className="att-sut-metrics-status">
@@ -1135,7 +1139,7 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
     {state === 'PARTIAL' && <p role="status">Some metrics are available; other queries returned no data or could not be collected.</p>}
     {state === 'NO_DATA' && <p role="status">No SUT samples are available yet for this time window.</p>}
     {state === 'READY' && !items.length && <p role="status">Collection is ready, but no metric series are present in this page.</p>}
-    {items.map((item, index) => <SutMetricCard item={item} range={activeLoad ? liveRange : collectionRange} rangeEnd={windowEnd} key={`${item.id || item.queryId || item.metricId}-${item.targetId}-${index}`} />)}
+    {items.map((item, index) => <SutMetricCard item={item} range={showLive ? liveRange : collectionRange} rangeEnd={windowEnd} key={`${item.id || item.queryId || item.metricId}-${item.targetId}-${index}`} />)}
     {diagnostics.length > 0 && <details><summary>Collection diagnostics ({diagnostics.length})</summary><ul>{diagnostics.slice(0, 20).map((item, index) => <li key={`${item.code}-${index}`}>{item.code || 'Collection issue'}: {item.message || 'No additional detail.'}</li>)}</ul></details>}
     {nextOffset !== null && <button type="button" onClick={() => void loadMore()} disabled={moreLoading}>{moreLoading ? 'Loading…' : 'Load more SUT metric series'}</button>}
     {loading && !response && <p role="status" aria-busy="true">Loading SUT Metrics…</p>}

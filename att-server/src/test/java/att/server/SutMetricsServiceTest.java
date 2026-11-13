@@ -50,6 +50,47 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void derivedProfileDefaultsReachBaseAndOnlyDeclaredScenarioOverridesAreAccepted() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(1); SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            Map<String, Object> base = map("schemaVersion", "att-sut-metrics-profile/v1", "id", "base", "name", "Base",
+                    "kind", "base", "category", "app", "params", Map.of("service", Map.of("type", "promLabelValue", "default", "base")),
+                    "parameters", Map.of("service", "base-default"), "targets", List.of(map("id", "base-target", "type", "app")),
+                    "metrics", List.of(map("id", "requests", "title", "Requests", "unit", "count", "kind", "gauge",
+                            "query", "up{service=\"{{service}}\"}")));
+            service.upsertProfile(base);
+            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "derived", "name", "Derived",
+                    "kind", "derived", "extends", "base", "source", "prom", "targets", List.of(map("id", "sut-1", "type", "app")),
+                    "parameters", Map.of("service", "derived-default")));
+            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "derived-open", "name", "Derived open",
+                    "kind", "derived", "extends", "base", "source", "prom", "targets", List.of(map("id", "sut-1", "type", "app")),
+                    "parameters", Map.of("service", "derived-default"), "overridableParams", List.of("service")));
+
+            Map<String, Object> defaulted = service.resolveScenario(scenario(List.of(map("profile", "derived")), "1m", "1m", "15s"), "alice");
+            assertEquals("up{service=\"derived-default\"}", maps(defaulted.get("queries")).get(0).get("query"));
+            assertThrows(IllegalArgumentException.class, () -> service.resolveScenario(scenario(List.of(
+                    map("profile", "derived", "parameters", Map.of("service", "scenario-value"))), "1m", "1m", "15s"), "alice"));
+
+            Map<String, Object> explicitlyOverridden = service.resolveScenario(scenario(List.of(
+                    map("profile", "derived-open", "parameters", Map.of("service", "scenario-value"))), "1m", "1m", "15s"), "alice");
+            assertEquals("up{service=\"scenario-value\"}", maps(explicitlyOverridden.get("queries")).get(0).get("query"));
+        }
+    }
+
+    @Test void duplicateMetricIdsAreRejectedAcrossProfilesForTheSameResolvedTarget() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(1); SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base-a", 1, false));
+            service.upsertProfile(baseProfile("base-b", 1, false));
+            List<Map<String, Object>> bindings = List.of(
+                    map("profile", "base-a", "source", "prom", "targets", List.of(map("id", "sut-1", "type", "app"))),
+                    map("profile", "base-b", "source", "prom", "targets", List.of(map("id", "sut-1", "type", "app"))));
+
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.resolveScenario(scenario(bindings, "1m", "1m", "15s"), "alice"));
+        }
+    }
+
     @Test void exactHttpsEgressAllowlistIsRequiredForRegisteredExternalHosts() throws Exception {
         Map<String, Object> external = source("prom", "https://metrics.example.test", List.of("*"), Map.of());
         try (SutMetricsService blocked = new SutMetricsService(temp.resolve("blocked"), Set.of())) {
