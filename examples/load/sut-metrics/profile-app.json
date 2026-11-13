@@ -4,11 +4,6 @@
   "name": "Application request health",
   "kind": "base",
   "category": "app",
-  "source": "prom-main",
-  "tenant": "production",
-  "targets": [
-    { "id": "payments-api", "type": "application" }
-  ],
   "metrics": [
     { "id": "active-requests", "title": "Active requests", "unit": "count", "kind": "gauge", "query": "application_active_requests" }
   ]

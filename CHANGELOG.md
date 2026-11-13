@@ -8,6 +8,9 @@
 - Add Server-managed Prometheus sources and reusable SUT Metrics profiles to LOAD Jobs, with immutable per-Job snapshots, bounded post-run sidecars, on-demand live preview, and a dedicated Job Details tab (#348).
 - Return the configured 413 size-limit response for oversized SUT Metrics requests and enforce Admin-only catalog writes.
 - Preserve live SUT Metrics cache coalescing, chronological coverage, explicit empty-result status, and timestamp-scaled chart gaps (#348).
+- Align #348 with the simplified two-form profile model: base profiles own only metric definitions and typed parameters; source/tenant/target bindings belong to direct Scenario bindings or one-level composite presets. Reject `extends`, derived profiles, nested composites, and incomplete preset bindings.
+- Publish the #348 provider-neutral `att-sut-metrics-observation/v1` contract with pinned source/profile/target revisions, UTC execution/phase/query windows, coverage, gaps, availability, and safe provenance.
+- Keep post-run metrics PENDING through the configured after-buffer and one query-step ingestion grace, mark missing post-run samples PARTIAL, and integrity-chain each Job-bound manifest transition.
 
 # Changelog
 

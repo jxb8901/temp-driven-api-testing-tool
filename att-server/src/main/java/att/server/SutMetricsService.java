@@ -49,6 +49,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeoutException;
@@ -61,7 +62,11 @@ final class SutMetricsService implements AutoCloseable {
     static final String SNAPSHOT_SCHEMA = "att-sut-metrics-snapshot/v1";
     static final String COLLECTION_SCHEMA = "att-sut-metrics-manifest/v1";
     static final String SERIES_SCHEMA = "att-sut-metrics-series/v1";
-    static final int MAX_SOURCES = 64, MAX_PROFILES = 256, MAX_PROFILE_DEPTH = 8;
+    static final String OBSERVATION_SCHEMA = "att-sut-metrics-observation/v1";
+    static final String MANIFEST_INTEGRITY_SCHEMA = "att-sut-metrics-manifest-integrity/v1";
+    static final int MAX_SOURCES = 64, MAX_PROFILES = 256;
+    static final int MAX_SCHEDULED_COLLECTIONS = 128, MAX_MANIFEST_TRANSITIONS = 16;
+    static final long MAX_MANIFEST_BYTES = 8L * 1024 * 1024;
     static final int MAX_EXPANDED_METRICS = 64, MAX_EXPANDED_TARGETS = 64, MAX_EXPANDED_QUERIES = 256;
     static final long MAX_COLLECTION_WINDOW_SECONDS = 26L * 60 * 60;
     static final long MAX_SEGMENT_SECONDS = 6L * 60 * 60;
@@ -84,6 +89,8 @@ final class SutMetricsService implements AutoCloseable {
     private Map<String, Map<String, Object>> sources = new LinkedHashMap<>();
     private Map<String, Map<String, Object>> profiles = new LinkedHashMap<>();
     private final ExecutorService collectors = boundedExecutor(2, 64, "att-sut-metrics-collector");
+    private final ScheduledThreadPoolExecutor collectionScheduler = scheduledExecutor("att-sut-metrics-scheduler");
+    private final Set<String> scheduledCollections = ConcurrentHashMap.newKeySet();
     private final ExecutorService previews = boundedExecutor(4, 16, "att-sut-metrics-preview");
     private final ExecutorService bodyReaders = boundedExecutor(4, 16, "att-sut-metrics-response");
     private final ConcurrentHashMap<String, CompletableFuture<Map<String, Object>>> previewFlights = new ConcurrentHashMap<>();
@@ -125,7 +132,7 @@ final class SutMetricsService implements AutoCloseable {
         synchronized (catalogLock) {
             List<Map<String, Object>> result = new ArrayList<>();
             for (Map<String, Object> profile : profiles.values()) {
-                if (admin || profileReadable(profile, principal, new HashSet<>(), 0)) result.add(profileView(profile, admin));
+                if (admin || profileReadable(profile, principal)) result.add(profileView(profile, admin));
             }
             result.sort(Comparator.comparing(value -> String.valueOf(value.get("id"))));
             return fields("schemaVersion", "att-sut-metrics-profiles/v1", "items", result);
@@ -227,7 +234,7 @@ final class SutMetricsService implements AutoCloseable {
                 String profileId = requiredText(binding, "profile");
                 Set<String> selected = stringSet(binding.get("targetIds"), "targetIds");
                 int before = expanded.size();
-                expand(profileId, binding, profileId, new LinkedHashSet<>(), expanded, provenance, principal, admin, selected, 0);
+                expand(profileId, binding, profileId, expanded, provenance, principal, admin, selected);
                 if (expanded.size() == before) throw new IllegalArgumentException("Profile binding " + profileId + " resolved to no metrics or targets.");
                 bindingIndex++;
             }
@@ -300,36 +307,56 @@ final class SutMetricsService implements AutoCloseable {
     void writeSnapshot(String jobId, Map<String, Object> snapshot) throws Exception {
         Path directory = jobMetricsDirectory(jobId);
         Files.createDirectories(directory);
+        Map<String, Object> initialManifest = fields("schemaVersion", COLLECTION_SCHEMA, "state", "PENDING", "complete", Boolean.FALSE,
+                "jobId", jobId, "snapshotId", snapshot.get("snapshotId"), "createdAt", Instant.now().toString(), "updatedAt", Instant.now().toString(),
+                "queries", queryMetadata(snapshot), "files", List.of(), "diagnostics", List.of());
+        byte[] initialManifestBytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(initialManifest);
         Map<String, Object> content = fields("schemaVersion", SNAPSHOT_SCHEMA, "snapshot", snapshot,
-                "snapshotSha256", sha256(json.writeValueAsBytes(snapshot)));
+                "snapshotSha256", sha256(json.writeValueAsBytes(snapshot)), "jobId", jobId,
+                "initialManifestSha256", sha256(initialManifestBytes));
         atomicJson(directory.resolve("snapshot.json"), content);
-        writeManifest(directory, fields("schemaVersion", COLLECTION_SCHEMA, "state", "PENDING", "complete", Boolean.FALSE,
-                "jobId", jobId, "snapshotId", snapshot.get("snapshotId"), "createdAt", Instant.now().toString(),
-                "queries", queryMetadata(snapshot), "files", List.of(), "diagnostics", List.of()));
+        writeManifest(directory, initialManifest);
     }
 
     Map<String, Object> snapshotForJob(String jobId) throws Exception {
+        SnapshotEnvelope envelope = snapshotEnvelope(jobId);
+        return envelope == null ? null : envelope.snapshot();
+    }
+
+    private SnapshotEnvelope snapshotEnvelope(String jobId) throws Exception {
         Path file = jobMetricsDirectory(jobId).resolve("snapshot.json");
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(file)) return null;
+        if (Files.size(file) > MAX_MANIFEST_BYTES) throw new IllegalStateException("The immutable SUT Metrics Job snapshot exceeds its read limit.");
         JsonNode wrapper = json.readTree(file.toFile());
         JsonNode snapshot = wrapper.path("snapshot");
+        String digest = wrapper.path("snapshotSha256").asText();
         if (!SNAPSHOT_SCHEMA.equals(snapshot.path("schemaVersion").asText())
-                || !wrapper.path("snapshotSha256").asText().equals(sha256(json.writeValueAsBytes(snapshot))))
+                || !digest.equals(sha256(json.writeValueAsBytes(snapshot)))
+                || wrapper.hasNonNull("jobId") && !jobId.equals(wrapper.path("jobId").asText()))
             throw new IllegalStateException("The immutable SUT Metrics Job snapshot failed integrity verification.");
-        return json.convertValue(snapshot, Map.class);
+        return new SnapshotEnvelope(json.convertValue(snapshot, Map.class), digest, wrapper.path("initialManifestSha256").asText(null));
     }
 
     Map<String, Object> collectionStatus(String jobId) throws Exception {
-        Map<String, Object> snapshot = snapshotForJob(jobId);
-        if (snapshot == null) return fields("schemaVersion", COLLECTION_SCHEMA, "state", "DISABLED", "complete", Boolean.TRUE,
+        SnapshotEnvelope envelope = snapshotEnvelope(jobId);
+        if (envelope == null) return fields("schemaVersion", COLLECTION_SCHEMA, "state", "DISABLED", "complete", Boolean.TRUE,
                 "jobId", jobId, "queries", List.of(), "files", List.of());
-        Path manifest = jobMetricsDirectory(jobId).resolve("manifest.json");
-        if (!Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(manifest))
+        Path directory = jobMetricsDirectory(jobId);
+        Path manifest = directory.resolve("manifest.json");
+        Path history = directory.resolve("manifest-integrity.json");
+        if (!Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(manifest)) {
+            if (Files.exists(history, LinkOption.NOFOLLOW_LINKS) || envelope.initialManifestSha256() != null)
+                throw new IllegalStateException("The SUT Metrics companion manifest is missing from its integrity record.");
             return fields("schemaVersion", COLLECTION_SCHEMA, "state", "PENDING", "complete", Boolean.FALSE,
-                    "jobId", jobId, "snapshotId", snapshot.get("snapshotId"), "queries", queryMetadata(snapshot), "files", List.of());
-        JsonNode value = json.readTree(manifest.toFile());
-        if (!COLLECTION_SCHEMA.equals(value.path("schemaVersion").asText())) throw new IllegalStateException("Unsupported SUT Metrics manifest schema.");
-        return json.convertValue(value, Map.class);
+                    "jobId", jobId, "snapshotId", envelope.snapshot().get("snapshotId"), "queries", queryMetadata(envelope.snapshot()), "files", List.of());
+        }
+        if (!Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS) || Files.size(manifest) > MAX_MANIFEST_BYTES)
+            throw new IllegalStateException("The SUT Metrics companion manifest exceeds its read limit.");
+        byte[] bytes = Files.readAllBytes(manifest);
+        Map<String, Object> value = json.readValue(bytes, Map.class);
+        validateManifest(value, jobId, envelope.snapshot());
+        verifyManifestIntegrity(directory, bytes, value, envelope, true);
+        return value;
     }
 
     List<String> pendingCollectionJobIds() throws Exception {
@@ -344,14 +371,8 @@ final class SutMetricsService implements AutoCloseable {
                 if (!Files.isDirectory(metricsDirectory, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(metricsDirectory)) continue;
                 Path snapshot = metricsDirectory.resolve("snapshot.json");
                 if (!Files.isRegularFile(snapshot, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(snapshot)) continue;
-                Path manifest = metricsDirectory.resolve("manifest.json");
-                if (!Files.exists(manifest, LinkOption.NOFOLLOW_LINKS)) { pending.add(jobId); continue; }
-                if (!Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(manifest)
-                        || Files.size(manifest) > 8L * 1024 * 1024) continue;
                 try {
-                    JsonNode value = json.readTree(manifest.toFile());
-                    if (COLLECTION_SCHEMA.equals(value.path("schemaVersion").asText())
-                            && "PENDING".equals(value.path("state").asText())) pending.add(jobId);
+                    if ("PENDING".equals(collectionStatus(jobId).get("state"))) pending.add(jobId);
                 } catch (Exception malformed) { /* Preserve the corrupt manifest for the normal integrity error path. */ }
             }
         }
@@ -367,16 +388,10 @@ final class SutMetricsService implements AutoCloseable {
                         || !Files.isDirectory(jobDirectory, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(jobDirectory)) continue;
                 Path directory = jobDirectory.resolve("sut-metrics");
                 if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(directory)) continue;
-                Path file = directory.resolve("manifest.json");
-                if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(file)
-                        || Files.size(file) > 8L * 1024 * 1024) continue;
-                JsonNode value;
-                try { value = json.readTree(file.toFile()); }
-                catch (Exception malformed) { continue; }
-                if (!COLLECTION_SCHEMA.equals(value.path("schemaVersion").asText())
-                        || !"COLLECTING".equals(value.path("state").asText())) continue;
-
-                Map<String, Object> manifest = json.convertValue(value, Map.class);
+                Map<String, Object> manifest;
+                try { manifest = collectionStatus(jobDirectory.getFileName().toString()); }
+                catch (Exception malformedOrTampered) { continue; }
+                if (!"COLLECTING".equals(manifest.get("state"))) continue;
                 List<Map<String, Object>> diagnostics = new ArrayList<>(listOfMaps(manifest.get("diagnostics")));
                 diagnostics.add(fields("code", "SERVER_RESTART_INTERRUPTED",
                         "message", "The Server restarted before SUT Metrics collection completed."));
@@ -485,10 +500,14 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     void jobFinished(String jobId, Instant startedAt, Instant finishedAt) {
+        jobFinished(jobId, startedAt, finishedAt, List.of());
+    }
+
+    void jobFinished(String jobId, Instant startedAt, Instant finishedAt, List<Map<String, Object>> phaseWindows) {
         try {
             Map<String, Object> snapshot = snapshotForJob(jobId);
             if (snapshot == null) return;
-        if (startedAt == null || finishedAt == null || !finishedAt.isAfter(startedAt)) {
+            if (startedAt == null || finishedAt == null || !finishedAt.isAfter(startedAt)) {
                 updateState(jobId, "UNAVAILABLE", "A trustworthy LOAD execution window was not available.", List.of());
                 return;
             }
@@ -497,16 +516,58 @@ final class SutMetricsService implements AutoCloseable {
             if (Duration.between(start, end).getSeconds() > MAX_COLLECTION_WINDOW_SECONDS) {
                 updateState(jobId, "FAILED", "The requested collection window exceeds the 26-hour Job budget.", List.of()); return;
             }
-            writeManifest(jobMetricsDirectory(jobId), fields("schemaVersion", COLLECTION_SCHEMA, "state", "COLLECTING",
-                    "complete", Boolean.FALSE, "jobId", jobId, "snapshotId", snapshot.get("snapshotId"),
-                    "startedAt", startedAt.toString(), "finishedAt", finishedAt.toString(), "windowStart", start.toString(),
-                    "windowEnd", end.toString(), "step", objectOrEmpty(snapshot.get("collection")).get("step"),
-                    "queries", queryMetadata(snapshot), "files", List.of(), "diagnostics", List.of()));
-            collectors.execute(() -> collectPostRun(jobId, snapshot, startedAt, finishedAt, start, end));
+            Map<String, Object> prior = collectionStatus(jobId);
+            if (!"PENDING".equals(prior.get("state"))) return;
+            if (!scheduledCollections.add(jobId)) return;
+            if (scheduledCollections.size() > MAX_SCHEDULED_COLLECTIONS) {
+                scheduledCollections.remove(jobId);
+                updateState(jobId, "FAILED", "Post-run collection scheduling capacity is full.", List.of());
+                return;
+            }
+            long stepSeconds = durationSeconds(String.valueOf(objectOrEmpty(snapshot.get("collection")).get("step")), "step");
+            Instant eligibleAt = end.plusSeconds(stepSeconds);
+            List<Map<String, Object>> safePhases = normalizePhaseWindows(phaseWindows, startedAt, finishedAt);
+            boolean alreadyScheduled = startedAt.toString().equals(prior.get("startedAt"))
+                    && finishedAt.toString().equals(prior.get("finishedAt"))
+                    && end.toString().equals(prior.get("windowEnd"))
+                    && eligibleAt.toString().equals(prior.get("eligibleAt"));
+            if (!alreadyScheduled) {
+                Map<String, Object> pending = new LinkedHashMap<>(prior);
+                pending.putAll(fields("state", "PENDING", "complete", Boolean.FALSE, "startedAt", startedAt.toString(),
+                        "finishedAt", finishedAt.toString(), "windowStart", start.toString(), "windowEnd", end.toString(),
+                        "eligibleAt", eligibleAt.toString(), "step", objectOrEmpty(snapshot.get("collection")).get("step"),
+                        "phaseWindows", safePhases, "updatedAt", Instant.now().toString()));
+                writeManifest(jobMetricsDirectory(jobId), pending);
+            }
+            long delayMillis = Math.max(0L, Duration.between(Instant.now(), eligibleAt).toMillis());
+            collectionScheduler.schedule(() -> {
+                try {
+                    Map<String, Object> current = collectionStatus(jobId);
+                    if (!"PENDING".equals(current.get("state"))) return;
+                    current.put("state", "COLLECTING");
+                    current.put("complete", Boolean.FALSE);
+                    current.put("updatedAt", Instant.now().toString());
+                    writeManifest(jobMetricsDirectory(jobId), current);
+                    collectors.execute(() -> {
+                        try { collectPostRun(jobId, snapshot, startedAt, finishedAt, start, end, eligibleAt, safePhases); }
+                        finally { scheduledCollections.remove(jobId); }
+                    });
+                } catch (java.util.concurrent.RejectedExecutionException full) {
+                    try { updateState(jobId, "FAILED", "Post-run collection capacity is full; no collection worker was available.", List.of()); }
+                    catch (Exception ignored) { }
+                    scheduledCollections.remove(jobId);
+                } catch (Exception failure) {
+                    try { updateState(jobId, "FAILED", "Post-run SUT Metrics could not be scheduled.", List.of()); }
+                    catch (Exception ignored) { }
+                    scheduledCollections.remove(jobId);
+                }
+            }, delayMillis, TimeUnit.MILLISECONDS);
         } catch (java.util.concurrent.RejectedExecutionException full) {
-            try { updateState(jobId, "FAILED", "Post-run collection capacity is full; no collection worker was available.", List.of()); }
+            scheduledCollections.remove(jobId);
+            try { updateState(jobId, "FAILED", "Post-run collection scheduling capacity is full.", List.of()); }
             catch (Exception ignored) { }
         } catch (Exception failure) {
+            scheduledCollections.remove(jobId);
             try { updateState(jobId, "FAILED", "Post-run SUT Metrics could not be scheduled.", List.of()); }
             catch (Exception ignored) { }
         }
@@ -520,11 +581,44 @@ final class SutMetricsService implements AutoCloseable {
         }
     }
 
+    private static List<Map<String, Object>> normalizePhaseWindows(List<Map<String, Object>> phases,
+                                                                   Instant executionStart, Instant executionEnd) {
+        if (phases == null || phases.isEmpty()) return List.of();
+        List<Map<String, Object>> result = new ArrayList<>();
+        Set<String> names = Set.of("RAMP_UP", "WARMUP", "STEADY", "RAMP_DOWN", "DRAIN");
+        for (Map<String, Object> raw : phases) {
+            if (result.size() >= 8) break;
+            String name = nullableText(raw.get("phase"));
+            Instant start = parseInstant(nullableText(raw.get("startAt")));
+            Instant end = parseInstant(nullableText(raw.get("endAt")));
+            if (!names.contains(name) || start == null || end == null || !end.isAfter(start)) continue;
+            if (executionStart != null && start.isBefore(executionStart)) start = executionStart;
+            if (executionEnd != null && end.isAfter(executionEnd)) end = executionEnd;
+            if (!end.isAfter(start)) continue;
+            boolean measured = raw.get("measured") instanceof Boolean value ? value
+                    : Set.of("STEADY", "RAMP_DOWN").contains(name);
+            result.add(fields("phase", name, "startAt", start.toString(), "endAt", end.toString(),
+                    "durationMs", Duration.between(start, end).toMillis(), "measured", measured));
+        }
+        result.sort(Comparator.comparing(value -> String.valueOf(value.get("startAt"))));
+        return result;
+    }
+
+    private static String observationFreshness(String lastSampleAt, Instant queryEnd, long stepSeconds) {
+        if (lastSampleAt == null) return "UNKNOWN";
+        try {
+            return Instant.parse(lastSampleAt).isBefore(queryEnd.minusSeconds(Math.max(stepSeconds * 2, 30))) ? "STALE" : "FRESH";
+        } catch (RuntimeException invalid) { return "UNKNOWN"; }
+    }
+
     private void collectPostRun(String jobId, Map<String, Object> snapshot, Instant executionStartedAt,
-                                Instant executionFinishedAt, Instant start, Instant end) {
+                                Instant executionFinishedAt, Instant start, Instant end, Instant eligibleAt,
+                                List<Map<String, Object>> phaseWindows) {
         List<Map<String, Object>> fileEntries = new ArrayList<>();
         List<Map<String, Object>> diagnostics = new ArrayList<>();
-        long totalBytes = 0, totalSamples = 0, queriesSucceeded = 0, queriesFailed = 0, queriesEmpty = 0;
+        long totalBytes = 0, totalSamples = 0, queriesSucceeded = 0, queriesFailed = 0, queriesEmpty = 0, queriesPartial = 0;
+        long stepSeconds = durationSeconds(String.valueOf(objectOrEmpty(snapshot.get("collection")).get("step")), "step");
+        long afterSeconds = durationSeconds(String.valueOf(objectOrEmpty(snapshot.get("collection")).get("after")), "after");
         Map<String, Long> sourceSampleCounts = new HashMap<>();
         Path directory;
         try {
@@ -536,20 +630,44 @@ final class SutMetricsService implements AutoCloseable {
                 try {
                     Map<String, Object> source = snapshotSource(snapshot, String.valueOf(query.get("sourceId")));
                     Map<String, Object> value = collectQuery(source, query, start, end,
-                            durationSeconds(String.valueOf(objectOrEmpty(snapshot.get("collection")).get("step")), "step"));
+                            stepSeconds);
                     List<Map<String, Object>> series = listOfMaps(value.get("series"));
                     int sampleCount = ((Number) value.get("sampleCount")).intValue();
+                    Map<String, Object> coverage = object(value.get("coverage"), "coverage");
+                    String lastSampleAt = nullableText(coverage.get("lastSampleAt"));
+                    boolean afterObserved = afterSeconds == 0 || lastSampleAt != null
+                            && Instant.parse(lastSampleAt).isAfter(executionFinishedAt);
+                    boolean queryPartial = sampleCount > 0 && !afterObserved;
                     String sourceId = String.valueOf(query.get("sourceId"));
                     long sourceSamples = sourceSampleCounts.getOrDefault(sourceId, 0L) + sampleCount;
                     long jobSamples = totalSamples + sampleCount;
                     if (sourceSamples > sourceInt(source, "maxSamplesPerJob")) throw new CollectionBudgetExceededException("The Data Source per-Job sample budget was exceeded.");
                     if (jobSamples > MAX_JOB_SAMPLES) throw new CollectionBudgetExceededException("The per-Job sample budget was exceeded.");
-                    byte[] bytes = json.writeValueAsBytes(fields("schemaVersion", SERIES_SCHEMA, "queryId", query.get("id"),
+                    String queryStatus = series.isEmpty() ? "NO_DATA" : queryPartial ? "PARTIAL" : "READY";
+                    List<Map<String, Object>> queryDiagnostics = queryPartial
+                            ? List.of(fields("code", "POST_BUFFER_NOT_OBSERVED",
+                                    "message", "No usable sample was observed after LOAD completion within the configured post-run buffer."))
+                            : List.of();
+                    Map<String, Object> observation = fields("schemaVersion", OBSERVATION_SCHEMA,
+                            "kind", "sampled-time-series", "effectiveBindingId", query.get("id"),
+                            "source", fields("id", query.get("sourceId"), "name", query.get("sourceName"), "revision", query.get("sourceRevision")),
+                            "profile", fields("id", query.get("profile"), "path", query.get("profilePath"), "revision", query.get("profileRevision")),
+                            "target", fields("id", query.get("targetId"), "type", query.get("targetType"), "revision", query.get("targetRevision")),
+                            "metric", fields("id", query.get("metricId"), "name", query.get("title"), "category", query.get("category"),
+                                    "unit", query.get("unit"), "kind", query.get("kind")),
+                            "window", fields("executionStartedAt", executionStartedAt.toString(), "executionFinishedAt", executionFinishedAt.toString(),
+                                    "queryStart", start.toString(), "queryEnd", end.toString(), "step", stepSeconds + "s", "phaseWindows", phaseWindows),
+                            "availability", fields("state", sampleCount == 0 ? "NO_DATA" : queryPartial ? "PARTIAL" : "AVAILABLE",
+                                    "freshness", observationFreshness(lastSampleAt, end, stepSeconds), "coverage", coverage,
+                                    "diagnostics", queryDiagnostics),
+                            "provenance", fields("provider", "prometheus", "jobId", jobId,
+                                    "snapshotId", snapshot.get("snapshotId"), "queryId", query.get("id")));
+                    byte[] bytes = json.writeValueAsBytes(fields("schemaVersion", OBSERVATION_SCHEMA, "queryId", query.get("id"),
                             "profile", query.get("profile"), "profilePath", query.get("profilePath"),
                             "sourceId", query.get("sourceId"), "sourceName", query.get("sourceName"),
                             "metricId", query.get("metricId"), "title", query.get("title"),
-                            "category", query.get("category"), "targetId", query.get("targetId"),
-                            "targetType", query.get("targetType"), "unit", query.get("unit"), "series", series));
+                            "category", query.get("category"), "kind", query.get("kind"), "targetId", query.get("targetId"),
+                            "targetType", query.get("targetType"), "unit", query.get("unit"), "observation", observation, "series", series));
                     if (bytes.length > MAX_SERIES_FILE_BYTES || totalBytes > MAX_JOB_COLLECTION_BYTES - bytes.length)
                         throw new CollectionBudgetExceededException("The per-Job SUT Metrics artifact budget was exceeded.");
                     String name = String.format(Locale.ROOT, "series-%04d.json", index);
@@ -557,12 +675,15 @@ final class SutMetricsService implements AutoCloseable {
                     totalSamples = jobSamples; sourceSampleCounts.put(sourceId, sourceSamples);
                     if (series.isEmpty()) queriesEmpty++;
                     else queriesSucceeded++;
+                    if (queryPartial) queriesPartial++;
                     fileEntries.add(fields("queryId", query.get("id"), "metricId", query.get("metricId"), "title", query.get("title"),
                             "profile", query.get("profile"), "profilePath", query.get("profilePath"), "category", query.get("category"),
                             "targetId", query.get("targetId"), "targetType", query.get("targetType"),
                             "sourceId", query.get("sourceId"), "unit", query.get("unit"), "path", name,
                             "lengthBytes", bytes.length, "sha256", sha256(bytes), "sampleCount", sampleCount,
-                            "seriesCount", series.size(), "coverage", value.get("coverage"), "queryStatus", series.isEmpty() ? "NO_DATA" : "READY"));
+                            "seriesCount", series.size(), "coverage", coverage, "queryStatus", queryStatus));
+                    diagnostics.addAll(queryDiagnostics.stream().map(diagnostic -> fields("queryId", query.get("id"),
+                            "code", diagnostic.get("code"), "message", diagnostic.get("message"))).toList());
                 } catch (CollectionBudgetExceededException budget) {
                     queriesFailed++;
                     diagnostics.add(fields("queryId", query.get("id"), "code", "QUERY_BUDGET_EXCEEDED", "message", safeFailureMessage(budget)));
@@ -579,13 +700,14 @@ final class SutMetricsService implements AutoCloseable {
                 }
             }
             String state = queriesFailed > 0 ? (queriesSucceeded == 0 ? "FAILED" : "PARTIAL")
-                    : queriesSucceeded == 0 ? "UNAVAILABLE" : queriesEmpty > 0 ? "PARTIAL" : "READY";
+                    : queriesSucceeded == 0 ? "UNAVAILABLE" : queriesEmpty > 0 || queriesPartial > 0 ? "PARTIAL" : "READY";
             Map<String, Object> manifest = fields("schemaVersion", COLLECTION_SCHEMA, "state", state,
                     "complete", "READY".equals(state), "jobId", jobId, "snapshotId", snapshot.get("snapshotId"),
                     "startedAt", executionStartedAt.toString(), "finishedAt", executionFinishedAt.toString(), "windowStart", start.toString(),
-                    "windowEnd", end.toString(), "step", objectOrEmpty(snapshot.get("collection")).get("step"),
+                    "windowEnd", end.toString(), "eligibleAt", eligibleAt.toString(), "step", objectOrEmpty(snapshot.get("collection")).get("step"),
+                    "phaseWindows", phaseWindows,
                     "coverage", fields("queryCount", queries.size(), "successfulQueries", queriesSucceeded,
-                            "emptyQueries", queriesEmpty, "failedQueries", queriesFailed, "sampleCount", totalSamples,
+                            "emptyQueries", queriesEmpty, "partialQueries", queriesPartial, "failedQueries", queriesFailed, "sampleCount", totalSamples,
                             "artifactBytes", totalBytes), "queries", queryMetadata(snapshot), "files", fileEntries,
                     "diagnostics", diagnostics);
             writeManifest(directory, manifest);
@@ -674,9 +796,14 @@ final class SutMetricsService implements AutoCloseable {
         }
         List<Map<String, Object>> series = new ArrayList<>(); long samples = 0;
         Long firstSampleEpochMs = null, lastSampleEpochMs = null;
+        long totalGapCount = 0;
         for (Map.Entry<String, TreeMap<Long, Double>> row : byLabels.entrySet()) {
             List<Map<String, Object>> points = new ArrayList<>();
+            long seriesGapCount = 0;
+            Long previousEpochMs = null;
             for (Map.Entry<Long, Double> point : row.getValue().entrySet()) {
+                if (previousEpochMs != null && point.getKey() - previousEpochMs > stepSeconds * 1500L) seriesGapCount++;
+                previousEpochMs = point.getKey();
                 points.add(fields("timestamp", Instant.ofEpochMilli(point.getKey()).toString(), "timestampEpochMs", point.getKey(), "value", point.getValue()));
                 firstSampleEpochMs = firstSampleEpochMs == null ? point.getKey() : Math.min(firstSampleEpochMs, point.getKey());
                 lastSampleEpochMs = lastSampleEpochMs == null ? point.getKey() : Math.max(lastSampleEpochMs, point.getKey());
@@ -685,12 +812,14 @@ final class SutMetricsService implements AutoCloseable {
             Instant first = points.isEmpty() ? null : Instant.parse(String.valueOf(points.get(0).get("timestamp")));
             Instant last = points.isEmpty() ? null : Instant.parse(String.valueOf(points.get(points.size() - 1).get("timestamp")));
             series.add(fields("labels", json.readValue(row.getKey(), Map.class), "samples", points,
-                    "coverage", fields("sampleCount", points.size(), "firstSampleAt", first == null ? null : first.toString(),
+                    "coverage", fields("sampleCount", points.size(), "seriesCount", 1, "gapCount", seriesGapCount,
+                            "firstSampleAt", first == null ? null : first.toString(),
                             "lastSampleAt", last == null ? null : last.toString(), "windowStart", start.toString(), "windowEnd", end.toString())));
+            totalGapCount += seriesGapCount;
         }
         if (samples > sourceInt(source, "maxSamplesPerQuery")) throw new IllegalArgumentException("The Data Source per-query sample budget was exceeded.");
         return fields("series", series, "sampleCount", samples,
-                "coverage", fields("sampleCount", samples, "seriesCount", series.size(),
+                "coverage", fields("sampleCount", samples, "seriesCount", series.size(), "gapCount", totalGapCount,
                         "firstSampleAt", firstSampleEpochMs == null ? null : Instant.ofEpochMilli(firstSampleEpochMs).toString(),
                         "lastSampleAt", lastSampleEpochMs == null ? null : Instant.ofEpochMilli(lastSampleEpochMs).toString(),
                         "windowStart", start.toString(), "windowEnd", end.toString()));
@@ -723,6 +852,11 @@ final class SutMetricsService implements AutoCloseable {
 
     private static long ceilEpochSecond(Instant instant) {
         return instant.getEpochSecond() + (instant.getNano() == 0 ? 0 : 1);
+    }
+
+    private static Instant parseInstant(String value) {
+        try { return value == null ? null : Instant.parse(value); }
+        catch (RuntimeException invalid) { return null; }
     }
 
     private List<Map<String, Object>> queryRange(Map<String, Object> source, String query, Instant start, Instant end, Duration step, String tenant) throws Exception {
@@ -831,11 +965,9 @@ final class SutMetricsService implements AutoCloseable {
         if (queryCount > sourceInt(source, "maxQueriesPerJob")) throw new IllegalArgumentException("The per-Job Prometheus query budget was exceeded.");
     }
 
-    private void expand(String profileId, Map<String, Object> binding, String profilePath, Set<String> stack,
+    private void expand(String profileId, Map<String, Object> binding, String profilePath,
                         List<Map<String, Object>> queries, List<Map<String, Object>> provenance,
-                        String principal, boolean admin, Set<String> selectedTargets, int depth) {
-        if (depth >= MAX_PROFILE_DEPTH) throw new IllegalArgumentException("Metrics Profile dependency depth exceeds 8.");
-        if (!stack.add(profileId)) throw new IllegalArgumentException("Metrics Profile dependency cycle detected at " + profileId + ".");
+                        String principal, boolean admin, Set<String> selectedTargets) {
         Map<String, Object> profile = profiles.get(profileId);
         if (profile == null) throw new IllegalArgumentException("Metrics Profile reference not found: " + profileId + ".");
         Set<String> bindingTargets = stringSet(binding.get("targetIds"), "targetIds");
@@ -851,44 +983,20 @@ final class SutMetricsService implements AutoCloseable {
         if ("composite".equals(kind)) {
             if (binding.keySet().stream().anyMatch(key -> !Set.of("profile", "targetIds").contains(key)))
                 throw new IllegalArgumentException("Composite profile bindings may select targetIds only; source and targets come from includes.");
-            int index = 0;
             for (Map<String, Object> include : listOfMaps(profile.get("includes"))) {
                 String child = String.valueOf(include.get("profile"));
-                String alias = String.valueOf(include.getOrDefault("alias", "include" + index));
+                String alias = String.valueOf(include.getOrDefault("alias", child));
                 String childPath = profilePath + "/" + alias;
                 Map<String, Object> childBinding = new LinkedHashMap<>(include);
                 childBinding.remove("profile"); childBinding.remove("alias");
-                expand(child, childBinding, childPath, stack, queries, provenance, principal, admin, effectiveTargets, depth + 1);
-                index++;
+                Map<String, Object> childProfile = profiles.get(child);
+                if (childProfile == null || !"base".equals(childProfile.get("kind")))
+                    throw new IllegalArgumentException("Composite profiles may include base profiles only.");
+                bindBase(childProfile, childBinding, childPath, queries, provenance, principal, admin, effectiveTargets);
             }
-        } else if ("derived".equals(kind)) {
-            String parent = String.valueOf(profile.get("extends"));
-            Map<String, Object> inherited = new LinkedHashMap<>(profile);
-            inherited.remove("id"); inherited.remove("kind"); inherited.remove("extends"); inherited.remove("description"); inherited.remove("category");
-            inherited.remove("overridableParams"); inherited.remove("allowTargetOverride"); inherited.remove("allowSourceOverride");
-            Map<String, Object> profileParameters = new LinkedHashMap<>(objectOrEmpty(profile.get("parameters")));
-            profileParameters.putAll(objectOrEmpty(binding.get("__derivedProfileParameters")));
-            Map<String, Object> scenarioParameters = binding.containsKey("__scenarioParameters")
-                    ? objectOrEmpty(binding.get("__scenarioParameters")) : objectOrEmpty(binding.get("parameters"));
-            if (binding.containsKey("parameters")) {
-                Set<String> allowed = stringSet(profile.get("overridableParams"), "overridableParams");
-                for (String name : scenarioParameters.keySet()) if (!allowed.contains(name))
-                    throw new IllegalArgumentException("Scenario override is not allowed for parameter " + name + " on " + profileId + ".");
-            }
-            inherited.remove("parameters");
-            Map<String, Object> callerBinding = new LinkedHashMap<>(binding);
-            callerBinding.keySet().removeIf(key -> key.startsWith("__"));
-            callerBinding.put("parameters", scenarioParameters);
-            Map<String, Object> merged = mergeBindings(inherited, callerBinding,
-                    bool(profile.get("allowTargetOverride")), bool(profile.get("allowSourceOverride")));
-            merged.put("__derivedProfileParameters", profileParameters);
-            merged.put("__scenarioParameters", scenarioParameters);
-            merged.put("__derivedBinding", Boolean.TRUE);
-            expand(parent, merged, profilePath + "/" + profileId, stack, queries, provenance, principal, admin, effectiveTargets, depth + 1);
         } else {
             bindBase(profile, binding, profilePath, queries, provenance, principal, admin, effectiveTargets);
         }
-        stack.remove(profileId);
         if (queries.size() > MAX_EXPANDED_QUERIES) throw new IllegalArgumentException("Resolved Metrics Profile exceeds the 256 query budget.");
     }
 
@@ -896,27 +1004,22 @@ final class SutMetricsService implements AutoCloseable {
                           List<Map<String, Object>> queries, List<Map<String, Object>> provenance,
                           String principal, boolean admin, Set<String> selectedTargets) {
         String profileId = String.valueOf(profile.get("id"));
-        String sourceId = nullableText(binding.get("source")); if (sourceId == null) sourceId = nullableText(profile.get("source"));
+        String sourceId = nullableText(binding.get("source"));
         if (sourceId == null) throw new IllegalArgumentException("A registered Data Source is required for profile " + profileId + ".");
         Map<String, Object> source = sources.get(sourceId);
         if (source == null) throw new IllegalArgumentException("Registered Data Source not found: " + sourceId + ".");
         if (!sourceAllowed(source, principal, admin)) throw new ServerRuntime.NotFoundException();
-        if (profile.containsKey("source") && binding.containsKey("source") && !sourceId.equals(profile.get("source")) && !bool(profile.get("allowSourceOverride")))
-            throw new IllegalArgumentException("Scenario cannot change the Data Source inherited from this profile.");
-        String tenant = nullableText(binding.get("tenant")); if (tenant == null) tenant = nullableText(profile.get("tenant"));
+        String tenant = nullableText(binding.get("tenant"));
         if (tenant == null) tenant = nullableText(source.get("defaultTenant"));
         if (tenant != null && !listOfStrings(source.get("allowedTenants")).contains(tenant)) throw new IllegalArgumentException("The selected Prometheus tenant is not allowed by the Data Source.");
         List<Map<String, Object>> targetBindings = listOfMaps(binding.get("targets"));
-        if (targetBindings.isEmpty()) targetBindings = listOfMaps(profile.get("targets"));
         if (targetBindings.isEmpty()) throw new IllegalArgumentException("Profile " + profileId + " has no target bindings.");
         if (targetBindings.size() > sourceInt(source, "maxTargets")) throw new IllegalArgumentException("Profile exceeds the Data Source target limit.");
         Map<String, Object> definitions = objectOrEmpty(profile.get("params"));
         Map<String, Object> defaults = objectOrEmpty(profile.get("parameters"));
-        Map<String, Object> derivedDefaults = objectOrEmpty(binding.get("__derivedProfileParameters"));
-        Map<String, Object> overrides = binding.containsKey("__scenarioParameters")
-                ? objectOrEmpty(binding.get("__scenarioParameters")) : objectOrEmpty(binding.get("parameters"));
+        Map<String, Object> overrides = objectOrEmpty(binding.get("parameters"));
         Set<String> overridable = stringSet(profile.get("overridableParams"), "overridableParams");
-        if (!bool(binding.get("__derivedBinding"))) for (String name : overrides.keySet()) if (!overridable.contains(name))
+        for (String name : overrides.keySet()) if (!overridable.contains(name))
             throw new IllegalArgumentException("Scenario override is not allowed for parameter " + name + " on " + profileId + ".");
         for (Map<String, Object> target : targetBindings) {
             String targetId = targetId(target);
@@ -927,7 +1030,6 @@ final class SutMetricsService implements AutoCloseable {
                 Map<String, Object> definition = object(entry.getValue(), "parameter " + entry.getKey());
                 Object value = definition.get("default");
                 if (defaults.containsKey(entry.getKey())) value = defaults.get(entry.getKey());
-                if (derivedDefaults.containsKey(entry.getKey())) value = derivedDefaults.get(entry.getKey());
                 if (targetParams.containsKey(entry.getKey())) value = targetParams.get(entry.getKey());
                 if (overrides.containsKey(entry.getKey())) value = overrides.get(entry.getKey());
                 if (value == null && bool(definition.get("required"))) throw new IllegalArgumentException("Required profile parameter " + entry.getKey() + " is missing for target " + targetId + ".");
@@ -935,7 +1037,6 @@ final class SutMetricsService implements AutoCloseable {
             }
             for (String name : targetParams.keySet()) if (!definitions.containsKey(name)) throw new IllegalArgumentException("Unknown profile parameter " + name + " on target " + targetId + ".");
             for (String name : defaults.keySet()) if (!definitions.containsKey(name)) throw new IllegalArgumentException("Unknown default profile parameter " + name + ".");
-            for (String name : derivedDefaults.keySet()) if (!definitions.containsKey(name)) throw new IllegalArgumentException("Unknown derived profile parameter " + name + ".");
             for (String name : overrides.keySet()) if (!definitions.containsKey(name)) throw new IllegalArgumentException("Unknown scenario profile parameter " + name + ".");
             if (parameters.size() != definitions.size() && definitions.values().stream().anyMatch(value -> bool(objectOrEmpty(value).get("required")) && !parameters.containsKey(definitionName(definitions, value))))
                 throw new IllegalArgumentException("One or more required profile parameters are missing.");
@@ -947,27 +1048,16 @@ final class SutMetricsService implements AutoCloseable {
                         "targetId", targetId, "targetType", target.getOrDefault("type", profile.getOrDefault("category", "")),
                         "metricId", metric.get("id"), "title", metric.get("title"), "category", metric.getOrDefault("category", profile.getOrDefault("category", "app")),
                         "unit", metric.get("unit"), "kind", metric.get("kind"), "parameters", parameters,
+                        "sourceRevision", sha256Json(source), "profileRevision", sha256Json(profile),
+                        "targetRevision", sha256Json(target),
                         "query", query);
                 queries.add(row);
             }
             provenance.add(fields("profile", profileId, "profilePath", profilePath, "sourceId", sourceId,
                     "sourceName", source.get("name"), "tenant", tenant, "targetId", targetId,
-                    "targetType", target.getOrDefault("type", ""), "parameters", parameters));
+                    "targetType", target.getOrDefault("type", ""), "sourceRevision", sha256Json(source),
+                    "profileRevision", sha256Json(profile), "targetRevision", sha256Json(target), "parameters", parameters));
         }
-    }
-
-    private static Map<String, Object> mergeBindings(Map<String, Object> profileDefaults, Map<String, Object> scenario,
-                                                      boolean allowTargetOverride, boolean allowSourceOverride) {
-        Map<String, Object> result = new LinkedHashMap<>(profileDefaults);
-        for (String key : List.of("source", "tenant", "targets", "parameters", "targetIds")) if (scenario.containsKey(key)) {
-            if ("source".equals(key) && !allowSourceOverride) throw new IllegalArgumentException("Scenario cannot change the Data Source inherited from the derived profile.");
-            if ("targets".equals(key) && !allowTargetOverride) throw new IllegalArgumentException("Scenario cannot replace targets on this derived profile.");
-            if ("parameters".equals(key)) {
-                Map<String, Object> merged = new LinkedHashMap<>(objectOrEmpty(result.get("parameters")));
-                merged.putAll(objectOrEmpty(scenario.get(key))); result.put(key, merged);
-            } else result.put(key, scenario.get(key));
-        }
-        return result;
     }
 
     private Map<String, Object> validateSource(Map<String, Object> input, boolean enforceEgressAllowlist) {
@@ -1012,40 +1102,30 @@ final class SutMetricsService implements AutoCloseable {
 
     private Map<String, Object> validateProfile(Map<String, Object> input) {
         rejectUnknown(input, Set.of("schemaVersion", "id", "name", "description", "kind", "category", "params", "parameters",
-                "overridableParams", "allowTargetOverride", "allowSourceOverride", "source", "tenant", "targets", "metrics", "extends", "includes"), "Metrics Profile");
+                "overridableParams", "metrics", "includes"), "Metrics Profile");
         if (input.containsKey("schemaVersion") && !"att-sut-metrics-profile/v1".equals(input.get("schemaVersion")))
             throw new IllegalArgumentException("Metrics Profile schemaVersion must be att-sut-metrics-profile/v1.");
         String id = requiredText(input, "id"), name = String.valueOf(input.getOrDefault("name", id));
         if (!ID.matcher(id).matches() || name.length() > 120 || hasControl(name)) throw new IllegalArgumentException("Metrics Profile id or name is invalid.");
         String kind = String.valueOf(input.getOrDefault("kind", "base")).toLowerCase(Locale.ROOT);
-        if (!Set.of("base", "derived", "composite").contains(kind)) throw new IllegalArgumentException("Metrics Profile kind must be base, derived, or composite.");
+        if (!Set.of("base", "composite").contains(kind)) throw new IllegalArgumentException("Metrics Profile kind must be base or composite.");
         String category = String.valueOf(input.getOrDefault("category", "app")).toLowerCase(Locale.ROOT);
         if (!Set.of("os", "jvm", "app", "db", "mq", "custom").contains(category)) throw new IllegalArgumentException("Metrics Profile category is invalid.");
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("schemaVersion", "att-sut-metrics-profile/v1"); result.put("id", id); result.put("name", name);
         result.put("description", boundedText(input.get("description"), 512)); result.put("kind", kind); result.put("category", category);
-        result.put("allowTargetOverride", bool(input.get("allowTargetOverride"))); result.put("allowSourceOverride", bool(input.get("allowSourceOverride")));
         List<String> overridable = checkedParamNames(input.get("overridableParams"), "overridableParams"); result.put("overridableParams", overridable);
-        if (input.containsKey("source")) { String source = requiredText(input, "source"); if (!sources.containsKey(source)) throw new IllegalArgumentException("Profile Data Source does not exist: " + source + "."); result.put("source", source); }
-        if (input.containsKey("tenant")) result.put("tenant", requiredText(input, "tenant"));
-        if (input.containsKey("targets")) result.put("targets", validateTargets(input.get("targets"), "targets"));
         if ("base".equals(kind)) {
-            if (input.containsKey("extends") || input.containsKey("includes")) throw new IllegalArgumentException("Base profiles cannot extend or include other profiles.");
+            if (input.containsKey("includes")) throw new IllegalArgumentException("Base profiles cannot include other profiles.");
             Map<String, Object> definitions = validateParamDefinitions(objectOrEmpty(input.get("params")));
             Map<String, Object> parameterDefaults = validateParameterDefaults(objectOrEmpty(input.get("parameters")), definitions);
             List<Map<String, Object>> metrics = validateMetrics(input.get("metrics"), category);
             if (metrics.isEmpty()) throw new IllegalArgumentException("Base profile requires at least one metric definition.");
             for (String param : overridable) if (!definitions.containsKey(param)) throw new IllegalArgumentException("overridableParams contains an undefined parameter: " + param + ".");
             result.put("params", definitions); result.put("parameters", parameterDefaults); result.put("metrics", metrics);
-        } else if ("derived".equals(kind)) {
-            if (input.containsKey("metrics") || input.containsKey("params") || input.containsKey("includes")) throw new IllegalArgumentException("Derived profiles use extends and cannot redefine base metrics or parameters.");
-            String parent = requiredText(input, "extends"); result.put("extends", parent);
-            result.put("parameters", objectOrEmpty(input.get("parameters")));
-            for (String param : objectOrEmpty(input.get("parameters")).keySet()) if (!PARAM.matcher(param).matches()) throw new IllegalArgumentException("Derived profile parameter name is invalid.");
-            if (input.containsKey("targets")) result.put("targets", validateTargets(input.get("targets"), "targets"));
         } else {
-            if (input.containsKey("extends") || input.containsKey("metrics") || input.containsKey("params") || input.containsKey("parameters"))
-                throw new IllegalArgumentException("Composite profiles use includes and keep metric definitions in their base profiles.");
+            if (input.containsKey("metrics") || input.containsKey("params") || input.containsKey("parameters"))
+                throw new IllegalArgumentException("Composite profiles contain base-profile bindings only; source and targets belong on each include.");
             List<Map<String, Object>> includes = validateIncludes(input.get("includes"));
             if (includes.isEmpty()) throw new IllegalArgumentException("Composite profiles require at least one include binding.");
             result.put("includes", includes);
@@ -1127,12 +1207,17 @@ final class SutMetricsService implements AutoCloseable {
         List<Map<String, Object>> out = new ArrayList<>(); Set<String> aliases = new HashSet<>();
         for (int i = 0; i < list.size(); i++) {
             Map<String, Object> include = object(list.get(i), "includes[" + i + "]");
-            rejectUnknown(include, Set.of("profile", "alias", "source", "tenant", "targets", "parameters", "targetIds"), "include binding");
-            String child = requiredText(include, "profile"), alias = String.valueOf(include.getOrDefault("alias", "include" + i));
-            if (!profiles.containsKey(child) || !ID.matcher(alias).matches() || !aliases.add(alias)) throw new IllegalArgumentException("Composite profile include is missing or has a duplicate alias.");
-            String source = nullableText(include.get("source")); if (source != null && !sources.containsKey(source)) throw new IllegalArgumentException("Composite profile source does not exist: " + source + ".");
+            rejectUnknown(include, Set.of("profile", "alias", "source", "tenant", "targets", "parameters"), "include binding");
+            String child = requiredText(include, "profile");
+            String alias = nullableText(include.get("alias"));
+            if (alias == null) alias = child;
+            Map<String, Object> childProfile = profiles.get(child);
+            if (childProfile == null || !"base".equals(childProfile.get("kind")))
+                throw new IllegalArgumentException("Composite profiles may include existing base profiles only.");
+            if (!ID.matcher(alias).matches() || !aliases.add(alias)) throw new IllegalArgumentException("Composite profile include has a duplicate or invalid alias; repeated base profiles require distinct explicit aliases.");
+            String source = requiredText(include, "source"); if (!sources.containsKey(source)) throw new IllegalArgumentException("Composite profile source does not exist: " + source + ".");
             Map<String, Object> binding = new LinkedHashMap<>(include); binding.put("profile", child); binding.put("alias", alias);
-            if (include.containsKey("targets")) binding.put("targets", validateTargets(include.get("targets"), "includes.targets"));
+            binding.put("targets", validateTargets(include.get("targets"), "includes.targets"));
             if (include.containsKey("parameters")) object(include.get("parameters"), "includes.parameters");
             out.add(binding);
         }
@@ -1156,39 +1241,21 @@ final class SutMetricsService implements AutoCloseable {
     private void validateProfileGraph() {
         if (profiles.size() > MAX_PROFILES) throw new IllegalArgumentException("Metrics Profile catalog exceeds 256 profiles.");
         for (Map<String, Object> profile : profiles.values()) {
-            String kind = String.valueOf(profile.get("kind"));
-            if ("derived".equals(kind)) {
-                String parent = String.valueOf(profile.get("extends"));
-                if (!profiles.containsKey(parent)) throw new IllegalArgumentException("Metrics Profile parent not found: " + parent + ".");
+            if (!Set.of("base", "composite").contains(profile.get("kind")))
+                throw new IllegalArgumentException("Metrics Profile kind must be base or composite.");
+            if ("composite".equals(profile.get("kind"))) for (Map<String, Object> include : listOfMaps(profile.get("includes"))) {
+                Map<String, Object> child = profiles.get(String.valueOf(include.get("profile")));
+                if (child == null || !"base".equals(child.get("kind")))
+                    throw new IllegalArgumentException("Composite profiles may include existing base profiles only.");
             }
-            for (Map<String, Object> include : listOfMaps(profile.get("includes"))) if (!profiles.containsKey(String.valueOf(include.get("profile"))))
-                throw new IllegalArgumentException("Metrics Profile include not found: " + include.get("profile") + ".");
         }
-        for (String id : profiles.keySet()) validateDag(id, new LinkedHashSet<>(), new HashSet<>(), 0);
     }
 
-    private void validateDag(String id, Set<String> active, Set<String> done, int depth) {
-        if (depth >= MAX_PROFILE_DEPTH) throw new IllegalArgumentException("Metrics Profile dependency depth exceeds 8.");
-        if (done.contains(id)) return;
-        if (!active.add(id)) throw new IllegalArgumentException("Metrics Profile dependency cycle detected at " + id + ".");
-        Map<String, Object> profile = profiles.get(id);
-        if (profile != null) {
-            if (profile.containsKey("extends")) validateDag(String.valueOf(profile.get("extends")), active, done, depth + 1);
-            for (Map<String, Object> include : listOfMaps(profile.get("includes"))) validateDag(String.valueOf(include.get("profile")), active, done, depth + 1);
-        }
-        active.remove(id); done.add(id);
-    }
-
-    private boolean profileReadable(Map<String, Object> profile, String principal, Set<String> active, int depth) {
-        if (depth >= MAX_PROFILE_DEPTH || !active.add(String.valueOf(profile.get("id")))) return false;
-        String sourceId = nullableText(profile.get("source"));
-        if (sourceId != null) { Map<String, Object> source = sources.get(sourceId); if (source == null || !sourceAllowed(source, principal)) return false; }
-        if (profile.containsKey("extends")) { Map<String, Object> parent = profiles.get(String.valueOf(profile.get("extends"))); if (parent == null || !profileReadable(parent, principal, active, depth + 1)) return false; }
+    private boolean profileReadable(Map<String, Object> profile, String principal) {
         for (Map<String, Object> include : listOfMaps(profile.get("includes"))) {
             String source = nullableText(include.get("source")); if (source != null && !sourceAllowed(sources.get(source), principal)) return false;
-            Map<String, Object> child = profiles.get(String.valueOf(include.get("profile"))); if (child == null || !profileReadable(child, principal, active, depth + 1)) return false;
         }
-        active.remove(String.valueOf(profile.get("id"))); return true;
+        return true;
     }
 
     private Map<String, Object> source(String id) {
@@ -1235,7 +1302,6 @@ final class SutMetricsService implements AutoCloseable {
             }
             result.remove("params"); result.put("parameterSchema", parameterSchema);
             result.remove("parameters"); result.remove("targets"); result.put("overridableParams", profile.get("overridableParams"));
-            if (profile.get("targets") instanceof List<?> targets) result.put("targetCount", targets.size());
             if (profile.get("includes") instanceof List<?>) {
                 List<Map<String, Object>> includes = new ArrayList<>();
                 for (Map<String, Object> include : listOfMaps(profile.get("includes")))
@@ -1247,13 +1313,11 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private boolean profileReferencesSource(Map<String, Object> profile, String id) {
-        if (id.equals(profile.get("source"))) return true;
         for (Map<String, Object> include : listOfMaps(profile.get("includes"))) if (id.equals(include.get("source"))) return true;
         return false;
     }
 
     private boolean profileReferencesProfile(Map<String, Object> profile, String id) {
-        if (id.equals(profile.get("extends"))) return true;
         for (Map<String, Object> include : listOfMaps(profile.get("includes"))) if (id.equals(include.get("profile"))) return true;
         return false;
     }
@@ -1300,7 +1364,155 @@ final class SutMetricsService implements AutoCloseable {
         atomicJson(catalogPath, catalog);
     }
 
-    private void writeManifest(Path directory, Map<String, Object> manifest) throws Exception { atomicJson(directory.resolve("manifest.json"), manifest); }
+    void writeManifest(Path directory, Map<String, Object> manifest) throws Exception {
+        String jobId = directory.getParent().getFileName().toString();
+        SnapshotEnvelope envelope = snapshotEnvelope(jobId);
+        if (envelope == null) throw new IllegalStateException("The SUT Metrics Job snapshot is missing for manifest publication.");
+        Map<String, Object> next = new LinkedHashMap<>(manifest);
+        next.put("schemaVersion", COLLECTION_SCHEMA);
+        next.put("jobId", jobId);
+        next.put("snapshotId", envelope.snapshot().get("snapshotId"));
+        next.put("updatedAt", next.getOrDefault("updatedAt", Instant.now().toString()));
+        validateManifest(next, jobId, envelope.snapshot());
+        byte[] nextBytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(next);
+        Path manifestPath = directory.resolve("manifest.json"), integrityPath = directory.resolve("manifest-integrity.json");
+        List<Map<String, Object>> entries = new ArrayList<>();
+        if (Files.exists(manifestPath, LinkOption.NOFOLLOW_LINKS)) {
+            if (Files.isSymbolicLink(manifestPath) || !Files.isRegularFile(manifestPath, LinkOption.NOFOLLOW_LINKS)
+                    || Files.size(manifestPath) > MAX_MANIFEST_BYTES)
+                throw new IllegalStateException("The current SUT Metrics manifest is not a bounded regular file.");
+            byte[] currentBytes = Files.readAllBytes(manifestPath);
+            Map<String, Object> current = json.readValue(currentBytes, Map.class);
+            validateManifest(current, jobId, envelope.snapshot());
+            entries = verifyManifestIntegrity(directory, currentBytes, current, envelope, true);
+        } else if (Files.exists(integrityPath, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException("The SUT Metrics manifest is missing from its integrity record.");
+        }
+        if (entries.isEmpty()) {
+            String initialDigest = envelope.initialManifestSha256();
+            if (initialDigest != null && !initialDigest.equals(sha256(nextBytes)))
+                throw new IllegalStateException("The initial SUT Metrics manifest does not match its immutable snapshot anchor.");
+        }
+        if (entries.size() >= MAX_MANIFEST_TRANSITIONS)
+            throw new IllegalStateException("The SUT Metrics manifest transition limit was exceeded.");
+        Map<String, Object> entry = manifestIntegrityEntry(entries.size() + 1, entries.isEmpty()
+                ? manifestIntegrityRoot(jobId, envelope.snapshotSha256())
+                : String.valueOf(entries.get(entries.size() - 1).get("entrySha256")),
+                sha256(nextBytes), next, jobId, String.valueOf(envelope.snapshot().get("snapshotId")));
+        entries.add(entry);
+        Map<String, Object> integrity = fields("schemaVersion", MANIFEST_INTEGRITY_SCHEMA, "jobId", jobId,
+                "snapshotId", envelope.snapshot().get("snapshotId"), "snapshotSha256", envelope.snapshotSha256(), "entries", entries);
+        atomicJson(integrityPath, integrity);
+        atomicBytes(manifestPath, nextBytes);
+    }
+
+    private void validateManifest(Map<String, Object> manifest, String jobId, Map<String, Object> snapshot) {
+        if (!COLLECTION_SCHEMA.equals(manifest.get("schemaVersion")) || !jobId.equals(manifest.get("jobId"))
+                || !String.valueOf(snapshot.get("snapshotId")).equals(manifest.get("snapshotId")))
+            throw new IllegalStateException("The SUT Metrics manifest identity does not match its Job snapshot.");
+        Set<String> states = Set.of("PENDING", "COLLECTING", "READY", "PARTIAL", "UNAVAILABLE", "FAILED");
+        String state = String.valueOf(manifest.get("state"));
+        if (!states.contains(state) || !(manifest.get("complete") instanceof Boolean complete)
+                || complete != "READY".equals(state))
+            throw new IllegalStateException("The SUT Metrics manifest state is invalid.");
+        Object queryValue = manifest.get("queries"), fileValue = manifest.get("files"), diagnosticValue = manifest.get("diagnostics");
+        if (!(queryValue instanceof List<?> queries) || queries.size() > MAX_EXPANDED_QUERIES
+                || !(fileValue instanceof List<?> files) || files.size() > MAX_EXPANDED_QUERIES
+                || !(diagnosticValue instanceof List<?> diagnostics) || diagnostics.size() > MAX_EXPANDED_QUERIES * 2)
+            throw new IllegalStateException("The SUT Metrics manifest exceeds its structure limits.");
+        List<Map<String, Object>> expectedQueries = queryMetadata(snapshot);
+        List<Map<String, Object>> actualQueries = new ArrayList<>();
+        Set<String> queryIds = new HashSet<>();
+        for (Object value : queries) {
+            Map<String, Object> query = object(value, "manifest query");
+            String id = nullableText(query.get("id"));
+            if (id == null || !queryIds.add(id)) throw new IllegalStateException("The SUT Metrics manifest has duplicate query identities.");
+            actualQueries.add(query);
+        }
+        if (!expectedQueries.equals(actualQueries)) throw new IllegalStateException("The SUT Metrics manifest query list does not match its immutable snapshot.");
+        Set<String> filePaths = new HashSet<>(), fileQueryIds = new HashSet<>();
+        Set<String> expectedQueryIds = new HashSet<>();
+        for (Map<String, Object> query : expectedQueries) expectedQueryIds.add(String.valueOf(query.get("id")));
+        for (Object value : files) {
+            Map<String, Object> file = object(value, "manifest file");
+            String path = nullableText(file.get("path")), queryId = nullableText(file.get("queryId"));
+            Object length = file.get("lengthBytes");
+            if (path == null || !path.matches("series-[0-9]{4}\\.json") || !filePaths.add(path)
+                    || queryId == null || !expectedQueryIds.contains(queryId) || !fileQueryIds.add(queryId)
+                    || !(length instanceof Number number) || number.longValue() < 1 || number.longValue() > MAX_SERIES_FILE_BYTES
+                    || !(file.get("sha256") instanceof String digest) || !digest.matches("[a-f0-9]{64}")
+                    || !(file.get("sampleCount") instanceof Number sampleCount) || sampleCount.longValue() < 0
+                    || !(file.get("seriesCount") instanceof Number seriesCount) || seriesCount.longValue() < 0
+                    || !(file.get("queryStatus") instanceof String queryStatus)
+                    || !Set.of("READY", "PARTIAL", "NO_DATA").contains(queryStatus))
+                throw new IllegalStateException("The SUT Metrics manifest contains an invalid sidecar entry.");
+        }
+        Object phases = manifest.get("phaseWindows");
+        if (phases != null && (!(phases instanceof List<?> phaseList) || phaseList.size() > 8))
+            throw new IllegalStateException("The SUT Metrics manifest phase windows exceed their limit.");
+    }
+
+    private List<Map<String, Object>> verifyManifestIntegrity(Path directory, byte[] manifestBytes,
+                                                               Map<String, Object> manifest, SnapshotEnvelope envelope,
+                                                               boolean allowBootstrap) throws Exception {
+        String jobId = String.valueOf(manifest.get("jobId"));
+        String snapshotId = String.valueOf(envelope.snapshot().get("snapshotId"));
+        Path historyPath = directory.resolve("manifest-integrity.json");
+        if (!Files.exists(historyPath, LinkOption.NOFOLLOW_LINKS)) {
+            String manifestDigest = sha256(manifestBytes);
+            if (envelope.initialManifestSha256() != null && !envelope.initialManifestSha256().equals(manifestDigest))
+                throw new IllegalStateException("The SUT Metrics manifest does not match its immutable integrity anchor.");
+            if (!allowBootstrap) throw new IllegalStateException("The SUT Metrics manifest integrity record is missing.");
+            List<Map<String, Object>> initial = List.of(manifestIntegrityEntry(1,
+                    manifestIntegrityRoot(jobId, envelope.snapshotSha256()), manifestDigest, manifest, jobId, snapshotId));
+            atomicJson(historyPath, fields("schemaVersion", MANIFEST_INTEGRITY_SCHEMA, "jobId", jobId,
+                    "snapshotId", snapshotId, "snapshotSha256", envelope.snapshotSha256(), "entries", initial));
+            return new ArrayList<>(initial);
+        }
+        if (Files.isSymbolicLink(historyPath) || !Files.isRegularFile(historyPath, LinkOption.NOFOLLOW_LINKS)
+                || Files.size(historyPath) > 128 * 1024)
+            throw new IllegalStateException("The SUT Metrics manifest integrity record is not a bounded regular file.");
+        JsonNode history = json.readTree(historyPath.toFile());
+        JsonNode rawEntries = history.path("entries");
+        if (!MANIFEST_INTEGRITY_SCHEMA.equals(history.path("schemaVersion").asText())
+                || !jobId.equals(history.path("jobId").asText()) || !snapshotId.equals(history.path("snapshotId").asText())
+                || !envelope.snapshotSha256().equals(history.path("snapshotSha256").asText())
+                || !rawEntries.isArray() || rawEntries.isEmpty() || rawEntries.size() > MAX_MANIFEST_TRANSITIONS)
+            throw new IllegalStateException("The SUT Metrics manifest integrity record identity or size is invalid.");
+        List<Map<String, Object>> entries = new ArrayList<>();
+        String previous = manifestIntegrityRoot(jobId, envelope.snapshotSha256());
+        for (int index = 0; index < rawEntries.size(); index++) {
+            Map<String, Object> entry = json.convertValue(rawEntries.get(index), Map.class);
+            if (!Integer.valueOf(index + 1).equals(((Number) entry.getOrDefault("sequence", -1)).intValue())
+                    || !previous.equals(entry.get("previousSha256")) || !jobId.equals(entry.get("jobId"))
+                    || !snapshotId.equals(entry.get("snapshotId")) || !Set.of("PENDING", "COLLECTING", "READY", "PARTIAL", "UNAVAILABLE", "FAILED").contains(entry.get("state"))
+                    || !(entry.get("manifestSha256") instanceof String digest) || !digest.matches("[a-f0-9]{64}"))
+                throw new IllegalStateException("The SUT Metrics manifest integrity chain is invalid.");
+            Map<String, Object> core = fields("sequence", index + 1, "previousSha256", previous,
+                    "manifestSha256", digest, "state", entry.get("state"), "jobId", jobId, "snapshotId", snapshotId);
+            String entrySha = sha256(json.writeValueAsBytes(core));
+            if (!entrySha.equals(entry.get("entrySha256"))) throw new IllegalStateException("The SUT Metrics manifest integrity chain failed verification.");
+            previous = entrySha;
+            entries.add(entry);
+        }
+        Map<String, Object> last = entries.get(entries.size() - 1);
+        if (!sha256(manifestBytes).equals(last.get("manifestSha256")) || !manifest.get("state").equals(last.get("state")))
+            throw new IllegalStateException("The SUT Metrics manifest does not match its durable integrity record.");
+        return entries;
+    }
+
+    private Map<String, Object> manifestIntegrityEntry(int sequence, String previous, String manifestDigest,
+                                                        Map<String, Object> manifest, String jobId, String snapshotId) throws Exception {
+        Map<String, Object> core = fields("sequence", sequence, "previousSha256", previous, "manifestSha256", manifestDigest,
+                "state", manifest.get("state"), "jobId", jobId, "snapshotId", snapshotId);
+        Map<String, Object> entry = new LinkedHashMap<>(core);
+        entry.put("entrySha256", sha256(json.writeValueAsBytes(core)));
+        return entry;
+    }
+
+    private static String manifestIntegrityRoot(String jobId, String snapshotSha256) {
+        return sha256((MANIFEST_INTEGRITY_SCHEMA + "\u0000" + jobId + "\u0000" + snapshotSha256).getBytes(StandardCharsets.UTF_8));
+    }
 
     private void updateState(String jobId, String state, String message, List<Map<String, Object>> diagnostics) throws Exception {
         Path directory = jobMetricsDirectory(jobId); Files.createDirectories(directory);
@@ -1335,7 +1547,9 @@ final class SutMetricsService implements AutoCloseable {
         for (Map<String, Object> query : listOfMaps(snapshot.get("queries"))) rows.add(fields("id", query.get("id"), "profile", query.get("profile"),
                 "profilePath", query.get("profilePath"), "sourceId", query.get("sourceId"), "sourceName", query.get("sourceName"),
                 "targetId", query.get("targetId"), "targetType", query.get("targetType"), "metricId", query.get("metricId"),
-                "title", query.get("title"), "category", query.get("category"), "unit", query.get("unit")));
+                "title", query.get("title"), "category", query.get("category"), "unit", query.get("unit"), "kind", query.get("kind"),
+                "sourceRevision", query.get("sourceRevision"), "profileRevision", query.get("profileRevision"),
+                "targetRevision", query.get("targetRevision")));
         return rows;
     }
 
@@ -1559,6 +1773,13 @@ final class SutMetricsService implements AutoCloseable {
             Thread thread = new Thread(task, name); thread.setDaemon(true); return thread;
         }, new ThreadPoolExecutor.AbortPolicy());
     }
+    private static ScheduledThreadPoolExecutor scheduledExecutor(String name) {
+        ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1, task -> {
+            Thread thread = new Thread(task, name); thread.setDaemon(true); return thread;
+        });
+        executor.setRemoveOnCancelPolicy(true);
+        return executor;
+    }
     private void atomicJson(Path path, Object value) throws Exception { atomicBytes(path, json.writerWithDefaultPrettyPrinter().writeValueAsBytes(value)); }
     private void atomicBytes(Path path, byte[] bytes) throws Exception {
         Files.createDirectories(path.getParent()); Path temporary = Files.createTempFile(path.getParent(), ".sut-metrics-", ".tmp");
@@ -1571,15 +1792,20 @@ final class SutMetricsService implements AutoCloseable {
     }
     private static String sha256(Path path) throws Exception { try (InputStream input = Files.newInputStream(path)) { MessageDigest digest = MessageDigest.getInstance("SHA-256"); byte[] buffer = new byte[8192]; int read; while ((read = input.read(buffer)) >= 0) if (read > 0) digest.update(buffer, 0, read); return hex(digest.digest()); } }
     private static String sha256(byte[] bytes) { try { return hex(MessageDigest.getInstance("SHA-256").digest(bytes)); } catch (Exception impossible) { throw new IllegalStateException(impossible); } }
+    private String sha256Json(Object value) {
+        try { return sha256(json.writeValueAsBytes(value)); }
+        catch (Exception impossible) { throw new IllegalStateException("Could not calculate a safe SUT Metrics revision.", impossible); }
+    }
     private static String hex(byte[] bytes) { StringBuilder out = new StringBuilder(bytes.length * 2); for (byte value : bytes) out.append(String.format(Locale.ROOT, "%02x", value & 0xff)); return out.toString(); }
     private Map<String, Object> cachedPreview(String key) { CacheEntry entry = previewCache.get(key); if (entry == null) return null; if (System.nanoTime() >= entry.expiresAtNanos) { previewCache.remove(key, entry); return null; } return entry.value; }
     private void trimPreviewCache() { if (previewCache.size() > 128) previewCache.entrySet().removeIf(entry -> System.nanoTime() >= entry.getValue().expiresAtNanos); if (previewCache.size() > 128) previewCache.clear(); }
 
-    @Override public void close() { collectors.shutdownNow(); previews.shutdownNow(); bodyReaders.shutdownNow(); previewFlights.clear(); previewCache.clear(); clients.clear(); }
+    @Override public void close() { collectionScheduler.shutdownNow(); collectors.shutdownNow(); previews.shutdownNow(); bodyReaders.shutdownNow(); scheduledCollections.clear(); previewFlights.clear(); previewCache.clear(); clients.clear(); }
     static final class CapacityException extends RuntimeException { CapacityException(String message) { super(message); } }
     static final class SutMetricsTimeoutException extends RuntimeException { SutMetricsTimeoutException(String message) { super(message); } }
     private static final class CollectionBudgetExceededException extends IllegalArgumentException {
         CollectionBudgetExceededException(String message) { super(message); }
     }
     private record CacheEntry(long expiresAtNanos, Map<String, Object> value) { }
+    private record SnapshotEnvelope(Map<String, Object> snapshot, String snapshotSha256, String initialManifestSha256) { }
 }

@@ -1,5 +1,6 @@
 package att.server;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
@@ -52,29 +53,28 @@ class SutMetricsServiceTest {
         }
     }
 
-    @Test void derivedProfileDefaultsReachBaseAndOnlyDeclaredScenarioOverridesAreAccepted() throws Exception {
+    @Test void oneLevelCompositeBindsBaseProfilesAndOnlyDeclaredScenarioParameterOverridesAreAccepted() throws Exception {
         try (PrometheusFixture fixture = new PrometheusFixture(1); SutMetricsService service = new SutMetricsService(temp)) {
             service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
             Map<String, Object> base = map("schemaVersion", "att-sut-metrics-profile/v1", "id", "base", "name", "Base",
                     "kind", "base", "category", "app", "params", Map.of("service", Map.of("type", "promLabelValue", "default", "base")),
-                    "parameters", Map.of("service", "base-default"), "targets", List.of(map("id", "base-target", "type", "app")),
+                    "parameters", Map.of("service", "base-default"),
+                    "overridableParams", List.of("service"),
                     "metrics", List.of(map("id", "requests", "title", "Requests", "unit", "count", "kind", "gauge",
                             "query", "up{service=\"{{service}}\"}")));
             service.upsertProfile(base);
-            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "derived", "name", "Derived",
-                    "kind", "derived", "extends", "base", "source", "prom", "targets", List.of(map("id", "sut-1", "type", "app")),
-                    "parameters", Map.of("service", "derived-default")));
-            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "derived-open", "name", "Derived open",
-                    "kind", "derived", "extends", "base", "source", "prom", "targets", List.of(map("id", "sut-1", "type", "app")),
-                    "parameters", Map.of("service", "derived-default"), "overridableParams", List.of("service")));
+            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "preset", "name", "Preset",
+                    "kind", "composite", "includes", List.of(map("profile", "base", "source", "prom",
+                            "targets", List.of(map("id", "sut-1", "type", "app")), "parameters", Map.of("service", "preset-value")))));
 
-            Map<String, Object> defaulted = service.resolveScenario(scenario(List.of(map("profile", "derived")), "1m", "1m", "15s"), "alice");
-            assertEquals("up{service=\"derived-default\"}", maps(defaulted.get("queries")).get(0).get("query"));
+            Map<String, Object> defaulted = service.resolveScenario(scenario(List.of(map("profile", "preset")), "1m", "1m", "15s"), "alice");
+            assertEquals("up{service=\"preset-value\"}", maps(defaulted.get("queries")).get(0).get("query"));
             assertThrows(IllegalArgumentException.class, () -> service.resolveScenario(scenario(List.of(
-                    map("profile", "derived", "parameters", Map.of("service", "scenario-value"))), "1m", "1m", "15s"), "alice"));
+                    map("profile", "preset", "parameters", Map.of("service", "scenario-value"))), "1m", "1m", "15s"), "alice"));
 
             Map<String, Object> explicitlyOverridden = service.resolveScenario(scenario(List.of(
-                    map("profile", "derived-open", "parameters", Map.of("service", "scenario-value"))), "1m", "1m", "15s"), "alice");
+                    map("profile", "base", "source", "prom", "targets", List.of(map("id", "sut-1", "type", "app")),
+                            "parameters", Map.of("service", "scenario-value"))), "1m", "1m", "15s"), "alice");
             assertEquals("up{service=\"scenario-value\"}", maps(explicitlyOverridden.get("queries")).get(0).get("query"));
         }
     }
@@ -93,26 +93,35 @@ class SutMetricsServiceTest {
         }
     }
 
-    @Test void missingProfileReferencesAndDependencyCyclesAreRejectedAtomically() throws Exception {
+    @Test void derivedExtendsNestedCompositesAndAmbiguousAliasesAreRejected() throws Exception {
         try (SutMetricsService service = new SutMetricsService(temp)) {
             service.upsertSource(source("prom", "http://127.0.0.1:9090", List.of("alice"), Map.of()));
             service.upsertProfile(baseProfile("base", 1, false));
-            Map<String, Object> first = map("schemaVersion", "att-sut-metrics-profile/v1", "id", "derived-one", "name", "Derived one",
-                    "kind", "derived", "extends", "base", "source", "prom", "targets", List.of(map("id", "sut-1", "type", "app")));
-            service.upsertProfile(first);
-            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "derived-two", "name", "Derived two",
-                    "kind", "derived", "extends", "derived-one"));
-
-            Map<String, Object> cycle = new LinkedHashMap<>(first);
-            cycle.put("extends", "derived-two");
-            assertThrows(IllegalArgumentException.class, () -> service.upsertProfile(cycle));
             assertThrows(IllegalArgumentException.class, () -> service.upsertProfile(map(
-                    "schemaVersion", "att-sut-metrics-profile/v1", "id", "missing-parent", "name", "Missing parent",
-                    "kind", "derived", "extends", "not-installed")));
-
-            Map<String, Object> resolved = service.resolveScenario(scenario(List.of(map("profile", "derived-one")), "1m", "1m", "15s"), "alice");
-            assertEquals("up", maps(resolved.get("queries")).get(0).get("query"),
-                    "A rejected catalog edit must leave the previously valid dependency graph intact.");
+                    "schemaVersion", "att-sut-metrics-profile/v1", "id", "bound-base", "kind", "base",
+                    "source", "prom", "targets", List.of(map("id", "sut-1")),
+                    "metrics", List.of(map("id", "m", "title", "Metric", "unit", "count", "query", "up")))));
+            assertThrows(IllegalArgumentException.class, () -> service.upsertProfile(map(
+                    "schemaVersion", "att-sut-metrics-profile/v1", "id", "derived", "kind", "derived", "extends", "base")));
+            assertThrows(IllegalArgumentException.class, () -> service.upsertProfile(map(
+                    "schemaVersion", "att-sut-metrics-profile/v1", "id", "extends", "kind", "base", "extends", "base",
+                    "metrics", List.of(map("id", "m", "title", "Metric", "unit", "count", "query", "up")))));
+            Map<String,Object> validPreset=map("schemaVersion","att-sut-metrics-profile/v1","id","preset","kind","composite",
+                    "includes",List.of(map("profile","base","source","prom","targets",List.of(map("id","sut-1")))));
+            service.upsertProfile(validPreset);
+            assertThrows(IllegalArgumentException.class, () -> service.upsertProfile(map("schemaVersion","att-sut-metrics-profile/v1",
+                    "id","unbound","kind","composite","includes",List.of(map("profile","base")))));
+            assertThrows(IllegalArgumentException.class,()->service.upsertProfile(map("schemaVersion","att-sut-metrics-profile/v1",
+                    "id","nested","kind","composite","includes",List.of(map("profile","preset")))));
+            assertThrows(IllegalArgumentException.class,()->service.upsertProfile(map("schemaVersion","att-sut-metrics-profile/v1",
+                    "id","ambiguous","kind","composite","includes",List.of(map("profile","base","source","prom",
+                            "targets",List.of(map("id","sut-1"))),map("profile","base","source","prom",
+                            "targets",List.of(map("id","sut-2")))))));
+            service.upsertProfile(map("schemaVersion","att-sut-metrics-profile/v1","id","aliased","kind","composite",
+                    "includes",List.of(map("profile","base","alias","first","source","prom","targets",List.of(map("id","sut-1"))),
+                            map("profile","base","alias","second","source","prom","targets",List.of(map("id","sut-2"))))));
+            Map<String,Object> resolved=service.resolveScenario(scenario(List.of(map("profile","aliased")),"1m","1m","15s"),"alice");
+            assertEquals(List.of("aliased/first","aliased/second"),maps(resolved.get("queries")).stream().map(q->q.get("profilePath")).toList());
         }
     }
 
@@ -274,7 +283,7 @@ class SutMetricsServiceTest {
     }
 
     @Test void postRunCollectionSegmentsTwentyFiveHoursAndPreservesLoadWindowAndSealedArtifacts() throws Exception {
-        try (PrometheusFixture fixture = new PrometheusFixture(1); SutMetricsService service = new SutMetricsService(temp)) {
+        try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::atWindowEndResponse); SutMetricsService service = new SutMetricsService(temp)) {
             service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
             service.upsertProfile(baseProfile("base", 1, false));
             Map<String, Object> snapshot = service.resolveScenario(scenario(List.of(binding("prom", null)), "1h", "1h", "300s"), "alice", false);
@@ -286,7 +295,7 @@ class SutMetricsServiceTest {
             byte[] archive = "sealed artifact archive".getBytes(StandardCharsets.UTF_8);
             Files.write(job.resolve("output/report.json"), report);
             Files.write(job.resolve("artifacts.zip"), archive);
-            Instant finishedAt = Instant.now();
+            Instant finishedAt = Instant.now().minusSeconds(7200);
             Instant startedAt = finishedAt.minusSeconds(23 * 3600L);
 
             service.jobFinished(JOB_ID, startedAt, finishedAt);
@@ -322,17 +331,17 @@ class SutMetricsServiceTest {
         Map<String, Object> snapshot;
         String completedJob = "J0000000000000081";
         String interruptedJob = "J0000000000000082";
-        try (PrometheusFixture fixture = new PrometheusFixture(1); SutMetricsService service = new SutMetricsService(data)) {
+        try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::atWindowEndResponse); SutMetricsService service = new SutMetricsService(data)) {
             service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
             service.upsertProfile(baseProfile("base", 1, false));
             snapshot = service.resolveScenario(scenario(List.of(binding("prom", null)), "1m", "1m", "15s"), "alice");
             service.writeSnapshot(completedJob, snapshot);
-            Instant finishedAt = Instant.now();
+            Instant finishedAt = Instant.now().minusSeconds(120);
             service.jobFinished(completedJob, finishedAt.minusSeconds(30), finishedAt);
             assertEquals("READY", awaitManifest(service, completedJob).get("state"));
         }
 
-        Path interruptedDirectory = data.resolve("jobs").resolve(interruptedJob).resolve("sut-metrics");
+            Path interruptedDirectory = data.resolve("jobs").resolve(interruptedJob).resolve("sut-metrics");
         try (SutMetricsService restarted = new SutMetricsService(data)) {
             Map<String, Object> restored = restarted.collectionStatus(completedJob);
             assertEquals("READY", restored.get("state"));
@@ -340,11 +349,10 @@ class SutMetricsServiceTest {
             assertEquals(1, maps(page.get("items")).size(), "Published sidecars remain readable after a Server service restart.");
 
             restarted.writeSnapshot(interruptedJob, snapshot);
-            Path manifest = interruptedDirectory.resolve("manifest.json");
-            Map<String, Object> inProgress = ServerRuntime.JSON.convertValue(ServerRuntime.JSON.readTree(manifest.toFile()), Map.class);
+            Map<String, Object> inProgress = restarted.collectionStatus(interruptedJob);
             inProgress.put("state", "COLLECTING");
             inProgress.put("complete", Boolean.FALSE);
-            Files.write(manifest, ServerRuntime.JSON.writeValueAsBytes(inProgress));
+            restarted.writeManifest(interruptedDirectory, inProgress);
             Files.writeString(interruptedDirectory.resolve("series-0000.json"), "unpublished partial sidecar");
         }
 
@@ -358,6 +366,133 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void postRunWaitsForAfterBufferAndIngestionStepBeforeQueryingPrometheus() throws Exception {
+        Instant finishedAt = Instant.now();
+        Instant visibleAt = finishedAt.plusSeconds(1);
+        AtomicInteger requests = new AtomicInteger();
+        try (PrometheusFixture fixture = new PrometheusFixture(raw -> {
+                 requests.incrementAndGet();
+                 if (Instant.now().isBefore(visibleAt)) return "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[]}}";
+                 return atWindowEndResponse(raw);
+             }); SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            Map<String, Object> snapshot = service.resolveScenario(scenario(List.of(binding("prom", null)), "1m", "1s", "15s"), "alice");
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant startedAt = finishedAt.minusSeconds(30);
+
+            service.jobFinished(JOB_ID, startedAt, finishedAt);
+            assertEquals("PENDING", service.collectionStatus(JOB_ID).get("state"));
+            assertEquals(0, requests.get(), "Prometheus must not be queried while the after-buffer is still open.");
+            Thread.sleep(1200);
+            assertEquals("PENDING", service.collectionStatus(JOB_ID).get("state"),
+                    "Elapsed after-buffer data remains pending through one query-step ingestion grace.");
+            assertEquals(0, requests.get(), "The collector must not query before the persisted eligibleAt boundary.");
+
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("READY", manifest.get("state"));
+            Map<String, Object> coverage = object(maps(manifest.get("files")).get(0).get("coverage"));
+            assertTrue(Instant.parse(String.valueOf(coverage.get("lastSampleAt"))).isAfter(finishedAt));
+            assertTrue(requests.get() > 0);
+        }
+    }
+
+    @Test void postRunObservationMatchesTheProviderNeutralGoldenContract() throws Exception {
+        Instant finishedAt = Instant.now().minusSeconds(120), startedAt = finishedAt.minusSeconds(60);
+        try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::atWindowEndResponse);
+             SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            Map<String, Object> snapshot = service.resolveScenario(scenario(List.of(binding("prom", null)), "1m", "1m", "15s"), "alice");
+            service.writeSnapshot(JOB_ID, snapshot);
+            List<Map<String, Object>> phases = List.of(
+                    phase("RAMP_UP", startedAt, startedAt.plusSeconds(10), false),
+                    phase("WARMUP", startedAt.plusSeconds(10), startedAt.plusSeconds(20), false),
+                    phase("STEADY", startedAt.plusSeconds(20), startedAt.plusSeconds(50), true),
+                    phase("RAMP_DOWN", startedAt.plusSeconds(50), finishedAt, true));
+
+            service.jobFinished(JOB_ID, startedAt, finishedAt, phases);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            Map<String, Object> file = maps(manifest.get("files")).get(0);
+            byte[] sidecar = Files.readAllBytes(temp.resolve("jobs").resolve(JOB_ID).resolve("sut-metrics").resolve(String.valueOf(file.get("path"))));
+            JsonNode golden;
+            try (var input = getClass().getResourceAsStream("/att/server/sut-metrics-observation-v1.golden.json")) {
+                assertNotNull(input, "The versioned observation golden fixture must be packaged with the service tests.");
+                golden = ServerRuntime.JSON.readTree(input);
+            }
+            JsonNode actual = ServerRuntime.JSON.readTree(sidecar);
+            assertGoldenShape(golden, actual, "$");
+            JsonNode observation = actual.path("observation");
+            assertEquals(SutMetricsService.OBSERVATION_SCHEMA, observation.path("schemaVersion").asText());
+            assertEquals(4, observation.path("window").path("phaseWindows").size());
+            assertEquals("FRESH", observation.path("availability").path("freshness").asText());
+            assertFalse(new String(sidecar, StandardCharsets.UTF_8).contains(fixture.url()));
+            assertFalse(actual.has("query"), "Resolved PromQL is omitted from published observation sidecars.");
+            assertFalse(observation.has("query"));
+        }
+    }
+
+    @Test void collectionManifestRejectsIdentityAndStateOrFileListTampering() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::atWindowEndResponse);
+             SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            service.writeSnapshot(JOB_ID, service.resolveScenario(scenario(List.of(binding("prom", null)), "1m", "1m", "15s"), "alice"));
+            Instant finishedAt = Instant.now().minusSeconds(120);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(30), finishedAt);
+            Map<String, Object> completed = awaitManifest(service, JOB_ID);
+            byte[] originalManifest = Files.readAllBytes(temp.resolve("jobs").resolve(JOB_ID).resolve("sut-metrics/manifest.json"));
+            Map<String, Object> file = maps(completed.get("files")).get(0);
+            Path sidecar = temp.resolve("jobs").resolve(JOB_ID).resolve("sut-metrics").resolve(String.valueOf(file.get("path")));
+            byte[] originalSidecar = Files.readAllBytes(sidecar);
+            Path manifestPath = temp.resolve("jobs").resolve(JOB_ID).resolve("sut-metrics/manifest.json");
+
+            Map<String, Object> wrongIdentity = object(ServerRuntime.JSON.readValue(originalManifest, Map.class));
+            wrongIdentity.put("jobId", "J0000000000000099");
+            Files.write(manifestPath, ServerRuntime.JSON.writeValueAsBytes(wrongIdentity));
+            assertThrows(IllegalStateException.class, () -> service.collectionStatus(JOB_ID));
+
+            Files.write(manifestPath, originalManifest);
+            Map<String, Object> wrongSnapshot = object(ServerRuntime.JSON.readValue(originalManifest, Map.class));
+            wrongSnapshot.put("snapshotId", "different-snapshot");
+            Files.write(manifestPath, ServerRuntime.JSON.writeValueAsBytes(wrongSnapshot));
+            assertThrows(IllegalStateException.class, () -> service.collectionStatus(JOB_ID));
+
+            Files.write(manifestPath, originalManifest);
+            Map<String, Object> alteredState = object(ServerRuntime.JSON.readValue(originalManifest, Map.class));
+            alteredState.put("state", "PARTIAL");
+            alteredState.put("complete", Boolean.FALSE);
+            Files.write(manifestPath, ServerRuntime.JSON.writeValueAsBytes(alteredState));
+            assertThrows(IllegalStateException.class, () -> service.collectionStatus(JOB_ID));
+
+            Files.write(manifestPath, originalManifest);
+            Map<String, Object> alteredPublication = object(ServerRuntime.JSON.readValue(originalManifest, Map.class));
+            alteredPublication.put("files", List.of());
+            Files.write(manifestPath, ServerRuntime.JSON.writeValueAsBytes(alteredPublication));
+            assertThrows(IllegalStateException.class, () -> service.collectionStatus(JOB_ID));
+            assertArrayEquals(originalSidecar, Files.readAllBytes(sidecar), "Manifest tampering leaves the published series file unchanged.");
+
+            Files.write(manifestPath, originalManifest);
+            assertEquals("READY", service.collectionStatus(JOB_ID).get("state"));
+        }
+    }
+
+    @Test void sampledSeriesWithoutAnAfterBufferSampleIsPartialNotReady() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(2); SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            service.writeSnapshot(JOB_ID, service.resolveScenario(scenario(List.of(binding("prom", null)), "1m", "1m", "15s"), "alice"));
+            Instant finishedAt = Instant.now().minusSeconds(120);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(30), finishedAt);
+
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("PARTIAL", manifest.get("state"));
+            Map<String, Object> file = maps(manifest.get("files")).get(0);
+            assertEquals("PARTIAL", file.get("queryStatus"));
+            assertEquals("POST_BUFFER_NOT_OBSERVED", maps(manifest.get("diagnostics")).get(0).get("code"));
+        }
+    }
+
     @Test void postRunStopsAfterThePerSourceSampleBudgetAndMarksUnissuedQueries() throws Exception {
         try (PrometheusFixture fixture = new PrometheusFixture(2); SutMetricsService service = new SutMetricsService(temp)) {
             service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of("maxSamplesPerJob", 1)));
@@ -365,7 +500,7 @@ class SutMetricsServiceTest {
             Map<String, Object> snapshot = service.resolveScenario(scenario(List.of(binding("prom", null)), "1m", "1m", "15s"), "alice", false);
             service.writeSnapshot(JOB_ID, snapshot);
 
-            Instant startedAt = Instant.now().minusSeconds(30), finishedAt = Instant.now();
+            Instant finishedAt = Instant.now().minusSeconds(120), startedAt = finishedAt.minusSeconds(30);
             service.jobFinished(JOB_ID, startedAt, finishedAt);
             Map<String, Object> manifest = awaitManifest(service, JOB_ID);
 
@@ -396,7 +531,7 @@ class SutMetricsServiceTest {
             service.upsertProfile(profileWithQueries("up","down"));
             service.writeSnapshot(JOB_ID,service.resolveScenario(scenario(List.of(binding("prom",null)),"1m","1m","15s"),"alice"));
 
-            Instant finished=Instant.now();service.jobFinished(JOB_ID,finished.minusSeconds(30),finished);
+            Instant finished=Instant.now().minusSeconds(120);service.jobFinished(JOB_ID,finished.minusSeconds(30),finished);
 
             Map<String,Object> manifest=awaitManifest(service,JOB_ID);
             assertEquals("PARTIAL",manifest.get("state"));
@@ -413,7 +548,7 @@ class SutMetricsServiceTest {
             service.upsertProfile(profileWithQueries("up","down"));
             service.writeSnapshot(JOB_ID,service.resolveScenario(scenario(List.of(binding("prom",null)),"1m","1m","15s"),"alice"));
 
-            Instant finished=Instant.now();service.jobFinished(JOB_ID,finished.minusSeconds(30),finished);
+            Instant finished=Instant.now().minusSeconds(120);service.jobFinished(JOB_ID,finished.minusSeconds(30),finished);
 
             Map<String,Object> manifest=awaitManifest(service,JOB_ID);
             assertEquals("PARTIAL",manifest.get("state"));
@@ -427,7 +562,7 @@ class SutMetricsServiceTest {
             service.upsertSource(source("prom",fixture.url(),List.of("alice"),Map.of()));
             service.upsertProfile(baseProfile("base",1,false));
             service.writeSnapshot(JOB_ID,service.resolveScenario(scenario(List.of(binding("prom",null)),"1m","1m","15s"),"alice"));
-            Instant finished=Instant.now();service.jobFinished(JOB_ID,finished.minusSeconds(30),finished);
+            Instant finished=Instant.now().minusSeconds(120);service.jobFinished(JOB_ID,finished.minusSeconds(30),finished);
 
             Map<String,Object> manifest=awaitManifest(service,JOB_ID);
             assertEquals("FAILED",manifest.get("state"));
@@ -440,7 +575,7 @@ class SutMetricsServiceTest {
             service.upsertSource(source("prom",fixture.url(),List.of("alice"),Map.of("requestTimeoutMs",250)));
             service.upsertProfile(baseProfile("base",1,false));
             service.writeSnapshot(JOB_ID,service.resolveScenario(scenario(List.of(binding("prom",null)),"1m","1m","15s"),"alice"));
-            Instant finished=Instant.now();service.jobFinished(JOB_ID,finished.minusSeconds(30),finished);
+            Instant finished=Instant.now().minusSeconds(120);service.jobFinished(JOB_ID,finished.minusSeconds(30),finished);
 
             Map<String,Object> manifest=awaitManifest(service,JOB_ID);
             assertEquals("FAILED",manifest.get("state"));
@@ -452,7 +587,7 @@ class SutMetricsServiceTest {
             service.upsertSource(source("prom",fixture.url(),List.of("alice"),Map.of("maxResponseBytes",1024)));
             service.upsertProfile(baseProfile("base",1,false));
             service.writeSnapshot(JOB_ID,service.resolveScenario(scenario(List.of(binding("prom",null)),"1m","1m","15s"),"alice"));
-            Instant finished=Instant.now();service.jobFinished(JOB_ID,finished.minusSeconds(30),finished);
+            Instant finished=Instant.now().minusSeconds(120);service.jobFinished(JOB_ID,finished.minusSeconds(30),finished);
 
             Map<String,Object> manifest=awaitManifest(service,JOB_ID);
             assertEquals("FAILED",manifest.get("state"));
@@ -466,7 +601,7 @@ class SutMetricsServiceTest {
         for(int index=0;index<queries.length;index++)metrics.add(map("id","metric-"+(index+1),"title","Metric "+(index+1),
                 "unit","count","kind","gauge","query",queries[index]));
         return map("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile","kind","base",
-                "category","app","metrics",metrics,"targets",List.of(map("id","default-target","type","app")));
+                "category","app","metrics",metrics);
     }
 
     private static Map<String, Object> source(String id, String url, List<String> readers, Map<String, Object> limits) {
@@ -478,11 +613,8 @@ class SutMetricsServiceTest {
         List<Map<String, Object>> metrics = new ArrayList<>();
         for (int index = 1; index <= metricCount; index++) metrics.add(map("id", "metric-" + index, "title", "Metric " + index,
                 "unit", "count", "kind", "gauge", "query", parameterized ? "up{service=\"{{service}}\"}" : "up"));
-        Map<String, Object> target = parameterized
-                ? map("id", "default-target", "type", "app", "parameters", Map.of("service", "profile-target"))
-                : map("id", "default-target", "type", "app");
         Map<String, Object> profile = map("schemaVersion", "att-sut-metrics-profile/v1", "id", id, "name", "Base profile",
-                "kind", "base", "category", "app", "metrics", metrics, "targets", List.of(target));
+                "kind", "base", "category", "app", "metrics", metrics);
         if (parameterized) {
             profile.put("params", Map.of("service", Map.of("type", "promLabelValue", "default", "parameter-default")));
             profile.put("parameters", Map.of("service", "profile-default"));
@@ -507,13 +639,13 @@ class SutMetricsServiceTest {
     }
 
     private static Map<String, Object> awaitManifest(SutMetricsService service, String jobId) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         Map<String, Object> manifest;
         do {
             manifest = service.collectionStatus(jobId);
             String state = String.valueOf(manifest.get("state"));
-            if (!"PENDING".equals(state) && !"COLLECTING".equals(state)) return manifest;
-            Thread.sleep(10);
+            if (Set.of("READY", "PARTIAL", "UNAVAILABLE", "FAILED", "DISABLED").contains(state)) return manifest;
+            Thread.sleep(25);
         } while (System.nanoTime() < deadline);
         fail("SUT Metrics collection did not finish before the test deadline.");
         return Map.of();
@@ -536,6 +668,39 @@ class SutMetricsServiceTest {
                 .filter(part -> part.startsWith(name + "="))
                 .map(part -> URLDecoder.decode(part.substring((name + "=").length()), StandardCharsets.UTF_8))
                 .findFirst().orElseThrow();
+    }
+
+    private static String atWindowEndResponse(String raw) {
+        long timestamp = Instant.parse(queryParameter(raw, "end")).toEpochMilli();
+        return "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":["
+                + "{\"metric\":{\"instance\":\"sut-1\"},\"values\":[["
+                + String.format(Locale.ROOT, "%.3f", timestamp / 1000.0) + ",\"1.0\"]]}]}}";
+    }
+
+    private static Map<String, Object> phase(String name, Instant start, Instant end, boolean measured) {
+        return map("phase", name, "startAt", start.toString(), "endAt", end.toString(), "measured", measured);
+    }
+
+    private static void assertGoldenShape(JsonNode expected, JsonNode actual, String path) {
+        if (expected.isObject()) {
+            assertTrue(actual.isObject(), path + " must be an object");
+            Set<String> expectedNames = new java.util.TreeSet<>(), actualNames = new java.util.TreeSet<>();
+            expected.fieldNames().forEachRemaining(expectedNames::add);
+            actual.fieldNames().forEachRemaining(actualNames::add);
+            assertEquals(expectedNames, actualNames, path + " field names changed");
+            expected.fields().forEachRemaining(entry -> assertGoldenShape(entry.getValue(), actual.get(entry.getKey()), path + "." + entry.getKey()));
+        } else if (expected.isArray()) {
+            assertTrue(actual.isArray(), path + " must be an array");
+            assertEquals(expected.size(), actual.size(), path + " length changed");
+            for (int index = 0; index < expected.size(); index++) assertGoldenShape(expected.get(index), actual.get(index), path + "[" + index + "]");
+        } else if (expected.isTextual() && expected.asText().startsWith("$")) {
+            String marker = expected.asText();
+            if ("$TIME".equals(marker)) assertDoesNotThrow(() -> Instant.parse(actual.asText()), path + " must be a UTC timestamp");
+            else if ("$REVISION".equals(marker) || "$SNAPSHOT".equals(marker)) assertTrue(actual.asText().matches("[a-f0-9]{64}"), path + " must be a SHA-256 revision");
+            else if ("$JOB".equals(marker)) assertEquals(JOB_ID, actual.asText(), path + " must identify the authorized Job");
+            else if ("$EPOCH".equals(marker)) assertTrue(actual.isIntegralNumber(), path + " must be epoch milliseconds");
+            else fail("Unknown golden marker " + marker + " at " + path);
+        } else assertEquals(expected, actual, path + " value changed");
     }
 
     private static final class PrometheusFixture implements AutoCloseable {

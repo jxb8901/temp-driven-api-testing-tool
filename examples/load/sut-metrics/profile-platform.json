@@ -5,7 +5,23 @@
   "kind": "composite",
   "category": "custom",
   "includes": [
-    { "profile": "profile-jvm-prod", "alias": "jvm" },
-    { "profile": "profile-app", "alias": "application" }
+    {
+      "profile": "profile-jvm",
+      "alias": "jvm",
+      "source": "prom-main",
+      "tenant": "production",
+      "targets": [
+        { "id": "payments-api", "type": "application", "parameters": { "instance": "payments-api-prod:8080" } }
+      ]
+    },
+    {
+      "profile": "profile-app",
+      "alias": "application",
+      "source": "prom-main",
+      "tenant": "production",
+      "targets": [
+        { "id": "payments-api", "type": "application" }
+      ]
+    }
   ]
 }

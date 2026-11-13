@@ -54,11 +54,11 @@ Explorer 是 React 與 TypeScript 單頁 UI，於 `att-web` Maven resource 階�
 
 ## SUT Metrics
 
-系統管理員可在 **Settings → SUT Metrics administration** 管理 Prometheus Data Source 及版本化 Metrics Profile。先建立 Data Source，再儲存 base、derived 及 composite profile。Data Source 設定 HTTPS endpoint、固定 query path、TLS、可選的 secret reference、讀取者範圍、tenant allowlist 及 collection limits。Secret 值由 Server 環境變數 `ATT_SECRET_<NAME>` 提供，API 不會回傳 secret 值。
+系統管理員可在 **Settings → SUT Metrics administration** 管理 Prometheus Data Source 及版本化 Metrics Profile。先建立 Data Source，再儲存 base profile 及 composite preset。Base profile 只管理 metric 定義及 typed parameters，不儲存 source 或 target binding；composite 只可組合 base profile 一層，並為每個 include 提供 source 和 target binding。Scenario 直接選取 base profile 時，必須在 Scenario binding 提供 source 及 targets。巢狀 composite 和 `extends` 均會被拒絕。Data Source 設定 HTTPS endpoint、固定 query path、TLS、可選的 secret reference、讀取者範圍、tenant allowlist 及 collection limits。Secret 值由 Server 環境變數 `ATT_SECRET_<NAME>` 提供，API 不會回傳 secret 值。
 
 HTTPS Data Source host 必須與 Server 的 `ATT_SUT_METRICS_ALLOWED_HOSTS` 環境變數其中一項完全相同。設定值以逗號分隔，只接受完整 host name 或 IP address，不接受 wildcard 或 URL path。HTTP 只適用於本機開發時的 loopback Prometheus。Server 不跟隨 redirect，也不使用 proxy。請同時用部署網路 egress rules 限制 DNS 解析後的 destination IP。
 
-`att-load/v1.9` 可選擇在 root-level 加入 `observability`，將已登記的 profile 綁定至 LOAD scenario。Profile 允許時，binding 可指定 targets 及 parameters。Scenario 不接受 Prometheus URL、credentials 或任意 PromQL。例如：
+`att-load/v1.9` 可選擇在 root-level 加入 `observability`，將已登記的 profile 綁定至 LOAD scenario。Scenario 可選擇 base profile，並明確提供 source 及 target binding；也可選擇已在各 include 綁定來源和目標的 composite preset。直接 binding 不會繼承或合併其他 profile 的值。Scenario 不接受 Prometheus URL、credentials 或任意 PromQL。例如：
 
 ~~~yaml
 observability:
@@ -69,8 +69,10 @@ observability:
   livePreview: { enabled: true, refreshInterval: 30s, defaultRange: 15m }
 ~~~
 
-LOAD Job Details 的 **SUT Metrics** 分頁會顯示 source、target、profile、coverage、sample freshness，以及 min/average/max。LOAD 執行期間，分頁每 30 秒向 Server 取得受限、只讀、以 snapshot 為準的 preview。可以選擇 target、profile 及 5 分鐘至 4 小時的 range。切換至其他 Job 分頁或瀏覽器文件隱藏時，系統會停止 polling。LOAD 完成後，分頁會讀取獨立 `jobs/<JOB_ID>/sut-metrics/` 目錄內有 checksum 的 sidecar，不會修改已封存的 LOAD report 或 artifact archive。Post-run collection 使用實際 LOAD 開始／結束時間，再加上設定的 before／after 範圍；長時間範圍會拆成最多六小時的請求。總 collection window 上限為 26 小時。Post-run range 會以 collection 結束時間為基準篩選 samples，因此舊 Job 的時間範圍也會正確顯示。
+LOAD Job Details 的 **SUT Metrics** 分頁會顯示 source、target、profile、coverage、sample freshness，以及 min/average/max。LOAD 執行期間，分頁每 30 秒向 Server 取得受限、只讀、以 snapshot 為準的 preview。可以選擇 target、profile 及 5 分鐘至 4 小時的 range。切換至其他 Job 分頁或瀏覽器文件隱藏時，系統會停止 polling。LOAD 完成後，分頁會讀取獨立 `jobs/<JOB_ID>/sut-metrics/` 目錄內有 checksum 的 sidecar，不會修改已封存的 LOAD report 或 artifact archive。Post-run collection 使用實際 LOAD execution 和 phase 時間，列出 RAMP_UP/WARMUP/STEADY/RAMP_DOWN/DRAIN 邊界，並加上設定的 before／after 範圍。待 after window 加上一個 query step 經過後才會查詢 Prometheus；如果 after buffer 沒有可用 sample，證據會標示為 PARTIAL。長時間範圍會拆成最多六小時的請求，總 collection window 上限為 26 小時。
+
+Post-run sidecar 使用版本化、provider-neutral 的 `att-sut-metrics-observation/v1` contract，記錄 effective binding、安全的 source/profile/target revision hash、metric unit/kind、UTC execution/query window、step、phase window、freshness、sample coverage/gaps、availability 及已遮蔽的 provenance。Mutable collection manifest 會綁定 Job 和 immutable snapshot，並在狀態轉換間保存獨立 integrity history。空結果維持 `NO_DATA`，不會補成零。
 
 Collection 狀態包括 `PENDING`、`COLLECTING`、`READY`、`PARTIAL`、`UNAVAILABLE` 及 `FAILED`；live metric 另會顯示 `STALE`、`NO_DATA` 或 unavailable。這些狀態不會改變 LOAD 結果或 verdict。本階段不會把 SUT 數值疊加至 TPS／latency，也不會評估 SUT thresholds。
 
-完整的 Data Source、base、derived、composite profile 及 scenario 範例位於 [`examples/load/sut-metrics/`](../../../examples/load/sut-metrics/)。使用 scenario 前，請先在 Settings 登記 Data Source 及 profiles，並將範例內的 Template target 換成 package 中可用的 target。
+完整的 Data Source、base、composite profile 及 scenario 範例位於 [`examples/load/sut-metrics/`](../../../examples/load/sut-metrics/)。使用 scenario 前，請先在 Settings 登記 Data Source 及 profiles，並將範例內的 Template target 換成 package 中可用的 target。

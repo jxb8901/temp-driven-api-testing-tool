@@ -30,7 +30,6 @@
     "kind": {
       "enum": [
         "base",
-        "derived",
         "composite"
       ]
     },
@@ -51,28 +50,6 @@
       "items": {
         "type": "string",
         "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
-      }
-    },
-    "allowTargetOverride": {
-      "type": "boolean"
-    },
-    "allowSourceOverride": {
-      "type": "boolean"
-    },
-    "source": {
-      "type": "string"
-    },
-    "tenant": {
-      "type": "string"
-    },
-    "targets": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 64,
-      "items": {
-        "type": "object",
-        "maxProperties": 40,
-        "additionalProperties": {}
       }
     },
     "params": {
@@ -190,9 +167,6 @@
         }
       }
     },
-    "extends": {
-      "type": "string"
-    },
     "includes": {
       "type": "array",
       "minItems": 1,
@@ -200,7 +174,9 @@
       "items": {
         "type": "object",
         "required": [
-          "profile"
+          "profile",
+          "source",
+          "targets"
         ],
         "additionalProperties": false,
         "properties": {
@@ -227,14 +203,6 @@
               "type": "object",
               "maxProperties": 40,
               "additionalProperties": {}
-            }
-          },
-          "targetIds": {
-            "type": "array",
-            "uniqueItems": true,
-            "maxItems": 64,
-            "items": {
-              "type": "string"
             }
           },
           "parameters": {
@@ -266,35 +234,6 @@
           {
             "required": [
               "extends"
-            ]
-          },
-          {
-            "required": [
-              "includes"
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "properties": {
-        "kind": {
-          "const": "derived"
-        }
-      },
-      "required": [
-        "extends"
-      ],
-      "not": {
-        "anyOf": [
-          {
-            "required": [
-              "metrics"
-            ]
-          },
-          {
-            "required": [
-              "params"
             ]
           },
           {

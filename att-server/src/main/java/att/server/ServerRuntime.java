@@ -268,7 +268,7 @@ final class ServerRuntime implements AutoCloseable {
             if(row==null||!"load".equals(row.get("command"))
                     ||!Set.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status")))continue;
             Instant[] window=loadExecutionWindow(row);
-            sutMetrics.jobFinished(id,window[0],window[1]);
+            sutMetrics.jobFinished(id,window[0],window[1],loadExecutionPhaseWindows(row));
         }
     }
     /** Capture only validator-approved data; never serialize WorkerRequest or inspection previews. */
@@ -1419,6 +1419,21 @@ final class ServerRuntime implements AutoCloseable {
             start=finishedAt.minusMillis(elapsed.longValue());
         if(end==null)end=finishedAt;
         return new Instant[]{start,end};
+    }
+    private List<Map<String,Object>> loadExecutionPhaseWindows(Job job) {
+        return loadExecutionPhaseWindows(job.resultJson);
+    }
+    private List<Map<String,Object>> loadExecutionPhaseWindows(Map<String,Object> row) {
+        return loadExecutionPhaseWindows(row.get("resultJson") instanceof String value?value:null);
+    }
+    private List<Map<String,Object>> loadExecutionPhaseWindows(String resultJson) {
+        try {
+            JsonNode phases=JSON.readTree(resultJson==null?"{}":resultJson).path("summary").path("timing").path("phases");
+            if(!phases.isArray()||phases.size()>8)return List.of();
+            List<Map<String,Object>> result=new ArrayList<>();
+            for(JsonNode phase:phases)if(phase.isObject())result.add(JSON.convertValue(phase,Map.class));
+            return result;
+        } catch(Exception ignored) { return List.of(); }
     }
     private static Map<String,Object> sutFields(Object... values) {
         Map<String,Object> result=new LinkedHashMap<>();
@@ -4696,7 +4711,7 @@ final class ServerRuntime implements AutoCloseable {
         }
         if("load".equals(j.command)) {
             Instant[] window=loadExecutionWindow(j);
-            sutMetrics.jobFinished(j.id,window[0],window[1]);
+            sutMetrics.jobFinished(j.id,window[0],window[1],loadExecutionPhaseWindows(j));
         }
     }
     private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}

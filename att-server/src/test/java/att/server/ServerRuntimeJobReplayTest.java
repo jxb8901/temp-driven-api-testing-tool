@@ -713,14 +713,14 @@ class ServerRuntimeJobReplayTest {
     @Test void rerunKeepsTheOriginalSutMetricsSnapshotAfterProfileCatalogEdits() throws Exception {
         Fixture fixture=fixture();
         String scenario="schemaVersion: att-load/v1.9\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 1s}\n"
-                +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: profile-app\n  collection: {mode: post-run, before: 1m, after: 1m, step: 30s}\n  livePreview: {enabled: false}\n";
+                +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: profile-app\n      source: prom\n      targets: [{id: sut-1, type: app}]\n  collection: {mode: post-run, before: 1m, after: 1m, step: 30s}\n  livePreview: {enabled: false}\n";
         Files.writeString(fixture.root.resolve("load/smoke.yaml"),scenario);
         try(ServerRuntime runtime=fixture.open()) {
             users(runtime);
             runtime.saveSutMetricSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Local Prometheus",
                     "url","http://127.0.0.1:1","readers",List.of("alice"),"readRoles",List.of()));
             Map<String,Object> profile=Map.of("schemaVersion","att-sut-metrics-profile/v1","id","profile-app","name","App",
-                    "kind","base","category","app","source","prom","targets",List.of(Map.of("id","sut-1","type","app")),
+                    "kind","base","category","app",
                     "metrics",List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up")));
             runtime.saveSutMetricProfile(profile);
 
@@ -744,7 +744,7 @@ class ServerRuntimeJobReplayTest {
     @Test void newScheduleOccurrencesResolveCurrentProfilesWhileRerunsKeepTheDispatchedSnapshot() throws Exception {
         Fixture fixture=fixture();
         String scenario="schemaVersion: att-load/v1.9\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 1s}\n"
-                +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: profile-app\n  collection: {mode: post-run, before: 1m, after: 1m, step: 30s}\n  livePreview: {enabled: false}\n";
+                +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: profile-app\n      source: prom\n      targets: [{id: sut-1, type: app}]\n  collection: {mode: post-run, before: 1m, after: 1m, step: 30s}\n  livePreview: {enabled: false}\n";
         Files.writeString(fixture.root.resolve("load/smoke.yaml"),scenario);
         ServerRuntimeTestSupport.MutableClock clock=new ServerRuntimeTestSupport.MutableClock(Instant.parse("2026-10-22T00:00:00Z"));
         try(ServerRuntime runtime=fixture.open(clock)) {
@@ -752,7 +752,7 @@ class ServerRuntimeJobReplayTest {
             runtime.saveSutMetricSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Local Prometheus",
                     "url","http://127.0.0.1:1","readers",List.of("alice"),"readRoles",List.of()));
             Map<String,Object> profile=Map.of("schemaVersion","att-sut-metrics-profile/v1","id","profile-app","name","App",
-                    "kind","base","category","app","source","prom","targets",List.of(Map.of("id","sut-1","type","app")),
+                    "kind","base","category","app",
                     "metrics",List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up")));
             runtime.saveSutMetricProfile(profile);
             LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name","SUT snapshot schedule",
@@ -792,9 +792,9 @@ class ServerRuntimeJobReplayTest {
             runtime.sutMetrics.upsertSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Local Prometheus",
                     "url","http://127.0.0.1:9090","readers",List.of("alice"),"readRoles",List.of()));
             runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","App",
-                    "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up")),
-                    "targets",List.of(Map.of("id","sut-1","type","app"))));
-            Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base","source","prom")),
+                    "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up"))));
+            Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base","source","prom",
+                            "targets",List.of(Map.of("id","sut-1","type","app")))),
                     "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"));
             Map<String,Object> snapshot=runtime.sutMetrics.resolveScenario(scenario,"alice",false);
             for(String id:List.of(pendingJob,collectingJob)) {
@@ -804,9 +804,9 @@ class ServerRuntimeJobReplayTest {
                 runtime.sutMetrics.writeSnapshot(id,snapshot);
             }
             Path collectingManifest=runtime.config.dataDir.resolve("jobs").resolve(collectingJob).resolve("sut-metrics/manifest.json");
-            Map<String,Object> inProgress=ServerRuntime.JSON.convertValue(ServerRuntime.JSON.readTree(collectingManifest.toFile()),Map.class);
+            Map<String,Object> inProgress=runtime.sutMetrics.collectionStatus(collectingJob);
             inProgress.put("state","COLLECTING");inProgress.put("complete",Boolean.FALSE);
-            Files.write(collectingManifest,ServerRuntime.JSON.writeValueAsBytes(inProgress));
+            runtime.sutMetrics.writeManifest(collectingManifest.getParent(),inProgress);
         }
         try(ServerRuntime restarted=fixture.open()) {
             Map<String,Object> pending=restarted.sutMetrics.collectionStatus(pendingJob);

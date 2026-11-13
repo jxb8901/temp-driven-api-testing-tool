@@ -14,12 +14,12 @@ const EMPTY_SUT_SOURCE = {
 };
 const EMPTY_SUT_PROFILE = {
   schemaVersion: 'att-sut-metrics-profile/v1', id: 'profile-os', name: 'Operating system', kind: 'base', category: 'os',
-  source: 'prom-main', params: { instance: { type: 'promLabelValue', required: true } }, overridableParams: ['instance'],
-  targets: [{ id: 'sut-1', type: 'application', parameters: { instance: 'app-1:8080' } }],
+  params: { instance: { type: 'promLabelValue', required: true } }, overridableParams: ['instance'],
   metrics: [{ id: 'cpu', title: 'CPU usage', unit: 'percent', kind: 'gauge', query: '100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle",instance="{{instance}}"}[5m])))' }],
 };
 const EMPTY_SUT_BINDING = {
-  schemaVersion: 'att-load-observability/v1', collections: [{ profile: 'profile-os' }],
+  schemaVersion: 'att-load-observability/v1', collections: [{ profile: 'profile-os', source: 'prom-main',
+    targets: [{ id: 'sut-1', type: 'application', parameters: { instance: 'app-1:8080' } }] }],
   collection: { mode: 'post-run', before: '5m', after: '2m', step: '30s' },
   livePreview: { enabled: true, refreshInterval: '30s', defaultRange: '15m' },
 };

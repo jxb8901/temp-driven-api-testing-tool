@@ -250,7 +250,7 @@ class ApiServletIntegratedLimitsTest {
 
             runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
                     "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
-                            "kind","gauge","query","up")),"targets",List.of(Map.of("id","default-target","type","app"))));
+                            "kind","gauge","query","up"))));
             Map<String,Object> wrongTenant=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
                     "source","prom","tenant","tenant-b","targets",List.of(Map.of("id","sut-1","type","app")))),
                     "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"));
@@ -272,7 +272,7 @@ class ApiServletIntegratedLimitsTest {
                     "defaultTenant","tenant-a"));
             runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
                     "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
-                            "kind","gauge","query","up")),"targets",List.of(Map.of("id","default-target","type","app"))));
+                            "kind","gauge","query","up"))));
             Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
                     "source","prom","tenant","tenant-a","targets",List.of(Map.of("id","sut-1","type","app")))),
                     "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"),"livePreview",Map.of("enabled",true));
@@ -312,7 +312,7 @@ class ApiServletIntegratedLimitsTest {
                         "defaultTenant","tenant-a","limits",entry.getValue()));
                 runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
                         "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
-                                "kind","gauge","query","up")),"targets",List.of(Map.of("id","default-target","type","app"))));
+                                "kind","gauge","query","up"))));
                 Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
                         "source","prom","tenant","tenant-a","targets",List.of(Map.of("id","sut-1","type","app")))),
                         "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"),"livePreview",Map.of("enabled",true));
@@ -351,7 +351,7 @@ class ApiServletIntegratedLimitsTest {
                     "readRoles",List.of("USER"),"allowedTenants",List.of("tenant-a"),"defaultTenant","tenant-a"));
             runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
                     "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
-                            "kind","gauge","query","up")),"targets",List.of(Map.of("id","default-target","type","app"))));
+                            "kind","gauge","query","up"))));
             Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
                     "source","prom","tenant","tenant-a","targets",List.of(Map.of("id","sut-1","type","app")))),
                     "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"),"livePreview",Map.of("enabled",true));
@@ -392,7 +392,7 @@ class ApiServletIntegratedLimitsTest {
                     "url",fixture.url(),"readers",List.of("alice"),"readRoles",List.of("USER"),"limits",Map.of("requestTimeoutMs",60000)));
             runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
                     "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
-                            "kind","gauge","query","up")),"targets",List.of(Map.of("id","default-target","type","app"))));
+                            "kind","gauge","query","up"))));
             List<Map<String,Object>> targets=new java.util.ArrayList<>();
             for(int index=0;index<21;index++)targets.add(Map.of("id","sut-"+index,"type","app"));
             Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
