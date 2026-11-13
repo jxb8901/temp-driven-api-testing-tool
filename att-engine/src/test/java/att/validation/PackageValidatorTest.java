@@ -20,8 +20,10 @@ class PackageValidatorTest {
         Path template = Files.createDirectories(root.resolve("templates/BROKEN"));
         Files.createDirectories(root.resolve("tools"));
         att.TestSchemas.install(root);
-        Files.writeString(config, "schemaVersion: att-config/v2.13\noutputDirectory: output\ntemplates: {root: templates}\ntestcase: {root: testcase}\n");
-        Files.writeString(template.resolve("template.yaml"), "schemaVersion: att-template/v3.6\nname: BROKEN\ndescription: valid descriptor with broken closure\nactions:\n  invokeMissingFlow:\n    type: flow\n    use: missing.flow.v1\n");
+        Files.write(config, "schemaVersion: att-config/v2.13\noutputDirectory: output\ntemplates: {root: templates}\ntestcase: {root: testcase}\n"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(template.resolve("template.yaml"), ("schemaVersion: att-template/v3.6\nname: BROKEN\ndescription: valid descriptor with broken closure\nactions:\n"
+                + "  invokeMissingFlow:\n    type: flow\n    use: missing.flow.v1\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
         FrameworkConfig loaded = new FrameworkConfigLoader().load(config, root, root, "SIT");
         PackageValidator.ValidationSummary result = new PackageValidator(root, loaded, config)
