@@ -133,6 +133,9 @@ async function main() {
           [String(earlyBucket)]: { bucketStartEpochMs: earlyBucket, bucketStart: new Date(earlyBucket).toISOString(), completedTps: 96, p95Ms: 74, p99Ms: 99 },
         } } },
       });
+      if (method === 'GET' && resource === `jobs/${jobId}/sut-metrics`) return json({
+        schemaVersion: 'att-sut-metrics-job/v1', state: 'DISABLED', jobId, items: [],
+      });
       if (method === 'GET' && resource === `jobs/${jobId}/artifacts`) return json({ items: [{ path: 'load-summary.json', size: 512 }], primaryReports: [], archiveStatus: 'READY' });
       if (method === 'GET' && resource === `jobs/${jobId}/events`) {
         eventConnectionCount += 1;
@@ -247,7 +250,7 @@ async function main() {
 
     const tabs = [
       ['Overview', 'Status'], ['Live Output', '[LOAD] status=RUNNING jobId=JOB-LOAD-204'], ['Events', null],
-      ['Results', 'Results'], ['Artifacts', 'Artifacts'], ['Metrics', 'Metrics'],
+      ['Results', 'Results'], ['Artifacts', 'Artifacts'], ['Metrics', 'Metrics'], ['SUT Metrics', 'SUT Metrics'],
     ];
     for (const [name, content] of tabs) {
       const tab = page.getByRole('tab', { name, exact: true });
@@ -264,7 +267,7 @@ async function main() {
         assert.equal(await panel.getByText(content, { exact: true }).count() > 0, true, `${name} panel should show ${content}`);
       }
     }
-    await page.getByRole('tab', { name: 'Metrics' }).click();
+    await page.getByRole('tab', { name: 'Metrics', exact: true }).click();
     const metricsPanel = page.locator('#job-panel-metrics');
     await metricsPanel.getByRole('img', { name: /Completed throughput by bucket start time/i }).waitFor();
     assert.equal(await metricsPanel.locator('svg[role="img"]').count(), 3, 'the returned throughput and latency bucket series should be charted');
@@ -293,7 +296,7 @@ async function main() {
     assert.equal(await createdEventSourceCount(page), 1, 'the standalone console tab should create exactly one EventSource for the terminal Job replay');
     await assertAxe(page, 'Standalone Job console should pass the configured WCAG accessibility rules');
     for (const href of await page.getByRole('link', { name: 'Open full Job details', exact: true }).evaluateAll(links => links.map(link => link.getAttribute('href')))) assert.equal(href, '#/jobs/' + jobId, 'Details links must keep the fixed Job');
-    assert.equal(await page.getByRole('tablist', { name: 'Job ' + jobId + ' sections' }).getByRole('tab').count(), 6);
+    assert.equal(await page.getByRole('tablist', { name: 'Job ' + jobId + ' sections' }).getByRole('tab').count(), 7);
     await page.goto(`${base}#/jobs/${jobId}`);
     await page.waitForURL(new RegExp(`#\\/jobs\\/${jobId}$`));
     await page.getByRole('heading', { name: `Job ${jobId}`, level: 1, exact: true }).waitFor();
