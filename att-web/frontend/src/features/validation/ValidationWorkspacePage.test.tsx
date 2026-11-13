@@ -34,15 +34,16 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi
 async function settle() { await act(async () => { for (let index = 0; index < 5; index++) await Promise.resolve(); }); }
 
 function renderWorkspace({ api, route = { kind: 'validation', scope: 'config' }, context = baseContext,
-  version = serverVersion, onRouteChange = vi.fn(), packages = { status: 'ready', data: [] } }: {
+  version = serverVersion, onRouteChange = vi.fn(), onOpenResource = vi.fn(), packages = { status: 'ready', data: [] } }: {
   api: { validateResource(input: ValidationRequest, signal?: AbortSignal): Promise<ValidationReportData> };
   route?: ValidationRouteState; context?: AppShellContextValue; version?: ServerVersion;
   onRouteChange?: (route: AppRoute) => void;
+  onOpenResource?: (packageId: string, resource: { type: string; resourceId: string; logicalId?: string }, environment?: string) => void;
   packages?: AsyncState<PackageSummary[]>;
 }) {
   return root.render(<AppShellContext.Provider value={context}>
     <ValidationWorkspacePage api={api as never} packages={packages} serverVersion={{ status: 'ready', data: version }}
-      route={route} onRouteChange={onRouteChange} />
+      route={route} onRouteChange={onRouteChange} onOpenResource={onOpenResource} />
   </AppShellContext.Provider>);
 }
 
@@ -103,11 +104,85 @@ describe('ValidationWorkspacePage', () => {
 
   it('copies only contract fields and redacts credentials and absolute paths', () => {
     const safe = safeValidationReportCopy({ ...report,
-      diagnostics: [{ code: 'ATT-SECRET', severity: 'ERROR', message: 'password=violet-123 from /Users/jeffrey/private/config.yaml' }],
+      diagnostics: [{ code: 'ATT-SECRET', severity: 'ERROR', message: 'password=violet-123; from /Users/jeffrey/private/config.yaml' }],
     });
     expect(safe).toContain('[REDACTED]');
     expect(safe).toContain('[REDACTED_PATH]');
     expect(safe).not.toContain('violet-123');
     expect(safe).not.toContain('serverPath');
+  });
+
+  it('resolves Package diagnostics through the authorized catalog before offering resource navigation', async () => {
+    const packageReport: ValidationReportData = { ...report, scope: 'PACKAGE', diagnostics: [{
+      code: 'ATT-TEMPLATE-INVALID', severity: 'ERROR', message: 'Template could not be validated',
+      resourceType: 'template', resourceId: 'template-42', source: 'templates/checkout.yaml',
+    }] };
+    const validateResource = vi.fn(async () => packageReport);
+    const listResources = vi.fn(async () => ({
+      items: [{ type: 'template' as const, resourceId: 'template-42', logicalId: 'checkout' }], total: 1,
+    }));
+    const onOpenResource = vi.fn();
+    const api = {
+      validateResource,
+      listResources,
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getPackageManifest: vi.fn(async () => ({ environment: 'SIT' })),
+    };
+    await act(async () => renderWorkspace({ api, route: { kind: 'validation', scope: 'package', packageId: 'payments' },
+      packages: { status: 'ready', data: [{ packageId: 'payments', name: 'Payments' } as PackageSummary] }, onOpenResource }));
+    await settle();
+    await act(async () => { host.querySelector<HTMLButtonElement>('button[type="submit"]')!.click(); await Promise.resolve(); });
+    await settle();
+
+    expect(listResources).toHaveBeenCalledWith('payments', expect.objectContaining({ type: 'template', query: 'template-42', limit: 100 }), expect.any(AbortSignal));
+    const openButton = [...host.querySelectorAll<HTMLButtonElement>('.att-validation-diagnostic-list button')]
+      .find(button => button.textContent?.includes('Open authorized resource'));
+    expect(openButton).toBeDefined();
+    await act(async () => openButton!.click());
+    expect(onOpenResource).toHaveBeenCalledWith('payments', { type: 'template', resourceId: 'template-42', logicalId: 'checkout' }, 'SIT');
+  });
+
+  it('keeps path-only and catalog-denied Package diagnostics as plain text and redacts displayed and copied secrets', async () => {
+    const secret = 'eyJabc123';
+    const packageReport: ValidationReportData = { ...report, scope: 'PACKAGE', diagnostics: [
+      { code: 'ATT-FLOW-DENIED', severity: 'ERROR', message: `Authorization: Bearer ${secret}; password="two word hidden secret"`,
+        resourceType: 'flow', resourceId: 'flow-denied', source: 'flows/denied.yaml' },
+      { code: 'ATT-SOURCE-ONLY', severity: 'WARN', message: 'Source-only diagnostic', source: 'templates/only-path.yaml' },
+    ] };
+    const validateResource = vi.fn(async () => packageReport);
+    const listResources = vi.fn(async () => { throw { status: 403 }; });
+    const copiedValues: string[] = [];
+    const writeText = vi.fn(async (value: string) => { copiedValues.push(value); });
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const api = {
+      validateResource, listResources,
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getPackageManifest: vi.fn(async () => ({ environment: 'SIT' })),
+    };
+    await act(async () => renderWorkspace({ api, route: { kind: 'validation', scope: 'package', packageId: 'payments' },
+      packages: { status: 'ready', data: [{ packageId: 'payments', name: 'Payments' } as PackageSummary] } }));
+    await settle();
+    await act(async () => { host.querySelector<HTMLButtonElement>('button[type="submit"]')!.click(); await Promise.resolve(); });
+    await settle();
+
+    expect(listResources).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toContain('flows/denied.yaml');
+    expect(host.textContent).toContain('templates/only-path.yaml');
+    expect(host.textContent).toContain('Authorization: [REDACTED]');
+    expect(host.textContent).toContain('password=[REDACTED]');
+    expect(host.textContent).not.toContain(secret);
+    expect(host.textContent).not.toContain('two word hidden secret');
+    expect(host.querySelectorAll('.att-validation-diagnostic-list button')).toHaveLength(0);
+    expect(host.querySelectorAll('.att-validation-diagnostic-list a')).toHaveLength(0);
+
+    await act(async () => {
+      [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Copy safe report'))!.click();
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const copied = copiedValues[0] || '';
+    expect(copied).toContain('Authorization: [REDACTED]');
+    expect(copied).not.toContain(secret);
+    expect(copied).not.toContain('two word hidden secret');
   });
 });

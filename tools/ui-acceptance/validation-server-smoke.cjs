@@ -45,13 +45,15 @@ async function main() {
     assert.equal(configResponse.status(), 200);
     const configReport = await configResponse.json();
     assert.equal(configReport.schemaVersion, 'att-validation/v1');
-    assert.equal(configReport.scope, 'config');
+    assert.equal(configReport.scope, 'CONFIG', 'the packaged Server serializes validation scope enums in uppercase');
     assert.ok(configReport.requestId);
     await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
+    assert.ok(['PASS', 'INVALID'].includes(await page.locator('.att-validation-status strong').textContent()),
+      'the real packaged Server report must pass through the frontend validator and render its result');
     assert.deepEqual(await getJobIds(), beforeConfig, 'Config validation must not add a persisted Job');
 
     await page.goto(`${origin}/tools/att/ui/index.html#/configuration/payments`);
-    await page.getByRole('heading', { name: 'Configuration', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Configuration', level: 1, exact: true }).waitFor();
     const sharedConfigResponsePromise = page.waitForResponse(response => response.request().method() === 'POST'
       && new URL(response.url()).pathname.endsWith('/api/v1/validation'));
     await page.getByRole('button', { name: 'Read-only validate Shared Config', exact: true }).click();
@@ -74,11 +76,18 @@ async function main() {
     const packageConfigResponse = await packageConfigResponsePromise;
     assert.equal(packageConfigResponse.status(), 200);
     assert.deepEqual(await packageConfigResponse.request().postDataJSON(), {
-      command: 'validate', targetKind: 'config', packageId: 'payments',
+      command: 'validate', targetKind: 'config', packageId: 'payments', environment: 'SIT',
     }, 'Package-effective Config validation must use the explicitly selected Package and Server default Environment');
     const packageConfigReport = await packageConfigResponse.json();
+    assert.equal(packageConfigReport.schemaVersion, 'att-validation/v1');
+    assert.equal(packageConfigReport.scope, 'CONFIG_PACKAGE');
     assert.equal(packageConfigReport.context.environment, 'SIT');
-    await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
+    try {
+      await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor({ timeout: 5000 });
+    } catch {
+      const uiError = await page.locator('.att-validation-error').textContent();
+      throw new Error(`Packaged Server report ${packageConfigReport.scope}/${packageConfigReport.overallStatus} was not rendered; UI error: ${uiError || 'none'}`);
+    }
 
     await page.goto(`${origin}/tools/att/ui/index.html#/packages/payments`);
     await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
@@ -98,7 +107,7 @@ async function main() {
     assert.equal(flowResponse.status(), 200);
     const flowReport = await flowResponse.json();
     assert.equal(flowReport.schemaVersion, 'att-validation/v1');
-    assert.equal(flowReport.scope, 'flow');
+    assert.equal(flowReport.scope, 'CONFIG_PACKAGE');
     assert.deepEqual(await flowResponse.request().postDataJSON(), {
       command: 'validate', targetKind: 'flow', packageId: 'payments', target,
     });

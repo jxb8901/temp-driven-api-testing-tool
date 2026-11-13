@@ -10,9 +10,24 @@ function resourceOf(diagnostic: ValidationDiagnostic): string {
   return field(diagnostic.resourceId) || field(diagnostic.target) || field(diagnostic.resource);
 }
 function sourceOf(diagnostic: ValidationDiagnostic): string { return field(diagnostic.source) || field(diagnostic.path); }
+const RESOURCE_TYPES = new Set(['case', 'template', 'flow', 'tool']);
+export function diagnosticResourceIdentity(diagnostic: ValidationDiagnostic): ResourceRoute | undefined {
+  const type = field(diagnostic.resourceType).toLowerCase();
+  const resourceId = typeof diagnostic.resourceId === 'string' ? diagnostic.resourceId
+    : typeof diagnostic.target === 'string' ? diagnostic.target : '';
+  if (!RESOURCE_TYPES.has(type) || !resourceId || resourceId.length > 512 || /[\u0000-\u001f\u007f]/.test(resourceId)) return undefined;
+  const logicalId = typeof diagnostic.logicalId === 'string' && diagnostic.logicalId.length <= 512
+    && !/[\u0000-\u001f\u007f]/.test(diagnostic.logicalId) ? diagnostic.logicalId : undefined;
+  return { type, resourceId, ...(logicalId ? { logicalId } : {}) };
+}
+export function diagnosticResourceKey(resource: Pick<ResourceRoute, 'type' | 'resourceId'>): string {
+  return `${resource.type}\u0000${resource.resourceId}`;
+}
 function safeDiagnosticText(value: string): string {
   return value.slice(0, 4000)
-    .replace(/\b(password|secret|token|credential|authorization|api[_-]?key)(\s*[:=]\s*)([^\s,;]+)/gi, '$1$2[REDACTED]')
+    .replace(/\b((?:proxy-)?authorization)(\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,;]*)/gi, '$1$2[REDACTED]')
+    .replace(/\bBearer\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|[A-Za-z0-9._~+/-]+=*)/gi, 'Bearer [REDACTED]')
+    .replace(/\b(password|secret|token|credential|api[_-]?key)(\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,;]+)/gi, '$1$2[REDACTED]')
     .replace(/(?:[A-Za-z]:[\\/]|\/(?:Users|home|private|tmp|var)\/)[^\s"'<>]*/g, '[REDACTED_PATH]');
 }
 
@@ -79,7 +94,8 @@ function SectionTree({ sections, locale }: { sections: ValidationSection[]; loca
   </li>)}</ul>;
 }
 
-export function ValidationReport({ report, scope, packageId, environment, effectiveEnvironment, target, resourceRoute, onOpenResource, onRevalidate, locale }: {
+export function ValidationReport({ report, scope, packageId, environment, effectiveEnvironment, target, resourceRoute,
+  diagnosticResourceRoutes = {}, onOpenResource, onRevalidate, locale }: {
   report: ValidationReportData;
   scope: ValidationScope;
   packageId?: string;
@@ -87,7 +103,8 @@ export function ValidationReport({ report, scope, packageId, environment, effect
   effectiveEnvironment?: string;
   target?: string;
   resourceRoute?: ResourceRoute;
-  onOpenResource?: () => void;
+  diagnosticResourceRoutes?: Record<string, ResourceRoute>;
+  onOpenResource?: (resource: ResourceRoute) => void;
   onRevalidate(): void;
   locale: UiLocale;
 }) {
@@ -138,7 +155,7 @@ export function ValidationReport({ report, scope, packageId, environment, effect
       <div><p className="att-eyebrow">{text('Result of last validation', '最近一次驗證結果', locale)}</p>
         <h2 id="att-validation-report-heading">{text('Validation report', '驗證報告', locale)}</h2></div>
       <div className="att-validation-report-actions">
-        {resourceRoute && resourceDiagnostic && onOpenResource && <button className="button button-quiet" type="button" onClick={onOpenResource}>{text('Open matching resource', '開啟相符資源', locale)}</button>}
+        {resourceRoute && resourceDiagnostic && onOpenResource && <button className="button button-quiet" type="button" onClick={() => onOpenResource(resourceRoute)}>{text('Open matching resource', '開啟相符資源', locale)}</button>}
         <button className="button button-quiet" type="button" onClick={() => void copyReport()}>{text('Copy safe report', '複製安全報告', locale)}</button>
         <button className="button button-primary" type="button" onClick={onRevalidate}>{text('Revalidate', '重新驗證', locale)}</button>
       </div>
@@ -174,13 +191,18 @@ export function ValidationReport({ report, scope, packageId, environment, effect
         <label>{text('Resource', '資源', locale)}<input aria-label={text('Filter diagnostics by resource', '依資源篩選診斷', locale)} value={resource} onChange={event => setResource(event.currentTarget.value)} /></label>
         <label>{text('Search diagnostics', '搜尋診斷', locale)}<input type="search" aria-label={text('Search diagnostics', '搜尋診斷', locale)} value={search} onChange={event => setSearch(event.currentTarget.value)} /></label>
       </div>
-      {filtered.length ? <ul className="att-validation-diagnostic-list">{filtered.map((diagnostic, index) => <li key={`${diagnostic.code}:${index}`}>
+      {filtered.length ? <ul className="att-validation-diagnostic-list">{filtered.map((diagnostic, index) => {
+        const identity = diagnosticResourceIdentity(diagnostic);
+        const authorizedResource = identity ? diagnosticResourceRoutes[diagnosticResourceKey(identity)] : undefined;
+        return <li key={`${diagnostic.code}:${index}`}>
         <strong>{safeDiagnosticText(diagnostic.severity)} · {safeDiagnosticText(diagnostic.code)}</strong><p>{safeDiagnosticText(diagnostic.message)}</p>
         {diagnostic.field && <small>{text('Field', '欄位', locale)}: {safeDiagnosticText(diagnostic.field)}</small>}
         {sourceOf(diagnostic) && <small>{text('Source', '來源', locale)}: {safeDiagnosticText(sourceOf(diagnostic))}</small>}
         {resourceOf(diagnostic) && <small>{text('Resource', '資源', locale)}: {safeDiagnosticText(resourceOf(diagnostic))}</small>}
         {diagnostic.suggestion && <small>{text('Suggestion', '建議', locale)}: {safeDiagnosticText(diagnostic.suggestion)}</small>}
-      </li>)}</ul> : <p>{text('No diagnostics match these filters.', '沒有符合篩選條件的診斷。', locale)}</p>}
+        {authorizedResource && onOpenResource && <button className="button button-quiet" type="button"
+          onClick={() => onOpenResource(authorizedResource)}>{text('Open authorized resource', '開啟已授權資源', locale)}</button>}
+      </li>})}</ul> : <p>{text('No diagnostics match these filters.', '沒有符合篩選條件的診斷。', locale)}</p>}
     </section>
   </section>;
 }

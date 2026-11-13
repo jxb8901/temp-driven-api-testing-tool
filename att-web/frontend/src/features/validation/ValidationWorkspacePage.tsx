@@ -3,7 +3,8 @@ import { AppShellContext } from '../../AppShell';
 import type { ResourceRoute, ValidationRouteState, ValidationScope } from '../../router';
 import type { api } from '../../api';
 import type { AsyncState, ApiError, PackageSummary, ServerVersion } from '../../types';
-import { ValidationReport } from './ValidationReport';
+import type { ResourceType } from '../explorer/types';
+import { diagnosticResourceIdentity, diagnosticResourceKey, ValidationReport } from './ValidationReport';
 import type { ValidationRequest, ValidationReportData } from './types';
 import './validation.css';
 
@@ -84,6 +85,7 @@ export function ValidationWorkspacePage({ api, packages, serverVersion, route, o
   const [targetSearch, setTargetSearch] = useState('');
   const [catalogRefresh, setCatalogRefresh] = useState(0);
   const [reportResult, setReportResult] = useState<{ key: string; report: ValidationReportData } | null>(null);
+  const [diagnosticResources, setDiagnosticResources] = useState<{ key: string; routes: Record<string, ResourceRoute> }>({ key: '', routes: {} });
   const [requestError, setRequestError] = useState<{ key: string; message: string; requestId?: string } | null>(null);
   const [requesting, setRequesting] = useState(false);
   const [notice, setNotice] = useState('');
@@ -242,6 +244,47 @@ export function ValidationWorkspacePage({ api, packages, serverVersion, route, o
   }
 
   const report = reportResult?.key === requestKey ? reportResult.report : null;
+  const diagnosticResolutionKey = report && packageId
+    ? JSON.stringify([requestKey, reportResult?.key, report.requestId || '']) : '';
+  useEffect(() => {
+    const controller = new AbortController();
+    setDiagnosticResources({ key: diagnosticResolutionKey, routes: {} });
+    if (!report || !packageId) return () => controller.abort();
+
+    const identities = new Map<string, ResourceRoute>();
+    for (const diagnostic of report.diagnostics || []) {
+      const identity = diagnosticResourceIdentity(diagnostic);
+      if (!identity) continue;
+      identities.set(diagnosticResourceKey(identity), identity);
+      if (identities.size >= 32) break;
+    }
+    if (!identities.size) return () => controller.abort();
+
+    const candidates = [...identities.entries()];
+    const routes: Record<string, ResourceRoute> = {};
+    let nextIndex = 0;
+    const resolveNext = async () => {
+      while (!controller.signal.aborted) {
+        const index = nextIndex++;
+        if (index >= candidates.length) return;
+        const [key, identity] = candidates[index];
+        try {
+          const page = await api.listResources(packageId, {
+            type: identity.type as ResourceType, query: identity.resourceId, limit: 100,
+          }, controller.signal);
+          const match = page.items.find(item => item.type === identity.type && item.resourceId === identity.resourceId);
+          if (match) routes[key] = { type: match.type, resourceId: match.resourceId,
+            ...(match.logicalId ? { logicalId: match.logicalId } : {}) };
+        } catch {
+          // Access denied or unresolved identities remain plain diagnostic text.
+        }
+      }
+    };
+    void Promise.all(Array.from({ length: Math.min(4, candidates.length) }, () => resolveNext())).then(() => {
+      if (!controller.signal.aborted) setDiagnosticResources({ key: diagnosticResolutionKey, routes });
+    });
+    return () => controller.abort();
+  }, [api, diagnosticResolutionKey, packageId, report]);
   const error = requestError?.key === requestKey ? requestError : null;
   const profileUnavailable = Boolean(packageId && environment && environmentStatus === 'ready' && !environmentKnown);
   const selectedPackageName = packages.status === 'ready' ? packages.data.find(item => item.packageId === packageId)?.name : undefined;
@@ -322,7 +365,9 @@ export function ValidationWorkspacePage({ api, packages, serverVersion, route, o
     {requesting && <p role="status" aria-live="polite">{text('The Server is running one bounded, read-only validation request…', 'Server 正在執行單一有界唯讀驗證請求…', locale)}</p>}
     {report && <ValidationReport report={report} scope={scope} packageId={packageId || undefined} environment={environment || undefined}
       effectiveEnvironment={typeof report.context?.environment === 'string' ? report.context.environment : effectiveEnvironment}
-      target={target || undefined} resourceRoute={resourceForReport} locale={locale} onRevalidate={() => void runValidation()}
-      onOpenResource={resourceForReport && packageId ? () => onOpenResource?.(packageId, resourceForReport, environment || effectiveEnvironment || undefined) : undefined} />}
+      target={target || undefined} resourceRoute={resourceForReport}
+      diagnosticResourceRoutes={diagnosticResources.key === diagnosticResolutionKey ? diagnosticResources.routes : {}}
+      locale={locale} onRevalidate={() => void runValidation()}
+      onOpenResource={packageId ? resource => onOpenResource?.(packageId, resource, environment || effectiveEnvironment || undefined) : undefined} />}
   </main>;
 }

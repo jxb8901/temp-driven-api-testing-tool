@@ -31,6 +31,31 @@ describe('api.validateResource', () => {
     expect(String(init.body)).not.toContain('job');
   });
 
+  it('normalizes all Server scope enum values and accepts an INVALID HTTP 200 report', async () => {
+    const scopes = ['CONFIG', 'CONFIG_PACKAGE', 'PACKAGE', 'CASE', 'SUITE', 'TEMPLATE', 'FLOW', 'TOOL', 'LOAD', 'SELECTED', 'ALL'];
+    let scopeIndex = 0;
+    const fetchMock = vi.fn(async () => {
+      const scope = scopes[scopeIndex++];
+      const invalid = scope === 'CONFIG_PACKAGE';
+      return new Response(JSON.stringify({
+        ...report,
+        scope,
+        overallStatus: invalid ? 'INVALID' : 'PASS',
+        complete: true,
+        exitCode: invalid ? 2 : 0,
+        counts: { pass: 0, fail: invalid ? 1 : 0, warn: 0, skip: 0, errors: invalid ? 1 : 0, warnings: 0 },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const actual = [];
+    for (let index = 0; index < scopes.length; index++) actual.push(await api.validateResource({ targetKind: 'config' }));
+
+    expect(actual.map(item => item.scope)).toEqual(scopes.map(scope => scope.toLowerCase()));
+    expect(actual[1]).toMatchObject({ scope: 'config_package', overallStatus: 'INVALID', exitCode: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(scopes.length);
+  });
+
   it('rejects a response that does not match att-validation/v1', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ schemaVersion: 'att-validation/v9' }), {
       status: 200, headers: { 'Content-Type': 'application/json' },

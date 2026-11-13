@@ -82,7 +82,11 @@ function isValidationReport(value: unknown): value is ValidationReportData {
     && (item.diagnostics === undefined || (Array.isArray(item.diagnostics) && item.diagnostics.every(isDiagnostic)))
     && (item.sections === undefined || (Array.isArray(item.sections) && item.sections.every(isSection)));
   return report.schemaVersion === 'att-validation/v1'
-    && ['config', 'package', 'case', 'suite', 'template', 'flow', 'tool', 'load', 'ALL'].includes(String(report.scope))
+    // Server enum names are serialized in uppercase while the CLI/client contract
+    // also contains lowercase scope names. Accept both forms at this boundary.
+    && typeof report.scope === 'string'
+    && ['config', 'config_package', 'package', 'case', 'suite', 'template', 'flow', 'tool', 'load', 'selected', 'cases', 'all']
+      .includes(report.scope.toLowerCase())
     && (report.backend === 'SERVER' || report.backend === 'LOCAL')
     && Array.isArray(report.sections) && report.sections.every(isSection)
     && Array.isArray(report.diagnostics) && report.diagnostics.every(isDiagnostic)
@@ -96,7 +100,8 @@ function isValidationReport(value: unknown): value is ValidationReportData {
 
 function requireValidationReport(value: unknown): ValidationReportData {
   if (!isValidationReport(value)) throw new ApiError('The ATT Server returned an unsupported or incomplete att-validation/v1 report.', { status: 0 });
-  return value;
+  // Keep the UI and copied report stable regardless of Server enum casing.
+  return { ...value, scope: value.scope.toLowerCase() };
 }
 
 /** Same-origin JSON transport shared by the Server UI feature modules. */
