@@ -43,4 +43,5 @@ Do not implement #349 TPS/latency overlays or correlation, #350 background colle
 - `mvn -pl att-server -am -DskipTests compile` — passed; this includes Java compilation, frontend TypeScript build, static assets, and bundle budget.
 - `mvn -pl att-server -am -Dtest=SutMetricsServiceTest -Datt.skipFrontendUnitTests=true -Dsurefire.failIfNoSpecifiedTests=false test` — passed, 5 tests. The fixture uses loopback HTTP and requires socket access. The reactor also built the frontend, type-checked it, and passed the bundle budget.
 - `npm test -- src/features/load/JobsPage.test.tsx` — passed, 63 tests including the three new SUT Metrics tests.
+- `python3 tools/verify_documentation.py` — passed after regenerating the bilingual Reference schema matrices and documentation inventory.
 - Full Java integration suites and the complete frontend suite have not been rerun on this implementation head.

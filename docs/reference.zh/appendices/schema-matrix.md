@@ -21,6 +21,12 @@
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.2 |
 | Load scenario | att-load/v1.9 |
+| LOAD observability binding | att-load-observability/v1 |
+| SUT Metrics Data Source | att-sut-metrics-source/v1 |
+| SUT Metrics Profile | att-sut-metrics-profile/v1 |
+| SUT Metrics Job snapshot | att-sut-metrics-snapshot/v1 |
+| SUT Metrics collection manifest | att-sut-metrics-manifest/v1 |
+| SUT Metrics series sidecar | att-sut-metrics-series/v1 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | 直接 Engine／CLI：legacy summary contract (schema under `schemas/history/`)；封存報告：att-load-summary/v1.3 |
