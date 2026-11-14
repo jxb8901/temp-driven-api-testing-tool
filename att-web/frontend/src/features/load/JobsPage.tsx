@@ -4,6 +4,7 @@ import { formatRoute } from "../../router";
 import { JobReplayActions } from "./JobReplayActions";
 import { StatusBadge } from './StatusBadge';
 import { ArchiveMetrics } from './ArchiveMetrics';
+import { CorrelationPanel } from './CorrelationPanel';
 import type { ArtifactArchiveMetrics } from './types';
 import { api as serverApi } from '../../api';
 import { artifactApi } from './artifactApi';
@@ -23,7 +24,7 @@ const MAX_BUCKET_ROWS = 4096;
 const BUCKET_PAGE_SIZE = 100;
 
 type LoadState = 'loading' | 'refreshing' | 'ready' | 'error';
-type JobTab = 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics';
+type JobTab = 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics' | 'correlation';
 const tabs: Array<{ id: JobTab; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'live', label: 'Live Output' },
@@ -32,6 +33,7 @@ const tabs: Array<{ id: JobTab; label: string }> = [
   { id: 'artifacts', label: 'Artifacts' },
   { id: 'metrics', label: 'Metrics' },
   { id: 'sutMetrics', label: 'SUT Metrics' },
+  { id: 'correlation', label: 'Correlation' },
 ];
 
 function toError(value: unknown, fallback: string): Error {
@@ -113,7 +115,7 @@ function secondaryLoadWarnings(payload: JobResultResponse | null): Array<Record<
 
 type ReportAvailability = 'idle' | 'loading' | 'PENDING' | 'ARCHIVING' | 'READY' | 'FAILED' | 'EXPIRED' | 'OMITTED' | 'ERROR' | 'UNAVAILABLE';
 
-function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean, includeSummary: boolean, includeMetricSeries: boolean) {
+function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean, includeSummary: boolean, metricSeriesTargets: string[] = ['metrics/buckets']) {
   const [availability, setAvailability] = useState<ReportAvailability>('idle');
   const [detailMetrics, setDetailMetrics] = useState<Record<string, unknown> | null>(null);
   const [detailEvidence, setDetailEvidence] = useState<unknown>(null);
@@ -179,7 +181,6 @@ function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean
         if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('The archived LOAD summary is invalid.');
         const metrics = (data as Record<string, unknown>).metrics;
         if (!metrics || typeof metrics !== 'object' || Array.isArray(metrics)) throw new Error('The archived LOAD summary has no metrics section.');
-        setDetailMetrics(metrics as Record<string, unknown>);
         const evidence = (data as Record<string, unknown>).evidence;
         setDetailEvidence(evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? evidence : null);
         const workloads = (data as Record<string, unknown>).workloads;
@@ -187,10 +188,14 @@ function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean
           ? workloads as Record<string, unknown> : null);
         const root = entry.path.slice(0, -'load-summary.json'.length);
         setDetailRoot(root);
-        if (includeSummary && includeMetricSeries) {
-          setDetailMetrics(await restoreMetricSeries(
-            metrics as Record<string, unknown>, features, jobId, root, controller.signal, seriesCache.current));
+        if (includeSummary && metricSeriesTargets.length) {
+          const restoredMetrics = await restoreMetricSeries(
+            metrics as Record<string, unknown>, features, jobId, root, controller.signal, seriesCache.current,
+            metricSeriesTargets, 'aggregate');
           if (controller.signal.aborted || current !== sequence.current) return;
+          setDetailMetrics(restoredMetrics);
+        } else {
+          setDetailMetrics(metrics as Record<string, unknown>);
         }
       } catch (reason) {
         if (!controller.signal.aborted && current === sequence.current) {
@@ -200,7 +205,7 @@ function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean
     }
     void load();
     return () => { controller.abort(); if (timer) clearTimeout(timer); };
-  }, [api, features, jobId, enabled, includeSummary, includeMetricSeries, attempt]);
+  }, [api, features, jobId, enabled, includeSummary, metricSeriesTargets.join('|'), attempt]);
 
   return { availability, detailMetrics, detailEvidence, detailWorkloads, detailRoot, archiveMetrics, error, retry: () => setAttempt(value => value + 1) };
 }
@@ -261,7 +266,8 @@ function useJobArtifactOverview(api: LoadJobsApi, jobId: string, enabled: boolea
 const MAX_DETAIL_SERIES_FILES = 9000;
 
 async function restoreMetricSeries(metrics: Record<string, unknown>, api: Pick<LoadJobsApi, 'getJobArtifactText'>, jobId: string, root: string,
-                                   signal: AbortSignal, cache: Map<string, string>): Promise<Record<string, unknown>> {
+                                   signal: AbortSignal, cache: Map<string, string>, targets: string[] = ['metrics/buckets'],
+                                   scope: 'aggregate' | 'workload' = 'aggregate', workloadId?: string): Promise<Record<string, unknown>> {
   const ref = metrics.detailSeries;
   if (!ref || typeof ref !== 'object' || Array.isArray(ref)) return metrics;
   const reference = ref as Record<string, unknown>;
@@ -280,14 +286,15 @@ async function restoreMetricSeries(metrics: Record<string, unknown>, api: Pick<L
     if (!rawRecord || typeof rawRecord !== 'object' || Array.isArray(rawRecord))
       throw new Error('The archived LOAD metric-series entry is invalid.');
     const record = rawRecord as Record<string, unknown>;
-    if (record.scope !== 'aggregate' || record.complete !== true || typeof record.target !== 'string'
+    if (record.scope !== scope || record.complete !== true || typeof record.target !== 'string'
+        || (scope === 'workload' && record.workloadId !== workloadId)
         || !['map', 'list'].includes(String(record.kind)) || !Number.isSafeInteger(record.count)
         || !Array.isArray(record.files) || record.files.length === 0
         || (record.sharedContent !== undefined && record.sharedContent !== true))
       throw new Error('The archived LOAD metric-series entry is incomplete.');
     // Metrics charts consume buckets. Other series are loaded only via their authorized artifact links,
     // rather than eagerly fetching every diagnostic and workload collection.
-    if (record.target !== 'metrics/buckets') continue;
+    if (!targets.includes(record.target)) continue;
     const paths = record.files.map(path => safeArtifactPath(root, path));
     if (paths.some(path => !path)) throw new Error('The archived LOAD metric-series path is invalid.');
     const chunks: Array<{ part: number; parts: number; items: unknown }> = new Array(paths.length);
@@ -315,7 +322,8 @@ async function restoreMetricSeries(metrics: Record<string, unknown>, api: Pick<L
         const shared = record.sharedContent === true;
         if ((shared
           ? chunk.schemaVersion !== 'att-load-detail-series/v2' || !/^[a-f0-9]{64}$/.test(String(chunk.contentSha256 ?? ''))
-          : chunk.schemaVersion !== 'att-load-detail-series/v1' || chunk.scope !== 'aggregate' || chunk.target !== record.target)
+          : chunk.schemaVersion !== 'att-load-detail-series/v1' || chunk.scope !== scope || chunk.target !== record.target
+              || (scope === 'workload' && chunk.workloadId !== workloadId))
             || chunk.kind !== record.kind || !Number.isSafeInteger(chunk.part)
             || !Number.isSafeInteger(chunk.parts) || chunk.total !== record.count
             || !validItems)
@@ -1360,9 +1368,11 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
   const jobStatus = selectedStatus;
   const canCancel = Boolean(job && ['QUEUED', 'PREPARING', 'RUNNING'].includes(jobStatus));
   const isLoadResult = job?.command === 'load' || loadTerminalSummary(result) !== null;
-  const visibleTabs = isLoadResult ? tabs : tabs.filter(tab => tab.id !== 'sutMetrics');
-  const report = useLoadArchiveSummary(api, jobId, isLoadResult && !activeLoad && (activeTab === 'results' || activeTab === 'metrics'),
-    activeTab === 'results' || activeTab === 'metrics', activeTab === 'metrics');
+  const visibleTabs = isLoadResult ? tabs : tabs.filter(tab => tab.id !== 'sutMetrics' && tab.id !== 'correlation');
+  const correlationTargets = activeTab === 'correlation' ? ['metrics/windowMetrics/timeSeries/points'] : [];
+  const metricTargets = activeTab === 'metrics' ? ['metrics/buckets'] : correlationTargets;
+  const report = useLoadArchiveSummary(api, jobId, isLoadResult && !activeLoad && (activeTab === 'results' || activeTab === 'metrics' || activeTab === 'correlation'),
+    activeTab === 'results' || activeTab === 'metrics' || activeTab === 'correlation', metricTargets);
   const archiveOverview = useJobArtifactOverview(api, jobId, isLoadResult && !activeLoad && activeTab === 'overview', detailRefresh);
   const terminalArchive = loadTerminalSummary(result)?.archive;
   const archiveHint = terminalArchive && typeof terminalArchive === 'object' && !Array.isArray(terminalArchive)
@@ -1373,6 +1383,8 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
   const metrics = useMemo(() => report.detailMetrics ? { ...(inlineMetrics || {}), ...report.detailMetrics } : inlineMetrics, [inlineMetrics, report.detailMetrics]);
   const buckets = useMemo(() => metricBuckets(metrics?.buckets).slice(0, MAX_BUCKET_ROWS), [metrics]);
   const charts = useMemo(() => metricSeries(buckets), [buckets]);
+  const loadTarget = job?.targetIdentity?.targets?.map(target => `${target.type || 'target'}:${target.id}`).join(', ')
+    || job?.targetGroup || job?.targetIdentity?.id || 'Not reported';
 
   function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const index = visibleTabs.findIndex(tab => tab.id === activeTab);
@@ -1451,6 +1463,9 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
       buckets={buckets} charts={charts} hidden={activeTab !== 'metrics'} activeLoad={activeLoad} liveProgress={liveProgress}
       liveHistory={job?.loadProgressHistory || []} liveTrend={job?.loadProgressTrend || []} streamHistory={eventStream.liveProgressHistory} checkpointHistory={eventStream.checkpointHistory} streamConnection={eventStream.connection} now={clockNow} terminalResultAvailable={payloadTerminal && Boolean(result?.result)} />
     {isLoadResult && <SutMetricsPanel api={api} jobId={jobId} activeLoad={activeLoad} hidden={activeTab !== 'sutMetrics'} />}
+    {isLoadResult && <CorrelationPanel api={api} jobId={jobId} activeLoad={activeLoad} hidden={activeTab !== 'correlation'}
+      availability={report.availability} archiveError={report.error} metrics={report.detailMetrics} workloads={report.detailWorkloads}
+      archiveRoot={report.detailRoot} loadTarget={loadTarget} />}
   </div>;
 }
 

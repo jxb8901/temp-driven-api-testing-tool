@@ -296,7 +296,7 @@ async function main() {
     assert.equal(await createdEventSourceCount(page), 1, 'the standalone console tab should create exactly one EventSource for the terminal Job replay');
     await assertAxe(page, 'Standalone Job console should pass the configured WCAG accessibility rules');
     for (const href of await page.getByRole('link', { name: 'Open full Job details', exact: true }).evaluateAll(links => links.map(link => link.getAttribute('href')))) assert.equal(href, '#/jobs/' + jobId, 'Details links must keep the fixed Job');
-    assert.equal(await page.getByRole('tablist', { name: 'Job ' + jobId + ' sections' }).getByRole('tab').count(), 7);
+    assert.equal(await page.getByRole('tablist', { name: 'Job ' + jobId + ' sections' }).getByRole('tab').count(), 8);
     await page.goto(`${base}#/jobs/${jobId}`);
     await page.waitForURL(new RegExp(`#\\/jobs\\/${jobId}$`));
     await page.getByRole('heading', { name: `Job ${jobId}`, level: 1, exact: true }).waitFor();

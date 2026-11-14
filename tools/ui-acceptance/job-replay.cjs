@@ -361,7 +361,7 @@ async function main() {
       await page.getByText('RETAINED_OUTPUT 549', { exact: false }).waitFor();
       assert.equal(broadRequests.length, before, 'Standalone must not load broad jobs or packages');
       assert.equal(await page.locator('aside, .app-header, .att-breadcrumbs, footer, .att-floating-console').count(), 0);
-      assert.equal(await page.getByRole('tablist', {name:'Job '+ids.load+' sections'}).getByRole('tab').count(), 7);
+      assert.equal(await page.getByRole('tablist', {name:'Job '+ids.load+' sections'}).getByRole('tab').count(), 8);
 
       for (const view of ['events', 'live']) {
         await page.getByRole('tab', { name: view === 'live' ? 'Live Output' : 'Events', exact: true }).click();

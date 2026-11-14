@@ -491,7 +491,7 @@ describe('JobsPage React feature', () => {
 
     const tabs = [
       ['Overview', 'overview'], ['Live Output', 'live'], ['Events', 'events'],
-      ['Results', 'results'], ['Artifacts', 'artifacts'], ['Metrics', 'metrics'], ['SUT Metrics', 'sutMetrics'],
+      ['Results', 'results'], ['Artifacts', 'artifacts'], ['Metrics', 'metrics'], ['SUT Metrics', 'sutMetrics'], ['Correlation', 'correlation'],
     ];
     expect([...host.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toEqual(tabs.map(([label]) => label));
     for (const [, id] of tabs) {
@@ -587,6 +587,216 @@ describe('JobsPage React feature', () => {
     expect(getLive).toHaveBeenLastCalledWith('JOB-204', expect.objectContaining({
       targetId: 'sut-1', profilePath: 'profile-platform/jvm/profile-jvm', range: '1h', step: '30s',
     }));
+  });
+
+  it('correlates archived LOAD phase bins with one selected archived SUT query on a shared UTC axis', async () => {
+    const phases = [
+      { phase: 'RAMP_UP', windowStartEpochMs: 1000, windowEndEpochMs: 2000 },
+      { phase: 'WARMUP', windowStartEpochMs: 2000, windowEndEpochMs: 3000 },
+      { phase: 'STEADY', windowStartEpochMs: 3000, windowEndEpochMs: 5000 },
+      { phase: 'RAMP_DOWN', windowStartEpochMs: 5000, windowEndEpochMs: 6000 },
+      { phase: 'DRAIN', windowStartEpochMs: 6000, windowEndEpochMs: 6000 },
+    ];
+    const archivedSummary = { metrics: { windowMetrics: { phaseBoundaries: phases, timeSeries: {
+      capacity: 2048, coverage: 'Whole execution; roll-up', bucketDurationMs: 1000, points: [
+        { windowStartEpochMs: 3000, durationMs: 1000, phaseCoverage: ['STEADY'], completedRate: 3, latencyP95Ms: 80, latencySampleCount: 3 },
+        { windowStartEpochMs: 4000, durationMs: 1000, phaseCoverage: ['STEADY'], completedRate: 4, latencyP95Ms: 90, latencySampleCount: 4 },
+      ],
+    } } }, workloads: { checkout: { target: { type: 'flow', id: 'checkout-flow' }, metrics: {
+      windowMetrics: { phaseBoundaries: phases, timeSeries: { bucketDurationMs: 1000, points: [] } },
+      detailSeries: { schemaVersion: 'att-load-detail-reference/v1', complete: true, series: [{ scope: 'workload', workloadId: 'checkout',
+        target: 'metrics/windowMetrics/timeSeries/points', kind: 'list', count: 2, complete: true, files: ['details/v1/workloads/workload-0001/series-0001.json'] }] },
+    } } } };
+    const workloadChunk = { schemaVersion: 'att-load-detail-series/v1', scope: 'workload', workloadId: 'checkout',
+      target: 'metrics/windowMetrics/timeSeries/points', kind: 'list', part: 1, parts: 1, total: 2, items: [
+        { windowStartEpochMs: 3000, durationMs: 1000, phaseCoverage: ['STEADY'], completedRate: 2, latencyP95Ms: 75, latencySampleCount: 2 },
+        { windowStartEpochMs: 4000, durationMs: 1000, phaseCoverage: ['STEADY'], completedRate: 3, latencyP95Ms: 85, latencySampleCount: 3 },
+      ] };
+    const query: SutMetricsJobResponse = { state: 'READY', collection: { state: 'READY', step: '1s', windowStart: new Date(3000).toISOString(), windowEnd: new Date(6000).toISOString(),
+      queries: [
+        { id: 'query-memory', profilePath: 'profile-platform/cpu', targetId: 'sut-prod', metricId: 'memory', title: 'Memory usage', unit: '%', kind: 'gauge', sourceName: 'Prometheus' },
+        { id: 'query-cpu', profilePath: 'profile-platform/cpu', targetId: 'sut-prod', metricId: 'cpu', title: 'CPU usage', unit: '%', kind: 'gauge', sourceName: 'Prometheus' },
+      ] } };
+    const sutSeries: SutMetricsJobResponse = { state: 'READY', collection: query.collection, items: [{ id: 'query-cpu', queryId: 'query-cpu',
+      profilePath: 'profile-platform/cpu', metricId: 'cpu', title: 'CPU usage', category: 'host', targetId: 'sut-prod', sourceName: 'Prometheus', unit: '%', kind: 'gauge', queryStatus: 'READY',
+      observation: { availability: { freshness: 'FRESH' } },
+      series: [{ labels: { instance: 'node-a' }, coverage: { firstSampleAt: new Date(3000).toISOString(), lastSampleAt: new Date(5500).toISOString(), gapCount: 0 },
+        samples: [3000, 4000, 5500].map((timestampEpochMs, index) => ({ timestamp: new Date(timestampEpochMs).toISOString(), timestampEpochMs, value: 40 + index * 10 })) }] }] };
+    const memorySeries: SutMetricsJobResponse = { state: 'READY', collection: query.collection, items: [{ id: 'query-memory', queryId: 'query-memory',
+      profilePath: 'profile-platform/cpu', metricId: 'memory', title: 'Memory usage', targetId: 'sut-prod', sourceName: 'Prometheus', unit: '%', kind: 'gauge',
+      series: [{ labels: { instance: 'node-a' }, samples: [3000, 4000].map((timestampEpochMs, index) => ({ timestamp: new Date(timestampEpochMs).toISOString(), timestampEpochMs, value: 70 + index })) }] }] };
+    const getSut = vi.fn(async () => query);
+    const getSutSeries = vi.fn(async (_jobId: string, input: { queryId: string; targetId?: string; profilePath?: string; signal?: AbortSignal }) =>
+      input.queryId === 'query-cpu' ? sutSeries : memorySeries);
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })), getJobSutMetrics: getSut, getJobSutMetricSeries: getSutSeries,
+      getJobArtifactArchive: vi.fn(async () => ({ archiveStatus: 'READY' as const, items: [], primaryReports: [{ path: 'load-summary.json', size: 120 }] })),
+      getJobArtifactText: vi.fn(async (_jobId: string, path: string) => path === 'load-summary.json' ? JSON.stringify(archivedSummary) : JSON.stringify(workloadChunk)) });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-correlation')!);
+    await advance();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const panel = host.querySelector('#job-panel-correlation')!;
+    const metricSelect = [...panel.querySelectorAll('label')].find(label => label.textContent?.includes('SUT metric'))?.querySelector('select') as HTMLSelectElement;
+    await act(async () => { metricSelect.value = 'cpu'; metricSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    await advance();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(panel.querySelector('svg[role="img"]')?.getAttribute('aria-label')).toContain('Completed TPS');
+    expect(panel.querySelector('svg[role="img"]')?.getAttribute('aria-label')).toContain('selected SUT metric in %');
+    expect(panel.textContent).toContain('LOAD job target');
+    expect(panel.textContent).toContain('SUT target');
+    expect(panel.textContent).toContain('Prometheus');
+    expect(panel.textContent).toContain('does not establish causation');
+    expect(panel.textContent).toContain('Latest selected SUT sample');
+    expect(panel.textContent).toContain('SUT query freshness (entire collected series)FRESH');
+    expect(panel.textContent).toContain('SUT metric kindgauge');
+    expect(panel.textContent).toContain('500 ms before requested collection-window end');
+    expect(panel.textContent).toContain('Latest SUT sample (entire collected series)');
+    expect(panel.textContent).toContain('Whole execution; roll-up');
+    expect(panel.textContent).toContain('capacity 2,048 bins');
+    expect(panel.textContent).toContain('Separate 4,096 one-second buckets');
+    const phaseSelect = [...panel.querySelectorAll('label')].find(label => label.textContent?.includes('Phase'))?.querySelector('select') as HTMLSelectElement;
+    await act(async () => { phaseSelect.value = 'STEADY'; phaseSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    const provenance = Object.fromEntries([...panel.querySelectorAll('.att-correlation-provenance dt')]
+      .map(field => [field.textContent, field.nextElementSibling?.textContent]));
+    expect(provenance['Selected SUT instance']).toBe('instance=node-a');
+    expect(provenance['Selected SUT series count']).toBe('1');
+    expect(provenance['Selected SUT samples in range and phase']).toBe('2');
+    expect(provenance['Selected SUT observed sample coverage']).toContain('1970');
+    expect(getSutSeries).toHaveBeenLastCalledWith('JOB-204', expect.objectContaining({ queryId: 'query-cpu', targetId: 'sut-prod', profilePath: 'profile-platform/cpu' }));
+    expect(provenance['Latest selected SUT sample']).toContain('00:00:04');
+    expect(provenance['Selected SUT samples in range and phase']).toBe('2');
+    expect(provenance['Selected SUT observed sample coverage']).toContain('00:00:03');
+    expect(provenance['Selected SUT observed sample coverage']).toContain('00:00:04');
+    expect(provenance['Latest SUT sample (entire collected series)']).toContain('00:00:05');
+
+    const rangeSelect = [...panel.querySelectorAll('label')].find(label => label.textContent?.includes('Time range'))?.querySelector('select')!;
+    await act(async () => { rangeSelect.value = 'custom'; rangeSelect.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(panel.textContent).toContain('Enter both times as valid UTC timestamps');
+    const [startInput, endInput] = [...panel.querySelectorAll('.att-correlation-filters input')] as HTMLInputElement[];
+    await act(async () => {
+      const setInput = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setInput.call(startInput, '1970-01-01T00:00:03Z'); startInput!.dispatchEvent(new Event('input', { bubbles: true }));
+      setInput.call(endInput, '1970-01-01T00:00:05Z'); endInput!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(panel.querySelector('[role="alert"]')).toBeNull();
+    expect(panel.querySelector('svg[role="img"]')).not.toBeNull();
+
+    const workload = panel.querySelector('select') as HTMLSelectElement;
+    await act(async () => { workload.value = 'checkout'; workload.dispatchEvent(new Event('change', { bubbles: true })); });
+    await advance();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(api.getJobArtifactText).toHaveBeenCalledWith('JOB-204', 'details/v1/workloads/workload-0001/series-0001.json', expect.any(AbortSignal));
+    expect(panel.textContent).toContain('flow:checkout-flow');
+    expect(panel.textContent).toContain('checkout');
+  });
+
+  it('does not load archive or SUT data for Correlation while LOAD is active', async () => {
+    const getArchive = vi.fn(async () => ({ archiveStatus: 'READY' as const, items: [], primaryReports: [] }));
+    const getSut = vi.fn(async () => ({ state: 'READY', collection: { state: 'READY', queries: [] } }));
+    const api = makeApi({ getJobResult: vi.fn(async () => ({ job: sampleJob, result: null })),
+      getJobArtifactArchive: getArchive, getJobSutMetrics: getSut });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-correlation')!);
+    await advance();
+    expect(host.querySelector('#job-panel-correlation')?.textContent).toContain('available after LOAD finishes');
+    expect(getArchive).not.toHaveBeenCalled();
+    expect(getSut).not.toHaveBeenCalled();
+  });
+
+  it('waits for PENDING → COLLECTING → READY before loading the selected SUT series without hiding Correlation', async () => {
+    const query = { id: 'query-cpu', profilePath: 'profile-platform/cpu', targetId: 'sut-prod', metricId: 'cpu', title: 'CPU usage', unit: '%', kind: 'gauge' };
+    const metadata = (state: string, updatedAt: string): SutMetricsJobResponse => ({ state, collection: { state, updatedAt,
+      windowStart: new Date(1000).toISOString(), windowEnd: new Date(2000).toISOString(), queries: [query] } });
+    const snapshots = [
+      metadata('PENDING', '2026-11-14T00:00:00Z'),
+      metadata('COLLECTING', '2026-11-14T00:00:05Z'),
+      metadata('READY', '2026-11-14T00:00:10Z'),
+    ];
+    const getSut = vi.fn(async () => snapshots.shift()!);
+    const selectedSeries: SutMetricsJobResponse = { state: 'READY', collection: metadata('READY', '2026-11-14T00:00:10Z').collection,
+      items: [{ ...query, queryId: query.id, queryStatus: 'READY', series: [{ labels: { instance: 'node-a' }, samples: [
+        { timestamp: new Date(1000).toISOString(), timestampEpochMs: 1000, value: 40 },
+        { timestamp: new Date(2000).toISOString(), timestampEpochMs: 2000, value: 50 },
+      ] }] }] };
+    const getSeries = vi.fn(async () => selectedSeries);
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })), getJobSutMetrics: getSut, getJobSutMetricSeries: getSeries,
+      getJobArtifactArchive: vi.fn(async () => ({ archiveStatus: 'READY' as const, items: [], primaryReports: [{ path: 'load-summary.json', size: 80 }] })),
+      getJobArtifactText: vi.fn(async () => JSON.stringify({ metrics: { windowMetrics: { timeSeries: { bucketDurationMs: 1000, points: [
+        { windowStartEpochMs: 1000, durationMs: 1000, completedRate: 2 },
+      ] } } } })),
+    });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-correlation')!);
+    await advance();
+    expect(host.querySelector('#job-panel-correlation')?.textContent).toContain('PENDING');
+    expect(getSeries).not.toHaveBeenCalled();
+
+    await advance(5000);
+    expect(host.querySelector('#job-panel-correlation')?.textContent).toContain('COLLECTING');
+    expect(getSeries).not.toHaveBeenCalled();
+
+    await advance(5000);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(getSeries).toHaveBeenCalledTimes(1);
+    expect(getSeries).toHaveBeenCalledWith('JOB-204', expect.objectContaining({ queryId: 'query-cpu', targetId: 'sut-prod' }));
+    expect(host.querySelector('#job-panel-correlation svg[role="img"]')).not.toBeNull();
+  });
+
+  it('aborts the selected archived SUT query when the Correlation tab is hidden', async () => {
+    const query: SutMetricsJobResponse = { state: 'READY', collection: { state: 'READY', step: '1s', queries: [
+      { id: 'query-cpu', profilePath: 'profile-platform/cpu', targetId: 'sut-prod', metricId: 'cpu', title: 'CPU usage', unit: '%' },
+    ] } };
+    const pending = deferred<SutMetricsJobResponse>();
+    let querySignal: AbortSignal | undefined;
+    const getSut = vi.fn(async () => query);
+    const getSutSeries = vi.fn((_jobId: string, input: { queryId: string; signal?: AbortSignal }) => {
+      querySignal = input.signal;
+      return pending.promise;
+    });
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })),
+      getJobResult: vi.fn(async () => ({ ...sampleResult, job: { ...sampleJob, status: 'PASS' } })),
+      getJobArtifactArchive: vi.fn(async () => ({ archiveStatus: 'READY' as const, items: [], primaryReports: [{ path: 'load-summary.json', size: 80 }] })),
+      getJobArtifactText: vi.fn(async () => JSON.stringify({ metrics: { windowMetrics: { timeSeries: { points: [] } } } })),
+      getJobSutMetrics: getSut, getJobSutMetricSeries: getSutSeries });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-correlation')!);
+    await advance();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(querySignal).toBeDefined();
+    expect(querySignal?.aborted).toBe(false);
+    await click(host.querySelector('#job-tab-metrics')!);
+    expect(querySignal?.aborted).toBe(true);
+  });
+
+  it('keeps old archived reports readable and explains that missing phase series cannot be correlated', async () => {
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })),
+      getJobResult: vi.fn(async () => ({ ...sampleResult, job: { ...sampleJob, status: 'PASS' } })),
+      getJobArtifactArchive: vi.fn(async () => ({ archiveStatus: 'READY' as const, items: [], primaryReports: [{ path: 'load-summary.json', size: 40 }] })),
+      getJobArtifactText: vi.fn(async () => JSON.stringify({ metrics: { completed: 12 } })),
+      getJobSutMetrics: vi.fn(async () => ({ state: 'DISABLED', collection: { state: 'DISABLED', queries: [] } })) });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-correlation')!);
+    await advance();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(host.querySelector('#job-panel-correlation')?.textContent).toContain('does not include native phase-aligned LOAD window metrics');
+    expect(host.querySelector('#job-panel-correlation svg')).toBeNull();
+  });
+
+  it('surfaces an authorized SUT Metrics API permission denial without substituting values', async () => {
+    const getSut = vi.fn(async () => { throw new Error('403 forbidden'); });
+    const api = makeApi({ getJob: vi.fn(async () => ({ ...sampleJob, status: 'PASS' })),
+      getJobResult: vi.fn(async () => ({ ...sampleResult, job: { ...sampleJob, status: 'PASS' } })),
+      getJobArtifactArchive: vi.fn(async () => ({ archiveStatus: 'READY' as const, items: [], primaryReports: [{ path: 'load-summary.json', size: 80 }] })),
+      getJobArtifactText: vi.fn(async () => JSON.stringify({ metrics: { windowMetrics: { timeSeries: { points: [] } } } })),
+      getJobSutMetrics: getSut });
+    await act(async () => root.render(<JobsPage api={api} jobId="JOB-204" onOpenJob={vi.fn()} onShowList={vi.fn()} />));
+    await click(host.querySelector('#job-tab-correlation')!);
+    await advance();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(getSut).toHaveBeenCalledWith('JOB-204', expect.objectContaining({ offset: 0, limit: 1, signal: expect.any(AbortSignal) }));
+    expect(host.querySelector('#job-panel-correlation [role="alert"]')?.textContent).toBe('403 forbidden');
+    expect(host.querySelector('#job-panel-correlation svg')).toBeNull();
   });
 
   it('aborts a live SUT Metrics request and does not poll while the document is hidden', async () => {
