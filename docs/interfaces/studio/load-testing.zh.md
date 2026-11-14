@@ -73,6 +73,16 @@ LOAD Job Details 的 **SUT Metrics** 分頁會顯示 source、target、profile�
 
 Post-run sidecar 使用版本化、provider-neutral 的 `att-sut-metrics-observation/v1` contract，記錄 effective binding、安全的 source/profile/target revision hash、metric unit/kind、UTC execution/query window、step、phase window、freshness、sample coverage/gaps、availability 及已遮蔽的 provenance。Mutable collection manifest 會綁定 Job 和 immutable snapshot，並在同一個 atomically published file 內嵌有上限的 integrity history。Server 重啟時會讀取完整的 manifest 狀態，並明確恢復中斷的 `COLLECTING` 工作。空結果維持 `NO_DATA`，不會補成零。
 
-Collection 狀態包括 `PENDING`、`COLLECTING`、`READY`、`PARTIAL`、`UNAVAILABLE` 及 `FAILED`；live metric 另會顯示 `STALE`、`NO_DATA` 或 unavailable。這些狀態不會改變 LOAD 結果或 verdict。本階段不會把 SUT 數值疊加至 TPS／latency，也不會評估 SUT thresholds。
+Collection 狀態包括 `PENDING`、`COLLECTING`、`READY`、`PARTIAL`、`UNAVAILABLE` 及 `FAILED`；live metric 另會顯示 `STALE`、`NO_DATA` 或 unavailable。這些狀態不會改變 LOAD 結果或 verdict。**SUT Metrics** 分頁維持獨立檢視，也不會評估 SUT thresholds。
+
+## 對照 LOAD 與 SUT metrics
+
+LOAD 到達 terminal 狀態且授權的 artifact archive 已就緒後，**Correlation** 會讀取已封存的原生 LOAD window series 及所選的 post-run SUT query。較長的 LOAD series 會透過授權 detail sidecar 讀取。此檢視不會以 Job 建立時間作為觀測起點、不會把 series 加入 Worker result 或 Job metadata，也不會更改現有的 **Metrics** 和 **SUT Metrics** 分頁。缺少原生 phase series 的舊報告會顯示不可用狀態。
+
+先選擇 aggregate LOAD 或單一 workload，再選擇 LOAD metric、phase 及時間範圍。時間範圍可選全部資料，或最新觀測時間之前的 15 分鐘、1 小時、6 小時及 24 小時。LOAD 選項會分開顯示 completed TPS、successful TPS、scheduled／started rate、SUT failure 數量、runtime error、generator drop，以及 scheduled-cohort latency p95。SUT 資料可按 profile、target、metric、source query 及具標籤的 instance 篩選。所選 series 會以共用 UTC 時間軸及各自標示單位的左右 y 軸顯示。LOAD 點使用實際 bin 起始時間及 duration；SUT 點使用記錄的 sample timestamp。Phase 色帶及篩選使用已封存的 UTC phase 邊界。
+
+每個 series 都保留其回報的解析度。此檢視會顯示觀測到的最小值、最大值；若所選值不是 percentile，也會計算觀測點的算術平均值。平均值會排除缺少的時間間隔；系統不會以零補值或插值。LOAD rate 仍使用完整 native bin 作為分母，即使 bin 只與所選 phase 部分重疊；畫面會指出這些 partial bin。Latency p95 仍是 scheduled-cohort percentile：畫面會顯示其觀測範圍及 cohort sample 數量，不會跨 bin 或 workload 平均 p95。圖表每個 series 最多顯示 1,200 個 downsampled 點，並會列出顯示點數及篩選後點數；遇到估算的內部缺口時會中斷線段。
+
+Provenance 欄位會分開標示 LOAD target 和所選 workload，以及 SUT source、target、profile、metric、unit、collection window、effective step 和 sample coverage。選取 workload 不代表共享主機 CPU、JVM、database 或 MQ 數值屬於該 workload。圖表只供時間上的對照；時間重疊不代表因果關係、判定或根因。
 
 完整的 Data Source、base、composite profile 及 scenario 範例位於 [`examples/load/sut-metrics/`](../../../examples/load/sut-metrics/)。使用 scenario 前，請先在 Settings 登記 Data Source 及 profiles，並將範例內的 Template target 換成 package 中可用的 target。
