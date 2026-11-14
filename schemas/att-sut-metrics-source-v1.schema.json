@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:att:schema:sut-metrics-source:v1",
-  "title": "ATT Prometheus Data Source",
+  "title": "ATT SUT Metrics Data Source",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -10,6 +10,43 @@
     "url"
   ],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "provider": { "const": "GRAFANA" } },
+        "required": ["provider"]
+      },
+      "then": {
+        "required": ["grafanaDatasourceUid", "defaultTenant", "allowedTenants", "auth"],
+        "properties": {
+          "apiPath": { "const": "/api/ds/query" },
+          "auth": {
+            "properties": { "mode": { "const": "BEARER" } },
+            "required": ["mode", "secretRef"]
+          },
+          "allowedTenants": {
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^[1-9][0-9]{0,9}$" }
+          },
+          "defaultTenant": { "type": "string", "pattern": "^[1-9][0-9]{0,9}$" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "provider": { "const": "PROMETHEUS" } },
+        "required": ["provider"]
+      },
+      "then": { "not": { "required": ["grafanaDatasourceUid"] } }
+    },
+    {
+      "if": { "required": ["grafanaDatasourceUid"] },
+      "then": {
+        "required": ["provider"],
+        "properties": { "provider": { "const": "GRAFANA" } }
+      }
+    }
+  ],
   "properties": {
     "schemaVersion": {
       "const": "att-sut-metrics-source/v1"
@@ -22,6 +59,15 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 120
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["PROMETHEUS", "GRAFANA"],
+      "default": "PROMETHEUS"
+    },
+    "grafanaDatasourceUid": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,80}$"
     },
     "url": {
       "type": "string",

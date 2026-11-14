@@ -195,3 +195,9 @@ Case log structured entries use YAML. The human log records each normal Action a
 Multiline String values nested in structured entries are shown as readable YAML block content. ATT preserves their LF, CRLF or lone-CR separators and does not parse, trim or reformat the business text. Raw process and user content also keeps its original line endings. The live console mirror uses the same rendered log text as the persisted `case.log`.
 
 ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or INVALID with `【!!!!!】`. Search for that marker to find abnormal blocks; PASS, SKIPPED and informational blocks remain unmarked.
+
+## Offline SUT metrics report
+
+A completed LOAD with SUT collection evidence can publish a separate, versioned offline report archive. The publisher verifies the source manifest and each observation sidecar, preserves the original sealed native archive byte-for-byte, and publishes an immutable snapshot. Its `att-load-report-extension/v2` manifest references the source-neutral `att-load-offline-observations/v1` record, whose `att-load-offline-observation/v1` entries carry source, metric, profile, target, UTC window, phase, units, sample resolution, coverage, gaps, diagnostics, checksums, and bounded chart previews. Full series sidecars retain the normalized `att-sut-metrics-observation/v1` contract. Partial or unavailable source data is reported explicitly and does not change the native Job result.
+
+The report works without network access and uses a restrictive Content Security Policy. It does not evaluate performance thresholds. If a separately versioned `att-load-verdict/v1` record is supplied, the report displays its recorded evaluation state and evidence reference without recalculating the verdict. The archive is available through the authenticated Job download route only after verified publication.

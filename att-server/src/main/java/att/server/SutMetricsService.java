@@ -66,6 +66,7 @@ final class SutMetricsService implements AutoCloseable {
     static final String COLLECTION_SCHEMA = "att-sut-metrics-manifest/v1";
     static final String SERIES_SCHEMA = "att-sut-metrics-series/v1";
     static final String OBSERVATION_SCHEMA = "att-sut-metrics-observation/v1";
+    static final String OFFLINE_OBSERVATION_SCHEMA = "att-load-offline-observation/v1";
     static final String MANIFEST_INTEGRITY_SCHEMA = "att-sut-metrics-manifest-integrity/v1";
     static final String THRESHOLD_EVALUATION_SCHEMA = "att-sut-threshold-evaluation/v1";
     private static final String MANIFEST_INTEGRITY_FIELD = "_integrity";
@@ -81,6 +82,8 @@ final class SutMetricsService implements AutoCloseable {
     static final long MAX_JOB_SAMPLES = 1_500_000L;
     static final long MAX_LIVE_PREVIEW_SAMPLES = 100_000L;
     static final int MAX_SERIES_FILE_BYTES = 2 * 1024 * 1024;
+    static final int MAX_REPORT_PREVIEW_SERIES = 16;
+    static final int MAX_REPORT_PREVIEW_POINTS = 96;
     private static final Pattern ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,79}");
     private static final Pattern JOB_ID = Pattern.compile("J[0-9A-F]{16}");
     private static final Pattern PARAM = Pattern.compile("[A-Za-z][A-Za-z0-9_]{0,63}");
@@ -88,6 +91,8 @@ final class SutMetricsService implements AutoCloseable {
     private static final Pattern DURATION = Pattern.compile("([1-9][0-9]*)(ms|s|m|h|d|w|y)");
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{([A-Za-z][A-Za-z0-9_]*)}}" );
     private static final Pattern SAFE_NUMBER = Pattern.compile("-?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)");
+    private static final Pattern GRAFANA_UID = Pattern.compile("[A-Za-z0-9_-]{1,80}");
+    private static final Pattern GRAFANA_ORG_ID = Pattern.compile("[1-9][0-9]{0,9}");
     private final ObjectMapper json = ServerRuntime.JSON;
     private final Path dataDir, jobsRoot, catalogPath;
     private final Set<String> allowedPrometheusHosts;
@@ -108,6 +113,7 @@ final class SutMetricsService implements AutoCloseable {
     private final ConcurrentHashMap<String, CompletableFuture<Map<String, Object>>> previewFlights = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, CacheEntry> previewCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, HttpClient> clients = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, GrafanaHealth> grafanaHealth = new ConcurrentHashMap<>();
 
     SutMetricsService(Path dataDir) throws Exception {
         this(dataDir, configuredAllowedPrometheusHosts());
@@ -115,6 +121,11 @@ final class SutMetricsService implements AutoCloseable {
 
     SutMetricsService(Path dataDir, Function<String, String> secretResolver) throws Exception {
         this(dataDir, configuredAllowedPrometheusHosts(), secretResolver);
+    }
+
+    SutMetricsService(Path dataDir, Function<String, String> secretResolver,
+                      Consumer<Path> afterManifestPublication) throws Exception {
+        this(dataDir, configuredAllowedPrometheusHosts(), secretResolver, afterManifestPublication);
     }
 
     SutMetricsService(Path dataDir, Set<String> allowedPrometheusHosts) throws Exception {
@@ -221,10 +232,14 @@ final class SutMetricsService implements AutoCloseable {
         Map<String, Object> source = source(id);
         Instant end = Instant.now(), start = end.minusSeconds(60);
         long began = System.nanoTime();
-        queryRange(source, "up", start, end, Duration.ofSeconds(30), null);
+        String provider = String.valueOf(source.getOrDefault("provider", "PROMETHEUS"));
+        String grafanaVersion = "";
+        if ("GRAFANA".equals(provider)) grafanaVersion = verifyGrafanaVersion(source, false);
+        queryRange(source, "up", start, end, Duration.ofSeconds(30), nullableText(source.get("defaultTenant")));
         return fields("ok", Boolean.TRUE, "sourceId", id, "testedAt", end.toString(),
                 "latencyMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began),
-                "message", "Prometheus query_range responded successfully.");
+                "provider", provider, "grafanaVersion", grafanaVersion,
+                "message", "GRAFANA".equals(provider) ? "The pinned Grafana data source query succeeded." : "Prometheus query_range responded successfully.");
     }
 
     Map<String, Object> resolveScenario(Map<String, Object> observability, String principal) {
@@ -798,6 +813,178 @@ final class SutMetricsService implements AutoCloseable {
         return fields("manifest", manifest, "items", rows, "nextOffset", to < all.size() ? to : null);
     }
 
+    Map<String, Object> writeOfflineReportEvidence(String jobId, Path reportRoot) throws Exception {
+        Map<String, Object> collection = collectionStatus(jobId);
+        String state = String.valueOf(collection.getOrDefault("state", "UNAVAILABLE"));
+        Map<String, Object> snapshot = snapshotForJob(jobId);
+        Path observationsRoot = reportRoot.resolve("report/v2/sut-metrics/observations").normalize();
+        if (!observationsRoot.startsWith(reportRoot.normalize())) throw new IllegalArgumentException("Invalid offline report path.");
+        Files.createDirectories(observationsRoot);
+        List<Map<String, Object>> observations = new ArrayList<>();
+        long totalBytes = 0L;
+        if (snapshot != null && Set.of("READY", "PARTIAL").contains(state)) {
+            List<Map<String, Object>> files = listOfMaps(collection.get("files"));
+            if (files.size() > MAX_EXPANDED_QUERIES) throw new IllegalStateException("The SUT report exceeds its file count limit.");
+            int index = 0;
+            for (Map<String, Object> file : files) {
+                byte[] sourceBytes = readSeriesBytes(jobId, file);
+                Map<String, Object> sourceSeries = json.readValue(sourceBytes, Map.class);
+                Map<String, Object> safeSeries = redactSeriesLabels(sourceSeries);
+                byte[] reportBytes = json.writeValueAsBytes(safeSeries);
+                if (reportBytes.length > MAX_SERIES_FILE_BYTES || totalBytes > MAX_JOB_COLLECTION_BYTES - reportBytes.length)
+                    throw new IllegalStateException("The SUT report exceeds its bounded observation budget.");
+                totalBytes += reportBytes.length;
+                String name = String.format(Locale.ROOT, "observation-%04d.json", index++);
+                Path output = observationsRoot.resolve(name).normalize();
+                if (!output.startsWith(observationsRoot)) throw new IllegalArgumentException("Invalid SUT report observation path.");
+                Files.write(output, reportBytes);
+                Map<String, Object> query = queryMetadataById(snapshot, String.valueOf(file.get("queryId")));
+                List<Map<String, Object>> series = listOfMaps(safeSeries.get("series"));
+                List<Map<String, Object>> preview = chartPreview(series, MAX_REPORT_PREVIEW_POINTS, String.valueOf(collection.get("step")));
+                observations.add(fields("schemaVersion", OFFLINE_OBSERVATION_SCHEMA, "kind", "timeseries",
+                        "source", fields("id", file.get("sourceId"), "name", query.get("sourceName")),
+                        "metric", fields("id", file.get("metricId"), "name", file.get("title"),
+                                "category", file.get("category"), "unit", file.get("unit")),
+                        "profile", fields("id", file.get("profile"), "path", file.get("profilePath")),
+                        "target", fields("id", file.get("targetId"), "type", file.get("targetType")),
+                        "window", fields("startAt", collection.get("windowStart"), "endAt", collection.get("windowEnd"),
+                                "phaseWindows", listOfMaps(collection.get("phaseWindows"))),
+                        "sampleResolution", collection.get("step"), "coverage", file.get("coverage"),
+                        "quality", fields("status", file.get("queryStatus"), "gapCount", objectOrEmpty(file.get("coverage")).get("gapCount")),
+                        "path", "report/v2/sut-metrics/observations/" + name,
+                        "sourceSha256", file.get("sha256"), "sha256", sha256(reportBytes), "lengthBytes", reportBytes.length,
+                        "seriesCount", file.get("seriesCount"), "sampleCount", file.get("sampleCount"), "previewOmittedSeriesCount", Math.max(0, series.size() - preview.size()), "preview", preview));
+            }
+        }
+        byte[] sourceManifest = manifestBytes(jobId);
+        String sourceManifestSha256 = sourceManifest == null ? null : sha256(sourceManifest);
+        Map<String, Object> result = fields("schemaVersion", "att-load-offline-observations/v1", "jobId", jobId,
+                "snapshotId", snapshot == null ? null : snapshot.get("snapshotId"), "state", state,
+                "complete", Boolean.TRUE.equals(collection.get("complete")),
+                "window", fields("startAt", collection.get("windowStart"), "endAt", collection.get("windowEnd"),
+                        "phaseWindows", listOfMaps(collection.get("phaseWindows"))),
+                "sampleResolution", collection.get("step"), "coverage", collection.get("coverage"),
+                "queries", snapshot == null ? List.of() : queryMetadata(snapshot), "observations", observations,
+                "diagnostics", safeReportDiagnostics(collection.get("diagnostics")),
+                "sourceManifestSha256", sourceManifestSha256,
+                "extensions", fields("thresholdVerdict", fields("schemaVersion", "att-load-verdict/v1",
+                                "state", "NOT_PROVIDED", "reference", "load-verdict/v1/manifest.json"),
+                        "correlation", fields("schemaVersion", "att-load-correlation/v1", "state", "NOT_INCLUDED"),
+                        "futureObservationTypes", List.of("windowAggregate", "dimensionSeries")));
+        byte[] manifestBytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(result);
+        if (manifestBytes.length > MAX_MANIFEST_BYTES) throw new IllegalStateException("The offline SUT report manifest exceeds its limit.");
+        Path manifestPath = reportRoot.resolve("report/v2/sut-metrics/manifest.json");
+        Files.createDirectories(manifestPath.getParent());
+        Files.write(manifestPath, manifestBytes);
+        return result;
+    }
+
+    private byte[] manifestBytes(String jobId) throws Exception {
+        Path manifest = jobMetricsDirectory(jobId).resolve("manifest.json");
+        if (!Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(manifest)
+                || Files.size(manifest) > MAX_MANIFEST_BYTES) return null;
+        return Files.readAllBytes(manifest);
+    }
+
+    private byte[] readSeriesBytes(String jobId, Map<String, Object> entry) throws Exception {
+        String relative = String.valueOf(entry.get("path"));
+        if (!relative.matches("series-[0-9]{4}\\.json")) throw new IllegalArgumentException("Unsafe SUT Metrics sidecar path.");
+        Path root = jobMetricsDirectory(jobId).toRealPath(), file = root.resolve(relative).normalize();
+        if (!file.startsWith(root) || Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                || Files.size(file) != ((Number) entry.get("lengthBytes")).longValue()
+                || Files.size(file) > MAX_SERIES_FILE_BYTES || !sha256(file).equals(entry.get("sha256")))
+            throw new IllegalStateException("SUT Metrics companion sidecar failed integrity verification.");
+        byte[] bytes = Files.readAllBytes(file);
+        if (!sha256(bytes).equals(entry.get("sha256"))) throw new IllegalStateException("SUT Metrics companion sidecar changed during report publication.");
+        return bytes;
+    }
+
+    private static Map<String, Object> queryMetadataById(Map<String, Object> snapshot, String id) {
+        for (Map<String, Object> query : queryMetadata(snapshot)) if (id.equals(query.get("id"))) return query;
+        return Map.of();
+    }
+
+    private static Map<String, Object> redactSeriesLabels(Map<String, Object> original) {
+        Map<String, Object> safe = new LinkedHashMap<>(original);
+        List<Map<String, Object>> series = new ArrayList<>();
+        for (Map<String, Object> row : listOfMaps(original.get("series"))) {
+            Map<String, Object> copy = new LinkedHashMap<>(row), labels = new LinkedHashMap<>();
+            objectOrEmpty(row.get("labels")).forEach((key, value) -> {
+                String label = String.valueOf(key);
+                if (label.matches("(?i).*(token|secret|password|credential|authorization|api[_-]?key).*")) labels.put(label, "[REDACTED]");
+                else if (value instanceof String text && text.length() <= 256 && !hasControl(text)) labels.put(label, text);
+            });
+            copy.put("labels", labels);
+            series.add(copy);
+        }
+        safe.put("series", series);
+        return safe;
+    }
+
+    private static List<Map<String, Object>> chartPreview(List<Map<String, Object>> series, int maximum, String sampleResolution) {
+        if (series.isEmpty() || maximum < 1) return List.of();
+        int shownSeries = Math.min(series.size(), Math.min(MAX_REPORT_PREVIEW_SERIES, maximum));
+        int pointsPerSeries = Math.max(1, maximum / shownSeries);
+        long expectedStepMillis;
+        try { expectedStepMillis = Math.multiplyExact(durationSeconds(sampleResolution, "sampleResolution"), 1000L); }
+        catch (RuntimeException invalid) { expectedStepMillis = 0L; }
+        List<Map<String, Object>> result = new ArrayList<>(shownSeries);
+        for (int seriesIndex = 0; seriesIndex < shownSeries; seriesIndex++) {
+            Map<String, Object> source = series.get(seriesIndex);
+            List<Map<String, Object>> samples = listOfMaps(source.get("samples"));
+            if (samples.isEmpty()) {
+                result.add(fields("labels", objectOrEmpty(source.get("labels")), "samples", List.of()));
+                continue;
+            }
+            int count = Math.min(samples.size(), pointsPerSeries);
+            List<Integer> selected = new ArrayList<>(count);
+            for (int point = 0; point < count; point++) {
+                int index = count == 1 ? 0 : (int) Math.round(point * (samples.size() - 1.0) / (count - 1.0));
+                if (selected.isEmpty() || selected.get(selected.size() - 1) != index) selected.add(index);
+            }
+            List<Map<String, Object>> previewSamples = new ArrayList<>(selected.size());
+            int previousIndex = -1;
+            for (int index : selected) {
+                Map<String, Object> sample = samples.get(index);
+                Map<String, Object> point = new LinkedHashMap<>();
+                if (sample.get("timestamp") instanceof String timestamp) point.put("timestamp", timestamp);
+                if (sample.get("timestampEpochMs") instanceof Number epoch) point.put("timestampEpochMs", epoch.longValue());
+                if (sample.get("value") instanceof Number value && Double.isFinite(value.doubleValue())) point.put("value", value.doubleValue());
+                point.put("gapBefore", previousIndex >= 0 && hasSampleGap(samples, previousIndex, index, expectedStepMillis));
+                previewSamples.add(point);
+                previousIndex = index;
+            }
+            result.add(fields("labels", objectOrEmpty(source.get("labels")), "samples", previewSamples));
+        }
+        return result;
+    }
+
+    private static boolean hasSampleGap(List<Map<String, Object>> samples, int previousSelected, int currentSelected,
+                                        long expectedStepMillis) {
+        if (expectedStepMillis < 1) return false;
+        long gapThreshold = expectedStepMillis + expectedStepMillis / 2;
+        for (int index = previousSelected + 1; index <= currentSelected; index++) {
+            Object previous = samples.get(index - 1).get("timestampEpochMs");
+            Object current = samples.get(index).get("timestampEpochMs");
+            if (previous instanceof Number before && current instanceof Number after
+                    && after.longValue() - before.longValue() > gapThreshold) return true;
+        }
+        return false;
+    }
+
+    private static List<Map<String, Object>> safeReportDiagnostics(Object value) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> item : listOfMaps(value)) {
+            String code = String.valueOf(item.getOrDefault("code", "SUT_METRICS"));
+            String message = String.valueOf(item.getOrDefault("message", "SUT Metrics data is incomplete."));
+            if (code.length() > 80 || hasControl(code)) code = "SUT_METRICS";
+            if (message.length() > 512 || message.contains("http://") || message.contains("https://") || hasControl(message))
+                message = "SUT Metrics collection reported incomplete external evidence.";
+            result.add(fields("code", code, "message", message));
+        }
+        return result;
+    }
+
     Map<String, Object> livePreview(String jobId, String principal, boolean admin, Instant startedAt,
                                     String range, String step, String targetId, String profilePath) throws Exception {
         Map<String, Object> snapshot = snapshotForJob(jobId);
@@ -1239,6 +1426,8 @@ final class SutMetricsService implements AutoCloseable {
 
     private List<Map<String, Object>> queryRange(Map<String, Object> source, String query, Instant start, Instant end, Duration step, String tenant) throws Exception {
         if (query == null || query.isBlank() || query.length() > 4096 || query.contains(";")) throw new IllegalArgumentException("PromQL expression is invalid or exceeds its limit.");
+        if ("GRAFANA".equals(String.valueOf(source.getOrDefault("provider", "PROMETHEUS"))))
+            return queryGrafanaRange(source, query, start, end, step, tenant);
         URI endpoint = endpoint(source, query, start, end, step);
         HttpRequest.Builder builder = HttpRequest.newBuilder(endpoint).timeout(Duration.ofMillis(sourceInt(source, "requestTimeoutMs")))
                 .header("Accept", "application/json").GET();
@@ -1293,6 +1482,150 @@ final class SutMetricsService implements AutoCloseable {
         }
         return rows;
     }
+
+    private List<Map<String, Object>> queryGrafanaRange(Map<String, Object> source, String query, Instant start,
+                                                        Instant end, Duration step, String tenant) throws Exception {
+        verifyGrafanaVersion(source, true);
+        String datasourceUid = String.valueOf(source.get("grafanaDatasourceUid"));
+        String orgId = tenant == null || tenant.isBlank() ? null : tenant;
+        if (orgId != null && (!GRAFANA_ORG_ID.matcher(orgId).matches()
+                || !listOfStrings(source.get("allowedTenants")).contains(orgId)))
+            throw new IllegalArgumentException("The requested Grafana organization is not allowed.");
+        long stepMillis = Math.max(1000L, step.toMillis());
+        long durationMillis = Math.max(stepMillis, Duration.between(start, end).toMillis());
+        long maxDataPoints = Math.min(sourceInt(source, "maxSamplesPerQuery"),
+                Math.max(1L, durationMillis / stepMillis + 1L));
+        Map<String, Object> model = fields("refId", "A", "datasource", fields("uid", datasourceUid, "type", "prometheus"),
+                "expr", query, "queryType", "range", "range", Boolean.TRUE, "instant", Boolean.FALSE,
+                "format", "time_series", "intervalMs", stepMillis, "maxDataPoints", maxDataPoints,
+                "legendFormat", "__auto");
+        byte[] requestBytes = json.writeValueAsBytes(fields("from", Long.toString(start.toEpochMilli()),
+                "to", Long.toString(end.toEpochMilli()), "queries", List.of(model)));
+        HttpRequest.Builder request = HttpRequest.newBuilder(grafanaEndpoint(source, "/api/ds/query"))
+                .timeout(Duration.ofMillis(sourceInt(source, "requestTimeoutMs")))
+                .header("Accept", "application/json").header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(requestBytes));
+        addAuthentication(request, source);
+        if (orgId != null) request.header("X-Grafana-Org-Id", orgId);
+        BoundedHttpResponse response = sendBounded(source, request.build());
+        if (response.statusCode() < 200 || response.statusCode() >= 300)
+            throw new IllegalArgumentException("Grafana data source query returned HTTP " + response.statusCode() + ".");
+        JsonNode root = json.readTree(response.body());
+        JsonNode result = root.path("results").path("A");
+        if (!root.path("results").isObject() || !result.isObject())
+            throw new IllegalArgumentException("Grafana returned an unsupported data source query result.");
+        if (result.hasNonNull("error")) throw new IllegalArgumentException("Grafana data source query failed.");
+        JsonNode frames = result.path("frames");
+        if (!frames.isArray()) throw new IllegalArgumentException("Grafana returned an unsupported data frame result.");
+        int maxSeries = sourceInt(source, "maxSeriesPerJob");
+        List<Map<String, Object>> rows = new ArrayList<>();
+        long sampleCount = 0L;
+        for (JsonNode frame : frames) {
+            JsonNode fields = frame.path("schema").path("fields"), values = frame.path("data").path("values");
+            if (!fields.isArray() || !values.isArray() || fields.size() != values.size())
+                throw new IllegalArgumentException("Grafana returned a malformed data frame.");
+            int timeColumn = -1;
+            for (int index = 0; index < fields.size(); index++) {
+                JsonNode field = fields.get(index);
+                if ("time".equalsIgnoreCase(field.path("type").asText())
+                        || "time".equalsIgnoreCase(field.path("name").asText())) { timeColumn = index; break; }
+            }
+            if (timeColumn < 0) throw new IllegalArgumentException("Grafana data frame has no time field.");
+            JsonNode timestamps = values.get(timeColumn);
+            if (!timestamps.isArray()) throw new IllegalArgumentException("Grafana data frame timestamps are invalid.");
+            for (int column = 0; column < fields.size(); column++) {
+                if (column == timeColumn) continue;
+                JsonNode field = fields.get(column), samples = values.get(column);
+                if (!samples.isArray()) continue;
+                Map<String, Object> labels = new LinkedHashMap<>();
+                JsonNode labelsNode = field.path("labels");
+                if (labelsNode.isObject()) labels.putAll(json.convertValue(labelsNode, Map.class));
+                String fieldName = field.path("name").asText("");
+                if (!fieldName.isBlank() && !"Value".equalsIgnoreCase(fieldName)) labels.putIfAbsent("__name__", fieldName);
+                List<Map<String, Object>> points = new ArrayList<>();
+                int count = Math.min(timestamps.size(), samples.size());
+                for (int index = 0; index < count; index++) {
+                    JsonNode timestampNode = timestamps.get(index), sample = samples.get(index);
+                    if (timestampNode == null || sample == null || sample.isNull()) continue;
+                    double rawTimestamp;
+                    if (timestampNode.isNumber()) rawTimestamp = timestampNode.asDouble();
+                    else if (timestampNode.isTextual()) {
+                        Instant instant = parseInstant(timestampNode.asText());
+                        if (instant == null) continue;
+                        rawTimestamp = instant.toEpochMilli();
+                    } else continue;
+                    double value;
+                    try { value = sample.isNumber() ? sample.asDouble() : Double.parseDouble(sample.asText()); }
+                    catch (NumberFormatException invalid) { continue; }
+                    if (!Double.isFinite(rawTimestamp) || !Double.isFinite(value)) continue;
+                    long epochMs = Math.round(rawTimestamp);
+                    if (epochMs < start.toEpochMilli() - stepMillis || epochMs > end.toEpochMilli() + stepMillis) continue;
+                    points.add(fields("timestamp", Instant.ofEpochMilli(epochMs).toString(), "timestampEpochMs", epochMs, "value", value));
+                    sampleCount++;
+                    if (sampleCount > sourceInt(source, "maxSamplesPerQuery"))
+                        throw new IllegalArgumentException("Grafana returned too many samples.");
+                }
+                if (!points.isEmpty()) rows.add(fields("labels", labels, "samples", points));
+                if (rows.size() > maxSeries) throw new IllegalArgumentException("Grafana returned too many series.");
+            }
+        }
+        return rows;
+    }
+
+    private BoundedHttpResponse sendBounded(Map<String, Object> source, HttpRequest request) throws Exception {
+        HttpResponse<InputStream> response = client(source).send(request, HttpResponse.BodyHandlers.ofInputStream());
+        InputStream responseBody = response.body();
+        Future<byte[]> bodyRead;
+        try { bodyRead = bodyReaders.submit(() -> readBounded(responseBody, sourceInt(source, "maxResponseBytes"))); }
+        catch (java.util.concurrent.RejectedExecutionException full) {
+            try { responseBody.close(); } catch (Exception ignored) { }
+            throw new CapacityException("Metrics response-read capacity is full; retry shortly.");
+        }
+        byte[] body;
+        try { body = bodyRead.get(sourceInt(source, "requestTimeoutMs"), TimeUnit.MILLISECONDS); }
+        catch (TimeoutException timeout) {
+            bodyRead.cancel(true); try { responseBody.close(); } catch (Exception ignored) { }
+            throw new SutMetricsTimeoutException("Metrics response body timed out.");
+        } catch (java.util.concurrent.ExecutionException failed) {
+            Throwable cause = failed.getCause() == null ? failed : failed.getCause();
+            if (cause instanceof Exception exception) throw exception;
+            throw new IllegalStateException("Metrics response could not be read.", cause);
+        } finally { try { responseBody.close(); } catch (Exception ignored) { } }
+        return new BoundedHttpResponse(response.statusCode(), body);
+    }
+
+    private String verifyGrafanaVersion(Map<String, Object> source, boolean cached) throws Exception {
+        String key = String.valueOf(source.get("id")) + ":" + String.valueOf(source.get("url"));
+        long now = System.nanoTime();
+        GrafanaHealth known = grafanaHealth.get(key);
+        if (cached && known != null && known.expiresAtNanos() > now) return known.version();
+        HttpRequest.Builder request = HttpRequest.newBuilder(grafanaEndpoint(source, "/api/health"))
+                .timeout(Duration.ofMillis(sourceInt(source, "requestTimeoutMs"))).header("Accept", "application/json").GET();
+        addAuthentication(request, source);
+        BoundedHttpResponse response = sendBounded(source, request.build());
+        if (response.statusCode() < 200 || response.statusCode() >= 300)
+            throw new IllegalArgumentException("Grafana health check returned HTTP " + response.statusCode() + ".");
+        JsonNode health = json.readTree(response.body());
+        String version = health.path("version").asText("");
+        Matcher matcher = Pattern.compile("^(\\d+)(?:\\.\\d+){1,2}(?:[-+].*)?$").matcher(version);
+        if (!matcher.matches()) throw new IllegalArgumentException("Grafana health response did not report a supported version.");
+        int major;
+        try { major = Integer.parseInt(matcher.group(1)); }
+        catch (NumberFormatException invalid) { throw new IllegalArgumentException("Grafana version is unsupported."); }
+        if (major < 9 || major > 13)
+            throw new IllegalArgumentException("Grafana version is outside the supported 9.x through 13.x adapter range.");
+        grafanaHealth.put(key, new GrafanaHealth(version, now + TimeUnit.MINUTES.toNanos(5)));
+        return version;
+    }
+
+    private static URI grafanaEndpoint(Map<String, Object> source, String endpoint) {
+        String base = String.valueOf(source.get("url"));
+        while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+        return URI.create(base + endpoint);
+    }
+
+    private record BoundedHttpResponse(int statusCode, byte[] body) { }
+    private record GrafanaHealth(String version, long expiresAtNanos) { }
 
     private URI endpoint(Map<String, Object> source, String query, Instant start, Instant end, Duration step) {
         String base = String.valueOf(source.get("url"));
@@ -1439,11 +1772,14 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private Map<String, Object> validateSource(Map<String, Object> input, boolean enforceEgressAllowlist) {
-        rejectUnknown(input, Set.of("schemaVersion", "id", "name", "url", "apiPath", "tls", "auth", "readers", "readRoles", "allowedTenants", "defaultTenant", "limits"), "Data Source");
+        rejectUnknown(input, Set.of("schemaVersion", "id", "name", "provider", "grafanaDatasourceUid", "url", "apiPath", "tls", "auth", "readers", "readRoles", "allowedTenants", "defaultTenant", "limits"), "Data Source");
         if (input.containsKey("schemaVersion") && !"att-sut-metrics-source/v1".equals(input.get("schemaVersion")))
             throw new IllegalArgumentException("Data Source schemaVersion must be att-sut-metrics-source/v1.");
         String id = requiredText(input, "id"), name = requiredText(input, "name"), url = requiredText(input, "url");
         if (!ID.matcher(id).matches() || name.length() > 120 || hasControl(name)) throw new IllegalArgumentException("Data Source id or name is invalid.");
+        String provider = String.valueOf(input.getOrDefault("provider", "PROMETHEUS")).toUpperCase(Locale.ROOT);
+        if (!Set.of("PROMETHEUS", "GRAFANA").contains(provider))
+            throw new IllegalArgumentException("Data Source provider must be PROMETHEUS or GRAFANA.");
         URI uri;
         try { uri = URI.create(url); } catch (RuntimeException malformed) { throw new IllegalArgumentException("Data Source URL is invalid."); }
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
@@ -1455,6 +1791,16 @@ final class SutMetricsService implements AutoCloseable {
         String apiPath = String.valueOf(input.getOrDefault("apiPath", "/api/v1/query_range"));
         if (!apiPath.startsWith("/") || apiPath.contains("..") || apiPath.contains("?") || apiPath.contains("#") || apiPath.length() > 256)
             throw new IllegalArgumentException("Data Source apiPath must be a fixed safe absolute path.");
+        String datasourceUid = nullableText(input.get("grafanaDatasourceUid"));
+        if ("GRAFANA".equals(provider)) {
+            if (datasourceUid == null || !GRAFANA_UID.matcher(datasourceUid).matches())
+                throw new IllegalArgumentException("Grafana sources require one approved datasource UID.");
+            if (!"/api/ds/query".equals(apiPath) && input.containsKey("apiPath"))
+                throw new IllegalArgumentException("Grafana uses the fixed /api/ds/query endpoint.");
+            apiPath = "/api/ds/query";
+        } else if (datasourceUid != null) {
+            throw new IllegalArgumentException("grafanaDatasourceUid is accepted only for Grafana sources.");
+        }
         Map<String, Object> tls = objectOrEmpty(input.get("tls")); rejectUnknown(tls, Set.of("verify", "caSecretRef"), "tls");
         boolean verifyTls = !tls.containsKey("verify") || bool(tls.get("verify"));
         String caRef = nullableText(tls.get("caSecretRef")); if (caRef != null) validateSecretRef(caRef);
@@ -1465,13 +1811,20 @@ final class SutMetricsService implements AutoCloseable {
         String secretRef = nullableText(auth.get("secretRef"));
         if (!"NONE".equals(authMode)) { if (secretRef == null) throw new IllegalArgumentException("A server secret reference is required for authenticated sources."); validateSecretRef(secretRef); }
         else if (secretRef != null) throw new IllegalArgumentException("secretRef is not accepted when auth.mode is NONE.");
+        if ("GRAFANA".equals(provider) && !"BEARER".equals(authMode))
+            throw new IllegalArgumentException("Grafana sources require a server-side service-account BEARER secret.");
         List<String> allowedTenants = checkedStrings(input.get("allowedTenants"), 32, 128, "allowedTenants");
+        if ("GRAFANA".equals(provider) && allowedTenants.stream().anyMatch(value -> !GRAFANA_ORG_ID.matcher(value).matches()))
+            throw new IllegalArgumentException("Grafana allowedTenants must contain numeric organization IDs.");
         String defaultTenant = nullableText(input.get("defaultTenant"));
+        if ("GRAFANA".equals(provider) && (allowedTenants.isEmpty() || defaultTenant == null))
+            throw new IllegalArgumentException("Grafana sources require an explicit default organization ID and permitted organization list.");
         if (defaultTenant != null && !allowedTenants.contains(defaultTenant)) throw new IllegalArgumentException("defaultTenant must be listed in allowedTenants.");
         List<String> readers = checkedStrings(input.get("readers"), 256, 120, "readers");
         List<String> readRoles = checkedRoles(input.get("readRoles"));
         Map<String, Object> limits = normalizeLimits(objectOrEmpty(input.get("limits")));
-        return fields("schemaVersion", "att-sut-metrics-source/v1", "id", id, "name", name, "url", uri.toString(),
+        return fields("schemaVersion", "att-sut-metrics-source/v1", "id", id, "name", name,
+                "provider", provider, "grafanaDatasourceUid", datasourceUid, "url", uri.toString(),
                 "apiPath", apiPath, "tls", fields("verify", verifyTls, "caSecretRef", caRef),
                 "auth", fields("mode", authMode, "secretRef", secretRef), "readers", readers, "readRoles", readRoles,
                 "allowedTenants", allowedTenants, "defaultTenant", defaultTenant, "limits", limits,
@@ -1653,10 +2006,13 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private Map<String, Object> sourceView(Map<String, Object> source, boolean admin) {
-        Map<String, Object> result = fields("id", source.get("id"), "name", source.get("name"), "authConfigured",
+        Map<String, Object> result = fields("id", source.get("id"), "name", source.get("name"),
+                "provider", source.getOrDefault("provider", "PROMETHEUS"), "authConfigured",
                 !"NONE".equals(objectOrEmpty(source.get("auth")).get("mode")), "tlsVerify", objectOrEmpty(source.get("tls")).get("verify"),
                 "allowedTenants", source.get("allowedTenants"), "defaultTenant", source.get("defaultTenant"), "limits", source.get("limits"));
-        if (admin) { result.put("url", source.get("url")); result.put("apiPath", source.get("apiPath")); result.put("readers", source.get("readers"));
+        if (admin) { result.put("url", source.get("url")); result.put("apiPath", source.get("apiPath"));
+            if ("GRAFANA".equals(source.get("provider"))) result.put("grafanaDatasourceUid", source.get("grafanaDatasourceUid"));
+            result.put("readers", source.get("readers"));
             result.put("readRoles", source.get("readRoles")); result.put("tls", fields("verify", objectOrEmpty(source.get("tls")).get("verify"),
                     "caSecretConfigured", objectOrEmpty(source.get("tls")).get("caSecretRef") != null,
                     "caSecretRef", objectOrEmpty(source.get("tls")).get("caSecretRef")));

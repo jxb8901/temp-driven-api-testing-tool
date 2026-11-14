@@ -48,6 +48,45 @@ class ApiServletIntegratedLimitsTest {
     private static final int DEFAULT_INSPECTION_TIMEOUT_MS=30_000;
     @TempDir Path temp;
 
+    @Test void nativeArtifactStatusSurvivesNonLoadJobsAndCorruptOptionalLoadMetadata() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("artifact-status-packages"));
+        createPackage(packages.resolve("p"));
+        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"artifact-status-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("artifact-status-libs"))) {
+            ApiServlet servlet=servlet(runtime);
+            for(String command:List.of("run","debug")) {
+                String id="debug".equals(command)?"J0000000000000731":"J0000000000000730";
+                Path output=Files.createDirectories(runtime.outputDirectoryForJob(id));
+                Files.writeString(output.resolve("native.txt"),"native report");
+                Job job=new Job(id,command,"p","alice",new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
+                runtime.store.insert(job,"{}");job.status="PASS";job.finishedAt=Instant.now();runtime.store.update(job);
+                ArtifactArchive.build(output,runtime.artifactArchivePath(id));
+                Files.writeString(runtime.artifactArchivePath(id).resolveSibling("archive-status.json"),"{\"state\":\"READY\"}");
+                Captured response=invoke(servlet,"GET","/jobs/"+id+"/artifacts/status",Collections.emptyMap(),new byte[0]);
+                JsonNode overview=ServerRuntime.JSON.readTree(response.body());
+                assertEquals(200,response.status,new String(response.body(),StandardCharsets.UTF_8));
+                assertEquals("READY",overview.path("archiveStatus").asText());
+                assertFalse(overview.has("loadReportV2"),command+" jobs must not expose a LOAD report extension.");
+            }
+
+            String id="J0000000000000732";
+            Path output=Files.createDirectories(runtime.outputDirectoryForJob(id));
+            Files.writeString(output.resolve("native.txt"),"native report");
+            Job job=new Job(id,"load","p","alice",new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
+            runtime.store.insert(job,"{}");job.status="PASS";job.finishedAt=Instant.now();runtime.store.update(job);
+            ArtifactArchive.build(output,runtime.artifactArchivePath(id));
+            Files.writeString(runtime.artifactArchivePath(id).resolveSibling("archive-status.json"),"{\"state\":\"READY\"}");
+            Path malformedSnapshot=output.getParent().resolve("sut-metrics/snapshot.json");
+            Files.createDirectories(malformedSnapshot.getParent());
+            Files.writeString(malformedSnapshot,"{not-json");
+            Captured response=invoke(servlet,"GET","/jobs/"+id+"/artifacts/status",Collections.emptyMap(),new byte[0]);
+            JsonNode overview=ServerRuntime.JSON.readTree(response.body());
+            assertEquals(200,response.status,new String(response.body(),StandardCharsets.UTF_8));
+            assertEquals("READY",overview.path("archiveStatus").asText());
+            assertEquals("FAILED",overview.path("loadReportV2").path("state").asText());
+        }
+    }
+
     @Test void emptyRegisteredPackageReturnsEmptyInspectorInventoryAndDoesNotAffectAnotherPackage() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("empty-package-packages"));
         Files.createDirectory(packages.resolve("lilyzhou"));

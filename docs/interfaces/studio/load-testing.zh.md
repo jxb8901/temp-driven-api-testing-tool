@@ -46,6 +46,12 @@ Jobs 在 Server 對完整 matching history 執行 filter、Target 排序／分�
 
 Explorer 是 React 與 TypeScript 單頁 UI，於 `att-web` Maven resource 階段使用 Vite 建置。Maven 會把產生的靜態資源複製至 `META-INF/resources/ui/`；Server WAR 再將它們封裝供 Tomcat 提供。Node.js 只用於建置階段。部署後的 UI 呼叫同源公開 REST API，無需額外 Node 程序或前端服務。
 
+## SUT Metrics 及離線 LOAD 報告
+
+SUT Metrics Data Source 由管理員在 Server 管理。Data Source 可直接使用 Prometheus，或使用固定一個 `grafanaDatasourceUid` 的 Grafana proxy；Grafana 請求只會使用固定 `/api/ds/query` route 及 Server 管理的 PromQL。請以 `ATT_SECRET_*` reference 配置 server-side service account token、已驗證 TLS、核准 host、permitted organization list 內明確的數值型 default organization ID，以及有界 request／sample 上限。Studio 不接受瀏覽器 URL、datasource UID、PromQL、token 或 proxy override。
+
+LOAD Job 結束後，既有的有界 SUT Metrics collection 在完成驗證且有最終狀態時，會另行發佈版本化離線報告。已驗證報告的下載與 `artifacts.zip` 分開，不會重寫原生 archive 或其 manifest。報告包含 source-neutral observation metadata、有界圖表預覽、已驗證 series sidecar、coverage、gaps、execution status 及 LOAD phase windows。Partial 或 unavailable collection state 會如實顯示。報告是靜態檔案，可離線使用，也不會發送即時請求。它不會評估 performance threshold，亦不會改變 Job result。若未來 verdict writer 提供獨立版本化 verdict record，報告可顯示該資料。此流程不會增加 continuous collector，專用的 **SUT Metrics** 與原生 **Metrics** tabs 仍保持獨立。
+
 ## 儲存私人 Scenario
 
 驗證 Load Template 組合後，選擇 **Save Scenario** 並輸入名稱。儲存會在 Server 建立私人記錄，不會啟動 Job、建立 Schedule 或寫入 Package 檔案。在 **Load testing → Scenarios** 的 **Saved scenarios** 中，可以搜尋、重新開啟、複製、驗證或刪除自己的記錄。Template 組合會在 Load Template 編輯器重新開啟；API 撰寫的 scenario 定義則在 Advanced Load 編輯器開啟。編輯並儲存會建立新版本，在同一個編輯器再次儲存亦然；版本衝突時須重新載入。儲存後須返回清單並驗證已儲存的版本，才可執行或排程。只有經驗證的預覽明確標示為未遮蔽時，檢視對話框才提供 **Export YAML**。

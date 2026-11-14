@@ -344,6 +344,17 @@ export interface JobArtifactOverview {
   complete?: boolean | null;
   omissions?: Array<{ count: number; category: string }> | null;
   omissionReasonsAvailable: boolean;
+  loadReportV2?: {
+    schemaVersion?: string;
+    state?: 'DISABLED' | 'PENDING' | 'BUILDING' | 'READY' | 'FAILED' | string;
+    collectionState?: string;
+    externalEvaluationStatus?: string;
+    performanceVerdict?: string;
+    publicationId?: string;
+    updatedAt?: string;
+    downloadPath?: string;
+    lastAttemptState?: string;
+  };
 }
 
 export interface JobEvent {

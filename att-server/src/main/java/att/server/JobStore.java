@@ -68,6 +68,8 @@ final class JobStore implements AutoCloseable {
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS archive_metrics_json CLOB");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS worker_quarantined BOOLEAN DEFAULT FALSE NOT NULL");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS artifact_recovery BOOLEAN DEFAULT TRUE NOT NULL");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS load_report_recovery BOOLEAN DEFAULT TRUE NOT NULL");
+            s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS load_report_publication_pending BOOLEAN DEFAULT FALSE NOT NULL");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retention_state VARCHAR(16)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retention_bytes BIGINT");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT FALSE NOT NULL");
@@ -85,6 +87,8 @@ final class JobStore implements AutoCloseable {
             s.execute("CREATE INDEX IF NOT EXISTS jobs_created_page_idx ON jobs(created_at,job_id)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_delete_requested_idx ON jobs(retention_state,delete_requested_at,job_id)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_artifact_recovery_idx ON jobs(artifact_recovery,job_id)");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_load_report_recovery_idx ON jobs(load_report_recovery,command,job_id)");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_load_report_pending_idx ON jobs(load_report_publication_pending,command,finished_at,job_id)");
             s.execute("CREATE TABLE IF NOT EXISTS job_worker_processes (job_id VARCHAR(80) NOT NULL, process_pid BIGINT NOT NULL, process_start_time VARCHAR(40), PRIMARY KEY(job_id,process_pid), FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE CASCADE)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS schedule_occurrence_id VARCHAR(160)");
             s.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_schedule_occurrence_uq ON jobs(schedule_occurrence_id)");
@@ -203,13 +207,13 @@ final class JobStore implements AutoCloseable {
         try(Connection c=connect()) {
             c.setAutoCommit(false);
             try {
-                try(PreparedStatement p=c.prepareStatement("INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,att_version,request_summary,schedule_occurrence_id,execution_spec,replay_unavailable,rerun_of_job_id,replay_intent,replay_owner,originating_schedule_id,target_identity,target_sort,target_group,environment,submission_source,schedule_owner,execution_principal,submitted_by,triggered_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
+                try(PreparedStatement p=c.prepareStatement("INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,att_version,request_summary,schedule_occurrence_id,execution_spec,replay_unavailable,rerun_of_job_id,replay_intent,replay_owner,originating_schedule_id,target_identity,target_sort,target_group,environment,submission_source,schedule_owner,execution_principal,submitted_by,triggered_by,load_report_recovery,load_report_publication_pending) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
                     p.setString(1,job.id);p.setString(2,job.command);p.setString(3,job.packageId);p.setString(4,job.principal);p.setString(5,job.status);p.setString(6,job.createdAt.toString());p.setString(7,ServerBuildInfo.PRODUCT);p.setString(8,summary);p.setString(9,job.scheduleOccurrenceId);p.setString(10,job.executionSpec);p.setString(11,job.replayUnavailable);p.setString(12,job.rerunOfJobId);p.setString(13,job.replayIntent);p.setString(14,job.replayOwner);p.setString(15,job.originatingScheduleId);
                     var metadata=ServerRuntime.JSON.readTree(summary);var identity=metadata.path("targetIdentity");
                     p.setString(16,identity.isObject()?identity.toString():null);
                     p.setString(17,identity.hasNonNull("type")?identity.path("type").asText()+" · "+identity.path("id").asText():"Unknown target");
                     p.setString(18,identity.path("signature").asText("legacy"));p.setString(19,metadata.path("environment").asText(""));
-                    p.setString(20,job.submissionSource);p.setString(21,job.scheduleOwner);p.setString(22,job.executionPrincipal);p.setString(23,job.submittedBy);p.setString(24,job.triggeredBy);p.executeUpdate();
+                    p.setString(20,job.submissionSource);p.setString(21,job.scheduleOwner);p.setString(22,job.executionPrincipal);p.setString(23,job.submittedBy);p.setString(24,job.triggeredBy);p.setBoolean(25,false);p.setBoolean(26,false);p.executeUpdate();
                 }
                 writeSearchTargets(c,job.id,targets);
                 if(job.replayIntent!=null)try(PreparedStatement p=c.prepareStatement("INSERT INTO job_replay_intents(principal,intent_id,source_job_id,job_id,expires_at) VALUES(?,?,?,?,?)")) {
@@ -955,7 +959,7 @@ final class JobStore implements AutoCloseable {
     }
     synchronized List<String> expiredJobIds(Instant before) throws Exception {
         List<String> ids=new ArrayList<>();
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id FROM jobs WHERE pinned=FALSE AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND (retention_state IS NULL OR retention_state='') AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at < ? ORDER BY finished_at LIMIT 500")) {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id FROM jobs WHERE pinned=FALSE AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND (load_report_publication_pending=FALSE OR command<>'load') AND (retention_state IS NULL OR retention_state='') AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at < ? ORDER BY finished_at LIMIT 500")) {
             p.setString(1,before.toString());try(ResultSet r=p.executeQuery()){while(r.next())ids.add(r.getString(1));}
         }
         return ids;
@@ -991,6 +995,39 @@ final class JobStore implements AutoCloseable {
             p.setBoolean(1,needed);p.setString(2,id);p.executeUpdate();
         }
     }
+    synchronized List<String> loadReportRecoveryJobIds(String after,int limit) throws Exception {
+        if(limit<1||limit>64)throw new IllegalArgumentException("Invalid LOAD report recovery batch size");
+        List<String> ids=new ArrayList<>();
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT job_id FROM jobs WHERE load_report_recovery=TRUE AND command='load' AND job_id>? AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL ORDER BY job_id LIMIT ?")) {
+            p.setString(1,after);p.setInt(2,limit);try(ResultSet r=p.executeQuery()){while(r.next())ids.add(r.getString(1));}
+        }
+        return ids;
+    }
+    synchronized void loadReportRecoveryNeeded(String id,boolean needed) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET load_report_recovery=?,load_report_publication_pending=CASE WHEN ?=FALSE THEN FALSE ELSE load_report_publication_pending END WHERE job_id=? AND command='load'")) {
+            p.setBoolean(1,needed);p.setBoolean(2,needed);p.setString(3,id);p.executeUpdate();
+        }
+    }
+    synchronized void markLoadReportPublicationPending(String id) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET load_report_recovery=TRUE,load_report_publication_pending=TRUE WHERE job_id=? AND command='load'")) {
+            p.setString(1,id);p.executeUpdate();
+        }
+    }
+    synchronized void deferLoadReportPublicationRetry(String id) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET load_report_recovery=TRUE,load_report_publication_pending=FALSE WHERE job_id=? AND command='load'")) {
+            p.setString(1,id);p.executeUpdate();
+        }
+    }
+    synchronized void completeLoadReportPublication(String id,boolean recoveryNeeded) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET load_report_recovery=?,load_report_publication_pending=FALSE WHERE job_id=? AND command='load'")) {
+            p.setBoolean(1,recoveryNeeded);p.setString(2,id);p.executeUpdate();
+        }
+    }
+    synchronized boolean loadReportPublicationPending(String id) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT load_report_publication_pending FROM jobs WHERE job_id=? AND command='load'")) {
+            p.setString(1,id);try(ResultSet r=p.executeQuery()){return r.next()&&r.getBoolean(1);}
+        }
+    }
     synchronized void quarantineWorker(String id) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET worker_quarantined=TRUE WHERE job_id=?")) {
             p.setString(1,id);if(p.executeUpdate()!=1)throw new IllegalStateException("Job quarantine could not be persisted");
@@ -1007,7 +1044,7 @@ final class JobStore implements AutoCloseable {
         return markDeleting(id, finishedAtOrBefore, null);
     }
     synchronized boolean markDeleting(String id, Instant finishedAtOrBefore, Long bytes) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET retention_state='DELETING', retention_bytes=? WHERE job_id=? AND pinned=FALSE AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at<=? AND (retention_state IS NULL OR retention_state='')")) {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET retention_state='DELETING', retention_bytes=? WHERE job_id=? AND pinned=FALSE AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND (load_report_publication_pending=FALSE OR command<>'load') AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND finished_at<=? AND (retention_state IS NULL OR retention_state='')")) {
             if(bytes==null||bytes<0)p.setNull(1,java.sql.Types.BIGINT);else p.setLong(1,bytes);
             p.setString(2,id);p.setString(3,finishedAtOrBefore.toString());return p.executeUpdate()==1;
         }
@@ -1035,7 +1072,7 @@ final class JobStore implements AutoCloseable {
         }
     }
     synchronized boolean markManualDeleting(String id,String actor) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET retention_state='DELETING',retention_actor=? WHERE job_id=? AND pinned=FALSE AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND (retention_state IS NULL OR retention_state='')")) {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET retention_state='DELETING',retention_actor=? WHERE job_id=? AND pinned=FALSE AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND (load_report_publication_pending=FALSE OR command<>'load') AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND (retention_state IS NULL OR retention_state='')")) {
             p.setString(1,bounded(actor,256));p.setString(2,id);return p.executeUpdate()==1;
         }
     }
@@ -1045,15 +1082,15 @@ final class JobStore implements AutoCloseable {
             c.setAutoCommit(false);
             try {
                 String outcome;
-                try(PreparedStatement p=c.prepareStatement("SELECT retention_state,pinned,worker_quarantined,artifact_recovery,status,finished_at FROM jobs WHERE job_id=? FOR UPDATE")) {
+                try(PreparedStatement p=c.prepareStatement("SELECT retention_state,pinned,worker_quarantined,artifact_recovery,load_report_publication_pending,status,finished_at FROM jobs WHERE job_id=? FOR UPDATE")) {
                     p.setString(1,id);
                     try(ResultSet r=p.executeQuery()) {
                         if(!r.next())outcome="ALREADY_UNAVAILABLE";
                         else if("DELETING".equals(r.getString(1)))outcome="ALREADY_CLAIMED";
                         else if(requested=="DELETE_REQUESTED".equals(r.getString(1)))outcome="ALREADY_IN_STATE";
                         else if(requested&&r.getBoolean(2))outcome="PINNED_UNPIN_FIRST";
-                        else if(requested&&(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(r.getString(5))||r.getString(6)==null))outcome="NOT_TERMINAL";
-                        else if(requested&&(r.getBoolean(3)||r.getBoolean(4)))outcome="NOT_ELIGIBLE";
+                        else if(requested&&(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(r.getString(6))||r.getString(7)==null))outcome="NOT_TERMINAL";
+                        else if(requested&&(r.getBoolean(3)||r.getBoolean(4)||r.getBoolean(5)))outcome="NOT_ELIGIBLE";
                         else {
                             try(PreparedStatement update=c.prepareStatement("UPDATE jobs SET retention_state=?,retention_actor=?,delete_requested_at=? WHERE job_id=?")) {
                                 update.setString(1,requested?"DELETE_REQUESTED":null);update.setString(2,requested?bounded(actor,256):null);
@@ -1082,7 +1119,7 @@ final class JobStore implements AutoCloseable {
         try(Connection c=connect()) {
             c.setAutoCommit(false);
             try {
-                try(PreparedStatement p=c.prepareStatement("UPDATE jobs SET retention_state='DELETING' WHERE job_id=? AND retention_state='DELETE_REQUESTED' AND delete_requested_at<=? AND pinned=FALSE AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL")) {
+                try(PreparedStatement p=c.prepareStatement("UPDATE jobs SET retention_state='DELETING' WHERE job_id=? AND retention_state='DELETE_REQUESTED' AND delete_requested_at<=? AND pinned=FALSE AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND (load_report_publication_pending=FALSE OR command<>'load') AND status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL")) {
                     p.setString(1,id);p.setLong(2,before);if(p.executeUpdate()!=1){c.rollback();return false;}
                 }
                 try(PreparedStatement p=c.prepareStatement("INSERT INTO audit(principal,action,job_id,created_at,outcome) SELECT COALESCE(retention_actor,'system:job-retention'),'JOB_DELETE_CLAIM',job_id,?,'CLAIMED' FROM jobs WHERE job_id=?")) {
@@ -1126,7 +1163,7 @@ final class JobStore implements AutoCloseable {
     synchronized List<Map<String,Object>> storageCandidates(String afterFinishedAt, String afterJobId) throws Exception {
         List<Map<String,Object>> rows=new ArrayList<>();
         boolean page=afterFinishedAt!=null&&afterJobId!=null;
-        String sql="SELECT job_id,finished_at,command,status,artifact_recovery,worker_quarantined,pinned FROM jobs WHERE status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND (retention_state IS NULL OR retention_state='') AND worker_quarantined=FALSE AND artifact_recovery=FALSE"
+        String sql="SELECT job_id,finished_at,command,status,artifact_recovery,worker_quarantined,pinned FROM jobs WHERE status IN ('PASS','FAIL','ERROR','INVALID','CANCELLED') AND finished_at IS NOT NULL AND (retention_state IS NULL OR retention_state='') AND worker_quarantined=FALSE AND artifact_recovery=FALSE AND (load_report_publication_pending=FALSE OR command<>'load')"
                 +(page?" AND (finished_at>? OR (finished_at=? AND job_id>?))":"")
                 +" ORDER BY finished_at ASC, job_id ASC LIMIT "+storageCandidatePage;
         try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)) {

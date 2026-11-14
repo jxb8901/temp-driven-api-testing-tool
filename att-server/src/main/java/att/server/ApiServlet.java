@@ -59,7 +59,8 @@ public final class ApiServlet extends HttpServlet {
     @Override protected void doGet(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String path=path(req);String requestId=requestId(req,res);
         if(path.equals("/sut-metrics/sources")||path.equals("/sut-metrics/profiles")
-                ||path.matches("/jobs/[^/]+/sut-metrics(?:/.*)?"))
+                ||path.matches("/jobs/[^/]+/sut-metrics(?:/.*)?")
+                ||path.matches("/jobs/[^/]+/load-report/v2/.*"))
             res.setHeader("Cache-Control","private, no-store");
         try {
             if(path.startsWith("/auth/")){authGet(req,res,path,requestId);return;}
@@ -146,6 +147,17 @@ public final class ApiServlet extends HttpServlet {
             }
             if(path.matches("/jobs/[^/]+/artifacts/status")) {
                 Map<String,Object> response=ServerRuntime.JSON.convertValue(runtime.artifactOverview(segment(path,2)),Map.class);
+                boolean admin;
+                try {admin=systemAdminCapability(req,principal);}
+                catch(Exception unavailable){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return;}
+                Map<String,Object> loadReportV2;
+                try { loadReportV2=runtime.loadReportV2Status(segment(path,2),principal,admin); }
+                catch(Exception optionalExtensionFailure) {
+                    // SUT report metadata is optional; keep a valid native artifact status response available.
+                    getServletContext().log("Offline LOAD report status is unavailable for Job "+segment(path,2),optionalExtensionFailure);
+                    loadReportV2=Map.of("schemaVersion","att-load-report-publication/v2","state","FAILED");
+                }
+                if(loadReportV2!=null)response.put("loadReportV2",loadReportV2);
                 response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;
             }
             if(path.matches("/jobs/[^/]+/replay-draft/[^/]+")){
@@ -161,6 +173,18 @@ public final class ApiServlet extends HttpServlet {
                     res.setContentType("application/zip");res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Cache-Control","private, no-store");
                     res.setHeader("Content-Disposition","attachment; filename=\""+id+"-artifacts.zip\"");res.setContentLengthLong(size);
                     read.writeTo(res.getOutputStream());
+                }
+                return;
+            }
+            if(path.matches("/jobs/[^/]+/load-report/v2/archive\\.zip")) {
+                String id=segment(path,2);boolean admin;
+                try {admin=systemAdminCapability(req,principal);}
+                catch(Exception unavailable){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return;}
+                try(ServerRuntime.ArtifactRead read=runtime.openLoadReportV2Archive(id,principal,admin)) {
+                    res.setContentType("application/zip");res.setHeader("X-Content-Type-Options","nosniff");
+                    res.setHeader("Cache-Control","private, no-store");
+                    res.setHeader("Content-Disposition","attachment; filename=\""+id+"-load-report-v2.zip\"");
+                    res.setContentLengthLong(read.length());read.writeTo(res.getOutputStream());
                 }
                 return;
             }

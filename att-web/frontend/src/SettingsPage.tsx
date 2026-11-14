@@ -8,7 +8,7 @@ import './SettingsPage.css';
 
 const EMPTY_SUT_SOURCE = {
   schemaVersion: 'att-sut-metrics-source/v1', id: 'prom-main', name: 'Main Prometheus',
-  url: 'https://prometheus.example.internal', apiPath: '/api/v1/query_range',
+  provider: 'PROMETHEUS', url: 'https://prometheus.example.internal', apiPath: '/api/v1/query_range',
   tls: { verify: true }, auth: { mode: 'NONE' }, readers: [], readRoles: ['USER'],
   allowedTenants: [], limits: { connectTimeoutMs: 5000, requestTimeoutMs: 10000, maxRangeSeconds: 93600, maxQueriesPerJob: 256 },
 };
@@ -171,15 +171,16 @@ function SutMetricsAdminPanel() {
 
   return <section className="panel att-settings-section att-sut-metrics-admin" aria-labelledby="sut-metrics-admin-title">
     <div className="att-settings-section-heading"><div><h2 id="sut-metrics-admin-title">SUT Metrics administration</h2>
-      <p className="att-settings-help">Register Prometheus endpoints and versioned metrics profiles. HTTPS hosts must exactly match ATT_SUT_METRICS_ALLOWED_HOSTS; HTTP is limited to loopback. Secret values are read from ATT_SECRET_* environment variables and are never returned by the API.</p></div></div>
+      <p className="att-settings-help">Register approved Prometheus or Grafana sources and versioned metrics profiles. Grafana uses one pinned Prometheus datasource UID through its fixed query endpoint and a service-account secret. HTTPS hosts must exactly match ATT_SUT_METRICS_ALLOWED_HOSTS; HTTP is limited to loopback. Secret values are read from ATT_SECRET_* environment variables and are never returned by the API.</p></div></div>
     {message && <p role="status" aria-live="polite">{message}</p>}
-    <section aria-labelledby="sut-sources-title"><h3 id="sut-sources-title">Prometheus Data Sources</h3>
+    <section aria-labelledby="sut-sources-title"><h3 id="sut-sources-title">SUT Metrics Data Sources</h3>
       <ul className="att-sut-catalog-list">{sources.map(source => <li key={String(source.id)}><strong>{String(source.name || source.id)}</strong> <code>{String(source.id)}</code>
         <button type="button" disabled={busy} onClick={() => setSourceJson(JSON.stringify(sourceForEditor(source), null, 2))}>Edit JSON</button>
         <button type="button" disabled={busy} onClick={() => void run(() => api.testSutMetricSource(String(source.id)), `Data Source ${String(source.id)} responded successfully.`)}>Test</button>
         <button type="button" disabled={busy} onClick={() => void run(() => api.deleteSutMetricSource(String(source.id)), `Data Source ${String(source.id)} deleted.`)}>Delete</button>
       </li>)}</ul>
       <label>Data Source JSON<textarea value={sourceJson} onChange={event => setSourceJson(event.target.value)} rows={12} spellCheck={false} /></label>
+      <p className="att-settings-help">Set <code>provider</code> to <code>GRAFANA</code> to pin <code>grafanaDatasourceUid</code>. Grafana organization IDs in <code>allowedTenants</code> and <code>defaultTenant</code> must be numeric. The adapter accepts only server-owned profiles and never accepts a browser query or proxy URL.</p>
       <button type="button" disabled={busy} onClick={() => void run(() => api.saveSutMetricSource(parseEditor(sourceJson, 'Data Source')), 'Data Source saved.')}>Save Data Source</button>
     </section>
     <section aria-labelledby="sut-profiles-title"><h3 id="sut-profiles-title">Metrics Profiles</h3>
@@ -211,7 +212,9 @@ function sourceForEditor(source: Record<string, unknown>): Record<string, unknow
   const tls = source.tls && typeof source.tls === 'object' ? source.tls as Record<string, unknown> : {};
   const auth = source.auth && typeof source.auth === 'object' ? source.auth as Record<string, unknown> : {};
   return {
-    schemaVersion: 'att-sut-metrics-source/v1', id: source.id, name: source.name, url: source.url, apiPath: source.apiPath,
+    schemaVersion: 'att-sut-metrics-source/v1', id: source.id, name: source.name,
+    provider: source.provider || 'PROMETHEUS', url: source.url, apiPath: source.apiPath,
+    ...(source.grafanaDatasourceUid ? { grafanaDatasourceUid: source.grafanaDatasourceUid } : {}),
     tls: { verify: tls.verify, ...(tls.caSecretRef ? { caSecretRef: tls.caSecretRef } : {}) },
     auth: { mode: auth.mode, ...(auth.secretRef ? { secretRef: auth.secretRef } : {}) },
     readers: source.readers || [], readRoles: source.readRoles || [], allowedTenants: source.allowedTenants || [],

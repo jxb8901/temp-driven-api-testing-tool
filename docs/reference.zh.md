@@ -123,6 +123,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [從 execution identity 追蹤 artifact](#從-execution-identity-追蹤-artifact)
   - [查閱 generated-output schemas](#查閱-generated-output-schemas)
   - [Reading `case.log` and `case.yaml`](#reading-caselog-and-caseyaml)
+  - [離線 SUT Metrics 報告](#離線-sut-metrics-報告)
 - [Validation 與 troubleshooting](#validation-與-troubleshooting)
   - [選擇第一個診斷步驟](#選擇第一個診斷步驟)
   - [先從 Validation 開始](#先從-validation-開始)
@@ -3356,6 +3357,12 @@ Case log structured entries use YAML. The human log records each normal Action a
 
 ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or INVALID with `【!!!!!】`. Search for that marker to find abnormal blocks; PASS, SKIPPED and informational blocks remain unmarked.
 
+### 離線 SUT Metrics 報告
+
+完成的 LOAD 若有 SUT collection evidence，可另外發佈獨立版本化的離線報告 archive。Publisher 會驗證來源 manifest 及每個 observation sidecar，逐 byte 保留原本 sealed native archive，並以不可變 snapshot 發佈。`att-load-report-extension/v2` manifest 會引用 source-neutral 的 `att-load-offline-observations/v1` record；其 `att-load-offline-observation/v1` entries 記錄 source、metric、profile、target、UTC window、phase、單位、sample resolution、coverage、gaps、diagnostics、checksums 及有界 chart preview。完整 series sidecar 仍使用 normalized `att-sut-metrics-observation/v1` contract。Partial 或 unavailable source data 會明確標示，不會改變 native Job result。
+
+報告可在沒有 network access 時使用，並採用 restrictive Content Security Policy。報告不會評估 performance threshold。如有獨立版本化的 `att-load-verdict/v1` record，報告只顯示其 evaluation state 與 evidence reference，不會重新計算 verdict。只有在驗證發佈成功後，才可透過 authenticated Job download route 取得 archive。
+
 ## Validation 與 troubleshooting
 
 ### 選擇第一個診斷步驟
@@ -3562,6 +3569,8 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | JUnit XML | att-junit/v2.1 |
 
 本次調整的 resource/config schema 舊版本位於 `schemas/history/`，除非嵌入的 Engine registry 登錄且支援，否則僅供歷史參考，不是 active execution contract。Unsupported version 會在 validation 失敗並提供 migration guidance。Repository `schemas/catalog.yaml` 僅為 build input；runtime 唯一權威來源是版本相符 ATT Engine JAR 內嵌 registry。Runtime 會從 classpath 讀取 schema files，並可在 private per-user temporary directory 建立經驗證、以內容 SHA-256 定位的相容快取。快取會保留目前及緊接上一版 registry 供 rollback；只有取得排他 OS lock 並確認沒有 Worker 使用後，才會刪除較舊版本。若清理中斷，下一次初始化會重試。不完整或遭竄改的快取只會在確認沒有程序持有 use lease 後重建；若仍有程序使用，validation 會 fail closed，並於 Worker 結束後重試。Validation revision 會綁定 Engine/registry identity、Package files、shared config files 及選定 Environment；Worker 處理請求前會驗證 Server 傳入的 registry identity。`ATT_HOME/schemas/` 及 package-local `schemas/` 不是 runtime 來源，也不能覆寫 registry。Package validation 會驗證 Engine 登錄的 schema resources；封存 schema 不會自動成為可用的 runtime contract。
+
+上表中的 SUT Metrics source schema 屬於 active Engine registry。離線報告 metadata 及外部提供的 verdict record 使用 `schemas/api/` 下的獨立 Server contracts，不屬於 Engine execution registry。詳見[離線 SUT Metrics 報告](reference.zh/results-reports-evidence.md)。
 
 <!-- att-docs:historical -->
 Load v1.6 及 MQHelper v1.2 是 loader 支援的相容歷史 schema；既有 scalar routing 及 legacy evidence policy 維持。新路由／配額欄位須使用 active schema。

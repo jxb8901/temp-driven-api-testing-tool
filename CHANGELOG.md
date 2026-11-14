@@ -6,6 +6,8 @@
 - Convert bundled Package examples from global Tool declarations and document migration from older configurations.
 - Add the Studio Read-only Validate workspace for shared/effective Config, registered Packages, Explorer resources, and executable LOAD Scenarios; advertise the `att-validation/v1` Server capability and report contract (#355).
 - Add Server-managed Prometheus sources and reusable SUT Metrics profiles to LOAD Jobs, with immutable per-Job snapshots, bounded post-run sidecars, on-demand live preview, and a dedicated Job Details tab (#348).
+- Add the Grafana SUT Metrics adapter and a verified, versioned offline LOAD report that references the native archive by digest and includes bounded observations, chart previews, diagnostics, and optional verdict state (#350).
+- Keep LOAD report recovery active through retry backoff while releasing the publication fence, so persistent optional-report failures do not block age, manual, or storage-pressure retention (#350).
 - Add pinned per-target SUT maximum thresholds, coverage-aware asynchronous evaluation and recovery, durable versioned records, authorized combined LOAD performance acceptance, and Studio rule/evidence views (#351).
 - Short-circuit SUT evidence loading only after a proven required-rule violation; continue evaluating optional rules (#351).
 - Keep native LOAD results available when optional SUT snapshots are corrupt, and retain SUT collection evidence when threshold records are corrupt without inferring a combined MET verdict (#351).

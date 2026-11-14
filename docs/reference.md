@@ -123,6 +123,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Trace execution identity to an artifact](#trace-execution-identity-to-an-artifact)
   - [Inspect generated-output schemas](#inspect-generated-output-schemas)
   - [Reading `case.log` and `case.yaml`](#reading-caselog-and-caseyaml)
+  - [Offline SUT metrics report](#offline-sut-metrics-report)
 - [Validation and troubleshooting](#validation-and-troubleshooting)
   - [Choose your first diagnostic step](#choose-your-first-diagnostic-step)
   - [Start with validation](#start-with-validation)
@@ -3483,6 +3484,12 @@ Multiline String values nested in structured entries are shown as readable YAML 
 
 ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or INVALID with `【!!!!!】`. Search for that marker to find abnormal blocks; PASS, SKIPPED and informational blocks remain unmarked.
 
+### Offline SUT metrics report
+
+A completed LOAD with SUT collection evidence can publish a separate, versioned offline report archive. The publisher verifies the source manifest and each observation sidecar, preserves the original sealed native archive byte-for-byte, and publishes an immutable snapshot. Its `att-load-report-extension/v2` manifest references the source-neutral `att-load-offline-observations/v1` record, whose `att-load-offline-observation/v1` entries carry source, metric, profile, target, UTC window, phase, units, sample resolution, coverage, gaps, diagnostics, checksums, and bounded chart previews. Full series sidecars retain the normalized `att-sut-metrics-observation/v1` contract. Partial or unavailable source data is reported explicitly and does not change the native Job result.
+
+The report works without network access and uses a restrictive Content Security Policy. It does not evaluate performance thresholds. If a separately versioned `att-load-verdict/v1` record is supplied, the report displays its recorded evaluation state and evidence reference without recalculating the verdict. The archive is available through the authenticated Job download route only after verified publication.
+
 ## Validation and troubleshooting
 
 ### Choose your first diagnostic step
@@ -3689,6 +3696,8 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | JUnit XML | att-junit/v2.1 |
 
 For the changed resource/configuration schemas, older versions are historical definitions under `schemas/history/`; they are not active execution contracts unless the embedded Engine registry registers and supports them. Unsupported versions fail validation with migration guidance. The repository catalog at `schemas/catalog.yaml` is build input; at runtime, the registry embedded in the matching ATT Engine JAR is authoritative. The Engine parses its Classpath catalog once per JVM and reads schema bytes directly from the JAR. Compiled JSON validators are held in a bounded, in-memory cache keyed by registry digest and schema resource. A verified, content-addressed cache in a private per-user temporary directory remains only as a transitional bridge for Path-based compatibility APIs. It retains the active registry and the immediately previous version for rollback; older entries are deleted only when an exclusive OS lock confirms no Worker is using them, and interrupted cleanup is retried at the next initialization. An incomplete or tampered cache is rebuilt only when no process holds its use lease; otherwise validation fails closed and retries after the active Worker exits. Validation revisions bind Engine and registry identity, Package files, shared config files and selected Environment; Workers verify the registry identity supplied by the Server before handling requests. `ATT_HOME/schemas/` and package-local `schemas/` are not runtime sources and cannot override that registry. Package validation checks the Engine's registered schema resources; it does not enable compatibility for unregistered archived versions.
+
+The [SUT Metrics data source schema](../schemas/att-sut-metrics-source-v1.schema.json) (`att-sut-metrics-source/v1`) is part of the active Engine registry. Offline report metadata and externally supplied verdict records use standalone Server-side contracts under `schemas/api/`; they are not registered Engine execution schemas. See [Offline SUT metrics report](reference/results-reports-evidence.md).
 
 <!-- att-docs:historical -->
 Load v1.6 and MQHelper v1.2 are compatible historical schemas supported by their loaders; their existing scalar routing and legacy evidence policies remain unchanged. New routing/quota fields require the active schema.
