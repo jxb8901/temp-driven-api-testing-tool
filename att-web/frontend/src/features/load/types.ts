@@ -247,12 +247,12 @@ export interface JobResultResponse {
 export interface SutMetricPoint { timestamp: string; timestampEpochMs: number; value: number }
 export interface SutMetricSeries { labels: Record<string, string>; samples: SutMetricPoint[]; coverage?: Record<string, unknown> }
 export interface SutMetricQueryMetadata {
-  id: string; profile?: string; profilePath?: string; sourceId?: string; sourceName?: string;
+  id: string; profile?: string; profilePath?: string; sourceId?: string; sourceName?: string; kind?: string;
   targetId: string; targetType?: string; metricId: string; title?: string; category?: string; unit?: string;
 }
 export interface SutMetricItem {
-  id?: string; queryId?: string; profile?: string; profilePath?: string; metricId: string; title: string; category?: string; targetId: string; targetType?: string;
-  sourceId?: string; sourceName?: string; unit: string; queryStatus?: string; series?: SutMetricSeries[];
+  id?: string; queryId?: string; profile?: string; profilePath?: string; metricId: string; title: string; category?: string; targetId: string; targetType?: string; kind?: string;
+  sourceId?: string; sourceName?: string; unit: string; queryStatus?: string; observation?: Record<string, unknown>; series?: SutMetricSeries[];
   coverage?: Record<string, unknown>; error?: string;
 }
 export interface SutMetricsManifest {
@@ -437,8 +437,8 @@ export interface LoadFeatureProps {
 }
 
 export interface JobsFeatureProps {
-  initialTab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics';
-  onTabChange?(tab: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics'): void;
+  initialTab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics' | 'correlation';
+  onTabChange?(tab: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics' | 'correlation'): void;
   standalone?: boolean;
   executionType?: 'load';
   schedulingEnabled?: boolean;

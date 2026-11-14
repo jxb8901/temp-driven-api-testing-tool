@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { meanForLoadMetric, missingIntervals, selectLoadPoints, selectSutPoints, splitSeriesAtGaps } from './CorrelationPanel';
+import { downsampleSegments, meanForLoadMetric, meanForSutMetric, missingIntervals, parseUtcInstant, selectLoadPoints, selectSutPoints, splitSeriesAtGaps } from './CorrelationPanel';
 
 describe('LOAD and SUT correlation series', () => {
   it('selects bins by actual phase overlap and preserves partial boundary bins without filling missing bins', () => {
@@ -39,5 +39,31 @@ describe('LOAD and SUT correlation series', () => {
     const rateBins = [{ x: 1000, y: 2 }, { x: 2000, y: 4 }];
     expect(meanForLoadMetric(p95Bins, true)).toBeNull();
     expect(meanForLoadMetric(rateBins, false)).toBe(3);
+  });
+
+  it('documents SUT sample means for gauges and rates but does not average counters or histograms', () => {
+    const points = [{ x: 1000, y: 20 }, { x: 2000, y: 40 }];
+    expect(meanForSutMetric(points, 'gauge')).toBe(30);
+    expect(meanForSutMetric(points, 'rate')).toBe(30);
+    expect(meanForSutMetric(points, 'counter')).toBeNull();
+    expect(meanForSutMetric(points, 'histogram')).toBeNull();
+    expect(meanForSutMetric(points)).toBeNull();
+  });
+
+  it('accepts strict UTC custom-range instants and rejects local or impossible timestamps', () => {
+    expect(parseUtcInstant('2026-11-14T02:10:00Z')).toBe(Date.parse('2026-11-14T02:10:00Z'));
+    expect(parseUtcInstant('2026-11-14T02:10:00.125Z')).toBe(Date.parse('2026-11-14T02:10:00.125Z'));
+    expect(parseUtcInstant('2026-11-14T02:10:00')).toBeNull();
+    expect(parseUtcInstant('2026-02-31T02:10:00Z')).toBeNull();
+  });
+
+  it('keeps a 25-hour native series under the display cap without turning downsampled points into gaps', () => {
+    const points = Array.from({ length: 25 * 60 + 1 }, (_, index) => ({ x: index * 60_000, y: index }));
+    const displayed = downsampleSegments(points, 60_000);
+    expect(displayed.total).toBe(1200);
+    expect(displayed.segments).toHaveLength(1);
+    expect(displayed.segments[0]).toHaveLength(1200);
+    expect(displayed.segments[0]?.[0]).toEqual(points[0]);
+    expect(displayed.segments[0]?.at(-1)).toEqual(points.at(-1));
   });
 });

@@ -1,7 +1,7 @@
 .att-correlation-panel > h2 { margin-top: 0; }
 .att-correlation-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: .75rem 1rem; margin: 1rem 0; }
 .att-correlation-filters label { display: grid; gap: .25rem; }
-.att-correlation-filters select { min-height: 40px; min-width: 0; padding: .45rem .6rem; }
+.att-correlation-filters select, .att-correlation-filters input { min-height: 40px; min-width: 0; padding: .45rem .6rem; }
 .att-correlation-provenance, .att-correlation-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: .7rem 1.25rem; margin: 1rem 0; }
 .att-correlation-provenance > div, .att-correlation-summary > div { min-width: 0; overflow-wrap: anywhere; }
 .att-correlation-provenance dt, .att-correlation-summary dt { color: var(--att-muted, #5f6873); font-size: .8rem; }

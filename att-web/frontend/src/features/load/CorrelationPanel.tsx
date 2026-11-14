@@ -38,6 +38,17 @@ function utcDateTime(value?: string | null): string {
   return Number.isFinite(time) ? `${UTC_TIME.format(time)} UTC` : value;
 }
 
+export function parseUtcInstant(value: string): number | null {
+  const normalized = value.trim();
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,3}))?Z$/.exec(normalized);
+  if (!match) return null;
+  const epoch = Date.parse(normalized);
+  if (!Number.isFinite(epoch)) return null;
+  const parsed = new Date(epoch);
+  const expectedMillis = Number((match[2] || '').padEnd(3, '0') || 0);
+  return parsed.toISOString().slice(0, 19) === match[1] && parsed.getUTCMilliseconds() === expectedMillis ? epoch : null;
+}
+
 function timeOf(sample: SutMetricPoint): number {
   return Number.isFinite(sample.timestampEpochMs) ? sample.timestampEpochMs : Date.parse(sample.timestamp);
 }
@@ -122,6 +133,11 @@ export function meanForLoadMetric(points: Point[], isPercentile: boolean): numbe
   return points.reduce((sum, point) => sum + point.y, 0) / points.length;
 }
 
+export function meanForSutMetric(points: Point[], kind?: string): number | null {
+  if (!['gauge', 'rate'].includes(kind || '') || !points.length) return null;
+  return points.reduce((sum, point) => sum + point.y, 0) / points.length;
+}
+
 export function splitSeriesAtGaps(points: Point[], resolutionMs: number): Point[][] {
   if (!points.length) return [];
   if (!Number.isFinite(resolutionMs) || resolutionMs <= 0) return points.map(point => [point]);
@@ -134,22 +150,26 @@ export function splitSeriesAtGaps(points: Point[], resolutionMs: number): Point[
   return segments;
 }
 
-function downsampleSegments(points: Point[], resolutionMs: number): { segments: Point[][]; total: number } {
-  if (!Number.isFinite(resolutionMs) || resolutionMs <= 0) {
-    const count = Math.min(points.length, MAX_CHART_POINTS);
-    const sampled = count === points.length ? points : Array.from({ length: count }, (_, index) => points[Math.floor(index * (points.length - 1) / Math.max(1, count - 1))]!);
-    return { segments: sampled.map(point => [point]), total: sampled.length };
+export function downsampleSegments(points: Point[], resolutionMs: number): { segments: Point[][]; total: number } {
+  const sourceSegments = splitSeriesAtGaps(points, resolutionMs);
+  if (points.length <= MAX_CHART_POINTS) return { segments: sourceSegments, total: points.length };
+  const segmentForPoint = new Array<number>(points.length);
+  let pointIndex = 0;
+  sourceSegments.forEach((segment, segmentIndex) => {
+    for (let index = 0; index < segment.length; index++) segmentForPoint[pointIndex++] = segmentIndex;
+  });
+  const sampled = Array.from({ length: MAX_CHART_POINTS }, (_, index) => {
+    const selectedIndex = Math.floor(index * (points.length - 1) / (MAX_CHART_POINTS - 1));
+    return { point: points[selectedIndex]!, segment: segmentForPoint[selectedIndex]! };
+  });
+  const segments: Point[][] = [];
+  let previousSegment = -1;
+  for (const selected of sampled) {
+    if (selected.segment !== previousSegment) segments.push([]);
+    segments[segments.length - 1]!.push(selected.point);
+    previousSegment = selected.segment;
   }
-  if (points.length <= MAX_CHART_POINTS) return { segments: splitSeriesAtGaps(points, resolutionMs), total: points.length };
-  const sampled = Array.from({ length: MAX_CHART_POINTS }, (_, index) => points[Math.floor(index * (points.length - 1) / (MAX_CHART_POINTS - 1))]!);
-  return { segments: splitSeriesAtGaps(sampled, resolutionMs), total: sampled.length };
-}
-
-function statistics(points: Point[]) {
-  if (!points.length) return null;
-  const bounds = points.reduce((current, point) => ({ min: Math.min(current.min, point.y), max: Math.max(current.max, point.y), total: current.total + point.y }),
-    { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY, total: 0 });
-  return { count: points.length, min: bounds.min, max: bounds.max, mean: bounds.total / points.length };
+  return { segments, total: sampled.length };
 }
 
 function observedRange(points: Point[]) {
@@ -263,6 +283,8 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   const [loadMetricId, setLoadMetricId] = useState('completedRate');
   const [phaseFilter, setPhaseFilter] = useState('all');
   const [rangeFilter, setRangeFilter] = useState('all');
+  const [customStartText, setCustomStartText] = useState('');
+  const [customEndText, setCustomEndText] = useState('');
 
   const workloadEntries = useMemo(() => Object.entries(workloads || {}).filter(([, value]) => Boolean(record(value))), [workloads]);
   const selectedWorkload = record(workloads?.[workloadId]);
@@ -276,7 +298,7 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
     if (!rawMetrics) { setWorkloadMetrics(null); setLoadedWorkloadId(''); setWorkloadError('This workload has no archived metrics summary.'); setWorkloadLoading(false); return; }
     const hasReference = Boolean(record(rawMetrics.detailSeries));
     if (!hasReference) { setWorkloadMetrics(rawMetrics); setLoadedWorkloadId(workloadId); setWorkloadError(''); setWorkloadLoading(false); return; }
-    if (hidden || !archiveRoot) { setWorkloadLoading(false); return; }
+    if (hidden) { setWorkloadLoading(false); return; }
     const controller = new AbortController();
     setWorkloadLoading(true); setWorkloadError(''); setWorkloadMetrics(null); setLoadedWorkloadId('');
     restoreWorkloadSeries(rawMetrics, api, jobId, archiveRoot, workloadId, controller.signal, workloadCache.current)
@@ -352,6 +374,8 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   useEffect(() => { if (!instances.some(instance => instance.key === instanceFilter)) setInstanceFilter(instances[0]?.key || ''); }, [selectedItem, instanceFilter]);
   const selectedInstance = instances.find(instance => instance.key === instanceFilter) || null;
   const selectedCoverage = record(selectedInstance?.series.coverage) || record(selectedItem?.coverage) || {};
+  const selectedObservation = record(selectedItem?.observation);
+  const selectedAvailability = record(selectedObservation?.availability);
   const activeMetrics = workloadId ? loadedWorkloadId === workloadId ? workloadMetrics : null : metrics;
   const rawLoadPoints = metricSeriesPoints(activeMetrics);
   const boundaries = phaseBoundaries(activeMetrics);
@@ -360,20 +384,42 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   const loadMetric = LOAD_METRICS.find(candidate => candidate.id === loadMetricId) || LOAD_METRICS[0]!;
   const sutSamples = selectedInstance?.series.samples || [];
   const sutResolution = metricStepMilliseconds(collection?.collection?.step);
-  const latestLoadTime = rawLoadPoints.reduce((latest, value) => {
+  const latestLoadTime = rawLoadPoints.reduce<number>((latest, value) => {
     const x = numeric(record(value)?.windowStartEpochMs);
     return x === null ? latest : Math.max(latest, x);
   }, Number.NEGATIVE_INFINITY);
-  const latestSutTime = sutSamples.reduce((latest, sample) => {
+  const latestSutTime = sutSamples.reduce<number>((latest, sample) => {
     const x = timeOf(sample);
     return Number.isFinite(x) ? Math.max(latest, x) : latest;
   }, Number.NEGATIVE_INFINITY);
+  const earliestSutTime = sutSamples.reduce<number>((earliest, sample) => {
+    const x = timeOf(sample);
+    return Number.isFinite(x) ? Math.min(earliest, x) : earliest;
+  }, Number.POSITIVE_INFINITY);
+  const loadObservedBounds = rawLoadPoints.reduce<{ first: number; last: number } | null>((bounds, value) => {
+    const item = record(value);
+    const start = numeric(item?.windowStartEpochMs);
+    const duration = numeric(item?.durationMs);
+    if (start === null || duration === null || duration <= 0) return bounds;
+    return bounds
+      ? { first: Math.min(bounds.first, start), last: Math.max(bounds.last, start + duration) }
+      : { first: start, last: start + duration };
+  }, null);
   const maxTime = Math.max(latestLoadTime, latestSutTime);
   const rangeSpan: Record<string, number> = { '15m': 900_000, '1h': 3_600_000, '6h': 21_600_000, '24h': 86_400_000 };
-  const rangeStart = rangeFilter === 'all' || !Number.isFinite(maxTime) ? Number.NEGATIVE_INFINITY : maxTime - (rangeSpan[rangeFilter] || 0);
-  const rangeEnd = rangeFilter === 'all' || !Number.isFinite(maxTime) ? Number.POSITIVE_INFINITY : maxTime;
-  const loadPoints = selectLoadPoints(rawLoadPoints, loadMetric, phaseFilter, boundaries, rangeStart, rangeEnd);
-  const sutPoints = selectSutPoints(sutSamples, phaseFilter, boundaries, rangeStart, rangeEnd);
+  const customStart = parseUtcInstant(customStartText);
+  const customEnd = parseUtcInstant(customEndText);
+  const customRangeError = rangeFilter !== 'custom' ? ''
+    : customStart === null || customEnd === null ? 'Enter both times as valid UTC timestamps, for example 2026-11-14T02:10:00Z.'
+      : customStart >= customEnd ? 'The UTC start time must be earlier than the end time.' : '';
+  const rangeStart = rangeFilter === 'custom' ? customStart ?? Number.POSITIVE_INFINITY
+    : rangeFilter === 'all' || !Number.isFinite(maxTime) ? Number.NEGATIVE_INFINITY : maxTime - (rangeSpan[rangeFilter] || 0);
+  const rangeEnd = rangeFilter === 'custom' ? customEnd ?? Number.NEGATIVE_INFINITY
+    : rangeFilter === 'all' || !Number.isFinite(maxTime) ? Number.POSITIVE_INFINITY : maxTime;
+  const loadPoints = customRangeError ? [] : selectLoadPoints(rawLoadPoints, loadMetric, phaseFilter, boundaries, rangeStart, rangeEnd);
+  const sutPoints = customRangeError ? [] : selectSutPoints(sutSamples, phaseFilter, boundaries, rangeStart, rangeEnd);
+  const chartDomain = Number.isFinite(rangeStart) && Number.isFinite(rangeEnd) && rangeStart < rangeEnd
+    ? [rangeStart, rangeEnd] as [number, number] : undefined;
   const partialBins = loadPoints.filter(point => point.partial).length;
   const phaseOptions = [...new Set(boundaries.map(boundary => boundary.phase))];
   const collectionState = String(collection?.state || collection?.collection?.state || (collectionLoading ? 'LOADING' : 'UNKNOWN'));
@@ -381,7 +427,18 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   const collectionWindowStart = collectionManifest?.windowStart;
   const collectionWindowEnd = collectionManifest?.windowEnd;
   const collectionCoverage = collectionWindowStart && collectionWindowEnd
-    ? `${collectionWindowStart} to ${collectionWindowEnd} (UTC)` : 'Not reported';
+    ? `${utcDateTime(collectionWindowStart)} to ${utcDateTime(collectionWindowEnd)}` : 'Not reported';
+  const collectionWindowEndMs = collectionWindowEnd ? Date.parse(collectionWindowEnd) : Number.NaN;
+  const sampleTailOffset = Number.isFinite(latestSutTime) && Number.isFinite(collectionWindowEndMs)
+    ? collectionWindowEndMs - latestSutTime : null;
+  const sampleTailDescription = sampleTailOffset === null ? 'Not reported'
+    : `${NUMBER.format(Math.abs(sampleTailOffset))} ms ${sampleTailOffset >= 0 ? 'before' : 'after'} requested collection-window end`;
+  const loadCoverage = typeof timeSeries?.coverage === 'string' ? timeSeries.coverage : 'Not reported';
+  const loadCapacity = numeric(timeSeries?.capacity);
+  const actualSutCoverage = Number.isFinite(earliestSutTime) && Number.isFinite(latestSutTime)
+    ? `${utcDateTime(new Date(earliestSutTime).toISOString())} to ${utcDateTime(new Date(latestSutTime).toISOString())}` : 'Not reported';
+  const sutMetricKind = selectedItem?.kind || selectedQuery?.kind || '';
+  const sutFreshness = typeof selectedAvailability?.freshness === 'string' ? selectedAvailability.freshness : 'Not reported';
 
   return <section className="att-job-panel att-correlation-panel" role="tabpanel" id="job-panel-correlation" aria-labelledby="job-tab-correlation" hidden={hidden} tabIndex={0}>
     <h2>Correlation</h2>
@@ -404,8 +461,12 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
           <option value="all">All phases</option>{phaseOptions.map(phase => <option key={phase} value={phase}>{phase}</option>)}
         </select></label>
         <label>Time range<select value={rangeFilter} onChange={event => setRangeFilter(event.target.value)}>
-          <option value="all">All available overlap</option><option value="15m">Last 15 minutes</option><option value="1h">Last hour</option><option value="6h">Last 6 hours</option><option value="24h">Last 24 hours</option>
+          <option value="all">All available overlap</option><option value="15m">Last 15 minutes</option><option value="1h">Last hour</option><option value="6h">Last 6 hours</option><option value="24h">Last 24 hours</option><option value="custom">Custom UTC range</option>
         </select></label>
+        {rangeFilter === 'custom' && <>
+          <label>UTC start<input type="text" autoComplete="off" placeholder="2026-11-14T02:10:00Z" value={customStartText} onChange={event => setCustomStartText(event.target.value)} /></label>
+          <label>UTC end<input type="text" autoComplete="off" placeholder="2026-11-14T03:10:00Z" value={customEndText} onChange={event => setCustomEndText(event.target.value)} /></label>
+        </>}
         <label>SUT profile<select value={profileFilter} onChange={event => { setProfileFilter(event.target.value); setTargetFilter(''); setMetricFilter(''); setQueryFilter(''); }}>
           <option value="">All profiles</option>{profileOptions.map(profile => <option key={profile} value={profile}>{profile}</option>)}
         </select></label>
@@ -426,6 +487,7 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
       </div>
       {workloadLoading && <p role="status" aria-busy="true">Loading the selected workload series from its authorized sidecar…</p>}
       {workloadError && <p role="alert">{workloadError}</p>}
+      {customRangeError && <p role="alert">{customRangeError}</p>}
       {collectionError && <p role="alert">{collectionError}</p>}
       {queryError && <p role="alert">{queryError}</p>}
       {!queries.length && <p role="status" aria-busy={collectionLoading}>SUT collection metadata is {collectionState}; no query definitions are available yet.</p>}
@@ -440,14 +502,27 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
           <div><dt>LOAD job target</dt><dd>{loadTarget}</dd></div>
           <div><dt>LOAD workload</dt><dd>{workloadId || 'Aggregate LOAD'}</dd></div>
           {workloadId && <div><dt>LOAD workload target</dt><dd>{loadWorkloadTarget}</dd></div>}
+          <div><dt>LOAD native window series</dt><dd>{loadResolution === null ? 'Native bin width not reported' : `${NUMBER.format(loadResolution)} ms native bin width`} · {rawLoadPoints.length} archived bins · capacity {loadCapacity === null ? 'not reported' : `${NUMBER.format(loadCapacity)} bins`} · {loadCoverage}</dd></div>
+          <div><dt>LOAD observed bin coverage</dt><dd>{loadObservedBounds
+            ? `${utcDateTime(new Date(loadObservedBounds.first).toISOString())} to ${utcDateTime(new Date(loadObservedBounds.last).toISOString())}`
+            : 'Not reported'}</dd></div>
+          <div><dt>Legacy Metrics ring</dt><dd>Separate 4,096 one-second buckets; not used as the native window-series resolution.</dd></div>
           <div><dt>SUT collection state</dt><dd>{collectionState}</dd></div>
           <div><dt>SUT source</dt><dd>{selectedItem?.sourceName || selectedQuery.sourceName || selectedQuery.sourceId || 'Not reported'}</dd></div>
           <div><dt>SUT target</dt><dd>{selectedItem?.targetId || selectedQuery.targetId}{(selectedItem?.targetType || selectedQuery.targetType) ? ` (${selectedItem?.targetType || selectedQuery.targetType})` : ''}</dd></div>
           <div><dt>Profile</dt><dd>{selectedItem?.profilePath || selectedItem?.profile || selectedQuery.profilePath || selectedQuery.profile || 'Not reported'}</dd></div>
           <div><dt>SUT metric and unit</dt><dd>{selectedItem?.title || selectedQuery.title || selectedQuery.metricId} · {selectedItem?.unit || selectedQuery.unit || 'unit not reported'}</dd></div>
+          <div><dt>SUT metric kind</dt><dd>{sutMetricKind || 'Not reported'}</dd></div>
+          <div><dt>SUT sample freshness</dt><dd>{sutFreshness}</dd></div>
           <div><dt>Collection resolution</dt><dd>{collection?.collection?.step || 'Not reported'}</dd></div>
-          <div><dt>Last source query</dt><dd>{utcDateTime(collection?.collection?.updatedAt || collection?.collection?.createdAt)}</dd></div>
+          <div><dt>Collection manifest updated</dt><dd>{utcDateTime(collection?.collection?.updatedAt || collection?.collection?.createdAt)}</dd></div>
           <div><dt>Collection coverage</dt><dd>{collectionCoverage}</dd></div>
+          <div><dt>Selected SUT instance</dt><dd>{selectedInstance?.label || 'Not reported'}</dd></div>
+          <div><dt>Selected SUT series count</dt><dd>{instances.length}</dd></div>
+          <div><dt>Selected SUT samples in range and phase</dt><dd>{sutPoints.length}</dd></div>
+          <div><dt>Latest selected SUT sample</dt><dd>{Number.isFinite(latestSutTime) ? utcDateTime(new Date(latestSutTime).toISOString()) : 'Not reported'}</dd></div>
+          <div><dt>Latest sample vs collection window end</dt><dd>{sampleTailDescription}</dd></div>
+          <div><dt>Selected SUT observed sample coverage</dt><dd>{actualSutCoverage}</dd></div>
           <div><dt>Selected SUT series coverage</dt><dd>{selectedCoverage.firstSampleAt || selectedCoverage.lastSampleAt
             ? `${selectedCoverage.firstSampleAt || 'first sample not reported'} to ${selectedCoverage.lastSampleAt || 'last sample not reported'} (UTC); ${selectedCoverage.gapCount ?? 'gap count not reported'} reported gaps`
             : 'Not reported'}</dd></div>
@@ -458,13 +533,14 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
       {selectedQuery && !queryLoading && !selectedItem && <p role="status">The selected query returned no SUT series for this collection.</p>}
       {phaseFilter !== 'all' && !phaseOptions.includes(phaseFilter) && <p role="status">The archived report has no actual phase boundary for {phaseFilter}.</p>}
       {workloadId && !workloadLoading && workloadMetrics && !metricSeriesPoints(workloadMetrics).length && <p role="status">The selected workload archive has no native phase-aligned window points.</p>}
-      {loadPoints.length > 0 && sutPoints.length > 0 && selectedQuery && !queryLoading && <>
-        <CorrelationSummary metric={loadMetric} loadPoints={loadPoints} sutPoints={sutPoints} loadResolution={loadResolution} sutResolution={sutResolution} partialBins={partialBins} />
+      {loadPoints.length > 0 && sutPoints.length > 0 && selectedQuery && !queryLoading && !customRangeError && <>
+        <CorrelationSummary metric={loadMetric} loadPoints={loadPoints} sutPoints={sutPoints} loadResolution={loadResolution} sutResolution={sutResolution}
+          partialBins={partialBins} loadCoverage={loadCoverage} loadCapacity={loadCapacity} sutMetricKind={sutMetricKind} />
         <CorrelationChart loadPoints={loadPoints} sutPoints={sutPoints} loadMetric={loadMetric} sutUnit={selectedItem?.unit || selectedQuery.unit || 'unit not reported'}
-          loadResolution={loadResolution} sutResolution={sutResolution} boundaries={boundaries} />
+          loadResolution={loadResolution} sutResolution={sutResolution} boundaries={boundaries} domain={chartDomain} />
       </>}
-      {!queryLoading && !loadPoints.length && <p role="status">No archived LOAD samples match the selected metric, phase, and time range.</p>}
-      {!queryLoading && selectedQuery && selectedInstance && !sutPoints.length && <p role="status">No SUT samples match the selected query, instance, phase, and time range.</p>}
+      {!customRangeError && !queryLoading && !loadPoints.length && <p role="status">No archived LOAD samples match the selected metric, phase, and time range.</p>}
+      {!customRangeError && !queryLoading && selectedQuery && selectedInstance && !sutPoints.length && <p role="status">No SUT samples match the selected query, instance, phase, and time range.</p>}
       <p className="att-correlation-caveat">The chart preserves source timestamps and native resolutions. It does not interpolate or fill gaps with zero. Temporal overlap is descriptive only: it does not establish causation or attribute shared host CPU, JVM, database, or MQ metrics to a LOAD workload.</p>
       {boundaries.length > 0 && <details className="att-correlation-boundaries"><summary>Actual LOAD phase boundaries (UTC)</summary><ul>
         {boundaries.map(boundary => <li key={`${boundary.phase}-${boundary.windowStartEpochMs}`}><strong>{boundary.phase}</strong>: {new Date(boundary.windowStartEpochMs).toISOString()} – {new Date(boundary.windowEndEpochMs).toISOString()}</li>)}
@@ -480,34 +556,37 @@ function metricStepMilliseconds(step?: string): number | null {
   return Number(match[1]) * multiplier[match[2]!]!;
 }
 
-function CorrelationSummary({ metric, loadPoints, sutPoints, loadResolution, sutResolution, partialBins }: {
+function CorrelationSummary({ metric, loadPoints, sutPoints, loadResolution, sutResolution, partialBins, loadCoverage, loadCapacity, sutMetricKind }: {
   metric: LoadMetric; loadPoints: Point[]; sutPoints: Point[]; loadResolution: number | null; sutResolution: number | null; partialBins: number;
+  loadCoverage: string; loadCapacity: number | null; sutMetricKind?: string;
 }) {
-  const load = observedRange(loadPoints); const sut = statistics(sutPoints);
+  const load = observedRange(loadPoints); const sut = observedRange(sutPoints);
   const loadMean = meanForLoadMetric(loadPoints, Boolean(metric.percentile));
+  const sutMean = meanForSutMetric(sutPoints, sutMetricKind);
   const loadMissing = loadResolution === null ? null : missingIntervals(loadPoints, loadResolution);
   const sutMissing = sutResolution === null ? null : missingIntervals(sutPoints, sutResolution);
   const cohortSamples = loadPoints.reduce((sum, point) => sum + (point.cohortSamples || 0), 0);
   return <dl className="att-correlation-summary">
     <div><dt>LOAD series</dt><dd>{metric.label} · {metric.unit}</dd></div>
-    <div><dt>LOAD native resolution</dt><dd>{loadResolution === null ? 'Not reported' : `${NUMBER.format(loadResolution)} ms`} · {loadPoints.length} observed bins · {loadMissing === null ? 'missing intervals not estimated' : `${loadMissing} estimated interior missing intervals`}</dd></div>
+    <div><dt>LOAD native resolution and coverage</dt><dd>{loadResolution === null ? 'Not reported' : `${NUMBER.format(loadResolution)} ms`} · {loadPoints.length} selected observed bins · capacity {loadCapacity === null ? 'not reported' : `${NUMBER.format(loadCapacity)} bins`} · {loadCoverage} · {loadMissing === null ? 'missing intervals not estimated' : `${loadMissing} estimated interior missing intervals`}</dd></div>
     <div><dt>LOAD observed range</dt><dd>Min {NUMBER.format(load!.min)} · {metric.percentile ? `Max ${NUMBER.format(load!.max)} · ${load!.count} scheduled-cohort p95 bins · ${NUMBER.format(cohortSamples)} cohort samples` : `Mean ${NUMBER.format(loadMean!)} · Max ${NUMBER.format(load!.max)}`}</dd></div>
     <div><dt>SUT selected samples</dt><dd>{sutPoints.length} · {sutResolution === null ? 'effective step not reported' : `${NUMBER.format(sutResolution)} ms effective step`} · {sutMissing === null ? 'missing intervals not estimated' : `${sutMissing} estimated interior missing intervals`}</dd></div>
-    <div><dt>SUT observed range</dt><dd>Min {NUMBER.format(sut!.min)} · Mean {NUMBER.format(sut!.mean)} · Max {NUMBER.format(sut!.max)}</dd></div>
+    <div><dt>SUT observed range</dt><dd>Min {NUMBER.format(sut!.min)} · {sutMean === null ? `mean not calculated for ${sutMetricKind || 'unreported metric kind'}` : `observed-sample arithmetic mean ${NUMBER.format(sutMean)}`} · Max {NUMBER.format(sut!.max)}</dd></div>
     <div><dt>Phase boundary bins</dt><dd>{partialBins} partially overlapping LOAD bins{partialBins ? ' (rate denominator remains the full native bin)' : ''}</dd></div>
-    <div><dt>Mean method</dt><dd>{metric.percentile ? 'No mean is calculated across p95 bins.' : 'Arithmetic mean of observed points; missing intervals are excluded.'} {metric.rate ? 'Each LOAD rate uses its full native-bin denominator.' : ''}</dd></div>
+    <div><dt>Mean method</dt><dd>{metric.percentile ? 'No mean is calculated across p95 bins.' : 'LOAD uses an arithmetic mean of observed points; missing intervals are excluded.'} {metric.rate ? 'Each LOAD rate uses its full native-bin denominator.' : ''} SUT uses the arithmetic mean of observed gauge or rate samples; counters and histograms are not averaged.</dd></div>
   </dl>;
 }
 
-function CorrelationChart({ loadPoints, sutPoints, loadMetric, sutUnit, loadResolution, sutResolution, boundaries }: {
-  loadPoints: Point[]; sutPoints: Point[]; loadMetric: LoadMetric; sutUnit: string; loadResolution: number | null; sutResolution: number | null; boundaries: PhaseBoundary[];
+function CorrelationChart({ loadPoints, sutPoints, loadMetric, sutUnit, loadResolution, sutResolution, boundaries, domain }: {
+  loadPoints: Point[]; sutPoints: Point[]; loadMetric: LoadMetric; sutUnit: string; loadResolution: number | null; sutResolution: number | null;
+  boundaries: PhaseBoundary[]; domain?: [number, number];
 }) {
   const width = 960; const height = 360; const left = 82; const right = 82; const top = 34; const bottom = 55;
   const plotWidth = width - left - right; const plotHeight = height - top - bottom;
   const minOf = (points: Point[]) => points.reduce((min, point) => Math.min(min, point.x), Number.POSITIVE_INFINITY);
   const maxOf = (points: Point[]) => points.reduce((max, point) => Math.max(max, point.x), Number.NEGATIVE_INFINITY);
-  let minX = Math.min(minOf(loadPoints), minOf(sutPoints));
-  let maxX = Math.max(maxOf(loadPoints), maxOf(sutPoints));
+  let minX = domain?.[0] ?? Math.min(minOf(loadPoints), minOf(sutPoints));
+  let maxX = domain?.[1] ?? Math.max(maxOf(loadPoints), maxOf(sutPoints));
   if (minX === maxX) { minX -= Math.max(loadResolution || 0, sutResolution || 0, 1000) / 2; maxX += Math.max(loadResolution || 0, sutResolution || 0, 1000) / 2; }
   let minLoad = loadPoints.reduce((min, point) => Math.min(min, point.y), Number.POSITIVE_INFINITY); let maxLoad = loadPoints.reduce((max, point) => Math.max(max, point.y), Number.NEGATIVE_INFINITY);
   let minSut = sutPoints.reduce((min, point) => Math.min(min, point.y), Number.POSITIVE_INFINITY); let maxSut = sutPoints.reduce((max, point) => Math.max(max, point.y), Number.NEGATIVE_INFINITY);
