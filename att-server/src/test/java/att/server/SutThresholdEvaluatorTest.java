@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SutThresholdEvaluatorTest {
@@ -94,6 +95,35 @@ class SutThresholdEvaluatorTest {
         }
     }
 
+    @Test void staleOrMismatchedBusinessSnapshotsCannotProveAThresholdViolation() {
+        Map<String, Object> phase = phase(START, START.plusSeconds(60));
+        Map<String, Object> rule = businessRule("business-q", "afterDrain", 10.0);
+        List<Map<String, Object>> rules = List.of(rule);
+        List<Map<String, Object>> queries = List.of(businessQuery("business-q", "afterDrain"));
+
+        Map<String, Object> stale = businessObservation(12.0, "STALE", "after-drain");
+        Map<String, Object> staleResult = evaluate(rules, queries, Map.of("business-q", stale), phase);
+        assertEquals("NOT_EVALUATED", staleResult.get("status"));
+        assertEquals("NOT_EVALUATED", maps(staleResult.get("targets")).get(0).get("status"));
+        assertEquals("NOT_EVALUATED", maps(staleResult.get("items")).get(0).get("status"));
+        assertFalse(SutThresholdEvaluator.hasProvenViolation(rules, "business-q", stale, phase,
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(10)));
+
+        Map<String, Object> mismatched = businessObservation(12.0, "FRESH", "steady-window-query");
+        Map<String, Object> mismatchedResult = evaluate(rules, queries, Map.of("business-q", mismatched), phase);
+        assertEquals("NOT_EVALUATED", mismatchedResult.get("status"));
+        assertEquals("NOT_EVALUATED", maps(mismatchedResult.get("targets")).get(0).get("status"));
+        assertFalse(SutThresholdEvaluator.hasProvenViolation(rules, "business-q", mismatched, phase,
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(10)));
+
+        Map<String, Object> fresh = businessObservation(12.0, "FRESH", "after-drain");
+        Map<String, Object> freshResult = evaluate(rules, queries, Map.of("business-q", fresh), phase);
+        assertEquals("NOT_MET", freshResult.get("status"));
+        assertEquals("NOT_MET", maps(freshResult.get("targets")).get(0).get("status"));
+        assertTrue(SutThresholdEvaluator.hasProvenViolation(rules, "business-q", fresh, phase,
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(10)));
+    }
+
     @Test void missingSamplesStayNotEvaluatedWithoutZeroFill() {
         Map<String, Object> result = evaluate(List.of(rule("cpu", 90.0, List.of("q1"))),
                 List.of(query("q1", "sut-1")), Map.of(), phase(START, START.plusSeconds(60)));
@@ -129,6 +159,28 @@ class SutThresholdEvaluatorTest {
         return fields("id", id, "profile", "base", "profilePath", "base", "metricId", "cpu", "metricName", "CPU",
                 "unit", "percent", "reduction", "max", "operator", "<=", "value", max,
                 "minimumCoverage", 0.95, "required", true, "queryIds", queryIds);
+    }
+
+    private static Map<String, Object> businessRule(String queryId, String window, double max) {
+        return fields("id", "business-limit", "profile", "business", "profilePath", "business",
+                "metricId", "count", "metricName", "Count", "unit", "count", "reduction", "max",
+                "operator", "<=", "value", max, "required", true, "window", window,
+                "queryIds", List.of(queryId));
+    }
+
+    private static Map<String, Object> businessQuery(String id, String sampling) {
+        return fields("id", id, "profile", "business", "profilePath", "business", "profileRevision", "profile-rev",
+                "sourceId", "dbhelper:orders", "sourceName", "DBHelper orders", "sourceRevision", "source-rev",
+                "targetId", "job", "targetType", "job", "targetRevision", "target-rev", "metricId", "count",
+                "title", "Count", "unit", "count", "kind", "gauge", "observationType", "business-call",
+                "sampling", sampling);
+    }
+
+    private static Map<String, Object> businessObservation(double value, String freshness, String windowKind) {
+        return fields("value", value, "observation", fields("kind", "timed-snapshot",
+                "window", fields("kind", windowKind, "executionFinishedAt", START.toString(),
+                        "observedAt", START.plusSeconds(30).toString()),
+                "availability", fields("state", "AVAILABLE", "freshness", freshness, "quality", "SINGLE_VALUE")));
     }
 
     private static Map<String, Object> query(String id, String targetId) {

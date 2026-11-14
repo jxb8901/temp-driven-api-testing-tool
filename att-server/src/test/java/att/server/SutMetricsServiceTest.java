@@ -1177,12 +1177,14 @@ class SutMetricsServiceTest {
                 @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
                                                 Instant executionFinishedAt, Instant steadyStart,
                                                 Instant steadyEnd, Instant observedAt) {
-                    calls.incrementAndGet(); return 1;
+                    calls.incrementAndGet(); return 12;
                 }
                 @Override public void close() { }
             });
 
-            Instant finishedAt = Instant.now().minusMillis(SutMetricsService.MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS + 30_000L);
+            long expectedPrometheusDelayMillis = (2 * 60L + 30L) * 1000L;
+            Instant finishedAt = Instant.now().minusMillis(SutMetricsService.MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS
+                    + expectedPrometheusDelayMillis + 30_000L);
             service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
             Map<String, Object> manifest = awaitManifest(service, JOB_ID);
             assertEquals(1, calls.get());
@@ -1194,12 +1196,52 @@ class SutMetricsServiceTest {
             Map<String, Object> window = object(observation.get("window"));
             Map<String, Object> availability = object(observation.get("availability"));
             long actualDelay = ((Number) window.get("delayFromExecutionEndMs")).longValue();
-            assertTrue(actualDelay > SutMetricsService.MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS);
+            assertTrue(actualDelay > SutMetricsService.MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS + expectedPrometheusDelayMillis);
             assertEquals("STALE", availability.get("freshness"));
             assertEquals("BUSINESS_CALL_STALE_AFTER_DRAIN", maps(availability.get("diagnostics")).get(0).get("code"));
             Map<String, Object> evaluation = awaitThresholdEvaluation(service, JOB_ID);
+            assertEquals("NOT_EVALUATED", evaluation.get("state"));
+            assertEquals("NOT_EVALUATED", object(evaluation.get("sutThresholds")).get("status"));
             Map<String, Object> rule = maps(object(evaluation.get("sutThresholds")).get("items")).get(0);
             assertEquals("NOT_EVALUATED", rule.get("status"));
+        }
+    }
+
+    @Test void defaultMixedPrometheusBufferKeepsAfterDrainBusinessSnapshotFreshAndEvaluable() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::atWindowEndResponse);
+             SutMetricsService service = new SutMetricsService(temp.resolve("mixed-default-business-freshness"))) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            service.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='select count(*)')}"));
+            Map<String, Object> configured = scenario(List.of(binding("prom", null), map("profile", "business")),
+                    "1m", "2m", "30s");
+            configured.put("thresholds", List.of(map("id", "count-max", "profile", "business", "metric", "count", "max", 10.0)));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            assertEquals("120s", object(snapshot.get("collection")).get("after"));
+            assertEquals("30s", object(snapshot.get("collection")).get("step"));
+            service.writeSnapshot(JOB_ID, snapshot);
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) { return 7; }
+                @Override public void close() { }
+            });
+
+            Instant finishedAt = Instant.now().minusSeconds(200);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("READY", manifest.get("state"));
+            Map<String, Object> businessFile = maps(manifest.get("files")).stream()
+                    .filter(file -> "count".equals(file.get("metricId"))).findFirst().orElseThrow();
+            Map<String, Object> sidecar = ServerRuntime.JSON.readValue(Files.readAllBytes(temp.resolve("mixed-default-business-freshness")
+                    .resolve("jobs").resolve(JOB_ID).resolve("sut-metrics").resolve(String.valueOf(businessFile.get("path")))), Map.class);
+            Map<String, Object> availability = object(object(sidecar.get("observation")).get("availability"));
+            assertEquals("FRESH", availability.get("freshness"));
+
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, JOB_ID);
+            assertEquals("MET", evaluation.get("state"));
+            assertEquals("MET", object(evaluation.get("sutThresholds")).get("status"));
+            assertEquals("MET", maps(object(evaluation.get("sutThresholds")).get("items")).get(0).get("status"));
         }
     }
 

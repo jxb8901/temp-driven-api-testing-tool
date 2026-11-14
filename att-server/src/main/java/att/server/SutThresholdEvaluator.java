@@ -180,34 +180,20 @@ final class SutThresholdEvaluator {
         if (actual == null) {
             status = "NOT_EVALUATED";
             reason = "The business metric has no finite numeric observation.";
-        } else if (actual > ((Number) rule.get("value")).doubleValue()) {
-            status = "NOT_MET";
-            reason = "The single valid business metric value exceeded the configured limit.";
         } else if (!"AVAILABLE".equals(availability.get("state")) || !"FRESH".equals(availability.get("freshness"))) {
             status = "NOT_EVALUATED";
             reason = "The business metric observation is unavailable or stale.";
+        } else if ((reason = businessObservationIssue(rule, sampling, availability, window, steadyPhase)) != null) {
+            status = "NOT_EVALUATED";
+        } else if (actual > ((Number) rule.get("value")).doubleValue()) {
+            status = "NOT_MET";
+            reason = "The single valid business metric value exceeded the configured limit.";
         } else if ("afterDrain".equals(sampling)) {
-            if (!"afterDrain".equals(configuredWindow) || instant(window.get("observedAt")) == null) {
-                status = "NOT_EVALUATED";
-                reason = "The pinned afterDrain snapshot timing is missing or does not match the threshold window.";
-            } else {
-                status = "MET";
-                reason = "The valid afterDrain snapshot is within the configured limit.";
-            }
+            status = "MET";
+            reason = "The valid afterDrain snapshot is within the configured limit.";
         } else {
-            Instant actualStart = instant(window.get("queryStart")), actualEnd = instant(window.get("queryEnd"));
-            Instant expectedStart = instant(steadyPhase == null ? null : steadyPhase.get("startAt"));
-            Instant expectedEnd = instant(steadyPhase == null ? null : steadyPhase.get("endAt"));
-            if (!"steady".equals(configuredWindow) || actualStart == null || actualEnd == null
-                    || expectedStart == null || expectedEnd == null
-                    || !actualStart.equals(expectedStart) || !actualEnd.equals(expectedEnd)
-                    || !"AUTHOR_DEFINED_WINDOW_QUERY".equals(availability.get("quality"))) {
-                status = "NOT_EVALUATED";
-                reason = "The author-defined query did not retain the actual STEADY interval and collection quality.";
-            } else {
-                status = "MET";
-                reason = "The author-defined STEADY window query returned a valid value within the configured limit; completion does not prove exhaustive coverage.";
-            }
+            status = "MET";
+            reason = "The author-defined STEADY window query returned a valid value within the configured limit; completion does not prove exhaustive coverage.";
         }
         Map<String, Object> source = fields("id", query.get("sourceId"), "name", query.get("sourceName"),
                 "revision", query.get("sourceRevision"));
@@ -226,14 +212,44 @@ final class SutThresholdEvaluator {
                 "status", status, "reason", reason);
     }
 
+    private static String businessObservationIssue(Map<String, Object> rule, String sampling,
+                                                    Map<String, Object> availability, Map<String, Object> window,
+                                                    Map<String, Object> steadyPhase) {
+        String configuredWindow = String.valueOf(rule.get("window"));
+        if ("afterDrain".equals(sampling)) {
+            Instant observedAt = instant(window.get("observedAt"));
+            Instant executionFinishedAt = instant(window.get("executionFinishedAt"));
+            if (!"afterDrain".equals(configuredWindow) || !"after-drain".equals(window.get("kind"))
+                    || observedAt == null || executionFinishedAt == null || observedAt.isBefore(executionFinishedAt))
+                return "The pinned afterDrain snapshot timing is missing or does not match the threshold window.";
+            return null;
+        }
+        Instant actualStart = instant(window.get("queryStart")), actualEnd = instant(window.get("queryEnd"));
+        Instant expectedStart = instant(steadyPhase == null ? null : steadyPhase.get("startAt"));
+        Instant expectedEnd = instant(steadyPhase == null ? null : steadyPhase.get("endAt"));
+        if (!"windowQuery".equals(sampling) || !"steady".equals(configuredWindow)
+                || !"steady-window-query".equals(window.get("kind"))
+                || actualStart == null || actualEnd == null || expectedStart == null || expectedEnd == null
+                || !actualStart.equals(expectedStart) || !actualEnd.equals(expectedEnd)
+                || !"AUTHOR_DEFINED_WINDOW_QUERY".equals(availability.get("quality")))
+            return "The author-defined query did not retain the actual STEADY interval and collection quality.";
+        return null;
+    }
+
     static boolean hasProvenViolation(List<Map<String, Object>> rules, String queryId,
                                       Map<String, Object> observation, Map<String, Object> phase,
                                       long deadlineNanos) {
         if (observation == null) return false;
         if (observation.get("value") instanceof Number raw && Double.isFinite(raw.doubleValue())) {
+            Map<String, Object> body = map(observation.get("observation"));
+            Map<String, Object> availability = map(body.get("availability"));
+            Map<String, Object> window = map(body.get("window"));
             for (Map<String, Object> rule : rules) {
                 if (!Boolean.TRUE.equals(rule.get("required")) || !list(rule.get("queryIds")).contains(queryId)
                         || !(rule.get("value") instanceof Number limit) || !Double.isFinite(limit.doubleValue())) continue;
+                String sampling = "afterDrain".equals(rule.get("window")) ? "afterDrain" : "windowQuery";
+                if (!"AVAILABLE".equals(availability.get("state")) || !"FRESH".equals(availability.get("freshness"))
+                        || businessObservationIssue(rule, sampling, availability, window, phase) != null) continue;
                 if (raw.doubleValue() > limit.doubleValue()) return true;
             }
             return false;

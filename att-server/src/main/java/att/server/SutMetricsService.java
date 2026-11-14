@@ -1437,6 +1437,10 @@ final class SutMetricsService implements AutoCloseable {
             directory = jobMetricsDirectory(jobId); Files.createDirectories(directory);
             List<Map<String, Object>> queries = listOfMaps(snapshot.get("queries"));
             queryRequestBudgets(snapshot, queries, Duration.between(start, end).getSeconds());
+            boolean hasPrometheusQueries = queries.stream()
+                    .anyMatch(query -> !"business-call".equals(query.get("observationType")));
+            long businessAfterDrainFreshnessLimitMillis = businessAfterDrainFreshnessLimitMillis(
+                    hasPrometheusQueries, afterSeconds, stepSeconds);
             boolean businessCallStopped = false;
             long firstBusinessCallNanos = 0L;
             for (int index = 0; index < queries.size(); index++) {
@@ -1528,7 +1532,7 @@ final class SutMetricsService implements AutoCloseable {
                         String sampling = String.valueOf(query.get("sampling"));
                         long delayFromExecutionEndMs = Math.max(0L, Duration.between(executionFinishedAt, observedAt).toMillis());
                         boolean staleAfterDrain = "afterDrain".equals(sampling)
-                                && delayFromExecutionEndMs > MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS;
+                                && delayFromExecutionEndMs > businessAfterDrainFreshnessLimitMillis;
                         Map<String, Object> observationWindow;
                         if ("afterDrain".equals(sampling)) {
                             observationWindow = fields("kind", "after-drain", "executionStartedAt", executionStartedAt.toString(),
@@ -1554,7 +1558,8 @@ final class SutMetricsService implements AutoCloseable {
                                 "availability", fields("state", "AVAILABLE", "freshness", staleAfterDrain ? "STALE" : "FRESH", "quality", quality,
                                         "collectionDurationMs", callDurationMs, "diagnostics", staleAfterDrain
                                                 ? List.of(fields("code", "BUSINESS_CALL_STALE_AFTER_DRAIN",
-                                                        "message", "The afterDrain business snapshot exceeded the 120000 ms freshness limit and is marked stale."))
+                                                        "message", "The afterDrain business snapshot exceeded the configured freshness limit of "
+                                                                + businessAfterDrainFreshnessLimitMillis + " ms and is marked stale."))
                                                 : List.of()),
                                 "provenance", fields("provider", "att-call", "sourceType", query.get("sourceType"),
                                         "sourceName", query.get("callName"), "jobId", jobId,
@@ -3042,6 +3047,14 @@ final class SutMetricsService implements AutoCloseable {
         if (multiplier == 0) { if ("ms".equals(matcher.group(2)) && number >= 1000) return number / 1000; throw new IllegalArgumentException(field + " must be at least one second."); }
         if (number > Long.MAX_VALUE / multiplier) throw new IllegalArgumentException(field + " is outside its supported range.");
         return number * multiplier;
+    }
+
+    private static long businessAfterDrainFreshnessLimitMillis(boolean hasPrometheusQueries,
+                                                                long afterSeconds, long stepSeconds) {
+        if (!hasPrometheusQueries) return MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS;
+        long expectedPrometheusDelaySeconds = Math.addExact(afterSeconds, stepSeconds);
+        long expectedPrometheusDelayMillis = Math.multiplyExact(expectedPrometheusDelaySeconds, 1000L);
+        return Math.addExact(MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS, expectedPrometheusDelayMillis);
     }
 
     private static void validateCollectionOptions(Map<String, Object> options) {
