@@ -29,6 +29,7 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | Embedded SUT Metrics manifest integrity history | att-sut-metrics-manifest-integrity/v1 |
 | SUT Metrics normalized observation | att-sut-metrics-observation/v1 |
 | SUT Metrics series sidecar | att-sut-metrics-series/v1 |
+| SUT Metrics threshold evaluation record | att-sut-threshold-evaluation/v1 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | direct Engine/CLI: legacy summary contract (schema under `schemas/history/`); archived report: att-load-summary/v1.3 |

@@ -308,6 +308,10 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const [workloads, setWorkloads] = useState<WorkloadDraft[]>([]);
   const [advanced, setAdvanced] = useState({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '', observability: '{}' });
   const [sutMetricsProfiles, setSutMetricsProfiles] = useState<Array<Record<string, unknown>>>([]);
+  const [sutThresholdProfile, setSutThresholdProfile] = useState('');
+  const [sutThresholdMetric, setSutThresholdMetric] = useState('');
+  const [sutThresholdMaximum, setSutThresholdMaximum] = useState('90');
+  const [sutThresholdEditorError, setSutThresholdEditorError] = useState('');
   const [draft, setDraft] = useState<import('./types').LoadDraftResponse | null>(null);
   const [draftState, setDraftState] = useState<'idle' | 'validating' | 'valid' | 'error' | 'submitting'>('idle');
   const [confirmationPending, setConfirmationPending] = useState(false);
@@ -646,12 +650,58 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   function updateAdvanced<K extends keyof typeof advanced>(key: K, value: (typeof advanced)[K]) {
     markReplayDirty();setAdvanced(current => ({ ...current, [key]: value }));
   }
+  function addSutThresholdRule() {
+    setSutThresholdEditorError('');
+    const profile = sutMetricsProfiles.find(item => String(item.id) === sutThresholdProfile);
+    const metrics = Array.isArray(profile?.metricCatalog) ? profile.metricCatalog
+      : Array.isArray(profile?.metrics) ? profile.metrics : [];
+    const metric = metrics.find(value => value && typeof value === 'object' && String((value as Record<string, unknown>).id) === sutThresholdMetric) as Record<string, unknown> | undefined;
+    const maximumText = sutThresholdMaximum.trim();
+    const maximum = maximumText ? Number(maximumText) : Number.NaN;
+    if (!profile || !metric || !Number.isFinite(maximum)) {
+      setSutThresholdEditorError('Choose a registered base profile and metric, then enter a finite maximum.');
+      return;
+    }
+    try {
+      const observability = parseObjectJson(advanced.observability || '{}', 'SUT Metrics observability');
+      const collections = Array.isArray(observability.collections)
+        ? observability.collections.filter(value => value && typeof value === 'object' && !Array.isArray(value)).map(value => ({ ...(value as Record<string, unknown>) }))
+        : [];
+      let binding = collections.find(value => value.profile === profile.id);
+      if (!binding) {
+        binding = { id: profile.id, profile: profile.id };
+        collections.push(binding);
+      }
+      const bindingAlias = typeof binding.id === 'string' ? binding.id : String(binding.profile);
+      const rules = Array.isArray(observability.thresholds)
+        ? observability.thresholds.filter(value => value && typeof value === 'object' && !Array.isArray(value)).map(value => ({ ...(value as Record<string, unknown>) }))
+        : [];
+      const stem = `sut-${String(profile.id)}-${String(metric.id)}`.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80);
+      let id = stem, suffix = 2;
+      while (rules.some(rule => rule.id === id)) {
+        const ending = `-${suffix++}`;
+        id = `${stem.slice(0, 80 - ending.length)}${ending}`;
+      }
+      rules.push({ id, profile: bindingAlias, metric: metric.id, max: maximum, unit: metric.unit,
+        window: 'steady', targets: 'all', minimumCoverage: 0.95, onInsufficientData: 'NOT_EVALUATED', required: true });
+      observability.schemaVersion = 'att-load-observability/v1';
+      observability.collections = collections;
+      observability.thresholds = rules;
+      updateAdvanced('observability', JSON.stringify(observability, null, 2));
+    } catch (failure) {
+      setSutThresholdEditorError(failure instanceof Error ? failure.message : 'SUT threshold could not be added.');
+    }
+  }
   function updateThresholdEditorValidity(key: string, message: string) {
     setThresholdEditorErrors(current => { const next = { ...current }; if (message) next[key] = message; else delete next[key]; return next; });
   }
 
   const preview = draft?.previewYaml || (draft?.preview ? JSON.stringify(draft.preview, null, 2) : '');
   const hasLiveDraft = Boolean(draft && Date.parse(draft.expiresAt) > Date.now());
+  const thresholdProfiles = sutMetricsProfiles.filter(profile => Array.isArray(profile.metricCatalog) || Array.isArray(profile.metrics));
+  const selectedThresholdProfile = thresholdProfiles.find(profile => String(profile.id) === sutThresholdProfile);
+  const selectedThresholdMetrics = Array.isArray(selectedThresholdProfile?.metricCatalog) ? selectedThresholdProfile.metricCatalog
+    : Array.isArray(selectedThresholdProfile?.metrics) ? selectedThresholdProfile.metrics : [];
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter'
@@ -791,6 +841,27 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
             <JsonArrayField label="Package-relative Testdata paths" value={advanced.testdata} onChange={value => updateAdvanced('testdata', value)} />
             <JsonObjectField label="SUT Metrics observability binding (att-load-observability/v1)" value={advanced.observability} onChange={value => updateAdvanced('observability', value)} />
           </div>
+          {thresholdProfiles.length > 0 && <fieldset className="att-sut-threshold-editor">
+            <legend>Add a SUT maximum rule</legend>
+            <div className="att-load-grid">
+              <label>Base Metrics Profile<select value={sutThresholdProfile} onChange={event => {
+                const next = event.target.value; setSutThresholdProfile(next);
+                const profile = thresholdProfiles.find(item => String(item.id) === next);
+                const rows = Array.isArray(profile?.metricCatalog) ? profile.metricCatalog : Array.isArray(profile?.metrics) ? profile.metrics : [];
+                setSutThresholdMetric(rows.length && rows[0] && typeof rows[0] === 'object' ? String((rows[0] as Record<string, unknown>).id || '') : '');
+              }}><option value="">Choose profile</option>{thresholdProfiles.map(profile => <option key={String(profile.id)} value={String(profile.id)}>{String(profile.name || profile.id)}</option>)}</select></label>
+              <label>Metric<select value={sutThresholdMetric} onChange={event => setSutThresholdMetric(event.target.value)} disabled={!selectedThresholdProfile}>
+                <option value="">Choose metric</option>{selectedThresholdMetrics.map(value => {
+                  const metric = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+                  return <option key={String(metric.id)} value={String(metric.id)}>{String(metric.title || metric.id)} · {String(metric.unit || '')}</option>;
+                })}
+              </select></label>
+              <label>Maximum value<input type="number" step="any" value={sutThresholdMaximum} onChange={event => setSutThresholdMaximum(event.target.value)} /></label>
+            </div>
+            <p className="att-help">Adds a required maximum ≤ rule over actual STEADY samples for every bound target. The default minimum coverage is 95%; finish the profile source and target binding in the JSON above.</p>
+            <button type="button" onClick={addSutThresholdRule} disabled={!sutThresholdProfile || !sutThresholdMetric}>Add maximum rule</button>
+            {sutThresholdEditorError && <p role="alert" className="att-inline-error">{sutThresholdEditorError}</p>}
+          </fieldset>}
           <p className="att-help">Bind only registered Metrics Profile IDs. Prometheus URLs and credentials are configured by a Server administrator and cannot be submitted in a scenario.</p>
           {sutMetricsProfiles.length > 0 && <details><summary>Profiles available to this account ({sutMetricsProfiles.length})</summary><ul>{sutMetricsProfiles.map(profile => <li key={String(profile.id)}><code>{String(profile.id)}</code> · {String(profile.kind)} / {String(profile.category)} · {String(profile.name || profile.id)}</li>)}</ul></details>}
           {rawScenarioJson && <details><summary>Current complete scenario JSON</summary><CodeEditor value={rawScenarioJson} language="json" label="Complete scenario JSON" readOnly /></details>}

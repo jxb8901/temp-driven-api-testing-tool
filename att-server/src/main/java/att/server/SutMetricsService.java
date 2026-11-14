@@ -66,12 +66,15 @@ final class SutMetricsService implements AutoCloseable {
     static final String SERIES_SCHEMA = "att-sut-metrics-series/v1";
     static final String OBSERVATION_SCHEMA = "att-sut-metrics-observation/v1";
     static final String MANIFEST_INTEGRITY_SCHEMA = "att-sut-metrics-manifest-integrity/v1";
+    static final String THRESHOLD_EVALUATION_SCHEMA = "att-sut-threshold-evaluation/v1";
     private static final String MANIFEST_INTEGRITY_FIELD = "_integrity";
     static final int MAX_SOURCES = 64, MAX_PROFILES = 256;
     static final int MAX_SCHEDULED_COLLECTIONS = 128, MAX_MANIFEST_TRANSITIONS = 16;
     static final long MAX_MANIFEST_BYTES = 8L * 1024 * 1024;
     static final int MAX_EXPANDED_METRICS = 64, MAX_EXPANDED_TARGETS = 64, MAX_EXPANDED_QUERIES = 256;
+    static final int MAX_THRESHOLD_RULES = 64, MAX_THRESHOLD_SUBJECTS = 256;
     static final long MAX_COLLECTION_WINDOW_SECONDS = 26L * 60 * 60;
+    static final long MAX_THRESHOLD_EVALUATION_MILLIS = 30_000L;
     static final long MAX_SEGMENT_SECONDS = 6L * 60 * 60;
     static final long MAX_JOB_COLLECTION_BYTES = 64L * 1024 * 1024;
     static final long MAX_JOB_SAMPLES = 1_500_000L;
@@ -94,8 +97,10 @@ final class SutMetricsService implements AutoCloseable {
     private Map<String, Map<String, Object>> sources = new LinkedHashMap<>();
     private Map<String, Map<String, Object>> profiles = new LinkedHashMap<>();
     private final ExecutorService collectors = boundedExecutor(2, 64, "att-sut-metrics-collector");
+    private final ExecutorService evaluators = boundedExecutor(2, 32, "att-sut-threshold-evaluator");
     private final ScheduledThreadPoolExecutor collectionScheduler = scheduledExecutor("att-sut-metrics-scheduler");
     private final Set<String> scheduledCollections = ConcurrentHashMap.newKeySet();
+    private final Set<String> evaluatingJobs = ConcurrentHashMap.newKeySet();
     private final ExecutorService previews = boundedExecutor(4, 16, "att-sut-metrics-preview");
     private final ExecutorService bodyReaders = boundedExecutor(4, 16, "att-sut-metrics-response");
     private final ConcurrentHashMap<String, CompletableFuture<Map<String, Object>>> previewFlights = new ConcurrentHashMap<>();
@@ -128,6 +133,7 @@ final class SutMetricsService implements AutoCloseable {
         this.afterManifestPublication = java.util.Objects.requireNonNull(afterManifestPublication, "afterManifestPublication");
         loadCatalog();
         recoverInterruptedCollections();
+        recoverThresholdEvaluations();
     }
 
     Map<String, Object> listSources(String principal, boolean admin) {
@@ -221,7 +227,7 @@ final class SutMetricsService implements AutoCloseable {
         if (observability == null) return null;
         if (!OBSERVABILITY_SCHEMA.equals(observability.get("schemaVersion")))
             throw new IllegalArgumentException("observability.schemaVersion must be " + OBSERVABILITY_SCHEMA + ".");
-        rejectUnknown(observability, Set.of("schemaVersion", "collections", "collection", "livePreview"), "observability");
+        rejectUnknown(observability, Set.of("schemaVersion", "collections", "collection", "livePreview", "thresholds"), "observability");
         Object rawCollections = observability.get("collections");
         if (!(rawCollections instanceof List<?> collectionList) || collectionList.isEmpty() || collectionList.size() > 16)
             throw new IllegalArgumentException("observability.collections must contain 1 to 16 profile bindings.");
@@ -238,14 +244,21 @@ final class SutMetricsService implements AutoCloseable {
         Map<String, Set<String>> sourceTargets = new LinkedHashMap<>();
         Map<String, Set<String>> sourceMetrics = new LinkedHashMap<>();
         int bindingIndex = 0;
+        Set<String> bindingIds = new HashSet<>(), explicitBindingIds = new HashSet<>();
         synchronized (catalogLock) {
             for (Object rawBinding : collectionList) {
                 Map<String, Object> binding = object(rawBinding, "observability.collections[" + bindingIndex + "]");
-                rejectUnknown(binding, Set.of("profile", "source", "tenant", "targets", "parameters", "targetIds"), "profile binding");
+                rejectUnknown(binding, Set.of("id", "profile", "source", "tenant", "targets", "parameters", "targetIds"), "profile binding");
                 String profileId = requiredText(binding, "profile");
+                String bindingId = binding.containsKey("id") ? requiredText(binding, "id") : profileId;
+                boolean explicitBindingId = binding.containsKey("id");
+                if (!ID.matcher(bindingId).matches()) throw new IllegalArgumentException("Profile binding id is invalid.");
+                if (!bindingIds.add(bindingId) && (explicitBindingId || explicitBindingIds.contains(bindingId)))
+                    throw new IllegalArgumentException("Profile binding ids must be unique when explicitly supplied.");
+                if (explicitBindingId) explicitBindingIds.add(bindingId);
                 Set<String> selected = stringSet(binding.get("targetIds"), "targetIds");
                 int before = expanded.size();
-                expand(profileId, binding, profileId, expanded, provenance, principal, admin, selected);
+                expand(profileId, binding, bindingId, profileId, expanded, provenance, principal, admin, selected);
                 if (expanded.size() == before) throw new IllegalArgumentException("Profile binding " + profileId + " resolved to no metrics or targets.");
                 bindingIndex++;
             }
@@ -287,13 +300,101 @@ final class SutMetricsService implements AutoCloseable {
         Map<String, Object> safeLive = fields("enabled", live.getOrDefault("enabled", Boolean.TRUE),
                 "refreshInterval", String.valueOf(live.getOrDefault("refreshInterval", "30s")),
                 "defaultRange", String.valueOf(live.getOrDefault("defaultRange", "15m")));
+        List<Map<String, Object>> thresholdRules = normalizeThresholdRules(observability.get("thresholds"), expanded);
         String snapshotDigest;
-        try { snapshotDigest = sha256(json.writeValueAsBytes(fields("queries", expanded, "sources", pinnedSources, "collection", safeCollection, "livePreview", safeLive))); }
+        try { snapshotDigest = sha256(json.writeValueAsBytes(fields("queries", expanded, "sources", pinnedSources,
+                "collection", safeCollection, "livePreview", safeLive, "thresholds", thresholdRules))); }
         catch (Exception impossible) { throw new IllegalStateException("Could not canonicalize SUT Metrics snapshot.", impossible); }
         return fields("schemaVersion", SNAPSHOT_SCHEMA, "snapshotId", snapshotDigest,
                 "createdAt", Instant.now().toString(), "collection", safeCollection, "livePreview", safeLive,
-                "provenance", provenance, "queries", expanded, "sources", pinnedSources, "budgets", fields("metrics", expanded.size(),
+                "provenance", provenance, "queries", expanded, "sources", pinnedSources, "thresholds", thresholdRules,
+                "budgets", fields("metrics", expanded.size(),
                         "targets", targets.size(), "maxWindowSeconds", MAX_COLLECTION_WINDOW_SECONDS));
+    }
+
+    private List<Map<String, Object>> normalizeThresholdRules(Object raw, List<Map<String, Object>> queries) {
+        if (raw == null) return List.of();
+        if (!(raw instanceof List<?> rules) || rules.isEmpty() || rules.size() > MAX_THRESHOLD_RULES)
+            throw new IllegalArgumentException("observability.thresholds must contain 1 to " + MAX_THRESHOLD_RULES + " rules.");
+        List<Map<String, Object>> normalized = new ArrayList<>();
+        Set<String> ids = new HashSet<>();
+        int subjects = 0;
+        for (int index = 0; index < rules.size(); index++) {
+            Map<String, Object> rule = object(rules.get(index), "observability.thresholds[" + index + "]");
+            rejectUnknown(rule, Set.of("id", "profile", "metric", "max", "reduction", "operator", "value", "unit",
+                    "window", "targets", "minimumCoverage", "onInsufficientData", "required"), "SUT threshold rule");
+            String id = requiredText(rule, "id");
+            if (!ID.matcher(id).matches() || !ids.add(id)) throw new IllegalArgumentException("SUT threshold ids must be valid and unique.");
+            String metricId = requiredText(rule, "metric");
+            String selectedProfile = nullableText(rule.get("profile"));
+            List<Map<String, Object>> matches = new ArrayList<>();
+            for (Map<String, Object> query : queries) {
+                if (!metricId.equals(query.get("metricId"))) continue;
+                if (selectedProfile != null && !selectedProfile.equals(query.get("bindingId"))
+                        && !selectedProfile.equals(query.get("profilePath"))
+                        && !selectedProfile.equals(query.get("profile"))) continue;
+                matches.add(query);
+            }
+            if (matches.isEmpty()) throw new IllegalArgumentException("SUT threshold " + id + " refers to an unknown profile or metric.");
+            Set<String> profilePaths = new LinkedHashSet<>(), kinds = new LinkedHashSet<>(), units = new LinkedHashSet<>();
+            Set<String> bindingAliases = new LinkedHashSet<>();
+            List<String> queryIds = new ArrayList<>();
+            for (Map<String, Object> query : matches) {
+                profilePaths.add(String.valueOf(query.get("profilePath")));
+                kinds.add(String.valueOf(query.get("kind")));
+                units.add(String.valueOf(query.get("unit")));
+                bindingAliases.add(String.valueOf(query.get("bindingId")));
+                queryIds.add(String.valueOf(query.get("id")));
+            }
+            if (profilePaths.size() > 1)
+                throw new IllegalArgumentException("SUT threshold " + id + " is ambiguous; select an effective profile binding or profile path.");
+            if (kinds.size() != 1 || !Set.of("gauge", "rate").contains(kinds.iterator().next()))
+                throw new IllegalArgumentException("SUT threshold " + id + " supports sampled gauge and rate metrics only.");
+            if (units.size() != 1) throw new IllegalArgumentException("SUT threshold " + id + " resolves to metrics with different units.");
+            String metricUnit = units.iterator().next();
+            if (rule.containsKey("unit") && !metricUnit.equals(requiredText(rule, "unit")))
+                throw new IllegalArgumentException("SUT threshold " + id + " unit must match the selected metric unit.");
+            boolean shorthand = rule.containsKey("max");
+            boolean explicit = rule.containsKey("reduction") || rule.containsKey("operator") || rule.containsKey("value");
+            if (shorthand == explicit) throw new IllegalArgumentException("SUT threshold " + id + " must use max shorthand or one canonical reduction/operator/value rule.");
+            if (shorthand && rule.keySet().stream().anyMatch(key -> Set.of("reduction", "operator", "value").contains(key)))
+                throw new IllegalArgumentException("SUT threshold " + id + " cannot mix max shorthand with canonical rule fields.");
+            String reduction = shorthand ? "max" : String.valueOf(rule.get("reduction"));
+            String operator = shorthand ? "<=" : String.valueOf(rule.get("operator"));
+            Object rawValue = shorthand ? rule.get("max") : rule.get("value");
+            if (!"max".equals(reduction) || !"<=".equals(operator))
+                throw new IllegalArgumentException("SUT threshold " + id + " supports only reduction max with operator <=.");
+            if (!(rawValue instanceof Number number) || !Double.isFinite(number.doubleValue()))
+                throw new IllegalArgumentException("SUT threshold " + id + " value must be a finite number.");
+            Object rawWindow = rule.getOrDefault("window", "steady");
+            if (!(rawWindow instanceof String window) || !"steady".equals(window))
+                throw new IllegalArgumentException("SUT threshold " + id + " supports only the steady window.");
+            Object rawTargets = rule.getOrDefault("targets", "all");
+            if (!(rawTargets instanceof String targets) || !"all".equals(targets))
+                throw new IllegalArgumentException("SUT threshold " + id + " supports targets: all only.");
+            Object rawCoverage = rule.getOrDefault("minimumCoverage", 0.95d);
+            if (!(rawCoverage instanceof Number coverage) || !Double.isFinite(coverage.doubleValue())
+                    || coverage.doubleValue() <= 0.0d || coverage.doubleValue() > 1.0d)
+                throw new IllegalArgumentException("SUT threshold " + id + " minimumCoverage must be greater than 0 and at most 1.");
+            Object rawInsufficient = rule.getOrDefault("onInsufficientData", "NOT_EVALUATED");
+            if (!(rawInsufficient instanceof String insufficient) || !"NOT_EVALUATED".equals(insufficient))
+                throw new IllegalArgumentException("SUT threshold " + id + " onInsufficientData must be NOT_EVALUATED.");
+            Object rawRequired = rule.getOrDefault("required", Boolean.TRUE);
+            if (!(rawRequired instanceof Boolean required))
+                throw new IllegalArgumentException("SUT threshold " + id + " required must be a boolean.");
+            subjects += queryIds.size();
+            if (subjects > MAX_THRESHOLD_SUBJECTS)
+                throw new IllegalArgumentException("SUT threshold target expansion exceeds the " + MAX_THRESHOLD_SUBJECTS + " subject budget.");
+            String profilePath = profilePaths.iterator().next();
+            normalized.add(fields("id", id, "profile", selectedProfile == null ? profilePath : selectedProfile,
+                    "bindingId", bindingAliases.size() == 1 ? bindingAliases.iterator().next() : null,
+                    "profilePath", profilePath, "metricId", metricId, "metricName", matches.get(0).get("title"),
+                    "unit", metricUnit, "kind", kinds.iterator().next(), "reduction", reduction,
+                    "operator", operator, "value", number.doubleValue(), "window", window, "targets", targets,
+                    "minimumCoverage", coverage.doubleValue(), "onInsufficientData", insufficient,
+                    "required", required, "queryIds", queryIds));
+        }
+        return normalized;
     }
 
     Map<String, Object> previewResolution(Map<String, Object> observability, String principal, boolean admin) {
@@ -305,14 +406,17 @@ final class SutMetricsService implements AutoCloseable {
     Map<String, Object> previewSnapshot(Map<String, Object> snapshot) {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> query : listOfMaps(snapshot.get("queries"))) {
-            rows.add(fields("id", query.get("id"), "profile", query.get("profile"), "profilePath", query.get("profilePath"),
+            Map<String, Object> row = fields("id", query.get("id"), "profile", query.get("profile"), "profilePath", query.get("profilePath"),
                     "sourceId", query.get("sourceId"), "sourceName", query.get("sourceName"), "targetId", query.get("targetId"),
                     "targetType", query.get("targetType"), "metricId", query.get("metricId"), "title", query.get("title"),
                     "category", query.get("category"), "unit", query.get("unit"), "parameters", query.get("parameters"),
-                    "queryPreview", query.get("query")));
+                    "queryPreview", query.get("query"));
+            if (query.get("bindingId") != null) row.put("bindingId", query.get("bindingId"));
+            rows.add(row);
         }
         return fields("configured", Boolean.TRUE, "schemaVersion", SNAPSHOT_SCHEMA,
-                "snapshotId", snapshot.get("snapshotId"), "collection", snapshot.get("collection"), "items", rows);
+                "snapshotId", snapshot.get("snapshotId"), "collection", snapshot.get("collection"),
+                "thresholds", snapshot.get("thresholds"), "items", rows);
     }
 
     void writeSnapshot(String jobId, Map<String, Object> snapshot) throws Exception {
@@ -327,6 +431,13 @@ final class SutMetricsService implements AutoCloseable {
                 "initialManifestSha256", sha256(initialManifestBytes));
         atomicJson(directory.resolve("snapshot.json"), content);
         writeManifest(directory, initialManifest);
+        if (!listOfMaps(snapshot.get("thresholds")).isEmpty()) {
+            Instant now = Instant.now();
+            writeThresholdEvaluation(jobId, snapshot, fields("state", "PENDING", "complete", Boolean.FALSE,
+                    "attempt", 0, "createdAt", now.toString(), "updatedAt", now.toString(),
+                    "collectionState", "PENDING", "effectiveRules", snapshot.get("thresholds"),
+                    "sutThresholds", null, "diagnostics", List.of()));
+        }
     }
 
     Map<String, Object> snapshotForJob(String jobId) throws Exception {
@@ -368,6 +479,204 @@ final class SutMetricsService implements AutoCloseable {
         verifyManifestIntegrity(directory, bytes, value, envelope, true);
         validateManifest(value, jobId, envelope.snapshot());
         return value;
+    }
+
+    Map<String, Object> thresholdEvaluationStatus(String jobId) throws Exception {
+        SnapshotEnvelope envelope = snapshotEnvelope(jobId);
+        if (envelope == null || listOfMaps(envelope.snapshot().get("thresholds")).isEmpty())
+            return fields("schemaVersion", THRESHOLD_EVALUATION_SCHEMA, "state", "DISABLED", "complete", Boolean.TRUE,
+                    "jobId", jobId, "items", List.of(), "targets", List.of());
+        Map<String, Object> record = readThresholdEvaluation(jobId, envelope);
+        if (record != null) return record;
+        return fields("schemaVersion", THRESHOLD_EVALUATION_SCHEMA, "state", "PENDING", "complete", Boolean.FALSE,
+                "jobId", jobId, "snapshotId", envelope.snapshot().get("snapshotId"), "attempt", 0,
+                "effectiveRules", envelope.snapshot().get("thresholds"), "collectionState", collectionStatus(jobId).get("state"),
+                "items", List.of(), "targets", List.of());
+    }
+
+    private Map<String, Object> readThresholdEvaluation(String jobId, SnapshotEnvelope envelope) throws Exception {
+        Path file = jobMetricsDirectory(jobId).resolve("threshold-evaluation.json");
+        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(file)) return null;
+        if (Files.size(file) > 1024L * 1024L) throw new IllegalStateException("The durable SUT threshold evaluation exceeds its read limit.");
+        Map<String, Object> record = json.readValue(file.toFile(), Map.class);
+        validateThresholdEvaluation(record, jobId, envelope);
+        return record;
+    }
+
+    private void writeThresholdEvaluation(String jobId, Map<String, Object> snapshot, Map<String, Object> update) throws Exception {
+        SnapshotEnvelope envelope = snapshotEnvelope(jobId);
+        if (envelope == null || !String.valueOf(snapshot.get("snapshotId")).equals(envelope.snapshot().get("snapshotId")))
+            throw new IllegalStateException("The SUT threshold evaluation does not match its immutable Job snapshot.");
+        Map<String, Object> record = new LinkedHashMap<>(update);
+        record.put("schemaVersion", THRESHOLD_EVALUATION_SCHEMA);
+        record.put("jobId", jobId);
+        record.put("snapshotId", envelope.snapshot().get("snapshotId"));
+        record.put("snapshotSha256", envelope.snapshotSha256());
+        record.put("effectiveRules", snapshot.get("thresholds"));
+        record.putIfAbsent("createdAt", Instant.now().toString());
+        record.put("updatedAt", Instant.now().toString());
+        validateThresholdEvaluation(record, jobId, envelope);
+        Path directory = jobMetricsDirectory(jobId);
+        Files.createDirectories(directory);
+        byte[] bytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(record);
+        if (bytes.length > 1024L * 1024L) throw new IllegalStateException("The durable SUT threshold evaluation exceeds its write limit.");
+        atomicBytes(directory.resolve("threshold-evaluation.json"), bytes);
+    }
+
+    private void validateThresholdEvaluation(Map<String, Object> record, String jobId, SnapshotEnvelope envelope) {
+        if (!THRESHOLD_EVALUATION_SCHEMA.equals(record.get("schemaVersion")) || !jobId.equals(record.get("jobId"))
+                || !String.valueOf(envelope.snapshot().get("snapshotId")).equals(record.get("snapshotId"))
+                || !envelope.snapshotSha256().equals(record.get("snapshotSha256")))
+            throw new IllegalStateException("The SUT threshold evaluation identity does not match its immutable Job snapshot.");
+        Object stateValue = record.get("state"), completeValue = record.get("complete"), attemptValue = record.get("attempt");
+        if (!(stateValue instanceof String state) || !Set.of("PENDING", "EVALUATING", "MET", "NOT_MET", "NOT_EVALUATED", "ERROR").contains(state)
+                || !(completeValue instanceof Boolean complete) || complete != Set.of("MET", "NOT_MET", "NOT_EVALUATED", "ERROR").contains(state)
+                || !(attemptValue instanceof Number attempt) || attempt.intValue() < 0 || attempt.intValue() > 2
+                || !(record.get("effectiveRules") instanceof List<?> rules) || rules.size() > MAX_THRESHOLD_RULES
+                || !(record.get("diagnostics") instanceof List<?> diagnostics) || diagnostics.size() > 4)
+            throw new IllegalStateException("The durable SUT threshold evaluation structure is invalid.");
+        try {
+            byte[] expected = json.writeValueAsBytes(envelope.snapshot().get("thresholds"));
+            byte[] actual = json.writeValueAsBytes(record.get("effectiveRules"));
+            if (!java.util.Arrays.equals(expected, actual)) throw new IllegalStateException("The SUT threshold evaluation rules do not match the immutable Job snapshot.");
+            Object results = record.get("sutThresholds");
+            if (results instanceof Map<?, ?> values) {
+                if (listOfMaps(values.get("targets")).size() > MAX_THRESHOLD_SUBJECTS
+                        || listOfMaps(values.get("items")).size() > MAX_THRESHOLD_RULES)
+                    throw new IllegalStateException("The durable SUT threshold evaluation exceeds its result limit.");
+            } else if (Set.of("MET", "NOT_MET", "NOT_EVALUATED").contains(state)) {
+                throw new IllegalStateException("The final SUT threshold evaluation is missing its result.");
+            }
+        } catch (Exception invalid) {
+            if (invalid instanceof IllegalStateException invalidState) throw invalidState;
+            throw new IllegalStateException("The durable SUT threshold evaluation could not be verified.", invalid);
+        }
+    }
+
+    private void recoverThresholdEvaluations() throws Exception {
+        if (!Files.isDirectory(jobsRoot, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(jobsRoot)) return;
+        try (var jobDirectories = Files.newDirectoryStream(jobsRoot)) {
+            for (Path jobDirectory : jobDirectories) {
+                String jobId = jobDirectory.getFileName().toString();
+                if (!JOB_ID.matcher(jobId).matches() || !Files.isDirectory(jobDirectory, LinkOption.NOFOLLOW_LINKS)
+                        || Files.isSymbolicLink(jobDirectory)) continue;
+                try {
+                    SnapshotEnvelope envelope = snapshotEnvelope(jobId);
+                    if (envelope == null || listOfMaps(envelope.snapshot().get("thresholds")).isEmpty()) continue;
+                    String collectionState = String.valueOf(collectionStatus(jobId).get("state"));
+                    if (!Set.of("READY", "PARTIAL", "UNAVAILABLE", "FAILED").contains(collectionState)) continue;
+                    Map<String, Object> record = readThresholdEvaluation(jobId, envelope);
+                    String state = record == null ? "PENDING" : String.valueOf(record.get("state"));
+                    int attempts = record != null && record.get("attempt") instanceof Number number ? number.intValue() : 0;
+                    if (Set.of("PENDING", "EVALUATING").contains(state) || "ERROR".equals(state) && attempts < 2)
+                        scheduleThresholdEvaluation(jobId);
+                } catch (Exception invalid) { /* Retain corrupt data for the authorized integrity-error path. */ }
+            }
+        }
+    }
+
+    private void scheduleThresholdEvaluation(String jobId) {
+        if (!evaluatingJobs.add(jobId)) return;
+        Map<String, Object> snapshot = null;
+        Map<String, Object> record;
+        int attempt = 0;
+        String collectionState = "UNKNOWN";
+        boolean submitted = false;
+        boolean recordReadCompleted = false;
+        try {
+            snapshot = snapshotForJob(jobId);
+            if (snapshot == null || listOfMaps(snapshot.get("thresholds")).isEmpty()) return;
+            Map<String, Object> collection = collectionStatus(jobId);
+            collectionState = String.valueOf(collection.get("state"));
+            if (!Set.of("READY", "PARTIAL", "UNAVAILABLE", "FAILED").contains(collectionState)) return;
+            SnapshotEnvelope envelope = snapshotEnvelope(jobId);
+            record = readThresholdEvaluation(jobId, envelope);
+            recordReadCompleted = true;
+            String priorState = record == null ? "PENDING" : String.valueOf(record.get("state"));
+            int priorAttempt = record != null && record.get("attempt") instanceof Number number ? number.intValue() : 0;
+            if (Set.of("MET", "NOT_MET", "NOT_EVALUATED").contains(priorState) || "ERROR".equals(priorState) && priorAttempt >= 2) return;
+            attempt = priorAttempt + 1;
+            Map<String, Object> evaluating = record == null ? new LinkedHashMap<>() : new LinkedHashMap<>(record);
+            evaluating.putAll(fields("state", "EVALUATING", "complete", Boolean.FALSE, "attempt", attempt,
+                    "collectionState", collectionState, "diagnostics", List.of()));
+            writeThresholdEvaluation(jobId, snapshot, evaluating);
+            Map<String, Object> evaluationSnapshot = snapshot;
+            Map<String, Object> collectionSnapshot = collection;
+            int evaluationAttempt = attempt;
+            evaluators.execute(() -> runThresholdEvaluation(jobId, evaluationSnapshot, collectionSnapshot, evaluationAttempt));
+            submitted = true;
+        } catch (java.util.concurrent.RejectedExecutionException full) {
+            if (snapshot != null) try {
+                int recordedAttempt = attempt >= 2 ? 2 : Math.max(0, attempt - 1);
+                writeThresholdEvaluation(jobId, snapshot, evaluationError(snapshot, collectionState,
+                        "EVALUATION_CAPACITY", "SUT threshold evaluation capacity is full.", recordedAttempt));
+                if (attempt < 2) collectionScheduler.schedule(() -> scheduleThresholdEvaluation(jobId), 1, TimeUnit.SECONDS);
+            } catch (Exception ignored) { }
+        } catch (Exception failure) {
+            if (snapshot != null && recordReadCompleted) {
+                try { writeThresholdEvaluation(jobId, snapshot, evaluationError(snapshot, collectionState,
+                        "EVALUATION_FAILED", "The durable SUT threshold evaluation could not start.", Math.min(2, attempt))); }
+                catch (Exception ignored) { }
+            }
+        } finally {
+            if (!submitted) evaluatingJobs.remove(jobId);
+        }
+    }
+
+    private void runThresholdEvaluation(String jobId, Map<String, Object> snapshot,
+                                        Map<String, Object> collection, int attempt) {
+        boolean retry = false;
+        try {
+            List<Map<String, Object>> queries = listOfMaps(snapshot.get("queries"));
+            Map<String, Map<String, Object>> observations = new LinkedHashMap<>();
+            for (Map<String, Object> entry : listOfMaps(collection.get("files"))) {
+                Map<String, Object> observation = readSeriesFile(jobId, entry);
+                observations.put(String.valueOf(entry.get("queryId")), observation);
+            }
+            long step = durationSeconds(String.valueOf(collection.get("step")), "step");
+            long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(MAX_THRESHOLD_EVALUATION_MILLIS);
+            Map<String, Object> result = SutThresholdEvaluator.evaluate(listOfMaps(snapshot.get("thresholds")), queries,
+                    observations, listOfMaps(collection.get("phaseWindows")), step, deadline);
+            String state = String.valueOf(result.get("status"));
+            Map<String, Object> completeness = fields("complete", Boolean.TRUE,
+                    "ruleCount", listOfMaps(snapshot.get("thresholds")).size(),
+                    "requiredRuleCount", result.get("requiredThresholdCount"),
+                    "targetCount", listOfMaps(result.get("targets")).size(),
+                    "notEvaluatedTargetCount", listOfMaps(result.get("targets")).stream()
+                            .filter(target -> "NOT_EVALUATED".equals(target.get("status"))).count());
+            Map<String, Object> finalRecord = fields("state", state, "complete", Boolean.TRUE,
+                    "attempt", attempt, "collectionState", collection.get("state"), "collectionUpdatedAt", collection.get("updatedAt"),
+                    "evaluatedAt", Instant.now().toString(), "window", fields("phase", "steady", "phaseWindows", collection.get("phaseWindows"), "step", collection.get("step")),
+                    "completeness", completeness, "sutThresholds", result, "diagnostics", List.of());
+            writeThresholdEvaluation(jobId, snapshot, finalRecord);
+        } catch (SutThresholdEvaluator.EvaluationTimeoutException timeout) {
+            retry = attempt < 2;
+            writeEvaluationFailure(jobId, snapshot, collection, attempt, "EVALUATION_TIMEOUT", timeout.getMessage());
+        } catch (Exception failure) {
+            retry = attempt < 2;
+            writeEvaluationFailure(jobId, snapshot, collection, attempt, "EVALUATION_FAILED", safeFailureMessage(failure));
+        } finally {
+            evaluatingJobs.remove(jobId);
+        }
+        if (retry) {
+            try { collectionScheduler.schedule(() -> scheduleThresholdEvaluation(jobId), 1, TimeUnit.SECONDS); }
+            catch (java.util.concurrent.RejectedExecutionException ignored) { }
+        }
+    }
+
+    private void writeEvaluationFailure(String jobId, Map<String, Object> snapshot, Map<String, Object> collection,
+                                        int attempt, String code, String message) {
+        try {
+            writeThresholdEvaluation(jobId, snapshot, evaluationError(snapshot, String.valueOf(collection.get("state")), code, message, attempt));
+        } catch (Exception ignored) { }
+    }
+
+    private Map<String, Object> evaluationError(Map<String, Object> snapshot, String collectionState,
+                                               String code, String message, int attempt) {
+        boolean finalAttempt = attempt >= 2;
+        return fields("state", finalAttempt ? "ERROR" : "PENDING", "complete", finalAttempt, "attempt", Math.min(2, attempt),
+                "collectionState", collectionState, "evaluatedAt", Instant.now().toString(), "sutThresholds", null,
+                "diagnostics", List.of(fields("code", code, "message", message == null ? "Evaluation failed." : message.substring(0, Math.min(240, message.length())))));
     }
 
     List<String> pendingCollectionJobIds() throws Exception {
@@ -986,7 +1295,7 @@ final class SutMetricsService implements AutoCloseable {
         if (queryCount > sourceInt(source, "maxQueriesPerJob")) throw new IllegalArgumentException("The per-Job Prometheus query budget was exceeded.");
     }
 
-    private void expand(String profileId, Map<String, Object> binding, String profilePath,
+    private void expand(String profileId, Map<String, Object> binding, String bindingId, String profilePath,
                         List<Map<String, Object>> queries, List<Map<String, Object>> provenance,
                         String principal, boolean admin, Set<String> selectedTargets) {
         Map<String, Object> profile = profiles.get(profileId);
@@ -1002,7 +1311,7 @@ final class SutMetricsService implements AutoCloseable {
         }
         String kind = String.valueOf(profile.get("kind"));
         if ("composite".equals(kind)) {
-            if (binding.keySet().stream().anyMatch(key -> !Set.of("profile", "targetIds").contains(key)))
+            if (binding.keySet().stream().anyMatch(key -> !Set.of("id", "profile", "targetIds").contains(key)))
                 throw new IllegalArgumentException("Composite profile bindings may select targetIds only; source and targets come from includes.");
             for (Map<String, Object> include : listOfMaps(profile.get("includes"))) {
                 String child = String.valueOf(include.get("profile"));
@@ -1013,15 +1322,15 @@ final class SutMetricsService implements AutoCloseable {
                 Map<String, Object> childProfile = profiles.get(child);
                 if (childProfile == null || !"base".equals(childProfile.get("kind")))
                     throw new IllegalArgumentException("Composite profiles may include base profiles only.");
-                bindBase(childProfile, childBinding, childPath, queries, provenance, principal, admin, effectiveTargets);
+                bindBase(childProfile, childBinding, bindingId, childPath, queries, provenance, principal, admin, effectiveTargets);
             }
         } else {
-            bindBase(profile, binding, profilePath, queries, provenance, principal, admin, effectiveTargets);
+            bindBase(profile, binding, bindingId, profilePath, queries, provenance, principal, admin, effectiveTargets);
         }
         if (queries.size() > MAX_EXPANDED_QUERIES) throw new IllegalArgumentException("Resolved Metrics Profile exceeds the 256 query budget.");
     }
 
-    private void bindBase(Map<String, Object> profile, Map<String, Object> binding, String profilePath,
+    private void bindBase(Map<String, Object> profile, Map<String, Object> binding, String bindingId, String profilePath,
                           List<Map<String, Object>> queries, List<Map<String, Object>> provenance,
                           String principal, boolean admin, Set<String> selectedTargets) {
         String profileId = String.valueOf(profile.get("id"));
@@ -1064,7 +1373,7 @@ final class SutMetricsService implements AutoCloseable {
             for (Map<String, Object> metric : listOfMaps(profile.get("metrics"))) {
                 String query = interpolate(String.valueOf(metric.get("query")), definitions, parameters);
                 String stableId = sourceId + "/" + profilePath + "/" + targetId + "/" + metric.get("id");
-                Map<String, Object> row = fields("id", stableId, "profile", profileId, "profilePath", profilePath,
+                Map<String, Object> row = fields("id", stableId, "bindingId", bindingId, "profile", profileId, "profilePath", profilePath,
                         "sourceId", sourceId, "sourceName", source.get("name"), "tenant", tenant,
                         "targetId", targetId, "targetType", target.getOrDefault("type", profile.getOrDefault("category", "")),
                         "metricId", metric.get("id"), "title", metric.get("title"), "category", metric.getOrDefault("category", profile.getOrDefault("category", "app")),
@@ -1393,8 +1702,10 @@ final class SutMetricsService implements AutoCloseable {
             return selected;
         });
         lock.lock.lock();
+        boolean published = false;
         try {
             writeManifestLocked(directory, manifest);
+            published = true;
         } finally {
             lock.lock.unlock();
             manifestWriteLocks.compute(jobId, (key, current) -> {
@@ -1402,6 +1713,8 @@ final class SutMetricsService implements AutoCloseable {
                 return --lock.users == 0 ? null : lock;
             });
         }
+        if (published && Set.of("READY", "PARTIAL", "UNAVAILABLE", "FAILED").contains(manifest.get("state")))
+            scheduleThresholdEvaluation(jobId);
     }
 
     private void writeManifestLocked(Path directory, Map<String, Object> manifest) throws Exception {
@@ -1611,12 +1924,16 @@ final class SutMetricsService implements AutoCloseable {
 
     private static List<Map<String, Object>> queryMetadata(Map<String, Object> snapshot) {
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (Map<String, Object> query : listOfMaps(snapshot.get("queries"))) rows.add(fields("id", query.get("id"), "profile", query.get("profile"),
-                "profilePath", query.get("profilePath"), "sourceId", query.get("sourceId"), "sourceName", query.get("sourceName"),
-                "targetId", query.get("targetId"), "targetType", query.get("targetType"), "metricId", query.get("metricId"),
-                "title", query.get("title"), "category", query.get("category"), "unit", query.get("unit"), "kind", query.get("kind"),
-                "sourceRevision", query.get("sourceRevision"), "profileRevision", query.get("profileRevision"),
-                "targetRevision", query.get("targetRevision")));
+        for (Map<String, Object> query : listOfMaps(snapshot.get("queries"))) {
+            Map<String, Object> row = fields("id", query.get("id"), "profile", query.get("profile"),
+                    "profilePath", query.get("profilePath"), "sourceId", query.get("sourceId"), "sourceName", query.get("sourceName"),
+                    "targetId", query.get("targetId"), "targetType", query.get("targetType"), "metricId", query.get("metricId"),
+                    "title", query.get("title"), "category", query.get("category"), "unit", query.get("unit"), "kind", query.get("kind"),
+                    "sourceRevision", query.get("sourceRevision"), "profileRevision", query.get("profileRevision"),
+                    "targetRevision", query.get("targetRevision"));
+            if (query.get("bindingId") != null) row.put("bindingId", query.get("bindingId"));
+            rows.add(row);
+        }
         return rows;
     }
 
@@ -1867,7 +2184,7 @@ final class SutMetricsService implements AutoCloseable {
     private Map<String, Object> cachedPreview(String key) { CacheEntry entry = previewCache.get(key); if (entry == null) return null; if (System.nanoTime() >= entry.expiresAtNanos) { previewCache.remove(key, entry); return null; } return entry.value; }
     private void trimPreviewCache() { if (previewCache.size() > 128) previewCache.entrySet().removeIf(entry -> System.nanoTime() >= entry.getValue().expiresAtNanos); if (previewCache.size() > 128) previewCache.clear(); }
 
-    @Override public void close() { collectionScheduler.shutdownNow(); collectors.shutdownNow(); previews.shutdownNow(); bodyReaders.shutdownNow(); scheduledCollections.clear(); previewFlights.clear(); previewCache.clear(); clients.clear(); }
+    @Override public void close() { collectionScheduler.shutdownNow(); collectors.shutdownNow(); evaluators.shutdownNow(); previews.shutdownNow(); bodyReaders.shutdownNow(); scheduledCollections.clear(); evaluatingJobs.clear(); previewFlights.clear(); previewCache.clear(); clients.clear(); }
     static final class CapacityException extends RuntimeException { CapacityException(String message) { super(message); } }
     static final class SutMetricsTimeoutException extends RuntimeException { SutMetricsTimeoutException(String message) { super(message); } }
     private static final class ManifestWriteLock {

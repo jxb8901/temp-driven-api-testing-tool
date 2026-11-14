@@ -55,6 +55,13 @@
     },
     "budgets": {
       "type": "object"
+    },
+    "thresholds": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object"
+      }
     }
   }
 }

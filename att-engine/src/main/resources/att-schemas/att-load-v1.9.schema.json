@@ -759,6 +759,14 @@
         },
         "livePreview": {
           "$ref": "#/$defs/observabilityLivePreview"
+        },
+        "thresholds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/sutThresholdRule"
+          }
         }
       }
     },
@@ -813,6 +821,12 @@
               "number"
             ]
           }
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
         }
       }
     },
@@ -851,6 +865,104 @@
           "const": "15m"
         }
       }
+    },
+    "sutThresholdRule": {
+      "type": "object",
+      "required": [
+        "id",
+        "metric"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "profile": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "metric": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "max": {
+          "type": "number"
+        },
+        "reduction": {
+          "const": "max"
+        },
+        "operator": {
+          "const": "<="
+        },
+        "value": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "window": {
+          "const": "steady"
+        },
+        "targets": {
+          "const": "all"
+        },
+        "minimumCoverage": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "onInsufficientData": {
+          "const": "NOT_EVALUATED"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "max"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "reduction"
+                ]
+              },
+              {
+                "required": [
+                  "operator"
+                ]
+              },
+              {
+                "required": [
+                  "value"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "reduction",
+            "operator",
+            "value"
+          ],
+          "not": {
+            "required": [
+              "max"
+            ]
+          }
+        }
+      ]
     }
   },
   "patternProperties": {

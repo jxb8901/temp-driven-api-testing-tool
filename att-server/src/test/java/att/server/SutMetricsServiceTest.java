@@ -435,6 +435,43 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void postRunThresholdEvaluationPersistsPerTargetEvidenceAndRecoversAfterRestart() throws Exception {
+        Path data = temp.resolve("threshold-evaluation-recovery");
+        String jobId = "J0000000000000091";
+        Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(60);
+        Map<String, Object> configured = scenario(List.of(map("id", "platform", "profile", "base", "source", "prom",
+                "targets", List.of(map("id", "sut-1", "type", "app")))), "1m", "1m", "15s");
+        configured.put("thresholds", List.of(map("id", "cpu-steady-90", "profile", "platform", "metric", "metric-1",
+                "max", 90.0, "unit", "count", "minimumCoverage", 0.95)));
+        try (PrometheusFixture fixture = new PrometheusFixture(raw -> thresholdResponse(raw, 90.0));
+             SutMetricsService service = new SutMetricsService(data)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            assertEquals(1, maps(snapshot.get("thresholds")).size());
+            assertEquals("platform", maps(snapshot.get("queries")).get(0).get("bindingId"));
+            service.writeSnapshot(jobId, snapshot);
+            List<Map<String, Object>> phases = List.of(phase("STEADY", startedAt.plusSeconds(10), finishedAt.minusSeconds(10), true));
+
+            service.jobFinished(jobId, startedAt, finishedAt, phases);
+            assertEquals("READY", awaitManifest(service, jobId).get("state"));
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, jobId);
+            assertEquals("MET", evaluation.get("state"));
+            Map<String, Object> results = object(evaluation.get("sutThresholds"));
+            Map<String, Object> threshold = maps(results.get("items")).get(0);
+            Map<String, Object> target = maps(threshold.get("targets")).get(0);
+            assertEquals("MET", target.get("status"));
+            assertEquals(90.0, ((Number) target.get("actual")).doubleValue());
+            assertEquals(90.0, ((Number) object(target.get("threshold")).get("value")).doubleValue());
+            Path record = data.resolve("jobs").resolve(jobId).resolve("sut-metrics/threshold-evaluation.json");
+            assertTrue(Files.isRegularFile(record));
+            assertFalse(Files.readString(record).contains(fixture.url()));
+        }
+        try (SutMetricsService recovered = new SutMetricsService(data)) {
+            assertEquals("MET", recovered.thresholdEvaluationStatus(jobId).get("state"));
+        }
+    }
+
     @Test void collectionManifestRejectsIdentityAndStateOrFileListTampering() throws Exception {
         try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::atWindowEndResponse);
              SutMetricsService service = new SutMetricsService(temp)) {
@@ -756,6 +793,19 @@ class SutMetricsServiceTest {
         return Map.of();
     }
 
+    private static Map<String, Object> awaitThresholdEvaluation(SutMetricsService service, String jobId) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        Map<String, Object> evaluation;
+        do {
+            evaluation = service.thresholdEvaluationStatus(jobId);
+            String state = String.valueOf(evaluation.get("state"));
+            if (Set.of("MET", "NOT_MET", "NOT_EVALUATED", "ERROR").contains(state)) return evaluation;
+            Thread.sleep(25);
+        } while (System.nanoTime() < deadline);
+        fail("SUT threshold evaluation did not finish before the test deadline.");
+        return Map.of();
+    }
+
     private static List<Map<String, Object>> maps(Object value) {
         return ServerRuntime.JSON.convertValue(value, ServerRuntime.JSON.getTypeFactory().constructCollectionType(List.class, Map.class));
     }
@@ -780,6 +830,19 @@ class SutMetricsServiceTest {
         return "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":["
                 + "{\"metric\":{\"instance\":\"sut-1\"},\"values\":[["
                 + String.format(Locale.ROOT, "%.3f", timestamp / 1000.0) + ",\"1.0\"]]}]}}";
+    }
+
+    private static String thresholdResponse(String raw, double value) {
+        long start = Instant.parse(queryParameter(raw, "start")).getEpochSecond();
+        long end = Instant.parse(queryParameter(raw, "end")).getEpochSecond();
+        long step = Long.parseLong(queryParameter(raw, "step").replace("s", ""));
+        StringBuilder samples = new StringBuilder();
+        for (long timestamp = start; timestamp <= end; timestamp += step) {
+            if (samples.length() > 0) samples.append(',');
+            samples.append('[').append(timestamp).append(",\"").append(value).append("\"]");
+        }
+        return "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":["
+                + "{\"metric\":{\"instance\":\"sut-1\"},\"values\":[" + samples + "]}]}}";
     }
 
     private static String sampleAtWindowEndOffsetResponse(String raw, long secondsBeforeEnd) {

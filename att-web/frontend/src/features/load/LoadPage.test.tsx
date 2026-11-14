@@ -53,6 +53,39 @@ async function click(element: Element) {
 }
 
 describe('LoadPage React feature', () => {
+  it('adds a profile-bound steady maximum rule from the SUT threshold editor', async () => {
+    const api = makeApi();
+    api.listSutMetricProfiles = vi.fn(async () => ({ items: [{ id: 'profile-os', name: 'OS metrics', kind: 'base',
+      metricCatalog: [{ id: 'cpu', title: 'CPU utilization', unit: 'percent', kind: 'gauge' }] }] }));
+    await act(async () => root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>vi.fn())} as never}><LoadPage
+      api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="" environments={['SIT']} inlineLoadEnabled
+      onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}
+    /></NavigationGuardContext.Provider>));
+    await flush();
+    const advanced = [...host.querySelectorAll('details')].find(item => item.querySelector('summary')?.textContent?.includes('Advanced scenario settings'))!;
+    advanced.open = true;
+    const profile = [...host.querySelectorAll('label')].find(label => label.textContent?.includes('Base Metrics Profile'))?.querySelector('select') as HTMLSelectElement;
+    await act(async () => { profile.value = 'profile-os'; profile.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const thresholdEditor = host.querySelector('.att-sut-threshold-editor')!;
+    const maximum = thresholdEditor.querySelector('input[type="number"]') as HTMLInputElement;
+    const addRule = [...host.querySelectorAll('button')].find(button => button.textContent === 'Add maximum rule')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(maximum, ''); maximum.dispatchEvent(new Event('input', { bubbles: true })); });
+    await flush();
+    await click(addRule);
+    await flush();
+    expect(thresholdEditor.querySelector('[role="alert"]')?.textContent).toContain('finite maximum');
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(maximum, '90'); maximum.dispatchEvent(new Event('input', { bubbles: true })); });
+    await flush();
+    await click(addRule);
+    await flush();
+    const editor = [...host.querySelectorAll('.att-json-field')].find(item => item.textContent?.includes('SUT Metrics observability binding'))?.querySelector('.cm-content');
+    expect(editor?.textContent).toContain('cpu');
+    expect(editor?.textContent).toContain('minimumCoverage');
+    expect(editor?.textContent).toContain('0.95');
+    expect(editor?.textContent).toContain('NOT_EVALUATED');
+  });
+
   it('inherits retained root pacing defaults and leaves unavailable workload values empty', () => {
     const retained=retainedScenarioToEditor({schemaVersion:'att-load/v1.9',load:{warmup:'2s',duration:'24h',users:12},workloads:[{id:'root-defaults',target:{type:'template',id:'checkout'}}]});
     expect(retained.model).toBe('virtualUsers');expect(retained.timing.duration).toBe('24h');

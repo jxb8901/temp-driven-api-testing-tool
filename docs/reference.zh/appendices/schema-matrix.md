@@ -29,6 +29,7 @@
 | 同一檔案內的 SUT Metrics Manifest 完整性歷程 | att-sut-metrics-manifest-integrity/v1 |
 | SUT Metrics normalized observation | att-sut-metrics-observation/v1 |
 | SUT Metrics series sidecar | att-sut-metrics-series/v1 |
+| SUT Metrics threshold evaluation record | att-sut-threshold-evaluation/v1 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | 直接 Engine／CLI：legacy summary contract (schema under `schemas/history/`)；封存報告：att-load-summary/v1.3 |

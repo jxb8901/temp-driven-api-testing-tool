@@ -242,6 +242,7 @@ export interface JobResultResponse {
   job: JobResultSummary;
   result: Record<string, unknown> | null;
   diagnostic?: Record<string, unknown> | null;
+  performanceAcceptance?: Record<string, unknown>;
 }
 
 export interface SutMetricPoint { timestamp: string; timestampEpochMs: number; value: number }
@@ -264,6 +265,7 @@ export interface SutMetricsManifest {
 export interface SutMetricsJobResponse {
   schemaVersion?: string; state?: string; jobId?: string; snapshotId?: string;
   collection?: SutMetricsManifest | null; livePreview?: Record<string, unknown>;
+  thresholdEvaluation?: Record<string, unknown>; performanceAcceptance?: Record<string, unknown>;
   items?: SutMetricItem[]; nextOffset?: number | null;
 }
 export interface SutMetricsLiveResponse {
