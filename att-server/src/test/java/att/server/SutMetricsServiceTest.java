@@ -1245,6 +1245,43 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void hourLongPrometheusBufferCannotMakeLateBusinessSnapshotFresh() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::atWindowEndResponse);
+             SutMetricsService service = new SutMetricsService(temp.resolve("mixed-hour-business-buffer"))) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            service.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='select count(*)')}"));
+            Map<String, Object> configured = scenario(List.of(binding("prom", null), map("profile", "business")),
+                    "1m", "1h", "5m");
+            configured.put("thresholds", List.of(map("id", "count-max", "profile", "business", "metric", "count", "max", 10.0)));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            service.writeSnapshot(JOB_ID, snapshot);
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) { return 12; }
+                @Override public void close() { }
+            });
+
+            Instant finishedAt = Instant.now().minusSeconds(70 * 60L);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            Map<String, Object> businessFile = maps(manifest.get("files")).stream()
+                    .filter(file -> "count".equals(file.get("metricId"))).findFirst().orElseThrow();
+            Map<String, Object> sidecar = ServerRuntime.JSON.readValue(Files.readAllBytes(temp.resolve("mixed-hour-business-buffer")
+                    .resolve("jobs").resolve(JOB_ID).resolve("sut-metrics").resolve(String.valueOf(businessFile.get("path")))), Map.class);
+            Map<String, Object> observation = object(sidecar.get("observation"));
+            Map<String, Object> window = object(observation.get("window"));
+            Map<String, Object> availability = object(observation.get("availability"));
+            assertTrue(((Number) window.get("delayFromExecutionEndMs")).longValue()
+                    > SutMetricsService.MAX_MIXED_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS);
+            assertEquals("STALE", availability.get("freshness"));
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, JOB_ID);
+            assertEquals("NOT_EVALUATED", evaluation.get("state"));
+            assertEquals("NOT_EVALUATED", maps(object(evaluation.get("sutThresholds")).get("items")).get(0).get("status"));
+        }
+    }
+
     @Test void businessCallThresholdsPersistMetNotMetAndNotEvaluatedResults() throws Exception {
         try (SutMetricsService service = new SutMetricsService(temp.resolve("business-thresholds"))) {
             service.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='select count(*) from orders')}"));

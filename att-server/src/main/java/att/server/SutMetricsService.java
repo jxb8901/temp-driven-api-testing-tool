@@ -104,6 +104,8 @@ final class SutMetricsService implements AutoCloseable {
     static final int MAX_BUSINESS_CALLS_PER_JOB = 16;
     static final long MAX_BUSINESS_CALL_TOTAL_MILLIS = 120_000L;
     static final long MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS = 120_000L;
+    // A larger Prometheus buffer cannot extend mixed-profile business freshness beyond five minutes.
+    static final long MAX_MIXED_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS = 300_000L;
     private static final String BUSINESS_CALL_PAYLOAD_SCHEMA = "att-sut-business-call-payload/v1";
     private static final int BUSINESS_CALL_PENDING = 0, BUSINESS_CALL_EXECUTING = 1, BUSINESS_CALL_CANCELLED = 2;
     private static final long MAX_BUSINESS_CALL_PAYLOAD_BYTES = 2L * 1024 * 1024;
@@ -3054,7 +3056,8 @@ final class SutMetricsService implements AutoCloseable {
         if (!hasPrometheusQueries) return MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS;
         long expectedPrometheusDelaySeconds = Math.addExact(afterSeconds, stepSeconds);
         long expectedPrometheusDelayMillis = Math.multiplyExact(expectedPrometheusDelaySeconds, 1000L);
-        return Math.addExact(MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS, expectedPrometheusDelayMillis);
+        return Math.min(MAX_MIXED_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS,
+                Math.addExact(MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS, expectedPrometheusDelayMillis));
     }
 
     private static void validateCollectionOptions(Map<String, Object> options) {
