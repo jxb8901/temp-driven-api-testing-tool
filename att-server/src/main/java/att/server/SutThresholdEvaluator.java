@@ -170,7 +170,8 @@ final class SutThresholdEvaluator {
         if (start == null || end == null || !end.isAfter(start)) return false;
         List<Double> limits = new ArrayList<>();
         for (Map<String, Object> rule : rules) {
-            if (!list(rule.get("queryIds")).contains(queryId) || !(rule.get("value") instanceof Number value)
+            if (!Boolean.TRUE.equals(rule.get("required"))
+                    || !list(rule.get("queryIds")).contains(queryId) || !(rule.get("value") instanceof Number value)
                     || !Double.isFinite(value.doubleValue())) continue;
             limits.add(value.doubleValue());
         }

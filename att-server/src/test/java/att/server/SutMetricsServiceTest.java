@@ -568,6 +568,38 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void optionalViolationDoesNotShortCircuitLaterRequiredEvidence() throws Exception {
+        Path data = temp.resolve("threshold-optional-violation-before-required");
+        String jobId = "J0000000000000095";
+        Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(60);
+        Map<String, Object> configured = scenario(List.of(binding("prom", null)), "1m", "1m", "15s");
+        configured.put("thresholds", List.of(
+                map("id", "optional-first", "profile", "base", "metric", "metric-1", "max", 90.0,
+                        "unit", "count", "minimumCoverage", 0.95, "required", false),
+                map("id", "required-second", "profile", "base", "metric", "metric-2", "max", 90.0,
+                        "unit", "count", "minimumCoverage", 0.95, "required", true)));
+        try (PrometheusFixture fixture = new PrometheusFixture(raw ->
+                thresholdResponse(raw, "up".equals(queryParameter(raw, "query")) ? 90.1 : 90.0));
+             SutMetricsService service = new SutMetricsService(data)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(profileWithQueries("up", "process_cpu_seconds_total"));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            assertEquals(List.of("prom/base/sut-1/metric-1", "prom/base/sut-1/metric-2"),
+                    maps(snapshot.get("queries")).stream().map(query -> query.get("id")).toList());
+            service.writeSnapshot(jobId, snapshot);
+            service.jobFinished(jobId, startedAt, finishedAt,
+                    List.of(phase("STEADY", startedAt.plusSeconds(10), finishedAt.minusSeconds(10), true)));
+
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, jobId);
+            assertEquals("MET", evaluation.get("state"));
+            List<Map<String, Object>> items = maps(object(evaluation.get("sutThresholds")).get("items"));
+            assertEquals("NOT_MET", items.get(0).get("status"), "Optional evidence should still be evaluated.");
+            assertFalse((Boolean) items.get(0).get("required"));
+            assertEquals("MET", items.get(1).get("status"), "The later required subject must be evaluated.");
+            assertTrue((Boolean) items.get(1).get("required"));
+        }
+    }
+
     @Test void pendingAndErrorThresholdRecordsMatchThePublishedSchemaWithoutNullResults() throws Exception {
         Path data = temp.resolve("threshold-evaluation-schema");
         String jobId = "J0000000000000093";

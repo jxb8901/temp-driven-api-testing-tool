@@ -357,6 +357,69 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void corruptSutSnapshotDoesNotBreakNativeLoadResultRoute() throws Exception {
+        Path packages = Files.createDirectories(temp.resolve("sut-threshold-corrupt-snapshot-packages"));
+        createPackage(packages.resolve("p"));
+        String jobId = "J0000000000000736";
+        try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.0);
+             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-threshold-corrupt-snapshot-data",
+                     DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-threshold-corrupt-snapshot-libs"), true)) {
+            Map<String, Object> snapshot = twoTargetThresholdSnapshot(runtime, fixture, true);
+            seedLoadJob(runtime, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
+            Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(30);
+            runtime.sutMetrics.jobFinished(jobId, startedAt, finishedAt,
+                    List.of(Map.of("phase", "STEADY", "startAt", startedAt.plusSeconds(10).toString(),
+                            "endAt", finishedAt.toString(), "measured", true)));
+            awaitThresholdEvaluation(runtime, jobId);
+            Path savedSnapshot = runtime.config.dataDir.resolve("jobs").resolve(jobId)
+                    .resolve("sut-metrics/snapshot.json");
+            Files.writeString(savedSnapshot, "{truncated");
+
+            Captured response = invokeAs(servlet(runtime), "GET", "/jobs/" + jobId + "/result",
+                    Collections.emptyMap(), new byte[0], "alice", Set.of(runtime.config.authorization.userRole));
+            JsonNode body = ServerRuntime.JSON.readTree(response.body());
+            JsonNode acceptance = body.path("performanceAcceptance");
+            assertEquals(200, response.status, response.bodyText());
+            assertEquals("MET", body.path("result").path("summary").path("performance").path("verdict").asText());
+            assertEquals("ERROR", acceptance.path("externalEvaluationStatus").asText());
+            assertEquals("NOT_EVALUATED", acceptance.path("performanceVerdict").asText());
+            assertEquals("SUT_SNAPSHOT_UNAVAILABLE",
+                    acceptance.path("externalEvaluation").path("diagnostics").path(0).path("code").asText());
+        }
+    }
+
+    @Test void corruptExternalEvaluationDoesNotBreakSutMetricsRoute() throws Exception {
+        Path packages = Files.createDirectories(temp.resolve("sut-threshold-corrupt-sut-metrics-packages"));
+        createPackage(packages.resolve("p"));
+        String jobId = "J0000000000000737";
+        try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.0);
+             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-threshold-corrupt-sut-metrics-data",
+                     DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-threshold-corrupt-sut-metrics-libs"), true)) {
+            Map<String, Object> snapshot = twoTargetThresholdSnapshot(runtime, fixture, true);
+            seedLoadJob(runtime, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
+            Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(30);
+            runtime.sutMetrics.jobFinished(jobId, startedAt, finishedAt,
+                    List.of(Map.of("phase", "STEADY", "startAt", startedAt.plusSeconds(10).toString(),
+                            "endAt", finishedAt.toString(), "measured", true)));
+            awaitThresholdEvaluation(runtime, jobId);
+            Path evaluation = runtime.config.dataDir.resolve("jobs").resolve(jobId)
+                    .resolve("sut-metrics/threshold-evaluation.json");
+            Files.writeString(evaluation, "{truncated");
+
+            Captured response = invokeAs(servlet(runtime), "GET", "/jobs/" + jobId + "/sut-metrics",
+                    Collections.emptyMap(), new byte[0], "alice", Set.of(runtime.config.authorization.userRole));
+            JsonNode body = ServerRuntime.JSON.readTree(response.body());
+            assertEquals(200, response.status, response.bodyText());
+            assertEquals("READY", body.path("collection").path("state").asText());
+            assertTrue(body.path("items").isArray() && body.path("items").size() > 0,
+                    "Valid SUT collection evidence should remain available.");
+            assertEquals("ERROR", body.path("thresholdEvaluation").path("state").asText());
+            assertEquals("THRESHOLD_EVALUATION_UNAVAILABLE",
+                    body.path("thresholdEvaluation").path("diagnostics").path(0).path("code").asText());
+            assertEquals("NOT_EVALUATED", body.path("performanceAcceptance").path("performanceVerdict").asText());
+        }
+    }
+
     @Test void loadResultRouteKeepsAProvenViolationWhenAnotherTargetHasNoEvidence() throws Exception {
         Path packages = Files.createDirectories(temp.resolve("sut-threshold-missing-result-packages"));
         createPackage(packages.resolve("p"));

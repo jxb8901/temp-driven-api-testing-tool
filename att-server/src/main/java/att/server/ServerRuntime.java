@@ -1378,7 +1378,7 @@ final class ServerRuntime implements AutoCloseable {
         response.put("jobId",id);response.put("snapshotId",snapshot.get("snapshotId"));
         response.put("livePreview",snapshot.get("livePreview"));response.put("collection",page.get("manifest"));
         response.put("items",page.get("items"));response.put("nextOffset",page.get("nextOffset"));
-        response.put("thresholdEvaluation",sutMetrics.thresholdEvaluationStatus(id));
+        response.put("thresholdEvaluation",thresholdEvaluationOrUnavailable(id,snapshot));
         Map<String,Object> result=resultRecord(id);
         Map<String,Object> acceptance=sutPerformanceAcceptance(id,principal,admin,(JsonNode)result.get("result"));
         if(acceptance!=null)response.put("performanceAcceptance",acceptance);
@@ -1389,18 +1389,21 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> row=store.get(id);
         if(row==null)throw new NotFoundException();
         if(!"load".equals(row.get("command")))return null;
-        Map<String,Object> snapshot=sutMetrics.snapshotForJob(id);
+        Map<String,Object> snapshot=null;
+        boolean snapshotUnavailable=false;
+        try { snapshot=sutMetrics.snapshotForJob(id); }
+        catch(Exception unavailable) { snapshotUnavailable=true; }
         List<Map<String,Object>> rules=snapshot==null?List.of():sutMaps(snapshot.get("thresholds"));
-        if(snapshot==null||rules.isEmpty())return null;
-        try { sutMetrics.authorizeSnapshot(snapshot,principal,admin); }
-        catch(NotFoundException denied) { return null; }
-
-        Map<String,Object> evaluation;
-        try { evaluation=sutMetrics.thresholdEvaluationStatus(id); }
-        catch(Exception unavailable) {
-            evaluation=sutMetrics.evaluationError(snapshot,"UNAVAILABLE","THRESHOLD_EVALUATION_UNAVAILABLE",
-                    "The persisted SUT threshold evaluation is unavailable.",2);
+        if(!snapshotUnavailable) {
+            if(snapshot==null||rules.isEmpty())return null;
+            try { sutMetrics.authorizeSnapshot(snapshot,principal,admin); }
+            catch(NotFoundException denied) { return null; }
         }
+
+        Map<String,Object> evaluation=snapshotUnavailable
+                ?sutMetrics.evaluationError(null,"UNAVAILABLE","SUT_SNAPSHOT_UNAVAILABLE",
+                        "The immutable SUT Metrics Job snapshot is unavailable.",2)
+                :thresholdEvaluationOrUnavailable(id,snapshot);
         String externalState=String.valueOf(evaluation.getOrDefault("state","PENDING"));
         Map<String,Object> sutThresholds=evaluation.get("sutThresholds") instanceof Map<?,?> values
                 ?JSON.convertValue(values,Map.class):Map.of();
@@ -1427,7 +1430,7 @@ final class ServerRuntime implements AutoCloseable {
         String nativeVerdict=nativePerformanceVerdict(summary);
         String executionStatus=summary.path("executionStatus").asText(nativePerformance.path("executionStatus").asText(
                 summary.path("execution").path("status").asText(String.valueOf(row.get("status")))));
-        boolean requiredRules=rules.stream().anyMatch(rule->!Boolean.FALSE.equals(rule.get("required")));
+        boolean requiredRules=snapshotUnavailable||rules.stream().anyMatch(rule->!Boolean.FALSE.equals(rule.get("required")));
         boolean active=!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(String.valueOf(row.get("status")));
         int externalAttempt=evaluation.get("attempt") instanceof Number attempt?attempt.intValue():0;
         String combined=combinedPerformanceVerdict(active,requiredRules,nativeConfigured,nativeVerdict,externalState,externalAttempt);
@@ -1441,6 +1444,14 @@ final class ServerRuntime implements AutoCloseable {
                 "nativeLoadThresholds",nativeThresholds,"externalEvaluationStatus",externalState,
                 "externalEvaluation",external,"sutThresholds",sutThresholds,
                 "performanceVerdict",combined);
+    }
+
+    private Map<String,Object> thresholdEvaluationOrUnavailable(String id,Map<String,Object> snapshot) {
+        try { return sutMetrics.thresholdEvaluationStatus(id); }
+        catch(Exception unavailable) {
+            return sutMetrics.evaluationError(snapshot,"UNAVAILABLE","THRESHOLD_EVALUATION_UNAVAILABLE",
+                    "The persisted SUT threshold evaluation is unavailable.",2);
+        }
     }
 
     static String nativePerformanceVerdict(JsonNode summary) {
