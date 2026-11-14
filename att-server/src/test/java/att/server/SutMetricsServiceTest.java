@@ -892,6 +892,465 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void businessCallValuePathsNormalizeTypedDatabaseAndToolResults() {
+        assertEquals(12.0, SutMetricsService.numericMetricValue(12, null));
+        assertEquals(7.0, SutMetricsService.numericMetricValue(map("rows", List.of(map("count", 7))), "rows[0].count"));
+        assertEquals(8.0, SutMetricsService.numericMetricValue(List.of(map("count", 8)), "rows[0].count"));
+        assertEquals(9.0, SutMetricsService.numericMetricValue(map("result", map("total", 9)), "result.total"));
+        assertThrows(IllegalArgumentException.class, () -> SutMetricsService.numericMetricValue(map("count", 1), null));
+        assertThrows(IllegalArgumentException.class, () -> SutMetricsService.numericMetricValue(null, null));
+        assertThrows(IllegalArgumentException.class, () -> SutMetricsService.numericMetricValue("not-a-number", null));
+        assertThrows(IllegalArgumentException.class, () -> SutMetricsService.numericMetricValue(Double.NaN, null));
+        assertThrows(IllegalArgumentException.class, () -> SutMetricsService.numericMetricValue(Double.POSITIVE_INFINITY, null));
+        assertThrows(IllegalArgumentException.class, () -> SutMetricsService.numericMetricValue(List.of(), "rows[0].count"));
+    }
+
+    @Test void businessCallExecutionPayloadIsPrivateAndCollectionTracksTypedCallsAndSteadyWindow() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp)) {
+            List<Map<String, Object>> queries = List.of(
+                    businessQuery("scalar", "#{db.orders.scalar(sql='select 1')}", "DBHELPER", null, "afterDrain", null),
+                    businessQuery("db-query", "#{db.orders.query(sql='select count(*) from orders')}", "DBHELPER", "rows[0].count", "afterDrain", null),
+                    businessQuery("tool-list", "#{reporter(summary='sensitive-tool-argument')}", "PACKAGE_TOOL", "rows[0].count", "afterDrain", null),
+                    businessQuery("steady", "#{db.orders.query(sql='select 4')}", "DBHELPER", "total", "windowQuery", "load-a"));
+            Map<String, Object> snapshot = businessSnapshot(queries);
+            service.writeSnapshot(JOB_ID, snapshot);
+
+            Path metrics = temp.resolve("jobs").resolve(JOB_ID).resolve("sut-metrics");
+            String publicSnapshot = Files.readString(metrics.resolve("snapshot.json"));
+            assertFalse(publicSnapshot.contains("sensitive-tool-argument"));
+            assertFalse(publicSnapshot.contains("select count(*)"));
+            assertFalse(service.snapshotForJob(JOB_ID).toString().contains("sensitive-tool-argument"));
+            assertTrue(Files.readString(metrics.resolve("business-calls.json")).contains("sensitive-tool-argument"));
+            try {
+                assertEquals("rw-------", java.nio.file.attribute.PosixFilePermissions.toString(
+                        Files.getPosixFilePermissions(metrics.resolve("business-calls.json"))));
+            } catch (UnsupportedOperationException ignored) { }
+
+            AtomicInteger opened = new AtomicInteger(), closed = new AtomicInteger();
+            AtomicReference<Instant> steadyStart = new AtomicReference<>(), steadyEnd = new AtomicReference<>();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> {
+                assertEquals(JOB_ID, jobId);
+                assertTrue(maps(executionSnapshot.get("queries")).stream().allMatch(query -> query.containsKey("call")));
+                opened.incrementAndGet();
+                return new SutMetricsService.BusinessCallSession() {
+                    @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                    Instant executionFinishedAt, Instant actualSteadyStart,
+                                                    Instant actualSteadyEnd, Instant observedAt) {
+                        assertNotNull(query.get("call"));
+                        if ("steady".equals(query.get("metricId"))) {
+                            steadyStart.set(actualSteadyStart); steadyEnd.set(actualSteadyEnd);
+                            assertEquals("load-a", query.get("workloadId"));
+                        }
+                        return switch (String.valueOf(query.get("metricId"))) {
+                            case "scalar" -> 3;
+                            case "db-query" -> map("rows", List.of(map("count", 7)));
+                            case "tool-list" -> List.of(map("count", 8));
+                            default -> map("total", 11);
+                        };
+                    }
+                    @Override public void close() { closed.incrementAndGet(); }
+                };
+            });
+            Instant startedAt = Instant.now().minusSeconds(180), finishedAt = Instant.now().minusSeconds(60);
+            Instant expectedSteadyStart = startedAt.plusSeconds(20), expectedSteadyEnd = finishedAt.minusSeconds(20);
+            service.jobFinished(JOB_ID, startedAt, finishedAt,
+                    List.of(phase("STEADY", expectedSteadyStart, expectedSteadyEnd, true)));
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+
+            assertEquals("READY", manifest.get("state"));
+            Map<String, Object> coverage = object(manifest.get("coverage"));
+            assertEquals(4, coverage.get("businessCallSubmitted"));
+            assertEquals(4, coverage.get("businessCallStarted"));
+            assertEquals(4, coverage.get("businessCallSucceeded"));
+            assertEquals(0, coverage.get("businessCallFailed"));
+            assertEquals(0, coverage.get("businessCallTimedOut"));
+            assertEquals(0, coverage.get("businessCallSkipped"));
+            assertTrue(((Number) coverage.get("businessCallDurationMs")).longValue() >= 0);
+            assertEquals(4, opened.get()); assertEquals(4, closed.get());
+            assertEquals(expectedSteadyStart, steadyStart.get()); assertEquals(expectedSteadyEnd, steadyEnd.get());
+            Map<String, Object> page = service.readCollectionPage(JOB_ID, 0, 16, null, null, null);
+            assertFalse(page.toString().contains("sensitive-tool-argument"));
+            assertFalse(service.collectionStatus(JOB_ID).toString().contains("select count(*)"));
+        }
+    }
+
+    @Test void timedOutBusinessCallIsCancelledAndRemainingCallsAreRecordedAsSkipped() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-timeout"))) {
+            service.setBusinessCallLimitsForTesting(2, 2_000, 250);
+            service.writeSnapshot(JOB_ID, businessSnapshot(List.of(
+                    businessQuery("timeout", "#{db.orders.query(sql='select sleep')}", "DBHELPER", null, "afterDrain", null),
+                    businessQuery("skipped", "#{db.orders.scalar(sql='select 2')}", "DBHELPER", null, "afterDrain", null))));
+            CountDownLatch entered = new CountDownLatch(1);
+            AtomicInteger cancelled = new AtomicInteger(), closed = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, snapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) throws Exception {
+                    entered.countDown();
+                    new CountDownLatch(1).await();
+                    return 1;
+                }
+                @Override public void cancel() { cancelled.incrementAndGet(); }
+                @Override public void close() { closed.incrementAndGet(); }
+            });
+            Instant finishedAt = Instant.now().minusSeconds(30);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            assertTrue(entered.await(5, TimeUnit.SECONDS), "The business call should begin before its timeout expires.");
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+
+            assertEquals("FAILED", manifest.get("state"));
+            Map<String, Object> coverage = object(manifest.get("coverage"));
+            assertEquals(1, coverage.get("businessCallSubmitted"));
+            assertEquals(1, coverage.get("businessCallStarted"));
+            assertEquals(0, coverage.get("businessCallSucceeded"));
+            assertEquals(1, coverage.get("businessCallFailed"));
+            assertEquals(1, coverage.get("businessCallTimedOut"));
+            assertEquals(0, coverage.get("businessCallNativeTimedOut"));
+            assertEquals(1, coverage.get("businessCallBudgetTimedOut"));
+            assertEquals(1, coverage.get("businessCallSkipped"));
+            assertTrue(((Number) coverage.get("businessCallDurationMs")).longValue() >= 200);
+            assertTrue(cancelled.get() >= 1);
+            long closeDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (closed.get() == 0 && System.nanoTime() < closeDeadline) Thread.sleep(10);
+            assertEquals(1, closed.get());
+            assertTrue(maps(manifest.get("diagnostics")).stream().anyMatch(d -> "BUSINESS_CALL_BUDGET_TIMEOUT".equals(d.get("code"))));
+            assertTrue(maps(manifest.get("diagnostics")).stream().anyMatch(d -> "BUSINESS_CALL_NOT_EXECUTED".equals(d.get("code"))));
+        }
+    }
+
+    @Test void timedOutCallDoesNotExecuteWhenDelayedSessionOpenCompletes() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-open-timeout"))) {
+            service.setBusinessCallLimitsForTesting(1, 2_000, 250);
+            service.writeSnapshot(JOB_ID, businessSnapshot(List.of(
+                    businessQuery("late-open", "#{db.orders.scalar(sql='select 1')}", "DBHELPER", null, "afterDrain", null))));
+            CountDownLatch openEntered = new CountDownLatch(1), releaseOpen = new CountDownLatch(1);
+            AtomicInteger executed = new AtomicInteger(), closed = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, snapshot) -> {
+                openEntered.countDown();
+                boolean interrupted = false;
+                while (true) {
+                    try { releaseOpen.await(); break; }
+                    catch (InterruptedException ignored) { interrupted = true; }
+                }
+                if (interrupted) Thread.currentThread().interrupt();
+                return new SutMetricsService.BusinessCallSession() {
+                    @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                    Instant executionFinishedAt, Instant steadyStart,
+                                                    Instant steadyEnd, Instant observedAt) {
+                        executed.incrementAndGet(); return 1;
+                    }
+                    @Override public void close() { closed.incrementAndGet(); }
+                };
+            });
+            Instant finishedAt = Instant.now().minusSeconds(30);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            try {
+                assertTrue(openEntered.await(5, TimeUnit.SECONDS), "Session setup should begin before the call timeout.");
+                Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+                assertEquals("FAILED", manifest.get("state"));
+                assertEquals(1, object(manifest.get("coverage")).get("businessCallTimedOut"));
+                assertEquals(1, object(manifest.get("coverage")).get("businessCallBudgetTimedOut"));
+                releaseOpen.countDown();
+                long closeDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (closed.get() == 0 && System.nanoTime() < closeDeadline) Thread.sleep(10);
+                assertEquals(0, executed.get(), "A session opened after timeout must never execute the call.");
+                assertEquals(1, closed.get());
+            } finally {
+                releaseOpen.countDown();
+            }
+        }
+    }
+
+    @Test void businessCallCountBudgetSkipsCallsAfterTheConfiguredPerJobLimit() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-count-budget"))) {
+            service.setBusinessCallLimitsForTesting(1, 2_000, 1_000);
+            service.writeSnapshot(JOB_ID, businessSnapshot(List.of(
+                    businessQuery("first", "#{db.orders.scalar(sql='select 1')}", "DBHELPER", null, "afterDrain", null),
+                    businessQuery("second", "#{db.orders.scalar(sql='select 2')}", "DBHELPER", null, "afterDrain", null))));
+            AtomicInteger executed = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, snapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    executed.incrementAndGet(); return 1;
+                }
+                @Override public void close() { }
+            });
+            Instant finishedAt = Instant.now().minusSeconds(30);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+
+            assertEquals("PARTIAL", manifest.get("state"));
+            Map<String, Object> coverage = object(manifest.get("coverage"));
+            assertEquals(1, coverage.get("businessCallSubmitted"));
+            assertEquals(1, coverage.get("businessCallStarted"));
+            assertEquals(1, coverage.get("businessCallSucceeded"));
+            assertEquals(1, coverage.get("businessCallSkipped"));
+            assertEquals(1, executed.get());
+            assertTrue(maps(manifest.get("diagnostics")).stream().anyMatch(d -> "BUSINESS_CALL_BUDGET_EXCEEDED".equals(d.get("code"))));
+        }
+    }
+
+    @Test void nativeBusinessCallTimeoutHasItsOwnDiagnosticAndCounter() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-native-timeout"))) {
+            service.setBusinessCallLimitsForTesting(1, 2_000, 1_000);
+            service.writeSnapshot(JOB_ID, businessSnapshot(List.of(
+                    businessQuery("native-timeout", "#{db.orders.scalar(sql='select timeout')}", "DBHELPER", null, "afterDrain", null))));
+            service.setBusinessCallExecutor((jobId, snapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) throws Exception {
+                    throw new SutMetricsService.BusinessCallNativeTimeoutException();
+                }
+                @Override public void close() { }
+            });
+            Instant finishedAt = Instant.now().minusSeconds(30);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+
+            assertEquals("FAILED", manifest.get("state"));
+            Map<String, Object> coverage = object(manifest.get("coverage"));
+            assertEquals(1, coverage.get("businessCallTimedOut"));
+            assertEquals(1, coverage.get("businessCallNativeTimedOut"));
+            assertEquals(0, coverage.get("businessCallBudgetTimedOut"));
+            assertTrue(maps(manifest.get("diagnostics")).stream().anyMatch(d -> "BUSINESS_CALL_TIMEOUT".equals(d.get("code"))));
+        }
+    }
+
+    @Test void businessCallProfilesAbovePerJobLimitAreRejectedAtAdmission() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-admission-budget"))) {
+            List<Map<String, Object>> metrics = new ArrayList<>();
+            for (int index = 1; index <= SutMetricsService.MAX_BUSINESS_CALLS_PER_JOB + 1; index++)
+                metrics.add(map("id", "count-" + index, "title", "Count " + index, "unit", "count", "kind", "gauge",
+                        "call", "#{db.orders.scalar(sql='select " + index + "')}"));
+            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "over-budget",
+                    "name", "Over budget", "kind", "base", "category", "db", "metrics", metrics));
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> service.resolveScenario(scenario(List.of(map("profile", "over-budget")), "1m", "1m", "15s"), "alice"));
+            assertTrue(failure.getMessage().contains("16 business-call per-Job limit"));
+        }
+    }
+
+    @Test void businessMetricRejectsCommandToolErrorEvenWhenOutputIsUsable() {
+        Map<String, Object> invocation = map("status", "ERROR", "exitCode", 1, "output", "42");
+        att.exec.ToolInvocationResult result = new att.exec.ToolInvocationResult("reporter", "metric-1", "42",
+                invocation, true);
+        assertFalse(ServerRuntime.businessMetricInvocationSucceeded(result));
+        assertTrue(ServerRuntime.businessMetricInvocationSucceeded(new att.exec.ToolInvocationResult(
+                "reporter", "metric-2", "42", map("status", "PASS", "exitCode", 0), true)));
+    }
+
+    @Test void businessMetricNativeToolAndDbHelperTimeoutsUseStructuredSignals() {
+        att.exec.ToolExecutionException toolTimeout = new att.exec.ToolExecutionException(
+                "TIMEOUT", "secret tool arguments are withheld", Map.of("message", "secret"), null, null);
+        assertTrue(ServerRuntime.businessMetricNativeTimeout(toolTimeout));
+        assertFalse(ServerRuntime.businessMetricNativeTimeout(new IllegalStateException("timed out")),
+                "Timeout words in free-form messages must not be used for classification.");
+
+        Map<String, Object> invocation = map("status", "ERROR", "DB", map("orders", map("metric-1", map(
+                "result", map("error", map("type", "TIMEOUT", "message", "secret SQL details"))))));
+        att.exec.ToolInvocationResult statementTimeout = new att.exec.ToolInvocationResult(
+                "db.orders", "metric-1", map("error", map("type", "TIMEOUT", "message", "secret")), invocation, false);
+        assertTrue(ServerRuntime.businessMetricInvocationTimedOut(statementTimeout));
+
+        att.exec.ToolInvocationResult poolTimeout = new att.exec.ToolInvocationResult("db.orders", "metric-2",
+                map("error", map("type", "DB_POOL_TIMEOUT", "message", "secret")), map("status", "ERROR"), false);
+        assertTrue(ServerRuntime.businessMetricInvocationTimedOut(poolTimeout));
+        att.exec.ToolInvocationResult sqlError = new att.exec.ToolInvocationResult("db.orders", "metric-3",
+                map("error", map("type", "SQL_ERROR", "message", "timed out")), map("status", "ERROR"), false);
+        assertFalse(ServerRuntime.businessMetricInvocationTimedOut(sqlError));
+    }
+
+    @Test void mixedPrometheusAndBusinessCallsMarkLateAfterDrainSnapshotsStale() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(1);
+             SutMetricsService service = new SutMetricsService(temp.resolve("mixed-late-business"))) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            service.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='select count(*)')}"));
+            Map<String, Object> configured = scenario(List.of(binding("prom", null), map("profile", "business")),
+                    "1m", "2m", "30s");
+            configured.put("thresholds", List.of(map("id", "count-max", "profile", "business", "metric", "count", "max", 10.0)));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            service.writeSnapshot(JOB_ID, snapshot);
+            AtomicInteger calls = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    calls.incrementAndGet(); return 12;
+                }
+                @Override public void close() { }
+            });
+
+            long expectedPrometheusDelayMillis = (2 * 60L + 30L) * 1000L;
+            Instant finishedAt = Instant.now().minusMillis(SutMetricsService.MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS
+                    + expectedPrometheusDelayMillis + 30_000L);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals(1, calls.get());
+            Map<String, Object> businessFile = maps(manifest.get("files")).stream()
+                    .filter(file -> "count".equals(file.get("metricId"))).findFirst().orElseThrow();
+            Map<String, Object> sidecar = ServerRuntime.JSON.readValue(Files.readAllBytes(temp.resolve("mixed-late-business").resolve("jobs").resolve(JOB_ID)
+                    .resolve("sut-metrics").resolve(String.valueOf(businessFile.get("path")))), Map.class);
+            Map<String, Object> observation = object(sidecar.get("observation"));
+            Map<String, Object> window = object(observation.get("window"));
+            Map<String, Object> availability = object(observation.get("availability"));
+            long actualDelay = ((Number) window.get("delayFromExecutionEndMs")).longValue();
+            assertTrue(actualDelay > SutMetricsService.MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS + expectedPrometheusDelayMillis);
+            assertEquals("STALE", availability.get("freshness"));
+            assertEquals("BUSINESS_CALL_STALE_AFTER_DRAIN", maps(availability.get("diagnostics")).get(0).get("code"));
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, JOB_ID);
+            assertEquals("NOT_EVALUATED", evaluation.get("state"));
+            assertEquals("NOT_EVALUATED", object(evaluation.get("sutThresholds")).get("status"));
+            Map<String, Object> rule = maps(object(evaluation.get("sutThresholds")).get("items")).get(0);
+            assertEquals("NOT_EVALUATED", rule.get("status"));
+        }
+    }
+
+    @Test void defaultMixedPrometheusBufferKeepsAfterDrainBusinessSnapshotFreshAndEvaluable() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::atWindowEndResponse);
+             SutMetricsService service = new SutMetricsService(temp.resolve("mixed-default-business-freshness"))) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            service.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='select count(*)')}"));
+            Map<String, Object> configured = scenario(List.of(binding("prom", null), map("profile", "business")),
+                    "1m", "2m", "30s");
+            configured.put("thresholds", List.of(map("id", "count-max", "profile", "business", "metric", "count", "max", 10.0)));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            assertEquals("120s", object(snapshot.get("collection")).get("after"));
+            assertEquals("30s", object(snapshot.get("collection")).get("step"));
+            service.writeSnapshot(JOB_ID, snapshot);
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) { return 7; }
+                @Override public void close() { }
+            });
+
+            Instant finishedAt = Instant.now().minusSeconds(200);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("READY", manifest.get("state"));
+            Map<String, Object> businessFile = maps(manifest.get("files")).stream()
+                    .filter(file -> "count".equals(file.get("metricId"))).findFirst().orElseThrow();
+            Map<String, Object> sidecar = ServerRuntime.JSON.readValue(Files.readAllBytes(temp.resolve("mixed-default-business-freshness")
+                    .resolve("jobs").resolve(JOB_ID).resolve("sut-metrics").resolve(String.valueOf(businessFile.get("path")))), Map.class);
+            Map<String, Object> availability = object(object(sidecar.get("observation")).get("availability"));
+            assertEquals("FRESH", availability.get("freshness"));
+
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, JOB_ID);
+            assertEquals("MET", evaluation.get("state"));
+            assertEquals("MET", object(evaluation.get("sutThresholds")).get("status"));
+            assertEquals("MET", maps(object(evaluation.get("sutThresholds")).get("items")).get(0).get("status"));
+        }
+    }
+
+    @Test void hourLongPrometheusBufferCannotMakeLateBusinessSnapshotFresh() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::atWindowEndResponse);
+             SutMetricsService service = new SutMetricsService(temp.resolve("mixed-hour-business-buffer"))) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            service.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='select count(*)')}"));
+            Map<String, Object> configured = scenario(List.of(binding("prom", null), map("profile", "business")),
+                    "1m", "1h", "5m");
+            configured.put("thresholds", List.of(map("id", "count-max", "profile", "business", "metric", "count", "max", 10.0)));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            service.writeSnapshot(JOB_ID, snapshot);
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) { return 12; }
+                @Override public void close() { }
+            });
+
+            Instant finishedAt = Instant.now().minusSeconds(70 * 60L);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            Map<String, Object> businessFile = maps(manifest.get("files")).stream()
+                    .filter(file -> "count".equals(file.get("metricId"))).findFirst().orElseThrow();
+            Map<String, Object> sidecar = ServerRuntime.JSON.readValue(Files.readAllBytes(temp.resolve("mixed-hour-business-buffer")
+                    .resolve("jobs").resolve(JOB_ID).resolve("sut-metrics").resolve(String.valueOf(businessFile.get("path")))), Map.class);
+            Map<String, Object> observation = object(sidecar.get("observation"));
+            Map<String, Object> window = object(observation.get("window"));
+            Map<String, Object> availability = object(observation.get("availability"));
+            assertTrue(((Number) window.get("delayFromExecutionEndMs")).longValue()
+                    > SutMetricsService.MAX_MIXED_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS);
+            assertEquals("STALE", availability.get("freshness"));
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, JOB_ID);
+            assertEquals("NOT_EVALUATED", evaluation.get("state"));
+            assertEquals("NOT_EVALUATED", maps(object(evaluation.get("sutThresholds")).get("items")).get(0).get("status"));
+        }
+    }
+
+    @Test void businessCallThresholdsPersistMetNotMetAndNotEvaluatedResults() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-thresholds"))) {
+            service.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='select count(*) from orders')}"));
+            Map<String, Object> configured = scenario(List.of(map("profile", "business")), "1m", "1m", "15s");
+            configured.put("thresholds", List.of(map("id", "count-max", "profile", "business", "metric", "count", "max", 10.0)));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            assertEquals("afterDrain", maps(snapshot.get("thresholds")).get(0).get("window"));
+
+            List<Object> results = java.util.Arrays.asList(7, 12, null);
+            List<String> expectedStates = List.of("MET", "NOT_MET", "NOT_EVALUATED");
+            for (int index = 0; index < results.size(); index++) {
+                String jobId = String.format(Locale.ROOT, "J%016X", 0x410L + index);
+                Object result = results.get(index);
+                service.setBusinessCallExecutor((ignoredJob, ignoredSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                    @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                    Instant executionFinishedAt, Instant steadyStart,
+                                                    Instant steadyEnd, Instant observedAt) { return result; }
+                    @Override public void close() { }
+                });
+                service.writeSnapshot(jobId, snapshot);
+                Instant finishedAt = Instant.now().minusSeconds(30);
+                service.jobFinished(jobId, finishedAt.minusSeconds(60), finishedAt);
+                Map<String, Object> manifest = awaitManifest(service, jobId);
+                assertTrue(Set.of("READY", "FAILED").contains(manifest.get("state")));
+                Map<String, Object> evaluation = awaitThresholdEvaluation(service, jobId);
+                assertEquals(expectedStates.get(index), evaluation.get("state"));
+                Map<String, Object> rule = maps(object(evaluation.get("sutThresholds")).get("items")).get(0);
+                assertEquals(expectedStates.get(index), rule.get("status"));
+            }
+        }
+    }
+
+    @Test void businessCallContextAdmissionOnlyLooksAtSelectedProfiles() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertProfile(baseProfile("prom", 1, false));
+            service.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='select 1')}"));
+            assertFalse(service.scenarioRequiresBusinessCallContext(scenario(List.of(binding("missing-source", null)), "1m", "1m", "15s")));
+            assertTrue(service.scenarioRequiresBusinessCallContext(scenario(List.of(map("profile", "business")), "1m", "1m", "15s")));
+        }
+    }
+
+    private static Map<String, Object> businessSnapshot(List<Map<String, Object>> queries) {
+        return map("schemaVersion", SutMetricsService.SNAPSHOT_SCHEMA, "snapshotId", "business-snapshot",
+                "createdAt", Instant.now().toString(), "collection", map("mode", "post-run", "before", "1s", "after", "1s", "step", "15s"),
+                "livePreview", map("enabled", false), "provenance", List.of(), "queries", queries, "sources", Map.of(),
+                "execution", map("packageId", "pkg", "environment", "test", "packageRevision", "a".repeat(64),
+                        "runtimeConfigRevision", "b".repeat(64)), "thresholds", List.of());
+    }
+
+    private static Map<String, Object> businessQuery(String id, String call, String sourceType, String valuePath,
+                                                     String sampling, String workloadId) {
+        boolean workload = workloadId != null;
+        return map("id", "att-call/profile/" + id, "profile", "business", "profilePath", "business",
+                "sourceId", "DBHELPER".equals(sourceType) ? "dbhelper:orders" : "package-tool:reporter",
+                "sourceName", "DBHELPER".equals(sourceType) ? "DBHelper orders" : "Package Tool reporter",
+                "sourceType", sourceType, "targetId", workload ? workloadId : "job", "targetType", workload ? "workload" : "job",
+                "metricId", id, "title", id, "category", "db", "unit", "count", "kind", "gauge",
+                "observationType", "business-call", "observationKind", "windowQuery".equals(sampling) ? "window-aggregate" : "timed-snapshot",
+                "sampling", sampling, "window", "windowQuery".equals(sampling) ? "steady" : null, "call", call,
+                "callType", sourceType, "callName", "DBHELPER".equals(sourceType) ? "orders" : "reporter",
+                "valuePath", valuePath, "scope", workload ? "workload" : "job", "workloadId", workloadId,
+                "sourceRevision", "b".repeat(64), "profileRevision", "c".repeat(64), "targetRevision", "a".repeat(64));
+    }
+
+    private static Map<String, Object> businessProfile(String id, String call) {
+        return map("schemaVersion", "att-sut-metrics-profile/v1", "id", id, "name", id, "kind", "base", "category", "db",
+                "metrics", List.of(map("id", "count", "title", "Count", "unit", "count", "kind", "gauge", "call", call)));
+    }
+
     private static Map<String,Object> profileWithQueries(String... queries) {
         List<Map<String,Object>> metrics=new ArrayList<>();
         for(int index=0;index<queries.length;index++)metrics.add(map("id","metric-"+(index+1),"title","Metric "+(index+1),

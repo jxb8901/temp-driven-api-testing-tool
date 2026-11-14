@@ -201,7 +201,9 @@ final class ServerRuntime implements AutoCloseable {
                   LoadProgressPersistence loadProgressPersistence,Function<String,String> secretResolver) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
         this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;
-        try{this.sutMetrics=new SutMetricsService(config.dataDir,secretResolver,this::sutMetricsManifestPublished);}catch(Exception failed){store.close();throw failed;}
+        try{this.sutMetrics=new SutMetricsService(config.dataDir,secretResolver,this::sutMetricsManifestPublished);}
+        catch(Exception failed){store.close();throw failed;}
+        this.sutMetrics.setBusinessCallExecutor(this::openBusinessCallSession);
         try{this.auth=new AuthService(config,store);}catch(Exception failed){sutMetrics.close();store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         manifestPublisher=new PackageManifestPublisher(config.dataDir,config.packageConfiguration,clock,
                 this::manifestEditableRoot,this::validateManifestCandidate,
@@ -819,8 +821,13 @@ final class ServerRuntime implements AutoCloseable {
                     scenario=readScheduledScenario(root,source.scenario);
                 }
                 Object rawObservability=scenario==null?null:scenario.get("observability");
-                if(rawObservability instanceof Map<?,?>)
-                    sutSnapshot=sutMetrics.resolveScenario(JSON.convertValue(rawObservability,Map.class),observationPrincipal,sutAdminPrincipal(observationPrincipal));
+                if(rawObservability instanceof Map<?,?>) {
+                    Map<String,Object> observability=JSON.convertValue(rawObservability,Map.class);
+                    SutMetricsService.BusinessCallContext callContext=sutMetrics.scenarioRequiresBusinessCallContext(observability)
+                            ?businessCallContext(packageId,root,request.environment,request.expectedRevisionDigest,workloadIds(scenario)):null;
+                    sutSnapshot=sutMetrics.resolveScenario(observability,observationPrincipal,
+                            sutAdminPrincipal(observationPrincipal),callContext);
+                }
                 else if(rawObservability!=null)throw new IllegalArgumentException("scenario.observability must be an object.");
             }
         }
@@ -2190,7 +2197,13 @@ final class ServerRuntime implements AutoCloseable {
             if(pinnedSutSnapshot!=null) {
                 sutMetrics.authorizeSnapshot(pinnedSutSnapshot,principal,administrator||sutAdminPrincipal(principal));
                 sutSnapshot=pinnedSutSnapshot;
-            } else sutSnapshot=sutMetrics.resolveScenario(JSON.convertValue(rawObservability,Map.class),principal,administrator||sutAdminPrincipal(principal));
+            } else {
+                Map<String,Object> observability=JSON.convertValue(rawObservability,Map.class);
+                SutMetricsService.BusinessCallContext callContext=sutMetrics.scenarioRequiresBusinessCallContext(observability)
+                        ?businessCallContext(packageId,root,environment,(String)rawDigest,workloadIds(scenario)):null;
+                sutSnapshot=sutMetrics.resolveScenario(observability,principal,
+                        administrator||sutAdminPrincipal(principal),callContext);
+            }
         }
         else if(rawObservability!=null)throw new IllegalArgumentException("scenario.observability must be an object.");
         else if(pinnedSutSnapshot!=null)throw new IllegalArgumentException("The retained SUT Metrics snapshot does not match the replayed scenario.");
@@ -2672,6 +2685,185 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=inspectionRequest(packageId,root,environment);request.inspectionAction="revision";request.expectedRevisionDigest=revision;
         executeInspection(root,request);
     }
+
+    private SutMetricsService.BusinessCallContext businessCallContext(String packageId,Path root,String environment,
+                                                                       String packageRevision,Set<String> workloadIds) throws Exception {
+        validatePackageRoot(root);
+        String pinnedRevision=packageRevision;
+        if(pinnedRevision==null||pinnedRevision.isBlank()) {
+            WorkerRequest revisionRequest=inspectionRequest(packageId,root,environment);
+            revisionRequest.inspectionAction="revision";
+            Object current=executeInspection(root,revisionRequest).get("revisionDigest");
+            if(!(current instanceof String digest)||!digest.matches("[a-f0-9]{64}"))
+                throw new IllegalStateException("The selected Package revision could not be pinned for business metrics.");
+            pinnedRevision=(String)current;
+        }
+        String pinnedRuntimeRevision=runtimeConfigRevision();
+        att.config.FrameworkConfig frameworkConfig=new att.config.FrameworkConfigLoader().load(config.runtimeConfigPath,
+                ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),root,environment);
+        frameworkConfig.requireExecutionConfig();
+        if(!pinnedRuntimeRevision.equals(runtimeConfigRevision()))
+            throw new IllegalStateException("The shared Runtime Config changed while business metrics were being admitted.");
+        return new SutMetricsService.BusinessCallContext(packageId,root,config.runtimeConfigPath,
+                ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),environment,pinnedRevision,
+                pinnedRuntimeRevision,workloadIds==null?Set.of():Set.copyOf(workloadIds),frameworkConfig);
+    }
+
+    private String runtimeConfigRevision() throws Exception {
+        byte[] bytes=Files.readAllBytes(config.runtimeConfigPath);
+        byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+        StringBuilder value=new StringBuilder(64);
+        for(byte item:digest)value.append(String.format(java.util.Locale.ROOT,"%02x",item));
+        return value.toString();
+    }
+
+    private SutMetricsService.BusinessCallSession openBusinessCallSession(String jobId,Map<String,Object> snapshot) throws Exception {
+        Map<String,Object> execution=snapshot.get("execution") instanceof Map<?,?>?JSON.convertValue(snapshot.get("execution"),Map.class):Map.of();
+        String packageId=execution.get("packageId") instanceof String?(String)execution.get("packageId"):null;
+        String environment=execution.get("environment") instanceof String?(String)execution.get("environment"):null;
+        String packageRevision=execution.get("packageRevision") instanceof String?(String)execution.get("packageRevision"):null;
+        String runtimeRevision=execution.get("runtimeConfigRevision") instanceof String?(String)execution.get("runtimeConfigRevision"):null;
+        if(packageId==null||environment==null||packageRevision==null||runtimeRevision==null)
+            throw new IllegalStateException("The immutable business-metric execution snapshot is incomplete.");
+        Path root=packageRoot(packageId);if(root==null)throw new IllegalStateException("The pinned Package is unavailable for business metrics.");
+        validatePackageRoot(root);
+        verifyPackageRevision(packageId,environment,packageRevision);
+        if(!runtimeRevision.equals(runtimeConfigRevision()))
+            throw new IllegalStateException("The shared Runtime Config changed after LOAD admission; business metrics were not executed.");
+        att.config.FrameworkConfig frameworkConfig=new att.config.FrameworkConfigLoader().load(config.runtimeConfigPath,
+                ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),root,environment);
+        frameworkConfig.requireExecutionConfig();
+        if(!runtimeRevision.equals(runtimeConfigRevision()))
+            throw new IllegalStateException("The shared Runtime Config changed while business metric execution was being prepared.");
+        att.exec.DbHelperExecutor dbHelpers=new att.exec.DbHelperExecutor(root,frameworkConfig);
+        att.exec.ToolInvoker tools=new att.exec.ToolInvoker(root,frameworkConfig);
+        att.template.UnifiedTemplateEngine engine=new att.template.UnifiedTemplateEngine(tools,dbHelpers);
+        Path jobDirectory=config.dataDir.resolve("jobs").resolve(jobId).toAbsolutePath().normalize();
+        Path outputDirectory=jobDirectory.resolve("sut-metrics");
+        att.core.TestCase testCase=new att.core.TestCase(1,"","SUT_METRICS","SUT_METRICS","METRIC",List.of(),
+                Map.of(),Map.of(),null);
+        att.core.CaseExecutionLog log=att.core.CaseExecutionLog.discarding(outputDirectory.resolve("business-call.log"));
+        log.setProjectRoot(root);
+        att.core.CaseRuntimeContext context=new att.core.CaseRuntimeContext(testCase,outputDirectory,jobId,jobDirectory,
+                log.path(),"load");
+        context.setProject(root);
+        context.setCommandWorkingDirectory(root);
+        return new SutMetricsService.BusinessCallSession() {
+            @Override public Object execute(Map<String,Object> query,Instant executionStartedAt,Instant executionFinishedAt,
+                                            Instant steadyStart,Instant steadyEnd,Instant callStartedAt) throws Exception {
+                String sampling=String.valueOf(query.get("sampling"));
+                Map<String,Object> values=new LinkedHashMap<>();
+                values.put("MODE",sampling);values.put("EXECUTION_STARTED_AT",executionStartedAt.toString());
+                values.put("EXECUTION_FINISHED_AT",executionFinishedAt.toString());
+                values.put("CALL_STARTED_AT",callStartedAt.toString());
+                values.put("WORKLOAD_ID",query.get("workloadId"));
+                if("windowQuery".equals(sampling)) {
+                    if(steadyStart==null||steadyEnd==null||!steadyEnd.isAfter(steadyStart))
+                        throw new IllegalStateException("The actual STEADY interval is unavailable for a windowQuery business metric.");
+                    values.put("WINDOW_START",steadyStart.toString());values.put("WINDOW_END",steadyEnd.toString());
+                    values.put("STEADY_START",steadyStart.toString());values.put("STEADY_END",steadyEnd.toString());
+                }
+                context.setObservation(values);
+                boolean began=false;
+                try {
+                    dbHelpers.beginCase();began=true;
+                    att.exec.ToolInvocationResult invocation;
+                    try {
+                        invocation=engine.executeToolAttempt(String.valueOf(query.get("call")),context,log,
+                                "SUT_METRIC_"+String.valueOf(query.get("metricId")),null,"",false,true);
+                    } catch (att.exec.ToolExecutionException failure) {
+                        if (businessMetricNativeTimeout(failure))
+                            throw new SutMetricsService.BusinessCallNativeTimeoutException();
+                        throw failure;
+                    }
+                    if(!businessMetricInvocationSucceeded(invocation)) {
+                        if (businessMetricInvocationTimedOut(invocation))
+                            throw new SutMetricsService.BusinessCallNativeTimeoutException();
+                        throw new IllegalStateException("The configured Package Tool reported a failed business metric call.");
+                    }
+                    Object result=invocation.output();
+                    List<att.core.ValidationResult> finalized=dbHelpers.finishCase(context,log);began=false;
+                    if(finalized.stream().anyMatch(item->item.status()==att.core.ResultStatus.ERROR))
+                        throw new IllegalStateException("DBHelper transaction finalization failed for the business metric call.");
+                    return result;
+                } catch(Exception failure) {
+                    if(began)dbHelpers.abortCase();
+                    throw failure;
+                }
+            }
+            @Override public void close() throws Exception {
+                try { dbHelpers.closeAll();dbHelpers.close(); }
+                finally { log.close(); }
+            }
+            @Override public void cancel() throws Exception {
+                dbHelpers.closeAll();
+            }
+        };
+    }
+
+    static boolean businessMetricInvocationSucceeded(att.exec.ToolInvocationResult result) {
+        if (result == null || !result.executionSuccess()) return false;
+        Map<String, Object> details = result.invocation();
+        if (details == null) return true;
+        Object status = details.get("status");
+        if ("ERROR".equalsIgnoreCase(String.valueOf(status)) || "TIMEOUT".equalsIgnoreCase(String.valueOf(status))) return false;
+        Object exitCode = details.get("exitCode");
+        return !(exitCode instanceof Number) || ((Number) exitCode).intValue() == 0;
+    }
+
+    static boolean businessMetricNativeTimeout(Exception failure) {
+        return failure instanceof att.exec.ToolExecutionException toolFailure
+                && "TIMEOUT".equalsIgnoreCase(toolFailure.category());
+    }
+
+    static boolean businessMetricInvocationTimedOut(att.exec.ToolInvocationResult result) {
+        if (result == null) return false;
+        Map<String, Object> invocation = result.invocation();
+        if (invocation != null) {
+            if (businessMetricTimeoutCode(invocation.get("status"))) return true;
+            int[] budget = {256};
+            if (hasBusinessMetricTimeoutEvidence(invocation.get("DB"), 0, budget)
+                    || hasBusinessMetricTimeoutEvidence(invocation.get("TOOL"), 0, budget)) return true;
+        }
+        Object output = result.output();
+        if (output instanceof Map<?, ?> outputMap)
+            return hasBusinessMetricTimeoutEvidence(outputMap.get("error"), 0, new int[]{64});
+        return false;
+    }
+
+    private static boolean hasBusinessMetricTimeoutEvidence(Object value, int depth, int[] remaining) {
+        if (value == null || depth > 10 || remaining[0]-- <= 0) return false;
+        if (value instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                Object child = entry.getValue();
+                if (("type".equalsIgnoreCase(key) || "status".equalsIgnoreCase(key)
+                        || "category".equalsIgnoreCase(key)) && businessMetricTimeoutCode(child)) return true;
+                if (!"input".equalsIgnoreCase(key) && !"parameters".equalsIgnoreCase(key)
+                        && !"sql".equalsIgnoreCase(key) && !"message".equalsIgnoreCase(key)
+                        && hasBusinessMetricTimeoutEvidence(child, depth + 1, remaining)) return true;
+            }
+        } else if (value instanceof Iterable<?> values) {
+            for (Object child : values)
+                if (hasBusinessMetricTimeoutEvidence(child, depth + 1, remaining)) return true;
+        }
+        return false;
+    }
+
+    private static boolean businessMetricTimeoutCode(Object value) {
+        if (!(value instanceof String code)) return false;
+        String normalized = code.toUpperCase(java.util.Locale.ROOT);
+        return "TIMEOUT".equals(normalized) || normalized.endsWith("_TIMEOUT");
+    }
+
+    private static Set<String> workloadIds(Map<String,Object> scenario) {
+        Set<String> ids=new java.util.LinkedHashSet<>();
+        Object raw=scenario==null?null:scenario.get("workloads");
+        if(raw instanceof List<?> rows) for(Object row:rows) if(row instanceof Map<?,?> map&&map.get("id") instanceof String id)ids.add(id);
+        if(ids.isEmpty())ids.add("default");
+        return Set.copyOf(ids);
+    }
+
     private void requireLiveDraft(DebugDraft draft) {
         if(!draft.expiresAt.isAfter(clock.instant()))throw new StaleDraftException();
     }
@@ -5130,7 +5322,8 @@ final class ServerRuntime implements AutoCloseable {
             } catch(Exception ignored) { }
             try { store.deferLoadReportPublicationRetry(id); }
             catch(Exception ignored) { }
-            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Offline SUT report publication failed for Job "+id);
+            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning(
+                    "Offline SUT report publication failed for Job "+id);
         } finally {
             boolean reschedule;
             synchronized(loadReportV2ScheduleLock) {

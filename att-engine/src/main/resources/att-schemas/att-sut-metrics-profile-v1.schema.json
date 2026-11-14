@@ -111,8 +111,7 @@
         "required": [
           "id",
           "title",
-          "unit",
-          "query"
+          "unit"
         ],
         "additionalProperties": false,
         "properties": {
@@ -163,8 +162,95 @@
             "not": {
               "pattern": ";"
             }
+          },
+          "call": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "sampling": {
+            "enum": [
+              "afterDrain",
+              "windowQuery"
+            ]
+          },
+          "window": {
+            "const": "steady"
+          },
+          "valuePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[[0-9]{1,6}\\]){0,16}$"
+          },
+          "sideEffectsAcknowledged": {
+            "type": "boolean"
           }
-        }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "query"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "call"
+                  ]
+                },
+                {
+                  "required": [
+                    "sampling"
+                  ]
+                },
+                {
+                  "required": [
+                    "window"
+                  ]
+                },
+                {
+                  "required": [
+                    "valuePath"
+                  ]
+                },
+                {
+                  "required": [
+                    "sideEffectsAcknowledged"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "call",
+              "sampling"
+            ],
+            "if": {
+              "properties": {
+                "sampling": {
+                  "const": "windowQuery"
+                }
+              },
+              "required": [
+                "sampling"
+              ]
+            },
+            "then": {
+              "required": [
+                "window"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "window"
+                ]
+              }
+            }
+          }
+        ]
       }
     },
     "includes": {
@@ -174,9 +260,7 @@
       "items": {
         "type": "object",
         "required": [
-          "profile",
-          "source",
-          "targets"
+          "profile"
         ],
         "additionalProperties": false,
         "properties": {
@@ -214,8 +298,98 @@
                 "number"
               ]
             }
+          },
+          "scope": {
+            "enum": [
+              "job",
+              "workload"
+            ]
+          },
+          "workloadId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
           }
-        }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "source",
+              "targets"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "scope"
+                  ]
+                },
+                {
+                  "required": [
+                    "workloadId"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "scope": {
+                "enum": [
+                  "job",
+                  "workload"
+                ]
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "source"
+                  ]
+                },
+                {
+                  "required": [
+                    "tenant"
+                  ]
+                },
+                {
+                  "required": [
+                    "targets"
+                  ]
+                },
+                {
+                  "required": [
+                    "parameters"
+                  ]
+                }
+              ]
+            },
+            "if": {
+              "properties": {
+                "scope": {
+                  "const": "workload"
+                }
+              },
+              "required": [
+                "scope"
+              ]
+            },
+            "then": {
+              "required": [
+                "workloadId"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "workloadId"
+                ]
+              }
+            }
+          }
+        ]
       }
     }
   },

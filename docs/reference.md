@@ -1549,6 +1549,33 @@ The Server stores immutable normalized rules in the Job's SUT snapshot and write
 
 Scenario authoring, the complete rule shape, coverage requirements, and Studio evidence are documented in [Studio Load testing](interfaces/studio/load-testing.md#sut-metrics).
 
+##### Single-call business metrics
+
+A base profile may define a business metric with one configured `call` instead of PromQL. ATT executes each expanded metric binding once after all LOAD work drains, through the selected package's existing DBHelper or Package Tool configuration. A job-scoped binding is the default; a workload-scoped binding requires one exact `workloadId` from the LOAD scenario. No target fan-out, polling, or implicit retry is performed. DBHelper calls use the existing helper configuration, bind parameters, and connection limits. A Package Tool requires `sideEffectsAcknowledged: true` because ATT cannot determine whether package code has side effects.
+
+~~~json
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "active-sessions",
+  "kind": "base",
+  "category": "db",
+  "metrics": [
+    {
+      "id": "active",
+      "title": "Active sessions",
+      "unit": "count",
+      "kind": "gauge",
+      "call": "#{db.reporting.scalar(sql='select count(*) from active_sessions')}",
+      "sampling": "afterDrain"
+    }
+  ]
+}
+~~~
+
+Set `sampling: windowQuery` and `window: steady` to make one post-drain call with the actual STEADY bounds available as `EXEC.OBSERVATION.WINDOW_START` and `EXEC.OBSERVATION.WINDOW_END`. The query author defines the aggregation; a returned value does not prove exhaustive coverage. A map or list result requires an explicit `valuePath` such as `rows[0].active`, and the resolved value must be one finite number. The Server pins the package and Runtime Config revisions at Job admission and refuses execution if either changes. Calls run in a bounded Server worker pool, outside LOAD workers. A failed, timed-out, stale, or non-numeric call is recorded as unavailable and evaluates to `NOT_EVALUATED`; it is never substituted with zero and does not change the Worker result. Binding validation and live preview never execute a business call.
+
+Business metrics support `max <= value` thresholds. Use `window: afterDrain` for an `afterDrain` metric or `window: steady` for a `windowQuery` metric. These single-value rules do not use `minimumCoverage`.
+
 In the summary's `thresholds` object, `status` and `performanceVerdict` are authoritative and use `MET`, `NOT_MET` or `NOT_EVALUATED`. `legacyPassed` is an optional compatibility boolean that retains the previous `passed()` semantics: it is false when configured thresholds are unevaluable and true when no thresholds are configured. Consumers should use the tri-state fields to distinguish incomplete evidence from a missed threshold.
 
 The summary separates generator observations from SUT outcomes. `metrics.generator` includes sampled heap used/committed/maximum, observed peak live threads, GC count/time, and process CPU when the JVM exposes it. Sampling is limited to one observation per 100 ms, so brief peaks may be missed. `schedulerWakeups`, `submitLag*`, and `workerQueueDepth*` describe scheduler pressure; arrival drops remain separate from SUT errors. `resources.http` reports active/idle/waiting and observed peak connections per HTTP helper alongside DB, MQ, and Render pool/plan diagnostics; `resources.resourceMetricSamples` reports the number of rate-limited resource observations. `resources.executionIds` reports custom execution-ID reservation counts. Testdata mapping and selection counts are under `resources.generator.testdata`; interpretation and implementation limits are documented in [Load Generator Telemetry](system-design/load-telemetry.md).
@@ -3486,7 +3513,7 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 
 ### Offline SUT metrics report
 
-A completed LOAD with SUT collection evidence can publish a separate, versioned offline report archive. The publisher verifies the source manifest and each observation sidecar, preserves the original sealed native archive byte-for-byte, and publishes an immutable snapshot. Its `att-load-report-extension/v2` manifest references the source-neutral `att-load-offline-observations/v1` record, whose `att-load-offline-observation/v1` entries carry source, metric, profile, target, UTC window, phase, units, sample resolution, coverage, gaps, diagnostics, checksums, and bounded chart previews. Full series sidecars retain the normalized `att-sut-metrics-observation/v1` contract. Partial or unavailable source data is reported explicitly and does not change the native Job result.
+A completed LOAD with SUT collection evidence can publish a separate, versioned offline report archive. The publisher verifies the source manifest and each observation sidecar, preserves the original sealed native archive byte-for-byte, and publishes an immutable snapshot. Its `att-load-report-extension/v2` manifest references the source-neutral `att-load-offline-observations/v1` record. The `att-load-offline-observation/v1` entries carry source, metric, profile, target, UTC window, phase, units, quality, checksums, and either bounded chart previews for time series or one numeric value for a business metric. Full sidecars retain the normalized `att-sut-metrics-observation/v1` contract. Partial or unavailable source data is reported explicitly and does not change the native Job result.
 
 The report works without network access and uses a restrictive Content Security Policy. It does not evaluate performance thresholds. If a separately versioned `att-load-verdict/v1` record is supplied, the report displays its recorded evaluation state and evidence reference without recalculating the verdict. The archive is available through the authenticated Job download route only after verified publication.
 

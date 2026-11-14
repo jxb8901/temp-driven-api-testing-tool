@@ -182,6 +182,6 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 
 ## 離線 SUT Metrics 報告
 
-完成的 LOAD 若有 SUT collection evidence，可另外發佈獨立版本化的離線報告 archive。Publisher 會驗證來源 manifest 及每個 observation sidecar，逐 byte 保留原本 sealed native archive，並以不可變 snapshot 發佈。`att-load-report-extension/v2` manifest 會引用 source-neutral 的 `att-load-offline-observations/v1` record；其 `att-load-offline-observation/v1` entries 記錄 source、metric、profile、target、UTC window、phase、單位、sample resolution、coverage、gaps、diagnostics、checksums 及有界 chart preview。完整 series sidecar 仍使用 normalized `att-sut-metrics-observation/v1` contract。Partial 或 unavailable source data 會明確標示，不會改變 native Job result。
+完成的 LOAD 若有 SUT collection evidence，可另外發佈獨立版本化的離線報告 archive。Publisher 會驗證來源 manifest 及每個 observation sidecar，逐 byte 保留原本 sealed native archive，並以不可變 snapshot 發佈。`att-load-report-extension/v2` manifest 會引用 source-neutral 的 `att-load-offline-observations/v1` record。`att-load-offline-observation/v1` entries 記錄 source、metric、profile、target、UTC window、phase、單位、quality 和 checksum；time-series 會提供有界 chart preview，business metric 則提供單一數值。完整 sidecar 仍使用 normalized `att-sut-metrics-observation/v1` contract。Partial 或 unavailable source data 會明確標示，不會改變 native Job result。
 
 報告可在沒有 network access 時使用，並採用 restrictive Content Security Policy。報告不會評估 performance threshold。如有獨立版本化的 `att-load-verdict/v1` record，報告只顯示其 evaluation state 與 evidence reference，不會重新計算 verdict。只有在驗證發佈成功後，才可透過 authenticated Job download route 取得 archive。

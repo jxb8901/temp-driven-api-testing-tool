@@ -42,7 +42,7 @@ public final class ContextPathPolicy {
         return "ID".equals(field) || "RUN_ID".equals(field) || "STARTED_AT".equals(field)
                 || "RUN_STARTED_AT".equals(field)
                 || "OUTPUT_DIR".equals(field) || "INPUT".equals(field) || "VARS".equals(field)
-                || "ACTIONS".equals(field) || "LOAD".equals(field);
+                || "ACTIONS".equals(field) || "LOAD".equals(field) || "OBSERVATION".equals(field);
     }
     public static boolean isCanonicalExecField(String field) { return isFrameworkOwnedExecField(field); }
     public static boolean isCanonicalMetaField(String field) {
@@ -79,6 +79,7 @@ public final class ContextPathPolicy {
         if (scope == Scope.LEGACY_ALIAS && path.startsWith("ACTIONS.")) return true;
         return "CASE.outputDirectory".equals(path) || "EXEC.LOAD".equals(path)
                 || (path != null && path.startsWith("EXEC.LOAD."))
+                || "EXEC.OBSERVATION".equals(path) || (path != null && path.startsWith("EXEC.OBSERVATION."))
                 || (path != null && (path.startsWith("META.TEMPLATE.") || path.startsWith("META.FLOW.")
                 || path.startsWith("META.TOOL.") || path.startsWith("META.DBHELPER.") || path.startsWith("META.MQHELPER.")
                 || path.startsWith("META.HTTPHELPER.")));

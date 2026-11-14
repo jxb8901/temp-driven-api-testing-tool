@@ -93,8 +93,103 @@
           "minLength": 1,
           "maxLength": 80,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "scope": {
+          "enum": [
+            "job",
+            "workload"
+          ]
+        },
+        "workloadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
         }
-      }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "source",
+            "targets"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "scope"
+                ]
+              },
+              {
+                "required": [
+                  "workloadId"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "scope": {
+              "enum": [
+                "job",
+                "workload"
+              ]
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "source"
+                ]
+              },
+              {
+                "required": [
+                  "tenant"
+                ]
+              },
+              {
+                "required": [
+                  "targets"
+                ]
+              },
+              {
+                "required": [
+                  "targetIds"
+                ]
+              },
+              {
+                "required": [
+                  "parameters"
+                ]
+              }
+            ]
+          },
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "workload"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "required": [
+              "workloadId"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "workloadId"
+              ]
+            }
+          }
+        }
+      ]
     },
     "observabilityCollection": {
       "type": "object",
@@ -174,7 +269,10 @@
           "maxLength": 80
         },
         "window": {
-          "const": "steady"
+          "enum": [
+            "steady",
+            "afterDrain"
+          ]
         },
         "targets": {
           "const": "all"
