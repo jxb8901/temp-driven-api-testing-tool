@@ -250,11 +250,12 @@ export interface SutMetricSeries { labels: Record<string, string>; samples: SutM
 export interface SutMetricQueryMetadata {
   id: string; profile?: string; profilePath?: string; sourceId?: string; sourceName?: string; kind?: string;
   targetId: string; targetType?: string; metricId: string; title?: string; category?: string; unit?: string;
+  observationType?: string; observationKind?: string; sampling?: string; scope?: string; workloadId?: string; sourceType?: string;
 }
 export interface SutMetricItem {
   id?: string; queryId?: string; profile?: string; profilePath?: string; metricId: string; title: string; category?: string; targetId: string; targetType?: string; kind?: string;
   sourceId?: string; sourceName?: string; unit: string; queryStatus?: string; observation?: Record<string, unknown>; series?: SutMetricSeries[];
-  coverage?: Record<string, unknown>; error?: string;
+  value?: number; coverage?: Record<string, unknown>; error?: string;
 }
 export interface SutMetricsManifest {
   schemaVersion?: string; state?: string; complete?: boolean; createdAt?: string; updatedAt?: string;

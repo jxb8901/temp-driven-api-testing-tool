@@ -1208,7 +1208,7 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
 
   return <section className="att-job-panel att-sut-metrics-panel" role="tabpanel" id="job-panel-sutMetrics" aria-labelledby="job-tab-sutMetrics" hidden={hidden} tabIndex={0}>
     <h2>SUT Metrics</h2>
-    <p className="att-help">Prometheus metrics for the selected system under test. Live preview is read-only and does not itself change acceptance. Configured rules produce a separate persisted performance verdict.</p>
+    <p className="att-help">SUT observations include read-only live Prometheus previews and configured post-run metrics. Business calls run once after LOAD drain. Configured rules produce a separate persisted performance verdict.</p>
     {queries.length > 0 && <div className="att-sut-metrics-filters" aria-label="SUT Metrics filters">
       <label>Target<select value={targetFilter} onChange={event => setTargetFilter(event.target.value)}><option value="">All targets</option>{targets.map(target => <option key={target} value={target}>{target}</option>)}</select></label>
       <label>Profile<select value={profileFilter} onChange={event => setProfileFilter(event.target.value)}><option value="">All profiles</option>{profiles.map(profile => <option key={profile} value={profile}>{profile}</option>)}</select></label>
@@ -1225,8 +1225,8 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
     <SutAcceptanceSummary acceptance={(response as SutMetricsJobResponse | null)?.performanceAcceptance} />
     {state === 'DISABLED' && <p role="status">SUT Metrics are not configured for this LOAD Job.</p>}
     {state === 'PENDING' && <p role="status" aria-busy={loading}>SUT Metrics are waiting for LOAD execution or the post-run collection worker.</p>}
-    {state === 'COLLECTING' && <p role="status" aria-busy="true">Prometheus post-run collection is in progress. The LOAD execution result is independent of this status.</p>}
-    {state === 'UNAVAILABLE' && <p role="status">Prometheus did not return any SUT metric samples for this window.</p>}
+    {state === 'COLLECTING' && <p role="status" aria-busy="true">Post-run SUT Metrics collection is in progress. The LOAD execution result is independent of this status.</p>}
+    {state === 'UNAVAILABLE' && <p role="status">No SUT metric observations were collected for this Job.</p>}
     {state === 'FAILED' && <p role="alert">SUT Metrics collection failed. The LOAD execution verdict is unchanged.</p>}
     {state === 'PARTIAL' && <p role="status">Some metrics are available; other queries returned no data or could not be collected.</p>}
     {state === 'NO_DATA' && <p role="status">No SUT samples are available yet for this time window.</p>}
@@ -1303,12 +1303,28 @@ const SutMetricCard = memo(function SutMetricCard({ item, range, rangeStart, ran
   const firstVisible = chronologicalPoints[0]?.timestamp || coverage.firstSampleAt;
   const latestVisible = chronologicalPoints[chronologicalPoints.length - 1]?.timestamp || coverage.lastSampleAt;
   const status = item.queryStatus || (count ? 'READY' : 'NO_DATA');
+  const observationWindow = item.observation?.window && typeof item.observation.window === 'object'
+    ? item.observation.window as Record<string, unknown> : {};
+  const availability = item.observation?.availability && typeof item.observation.availability === 'object'
+    ? item.observation.availability as Record<string, unknown> : {};
+  const observedAt = observationWindow.observedAt || observationWindow.completedAt;
+  const businessValue = typeof item.value === 'number' && Number.isFinite(item.value);
   return <article className="att-sut-metric-card">
     <header><div><h3>{item.title || item.metricId}</h3><p>{item.category || 'SUT'} · {item.targetType || 'target'} {item.targetId} · {item.unit}{item.profilePath ? ` · ${item.profilePath}` : ''}</p></div>
       <span className={`att-sut-metric-query-status att-sut-metric-query-status-${status.toLowerCase()}`}>{status}</span></header>
     {item.error && <p role="status">{item.error}</p>}
+    {status === 'NOT_COLLECTED_LIVE' && <p role="status">Business calls run once after LOAD drain and are not executed by live preview.</p>}
+    {businessValue && <>
+      <dl className="att-sut-metric-summary"><div><dt>Observed value</dt><dd>{METRIC_NUMBER_FORMATTER.format(item.value!)} {item.unit}</dd></div>
+        <div><dt>Observation type</dt><dd>{String(item.observation?.kind || 'business metric')}</dd></div>
+        {typeof observedAt === 'string' && <div><dt>Collected at</dt><dd>{dateTime(observedAt)}</dd></div>}
+        {typeof availability.collectionDurationMs === 'number' && <div><dt>Call duration</dt><dd>{METRIC_NUMBER_FORMATTER.format(availability.collectionDurationMs)} ms</dd></div>}
+      </dl>
+      {item.observation?.kind === 'timed-snapshot' && <p role="note">This is one snapshot after LOAD drain. It does not represent steady-window coverage.</p>}
+      {item.observation?.kind === 'window-aggregate' && <p role="note">This value comes from an author-defined query over the recorded STEADY interval; a successful query does not prove exhaustive coverage.</p>}
+    </>}
     {status === 'STALE' && <p role="status">The latest sample is older than the live freshness window.</p>}
-    {!count && status !== 'UNAVAILABLE' && <p role="status">No samples were returned for this metric and time window.</p>}
+    {!count && !businessValue && status !== 'UNAVAILABLE' && status !== 'NOT_COLLECTED_LIVE' && <p role="status">No samples were returned for this metric and time window.</p>}
     {status === 'UNAVAILABLE' && <p role="status">This metric query is unavailable.</p>}
     {paths.length > 0 && <svg className="att-sut-metric-chart" role="img" aria-label={`${item.title} for ${item.targetId}`} viewBox="0 0 820 220">
       <path d="M0 190 H800 M0 105 H800 M0 20 H800" className="att-sut-metric-grid" />
@@ -1320,8 +1336,8 @@ const SutMetricCard = memo(function SutMetricCard({ item, range, rangeStart, ran
       <div><dt>Avg</dt><dd>{METRIC_NUMBER_FORMATTER.format(average!)} {item.unit}</dd></div>
       <div><dt>Max</dt><dd>{METRIC_NUMBER_FORMATTER.format(maximum)} {item.unit}</dd></div>
     </dl>}
-    <p className="att-sut-metric-coverage">{count} samples across {visibleSeries.filter(series => series.samples.length > 0).length} series · source {item.sourceName || item.sourceId || 'registered Prometheus'}
-      {firstVisible != null && <> · first {dateTime(String(firstVisible))}</>}{latestVisible != null && <> · latest {dateTime(String(latestVisible))}</>}</p>
+    {!businessValue && status !== 'NOT_COLLECTED_LIVE' && <p className="att-sut-metric-coverage">{count} samples across {visibleSeries.filter(series => series.samples.length > 0).length} series · source {item.sourceName || item.sourceId || 'registered SUT Metrics source'}
+      {firstVisible != null && <> · first {dateTime(String(firstVisible))}</>}{latestVisible != null && <> · latest {dateTime(String(latestVisible))}</>}</p>}
   </article>;
 });
 

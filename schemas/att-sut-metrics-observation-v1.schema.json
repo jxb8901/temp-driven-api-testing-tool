@@ -17,131 +17,533 @@
     "targetId",
     "targetType",
     "unit",
-    "observation",
-    "series"
+    "observation"
   ],
   "additionalProperties": false,
   "properties": {
-    "schemaVersion": { "const": "att-sut-metrics-observation/v1" },
-    "queryId": { "type": "string", "minLength": 1, "maxLength": 512 },
-    "profile": { "type": "string" },
-    "profilePath": { "type": "string" },
-    "sourceId": { "type": "string" },
-    "sourceName": { "type": "string" },
-    "metricId": { "type": "string" },
-    "title": { "type": "string" },
-    "category": { "type": "string" },
-    "kind": { "enum": ["gauge", "rate", "counter", "histogram"] },
-    "targetId": { "type": "string" },
-    "targetType": { "type": "string" },
-    "unit": { "type": "string" },
+    "schemaVersion": {
+      "const": "att-sut-metrics-observation/v1"
+    },
+    "queryId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "profile": {
+      "type": "string"
+    },
+    "profilePath": {
+      "type": "string"
+    },
+    "sourceId": {
+      "type": "string"
+    },
+    "sourceName": {
+      "type": "string"
+    },
+    "metricId": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "gauge",
+        "rate",
+        "counter",
+        "histogram"
+      ]
+    },
+    "targetId": {
+      "type": "string"
+    },
+    "targetType": {
+      "type": "string"
+    },
+    "unit": {
+      "type": "string"
+    },
     "observation": {
       "type": "object",
-      "required": ["schemaVersion", "kind", "effectiveBindingId", "source", "profile", "target", "metric", "window", "availability", "provenance"],
+      "required": [
+        "schemaVersion",
+        "kind",
+        "effectiveBindingId",
+        "source",
+        "profile",
+        "target",
+        "metric",
+        "window",
+        "availability",
+        "provenance"
+      ],
       "additionalProperties": false,
       "properties": {
-        "schemaVersion": { "const": "att-sut-metrics-observation/v1" },
-        "kind": { "const": "sampled-time-series" },
-        "effectiveBindingId": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "schemaVersion": {
+          "const": "att-sut-metrics-observation/v1"
+        },
+        "kind": {
+          "enum": [
+            "sampled-time-series",
+            "timed-snapshot",
+            "window-aggregate"
+          ]
+        },
+        "effectiveBindingId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
         "source": {
           "type": "object",
-          "required": ["id", "name", "revision"],
+          "required": [
+            "id",
+            "name",
+            "revision"
+          ],
           "additionalProperties": false,
-          "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "revision": { "$ref": "#/$defs/revision" } }
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "revision": {
+              "$ref": "#/$defs/revision"
+            }
+          }
         },
         "profile": {
           "type": "object",
-          "required": ["id", "path", "revision"],
+          "required": [
+            "id",
+            "path",
+            "revision"
+          ],
           "additionalProperties": false,
-          "properties": { "id": { "type": "string" }, "path": { "type": "string" }, "revision": { "$ref": "#/$defs/revision" } }
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "revision": {
+              "$ref": "#/$defs/revision"
+            }
+          }
         },
         "target": {
           "type": "object",
-          "required": ["id", "type", "revision"],
+          "required": [
+            "id",
+            "type",
+            "revision"
+          ],
           "additionalProperties": false,
-          "properties": { "id": { "type": "string" }, "type": { "type": "string" }, "revision": { "$ref": "#/$defs/revision" } }
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "revision": {
+              "$ref": "#/$defs/revision"
+            }
+          }
         },
         "metric": {
           "type": "object",
-          "required": ["id", "name", "category", "unit", "kind"],
+          "required": [
+            "id",
+            "name",
+            "category",
+            "unit",
+            "kind"
+          ],
           "additionalProperties": false,
           "properties": {
-            "id": { "type": "string" }, "name": { "type": "string" }, "category": { "type": "string" },
-            "unit": { "type": "string" }, "kind": { "enum": ["gauge", "rate", "counter", "histogram"] }
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string"
+            },
+            "unit": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "gauge",
+                "rate",
+                "counter",
+                "histogram"
+              ]
+            }
           }
         },
         "window": {
           "type": "object",
-          "required": ["executionStartedAt", "executionFinishedAt", "queryStart", "queryEnd", "step", "phaseWindows"],
+          "required": [],
           "additionalProperties": false,
           "properties": {
-            "executionStartedAt": { "type": "string", "format": "date-time" },
-            "executionFinishedAt": { "type": "string", "format": "date-time" },
-            "queryStart": { "type": "string", "format": "date-time" },
-            "queryEnd": { "type": "string", "format": "date-time" },
-            "step": { "type": "string" },
+            "executionStartedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "executionFinishedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "queryStart": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "queryEnd": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "step": {
+              "type": "string"
+            },
             "phaseWindows": {
-              "type": "array", "maxItems": 8,
+              "type": "array",
+              "maxItems": 8,
               "items": {
-                "type": "object", "required": ["phase", "startAt", "endAt", "durationMs", "measured"], "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "phase",
+                  "startAt",
+                  "endAt",
+                  "durationMs",
+                  "measured"
+                ],
+                "additionalProperties": false,
                 "properties": {
-                  "phase": { "enum": ["RAMP_UP", "WARMUP", "STEADY", "RAMP_DOWN", "DRAIN"] },
-                  "startAt": { "type": "string", "format": "date-time" },
-                  "endAt": { "type": "string", "format": "date-time" },
-                  "durationMs": { "type": "integer", "minimum": 0 },
-                  "measured": { "type": "boolean" }
+                  "phase": {
+                    "enum": [
+                      "RAMP_UP",
+                      "WARMUP",
+                      "STEADY",
+                      "RAMP_DOWN",
+                      "DRAIN"
+                    ]
+                  },
+                  "startAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "endAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "measured": {
+                    "type": "boolean"
+                  }
                 }
               }
+            },
+            "kind": {
+              "enum": [
+                "after-drain",
+                "steady-window-query"
+              ]
+            },
+            "observedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "completedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "delayFromExecutionEndMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "semantics": {
+              "type": "string",
+              "maxLength": 240
             }
           }
         },
         "availability": {
           "type": "object",
-          "required": ["state", "freshness", "coverage", "diagnostics"],
+          "required": [
+            "state",
+            "freshness",
+            "diagnostics"
+          ],
           "additionalProperties": false,
           "properties": {
-            "state": { "enum": ["AVAILABLE", "PARTIAL", "NO_DATA"] },
-            "freshness": { "enum": ["FRESH", "STALE", "UNKNOWN"] },
-            "coverage": { "$ref": "#/$defs/coverage" },
-            "diagnostics": { "type": "array", "maxItems": 512, "items": { "type": "object", "required": ["code", "message"], "additionalProperties": false, "properties": { "code": { "type": "string" }, "message": { "type": "string", "maxLength": 240 } } } }
+            "state": {
+              "enum": [
+                "AVAILABLE",
+                "PARTIAL",
+                "NO_DATA"
+              ]
+            },
+            "freshness": {
+              "enum": [
+                "FRESH",
+                "STALE",
+                "UNKNOWN"
+              ]
+            },
+            "coverage": {
+              "$ref": "#/$defs/coverage"
+            },
+            "diagnostics": {
+              "type": "array",
+              "maxItems": 512,
+              "items": {
+                "type": "object",
+                "required": [
+                  "code",
+                  "message"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 240
+                  }
+                }
+              }
+            },
+            "quality": {
+              "enum": [
+                "SINGLE_VALUE",
+                "AUTHOR_DEFINED_WINDOW_QUERY"
+              ]
+            },
+            "collectionDurationMs": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         },
         "provenance": {
-          "type": "object", "required": ["provider", "jobId", "snapshotId", "queryId"], "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "provider",
+            "jobId",
+            "snapshotId",
+            "queryId"
+          ],
+          "additionalProperties": false,
           "properties": {
-            "provider": { "const": "prometheus" }, "jobId": { "type": "string", "pattern": "^J[A-F0-9]{16}$" },
-            "snapshotId": { "$ref": "#/$defs/revision" }, "queryId": { "type": "string" }
+            "provider": {
+              "enum": [
+                "prometheus",
+                "att-call"
+              ]
+            },
+            "jobId": {
+              "type": "string",
+              "pattern": "^J[A-F0-9]{16}$"
+            },
+            "snapshotId": {
+              "$ref": "#/$defs/revision"
+            },
+            "queryId": {
+              "type": "string"
+            },
+            "sourceType": {
+              "enum": [
+                "DBHELPER",
+                "PACKAGE_TOOL"
+              ]
+            },
+            "sourceName": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "packageRevision": {
+              "$ref": "#/$defs/revision"
+            },
+            "runtimeConfigRevision": {
+              "$ref": "#/$defs/revision"
+            }
           }
         }
       }
     },
     "series": {
-      "type": "array", "maxItems": 512,
+      "type": "array",
+      "maxItems": 512,
       "items": {
-        "type": "object", "required": ["labels", "samples", "coverage"], "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "labels",
+          "samples",
+          "coverage"
+        ],
+        "additionalProperties": false,
         "properties": {
-          "labels": { "type": "object", "maxProperties": 40, "additionalProperties": { "type": "string", "maxLength": 512 } },
-          "samples": { "type": "array", "maxItems": 250000, "items": { "type": "object", "required": ["timestamp", "timestampEpochMs", "value"], "additionalProperties": false, "properties": { "timestamp": { "type": "string", "format": "date-time" }, "timestampEpochMs": { "type": "integer" }, "value": { "type": "number" } } } },
-          "coverage": { "$ref": "#/$defs/coverage" }
+          "labels": {
+            "type": "object",
+            "maxProperties": 40,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          "samples": {
+            "type": "array",
+            "maxItems": 250000,
+            "items": {
+              "type": "object",
+              "required": [
+                "timestamp",
+                "timestampEpochMs",
+                "value"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "timestampEpochMs": {
+                  "type": "integer"
+                },
+                "value": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "coverage": {
+            "$ref": "#/$defs/coverage"
+          }
+        }
+      }
+    },
+    "value": {
+      "type": "number"
+    }
+  },
+  "$defs": {
+    "revision": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "coverage": {
+      "type": "object",
+      "required": [
+        "sampleCount",
+        "seriesCount",
+        "gapCount",
+        "firstSampleAt",
+        "lastSampleAt",
+        "windowStart",
+        "windowEnd"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "sampleCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "seriesCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gapCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "firstSampleAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastSampleAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "windowStart": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "windowEnd": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     }
   },
-  "$defs": {
-    "revision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "coverage": {
-      "type": "object",
-      "required": ["sampleCount", "seriesCount", "gapCount", "firstSampleAt", "lastSampleAt", "windowStart", "windowEnd"],
-      "additionalProperties": false,
+  "oneOf": [
+    {
+      "required": [
+        "series"
+      ],
+      "not": {
+        "required": [
+          "value"
+        ]
+      },
       "properties": {
-        "sampleCount": { "type": "integer", "minimum": 0 },
-        "seriesCount": { "type": "integer", "minimum": 0 },
-        "gapCount": { "type": "integer", "minimum": 0 },
-        "firstSampleAt": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
-        "lastSampleAt": { "oneOf": [{ "type": "string", "format": "date-time" }, { "type": "null" }] },
-        "windowStart": { "type": "string", "format": "date-time" },
-        "windowEnd": { "type": "string", "format": "date-time" }
+        "observation": {
+          "properties": {
+            "kind": {
+              "const": "sampled-time-series"
+            }
+          }
+        }
+      }
+    },
+    {
+      "required": [
+        "value"
+      ],
+      "not": {
+        "required": [
+          "series"
+        ]
+      },
+      "properties": {
+        "observation": {
+          "properties": {
+            "kind": {
+              "enum": [
+                "timed-snapshot",
+                "window-aggregate"
+              ]
+            }
+          }
+        }
       }
     }
-  }
+  ]
 }

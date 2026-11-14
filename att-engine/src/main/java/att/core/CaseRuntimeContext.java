@@ -81,6 +81,8 @@ public final class CaseRuntimeContext {
     private final Map<String, Object> diagnosticsNode = new LinkedHashMap<String, Object>();
     /** Public uppercase load identity published below EXEC.LOAD. */
     private final Map<String, Object> loadNode = new LinkedHashMap<String, Object>();
+    /** Server-owned bounded observation window published below EXEC.OBSERVATION. */
+    private final Map<String, Object> observationNode = new LinkedHashMap<String, Object>();
     private static final java.util.Set<String> LOAD_CONTEXT_FIELD_NAMES =
             java.util.Collections.unmodifiableSet(new java.util.LinkedHashSet<String>(java.util.Arrays.asList(
                     "RUN_ID", "ITERATION_ID", "MODEL", "USER_ID", "ITERATION", "PHASE", "WORKLOAD_ID", "MIX_ID", "TARGET_TYPE", "TARGET_ID")));
@@ -176,6 +178,7 @@ public final class CaseRuntimeContext {
         execNode.put("VARS", varsNode);
         execNode.put("ACTIONS", actionsView);
         execNode.put("LOAD", loadNode);
+        execNode.put("OBSERVATION", observationNode);
         Map<String, Object> executionDiagnostics = new LinkedHashMap<String, Object>();
         executionDiagnostics.put("mode", this.mode);
         executionDiagnostics.put("id", executionId);
@@ -615,7 +618,7 @@ public final class CaseRuntimeContext {
         }
         if (!ContextPathPolicy.isCanonicalExecField(first)) {
             throw new IllegalArgumentException("Unknown EXEC field: EXEC." + first
-                    + "; the public tree exposes ID, RUN_ID, STARTED_AT, RUN_STARTED_AT, OUTPUT_DIR, INPUT, VARS, ACTIONS, and LOAD");
+                    + "; the public tree exposes ID, RUN_ID, STARTED_AT, RUN_STARTED_AT, OUTPUT_DIR, INPUT, VARS, ACTIONS, LOAD, and OBSERVATION");
         }
         if ("INPUT".equals(first)) putPath(inputNode, suffix(path, first), value);
         else if ("VARS".equals(first)) putPath(varsNode, suffix(path, first), value);
@@ -840,6 +843,13 @@ public final class CaseRuntimeContext {
     public void setLoadWorkload(String workloadId, String targetType, String targetId) {
         setLoadWorkload(workloadId, null, targetType, targetId);
     }
+
+    /** Replaces the observer call's read-only, server-provided time and scope values. */
+    public synchronized void setObservation(Map<String, Object> values) {
+        observationNode.clear();
+        if (values != null) observationNode.putAll(values);
+    }
+
     public void setLoadWorkload(String workloadId, String mixId, String targetType, String targetId) {
         if (!"load".equals(mode)) throw new IllegalStateException("Load diagnostics require load execution mode");
         if (workloadId != null) loadNode.put("WORKLOAD_ID", workloadId);
