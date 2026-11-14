@@ -710,6 +710,112 @@ class ServerRuntimeJobReplayTest {
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.createJobReplayDraft(original,"alice"));
         }
     }
+    @Test void rerunKeepsTheOriginalSutMetricsSnapshotAfterProfileCatalogEdits() throws Exception {
+        Fixture fixture=fixture();
+        String scenario="schemaVersion: att-load/v1.9\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 1s}\n"
+                +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: profile-app\n      source: prom\n      targets: [{id: sut-1, type: app}]\n  collection: {mode: post-run, before: 1m, after: 1m, step: 30s}\n  livePreview: {enabled: false}\n";
+        Files.writeString(fixture.root.resolve("load/smoke.yaml"),scenario);
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            runtime.saveSutMetricSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Local Prometheus",
+                    "url","http://127.0.0.1:1","readers",List.of("alice"),"readRoles",List.of()));
+            Map<String,Object> profile=Map.of("schemaVersion","att-sut-metrics-profile/v1","id","profile-app","name","App",
+                    "kind","base","category","app",
+                    "metrics",List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up")));
+            runtime.saveSutMetricProfile(profile);
+
+            String original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/smoke.yaml")),"alice").get("jobId"));
+            await(runtime,original);
+            JsonNode retainedScenario=ServerRuntime.JSON.readTree(runtime.store.executionSpec(original).get("spec")).path("definition").path("scenario");
+            assertTrue(retainedScenario.path("observability").isObject(),retainedScenario.toString());
+            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForJob(original)).path("queries").get(0).path("query").asText());
+
+            Map<String,Object> changed=ServerRuntime.JSON.convertValue(profile,Map.class);
+            Map<String,Object> changedMetric=ServerRuntime.JSON.convertValue(((List<?>)changed.get("metrics")).get(0),Map.class);
+            changedMetric.put("query","down");changed.put("metrics",List.of(changedMetric));runtime.saveSutMetricProfile(changed);
+            Map<String,Object> review=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
+            assertEquals("up",ServerRuntime.JSON.valueToTree(review.get("preview")).path("sutMetrics").path("items").get(0).path("queryPreview").asText());
+
+            Map<String,Object> rerun=runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("intentId",review.get("intentId"),"confirm",true)),"alice");
+            String rerunId=String.valueOf(rerun.get("jobId"));
+            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForJob(rerunId)).path("queries").get(0).path("query").asText());
+        }
+    }
+    @Test void newScheduleOccurrencesResolveCurrentProfilesWhileRerunsKeepTheDispatchedSnapshot() throws Exception {
+        Fixture fixture=fixture();
+        String scenario="schemaVersion: att-load/v1.9\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 1s}\n"
+                +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: profile-app\n      source: prom\n      targets: [{id: sut-1, type: app}]\n  collection: {mode: post-run, before: 1m, after: 1m, step: 30s}\n  livePreview: {enabled: false}\n";
+        Files.writeString(fixture.root.resolve("load/smoke.yaml"),scenario);
+        ServerRuntimeTestSupport.MutableClock clock=new ServerRuntimeTestSupport.MutableClock(Instant.parse("2026-10-22T00:00:00Z"));
+        try(ServerRuntime runtime=fixture.open(clock)) {
+            users(runtime);
+            runtime.saveSutMetricSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Local Prometheus",
+                    "url","http://127.0.0.1:1","readers",List.of("alice"),"readRoles",List.of()));
+            Map<String,Object> profile=Map.of("schemaVersion","att-sut-metrics-profile/v1","id","profile-app","name","App",
+                    "kind","base","category","app",
+                    "metrics",List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up")));
+            runtime.saveSutMetricProfile(profile);
+            LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name","SUT snapshot schedule",
+                    "executionType","load","packageId","p","environment","SIT","scenario","load/smoke.yaml",
+                    "timezone","UTC","cron","0 2 * * *","enabled",false)),"alice");
+
+            Map<String,Object> firstOccurrence=runtime.triggerLoadSchedule(schedule.id,"alice");
+            assertEquals("submitted",firstOccurrence.get("status"),firstOccurrence.toString());
+            String firstJob=String.valueOf(firstOccurrence.get("jobId"));
+            await(runtime,firstJob);
+            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForJob(firstJob)).path("queries").get(0).path("query").asText());
+
+            Map<String,Object> updatedProfile=ServerRuntime.JSON.convertValue(profile,Map.class);
+            Map<String,Object> updatedMetric=ServerRuntime.JSON.convertValue(((List<?>)updatedProfile.get("metrics")).get(0),Map.class);
+            updatedMetric.put("query","down");updatedProfile.put("metrics",List.of(updatedMetric));runtime.saveSutMetricProfile(updatedProfile);
+            clock.advance(Duration.ofMinutes(runtime.config.scheduling.minimumIntervalMinutes+1L));
+            Map<String,Object> secondOccurrence=runtime.triggerLoadSchedule(schedule.id,"alice");
+            assertEquals("submitted",secondOccurrence.get("status"),secondOccurrence.toString());
+            String secondJob=String.valueOf(secondOccurrence.get("jobId"));
+            await(runtime,secondJob);
+            assertEquals("down",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForJob(secondJob)).path("queries").get(0).path("query").asText(),
+                    "Each newly dispatched Schedule occurrence resolves the current Admin profile.");
+
+            Map<String,Object> replayReview=runtime.createJobReplayDraft(firstJob,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
+            assertEquals("up",ServerRuntime.JSON.valueToTree(replayReview.get("preview")).path("sutMetrics").path("items").get(0).path("queryPreview").asText());
+            Map<String,Object> replay=runtime.rerunJob(firstJob,ServerRuntime.JSON.valueToTree(Map.of(
+                    "intentId",replayReview.get("intentId"),"confirm",true)),"alice");
+            String replayJob=String.valueOf(replay.get("jobId"));
+            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForJob(replayJob)).path("queries").get(0).path("query").asText(),
+                    "A rerun of a dispatched occurrence keeps that Job's pinned SUT Metrics snapshot.");
+            await(runtime,replayJob);
+        }
+    }
+    @Test void sutMetricsCollectionLifecycleRecoversWhenTheServerRestarts() throws Exception {
+        Fixture fixture=fixture();String pendingJob="J0000000000000083",collectingJob="J0000000000000084";
+        try(ServerRuntime runtime=fixture.open()) {
+            runtime.sutMetrics.upsertSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Local Prometheus",
+                    "url","http://127.0.0.1:9090","readers",List.of("alice"),"readRoles",List.of()));
+            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","App",
+                    "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up"))));
+            Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base","source","prom",
+                            "targets",List.of(Map.of("id","sut-1","type","app")))),
+                    "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"));
+            Map<String,Object> snapshot=runtime.sutMetrics.resolveScenario(scenario,"alice",false);
+            for(String id:List.of(pendingJob,collectingJob)) {
+                Path jobDirectory=Files.createDirectories(runtime.config.dataDir.resolve("jobs").resolve(id).resolve("output")).getParent();
+                Job job=new Job(id,"load","p","alice",new att.server.api.WorkerRequest(),new JobEvents(jobDirectory.resolve("events.jsonl"),100));
+                job.status="PASS";job.finishedAt=Instant.now();runtime.store.insert(job,"{}");runtime.store.update(job);
+                runtime.sutMetrics.writeSnapshot(id,snapshot);
+            }
+            Path collectingManifest=runtime.config.dataDir.resolve("jobs").resolve(collectingJob).resolve("sut-metrics/manifest.json");
+            Map<String,Object> inProgress=runtime.sutMetrics.collectionStatus(collectingJob);
+            inProgress.put("state","COLLECTING");inProgress.put("complete",Boolean.FALSE);
+            runtime.sutMetrics.writeManifest(collectingManifest.getParent(),inProgress);
+        }
+        try(ServerRuntime restarted=fixture.open()) {
+            Map<String,Object> pending=restarted.sutMetrics.collectionStatus(pendingJob);
+            Map<String,Object> interrupted=restarted.sutMetrics.collectionStatus(collectingJob);
+            assertEquals("UNAVAILABLE",pending.get("state"),"A terminal Job left at PENDING must receive an explicit result after restart.");
+            assertEquals("FAILED",interrupted.get("state"),"A collection interrupted by restart must not remain COLLECTING forever.");
+            assertEquals("SERVER_RESTART_INTERRUPTED",((List<Map<String,Object>>)interrupted.get("diagnostics")).get(0).get("code"));
+        }
+    }
     @Test void legacyScheduledDebugReplaysAsRunWithDebugModeAfterScheduleRemoval() throws Exception {
         Fixture fixture=fixture();
         try(ServerRuntime runtime=fixture.open()) {

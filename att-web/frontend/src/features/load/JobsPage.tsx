@@ -4,14 +4,15 @@ import { formatRoute } from "../../router";
 import { JobReplayActions } from "./JobReplayActions";
 import { StatusBadge } from './StatusBadge';
 import { ArchiveMetrics } from './ArchiveMetrics';
+import { CorrelationPanel } from './CorrelationPanel';
 import type { ArtifactArchiveMetrics } from './types';
-import { api as serverApi } from '../../api';
+import { api as serverApi, apiBaseUrl } from '../../api';
 import { artifactApi } from './artifactApi';
 import { memo, Profiler, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import './load.css';
 import './JobsPage.css';
 import { JobArtifacts } from './JobArtifacts';
-import type { JobArtifactOverview, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps, LoadJobsApi, LoadLiveProgressPoint, LoadLiveProgressSnapshot } from './types';
+import type { JobArtifactOverview, JobResultResponse, JobStatus, JobSummary, JobView, JobsFeatureProps, LoadJobsApi, LoadLiveProgressPoint, LoadLiveProgressSnapshot, SutMetricItem, SutMetricQueryMetadata, SutMetricsJobResponse, SutMetricsLiveResponse } from './types';
 import { JobConsoleView } from './JobConsoleView';
 import { useJobConsole } from './JobConsoleContext';
 import { useJobEventStatus, useJobEventStream, type JobStreamConnection } from './useJobEventStream';
@@ -23,7 +24,7 @@ const MAX_BUCKET_ROWS = 4096;
 const BUCKET_PAGE_SIZE = 100;
 
 type LoadState = 'loading' | 'refreshing' | 'ready' | 'error';
-type JobTab = 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics';
+type JobTab = 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics' | 'correlation';
 const tabs: Array<{ id: JobTab; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'live', label: 'Live Output' },
@@ -31,6 +32,8 @@ const tabs: Array<{ id: JobTab; label: string }> = [
   { id: 'results', label: 'Results' },
   { id: 'artifacts', label: 'Artifacts' },
   { id: 'metrics', label: 'Metrics' },
+  { id: 'sutMetrics', label: 'SUT Metrics' },
+  { id: 'correlation', label: 'Correlation' },
 ];
 
 function toError(value: unknown, fallback: string): Error {
@@ -64,6 +67,12 @@ function dateTime(value?: string | null): string {
   if (!value) return 'Not reported';
   const time = Date.parse(value);
   return Number.isFinite(time) ? DATE_TIME_FORMATTER.format(time) : value;
+}
+
+function utcTimestamp(value?: string | null): string {
+  if (!value) return 'Not reported';
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? new Date(time).toISOString() : value;
 }
 
 function numericRows(value: unknown, prefix = '', depth = 0, rows: Array<[string, number]> = []): Array<[string, number]> {
@@ -112,7 +121,7 @@ function secondaryLoadWarnings(payload: JobResultResponse | null): Array<Record<
 
 type ReportAvailability = 'idle' | 'loading' | 'PENDING' | 'ARCHIVING' | 'READY' | 'FAILED' | 'EXPIRED' | 'OMITTED' | 'ERROR' | 'UNAVAILABLE';
 
-function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean, includeSummary: boolean, includeMetricSeries: boolean) {
+function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean, includeSummary: boolean, metricSeriesTargets: string[] = ['metrics/buckets']) {
   const [availability, setAvailability] = useState<ReportAvailability>('idle');
   const [detailMetrics, setDetailMetrics] = useState<Record<string, unknown> | null>(null);
   const [detailEvidence, setDetailEvidence] = useState<unknown>(null);
@@ -178,7 +187,6 @@ function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean
         if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('The archived LOAD summary is invalid.');
         const metrics = (data as Record<string, unknown>).metrics;
         if (!metrics || typeof metrics !== 'object' || Array.isArray(metrics)) throw new Error('The archived LOAD summary has no metrics section.');
-        setDetailMetrics(metrics as Record<string, unknown>);
         const evidence = (data as Record<string, unknown>).evidence;
         setDetailEvidence(evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? evidence : null);
         const workloads = (data as Record<string, unknown>).workloads;
@@ -186,10 +194,14 @@ function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean
           ? workloads as Record<string, unknown> : null);
         const root = entry.path.slice(0, -'load-summary.json'.length);
         setDetailRoot(root);
-        if (includeSummary && includeMetricSeries) {
-          setDetailMetrics(await restoreMetricSeries(
-            metrics as Record<string, unknown>, features, jobId, root, controller.signal, seriesCache.current));
+        if (includeSummary && metricSeriesTargets.length) {
+          const restoredMetrics = await restoreMetricSeries(
+            metrics as Record<string, unknown>, features, jobId, root, controller.signal, seriesCache.current,
+            metricSeriesTargets, 'aggregate');
           if (controller.signal.aborted || current !== sequence.current) return;
+          setDetailMetrics(restoredMetrics);
+        } else {
+          setDetailMetrics(metrics as Record<string, unknown>);
         }
       } catch (reason) {
         if (!controller.signal.aborted && current === sequence.current) {
@@ -199,7 +211,7 @@ function useLoadArchiveSummary(api: LoadJobsApi, jobId: string, enabled: boolean
     }
     void load();
     return () => { controller.abort(); if (timer) clearTimeout(timer); };
-  }, [api, features, jobId, enabled, includeSummary, includeMetricSeries, attempt]);
+  }, [api, features, jobId, enabled, includeSummary, metricSeriesTargets.join('|'), attempt]);
 
   return { availability, detailMetrics, detailEvidence, detailWorkloads, detailRoot, archiveMetrics, error, retry: () => setAttempt(value => value + 1) };
 }
@@ -227,7 +239,8 @@ function useJobArtifactOverview(api: LoadJobsApi, jobId: string, enabled: boolea
         const next = await features.getJobArtifactOverview(jobId, controller.signal);
         if (stopped || controller.signal.aborted || request !== controller) return;
         setValue(next); setError('');
-        pending = next.archiveStatus === 'PENDING' || next.archiveStatus === 'ARCHIVING';
+        pending = next.archiveStatus === 'PENDING' || next.archiveStatus === 'ARCHIVING'
+          || next.loadReportV2?.state === 'PENDING' || next.loadReportV2?.state === 'BUILDING';
         if (pending && polls < 31 && visible) {
           timer = setTimeout(() => { timer = undefined; void load(); }, 2000);
         }
@@ -260,7 +273,8 @@ function useJobArtifactOverview(api: LoadJobsApi, jobId: string, enabled: boolea
 const MAX_DETAIL_SERIES_FILES = 9000;
 
 async function restoreMetricSeries(metrics: Record<string, unknown>, api: Pick<LoadJobsApi, 'getJobArtifactText'>, jobId: string, root: string,
-                                   signal: AbortSignal, cache: Map<string, string>): Promise<Record<string, unknown>> {
+                                   signal: AbortSignal, cache: Map<string, string>, targets: string[] = ['metrics/buckets'],
+                                   scope: 'aggregate' | 'workload' = 'aggregate', workloadId?: string): Promise<Record<string, unknown>> {
   const ref = metrics.detailSeries;
   if (!ref || typeof ref !== 'object' || Array.isArray(ref)) return metrics;
   const reference = ref as Record<string, unknown>;
@@ -279,14 +293,15 @@ async function restoreMetricSeries(metrics: Record<string, unknown>, api: Pick<L
     if (!rawRecord || typeof rawRecord !== 'object' || Array.isArray(rawRecord))
       throw new Error('The archived LOAD metric-series entry is invalid.');
     const record = rawRecord as Record<string, unknown>;
-    if (record.scope !== 'aggregate' || record.complete !== true || typeof record.target !== 'string'
+    if (record.scope !== scope || record.complete !== true || typeof record.target !== 'string'
+        || (scope === 'workload' && record.workloadId !== workloadId)
         || !['map', 'list'].includes(String(record.kind)) || !Number.isSafeInteger(record.count)
         || !Array.isArray(record.files) || record.files.length === 0
         || (record.sharedContent !== undefined && record.sharedContent !== true))
       throw new Error('The archived LOAD metric-series entry is incomplete.');
     // Metrics charts consume buckets. Other series are loaded only via their authorized artifact links,
     // rather than eagerly fetching every diagnostic and workload collection.
-    if (record.target !== 'metrics/buckets') continue;
+    if (!targets.includes(record.target)) continue;
     const paths = record.files.map(path => safeArtifactPath(root, path));
     if (paths.some(path => !path)) throw new Error('The archived LOAD metric-series path is invalid.');
     const chunks: Array<{ part: number; parts: number; items: unknown }> = new Array(paths.length);
@@ -314,7 +329,8 @@ async function restoreMetricSeries(metrics: Record<string, unknown>, api: Pick<L
         const shared = record.sharedContent === true;
         if ((shared
           ? chunk.schemaVersion !== 'att-load-detail-series/v2' || !/^[a-f0-9]{64}$/.test(String(chunk.contentSha256 ?? ''))
-          : chunk.schemaVersion !== 'att-load-detail-series/v1' || chunk.scope !== 'aggregate' || chunk.target !== record.target)
+          : chunk.schemaVersion !== 'att-load-detail-series/v1' || chunk.scope !== scope || chunk.target !== record.target
+              || (scope === 'workload' && chunk.workloadId !== workloadId))
             || chunk.kind !== record.kind || !Number.isSafeInteger(chunk.part)
             || !Number.isSafeInteger(chunk.parts) || chunk.total !== record.count
             || !validItems)
@@ -581,6 +597,68 @@ function unique(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b));
 }
 
+function shouldPollEvaluation(stateValue: unknown, attemptValue: unknown): boolean {
+  const state = String(stateValue || '');
+  if (state === 'PENDING' || state === 'EVALUATING') return true;
+  return state === 'ERROR' && typeof attemptValue === 'number' && attemptValue < 2;
+}
+
+function shouldPollExternalEvaluation(acceptance?: Record<string, unknown>): boolean {
+  const details = acceptance?.externalEvaluation && typeof acceptance.externalEvaluation === 'object'
+    ? acceptance.externalEvaluation as Record<string, unknown> : {};
+  return shouldPollEvaluation(acceptance?.externalEvaluationStatus, details.attempt);
+}
+
+function SutAcceptanceSummary({ acceptance }: { acceptance?: Record<string, unknown> }) {
+  if (!acceptance) return null;
+  const evaluation = acceptance.externalEvaluation && typeof acceptance.externalEvaluation === 'object'
+    ? acceptance.externalEvaluation as Record<string, unknown> : {};
+  const sut = acceptance.sutThresholds && typeof acceptance.sutThresholds === 'object'
+    ? acceptance.sutThresholds as Record<string, unknown> : {};
+  const rules = Array.isArray(sut.items) ? sut.items as Array<Record<string, unknown>> : [];
+  const reason = typeof evaluation.reason === 'string' ? evaluation.reason : null;
+  return <section className="att-sut-acceptance" aria-label="SUT performance acceptance">
+    <h4>SUT performance acceptance</h4>
+    <dl>
+      <div><dt>Execution status</dt><dd>{String(acceptance.executionStatus || 'Not reported')}</dd></div>
+      <div><dt>Native performance verdict</dt><dd>{String(acceptance.nativePerformanceVerdict || 'NOT_EVALUATED')}</dd></div>
+      <div><dt>SUT evaluation</dt><dd>{String(acceptance.externalEvaluationStatus || 'PENDING')}</dd></div>
+      <div><dt>Combined performance verdict</dt><dd>{String(acceptance.performanceVerdict || 'PENDING')}</dd></div>
+    </dl>
+    {reason && <p role="status">{reason}</p>}
+    {Boolean(evaluation.evaluatedAt) && <p>Evaluated {dateTime(String(evaluation.evaluatedAt))}; collection state {String(evaluation.collectionState || 'unknown')}.</p>}
+    {rules.length > 0 && <div className="att-table-scroll" tabIndex={0} role="region" aria-label="SUT threshold rules and target evidence">
+      <table><caption>SUT threshold evaluation by source target</caption><thead><tr><th>Rule</th><th>Target</th><th>UTC window / resolution</th><th>Observed maximum / peak time</th><th>Limit</th><th>Coverage</th><th>Source, profile and target revisions</th><th>Result</th></tr></thead>
+        <tbody>{rules.flatMap((rule, ruleIndex) => (Array.isArray(rule.targets) ? rule.targets as Array<Record<string, unknown>> : []).map((target, targetIndex) => {
+          const targetIdentity = target.target && typeof target.target === 'object' ? target.target as Record<string, unknown> : {};
+          const source = target.source && typeof target.source === 'object' ? target.source as Record<string, unknown> : {};
+          const window = target.window && typeof target.window === 'object' ? target.window as Record<string, unknown> : {};
+          const coverage = target.coverage && typeof target.coverage === 'object' ? target.coverage as Record<string, unknown> : {};
+          const threshold = target.threshold && typeof target.threshold === 'object' ? target.threshold as Record<string, unknown> : {};
+          const actual = typeof target.actual === 'number' ? `${METRIC_NUMBER_FORMATTER.format(target.actual)} ${String(target.unit || rule.unit || '')}` : 'Not available';
+          const limit = typeof threshold.value === 'number' ? `≤ ${METRIC_NUMBER_FORMATTER.format(threshold.value)} ${String(threshold.unit || rule.unit || '')}` : 'Not available';
+          const ratio = typeof coverage.ratio === 'number' ? `${METRIC_NUMBER_FORMATTER.format(coverage.ratio * 100)}% (${String(coverage.sampleCount ?? 0)} / ${String(coverage.expectedSampleCount ?? 0)})` : 'Not available';
+          const profile = String(target.profile || rule.profile || 'profile');
+          const provenance = `${String(source.name || source.id || 'source')} · source rev ${String(source.revision || 'unknown')} · ${profile} rev ${String(target.profileRevision || 'unknown')} · target rev ${String(targetIdentity.revision || 'unknown')}`;
+          return <tr key={`${String(rule.id || ruleIndex)}-${String(target.queryId || targetIndex)}`}>
+            <th scope="row">{String(rule.id || target.ruleId || 'SUT rule')} · {String(rule.metricName || rule.metricId || target.metricId || '')}</th>
+            <td>{String(targetIdentity.id || 'Unknown')} · {String(targetIdentity.type || 'target')} · {String(source.id || 'source')}</td>
+            <td><time dateTime={typeof window.startAt === 'string' ? window.startAt : undefined}>{utcTimestamp(typeof window.startAt === 'string' ? window.startAt : null)}</time> — <time dateTime={typeof window.endAt === 'string' ? window.endAt : undefined}>{utcTimestamp(typeof window.endAt === 'string' ? window.endAt : null)}</time><small>{String(target.sampleResolution || window.step || 'Resolution unknown')}</small></td>
+            <td>{actual}{typeof target.peakObservedAt === 'string' ? <small><time dateTime={target.peakObservedAt}>{utcTimestamp(target.peakObservedAt)}</time></small> : null}</td>
+            <td>{limit}</td><td>{ratio}</td><td>{provenance}<small>{String(target.profilePath || rule.profilePath || '')}</small></td>
+            <td>{String(target.status || rule.status || 'NOT_EVALUATED')}<small>{String(target.reason || '')}</small></td>
+          </tr>;
+        }))}</tbody>
+      </table>
+    </div>}
+    {rules.length === 0 && ['PENDING', 'EVALUATING'].includes(String(acceptance.externalEvaluationStatus))
+      && <p role="status">Threshold results will appear after the post-run collection window is evaluated.</p>}
+    {Array.isArray(evaluation.diagnostics) && evaluation.diagnostics.length > 0 && <details><summary>Evaluation diagnostics</summary><ul>
+      {(evaluation.diagnostics as Array<Record<string, unknown>>).slice(0, 4).map((item, index) => <li key={`${String(item.code || 'evaluation')}-${index}`}>{String(item.code || 'Evaluation issue')}: {String(item.message || 'No further detail.')}</li>)}
+    </ul></details>}
+  </section>;
+}
+
 function CompactLoadSummary({ payload, archiveState, archiveMessage, archiveOverview, archiveHint }: { payload: JobResultResponse | null; archiveState?: ReportAvailability; archiveMessage?: string; archiveOverview?: JobArtifactOverview | null; archiveHint?: string }) {
   const summary = loadTerminalSummary(payload);
   if (!summary) return null;
@@ -591,6 +669,7 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage, archiveOver
   const root = primaryLoadError(payload);
   const secondaryWarnings = secondaryLoadWarnings(payload);
   const archive = summary.archive && typeof summary.archive === 'object' ? summary.archive as Record<string, unknown> : {};
+  const acceptance = payload?.performanceAcceptance;
   const overviewState = archiveOverview?.archiveStatus === 'READY' ? archiveOverview.reportAvailability : archiveOverview?.archiveStatus;
   const reportedState = overviewState || (typeof archiveState === 'string' && archiveState !== 'idle' ? archiveState : String(archive.reportAvailability || archive.status || 'PENDING'));
   const availabilityText: Record<string, string> = {
@@ -643,7 +722,18 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage, archiveOver
       {archiveOverview.archiveStatus === 'READY' && !archiveOverview.omissionReasonsAvailable && <p>Omission reasons are unavailable in this archive version.</p>}
     </>}
     {!archiveOverview?.summaryVerified && archiveHint && <p>Initial report path hint (unverified): <code>{archiveHint}</code></p>}
+    {archiveOverview?.loadReportV2 && <section aria-label="Versioned offline SUT report">
+      <h3>Offline SUT report</h3>
+      <p role="status">Publication: <strong>{archiveOverview.loadReportV2.state || 'UNKNOWN'}</strong>
+        {archiveOverview.loadReportV2.collectionState ? ` · SUT collection: ${archiveOverview.loadReportV2.collectionState}` : ''}
+        {archiveOverview.loadReportV2.externalEvaluationStatus ? ` · external evaluation: ${archiveOverview.loadReportV2.externalEvaluationStatus}` : ''}</p>
+      {archiveOverview.loadReportV2.state === 'READY' && payload?.job?.jobId && <p><a href={new URL(
+        `jobs/${encodeURIComponent(payload.job.jobId)}/load-report/v2/archive.zip`, apiBaseUrl()).toString()}>
+        Download verified offline report (ZIP)</a></p>}
+      <p>This versioned report preserves the original LOAD archive. It does not calculate thresholds or change the execution result.</p>
+    </section>}
     <p className="att-load-performance-note">Execution status and performance verdict are separate. PASS describes execution; configured performance checks have their own verdict.</p>
+    <SutAcceptanceSummary acceptance={acceptance} />
     {root && <section aria-label="LOAD root-cause diagnosis" role="alert">
       <h4>{String(root.code || 'LOAD runtime error')}</h4><p>{String(root.summary || 'The LOAD ended with ERROR.')}</p>
     </section>}
@@ -1009,6 +1099,232 @@ export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, me
   </section>;
 });
 
+export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activeLoad, hidden }: {
+  api: LoadJobsApi; jobId: string; activeLoad: boolean; hidden: boolean;
+}) {
+  const [response, setResponse] = useState<SutMetricsJobResponse | SutMetricsLiveResponse | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [moreLoading, setMoreLoading] = useState(false);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [targetFilter, setTargetFilter] = useState('');
+  const [profileFilter, setProfileFilter] = useState('');
+  const [liveRange, setLiveRange] = useState('15m');
+  const [collectionRange, setCollectionRange] = useState('all');
+  const [queryDefinitions, setQueryDefinitions] = useState<SutMetricQueryMetadata[]>([]);
+  const [liveEndedJobId, setLiveEndedJobId] = useState<string | null>(null);
+  const requestRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (hidden) return;
+    let disposed = false;
+    let timer: number | undefined;
+    const schedule = (delay: number) => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      if (!disposed && !document.hidden) timer = window.setTimeout(() => void poll(), delay);
+    };
+    const poll = async () => {
+      if (disposed || document.hidden) return;
+      const useLive = activeLoad && liveEndedJobId !== jobId;
+      const controller = new AbortController(); requestRef.current = controller;
+      setLoading(current => current || !response); setError('');
+      try {
+        if (useLive) {
+          const fetchLive = api.getJobSutMetricsLive;
+          if (!fetchLive) throw new Error('This Server client does not support SUT Metrics live preview.');
+          const value = await fetchLive(jobId, { range: liveRange, step: '30s', targetId: targetFilter || undefined, profilePath: profileFilter || undefined, signal: controller.signal });
+          if (disposed || controller.signal.aborted) return;
+          if (value.state === 'ENDED') { setLiveEndedJobId(jobId); return; }
+          setResponse(value); setQueryDefinitions(value.queries || []); setNextOffset(null); schedule(30_000);
+        } else {
+          const fetchCollection = api.getJobSutMetrics;
+          if (!fetchCollection) throw new Error('This Server client does not support SUT Metrics collection.');
+          const value = await fetchCollection(jobId, { offset: 0, limit: 4, targetId: targetFilter || undefined, profilePath: profileFilter || undefined, signal: controller.signal });
+          if (disposed || controller.signal.aborted) return;
+          setResponse(value); setQueryDefinitions(value.collection?.queries || []); setNextOffset(typeof value.nextOffset === 'number' ? value.nextOffset : null);
+          const evaluationState = String(value.thresholdEvaluation?.state || 'DISABLED');
+          if (['PENDING', 'COLLECTING'].includes(String(value.state || value.collection?.state))) schedule(5_000);
+          else if (shouldPollEvaluation(evaluationState, value.thresholdEvaluation?.attempt)) schedule(2_000);
+        }
+      } catch (failure) {
+        if (disposed || controller.signal.aborted) return;
+        setError(failure instanceof Error ? failure.message : 'SUT Metrics could not be loaded.');
+        schedule(useLive ? 30_000 : 10_000);
+      } finally {
+        if (!disposed && !controller.signal.aborted) setLoading(false);
+        if (requestRef.current === controller) requestRef.current = null;
+      }
+    };
+    const visibility = () => {
+      if (document.hidden) {
+        if (timer !== undefined) window.clearTimeout(timer);
+        requestRef.current?.abort();
+      } else void poll();
+    };
+    setResponse(null); setNextOffset(null); setError(''); setLoading(true);
+    document.addEventListener('visibilitychange', visibility);
+    if (!document.hidden) void poll();
+    return () => {
+      disposed = true; if (timer !== undefined) window.clearTimeout(timer);
+      requestRef.current?.abort(); requestRef.current = null;
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, [api, jobId, activeLoad, liveEndedJobId, hidden, targetFilter, profileFilter, liveRange]);
+
+  async function loadMore() {
+    if (nextOffset === null || !api.getJobSutMetrics || moreLoading || hidden) return;
+    const controller = new AbortController(); requestRef.current = controller; setMoreLoading(true);
+    try {
+      const page = await api.getJobSutMetrics(jobId, { offset: nextOffset, limit: 4, targetId: targetFilter || undefined, profilePath: profileFilter || undefined, signal: controller.signal });
+      if (controller.signal.aborted) return;
+      setResponse(current => current ? { ...page, items: [...(current.items || []), ...(page.items || [])] } : page);
+      setNextOffset(typeof page.nextOffset === 'number' ? page.nextOffset : null);
+    } catch (failure) {
+      if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : 'More SUT Metrics could not be loaded.');
+    } finally {
+      if (requestRef.current === controller) requestRef.current = null;
+      setMoreLoading(false);
+    }
+  }
+
+  const state = String(response?.state || (response as SutMetricsJobResponse | null)?.collection?.state || (loading ? 'PENDING' : 'UNKNOWN'));
+  const collection = (response as SutMetricsJobResponse | null)?.collection;
+  const items = response?.items || [];
+  const windowStart = (response as SutMetricsLiveResponse | null)?.windowStart || collection?.windowStart;
+  const windowEnd = (response as SutMetricsLiveResponse | null)?.windowEnd || collection?.windowEnd;
+  const freshness = (response as SutMetricsLiveResponse | null)?.sourceQueryTime || collection?.updatedAt || collection?.createdAt;
+  const sampleCount = (response as SutMetricsLiveResponse | null)?.sampleCount;
+  const diagnostics = collection?.diagnostics || [];
+  const showLive = activeLoad && liveEndedJobId !== jobId;
+  const queries = queryDefinitions.length ? queryDefinitions : showLive
+    ? ((response as SutMetricsLiveResponse | null)?.queries || [])
+    : (collection?.queries || []);
+  const targets = [...new Set(queries.map(query => query.targetId).filter(Boolean))].sort();
+  const profiles = [...new Set(queries.map(query => query.profilePath || query.profile || '').filter(Boolean))].sort();
+  const selectedRange = showLive ? liveRange : collectionRange;
+  const rangeOptions = showLive
+    ? [['5m', 'Last 5 minutes'], ['15m', 'Last 15 minutes'], ['30m', 'Last 30 minutes'], ['1h', 'Last hour'], ['4h', 'Last 4 hours']]
+    : [['all', 'Entire collection'], ['15m', 'Last 15 minutes'], ['1h', 'Last hour'], ['6h', 'Last 6 hours'], ['12h', 'Last 12 hours'], ['24h', 'Last 24 hours']];
+
+  return <section className="att-job-panel att-sut-metrics-panel" role="tabpanel" id="job-panel-sutMetrics" aria-labelledby="job-tab-sutMetrics" hidden={hidden} tabIndex={0}>
+    <h2>SUT Metrics</h2>
+    <p className="att-help">Prometheus metrics for the selected system under test. Live preview is read-only and does not itself change acceptance. Configured rules produce a separate persisted performance verdict.</p>
+    {queries.length > 0 && <div className="att-sut-metrics-filters" aria-label="SUT Metrics filters">
+      <label>Target<select value={targetFilter} onChange={event => setTargetFilter(event.target.value)}><option value="">All targets</option>{targets.map(target => <option key={target} value={target}>{target}</option>)}</select></label>
+      <label>Profile<select value={profileFilter} onChange={event => setProfileFilter(event.target.value)}><option value="">All profiles</option>{profiles.map(profile => <option key={profile} value={profile}>{profile}</option>)}</select></label>
+      <label>Range<select value={selectedRange} onChange={event => showLive ? setLiveRange(event.target.value) : setCollectionRange(event.target.value)}>{rangeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+    </div>}
+    {error && <p role="alert" className="att-inline-error">{error}</p>}
+    <dl className="att-sut-metrics-status">
+      <div><dt>Collection state</dt><dd>{state}</dd></div>
+      {windowStart && <div><dt>Coverage start</dt><dd>{dateTime(windowStart)}</dd></div>}
+      {windowEnd && <div><dt>Coverage end</dt><dd>{dateTime(windowEnd)}</dd></div>}
+      {freshness && <div><dt>Last source query</dt><dd>{dateTime(freshness)}</dd></div>}
+      {sampleCount !== undefined && <div><dt>Samples in preview</dt><dd>{METRIC_NUMBER_FORMATTER.format(sampleCount)}</dd></div>}
+    </dl>
+    <SutAcceptanceSummary acceptance={(response as SutMetricsJobResponse | null)?.performanceAcceptance} />
+    {state === 'DISABLED' && <p role="status">SUT Metrics are not configured for this LOAD Job.</p>}
+    {state === 'PENDING' && <p role="status" aria-busy={loading}>SUT Metrics are waiting for LOAD execution or the post-run collection worker.</p>}
+    {state === 'COLLECTING' && <p role="status" aria-busy="true">Prometheus post-run collection is in progress. The LOAD execution result is independent of this status.</p>}
+    {state === 'UNAVAILABLE' && <p role="status">Prometheus did not return any SUT metric samples for this window.</p>}
+    {state === 'FAILED' && <p role="alert">SUT Metrics collection failed. The LOAD execution verdict is unchanged.</p>}
+    {state === 'PARTIAL' && <p role="status">Some metrics are available; other queries returned no data or could not be collected.</p>}
+    {state === 'NO_DATA' && <p role="status">No SUT samples are available yet for this time window.</p>}
+    {state === 'READY' && !items.length && <p role="status">Collection is ready, but no metric series are present in this page.</p>}
+    {items.map((item, index) => <SutMetricCard item={item} range={showLive ? liveRange : collectionRange}
+      rangeStart={windowStart} rangeEnd={windowEnd}
+      stepMilliseconds={showLive
+        ? Math.max(1, Number((response as SutMetricsLiveResponse | null)?.stepSeconds || 30)) * 1000
+        : metricStepMilliseconds(collection?.step)}
+      key={`${item.id || item.queryId || item.metricId}-${item.targetId}-${index}`} />)}
+    {diagnostics.length > 0 && <details><summary>Collection diagnostics ({diagnostics.length})</summary><ul>{diagnostics.slice(0, 20).map((item, index) => <li key={`${item.code}-${index}`}>{item.code || 'Collection issue'}: {item.message || 'No additional detail.'}</li>)}</ul></details>}
+    {nextOffset !== null && <button type="button" onClick={() => void loadMore()} disabled={moreLoading}>{moreLoading ? 'Loading…' : 'Load more SUT metric series'}</button>}
+    {loading && !response && <p role="status" aria-busy="true">Loading SUT Metrics…</p>}
+  </section>;
+});
+
+function metricStepMilliseconds(step?: string): number {
+  const match = /^([1-9][0-9]*)(ms|s|m|h|d|w|y)$/.exec(step || '');
+  if (!match) return 30_000;
+  const multiplier: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000, y: 31_536_000_000 };
+  return Number(match[1]) * multiplier[match[2]!]!;
+}
+
+function metricPointTime(point: { timestamp: string; timestampEpochMs: number }): number {
+  return Number.isFinite(point.timestampEpochMs) ? point.timestampEpochMs : Date.parse(point.timestamp);
+}
+
+const SutMetricCard = memo(function SutMetricCard({ item, range, rangeStart, rangeEnd, stepMilliseconds }: {
+  item: SutMetricItem; range: string; rangeStart?: string; rangeEnd?: string; stepMilliseconds: number;
+}) {
+  const rangeSeconds: Record<string, number> = { '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '6h': 21600, '12h': 43200, '24h': 86400 };
+  const parsedRangeEnd = rangeEnd ? Date.parse(rangeEnd) : Number.NaN;
+  const coverage = item.coverage || item.series?.[0]?.coverage || {};
+  const pointTimes = (item.series || []).slice(0, 8).flatMap(series => (series.samples || []).map(metricPointTime).filter(Number.isFinite));
+  const earliestPoint = pointTimes.length ? Math.min(...pointTimes) : Number.NaN;
+  const latestPoint = pointTimes.length ? Math.max(...pointTimes) : Number.NaN;
+  const parsedRangeStart = rangeStart ? Date.parse(rangeStart) : Number.NaN;
+  const coverageStart = typeof coverage.windowStart === 'string' ? Date.parse(coverage.windowStart) : Number.NaN;
+  const coverageEnd = typeof coverage.windowEnd === 'string' ? Date.parse(coverage.windowEnd) : Number.NaN;
+  const rangeAnchor = Number.isFinite(parsedRangeEnd) ? parsedRangeEnd : Number.isFinite(coverageEnd) ? coverageEnd : latestPoint;
+  const coverageAnchor = Number.isFinite(parsedRangeStart) ? parsedRangeStart : Number.isFinite(coverageStart) ? coverageStart : earliestPoint;
+  const selectedStart = range === 'all' ? coverageAnchor : rangeAnchor - (rangeSeconds[range] || 900) * 1000;
+  const domainStart = Math.max(Number.isFinite(coverageAnchor) ? coverageAnchor : selectedStart, selectedStart);
+  const domainEnd = rangeAnchor;
+  const domainSpan = Math.max(1, domainEnd - domainStart);
+  const visibleSeries = (item.series || []).slice(0, 8).map(series => ({
+    ...series,
+    samples: (series.samples || []).filter(point => {
+      const timestamp = metricPointTime(point);
+      return Number.isFinite(timestamp) && timestamp >= domainStart && timestamp <= domainEnd;
+    }).sort((left, right) => metricPointTime(left) - metricPointTime(right)).slice(-800),
+  }));
+  const visiblePoints = visibleSeries.flatMap(series => series.samples);
+  const values = visiblePoints.map(point => point.value);
+  const minimum = values.length ? Math.min(...values) : 0, maximum = values.length ? Math.max(...values) : 1;
+  const average = values.length ? values.reduce((total, value) => total + value, 0) / values.length : null;
+  const span = maximum - minimum || 1;
+  const paths = visibleSeries.map((series, index) => {
+    const points = series.samples;
+    if (!points.length) return null;
+    let previousTimestamp: number | null = null;
+    const path = points.map(point => {
+      const timestamp = metricPointTime(point);
+      const x = Math.max(0, Math.min(800, (timestamp - domainStart) / domainSpan * 800));
+      const y = 190 - ((point.value - minimum) / span) * 170;
+      const command = previousTimestamp === null || timestamp - previousTimestamp > stepMilliseconds * 1.5 ? 'M' : 'L';
+      previousTimestamp = timestamp;
+      return `${command}${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    return { path, index };
+  }).filter((value): value is NonNullable<typeof value> => value !== null);
+  const count = visiblePoints.length;
+  const chronologicalPoints = [...visiblePoints].sort((left, right) => metricPointTime(left) - metricPointTime(right));
+  const firstVisible = chronologicalPoints[0]?.timestamp || coverage.firstSampleAt;
+  const latestVisible = chronologicalPoints[chronologicalPoints.length - 1]?.timestamp || coverage.lastSampleAt;
+  const status = item.queryStatus || (count ? 'READY' : 'NO_DATA');
+  return <article className="att-sut-metric-card">
+    <header><div><h3>{item.title || item.metricId}</h3><p>{item.category || 'SUT'} · {item.targetType || 'target'} {item.targetId} · {item.unit}{item.profilePath ? ` · ${item.profilePath}` : ''}</p></div>
+      <span className={`att-sut-metric-query-status att-sut-metric-query-status-${status.toLowerCase()}`}>{status}</span></header>
+    {item.error && <p role="status">{item.error}</p>}
+    {status === 'STALE' && <p role="status">The latest sample is older than the live freshness window.</p>}
+    {!count && status !== 'UNAVAILABLE' && <p role="status">No samples were returned for this metric and time window.</p>}
+    {status === 'UNAVAILABLE' && <p role="status">This metric query is unavailable.</p>}
+    {paths.length > 0 && <svg className="att-sut-metric-chart" role="img" aria-label={`${item.title} for ${item.targetId}`} viewBox="0 0 820 220">
+      <path d="M0 190 H800 M0 105 H800 M0 20 H800" className="att-sut-metric-grid" />
+      {paths.map(line => <path key={line.index} d={line.path} className={`att-sut-metric-line att-sut-metric-line-${line.index % 8}`} />)}
+      <text x="4" y="214">{dateTime(String(firstVisible || ''))}</text><text x="800" y="214" textAnchor="end">{dateTime(String(latestVisible || ''))}</text>
+    </svg>}
+    {count > 0 && <dl className="att-sut-metric-summary">
+      <div><dt>Min</dt><dd>{METRIC_NUMBER_FORMATTER.format(minimum)} {item.unit}</dd></div>
+      <div><dt>Avg</dt><dd>{METRIC_NUMBER_FORMATTER.format(average!)} {item.unit}</dd></div>
+      <div><dt>Max</dt><dd>{METRIC_NUMBER_FORMATTER.format(maximum)} {item.unit}</dd></div>
+    </dl>}
+    <p className="att-sut-metric-coverage">{count} samples across {visibleSeries.filter(series => series.samples.length > 0).length} series · source {item.sourceName || item.sourceId || 'registered Prometheus'}
+      {firstVisible != null && <> · first {dateTime(String(firstVisible))}</>}{latestVisible != null && <> · latest {dateTime(String(latestVisible))}</>}</p>
+  </article>;
+});
+
 export function JobsPage(props: JobsFeatureProps) {
   return props.jobId ? <JobDetail key={props.jobId} {...props} jobId={props.jobId} /> : <JobsList {...props} />;
 }
@@ -1083,6 +1399,34 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
   }, [api, jobId, detailRefresh, terminalRefresh]);
 
   useEffect(() => {
+    if (!shouldPollExternalEvaluation(result?.performanceAcceptance) || !['overview', 'results'].includes(activeTab)) return;
+    let disposed = false;
+    let timer: number | undefined;
+    let controller: AbortController | null = null;
+    const schedule = () => {
+      if (!disposed && !document.hidden) timer = window.setTimeout(() => void refresh(), 10_000);
+    };
+    const refresh = async () => {
+      if (disposed || document.hidden) return;
+      controller = new AbortController();
+      try {
+        const value = await api.getJobResult(jobId, controller.signal);
+        if (disposed || controller.signal.aborted) return;
+        setResult(value);
+        if (shouldPollExternalEvaluation(value.performanceAcceptance)) schedule();
+      } catch { if (!disposed && !controller.signal.aborted) schedule(); }
+    };
+    const visibility = () => {
+      if (document.hidden) { if (timer !== undefined) window.clearTimeout(timer); controller?.abort(); }
+      else void refresh();
+    };
+    schedule();
+    document.addEventListener('visibilitychange', visibility);
+    return () => { disposed = true; if (timer !== undefined) window.clearTimeout(timer); controller?.abort(); document.removeEventListener('visibilitychange', visibility); };
+  }, [api, jobId, result?.performanceAcceptance?.externalEvaluationStatus,
+    (result?.performanceAcceptance?.externalEvaluation as Record<string, unknown> | undefined)?.attempt, activeTab]);
+
+  useEffect(() => {
     if (statusSnapshot.eventRevision === 0) return;
     const terminal = Boolean(statusSnapshot.status && isTerminalStatus(statusSnapshot.status as JobStatus));
     if (terminal) terminalStatus.current = statusSnapshot.status as JobStatus;
@@ -1136,8 +1480,11 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
   const jobStatus = selectedStatus;
   const canCancel = Boolean(job && ['QUEUED', 'PREPARING', 'RUNNING'].includes(jobStatus));
   const isLoadResult = job?.command === 'load' || loadTerminalSummary(result) !== null;
-  const report = useLoadArchiveSummary(api, jobId, isLoadResult && !activeLoad && (activeTab === 'results' || activeTab === 'metrics'),
-    activeTab === 'results' || activeTab === 'metrics', activeTab === 'metrics');
+  const visibleTabs = isLoadResult ? tabs : tabs.filter(tab => tab.id !== 'sutMetrics' && tab.id !== 'correlation');
+  const correlationTargets = activeTab === 'correlation' ? ['metrics/windowMetrics/timeSeries/points'] : [];
+  const metricTargets = activeTab === 'metrics' ? ['metrics/buckets'] : correlationTargets;
+  const report = useLoadArchiveSummary(api, jobId, isLoadResult && !activeLoad && (activeTab === 'results' || activeTab === 'metrics' || activeTab === 'correlation'),
+    activeTab === 'results' || activeTab === 'metrics' || activeTab === 'correlation', metricTargets);
   const archiveOverview = useJobArtifactOverview(api, jobId, isLoadResult && !activeLoad && activeTab === 'overview', detailRefresh);
   const terminalArchive = loadTerminalSummary(result)?.archive;
   const archiveHint = terminalArchive && typeof terminalArchive === 'object' && !Array.isArray(terminalArchive)
@@ -1148,18 +1495,20 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
   const metrics = useMemo(() => report.detailMetrics ? { ...(inlineMetrics || {}), ...report.detailMetrics } : inlineMetrics, [inlineMetrics, report.detailMetrics]);
   const buckets = useMemo(() => metricBuckets(metrics?.buckets).slice(0, MAX_BUCKET_ROWS), [metrics]);
   const charts = useMemo(() => metricSeries(buckets), [buckets]);
+  const loadTarget = job?.targetIdentity?.targets?.map(target => `${target.type || 'target'}:${target.id}`).join(', ')
+    || job?.targetGroup || job?.targetIdentity?.id || 'Not reported';
 
   function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const index = tabs.findIndex(tab => tab.id === activeTab);
+    const index = visibleTabs.findIndex(tab => tab.id === activeTab);
     let next = index;
-    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
-    else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+    if (event.key === 'ArrowRight') next = (index + 1) % visibleTabs.length;
+    else if (event.key === 'ArrowLeft') next = (index + visibleTabs.length - 1) % visibleTabs.length;
     else if (event.key === 'Home') next = 0;
-    else if (event.key === 'End') next = tabs.length - 1;
+    else if (event.key === 'End') next = visibleTabs.length - 1;
     else return;
     event.preventDefault();
-    setActiveTab(tabs[next].id);
-    document.getElementById(`job-tab-${tabs[next].id}`)?.focus();
+    setActiveTab(visibleTabs[next].id);
+    document.getElementById(`job-tab-${visibleTabs[next].id}`)?.focus();
   }
 
   return <div className={`page-content att-job-detail${standalone ? " att-standalone-job-details" : ""}`} aria-labelledby="job-title">
@@ -1183,7 +1532,7 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
     {cancelState === 'pending' && <p role="status" aria-live="polite">Cancellation request sent; waiting for the Server status update.</p>}
 
     <div className="att-job-tabs" role="tablist" aria-label={`Job ${jobId} sections`} onKeyDown={onTabKeyDown}>
-      {tabs.map(tab => <button key={tab.id} type="button" role="tab" id={`job-tab-${tab.id}`} aria-controls={`job-panel-${tab.id}`} aria-selected={activeTab === tab.id} tabIndex={activeTab === tab.id ? 0 : -1} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
+      {visibleTabs.map(tab => <button key={tab.id} type="button" role="tab" id={`job-tab-${tab.id}`} aria-controls={`job-panel-${tab.id}`} aria-selected={activeTab === tab.id} tabIndex={activeTab === tab.id ? 0 : -1} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
     </div>
     <JobOverview job={job} status={jobStatus} statusText={statusSnapshot.text} jobState={jobState} result={result}
       reportAvailability={archiveOverview.loading ? 'loading' : report.availability} reportMessage={report.error}
@@ -1225,6 +1574,10 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
       reportAvailability={report.availability} reportError={report.error} onRetryReport={report.retry} reportDetailsLoaded={Boolean(report.detailMetrics)}
       buckets={buckets} charts={charts} hidden={activeTab !== 'metrics'} activeLoad={activeLoad} liveProgress={liveProgress}
       liveHistory={job?.loadProgressHistory || []} liveTrend={job?.loadProgressTrend || []} streamHistory={eventStream.liveProgressHistory} checkpointHistory={eventStream.checkpointHistory} streamConnection={eventStream.connection} now={clockNow} terminalResultAvailable={payloadTerminal && Boolean(result?.result)} />
+    {isLoadResult && <SutMetricsPanel api={api} jobId={jobId} activeLoad={activeLoad} hidden={activeTab !== 'sutMetrics'} />}
+    {isLoadResult && <CorrelationPanel api={api} jobId={jobId} activeLoad={activeLoad} hidden={activeTab !== 'correlation'}
+      availability={report.availability} archiveError={report.error} metrics={report.detailMetrics} workloads={report.detailWorkloads}
+      archiveRoot={report.detailRoot} loadTarget={loadTarget} />}
   </div>;
 }
 

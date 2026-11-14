@@ -123,6 +123,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [從 execution identity 追蹤 artifact](#從-execution-identity-追蹤-artifact)
   - [查閱 generated-output schemas](#查閱-generated-output-schemas)
   - [Reading `case.log` and `case.yaml`](#reading-caselog-and-caseyaml)
+  - [離線 SUT Metrics 報告](#離線-sut-metrics-報告)
 - [Validation 與 troubleshooting](#validation-與-troubleshooting)
   - [選擇第一個診斷步驟](#選擇第一個診斷步驟)
   - [先從 Validation 開始](#先從-validation-開始)
@@ -1540,6 +1541,14 @@ ATT 在 run root 寫入有界 load-summary.json/yaml 與 self-contained report/i
 Load v1.9 新增 `all`、`measured`、`steady` 三個 event-time window。`measured` 從 ramp-up 及 warm-up 結束後開始，只包含 steady 及 ramp-down；`steady` 只涵蓋配置的穩態 duration。HTML report 預設顯示 `steady`，並可切換其他 window。Scheduled、started、completed rate 依各 event timestamp 及配置 window duration 計算，因此 `startedRate` 仍按 event time 計算。`admissionRate` 則使用相同的 scheduled cohort：分子是該 window 內排程且在 run 結束前已開始的 arrival，分母是該 window 內全部排程 arrival；run 結束仍未開始的 arrival 視為未准入。Latency percentile 和 outcome count 依 scheduled cohort 計算，因此 drain 完成的 iteration 仍屬於其 scheduled phase。既有 top-level metric 名稱及 legacy 語義仍保留。
 
 巢狀 `thresholds.steady` 和 `thresholds.overall` 分別對 steady 與 all-execution window 評估。Top-level measured threshold 使用修正後的 measured interval，即 `STEADY + RAMP_DOWN`；ramp-up 和 warm-up 不計入。Window 不完整或無法評估時回報 `NOT_EVALUATED`，不視為 performance pass。Report 會把 execution status 與 performance verdict 分開，並顯示 percentile sample／observation count，讓稀疏估算可被辨識。直接 Engine／CLI summary 使用 legacy summary contract (schema under `schemas/history/`)；archived report 使用新增 `detailManifestPath` 和 workload sidecar references 的 `att-load-summary/v1.3`。
+
+##### SUT threshold acceptance
+
+LOAD scenario 可針對已登記的 SUT Metrics profile 設定 `observability.thresholds`。目前規則支援在實際 UTC `STEADY` interval 內計算 sampled `max <= value`，並套用至所有已綁定 target。每個 source target 都會獨立評估。數值等於上限時為 `MET`；任何有效 sample 超標時，即使 coverage 不完整仍為 `NOT_MET`。缺少、過舊、部分或覆蓋不足的 samples 會回報 `NOT_EVALUATED`，除非有效超標已能證明 `NOT_MET`。最低 coverage 預設為 95%。
+
+Server 會將正規化規則固定在 Job 的 SUT snapshot，並把 post-run 結果寫入獨立版本化 `att-sut-threshold-evaluation/v1` record。`GET /api/v1/jobs/{id}/result` 可在授權後加入 `performanceAcceptance` object，包含 `executionStatus`、`nativeLoadThresholds`、`sutThresholds`、`externalEvaluationStatus` 及 combined `performanceVerdict`。每個 target 的 evidence 會列出實際 UTC STEADY window、sampled peak 和時間、resolution、coverage，以及固定的 source/profile/target revision。Worker terminal result 和 native thresholds 保持不變。External evaluation pending 時，combined verdict 會保持 pending；已知的 native 或 SUT threshold failure 則維持 `NOT_MET`。
+
+Scenario authoring、完整 rule 欄位、coverage 條件及 Studio evidence 見 [Studio Load testing](interfaces/studio/load-testing.zh.md#sut-metrics)。
 
 Summary 的 `thresholds` object 中，`status` 和 `performanceVerdict` 是 authoritative tri-state 欄位，值為 `MET`、`NOT_MET` 或 `NOT_EVALUATED`。Optional `legacyPassed` boolean 維持舊有 `passed()` 語義：已配置但無法評估的 threshold 為 false，未配置 threshold 時為 true。Consumer 應使用 tri-state 欄位，區分 evidence 不完整與 threshold 未達標。
 
@@ -3348,6 +3357,12 @@ Case log structured entries use YAML. The human log records each normal Action a
 
 ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or INVALID with `【!!!!!】`. Search for that marker to find abnormal blocks; PASS, SKIPPED and informational blocks remain unmarked.
 
+### 離線 SUT Metrics 報告
+
+完成的 LOAD 若有 SUT collection evidence，可另外發佈獨立版本化的離線報告 archive。Publisher 會驗證來源 manifest 及每個 observation sidecar，逐 byte 保留原本 sealed native archive，並以不可變 snapshot 發佈。`att-load-report-extension/v2` manifest 會引用 source-neutral 的 `att-load-offline-observations/v1` record；其 `att-load-offline-observation/v1` entries 記錄 source、metric、profile、target、UTC window、phase、單位、sample resolution、coverage、gaps、diagnostics、checksums 及有界 chart preview。完整 series sidecar 仍使用 normalized `att-sut-metrics-observation/v1` contract。Partial 或 unavailable source data 會明確標示，不會改變 native Job result。
+
+報告可在沒有 network access 時使用，並採用 restrictive Content Security Policy。報告不會評估 performance threshold。如有獨立版本化的 `att-load-verdict/v1` record，報告只顯示其 evaluation state 與 evidence reference，不會重新計算 verdict。只有在驗證發佈成功後，才可透過 authenticated Job download route 取得 archive。
+
 ## Validation 與 troubleshooting
 
 ### 選擇第一個診斷步驟
@@ -3534,6 +3549,15 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.2 |
 | Load scenario | att-load/v1.9 |
+| LOAD observability binding | att-load-observability/v1 |
+| SUT Metrics Data Source | att-sut-metrics-source/v1 |
+| SUT Metrics Profile | att-sut-metrics-profile/v1 |
+| SUT Metrics Job snapshot | att-sut-metrics-snapshot/v1 |
+| SUT Metrics collection manifest | att-sut-metrics-manifest/v1 |
+| 同一檔案內的 SUT Metrics Manifest 完整性歷程 | att-sut-metrics-manifest-integrity/v1 |
+| SUT Metrics normalized observation | att-sut-metrics-observation/v1 |
+| SUT Metrics series sidecar | att-sut-metrics-series/v1 |
+| SUT Metrics threshold evaluation record | att-sut-threshold-evaluation/v1 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | 直接 Engine／CLI：legacy summary contract (schema under `schemas/history/`)；封存報告：att-load-summary/v1.3 |
@@ -3545,6 +3569,8 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | JUnit XML | att-junit/v2.1 |
 
 本次調整的 resource/config schema 舊版本位於 `schemas/history/`，除非嵌入的 Engine registry 登錄且支援，否則僅供歷史參考，不是 active execution contract。Unsupported version 會在 validation 失敗並提供 migration guidance。Repository `schemas/catalog.yaml` 僅為 build input；runtime 唯一權威來源是版本相符 ATT Engine JAR 內嵌 registry。Runtime 會從 classpath 讀取 schema files，並可在 private per-user temporary directory 建立經驗證、以內容 SHA-256 定位的相容快取。快取會保留目前及緊接上一版 registry 供 rollback；只有取得排他 OS lock 並確認沒有 Worker 使用後，才會刪除較舊版本。若清理中斷，下一次初始化會重試。不完整或遭竄改的快取只會在確認沒有程序持有 use lease 後重建；若仍有程序使用，validation 會 fail closed，並於 Worker 結束後重試。Validation revision 會綁定 Engine/registry identity、Package files、shared config files 及選定 Environment；Worker 處理請求前會驗證 Server 傳入的 registry identity。`ATT_HOME/schemas/` 及 package-local `schemas/` 不是 runtime 來源，也不能覆寫 registry。Package validation 會驗證 Engine 登錄的 schema resources；封存 schema 不會自動成為可用的 runtime contract。
+
+上表中的 SUT Metrics source schema 屬於 active Engine registry。離線報告 metadata 及外部提供的 verdict record 使用 `schemas/api/` 下的獨立 Server contracts，不屬於 Engine execution registry。詳見[離線 SUT Metrics 報告](reference.zh/results-reports-evidence.md)。
 
 <!-- att-docs:historical -->
 Load v1.6 及 MQHelper v1.2 是 loader 支援的相容歷史 schema；既有 scalar routing 及 legacy evidence policy 維持。新路由／配額欄位須使用 active schema。

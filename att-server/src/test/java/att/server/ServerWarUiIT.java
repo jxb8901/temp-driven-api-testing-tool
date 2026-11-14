@@ -412,7 +412,10 @@ class ServerWarUiIT {
                 if("load".equals(command)) {
                     assertTrue(overview.path("reportPath").isTextual(),overview.toString());
                     assertTrue(index.path("primaryReports").findValuesAsText("path").contains(overview.path("reportPath").asText()),overview.toString());
-                } else assertTrue(overview.path("reportPath").isNull(),overview.toString());
+                } else {
+                    assertTrue(overview.path("reportPath").isNull(),overview.toString());
+                    assertFalse(overview.has("loadReportV2"),"Non-LOAD Jobs must not expose LOAD report status");
+                }
                 JsonNode journal=getJson(port,api+"/monitoring/jobs/"+id+"/journal",peer);
                 assertEquals(id,journal.path("jobId").asText());assertTrue(journal.path("metricsAvailable").isBoolean());
                 if(journal.path("metricsAvailable").asBoolean())assertTrue(journal.path("journalBytes").isIntegralNumber(),journal.toString());
@@ -812,7 +815,10 @@ class ServerWarUiIT {
             tomcat = startScheduledWar(war, users);
             int port = tomcat.getConnector().getLocalPort();
             String resourceRoute = api + "/packages/payments/resources?type=template&query=DEGRADED";
-            HttpURLConnection baselineResponse = open(port, resourceRoute, auth);
+            // The first resource request can overlap lazy ServerRuntime startup in the
+            // packaged WAR. Keep its wait bounded, but allow that initialization to finish
+            // on slower release runners before failing the integration check.
+            HttpURLConnection baselineResponse = open(port, resourceRoute, auth, 30_000);
             String baselineRevision;
             JsonNode baseline;
             try (var input = baselineResponse.getInputStream()) {
@@ -1756,9 +1762,13 @@ class ServerWarUiIT {
     }
 
     private static HttpURLConnection open(int port, String path, String authorization) throws Exception {
+        return open(port, path, authorization, 3_000);
+    }
+
+    private static HttpURLConnection open(int port, String path, String authorization, int readTimeoutMillis) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL("http://127.0.0.1:" + port + path).openConnection();
         connection.setConnectTimeout(3000);
-        connection.setReadTimeout(3000);
+        connection.setReadTimeout(readTimeoutMillis);
         if (authorization != null) connection.setRequestProperty("Authorization", authorization);
         return connection;
     }

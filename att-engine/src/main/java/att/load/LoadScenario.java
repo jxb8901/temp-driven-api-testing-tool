@@ -28,6 +28,7 @@ public final class LoadScenario {
     private final boolean workloadView;
     private final Map<String, Object> loadDefaults;
     private final Map<String, Object> executionDefaults;
+    private final Map<String, Object> observability;
     private final boolean policyOnly;
     private final List<Path> testdataDescriptors;
     public boolean resourceOutputEnabled() {
@@ -76,6 +77,14 @@ public final class LoadScenario {
 
     LoadScenario(Path source, String schemaVersion, List<LoadWorkload> workloads, Long seed,
                  Map<String, Object> thresholds, Map<String, Object> evidence,
+                 Map<String, Object> loadDefaults, Map<String, Object> executionDefaults, boolean policyOnly,
+                 List<Path> testdataDescriptors, Map<String, Object> observability) {
+        this(source, schemaVersion, workloads, seed, thresholds, evidence, false,
+                loadDefaults, executionDefaults, policyOnly, testdataDescriptors, observability);
+    }
+
+    LoadScenario(Path source, String schemaVersion, List<LoadWorkload> workloads, Long seed,
+                 Map<String, Object> thresholds, Map<String, Object> evidence,
                  Map<String, Object> loadDefaults, Map<String, Object> executionDefaults, boolean policyOnly) {
         this(source, schemaVersion, workloads, seed, thresholds, evidence, false,
                 loadDefaults, executionDefaults, policyOnly, Collections.<Path>emptyList());
@@ -92,6 +101,14 @@ public final class LoadScenario {
                          Map<String, Object> thresholds, Map<String, Object> evidence, boolean workloadView,
                          Map<String, Object> loadDefaults, Map<String, Object> executionDefaults, boolean policyOnly,
                          List<Path> testdataDescriptors) {
+        this(source, schemaVersion, workloads, seed, thresholds, evidence, workloadView, loadDefaults,
+                executionDefaults, policyOnly, testdataDescriptors, Collections.<String, Object>emptyMap());
+    }
+
+    private LoadScenario(Path source, String schemaVersion, List<LoadWorkload> workloads, Long seed,
+                         Map<String, Object> thresholds, Map<String, Object> evidence, boolean workloadView,
+                         Map<String, Object> loadDefaults, Map<String, Object> executionDefaults, boolean policyOnly,
+                         List<Path> testdataDescriptors, Map<String, Object> observability) {
         if (workloads == null || (workloads.isEmpty() && !policyOnly)) throw new IllegalArgumentException("Load scenario requires at least one workload unless it is policy-only");
         this.source = source;
         this.schemaVersion = schemaVersion == null ? Version.LOAD_SCHEMA : schemaVersion;
@@ -102,6 +119,7 @@ public final class LoadScenario {
         this.workloadView = workloadView;
         this.loadDefaults = immutable(loadDefaults);
         this.executionDefaults = immutable(executionDefaults);
+        this.observability = immutable(observability);
         this.policyOnly = policyOnly;
         this.testdataDescriptors = testdataDescriptors == null ? Collections.<Path>emptyList()
                 : Collections.unmodifiableList(new ArrayList<Path>(testdataDescriptors));
@@ -149,6 +167,7 @@ public final class LoadScenario {
     public Map<String, Object> evidence() { return evidence; }
     public Map<String, Object> loadDefaults() { return loadDefaults; }
     public Map<String, Object> executionDefaults() { return executionDefaults; }
+    public Map<String, Object> observability() { return observability; }
     public List<Path> testdataDescriptors() { return testdataDescriptors; }
 
     public int configuredUsers() {
@@ -176,7 +195,7 @@ public final class LoadScenario {
         if (workload == null) throw new IllegalArgumentException("Load workload is required");
         return new LoadScenario(source, schemaVersion, Collections.singletonList(workload), seed,
                 workload.thresholds(), evidence, true, loadDefaults, executionDefaults, false,
-                testdataDescriptors);
+                testdataDescriptors, observability);
     }
 
     LoadScenario forMixEntry(LoadWorkload workload, LoadMixEntry entry) {
@@ -203,6 +222,7 @@ public final class LoadScenario {
         }
         if (!thresholds.isEmpty()) result.put("thresholds", thresholds);
         if (!evidence.isEmpty()) result.put("evidence", evidence);
+        if (includeExecutionData && !observability.isEmpty()) result.put("observability", observability);
         return result;
     }
 

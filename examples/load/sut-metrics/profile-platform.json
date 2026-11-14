@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "profile-platform",
+  "name": "Combined platform overview",
+  "kind": "composite",
+  "category": "custom",
+  "includes": [
+    {
+      "profile": "profile-jvm",
+      "alias": "jvm",
+      "source": "prom-main",
+      "tenant": "production",
+      "targets": [
+        { "id": "payments-api", "type": "application", "parameters": { "instance": "payments-api-prod:8080" } }
+      ]
+    },
+    {
+      "profile": "profile-app",
+      "alias": "application",
+      "source": "prom-main",
+      "tenant": "production",
+      "targets": [
+        { "id": "payments-api", "type": "application" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "profile-jvm",
+  "name": "JVM and process health",
+  "kind": "base",
+  "category": "jvm",
+  "params": {
+    "instance": { "type": "promLabelValue", "required": true }
+  },
+  "overridableParams": ["instance"],
+  "metrics": [
+    { "id": "up", "title": "Process up", "unit": "count", "kind": "gauge", "query": "up{instance=\"{{instance}}\"}" },
+    { "id": "heap-used", "title": "JVM heap used", "unit": "bytes", "kind": "gauge", "query": "jvm_memory_used_bytes{area=\"heap\",instance=\"{{instance}}\"}" }
+  ]
+}

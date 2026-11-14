@@ -13,6 +13,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -81,8 +82,15 @@ class ClosedVuSchedulerTest {
             return result(request.iterationId(), ResultStatus.PASS);
         };
 
-        ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, runner, "run-19", events::add, fake.timing());
-        LoadRunResult result = scheduler.run();
+        ThreadPoolExecutor inlineWorkers = inlineWorkers();
+        LoadRunResult result;
+        try {
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, runner, "run-19", events::add, fake.timing());
+            scheduler.useSharedWorkers(inlineWorkers);
+            result = scheduler.run();
+        } finally {
+            inlineWorkers.shutdownNow();
+        }
         List<LoadEvent> completions = new ArrayList<LoadEvent>();
         for (LoadEvent event : events) if (event.completed()) completions.add(event);
 
@@ -112,7 +120,14 @@ class ClosedVuSchedulerTest {
             return result(request.iterationId(), ResultStatus.PASS);
         };
 
-        new ClosedVuScheduler(scenario, runner, "run-19-failure", events::add, fake.timing()).run();
+        ThreadPoolExecutor inlineWorkers = inlineWorkers();
+        try {
+            ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, runner, "run-19-failure", events::add, fake.timing());
+            scheduler.useSharedWorkers(inlineWorkers);
+            scheduler.run();
+        } finally {
+            inlineWorkers.shutdownNow();
+        }
         List<LoadEvent> completions = new ArrayList<LoadEvent>();
         for (LoadEvent event : events) if (event.completed()) completions.add(event);
 
@@ -190,6 +205,13 @@ class ClosedVuSchedulerTest {
     private static IterationResult result(String iterationId, ResultStatus status) {
         return new IterationResult(iterationId, status, Duration.ofMillis(5L), null,
                 Collections.emptyList(), null, null);
+    }
+
+    private static ThreadPoolExecutor inlineWorkers() {
+        return new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<Runnable>()) {
+            @Override public void execute(Runnable task) { task.run(); }
+        };
     }
 
     private static final class FakeTiming {

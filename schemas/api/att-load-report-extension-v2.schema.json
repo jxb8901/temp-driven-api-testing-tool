@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:api-schema:load-report-extension:v2",
+  "$comment": "Server-owned offline LOAD report contract; not registered in the Engine schema catalog.",
+  "title": "ATT offline LOAD report extension",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "publicationId", "jobId", "createdAt", "executionStatus", "nativeArchive",
+    "observationsSchema", "collectionState", "collectionManifestSha256", "observations", "window",
+    "sampleResolution", "coverage", "diagnostics", "extensions"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "att-load-report-extension/v2" },
+    "publicationId": { "$ref": "#/$defs/digest" },
+    "jobId": { "type": "string", "pattern": "^J[A-F0-9]{16}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "executionStatus": { "type": "string", "maxLength": 64 },
+    "nativeArchive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "const": "artifacts.zip" },
+        "sha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "observationsSchema": { "const": "att-load-offline-observations/v1" },
+    "collectionState": { "type": "string", "enum": ["DISABLED", "PENDING", "COLLECTING", "READY", "PARTIAL", "UNAVAILABLE", "FAILED"] },
+    "collectionManifestSha256": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "const": "" }] },
+    "observations": { "type": "array", "maxItems": 256, "items": { "type": "object" } },
+    "window": { "type": "object" },
+    "sampleResolution": { "type": ["string", "null"] },
+    "coverage": { "type": "object" },
+    "diagnostics": { "type": "array", "maxItems": 256, "items": { "type": "object" } },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["thresholdVerdict", "correlation", "futureObservationTypes"],
+      "properties": {
+        "thresholdVerdict": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "state", "externalEvaluationStatus", "reference", "recordSha256", "evidencePath", "evidenceSha256"],
+          "properties": {
+            "schemaVersion": { "const": "att-load-verdict/v1" },
+            "state": { "type": "string", "enum": ["NOT_PROVIDED", "INVALID", "PENDING", "FINAL"] },
+            "externalEvaluationStatus": { "type": "string", "enum": ["NOT_PROVIDED", "UNKNOWN", "PENDING", "EVALUATING", "MET", "NOT_MET", "NOT_EVALUATED", "ERROR"] },
+            "performanceVerdict": { "type": ["string", "null"], "enum": ["MET", "NOT_MET", "NOT_EVALUATED", "PENDING", null] },
+            "reference": { "const": "load-verdict/v1/manifest.json" },
+            "recordSha256": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "const": "" }] },
+            "evidencePath": {
+              "anyOf": [
+                { "const": "report/v2/extensions/load-verdict/v1/evidence.json" },
+                { "type": "null" }
+              ]
+            },
+            "evidenceSha256": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] }
+          }
+        },
+        "correlation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "state"],
+          "properties": {
+            "schemaVersion": { "const": "att-load-correlation/v1" },
+            "state": { "const": "NOT_INCLUDED" }
+          }
+        },
+        "futureObservationTypes": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 64 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

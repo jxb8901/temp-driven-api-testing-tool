@@ -489,6 +489,7 @@ public final class LoadScenarioLoader {
         List<Object> raw = root.containsKey("workloads") ? list(root.get("workloads"), "workloads") : Collections.<Object>emptyList();
         Map<String, Object> rootLoad = configMapOptional(root.get("load"), "load");
         Map<String, Object> rootExecution = configMapOptional(root.get("execution"), "execution");
+        Map<String, Object> observability = configMapOptional(root.get("observability"), "observability");
         Map<String, Object> workloadExecutionDefaults = new LinkedHashMap<String, Object>(rootExecution);
         Map<String, Object> rootThresholds = configMapOptional(root.get("thresholds"), "thresholds");
         if (raw.isEmpty()) {
@@ -497,7 +498,7 @@ public final class LoadScenarioLoader {
             Long policySeed = longInteger(root.get("seed"), "seed");
             Map<String, Object> policyEvidence = evidenceMap(root.get("evidence"), "evidence");
             LoadScenario policyScenario = new LoadScenario(source, String.valueOf(root.get("schemaVersion")), Collections.<LoadWorkload>emptyList(),
-                    policySeed, rootThresholds, policyEvidence, rootLoad, rootExecution, true, testdataDescriptors);
+                    policySeed, rootThresholds, policyEvidence, rootLoad, rootExecution, true, testdataDescriptors, observability);
             validateEvidencePolicy(policyScenario, "evidence");
             return policyScenario;
         }
@@ -539,7 +540,7 @@ public final class LoadScenarioLoader {
         Long seed = longInteger(root.get("seed"), "seed");
         Map<String, Object> execution = rootExecution;
         LoadScenario scenario = new LoadScenario(source, String.valueOf(root.get("schemaVersion")), workloads, seed, thresholds, evidence,
-                rootLoad, rootExecution, false, testdataDescriptors);
+                rootLoad, rootExecution, false, testdataDescriptors, observability);
         validateEvidencePolicy(scenario, "evidence");
         return scenario;
     }

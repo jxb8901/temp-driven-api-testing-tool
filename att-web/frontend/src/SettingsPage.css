@@ -65,3 +65,9 @@
   .att-auth-dialog { padding: var(--att-space-4); }
   .att-auth-password-control { grid-template-columns: minmax(0, 1fr); }
 }
+.att-sut-metrics-admin section { margin-top: 1.25rem; }
+.att-sut-metrics-admin textarea { box-sizing: border-box; display: block; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; margin: .35rem 0 .65rem; max-width: 100%; min-height: 8rem; width: 100%; }
+.att-sut-catalog-list { list-style: none; margin: .5rem 0; padding: 0; }
+.att-sut-catalog-list li { align-items: center; border-bottom: 1px solid var(--att-border, #ccd2d9); display: flex; flex-wrap: wrap; gap: .5rem; padding: .5rem 0; }
+.att-sut-catalog-list li button { margin-left: .25rem; }
+.att-sut-preview { max-height: 30rem; overflow: auto; }

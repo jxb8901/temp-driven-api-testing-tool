@@ -21,6 +21,15 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.2 |
 | Load scenario | att-load/v1.9 |
+| LOAD observability binding | att-load-observability/v1 |
+| SUT Metrics Data Source | att-sut-metrics-source/v1 |
+| SUT Metrics Profile | att-sut-metrics-profile/v1 |
+| SUT Metrics Job snapshot | att-sut-metrics-snapshot/v1 |
+| SUT Metrics collection manifest | att-sut-metrics-manifest/v1 |
+| Embedded SUT Metrics manifest integrity history | att-sut-metrics-manifest-integrity/v1 |
+| SUT Metrics normalized observation | att-sut-metrics-observation/v1 |
+| SUT Metrics series sidecar | att-sut-metrics-series/v1 |
+| SUT Metrics threshold evaluation record | att-sut-threshold-evaluation/v1 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | direct Engine/CLI: legacy summary contract (schema under `schemas/history/`); archived report: att-load-summary/v1.3 |
@@ -32,6 +41,8 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | JUnit XML | att-junit/v2.1 |
 
 For the changed resource/configuration schemas, older versions are historical definitions under `schemas/history/`; they are not active execution contracts unless the embedded Engine registry registers and supports them. Unsupported versions fail validation with migration guidance. The repository catalog at `schemas/catalog.yaml` is build input; at runtime, the registry embedded in the matching ATT Engine JAR is authoritative. The Engine parses its Classpath catalog once per JVM and reads schema bytes directly from the JAR. Compiled JSON validators are held in a bounded, in-memory cache keyed by registry digest and schema resource. A verified, content-addressed cache in a private per-user temporary directory remains only as a transitional bridge for Path-based compatibility APIs. It retains the active registry and the immediately previous version for rollback; older entries are deleted only when an exclusive OS lock confirms no Worker is using them, and interrupted cleanup is retried at the next initialization. An incomplete or tampered cache is rebuilt only when no process holds its use lease; otherwise validation fails closed and retries after the active Worker exits. Validation revisions bind Engine and registry identity, Package files, shared config files and selected Environment; Workers verify the registry identity supplied by the Server before handling requests. `ATT_HOME/schemas/` and package-local `schemas/` are not runtime sources and cannot override that registry. Package validation checks the Engine's registered schema resources; it does not enable compatibility for unregistered archived versions.
+
+The [SUT Metrics data source schema](../../../schemas/att-sut-metrics-source-v1.schema.json) (`att-sut-metrics-source/v1`) is part of the active Engine registry. Offline report metadata and externally supplied verdict records use standalone Server-side contracts under `schemas/api/`; they are not registered Engine execution schemas. See [Offline SUT metrics report](../results-reports-evidence.md).
 
 <!-- att-docs:historical -->
 Load v1.6 and MQHelper v1.2 are compatible historical schemas supported by their loaders; their existing scalar routing and legacy evidence policies remain unchanged. New routing/quota fields require the active schema.

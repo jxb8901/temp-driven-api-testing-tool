@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -84,6 +85,7 @@ final class ServerRuntime implements AutoCloseable {
     final JobStore store;
     private final LoadProgressPersistence loadProgressPersistence;
     final AuthService auth;
+    final SutMetricsService sutMetrics;
     final ThreadPoolExecutor workers,streams,inspectors;
     private final ThreadPoolExecutor eventCompactions=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(1024),r->{Thread t=new Thread(r,"att-server-event-compactor");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
     private final ThreadPoolExecutor eventNotifications=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(4096),r->{Thread t=new Thread(r,"att-server-event-dispatch");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -100,10 +102,14 @@ final class ServerRuntime implements AutoCloseable {
         return stripes;
     }
     private final ThreadPoolExecutor artifactWriters;
+    private final ThreadPoolExecutor loadReportV2Writers;
     private final ArtifactPublisher artifactPublisher;
     private final Semaphore artifactReadSlots=new Semaphore(MAX_ARTIFACT_READ_SLOTS,true);
     private final Set<String> pendingArtifactJobs=ConcurrentHashMap.newKeySet();
     private final Set<String> requestedArtifactRetries=ConcurrentHashMap.newKeySet();
+    private final Set<String> pendingLoadReportV2Jobs=ConcurrentHashMap.newKeySet();
+    private final Set<String> requestedLoadReportV2Jobs=ConcurrentHashMap.newKeySet();
+    private final Object loadReportV2ScheduleLock=new Object();
     private final java.util.concurrent.locks.ReentrantReadWriteLock artifactLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
     /** Pages of {@link JobStore#STORAGE_CANDIDATE_PAGE} examined in one size sweep. Tests lower this to hit the boundary. */
@@ -133,6 +139,7 @@ final class ServerRuntime implements AutoCloseable {
     private final java.util.concurrent.ConcurrentLinkedQueue<Job> deferredWorkerReleases=new java.util.concurrent.ConcurrentLinkedQueue<>();
     private final Set<String> deferredWorkerReleaseIds=ConcurrentHashMap.newKeySet();
     private String artifactRecoveryCursor="";
+    private String loadReportRecoveryCursor="";
     private final ScheduledExecutorService inspectionWatchdogs;
     private LoadScheduleScheduler loadScheduleScheduler;
     private final WorkerProcessLauncher processLauncher;
@@ -187,8 +194,15 @@ final class ServerRuntime implements AutoCloseable {
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher,
                   LoadProgressPersistence loadProgressPersistence) throws Exception {
+        this(config,workerLibs,processLauncher,clock,artifactPublisher,loadProgressPersistence,
+                ref->System.getenv("ATT_SECRET_"+ref));
+    }
+    ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher,
+                  LoadProgressPersistence loadProgressPersistence,Function<String,String> secretResolver) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
-        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;try{this.auth=new AuthService(config,store);}catch(Exception failed){store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;
+        try{this.sutMetrics=new SutMetricsService(config.dataDir,secretResolver,this::sutMetricsManifestPublished);}catch(Exception failed){store.close();throw failed;}
+        try{this.auth=new AuthService(config,store);}catch(Exception failed){sutMetrics.close();store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         manifestPublisher=new PackageManifestPublisher(config.dataDir,config.packageConfiguration,clock,
                 this::manifestEditableRoot,this::validateManifestCandidate,
                 (actor,action,packageId,detail)->store.audit(actor,action,null,packageId,detail));
@@ -197,6 +211,11 @@ final class ServerRuntime implements AutoCloseable {
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         streams=new ThreadPoolExecutor(0,MAX_STREAM_OBSERVERS,30,TimeUnit.SECONDS,new SynchronousQueue<>(),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         artifactWriters=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(Math.max(1,config.queuedLimit+config.maxConcurrent)),r->{Thread t=new Thread(r,"att-server-artifact-writer");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+        loadReportV2Writers=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(Math.max(1,Math.min(32,config.maxConcurrent))),
+                r->{Thread t=new Thread(r,"att-server-load-report-v2-writer");t.setDaemon(true);return t;},
+                new ThreadPoolExecutor.AbortPolicy());
+        for(String id:List.copyOf(requestedLoadReportV2Jobs))scheduleLoadReportV2(id);
         inspectionTaskSlots=new Semaphore(config.inspection.maxConcurrent+config.inspection.queuedLimit,true);
         java.util.concurrent.BlockingQueue<Runnable> inspectionQueue=new PriorityBlockingQueue<>();
         inspectors=new ThreadPoolExecutor(config.inspection.maxConcurrent,config.inspection.maxConcurrent,0,TimeUnit.MILLISECONDS,inspectionQueue,r->{Thread t=new Thread(r,"att-server-inspector");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
@@ -208,9 +227,10 @@ final class ServerRuntime implements AutoCloseable {
         inspectionWarmup=config.inspection.enabled&&config.inspection.warmup.enabled()
                 ?java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-warmup");t.setDaemon(true);return t;}):null;
         try {
-        recover();reconcileDeletingJobsSafely();cleanupExpiredJobsSafely();recoverArtifactArchivesSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
+        recover();reconcileDeletingJobsSafely();cleanupExpiredJobsSafely();recoverArtifactArchivesSafely();recoverLoadReportV2Safely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
         if(config.jobStorage.enabled){if(!skipInitialStorageSweep)cleanupJobStorageSafely();retention.scheduleWithFixedDelay(this::cleanupJobStorageSafely,config.jobStorage.cleanupIntervalMinutes,config.jobStorage.cleanupIntervalMinutes,TimeUnit.MINUTES);}
         artifactMaintenance.scheduleWithFixedDelay(this::recoverArtifactArchivesSafely,5,5,TimeUnit.MINUTES);
+        artifactMaintenance.scheduleWithFixedDelay(this::recoverLoadReportV2Safely,5,5,TimeUnit.MINUTES);
         artifactMaintenance.scheduleWithFixedDelay(this::reconcileWorkerReleases,1,1,TimeUnit.SECONDS);
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
         retention.scheduleWithFixedDelay(this::cleanupRequestedDeletionsSafely,5,5,TimeUnit.SECONDS);
@@ -253,6 +273,13 @@ final class ServerRuntime implements AutoCloseable {
             String summary="Job was interrupted by Server restart and was not rerun";
             events.append("diagnostic",Map.of("code","ATT-SERVER-INTERRUPTED","summary",summary,"console",publishConsole(att.console.ExecutionConsoleFormatter.diagnostic(mode,"ATT-SERVER-INTERRUPTED",summary))));
             events.append("result",Map.of("jobId",id,"status","ERROR","console",publishConsole(att.console.ExecutionConsoleFormatter.lifecycle(mode,id,"ERROR",null))));
+        }
+        for(String id:sutMetrics.pendingCollectionJobIds()) {
+            Map<String,Object> row=store.get(id);
+            if(row==null||!"load".equals(row.get("command"))
+                    ||!Set.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(row.get("status")))continue;
+            Instant[] window=loadExecutionWindow(row);
+            sutMetrics.jobFinished(id,window[0],window[1],loadExecutionPhaseWindows(row));
         }
     }
     /** Capture only validator-approved data; never serialize WorkerRequest or inspection previews. */
@@ -420,6 +447,8 @@ final class ServerRuntime implements AutoCloseable {
             String packageId=required(definition,"packageId"),environment=optionalText(definition,"environment");
             if("strict".equals(sourcePolicy))verifyStrictReplayRevision(packageId,environment,spec.revision());
             boolean run="run".equals(definition.path("executionType").asText());
+            Map<String,Object> sourceSutSnapshot="load".equals(definition.path("executionType").asText())?sutMetrics.snapshotForJob(id):null;
+            if(sourceSutSnapshot!=null)sutMetrics.authorizeSnapshot(sourceSutSnapshot,principal,sutAdminPrincipal(principal));
             Map<String,Object> draft=null;String validationCode=null;List<Map<String,Object>> diagnostics=Collections.emptyList();
             try {
                 if(run)draft=createRunDraft(definition,principal,true,null);
@@ -435,8 +464,9 @@ final class ServerRuntime implements AutoCloseable {
                     CatalogLoadDraftState retained=new CatalogLoadDraftState("C"+UUID.randomUUID().toString().replace("-","").toUpperCase(),principal,packageId,environment,path,validated.revisionDigest,validated.model,validated.scenario,null,configuration,clock.instant().plusMillis(DRAFT_TTL_MILLIS));
                     synchronized(draftLock){expireDrafts();checkDraftCapacity(principal);catalogLoadDrafts.put(retained.id,retained);}
                     draft=catalogLoadDraftView(retained);
+                    if(sourceSutSnapshot!=null)draft.put("sutMetrics",sutMetrics.previewSnapshot(sourceSutSnapshot));
                 } else {
-                    ObjectNode input=definition.deepCopy();input.remove("executionType");draft=createAdvancedLoadDraft(input,principal,null);
+                    ObjectNode input=definition.deepCopy();input.remove("executionType");draft=createAdvancedLoadDraft(input,principal,null,false,sourceSutSnapshot);
                     JsonNode normalized=JSON.valueToTree(draft.get("scenario"));if(normalized.isObject())definition.set("scenario",normalized);
                 }
             } catch(ReplayInputMissingException missing){validationCode="ATT-SERVER-REPLAY-INPUT-MISSING";diagnostics=List.of(replayDiagnostic(validationCode,"inputs",missing.getMessage()));}
@@ -610,6 +640,11 @@ final class ServerRuntime implements AutoCloseable {
                 input.set("inlineLoadScenario",JSON.valueToTree(draft==null?catalog.scenario:draft.scenario));input.put("expectedRevisionDigest",review.selectedRevision);
                 if(draft==null&&catalog.resourceId!=null)input.put("scenario",catalog.resourceId);
                 input.set("configurationProvenance",JSON.valueToTree(review.configuration));
+                Map<String,Object> sutSnapshot=draft==null?sutMetrics.snapshotForJob(id):draft.sutMetricsSnapshot;
+                if(sutSnapshot!=null) {
+                    sutMetrics.authorizeSnapshot(sutSnapshot,principal,sutAdminPrincipal(principal));
+                    input.set("sutMetricsSnapshot",JSON.valueToTree(sutSnapshot));
+                }
             }
             input.put("expectedRevisionDigest",review.selectedRevision);
             input.set("configurationProvenance",JSON.valueToTree(review.configuration));
@@ -675,8 +710,16 @@ final class ServerRuntime implements AutoCloseable {
         if(admissionSlots.availablePermits()==0){queueCapacityRejections.incrementAndGet();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
         if(!serverIssuedDraft&&(input.has("draftId")||input.has("inlineDebugInput")||input.has("inlineLoadScenario")
                 ||input.has("expectedRevisionDigest")||input.has("expectedSchemaRegistryDigest")||input.has("draftResourceId")
-                ||input.has("configurationProvenance")||input.has("registeredPackageId")))
+                ||input.has("configurationProvenance")||input.has("registeredPackageId")||input.has("sutMetricsSnapshot")))
             throw new IllegalArgumentException("Inline execution fields require a server-issued draft");
+        Map<String,Object> submittedSutSnapshot=null;
+        if(input.has("sutMetricsSnapshot")) {
+            if(!serverIssuedDraft||!"load".equals(command)||!input.path("sutMetricsSnapshot").isObject())
+                throw new IllegalArgumentException("SUT Metrics snapshots are server-issued Job metadata.");
+            submittedSutSnapshot=JSON.convertValue(input.path("sutMetricsSnapshot"),Map.class);
+            if(!SutMetricsService.SNAPSHOT_SCHEMA.equals(submittedSutSnapshot.get("schemaVersion")))
+                throw new IllegalArgumentException("Unsupported SUT Metrics snapshot schema.");
+        }
         if(serverIssuedDraft&&"load".equals(command)) {
             if(!scheduleIssued&&!fileBackedReplay)requireInlineLoadEnabled();
             JsonNode scenarioNode=input.get("inlineLoadScenario");
@@ -693,6 +736,7 @@ final class ServerRuntime implements AutoCloseable {
         if(root==null)throw new IllegalArgumentException("Unknown packageId");
         validatePackageRoot(root);
         ObjectNode pinned=((ObjectNode)input).deepCopy();
+        pinned.remove("sutMetricsSnapshot");
         String requestedEnvironment=optionalText(input,"environment");
         Map<String,Object> configuration;
         if(serverIssuedDraft&&input.path("configurationProvenance").isObject()) {
@@ -756,6 +800,30 @@ final class ServerRuntime implements AutoCloseable {
                 throw new JobConflictException("ATT-SERVER-REPLAY-DRAFT-STALE","The Package changed after replay validation. Your edits are still available; validate them again.");
             }
         }
+        Map<String,Object> sutSnapshot=null;
+        if(loadAdmission) {
+            String observationPrincipal=principal;
+            if(scheduleOccurrenceId!=null&&replayOwner!=null&&!replayOwner.isBlank())observationPrincipal=replayOwner;
+            if(submittedSutSnapshot!=null) {
+                sutMetrics.authorizeSnapshot(submittedSutSnapshot,observationPrincipal,sutAdminPrincipal(observationPrincipal));
+                sutSnapshot=submittedSutSnapshot;
+            } else {
+                Map<String,Object> scenario=null;
+                if(request.inlineLoadScenario!=null)scenario=JSON.convertValue(request.inlineLoadScenario,Map.class);
+                else if(executionSpec!=null) {
+                    JsonNode retainedScenario=JobExecutionSpec.parse(executionSpec).definition().path("scenario");
+                    if(retainedScenario.isObject())scenario=JSON.convertValue(retainedScenario,Map.class);
+                }
+                if(scenario==null&&request.scenario!=null) {
+                    LoadSchedule source=new LoadSchedule();source.packageId=packageId;source.environment=request.environment;source.scenario=request.scenario;
+                    scenario=readScheduledScenario(root,source.scenario);
+                }
+                Object rawObservability=scenario==null?null:scenario.get("observability");
+                if(rawObservability instanceof Map<?,?>)
+                    sutSnapshot=sutMetrics.resolveScenario(JSON.convertValue(rawObservability,Map.class),observationPrincipal,sutAdminPrincipal(observationPrincipal));
+                else if(rawObservability!=null)throw new IllegalArgumentException("scenario.observability must be an object.");
+            }
+        }
         if(loadAdmission&&!loadSlots.tryAcquire()){loadCapacityRejections.incrementAndGet();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_LOAD_CAPACITY");throw new QueueFullException("Load capacity is full; retry after a Load job completes");}
         if(!admissionSlots.tryAcquire()){if(loadAdmission)loadSlots.release();queueCapacityRejections.incrementAndGet();store.audit(principal,"SUBMIT",null,packageId,"REJECTED_QUEUE_FULL");throw new QueueFullException("Worker capacity is full; retry after a job completes");}
         AdmissionLease lease=new AdmissionLease(admissionSlots,loadAdmission?loadSlots:null);
@@ -763,6 +831,7 @@ final class ServerRuntime implements AutoCloseable {
         try {
             id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();request.jobId=id;
             jobPath=config.dataDir.resolve("jobs").resolve(id);Files.createDirectories(jobPath.resolve("output"));final Path activeJobPath=jobPath;
+            if(sutSnapshot!=null)sutMetrics.writeSnapshot(id,sutSnapshot);
             JobEvents events=new JobEvents(jobPath.resolve("events.jsonl"),config.maxEventsPerJob,config.maxEventJournalBytes,
                     config.maxEventJournalMemoryBytes,eventCompactions,eventNotifications,this::recordCompactionFailure);
             Job job=new Job(id,command,packageId,principal,request,events);job.scheduleOccurrenceId=scheduleOccurrenceId;job.requestReceivedNanos=requestReceivedNanos;
@@ -1279,6 +1348,213 @@ final class ServerRuntime implements AutoCloseable {
         if(!JOB_ID.matcher(id).matches())throw new NotFoundException();
         if(store.get(id)==null)throw new NotFoundException();
         if("local".equals(config.authMode)&&!store.isActiveUser(principal))throw new NotFoundException();
+    }
+    private boolean sutAdminPrincipal(String principal) {
+        if(!"local".equals(config.authMode)||principal==null)return false;
+        try {Map<String,Object> user=store.authUser(principal);return user!=null&&Boolean.TRUE.equals(user.get("active"))&&"ADMIN".equals(user.get("role"));}
+        catch(Exception unavailable){return false;}
+    }
+    Map<String,Object> sutMetricSources(String principal,boolean admin) { return sutMetrics.listSources(principal,admin); }
+    Map<String,Object> sutMetricProfiles(String principal,boolean admin) { return sutMetrics.listProfiles(principal,admin); }
+    Map<String,Object> saveSutMetricSource(Map<String,Object> value) throws Exception { return sutMetrics.upsertSource(value); }
+    Map<String,Object> saveSutMetricProfile(Map<String,Object> value) throws Exception { return sutMetrics.upsertProfile(value); }
+    Map<String,Object> deleteSutMetricSource(String id) throws Exception { return sutMetrics.deleteSource(id); }
+    Map<String,Object> deleteSutMetricProfile(String id) throws Exception { return sutMetrics.deleteProfile(id); }
+    Map<String,Object> testSutMetricSource(String id) throws Exception { return sutMetrics.testSource(id); }
+    Map<String,Object> previewSutMetrics(Map<String,Object> observability,String principal,boolean admin) {
+        return sutMetrics.previewResolution(observability,principal,admin);
+    }
+    Map<String,Object> sutMetricsJob(String id,String principal,boolean admin,String range,String step,String targetId,
+                                     String profilePath,int offset,int limit,String queryId,boolean live) throws Exception {
+        Map<String,Object> row=store.get(id);
+        if(row==null||!"load".equals(row.get("command")))throw new NotFoundException();
+        Map<String,Object> snapshot=sutMetrics.snapshotForJob(id);
+        if(snapshot==null)return sutFields("schemaVersion",SutMetricsService.COLLECTION_SCHEMA,"state","DISABLED","jobId",id,"items",List.of());
+        sutMetrics.authorizeSnapshot(snapshot,principal,admin);
+        if(live) {
+            if(terminal(id))return sutFields("schemaVersion","att-sut-metrics-live/v1","state","ENDED","jobId",id,
+                    "snapshotId",snapshot.get("snapshotId"),"items",List.of(),"message","LOAD has ended; use the post-run collection.");
+            Instant started=liveLoadStart(id,row);
+            if(terminal(id))return sutFields("schemaVersion","att-sut-metrics-live/v1","state","ENDED","jobId",id,
+                    "snapshotId",snapshot.get("snapshotId"),"items",List.of(),"message","LOAD has ended; use the post-run collection.");
+            Map<String,Object> preview=sutMetrics.livePreview(id,principal,admin,started,range,step,targetId,profilePath);
+            Map<String,Object> result=resultRecord(id);
+            Map<String,Object> acceptance=sutPerformanceAcceptance(id,principal,admin,(JsonNode)result.get("result"));
+            if(acceptance!=null)preview.put("performanceAcceptance",acceptance);
+            return preview;
+        }
+        Map<String,Object> page=sutMetrics.readCollectionPage(id,offset,limit,queryId,targetId,profilePath);
+        Map<String,Object> response=new LinkedHashMap<>();response.put("schemaVersion","att-sut-metrics-job/v1");
+        response.put("state",page.get("manifest") instanceof Map<?,?> manifest?manifest.get("state"):"PENDING");
+        response.put("jobId",id);response.put("snapshotId",snapshot.get("snapshotId"));
+        response.put("livePreview",snapshot.get("livePreview"));response.put("collection",page.get("manifest"));
+        response.put("items",page.get("items"));response.put("nextOffset",page.get("nextOffset"));
+        response.put("thresholdEvaluation",thresholdEvaluationOrUnavailable(id,snapshot));
+        Map<String,Object> result=resultRecord(id);
+        Map<String,Object> acceptance=sutPerformanceAcceptance(id,principal,admin,(JsonNode)result.get("result"));
+        if(acceptance!=null)response.put("performanceAcceptance",acceptance);
+        return response;
+    }
+
+    Map<String,Object> sutPerformanceAcceptance(String id,String principal,boolean admin,JsonNode result) throws Exception {
+        Map<String,Object> row=store.get(id);
+        if(row==null)throw new NotFoundException();
+        if(!"load".equals(row.get("command")))return null;
+        Map<String,Object> snapshot=null;
+        boolean snapshotUnavailable=false;
+        try { snapshot=sutMetrics.snapshotForJob(id); }
+        catch(Exception unavailable) { snapshotUnavailable=true; }
+        List<Map<String,Object>> rules=snapshot==null?List.of():sutMaps(snapshot.get("thresholds"));
+        if(!snapshotUnavailable) {
+            if(snapshot==null||rules.isEmpty())return null;
+            try { sutMetrics.authorizeSnapshot(snapshot,principal,admin); }
+            catch(NotFoundException denied) { return null; }
+        }
+
+        Map<String,Object> evaluation=snapshotUnavailable
+                ?sutMetrics.evaluationError(null,"UNAVAILABLE","SUT_SNAPSHOT_UNAVAILABLE",
+                        "The immutable SUT Metrics Job snapshot is unavailable.",2)
+                :thresholdEvaluationOrUnavailable(id,snapshot);
+        String externalState=String.valueOf(evaluation.getOrDefault("state","PENDING"));
+        Map<String,Object> sutThresholds=evaluation.get("sutThresholds") instanceof Map<?,?> values
+                ?JSON.convertValue(values,Map.class):Map.of();
+        JsonNode summary=result==null?JSON.createObjectNode():result.path("summary");
+        JsonNode nativePerformance=summary.path("performance");
+        JsonNode nativeThresholdNode=summary.path("thresholds");
+        Map<String,Object> nativeThresholds=nativeThresholdNode.isObject()
+                ?new LinkedHashMap<>(JSON.convertValue(nativeThresholdNode,Map.class)):new LinkedHashMap<>();
+        boolean nativeConfigured=nativeThresholdNode.path("total").asInt(0)>0;
+        Map<String,Object> workloadThresholds=new LinkedHashMap<>();
+        JsonNode workloads=summary.path("workloads");
+        if(workloads.isObject()) {
+            var workloadFields=workloads.fields();
+            while(workloadFields.hasNext()) {
+                var workload=workloadFields.next();
+                JsonNode thresholds=workload.getValue().path("thresholds");
+                if(thresholds.path("total").asInt(0)>0) {
+                    nativeConfigured=true;
+                    workloadThresholds.put(workload.getKey(),JSON.convertValue(thresholds,Map.class));
+                }
+            }
+        }
+        if(!workloadThresholds.isEmpty())nativeThresholds.put("workloads",workloadThresholds);
+        String nativeVerdict=nativePerformanceVerdict(summary);
+        String executionStatus=summary.path("executionStatus").asText(nativePerformance.path("executionStatus").asText(
+                summary.path("execution").path("status").asText(String.valueOf(row.get("status")))));
+        boolean requiredRules=snapshotUnavailable||rules.stream().anyMatch(rule->!Boolean.FALSE.equals(rule.get("required")));
+        boolean active=!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(String.valueOf(row.get("status")));
+        int externalAttempt=evaluation.get("attempt") instanceof Number attempt?attempt.intValue():0;
+        String combined=combinedPerformanceVerdict(active,requiredRules,nativeConfigured,nativeVerdict,externalState,externalAttempt);
+        Map<String,Object> external=new LinkedHashMap<>();
+        for(String key:List.of("state","complete","attempt","collectionState","evaluatedAt","window","completeness","diagnostics"))
+            if(evaluation.containsKey(key))external.put(key,evaluation.get(key));
+        if("PENDING".equals(externalState)||"EVALUATING".equals(externalState))
+            external.put("reason","SUT threshold evaluation is waiting for complete post-run collection evidence.");
+        return sutFields("schemaVersion","att-load-performance-acceptance/v1","jobId",id,
+                "executionStatus",executionStatus,"nativePerformanceVerdict",nativeVerdict,
+                "nativeLoadThresholds",nativeThresholds,"externalEvaluationStatus",externalState,
+                "externalEvaluation",external,"sutThresholds",sutThresholds,
+                "performanceVerdict",combined);
+    }
+
+    private Map<String,Object> thresholdEvaluationOrUnavailable(String id,Map<String,Object> snapshot) {
+        try { return sutMetrics.thresholdEvaluationStatus(id); }
+        catch(Exception unavailable) {
+            return sutMetrics.evaluationError(snapshot,"UNAVAILABLE","THRESHOLD_EVALUATION_UNAVAILABLE",
+                    "The persisted SUT threshold evaluation is unavailable.",2);
+        }
+    }
+
+    static String nativePerformanceVerdict(JsonNode summary) {
+        JsonNode nativePerformance=summary==null?JSON.createObjectNode():summary.path("performance");
+        JsonNode thresholds=summary==null?JSON.createObjectNode():summary.path("thresholds");
+        return (summary==null?JSON.createObjectNode():summary).path("performanceVerdict").asText(
+                nativePerformance.path("verdict").asText(thresholds.path("performanceVerdict").asText("NOT_EVALUATED")));
+    }
+
+    static String combinedPerformanceVerdict(boolean executionActive,boolean requiredSutRules,
+                                             boolean nativeConfigured,String nativeVerdict,String externalState,
+                                             int externalAttempt) {
+        if("NOT_MET".equals(nativeVerdict)||"NOT_MET".equals(externalState))return "NOT_MET";
+        if(executionActive&&(requiredSutRules||nativeConfigured))return "PENDING";
+        if(requiredSutRules&&(Set.of("PENDING","EVALUATING").contains(externalState)
+                ||"ERROR".equals(externalState)&&externalAttempt<2))return "PENDING";
+        if(requiredSutRules&& !"MET".equals(externalState))return "NOT_EVALUATED";
+        if(nativeConfigured&&"PENDING".equals(nativeVerdict))return "PENDING";
+        if(nativeConfigured&& !"MET".equals(nativeVerdict))return "NOT_EVALUATED";
+        if(requiredSutRules||nativeConfigured)return "MET";
+        return "NOT_EVALUATED";
+    }
+
+    private static List<Map<String,Object>> sutMaps(Object value) {
+        if(!(value instanceof List<?> rows))return List.of();
+        List<Map<String,Object>> output=new ArrayList<>();
+        for(Object row:rows)if(row instanceof Map<?,?> map)output.add(JSON.convertValue(map,Map.class));
+        return output;
+    }
+    private Instant liveLoadStart(String id,Map<String,Object> row) {
+        Job active=jobs.get(id);
+        if(active!=null&&active.terminal())return null;
+        if(active!=null&&active.loadProgress!=null&&active.loadProgress.get("elapsedMs") instanceof Number elapsed&&elapsed.longValue()>=0) {
+            Object capturedAt=active.loadProgress.get("capturedAt");
+            if(capturedAt instanceof String timestamp) {
+                try { return Instant.parse(timestamp).minusMillis(elapsed.longValue()); }
+                catch(RuntimeException ignored) { }
+            }
+            if(active.startedAt!=null)return active.startedAt;
+        }
+        if(active!=null&&!active.terminal())return null;
+        try {
+            String result=String.valueOf(row.get("resultJson"));JsonNode root=JSON.readTree(result);
+            JsonNode summary=root.path("summary"),execution=summary.path("execution");
+            Instant start=parseInstant(execution.path("startedAt").asText(null));
+            if(start!=null)return start;
+            start=parseInstant(summary.path("startedAt").asText(null));if(start!=null)return start;
+        } catch(Exception ignored) { }
+        if(active!=null&&active.loadProgress!=null&&active.finishedAt!=null&&active.loadProgress.get("elapsedMs") instanceof Number elapsed&&elapsed.longValue()>0)
+            return active.finishedAt.minusMillis(elapsed.longValue());
+        return null;
+    }
+    private static Instant parseInstant(String value) { try {return value==null?null:Instant.parse(value);}catch(Exception invalid){return null;} }
+    private Instant[] loadExecutionWindow(Job job) {
+        return loadExecutionWindow(job.resultJson,job.loadProgress,job.finishedAt);
+    }
+    private Instant[] loadExecutionWindow(Map<String,Object> row) {
+        Map<String,Object> progress=row.get("loadProgress") instanceof Map<?,?> value?JSON.convertValue(value,Map.class):null;
+        return loadExecutionWindow(row.get("resultJson") instanceof String value?value:null,progress,parseInstant(String.valueOf(row.get("finishedAt"))));
+    }
+    private Instant[] loadExecutionWindow(String resultJson,Map<String,Object> loadProgress,Instant finishedAt) {
+        Instant start=null,end=null;
+        try {
+            JsonNode root=JSON.readTree(resultJson==null?"{}":resultJson),summary=root.path("summary"),execution=summary.path("execution");
+            start=parseInstant(execution.path("startedAt").asText(null));end=parseInstant(execution.path("endedAt").asText(null));
+            if(start==null)start=parseInstant(summary.path("startedAt").asText(null));
+            if(end==null)end=parseInstant(summary.path("endedAt").asText(null));
+        } catch(Exception ignored) { }
+        if(start==null&&loadProgress!=null&&finishedAt!=null&&loadProgress.get("elapsedMs") instanceof Number elapsed&&elapsed.longValue()>0)
+            start=finishedAt.minusMillis(elapsed.longValue());
+        if(end==null)end=finishedAt;
+        return new Instant[]{start,end};
+    }
+    private List<Map<String,Object>> loadExecutionPhaseWindows(Job job) {
+        return loadExecutionPhaseWindows(job.resultJson);
+    }
+    private List<Map<String,Object>> loadExecutionPhaseWindows(Map<String,Object> row) {
+        return loadExecutionPhaseWindows(row.get("resultJson") instanceof String value?value:null);
+    }
+    private List<Map<String,Object>> loadExecutionPhaseWindows(String resultJson) {
+        try {
+            JsonNode phases=JSON.readTree(resultJson==null?"{}":resultJson).path("summary").path("timing").path("phases");
+            if(!phases.isArray()||phases.size()>8)return List.of();
+            List<Map<String,Object>> result=new ArrayList<>();
+            for(JsonNode phase:phases)if(phase.isObject())result.add(JSON.convertValue(phase,Map.class));
+            return result;
+        } catch(Exception ignored) { return List.of(); }
+    }
+    private static Map<String,Object> sutFields(Object... values) {
+        Map<String,Object> result=new LinkedHashMap<>();
+        for(int i=0;i<values.length;i+=2)result.put((String)values[i],values[i+1]);
+        return result;
     }
     List<Map<String,Object>> jobsFor(String principal,String search) throws Exception {
         return jobsFor(principal,search,false);
@@ -1872,9 +2148,19 @@ final class ServerRuntime implements AutoCloseable {
         return quickLoadDraftView(draft);
     }
     Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal) throws Exception {
-        return createAdvancedLoadDraft(input,principal,null);
+        return createAdvancedLoadDraft(input,principal,null,false);
+    }
+    Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal,boolean administrator) throws Exception {
+        return createAdvancedLoadDraft(input,principal,null,administrator);
     }
     private Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal,Map<String,Object> approvedConfiguration) throws Exception {
+        return createAdvancedLoadDraft(input,principal,approvedConfiguration,false);
+    }
+    private Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal,Map<String,Object> approvedConfiguration,boolean administrator) throws Exception {
+        return createAdvancedLoadDraft(input,principal,approvedConfiguration,administrator,null);
+    }
+    private Map<String,Object> createAdvancedLoadDraft(JsonNode input,String principal,Map<String,Object> approvedConfiguration,
+                                                       boolean administrator,Map<String,Object> pinnedSutSnapshot) throws Exception {
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         if(!config.inspection.enabled)throw new NotFoundException();
         requireInlineLoadEnabled();
@@ -1898,9 +2184,19 @@ final class ServerRuntime implements AutoCloseable {
             throw new IllegalStateException("Load validation Worker returned an invalid response");
         @SuppressWarnings("unchecked") Map<String,Object> scenario=(Map<String,Object>)JSON.convertValue(rawScenario,Map.class);
         enforceInlineLoadLimits(scenario);
+        Map<String,Object> sutSnapshot=null;
+        Object rawObservability=scenario.get("observability");
+        if(rawObservability instanceof Map<?,?>) {
+            if(pinnedSutSnapshot!=null) {
+                sutMetrics.authorizeSnapshot(pinnedSutSnapshot,principal,administrator||sutAdminPrincipal(principal));
+                sutSnapshot=pinnedSutSnapshot;
+            } else sutSnapshot=sutMetrics.resolveScenario(JSON.convertValue(rawObservability,Map.class),principal,administrator||sutAdminPrincipal(principal));
+        }
+        else if(rawObservability!=null)throw new IllegalArgumentException("scenario.observability must be an object.");
+        else if(pinnedSutSnapshot!=null)throw new IllegalArgumentException("The retained SUT Metrics snapshot does not match the replayed scenario.");
         AdvancedLoadDraftState draft=new AdvancedLoadDraftState("A"+UUID.randomUUID().toString().replace("-","").toUpperCase(),
                 principal,packageId,environment,(String)rawModel,(String)rawDigest,scenario,((Boolean)rawSensitive).booleanValue(),inspected,
-                clock.instant().plusMillis(DRAFT_TTL_MILLIS), scenarioInput, input.has("templateComposition"), ((Boolean)rawAuthoredSensitive).booleanValue());
+                sutSnapshot,clock.instant().plusMillis(DRAFT_TTL_MILLIS), scenarioInput, input.has("templateComposition"), ((Boolean)rawAuthoredSensitive).booleanValue());
         synchronized(draftLock) {
             expireDrafts();
             checkDraftCapacity(principal);
@@ -2326,6 +2622,7 @@ final class ServerRuntime implements AutoCloseable {
             internal.set("configurationProvenance",JSON.valueToTree(retainedConfiguration(draft.preview)));
             internal.put("packageId",draft.packageId);if(draft.environment!=null)internal.put("environment",draft.environment);
             internal.put("loadModel",draft.model);internal.set("inlineLoadScenario",JSON.valueToTree(draft.scenario));
+            if(draft.sutMetricsSnapshot!=null)internal.set("sutMetricsSnapshot",JSON.valueToTree(draft.sutMetricsSnapshot));
             internal.put("expectedRevisionDigest",draft.revisionDigest);
             applyInspectionPolicy(internal,draft.packageId);
             requireLiveDraft(draft.expiresAt);
@@ -2604,6 +2901,7 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> view=new LinkedHashMap<String,Object>();view.put("draftId",draft.id);view.put("packageId",draft.packageId);
         view.put("configuration",draft.preview.get("configuration"));view.put("environment",draft.environment);view.put("model",draft.model);view.put("revisionDigest",draft.revisionDigest);
         view.put("preview",draft.preview.get("preview"));view.put("previewYaml",draft.preview.get("previewYaml"));
+        if(draft.sutMetricsSnapshot!=null)view.put("sutMetrics",sutMetrics.previewSnapshot(draft.sutMetricsSnapshot));
         view.put("redacted",Boolean.TRUE.equals(draft.preview.get("redacted")));view.put("diagnostics",Collections.emptyList());
         view.put("expiresAt",draft.expiresAt.toString());return view;
     }
@@ -4436,6 +4734,7 @@ final class ServerRuntime implements AutoCloseable {
     private static int number(Map<String,Object> values,String key) {return (int)Math.max(0L,numberLong(values,key));}
     private static long numberLong(Map<String,Object> values,String key) {Object value=values.get(key);return value instanceof Number n?Math.max(0L,n.longValue()):0L;}
     private static Long nullableLong(Map<String,Object> values,String key) {Object value=values.get(key);return value instanceof Number n&&n.longValue()>=0L?n.longValue():null;}
+    private static String nullableText(Object value) {return value instanceof String s?s:null;}
     private static Double nullableDouble(Map<String,Object> values,String key) {Object value=values.get(key);return value instanceof Number n&&Double.isFinite(n.doubleValue())&&n.doubleValue()>=0d?n.doubleValue():null;}
     private static String nullableText(Map<String,Object> values,String key) {Object value=values.get(key);return value instanceof String s?s:null;}
     private static Long multiply(Long value,long factor) {return value==null||value>Long.MAX_VALUE/factor?null:value*factor;}
@@ -4526,6 +4825,10 @@ final class ServerRuntime implements AutoCloseable {
                 j.workerMetrics=worker;
                 store.update(j);
             }
+        }
+        if("load".equals(j.command)) {
+            Instant[] window=loadExecutionWindow(j);
+            sutMetrics.jobFinished(j.id,window[0],window[1],loadExecutionPhaseWindows(j));
         }
     }
     private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}
@@ -4633,6 +4936,301 @@ final class ServerRuntime implements AutoCloseable {
         String availability=report!=null?"READY":reportOmitted?"OMITTED":"NOT_PRESENT";
         return new JobArtifactOverview(state,true,availability,report,nodeInt(value,"approvedArtifactCount"),
                 nodeInt(value,"approvedReportCount"),omitted,complete,List.copyOf(omissions),true);
+    }
+    private Path loadReportV2Root(String id) { return config.dataDir.resolve("jobs").resolve(id).resolve("load-report-publications").resolve("v2"); }
+    private Path loadReportV2CurrentPath(String id) { return loadReportV2Root(id).resolve("current.json"); }
+    private Map<String,Object> readLoadReportV2Pointer(String id) {
+        Path pointer=loadReportV2CurrentPath(id);
+        try {
+            if(!Files.exists(pointer,java.nio.file.LinkOption.NOFOLLOW_LINKS))return Map.of();
+            if(Files.isSymbolicLink(pointer)||!Files.isRegularFile(pointer,java.nio.file.LinkOption.NOFOLLOW_LINKS)||Files.size(pointer)>32768L)
+                throw new IllegalArgumentException();
+            JsonNode value=JSON.readTree(pointer.toFile());
+            if(value==null||!"att-load-report-publication/v2".equals(value.path("schemaVersion").asText())
+                    ||!Set.of("PENDING","BUILDING","READY","FAILED").contains(value.path("state").asText()))throw new IllegalArgumentException();
+            return JSON.convertValue(value,Map.class);
+        } catch(Exception invalid) { return Map.of("schemaVersion","att-load-report-publication/v2","state","FAILED","reason","invalid_metadata"); }
+    }
+    Map<String,Object> loadReportV2Status(String id,String principal,boolean admin) throws Exception {
+        Map<String,Object> job=store.get(id);
+        if(job==null)throw new NotFoundException();
+        requireJobOwner(id,principal);
+        if(!"load".equals(job.get("command")))return null;
+        authorizeLoadReportV2(id,principal,admin);
+        Map<String,Object> pointer=readLoadReportV2Pointer(id);
+        Map<String,Object> snapshot=sutMetrics.snapshotForJob(id);
+        if(snapshot==null)return reportV2Status("DISABLED",null,null,null,null,null);
+        Map<String,Object> collection=sutMetrics.collectionStatus(id);
+        if(pointer.isEmpty())return reportV2Status("PENDING",String.valueOf(collection.get("state")),null,null,null,null);
+        String state=String.valueOf(pointer.getOrDefault("state","FAILED"));
+        if("READY".equals(state)) {
+            try {
+                String currentVerdict=SutMetricsOfflineReportPublisher.verdictRecordSha256(id,config.dataDir.resolve("jobs").resolve(id));
+                if(!java.util.Objects.equals(currentVerdict,nullableText(pointer.get("verdictRecordSha256"))))loadVerdictPublished(id);
+            } catch(Exception invalidVerdict) {
+                java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine("Offline SUT report verdict metadata is unavailable");
+            }
+        }
+        String archiveName=nullableText(pointer.get("archiveName"));
+        if("READY".equals(state)) {
+            if(archiveName==null||!archiveName.matches("[a-f0-9]{64}\\.zip")
+                    ||nullableText(pointer.get("archiveSha256"))==null
+                    ||!nullableText(pointer.get("archiveSha256")).matches("[a-f0-9]{64}"))state="FAILED";
+            else {
+                Path archive=loadReportV2Root(id).resolve("snapshots").resolve(archiveName).normalize();
+                if(!archive.startsWith(loadReportV2Root(id).resolve("snapshots").normalize())
+                        ||Files.isSymbolicLink(archive)||!Files.isRegularFile(archive,java.nio.file.LinkOption.NOFOLLOW_LINKS))state="FAILED";
+            }
+        }
+        Map<String,Object> result=reportV2Status(state,
+                String.valueOf(pointer.getOrDefault("collectionState",collection.get("state"))),
+                nullableText(pointer.get("externalEvaluationStatus")),nullableText(pointer.get("performanceVerdict")),
+                nullableText(pointer.get("publicationId")),nullableText(pointer.get("updatedAt")));
+        if("READY".equals(state))result.put("downloadPath","archive.zip");
+        Object lastAttempt=pointer.get("lastAttemptState");if(lastAttempt!=null)result.put("lastAttemptState",lastAttempt);
+        return result;
+    }
+    private static Map<String,Object> reportV2Status(String state,String collectionState,String evaluationState,
+                                                     String performanceVerdict,String publicationId,String updatedAt) {
+        Map<String,Object> result=new LinkedHashMap<>();result.put("schemaVersion","att-load-report-publication/v2");
+        result.put("state",state);if(collectionState!=null)result.put("collectionState",collectionState);
+        if(evaluationState!=null)result.put("externalEvaluationStatus",evaluationState);
+        if(performanceVerdict!=null)result.put("performanceVerdict",performanceVerdict);
+        if(publicationId!=null)result.put("publicationId",publicationId);if(updatedAt!=null)result.put("updatedAt",updatedAt);
+        return result;
+    }
+    private void authorizeLoadReportV2(String id,String principal,boolean admin) throws Exception {
+        Map<String,Object> row=store.get(id);
+        if(row==null||!"load".equals(row.get("command")))throw new NotFoundException();
+        requireJobOwner(id,principal);
+        Map<String,Object> snapshot=sutMetrics.snapshotForJob(id);
+        if(snapshot!=null)sutMetrics.authorizeSnapshot(snapshot,principal,admin);
+    }
+    ArtifactRead openLoadReportV2Archive(String id,String principal,boolean admin) throws Exception {
+        if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
+        artifactLifecycle.readLock().lock();
+        try {
+            authorizeLoadReportV2(id,principal,admin);
+            if(store.workerQuarantined(id))throw new ArchiveUnavailableException("FAILED");
+            Map<String,Object> pointer=readLoadReportV2Pointer(id);
+            String archiveName=nullableText(pointer.get("archiveName"));
+            String expectedSha256=nullableText(pointer.get("archiveSha256"));
+            if(!"READY".equals(pointer.get("state"))||archiveName==null||!archiveName.matches("[a-f0-9]{64}\\.zip")
+                    ||expectedSha256==null||!expectedSha256.matches("[a-f0-9]{64}"))
+                throw new ArchiveUnavailableException(String.valueOf(pointer.getOrDefault("state","PENDING")));
+            Path archive=loadReportV2Root(id).resolve("snapshots").resolve(archiveName).normalize();
+            if(!archive.startsWith(loadReportV2Root(id).resolve("snapshots").normalize())
+                    ||Files.isSymbolicLink(archive)||!Files.isRegularFile(archive,java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                throw new ArchiveUnavailableException("FAILED");
+            ArtifactDownload download;
+            try {download=ArtifactDownload.open(archive,expectedSha256);}
+            catch(Exception invalid){throw new ArchiveUnavailableException("FAILED");}
+            return new ArtifactRead(archive,null,download);
+        } catch(Exception failure) { artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure; }
+    }
+    /**
+     * Issue #351 must call this immediately after atomically publishing a verdict manifest.
+     * The bounded recovery cursor also compares unresolved verdict digests to recover missed notifications.
+     */
+    void loadVerdictPublished(String id) { refreshLoadReportV2(id); }
+
+    void refreshLoadReportV2(String id) {
+        if(id==null||!JOB_ID.matcher(id).matches()||closing)return;
+        scheduleLoadReportV2(id);
+    }
+
+    private void sutMetricsManifestPublished(Path manifestPath) {
+        try {
+            if(manifestPath==null||!"manifest.json".equals(manifestPath.getFileName().toString()))return;
+            Path metricsDirectory=manifestPath.getParent();if(metricsDirectory==null||!"sut-metrics".equals(metricsDirectory.getFileName().toString()))return;
+            Path jobDirectory=metricsDirectory.getParent();if(jobDirectory==null)return;
+            String id=jobDirectory.getFileName().toString();if(!JOB_ID.matcher(id).matches())return;
+            if(loadReportV2Writers==null){requestedLoadReportV2Jobs.add(id);return;}
+            Map<String,Object> collection=sutMetrics.collectionStatus(id);
+            if(Set.of("READY","PARTIAL","UNAVAILABLE","FAILED").contains(String.valueOf(collection.get("state"))))refreshLoadReportV2(id);
+        } catch(Exception failed) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine("SUT report publication was deferred"); }
+    }
+    private void scheduleLoadReportV2(String id) {
+        if(closing)return;
+        Map<String,Object> pointer=readLoadReportV2Pointer(id);
+        boolean previousAttemptFailed="FAILED".equals(pointer.get("state"))
+                ||("READY".equals(pointer.get("state"))&&"FAILED".equals(pointer.get("lastAttemptState")));
+        if(previousAttemptFailed&&!retryIsDue(pointer,clock.instant())) {
+            synchronized(loadReportV2ScheduleLock) {
+                try { store.deferLoadReportPublicationRetry(id); }
+                catch(Exception ignored) { }
+                requestedLoadReportV2Jobs.remove(id);
+            }
+            return;
+        }
+        synchronized(loadReportV2ScheduleLock) {
+            try { store.markLoadReportPublicationPending(id); }
+            catch(Exception failed) { requestedLoadReportV2Jobs.add(id);return; }
+            if(loadReportV2Writers==null){requestedLoadReportV2Jobs.add(id);return;}
+            if(!pendingLoadReportV2Jobs.add(id)){requestedLoadReportV2Jobs.add(id);return;}
+            requestedLoadReportV2Jobs.remove(id);
+        }
+        try { loadReportV2Writers.execute(()->publishLoadReportV2(id)); }
+        catch(RejectedExecutionException full) {
+            synchronized(loadReportV2ScheduleLock) {
+                pendingLoadReportV2Jobs.remove(id);requestedLoadReportV2Jobs.add(id);
+            }
+        }
+    }
+    private void publishLoadReportV2(String id) {
+        artifactLifecycle.readLock().lock();
+        boolean publicationFailed=false;
+        try {
+            Map<String,Object> job=store.get(id);
+            if(job==null||!"load".equals(job.get("command"))){store.loadReportRecoveryNeeded(id,false);return;}
+            if(!terminal(id)||jobs.containsKey(id))return;
+            if(store.workerQuarantined(id)){store.loadReportRecoveryNeeded(id,false);return;}
+            Map<String,Object> snapshot=sutMetrics.snapshotForJob(id);
+            if(snapshot==null){store.loadReportRecoveryNeeded(id,false);return;}
+            Map<String,Object> collection=sutMetrics.collectionStatus(id);
+            if(!Set.of("READY","PARTIAL","UNAVAILABLE","FAILED").contains(String.valueOf(collection.get("state")))) {
+                store.loadReportRecoveryNeeded(id,false);return;
+            }
+            Path nativeArchive=artifactArchivePath(id);
+            if(!"READY".equals(readArchiveStatus(nativeArchive.resolveSibling("archive-status.json")).path("state").asText())
+                    ||!Files.isRegularFile(nativeArchive,java.nio.file.LinkOption.NOFOLLOW_LINKS)||Files.isSymbolicLink(nativeArchive))return;
+            Map<String,Object> previous=readLoadReportV2Pointer(id);
+            boolean hasPrevious="READY".equals(previous.get("state"))&&previous.get("archiveName") instanceof String;
+            Map<String,Object> building=hasPrevious?copyReportV2State(previous,"READY","BUILDING"):reportV2Status(
+                    "BUILDING",String.valueOf(collection.get("state")),"PENDING",null,null,clock.instant().toString());
+            building.put("retryCount",retryCount(previous));
+            writeLoadReportV2Status(id,building);
+            Path root=loadReportV2Root(id);
+            SutMetricsOfflineReportPublisher.Publication publication=SutMetricsOfflineReportPublisher.publish(
+                    id,job,config.dataDir.resolve("jobs").resolve(id),nativeArchive,root,sutMetrics,artifactPublisher,
+                    ServerRuntime::validateApprovedArtifactBytes);
+            Map<String,Object> pointer=new LinkedHashMap<>();pointer.put("schemaVersion","att-load-report-publication/v2");
+            pointer.put("state","READY");pointer.put("publicationId",publication.publicationId());
+            pointer.put("archiveName",publication.publicationId()+".zip");pointer.put("archiveSha256",publication.archiveSha256());
+            pointer.put("archiveBytes",publication.archiveBytes());pointer.put("manifestSha256",publication.manifestSha256());
+            pointer.put("nativeArchiveSha256",publication.nativeArchiveSha256());pointer.put("collectionState",publication.collectionState());
+            pointer.put("externalEvaluationStatus",publication.externalEvaluationStatus());
+            pointer.put("verdictRecordSha256",publication.verdictRecordSha256());
+            pointer.put("retryCount",0);pointer.remove("nextRetryAt");
+            if(publication.performanceVerdict()!=null)pointer.put("performanceVerdict",publication.performanceVerdict());
+            pointer.put("updatedAt",clock.instant().toString());
+            writeLoadReportV2Status(id,pointer);
+            store.completeLoadReportPublication(id,unresolvedVerdict(publication.externalEvaluationStatus()));
+        } catch(Exception failure) {
+            publicationFailed=true;
+            try {
+                Map<String,Object> prior=readLoadReportV2Pointer(id);
+                int retryCount=Math.min(30,retryCount(prior)+1);
+                Map<String,Object> failed;
+                if("READY".equals(prior.get("state")))failed=copyReportV2State(prior,"READY","FAILED");
+                else failed=reportV2Status("FAILED",null,null,null,null,clock.instant().toString());
+                failed.put("retryCount",retryCount);
+                failed.put("nextRetryAt",clock.instant().plusSeconds(loadReportRetryDelaySeconds(retryCount)).toString());
+                writeLoadReportV2Status(id,failed);
+            } catch(Exception ignored) { }
+            try { store.deferLoadReportPublicationRetry(id); }
+            catch(Exception ignored) { }
+            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Offline SUT report publication failed for Job "+id);
+        } finally {
+            boolean reschedule;
+            synchronized(loadReportV2ScheduleLock) {
+                pendingLoadReportV2Jobs.remove(id);
+                boolean wasRequested=requestedLoadReportV2Jobs.remove(id);
+                reschedule=wasRequested&&!publicationFailed;
+                if(reschedule)try { store.markLoadReportPublicationPending(id); } catch(Exception ignored) { }
+            }
+            artifactLifecycle.readLock().unlock();
+            pruneLoadReportV2Snapshots(id);
+            if(reschedule)scheduleLoadReportV2(id);
+            for(String requested:List.copyOf(requestedLoadReportV2Jobs))scheduleLoadReportV2(requested);
+        }
+    }
+    private static Map<String,Object> copyReportV2State(Map<String,Object> previous,String state,String lastAttemptState) {
+        Map<String,Object> value=new LinkedHashMap<>(previous);value.put("state",state);
+        value.put("lastAttemptState",lastAttemptState);value.put("lastAttemptAt",Instant.now().toString());return value;
+    }
+    private void writeLoadReportV2Status(String id,Map<String,Object> value) throws Exception {
+        Path target=loadReportV2CurrentPath(id);Files.createDirectories(target.getParent());
+        Path temporary=Files.createTempFile(target.getParent(),".report-v2-status-",".tmp");
+        try {
+            byte[] bytes=JSON.writeValueAsBytes(value);if(bytes.length>32768)throw new IllegalArgumentException("Offline report pointer exceeds its size limit.");
+            Files.write(temporary,bytes);
+            try(var channel=java.nio.channels.FileChannel.open(temporary,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
+            Files.move(temporary,target,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } finally {Files.deleteIfExists(temporary);}
+    }
+    synchronized int recoverLoadReportV2() throws Exception {
+        if(closing)return 0;
+        List<String> ids=store.loadReportRecoveryJobIds(loadReportRecoveryCursor,64);
+        if(ids.isEmpty()){loadReportRecoveryCursor="";return 0;}
+        Instant now=clock.instant();
+        for(String id:ids) {
+            loadReportRecoveryCursor=id;
+            Map<String,Object> pointer=Map.of();
+            try {
+                pointer=readLoadReportV2Pointer(id);
+                String state=String.valueOf(pointer.getOrDefault("state","PENDING"));
+                if("READY".equals(state)) {
+                    String currentDigest=SutMetricsOfflineReportPublisher.verdictRecordSha256(id,config.dataDir.resolve("jobs").resolve(id));
+                    String publishedDigest=nullableText(pointer.get("verdictRecordSha256"));
+                    if(!java.util.Objects.equals(currentDigest,publishedDigest)) { refreshLoadReportV2(id); continue; }
+                    if("FAILED".equals(pointer.get("lastAttemptState"))) {
+                        if(retryIsDue(pointer,now))scheduleLoadReportV2(id);
+                        else store.deferLoadReportPublicationRetry(id);
+                    } else store.completeLoadReportPublication(id,
+                            unresolvedVerdict(String.valueOf(pointer.getOrDefault("externalEvaluationStatus","NOT_PROVIDED"))));
+                } else if(!retryIsDue(pointer,now)) {
+                    store.deferLoadReportPublicationRetry(id);
+                    continue;
+                } else scheduleLoadReportV2(id);
+            } catch(Exception ignored) {
+                if(retryIsDue(pointer,now))scheduleLoadReportV2(id);
+                else store.deferLoadReportPublicationRetry(id);
+            }
+        }
+        return ids.size();
+    }
+    private void recoverLoadReportV2Safely() {
+        try { recoverLoadReportV2(); }
+        catch(Exception failed) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine("Offline SUT report recovery cursor will retry"); }
+    }
+    private static boolean unresolvedVerdict(String state) {
+        return Set.of("NOT_PROVIDED","PENDING","EVALUATING").contains(state);
+    }
+    private static int retryCount(Map<String,Object> pointer) {
+        Object value=pointer.get("retryCount");
+        return value instanceof Number number?Math.max(0,Math.min(30,number.intValue())):0;
+    }
+    private static long loadReportRetryDelaySeconds(int retryCount) {
+        int exponent=Math.max(0,Math.min(10,retryCount-1));
+        return Math.min(3600L,5L*(1L<<exponent));
+    }
+    private static boolean retryIsDue(Map<String,Object> pointer,Instant now) {
+        String next=nullableText(pointer.get("nextRetryAt"));
+        if(next==null)return true;
+        try{return !Instant.parse(next).isAfter(now);}catch(RuntimeException invalid){return true;}
+    }
+    private void pruneLoadReportV2Snapshots(String id) {
+        if(!artifactLifecycle.writeLock().tryLock())return;
+        try {
+            Path root=loadReportV2Root(id),snapshots=root.resolve("snapshots");
+            if(!Files.isDirectory(snapshots,java.nio.file.LinkOption.NOFOLLOW_LINKS)||Files.isSymbolicLink(snapshots))return;
+            String current=nullableText(readLoadReportV2Pointer(id).get("archiveName"));
+            List<Path> archives;
+            try(var entries=Files.newDirectoryStream(snapshots,"*.zip")) {
+                archives=new ArrayList<>();for(Path entry:entries)
+                    if(!Files.isSymbolicLink(entry)&&Files.isRegularFile(entry,java.nio.file.LinkOption.NOFOLLOW_LINKS))archives.add(entry);
+            }
+            archives.sort((left,right)->{
+                try {return Files.getLastModifiedTime(right).compareTo(Files.getLastModifiedTime(left));}
+                catch(Exception ignored){return left.getFileName().toString().compareTo(right.getFileName().toString());}
+            });
+            Set<Path> keep=new java.util.HashSet<>();
+            if(current!=null&&current.matches("[a-f0-9]{64}\\.zip"))keep.add(snapshots.resolve(current).normalize());
+            for(Path archive:archives)if(keep.size()<2)keep.add(archive);
+            for(Path archive:archives)if(!keep.contains(archive))try{Files.deleteIfExists(archive);}catch(Exception ignored){}
+        } catch(Exception ignored) { }
+        finally {artifactLifecycle.writeLock().unlock();}
     }
     Map<String,Object> artifactIndex(String id,int offset,int limit) throws Exception {
         if(offset<0||offset>1_000_000||limit<1||limit>100)throw new IllegalArgumentException("Artifact listing pagination is invalid");
@@ -4811,6 +5409,7 @@ final class ServerRuntime implements AutoCloseable {
                 catch(Exception cleanupFailure){metrics.fail("cleanup_failed");metrics.value.outcome="CLEANUP_PENDING";java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact cleanup will be retried for Job "+id);}
                 try {store.audit("SYSTEM","ARTIFACT_PUBLICATION",id,null,"READY");}
                 catch(Exception auditFailure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to audit artifact publication for Job "+id);}
+                scheduleLoadReportV2(id);
             } catch(Exception failure) {
                 boolean policy=failure instanceof IllegalArgumentException;
                 if(metrics!=null&&metrics.value.failurePhase==null)metrics.fail(policy?"policy_limit":"publication_failed");
@@ -5404,10 +6003,12 @@ final class ServerRuntime implements AutoCloseable {
             catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}catch(Exception ignored){}
         }
         // Worker/SSE producers are quiescent before artifact writers and journal compactions drain.
-        artifactWriters.shutdown();terminateExecutor(artifactWriters,"artifact writers");
+        artifactWriters.shutdown();loadReportV2Writers.shutdown();
+        terminateExecutor(artifactWriters,"artifact writers");terminateExecutor(loadReportV2Writers,"LOAD report v2 writers");
         eventNotifications.shutdown();terminateExecutor(eventNotifications,"event notifications");
         eventCompactions.shutdown();terminateExecutor(eventCompactions,"event compactions");
         synchronized(terminalEventCacheLock){terminalEventCache.clear();terminalEventCacheWeight=0L;}
+        sutMetrics.close();
         try {store.close();}catch(Exception failed){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).log(java.util.logging.Level.WARNING,"ATT database cleanup failed",failed);}
     }
     static void terminateExecutor(java.util.concurrent.ExecutorService executor,String name) {
@@ -5539,7 +6140,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     private static final class AdvancedLoadDraftState {
         final String id,principal,packageId,environment,model,revisionDigest;
-        final Map<String,Object> scenario,preview;
+        final Map<String,Object> scenario,preview,sutMetricsSnapshot;
         final boolean containsSensitiveValues,containsSensitiveAuthoredValues,templateComposition;
         final Map<String,Object> authored;
         final Instant expiresAt;
@@ -5547,10 +6148,11 @@ final class ServerRuntime implements AutoCloseable {
         String savedScenarioId,savedScenarioOwner;
         long savedScenarioRevision;
         AdvancedLoadDraftState(String id,String principal,String packageId,String environment,String model,
-                               String revisionDigest,Map<String,Object> scenario,boolean containsSensitiveValues,Map<String,Object> preview,
+                               String revisionDigest,Map<String,Object> scenario,boolean containsSensitiveValues,Map<String,Object> preview,Map<String,Object> sutMetricsSnapshot,
                                Instant expiresAt,Map<String,Object> authored,boolean templateComposition,boolean containsSensitiveAuthoredValues) {
             this.id=id;this.principal=principal;this.packageId=packageId;this.environment=environment;
             this.model=model;this.revisionDigest=revisionDigest;this.scenario=deepMap(scenario);
+            this.sutMetricsSnapshot=sutMetricsSnapshot==null?null:deepMap(sutMetricsSnapshot);
             this.containsSensitiveValues=containsSensitiveValues;this.preview=deepMap(preview);this.expiresAt=expiresAt;
             this.authored=deepMap(authored);this.templateComposition=templateComposition;this.containsSensitiveAuthoredValues=containsSensitiveAuthoredValues;
         }

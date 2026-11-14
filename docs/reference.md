@@ -123,6 +123,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Trace execution identity to an artifact](#trace-execution-identity-to-an-artifact)
   - [Inspect generated-output schemas](#inspect-generated-output-schemas)
   - [Reading `case.log` and `case.yaml`](#reading-caselog-and-caseyaml)
+  - [Offline SUT metrics report](#offline-sut-metrics-report)
 - [Validation and troubleshooting](#validation-and-troubleshooting)
   - [Choose your first diagnostic step](#choose-your-first-diagnostic-step)
   - [Start with validation](#start-with-validation)
@@ -1539,6 +1540,14 @@ For long scenarios, the Engine performs a read-only preflight and records `resou
 Load v1.9 adds event-time windows named `all`, `measured` and `steady`. `measured` starts after ramp-up and warm-up and includes steady and ramp-down; `steady` covers only the configured steady duration. The HTML report opens on `steady` and lets readers select another window. Scheduled, started and completed rates use the timestamp of each event and the configured window duration. `startedRate` therefore remains event-time. `admissionRate` instead uses the same scheduled cohort: arrivals scheduled in the window that start by run finish divided by all arrivals scheduled in that window; arrivals still unstarted at finish count as not admitted. Latency percentiles and outcome counts use the scheduled cohort, so a drained iteration remains attributed to the phase where it was scheduled. Existing top-level metric names remain available; measured aggregates include scheduled STEADY and RAMP_DOWN work only.
 
 Nested `thresholds.steady` and `thresholds.overall` evaluate against the steady and all-execution windows. Top-level measured thresholds use the corrected measured interval, `STEADY + RAMP_DOWN`; ramp-up and warm-up are excluded. An incomplete or unevaluable window returns `NOT_EVALUATED`; it is not a performance pass. Reports show execution status separately from the performance verdict and disclose the percentile sample and observation counts so sparse estimates are visible. Direct Engine/CLI summaries use legacy summary contract (schema under `schemas/history/`); archived reports use the additive `att-load-summary/v1.3` schema with optional detail-manifest and workload-sidecar references.
+
+##### SUT threshold acceptance
+
+A LOAD scenario may define `observability.thresholds` against registered SUT Metrics profiles. Rules currently support a sampled `max <= value` over the actual UTC `STEADY` interval and all bound targets. Every source target is evaluated independently. A value equal to the limit is `MET`; any valid exceedance is `NOT_MET`, even if coverage is otherwise incomplete. Missing, stale, partial, or under-covered samples produce `NOT_EVALUATED` unless a valid exceedance already proves `NOT_MET`. The default minimum coverage is 95 percent.
+
+The Server stores immutable normalized rules in the Job's SUT snapshot and writes post-run outcomes to the separate versioned `att-sut-threshold-evaluation/v1` record. `GET /api/v1/jobs/{id}/result` may include an authorized `performanceAcceptance` object with `executionStatus`, `nativeLoadThresholds`, `sutThresholds`, `externalEvaluationStatus`, and the combined `performanceVerdict`. Per-target evidence includes the actual UTC STEADY window, sampled peak and time, resolution, coverage, and pinned source/profile/target revisions. The Worker terminal result and native thresholds remain unchanged. A pending external evaluation keeps the combined verdict pending; a known native or SUT threshold failure remains `NOT_MET`.
+
+Scenario authoring, the complete rule shape, coverage requirements, and Studio evidence are documented in [Studio Load testing](interfaces/studio/load-testing.md#sut-metrics).
 
 In the summary's `thresholds` object, `status` and `performanceVerdict` are authoritative and use `MET`, `NOT_MET` or `NOT_EVALUATED`. `legacyPassed` is an optional compatibility boolean that retains the previous `passed()` semantics: it is false when configured thresholds are unevaluable and true when no thresholds are configured. Consumers should use the tri-state fields to distinguish incomplete evidence from a missed threshold.
 
@@ -3475,6 +3484,12 @@ Multiline String values nested in structured entries are shown as readable YAML 
 
 ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or INVALID with `【!!!!!】`. Search for that marker to find abnormal blocks; PASS, SKIPPED and informational blocks remain unmarked.
 
+### Offline SUT metrics report
+
+A completed LOAD with SUT collection evidence can publish a separate, versioned offline report archive. The publisher verifies the source manifest and each observation sidecar, preserves the original sealed native archive byte-for-byte, and publishes an immutable snapshot. Its `att-load-report-extension/v2` manifest references the source-neutral `att-load-offline-observations/v1` record, whose `att-load-offline-observation/v1` entries carry source, metric, profile, target, UTC window, phase, units, sample resolution, coverage, gaps, diagnostics, checksums, and bounded chart previews. Full series sidecars retain the normalized `att-sut-metrics-observation/v1` contract. Partial or unavailable source data is reported explicitly and does not change the native Job result.
+
+The report works without network access and uses a restrictive Content Security Policy. It does not evaluate performance thresholds. If a separately versioned `att-load-verdict/v1` record is supplied, the report displays its recorded evaluation state and evidence reference without recalculating the verdict. The archive is available through the authenticated Job download route only after verified publication.
+
 ## Validation and troubleshooting
 
 ### Choose your first diagnostic step
@@ -3661,6 +3676,15 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.2 |
 | Load scenario | att-load/v1.9 |
+| LOAD observability binding | att-load-observability/v1 |
+| SUT Metrics Data Source | att-sut-metrics-source/v1 |
+| SUT Metrics Profile | att-sut-metrics-profile/v1 |
+| SUT Metrics Job snapshot | att-sut-metrics-snapshot/v1 |
+| SUT Metrics collection manifest | att-sut-metrics-manifest/v1 |
+| Embedded SUT Metrics manifest integrity history | att-sut-metrics-manifest-integrity/v1 |
+| SUT Metrics normalized observation | att-sut-metrics-observation/v1 |
+| SUT Metrics series sidecar | att-sut-metrics-series/v1 |
+| SUT Metrics threshold evaluation record | att-sut-threshold-evaluation/v1 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | direct Engine/CLI: legacy summary contract (schema under `schemas/history/`); archived report: att-load-summary/v1.3 |
@@ -3672,6 +3696,8 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | JUnit XML | att-junit/v2.1 |
 
 For the changed resource/configuration schemas, older versions are historical definitions under `schemas/history/`; they are not active execution contracts unless the embedded Engine registry registers and supports them. Unsupported versions fail validation with migration guidance. The repository catalog at `schemas/catalog.yaml` is build input; at runtime, the registry embedded in the matching ATT Engine JAR is authoritative. The Engine parses its Classpath catalog once per JVM and reads schema bytes directly from the JAR. Compiled JSON validators are held in a bounded, in-memory cache keyed by registry digest and schema resource. A verified, content-addressed cache in a private per-user temporary directory remains only as a transitional bridge for Path-based compatibility APIs. It retains the active registry and the immediately previous version for rollback; older entries are deleted only when an exclusive OS lock confirms no Worker is using them, and interrupted cleanup is retried at the next initialization. An incomplete or tampered cache is rebuilt only when no process holds its use lease; otherwise validation fails closed and retries after the active Worker exits. Validation revisions bind Engine and registry identity, Package files, shared config files and selected Environment; Workers verify the registry identity supplied by the Server before handling requests. `ATT_HOME/schemas/` and package-local `schemas/` are not runtime sources and cannot override that registry. Package validation checks the Engine's registered schema resources; it does not enable compatibility for unregistered archived versions.
+
+The [SUT Metrics data source schema](../schemas/att-sut-metrics-source-v1.schema.json) (`att-sut-metrics-source/v1`) is part of the active Engine registry. Offline report metadata and externally supplied verdict records use standalone Server-side contracts under `schemas/api/`; they are not registered Engine execution schemas. See [Offline SUT metrics report](reference/results-reports-evidence.md).
 
 <!-- att-docs:historical -->
 Load v1.6 and MQHelper v1.2 are compatible historical schemas supported by their loaders; their existing scalar routing and legacy evidence policies remain unchanged. New routing/quota fields require the active schema.

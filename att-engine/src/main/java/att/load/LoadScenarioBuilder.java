@@ -12,7 +12,7 @@ public final class LoadScenarioBuilder {
     public static final String MODEL_ARRIVAL_RATE = "arrivalRate";
 
     private static final List<String> POLICY_FIELDS = Arrays.asList(
-            "schemaVersion", "seed", "testdata", "load", "execution", "thresholds", "evidence");
+            "schemaVersion", "seed", "testdata", "load", "execution", "thresholds", "evidence", "observability");
     private static final List<String> VIRTUAL_USER_FIELDS = Arrays.asList(
             "users", "rampUp", "warmup", "duration", "rampDown");
     private static final List<String> ARRIVAL_RATE_FIELDS = Arrays.asList(

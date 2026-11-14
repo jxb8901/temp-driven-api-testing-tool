@@ -58,7 +58,9 @@ public final class PackageConfigurationSnapshots {
             FrameworkConfig parsed=effective?new FrameworkConfigLoader().loadDiscoveryParsed(file,resolver.packageRoot(),environment,raw):null;
             Fingerprint after=fingerprint(resolver,dependencies,effective);
             if(!Arrays.equals(first.digest,after.digest))continue;
-            Snapshot snapshot=new Snapshot(raw,parsed,dependencies,after.digest,after.bytes*16L);
+            // Schema contents participate in revision validation but are not retained by Snapshot.
+            // Charge only package configuration and descriptor bytes against the retained heap budget.
+            Snapshot snapshot=new Snapshot(raw,parsed,dependencies,after.digest,after.retainedBytes*16L);
             if(snapshot.weight<=MAX_RETAINED_WEIGHT) {
                 entries.put(key,snapshot);retainedWeight+=snapshot.weight;
                 while(entries.size()>CAPACITY||retainedWeight>MAX_RETAINED_WEIGHT) {
@@ -123,7 +125,7 @@ public final class PackageConfigurationSnapshots {
             }
         }
         if(paths.size()>MAX_FILES)throw new PackageConfigurationInspector.ConfigurationLimitException("packageConfiguration.maxSnapshotFiles",MAX_FILES,paths.size());
-        MessageDigest digest=MessageDigest.getInstance("SHA-256");long[] bytes={0};
+        MessageDigest digest=MessageDigest.getInstance("SHA-256");long[] bytes={0},retainedBytes={0};
         for(Path path:paths) {
             digest.update(resolver.packageRoot().relativize(path).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
             digest.update((byte)0);
@@ -132,9 +134,9 @@ public final class PackageConfigurationSnapshots {
             resolver.internalCandidate(path);
             boolean present=Files.exists(path,LinkOption.NOFOLLOW_LINKS);
             digest.update((byte)(present?1:0));
-            if(present)digest.update(digestFile(resolver,path,bytes));
+            if(present){long before=bytes[0];digest.update(digestFile(resolver,path,bytes));if(dependencies.contains(path))retainedBytes[0]+=bytes[0]-before;}
         }
-        return new Fingerprint(digest.digest(),bytes[0]);
+        return new Fingerprint(digest.digest(),retainedBytes[0]);
     }
     private byte[] digestFile(PackageResourceResolver resolver,Path path,long[] bytes) throws Exception {
         if(Files.isSymbolicLink(path))throw new IllegalArgumentException("Unsafe configuration dependency");
@@ -152,7 +154,7 @@ public final class PackageConfigurationSnapshots {
         final Map<?,?> raw;final FrameworkConfig config;final Set<Path> dependencies;final byte[] revision;final long weight;
         Snapshot(Map<?,?> raw,FrameworkConfig config,Set<Path> dependencies,byte[] revision,long weight){this.raw=raw;this.config=config;this.dependencies=dependencies;this.revision=revision;this.weight=weight;}
     }
-    private static final class Fingerprint {final byte[] digest;final long bytes;Fingerprint(byte[] digest,long bytes){this.digest=digest;this.bytes=bytes;}}
+    private static final class Fingerprint {final byte[] digest;final long retainedBytes;Fingerprint(byte[] digest,long retainedBytes){this.digest=digest;this.retainedBytes=retainedBytes;}}
     private static final class Key {
         final Path root,config;final String environment;final Object context;final boolean effective,shared;
         Key(Path root,Path config,String environment,Object context,boolean effective,boolean shared){this.shared=shared;this.root=root;this.config=config;this.environment=environment;this.context=context;this.effective=effective;}

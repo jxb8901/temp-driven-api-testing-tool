@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:sut-metrics-series:v1",
+  "title": "ATT SUT Metrics query series sidecar",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "queryId",
+    "profile",
+    "profilePath",
+    "sourceId",
+    "sourceName",
+    "metricId",
+    "title",
+    "category",
+    "targetId",
+    "targetType",
+    "unit",
+    "series"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "att-sut-metrics-series/v1"
+    },
+    "queryId": {
+      "type": "string"
+    },
+    "profile": { "type": "string" },
+    "profilePath": { "type": "string" },
+    "sourceId": { "type": "string" },
+    "sourceName": { "type": "string" },
+    "metricId": {
+      "type": "string"
+    },
+    "title": { "type": "string" },
+    "category": { "type": "string" },
+    "targetId": {
+      "type": "string"
+    },
+    "targetType": { "type": "string" },
+    "unit": {
+      "type": "string"
+    },
+    "series": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "labels",
+          "samples"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "timestamp",
+                "timestampEpochMs",
+                "value"
+              ],
+              "properties": {
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "timestampEpochMs": {
+                  "type": "integer"
+                },
+                "value": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
