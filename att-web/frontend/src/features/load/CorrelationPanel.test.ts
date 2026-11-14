@@ -13,19 +13,46 @@ describe('LOAD and SUT correlation series', () => {
     ]);
 
     expect(points).toEqual([
-      { x: 1500, y: 2, durationMs: 1000, partial: true, cohortSamples: 0 },
-      { x: 2500, y: 3, durationMs: 1000, partial: false, cohortSamples: 0 },
+      { x: 1500, y: 2, durationMs: 1000, partialPhase: true, partialRange: false, cohortSamples: 0 },
+      { x: 2500, y: 3, durationMs: 1000, partialPhase: false, partialRange: false, cohortSamples: 0 },
     ]);
     expect(points).toHaveLength(2);
+  });
+
+  it('uses half-open interval overlap for custom ranges and marks bins clipped by either boundary', () => {
+    const points = selectLoadPoints([
+      { windowStartEpochMs: 0, durationMs: 60_000, completedRate: 2 },
+      { windowStartEpochMs: 60_000, durationMs: 60_000, completedRate: 3 },
+      { windowStartEpochMs: 120_000, durationMs: 60_000, completedRate: 4 },
+    ], { id: 'completedRate', field: 'completedRate', label: 'Completed TPS', unit: 'requests/s' }, 'all', [], 30_000, 90_000);
+
+    expect(points).toEqual([
+      { x: 0, y: 2, durationMs: 60_000, partialPhase: false, partialRange: true, cohortSamples: 0 },
+      { x: 60_000, y: 3, durationMs: 60_000, partialPhase: false, partialRange: true, cohortSamples: 0 },
+    ]);
+    // Retained bin values and durations are unchanged; the display discloses that each bin is partial.
+    expect(points.map(point => [point.y, point.durationMs])).toEqual([[2, 60_000], [3, 60_000]]);
   });
 
   it('uses UTC epoch sample times for phase and range selection', () => {
     const selected = selectSutPoints([
       { timestamp: '1970-01-01T00:00:03.000Z', timestampEpochMs: 3000, value: 40 },
       { timestamp: '1970-01-01T00:00:04.000Z', timestampEpochMs: 4000, value: 50 },
+      { timestamp: '1970-01-01T00:00:04.500Z', timestampEpochMs: 4500, value: 60 },
     ], 'STEADY', [{ phase: 'STEADY', windowStartEpochMs: 3500, windowEndEpochMs: 5000 }], 3500, 4500);
 
     expect(selected).toEqual([{ x: 4000, y: 50 }]);
+  });
+
+  it('returns no samples when the selected phase has no archived boundary', () => {
+    const samples = [
+      { timestamp: '1970-01-01T00:00:03.000Z', timestampEpochMs: 3000, value: 40 },
+      { timestamp: '1970-01-01T00:00:04.000Z', timestampEpochMs: 4000, value: 50 },
+    ];
+    expect(selectSutPoints(samples, 'STEADY', [], 0, 5000)).toEqual([]);
+    expect(selectLoadPoints([
+      { windowStartEpochMs: 2000, durationMs: 1000, completedRate: 2 },
+    ], { id: 'completedRate', field: 'completedRate', label: 'Completed TPS', unit: 'requests/s' }, 'STEADY', [], 0, 5000)).toEqual([]);
   });
 
   it('reports missing intervals and breaks the line at those gaps', () => {

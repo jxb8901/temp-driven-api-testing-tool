@@ -10,7 +10,7 @@ const UTC_TIME = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', year: 'nume
 const UTC_TICK = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
 type PhaseBoundary = { phase: string; windowStartEpochMs: number; windowEndEpochMs: number };
-type Point = { x: number; y: number; durationMs?: number; partial?: boolean; cohortSamples?: number };
+type Point = { x: number; y: number; durationMs?: number; partialPhase?: boolean; partialRange?: boolean; cohortSamples?: number };
 type LoadMetric = { id: string; field: string; label: string; unit: string; percentile?: boolean; rate?: boolean };
 
 const LOAD_METRICS: LoadMetric[] = [
@@ -90,6 +90,8 @@ function phaseOverlap(start: number, end: number, phase: PhaseBoundary): number 
 }
 
 export function selectLoadPoints(points: unknown[], metric: LoadMetric, phase: string, boundaries: PhaseBoundary[], start = Number.NEGATIVE_INFINITY, end = Number.POSITIVE_INFINITY): Point[] {
+  const selectedBoundary = phase === 'all' ? null : boundaries.find(candidate => candidate.phase === phase) || null;
+  if (phase !== 'all' && !selectedBoundary) return [];
   return points.flatMap(value => {
     const item = record(value);
     const x = numeric(item?.windowStartEpochMs);
@@ -97,22 +99,23 @@ export function selectLoadPoints(points: unknown[], metric: LoadMetric, phase: s
     const y = numeric(item?.[metric.field]);
     if (!item || x === null || durationMs === null || durationMs <= 0 || y === null) return [];
     const binEnd = x + durationMs;
-    if (phase !== 'all') {
-      const boundary = boundaries.find(candidate => candidate.phase === phase);
-      if (!boundary || phaseOverlap(x, binEnd, boundary) <= 0) return [];
-    }
-    if (x < start || x > end) return [];
-    const selectedBoundary = phase === 'all' ? null : boundaries.find(candidate => candidate.phase === phase);
-    const partial = Boolean(selectedBoundary && phaseOverlap(x, binEnd, selectedBoundary) > 0 && phaseOverlap(x, binEnd, selectedBoundary) < durationMs);
-    return [{ x, y, durationMs, partial, cohortSamples: numeric(item.latencySampleCount) ?? 0 }];
+    const rangeOverlap = Math.max(0, Math.min(binEnd, end) - Math.max(x, start));
+    if (rangeOverlap <= 0) return [];
+    const phaseOverlapMs = selectedBoundary ? phaseOverlap(x, binEnd, selectedBoundary) : durationMs;
+    if (phaseOverlapMs <= 0) return [];
+    return [{ x, y, durationMs,
+      partialPhase: Boolean(selectedBoundary && phaseOverlapMs < durationMs),
+      partialRange: rangeOverlap < durationMs,
+      cohortSamples: numeric(item.latencySampleCount) ?? 0 }];
   }).sort((left, right) => left.x - right.x);
 }
 
 export function selectSutPoints(samples: SutMetricPoint[], phase: string, boundaries: PhaseBoundary[], start = Number.NEGATIVE_INFINITY, end = Number.POSITIVE_INFINITY): Point[] {
   const selectedPhase = phase === 'all' ? null : boundaries.find(candidate => candidate.phase === phase) || null;
+  if (phase !== 'all' && !selectedPhase) return [];
   return samples.flatMap(sample => {
     const x = timeOf(sample);
-    return Number.isFinite(x) && numeric(sample.value) !== null && x >= start && x <= end
+    return Number.isFinite(x) && numeric(sample.value) !== null && x >= start && x < end
       && (!selectedPhase || (x >= selectedPhase.windowStartEpochMs && x < selectedPhase.windowEndEpochMs))
       ? [{ x, y: sample.value }] : [];
   }).sort((left, right) => left.x - right.x);
@@ -473,7 +476,8 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   const earliestSelectedSutTime = sutPoints.reduce((earliest, point) => Math.min(earliest, point.x), Number.POSITIVE_INFINITY);
   const chartDomain = Number.isFinite(rangeStart) && Number.isFinite(rangeEnd) && rangeStart < rangeEnd
     ? [rangeStart, rangeEnd] as [number, number] : undefined;
-  const partialBins = loadPoints.filter(point => point.partial).length;
+  const partialPhaseBins = loadPoints.filter(point => point.partialPhase).length;
+  const partialRangeBins = loadPoints.filter(point => point.partialRange).length;
   const phaseOptions = [...new Set(boundaries.map(boundary => boundary.phase))];
   const collectionManifest = collection?.collection;
   const collectionWindowStart = collectionManifest?.windowStart;
@@ -588,7 +592,7 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
       {workloadId && !workloadLoading && workloadMetrics && !metricSeriesPoints(workloadMetrics).length && <p role="status">The selected workload archive has no native phase-aligned window points.</p>}
       {loadPoints.length > 0 && sutPoints.length > 0 && selectedQuery && !queryLoading && !customRangeError && <>
         <CorrelationSummary metric={loadMetric} loadPoints={loadPoints} sutPoints={sutPoints} loadResolution={loadResolution} sutResolution={sutResolution}
-          partialBins={partialBins} loadCoverage={loadCoverage} loadCapacity={loadCapacity} sutMetricKind={sutMetricKind} />
+          partialPhaseBins={partialPhaseBins} partialRangeBins={partialRangeBins} loadCoverage={loadCoverage} loadCapacity={loadCapacity} sutMetricKind={sutMetricKind} />
         <CorrelationChart loadPoints={loadPoints} sutPoints={sutPoints} loadMetric={loadMetric} sutUnit={selectedItem?.unit || selectedQuery.unit || 'unit not reported'}
           loadResolution={loadResolution} sutResolution={sutResolution} boundaries={boundaries} domain={chartDomain} />
       </>}
@@ -609,8 +613,8 @@ function metricStepMilliseconds(step?: string): number | null {
   return Number(match[1]) * multiplier[match[2]!]!;
 }
 
-function CorrelationSummary({ metric, loadPoints, sutPoints, loadResolution, sutResolution, partialBins, loadCoverage, loadCapacity, sutMetricKind }: {
-  metric: LoadMetric; loadPoints: Point[]; sutPoints: Point[]; loadResolution: number | null; sutResolution: number | null; partialBins: number;
+function CorrelationSummary({ metric, loadPoints, sutPoints, loadResolution, sutResolution, partialPhaseBins, partialRangeBins, loadCoverage, loadCapacity, sutMetricKind }: {
+  metric: LoadMetric; loadPoints: Point[]; sutPoints: Point[]; loadResolution: number | null; sutResolution: number | null; partialPhaseBins: number; partialRangeBins: number;
   loadCoverage: string; loadCapacity: number | null; sutMetricKind?: string;
 }) {
   const load = observedRange(loadPoints); const sut = observedRange(sutPoints);
@@ -625,7 +629,8 @@ function CorrelationSummary({ metric, loadPoints, sutPoints, loadResolution, sut
     <div><dt>LOAD observed range</dt><dd>Min {NUMBER.format(load!.min)} · {metric.percentile ? `Max ${NUMBER.format(load!.max)} · ${load!.count} scheduled-cohort p95 bins · ${NUMBER.format(cohortSamples)} cohort samples` : `Mean ${NUMBER.format(loadMean!)} · Max ${NUMBER.format(load!.max)}`}</dd></div>
     <div><dt>SUT selected samples</dt><dd>{sutPoints.length} · {sutResolution === null ? 'effective step not reported' : `${NUMBER.format(sutResolution)} ms effective step`} · {sutMissing === null ? 'missing intervals not estimated' : `${sutMissing} estimated interior missing intervals`}</dd></div>
     <div><dt>SUT observed range</dt><dd>Min {NUMBER.format(sut!.min)} · {sutMean === null ? `mean not calculated for ${sutMetricKind || 'unreported metric kind'}` : `observed-sample arithmetic mean ${NUMBER.format(sutMean)}`} · Max {NUMBER.format(sut!.max)}</dd></div>
-    <div><dt>Phase boundary bins</dt><dd>{partialBins} partially overlapping LOAD bins{partialBins ? ' (rate denominator remains the full native bin)' : ''}</dd></div>
+    <div><dt>Phase boundary bins</dt><dd>{partialPhaseBins} partially overlapping LOAD bins</dd></div>
+    <div><dt>Time-range boundary bins</dt><dd>{partialRangeBins} partially overlapping LOAD bins{partialPhaseBins || partialRangeBins ? ' (reported values and rates retain the full native-bin denominator)' : ''}</dd></div>
     <div><dt>Mean method</dt><dd>{metric.percentile ? 'No mean is calculated across p95 bins.' : 'LOAD uses an arithmetic mean of observed points; missing intervals are excluded.'} {metric.rate ? 'Each LOAD rate uses its full native-bin denominator.' : ''} SUT uses the arithmetic mean of observed gauge or rate samples; counters and histograms are not averaged.</dd></div>
   </dl>;
 }
