@@ -378,7 +378,7 @@ class UnifiedTemplateEngineTest {
             ToolInvocationResult result = engine.executeToolAttempt("#{reporter()}", context, log,
                     "business-metric", null, "", false, true);
             assertEquals("42", result.output());
-            assertFalse(result.executionSuccess());
+            assertTrue(result.executionSuccess(), "Tool exit status remains invocation evidence for ordinary Tool calls.");
             assertEquals("ERROR", result.invocation().get("status"));
             assertEquals(1, ((Number) result.invocation().get("exitCode")).intValue());
         }

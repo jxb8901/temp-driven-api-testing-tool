@@ -2770,7 +2770,7 @@ final class ServerRuntime implements AutoCloseable {
                     att.exec.ToolInvocationResult invocation=engine.executeToolAttempt(
                             String.valueOf(query.get("call")),context,log,
                             "SUT_METRIC_"+String.valueOf(query.get("metricId")),null,"",false,true);
-                    if(!invocation.executionSuccess())
+                    if(!businessMetricInvocationSucceeded(invocation))
                         throw new IllegalStateException("The configured Package Tool reported a failed business metric call.");
                     Object result=invocation.output();
                     List<att.core.ValidationResult> finalized=dbHelpers.finishCase(context,log);began=false;
@@ -2790,6 +2790,16 @@ final class ServerRuntime implements AutoCloseable {
                 dbHelpers.closeAll();
             }
         };
+    }
+
+    static boolean businessMetricInvocationSucceeded(att.exec.ToolInvocationResult result) {
+        if (result == null || !result.executionSuccess()) return false;
+        Map<String, Object> details = result.invocation();
+        if (details == null) return true;
+        Object status = details.get("status");
+        if ("ERROR".equalsIgnoreCase(String.valueOf(status)) || "TIMEOUT".equalsIgnoreCase(String.valueOf(status))) return false;
+        Object exitCode = details.get("exitCode");
+        return !(exitCode instanceof Number) || ((Number) exitCode).intValue() == 0;
     }
 
     private static Set<String> workloadIds(Map<String,Object> scenario) {

@@ -1101,6 +1101,15 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void businessMetricRejectsCommandToolErrorEvenWhenOutputIsUsable() {
+        Map<String, Object> invocation = map("status", "ERROR", "exitCode", 1, "output", "42");
+        att.exec.ToolInvocationResult result = new att.exec.ToolInvocationResult("reporter", "metric-1", "42",
+                invocation, true);
+        assertFalse(ServerRuntime.businessMetricInvocationSucceeded(result));
+        assertTrue(ServerRuntime.businessMetricInvocationSucceeded(new att.exec.ToolInvocationResult(
+                "reporter", "metric-2", "42", map("status", "PASS", "exitCode", 0), true)));
+    }
+
     @Test void businessCallThresholdsPersistMetNotMetAndNotEvaluatedResults() throws Exception {
         try (SutMetricsService service = new SutMetricsService(temp.resolve("business-thresholds"))) {
             service.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='select count(*) from orders')}"));
