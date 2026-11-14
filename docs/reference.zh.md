@@ -1541,6 +1541,14 @@ Load v1.9 新增 `all`、`measured`、`steady` 三個 event-time window。`measu
 
 巢狀 `thresholds.steady` 和 `thresholds.overall` 分別對 steady 與 all-execution window 評估。Top-level measured threshold 使用修正後的 measured interval，即 `STEADY + RAMP_DOWN`；ramp-up 和 warm-up 不計入。Window 不完整或無法評估時回報 `NOT_EVALUATED`，不視為 performance pass。Report 會把 execution status 與 performance verdict 分開，並顯示 percentile sample／observation count，讓稀疏估算可被辨識。直接 Engine／CLI summary 使用 legacy summary contract (schema under `schemas/history/`)；archived report 使用新增 `detailManifestPath` 和 workload sidecar references 的 `att-load-summary/v1.3`。
 
+##### SUT threshold acceptance
+
+LOAD scenario 可針對已登記的 SUT Metrics profile 設定 `observability.thresholds`。目前規則支援在實際 UTC `STEADY` interval 內計算 sampled `max <= value`，並套用至所有已綁定 target。每個 source target 都會獨立評估。數值等於上限時為 `MET`；任何有效 sample 超標時，即使 coverage 不完整仍為 `NOT_MET`。缺少、過舊、部分或覆蓋不足的 samples 會回報 `NOT_EVALUATED`，除非有效超標已能證明 `NOT_MET`。最低 coverage 預設為 95%。
+
+Server 會將正規化規則固定在 Job 的 SUT snapshot，並把 post-run 結果寫入獨立版本化 `att-sut-threshold-evaluation/v1` record。`GET /api/v1/jobs/{id}/result` 可在授權後加入 `performanceAcceptance` object，包含 `executionStatus`、`nativeLoadThresholds`、`sutThresholds`、`externalEvaluationStatus` 及 combined `performanceVerdict`。每個 target 的 evidence 會列出實際 UTC STEADY window、sampled peak 和時間、resolution、coverage，以及固定的 source/profile/target revision。Worker terminal result 和 native thresholds 保持不變。External evaluation pending 時，combined verdict 會保持 pending；已知的 native 或 SUT threshold failure 則維持 `NOT_MET`。
+
+Scenario authoring、完整 rule 欄位、coverage 條件及 Studio evidence 見 [Studio Load testing](interfaces/studio/load-testing.zh.md#sut-metrics)。
+
 Summary 的 `thresholds` object 中，`status` 和 `performanceVerdict` 是 authoritative tri-state 欄位，值為 `MET`、`NOT_MET` 或 `NOT_EVALUATED`。Optional `legacyPassed` boolean 維持舊有 `passed()` 語義：已配置但無法評估的 threshold 為 false，未配置 threshold 時為 true。Consumer 應使用 tri-state 欄位，區分 evidence 不完整與 threshold 未達標。
 
 Summary 會將 generator observation 與 SUT outcome 分開。`metrics.generator` 包含 sampled heap used/committed/maximum、觀察到的 peak live threads、GC count/time，以及 JVM 支援時的 process CPU。Sampling 限制為每 100 ms 至多一次，較短暫的 peak 可能錯過。`schedulerWakeups`、`submitLag*` 與 `workerQueueDepth*` 描述 scheduler pressure；arrival drops 與 SUT error 分開。`resources.http` 會按 HTTP helper 報告 active/idle/waiting 與觀察到的 peak connections，並與 DB、MQ、Render pool/plan diagnostics 並列；`resources.resourceMetricSamples` 顯示 rate-limited resource observations 的數量。`resources.executionIds` 顯示 custom execution-ID reservation 數量。Testdata mapping/selection counts 位於 `resources.generator.testdata`；解讀方式和 implementation limits 見 [Load Generator Telemetry](system-design/load-telemetry.zh.md)。
@@ -3542,6 +3550,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | 同一檔案內的 SUT Metrics Manifest 完整性歷程 | att-sut-metrics-manifest-integrity/v1 |
 | SUT Metrics normalized observation | att-sut-metrics-observation/v1 |
 | SUT Metrics series sidecar | att-sut-metrics-series/v1 |
+| SUT Metrics threshold evaluation record | att-sut-threshold-evaluation/v1 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | 直接 Engine／CLI：legacy summary contract (schema under `schemas/history/`)；封存報告：att-load-summary/v1.3 |

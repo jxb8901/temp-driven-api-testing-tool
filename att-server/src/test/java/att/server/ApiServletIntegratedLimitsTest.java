@@ -295,6 +295,137 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void loadResultRouteReturnsNativeAndSutCombinedPerformanceVerdict() throws Exception {
+        Path packages = Files.createDirectories(temp.resolve("sut-threshold-result-packages"));
+        createPackage(packages.resolve("p"));
+        String jobId = "J0000000000000731";
+        try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.1);
+             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-threshold-result-data",
+                     DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-threshold-result-libs"), true)) {
+            Map<String, Object> snapshot = twoTargetThresholdSnapshot(runtime, fixture, true);
+            seedLoadJob(runtime, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
+
+            Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(30);
+            runtime.sutMetrics.jobFinished(jobId, startedAt, finishedAt,
+                    List.of(Map.of("phase", "STEADY", "startAt", startedAt.plusSeconds(10).toString(),
+                            "endAt", finishedAt.toString(), "measured", true)));
+            awaitThresholdEvaluation(runtime, jobId);
+
+            Captured response = invokeAs(servlet(runtime), "GET", "/jobs/" + jobId + "/result",
+                    Collections.emptyMap(), new byte[0], "alice", Set.of(runtime.config.authorization.userRole));
+            JsonNode acceptance = ServerRuntime.JSON.readTree(response.body()).path("performanceAcceptance");
+            assertEquals(200, response.status, response.bodyText());
+            assertEquals("MET", acceptance.path("nativePerformanceVerdict").asText());
+            assertEquals("NOT_MET", acceptance.path("sutThresholds").path("status").asText());
+            assertEquals("NOT_MET", acceptance.path("performanceVerdict").asText());
+            JsonNode sutTargets = acceptance.path("sutThresholds").path("items").path(0).path("targets");
+            assertEquals("NOT_MET", sutTargets.get(0).path("status").asText());
+            assertEquals("sut-a", sutTargets.get(0).path("target").path("id").asText());
+            assertEquals("MET", sutTargets.get(1).path("status").asText());
+            assertEquals("sut-b", sutTargets.get(1).path("target").path("id").asText());
+        }
+    }
+
+    @Test void loadResultRouteKeepsAProvenViolationWhenAnotherTargetHasNoEvidence() throws Exception {
+        Path packages = Files.createDirectories(temp.resolve("sut-threshold-missing-result-packages"));
+        createPackage(packages.resolve("p"));
+        String jobId = "J0000000000000732";
+        try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.1, "sut-b");
+             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-threshold-missing-result-data",
+                     DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-threshold-missing-result-libs"), true)) {
+            Map<String, Object> snapshot = twoTargetThresholdSnapshot(runtime, fixture, true);
+            seedLoadJob(runtime, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
+            Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(30);
+            runtime.sutMetrics.jobFinished(jobId, startedAt, finishedAt,
+                    List.of(Map.of("phase", "STEADY", "startAt", startedAt.plusSeconds(10).toString(),
+                            "endAt", finishedAt.toString(), "measured", true)));
+            awaitThresholdEvaluation(runtime, jobId);
+
+            Captured response = invokeAs(servlet(runtime), "GET", "/jobs/" + jobId + "/result",
+                    Collections.emptyMap(), new byte[0], "alice", Set.of(runtime.config.authorization.userRole));
+            JsonNode acceptance = ServerRuntime.JSON.readTree(response.body()).path("performanceAcceptance");
+            assertEquals(200, response.status, response.bodyText());
+            assertEquals("MET", acceptance.path("nativePerformanceVerdict").asText());
+            assertEquals("NOT_MET", acceptance.path("sutThresholds").path("status").asText());
+            assertEquals("NOT_MET", acceptance.path("performanceVerdict").asText());
+            JsonNode targets = acceptance.path("sutThresholds").path("items").path(0).path("targets");
+            assertTargetStatus(targets, "sut-a", "NOT_MET");
+            assertTargetStatus(targets, "sut-b", "NOT_EVALUATED");
+        }
+    }
+
+    @Test void loadResultRouteDoesNotLetAnOptionalSutFailureOverrideNativeMet() throws Exception {
+        Path packages = Files.createDirectories(temp.resolve("sut-threshold-optional-result-packages"));
+        createPackage(packages.resolve("p"));
+        String jobId = "J0000000000000733";
+        try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.1);
+             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-threshold-optional-result-data",
+                     DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-threshold-optional-result-libs"), true)) {
+            Map<String, Object> snapshot = twoTargetThresholdSnapshot(runtime, fixture, false);
+            seedLoadJob(runtime, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
+            Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(30);
+            runtime.sutMetrics.jobFinished(jobId, startedAt, finishedAt,
+                    List.of(Map.of("phase", "STEADY", "startAt", startedAt.plusSeconds(10).toString(),
+                            "endAt", finishedAt.toString(), "measured", true)));
+            awaitThresholdEvaluation(runtime, jobId);
+
+            Captured response = invokeAs(servlet(runtime), "GET", "/jobs/" + jobId + "/result",
+                    Collections.emptyMap(), new byte[0], "alice", Set.of(runtime.config.authorization.userRole));
+            JsonNode acceptance = ServerRuntime.JSON.readTree(response.body()).path("performanceAcceptance");
+            assertEquals(200, response.status, response.bodyText());
+            assertEquals("MET", acceptance.path("nativePerformanceVerdict").asText());
+            assertEquals("MET", acceptance.path("sutThresholds").path("status").asText());
+            assertEquals("MET", acceptance.path("performanceVerdict").asText());
+            JsonNode rule = acceptance.path("sutThresholds").path("items").path(0);
+            assertFalse(rule.path("required").asBoolean());
+            assertEquals("NOT_MET", rule.path("status").asText());
+        }
+    }
+
+    @Test void loadResultRouteResumesPendingEvaluationAfterRestart() throws Exception {
+        Path packages = Files.createDirectories(temp.resolve("sut-threshold-restart-result-packages"));
+        createPackage(packages.resolve("p"));
+        Path runtimeConfig = sharedRuntimeConfig();
+        Path libs = workerLibraries("sut-threshold-restart-result-libs");
+        String dataName = "sut-threshold-restart-result-data";
+        String jobId = "J0000000000000734";
+        Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(30);
+        try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.0)) {
+            ServerRuntime first = runtime(packages, runtimeConfig, dataName, DEFAULT_INSPECTION_TIMEOUT_MS, null, libs, true);
+            CountDownLatch releaseEvaluators = null;
+            try {
+                Map<String, Object> snapshot = twoTargetThresholdSnapshot(first, fixture, true);
+                seedLoadJob(first, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
+                releaseEvaluators = blockThresholdEvaluators(first);
+                first.sutMetrics.jobFinished(jobId, startedAt, finishedAt,
+                        List.of(Map.of("phase", "STEADY", "startAt", startedAt.plusSeconds(10).toString(),
+                                "endAt", finishedAt.toString(), "measured", true)));
+                awaitCollectionState(first, jobId, "READY");
+                awaitEvaluationState(first, jobId, "EVALUATING");
+
+                Captured pendingResponse = invokeAs(servlet(first), "GET", "/jobs/" + jobId + "/result",
+                        Collections.emptyMap(), new byte[0], "alice", Set.of(first.config.authorization.userRole));
+                JsonNode pendingAcceptance = ServerRuntime.JSON.readTree(pendingResponse.body()).path("performanceAcceptance");
+                assertEquals(200, pendingResponse.status, pendingResponse.bodyText());
+                assertEquals("EVALUATING", pendingAcceptance.path("externalEvaluationStatus").asText());
+                assertEquals("PENDING", pendingAcceptance.path("performanceVerdict").asText());
+            } finally {
+                first.close();
+                if (releaseEvaluators != null) releaseEvaluators.countDown();
+            }
+
+            try (ServerRuntime recovered = runtime(packages, runtimeConfig, dataName, DEFAULT_INSPECTION_TIMEOUT_MS, null, libs, true)) {
+                assertEquals("MET", awaitThresholdEvaluation(recovered, jobId).get("state"));
+                Captured finalResponse = invokeAs(servlet(recovered), "GET", "/jobs/" + jobId + "/result",
+                        Collections.emptyMap(), new byte[0], "alice", Set.of(recovered.config.authorization.userRole));
+                JsonNode finalAcceptance = ServerRuntime.JSON.readTree(finalResponse.body()).path("performanceAcceptance");
+                assertEquals(200, finalResponse.status, finalResponse.bodyText());
+                assertEquals("MET", finalAcceptance.path("externalEvaluationStatus").asText());
+                assertEquals("MET", finalAcceptance.path("performanceVerdict").asText());
+            }
+        }
+    }
+
     @Test void sutMetricsLiveRouteUsesPinnedTenantAndReturnsBoundedTimeoutAndResponseFailures() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("sut-metrics-live-api-packages"));
         createPackage(packages.resolve("p"));
@@ -432,12 +563,106 @@ class ApiServletIntegratedLimitsTest {
     }
 
     private void seedLoadJob(ServerRuntime runtime,String id,String owner,Map<String,Object> snapshot) throws Exception {
+        seedLoadJob(runtime, id, owner, snapshot, "{}");
+    }
+
+    private void seedLoadJob(ServerRuntime runtime,String id,String owner,Map<String,Object> snapshot,String resultJson) throws Exception {
         Path jobDir=runtime.config.dataDir.resolve("jobs").resolve(id);
         Files.createDirectories(jobDir.resolve("output"));
         Job job=new Job(id,"load","p",owner,new WorkerRequest(),new JobEvents(jobDir.resolve("events.jsonl"),100));
         job.status="PASS";job.exitCode=0;job.finishedAt=Instant.now();
-        runtime.store.insert(job,"{}");
+        runtime.store.insert(job,resultJson);
+        job.resultJson=resultJson;
+        runtime.store.update(job);
         runtime.sutMetrics.writeSnapshot(id,snapshot);
+    }
+
+    private Map<String, Object> twoTargetThresholdSnapshot(ServerRuntime runtime, ApiPrometheusFixture fixture, boolean required) throws Exception {
+        runtime.sutMetrics.upsertSource(Map.of("schemaVersion", "att-sut-metrics-source/v1", "id", "prom", "name", "Prometheus",
+                "url", fixture.url(), "readers", List.of("alice"), "readRoles", List.of()));
+        runtime.sutMetrics.upsertProfile(Map.of("schemaVersion", "att-sut-metrics-profile/v1", "id", "base", "name", "Base profile",
+                "kind", "base", "category", "app", "params", Map.of("instance", Map.of("type", "promLabelValue", "default", "sut-a")),
+                "parameters", Map.of("instance", "sut-a"), "overridableParams", List.of("instance"),
+                "metrics", List.of(Map.of("id", "cpu", "title", "CPU", "unit", "percent",
+                        "kind", "gauge", "query", "up{instance=\"{{instance}}\"}"))));
+        Map<String, Object> scenario = Map.of("schemaVersion", "att-load-observability/v1",
+                "collections", List.of(Map.of("id", "primary", "profile", "base", "source", "prom",
+                        "targets", List.of(
+                                Map.of("id", "sut-a", "type", "app", "parameters", Map.of("instance", "sut-a")),
+                                Map.of("id", "sut-b", "type", "app", "parameters", Map.of("instance", "sut-b"))))),
+                "collection", Map.of("mode", "post-run", "step", "15s", "before", "1m", "after", "1m"),
+                "thresholds", List.of(Map.of("id", "cpu-max-90", "profile", "primary", "metric", "cpu", "max", 90.0,
+                        "unit", "percent", "minimumCoverage", 0.95, "required", required)),
+                "livePreview", Map.of("enabled", true));
+        return runtime.sutMetrics.resolveScenario(scenario, "alice", false);
+    }
+
+    private String nativeLoadResult(String jobId, String verdict) throws Exception {
+        return ServerRuntime.JSON.writeValueAsString(Map.of("executionId", jobId, "status", "PASS", "exitCode", 0,
+                "summary", Map.of("executionStatus", "PASS", "performanceVerdict", verdict,
+                        "thresholds", Map.of("total", 1, "performanceVerdict", verdict, "results", List.of()))));
+    }
+
+    private void assertTargetStatus(JsonNode targets, String targetId, String expectedStatus) {
+        for (JsonNode target : targets) {
+            if (targetId.equals(target.path("target").path("id").asText())) {
+                assertEquals(expectedStatus, target.path("status").asText(), target.toString());
+                return;
+            }
+        }
+        fail("Missing SUT threshold result for target " + targetId + ": " + targets);
+    }
+
+    private CountDownLatch blockThresholdEvaluators(ServerRuntime runtime) throws Exception {
+        Field field = SutMetricsService.class.getDeclaredField("evaluators");
+        field.setAccessible(true);
+        ExecutorService evaluators = (ExecutorService) field.get(runtime.sutMetrics);
+        CountDownLatch started = new CountDownLatch(2), release = new CountDownLatch(1);
+        for (int index = 0; index < 2; index++) evaluators.execute(() -> {
+            started.countDown();
+            try { release.await(); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        });
+        if (!started.await(5, TimeUnit.SECONDS)) {
+            release.countDown();
+            fail("Threshold evaluation workers did not start in time.");
+        }
+        return release;
+    }
+
+    private Map<String, Object> awaitCollectionState(ServerRuntime runtime, String jobId, String expectedState) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        do {
+            Map<String, Object> manifest = runtime.sutMetrics.collectionStatus(jobId);
+            if (expectedState.equals(manifest.get("state"))) return manifest;
+            if (Set.of("FAILED", "UNAVAILABLE").contains(manifest.get("state")))
+                fail("Collection ended before the expected state: " + manifest);
+            Thread.sleep(10);
+        } while (System.nanoTime() < deadline);
+        fail("SUT Metrics collection did not reach " + expectedState + " before the test deadline.");
+        return Map.of();
+    }
+
+    private Map<String, Object> awaitEvaluationState(ServerRuntime runtime, String jobId, String expectedState) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        do {
+            Map<String, Object> evaluation = runtime.sutMetrics.thresholdEvaluationStatus(jobId);
+            if (expectedState.equals(evaluation.get("state"))) return evaluation;
+            Thread.sleep(10);
+        } while (System.nanoTime() < deadline);
+        fail("SUT threshold evaluation did not reach " + expectedState + " before the test deadline.");
+        return Map.of();
+    }
+
+    private Map<String,Object> awaitThresholdEvaluation(ServerRuntime runtime,String jobId) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+        do {
+            Map<String,Object> evaluation=runtime.sutMetrics.thresholdEvaluationStatus(jobId);
+            if(Set.of("MET","NOT_MET","NOT_EVALUATED","ERROR").contains(evaluation.get("state")))return evaluation;
+            Thread.sleep(10);
+        } while(System.nanoTime()<deadline);
+        fail("SUT threshold evaluation did not finish before the test deadline.");
+        return Map.of();
     }
 
     private void seedRunningLoadJob(ServerRuntime runtime,String id,String owner,Map<String,Object> snapshot) throws Exception {
@@ -736,8 +961,19 @@ class ApiServletIntegratedLimitsTest {
         private final ExecutorService executor=Executors.newCachedThreadPool();
         private final long delayMs;
         private final int responseBytes;
+        private final Double rangeValue;
+        private final String unavailableInstance;
         ApiPrometheusFixture(long delayMs,int responseBytes) throws Exception {
-            this.delayMs=delayMs;this.responseBytes=responseBytes;
+            this(delayMs,responseBytes,null,null);
+        }
+        ApiPrometheusFixture(long delayMs,int responseBytes,double rangeValue) throws Exception {
+            this(delayMs,responseBytes,Double.valueOf(rangeValue),null);
+        }
+        ApiPrometheusFixture(long delayMs,int responseBytes,double rangeValue,String unavailableInstance) throws Exception {
+            this(delayMs,responseBytes,Double.valueOf(rangeValue),unavailableInstance);
+        }
+        private ApiPrometheusFixture(long delayMs,int responseBytes,Double rangeValue,String unavailableInstance) throws Exception {
+            this.delayMs=delayMs;this.responseBytes=responseBytes;this.rangeValue=rangeValue;this.unavailableInstance=unavailableInstance;
             server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);server.setExecutor(executor);
             server.createContext("/api/v1/query_range",this::respond);server.start();
         }
@@ -751,13 +987,37 @@ class ApiServletIntegratedLimitsTest {
             try {
                 if(delayMs>0)Thread.sleep(delayMs);
                 long timestamp=Instant.now().getEpochSecond()-1;
-                byte[] body=responseBytes>0?new byte[responseBytes]:
-                        ("{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{\"instance\":\"sut-1\"},\"values\":[["
-                                +timestamp+",\"1.0\"]]}]}}").getBytes(StandardCharsets.UTF_8);
+                String queryText=queryParameter(raw,"query");
+                if(unavailableInstance!=null&&queryText.contains(unavailableInstance)) {
+                    exchange.sendResponseHeaders(503,-1);
+                    return;
+                }
+                byte[] body;
+                if(responseBytes>0)body=new byte[responseBytes];
+                else if(rangeValue!=null) {
+                    String startText=queryParameter(raw,"start"),endText=queryParameter(raw,"end"),stepText=queryParameter(raw,"step");
+                    long start=Instant.parse(startText).getEpochSecond(),end=Instant.parse(endText).getEpochSecond();
+                    long step=Long.parseLong(stepText.substring(0,stepText.length()-1));
+                    String instance=queryText.contains("sut-a")?"sut-a":"sut-b";
+                    double value="sut-a".equals(instance)?rangeValue:90.0;
+                    StringBuilder values=new StringBuilder();
+                    for(long at=start;at<=end;at+=step) {
+                        if(values.length()>0)values.append(',');
+                        values.append('[').append(at).append(",\"").append(value).append("\"]");
+                    }
+                    body=("{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{\"instance\":\""+instance+"\"},\"values\":["
+                            +values+"]}]}}").getBytes(StandardCharsets.UTF_8);
+                } else body=("{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{\"instance\":\"sut-1\"},\"values\":[["
+                        +timestamp+",\"1.0\"]]}]}}").getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type","application/json");exchange.sendResponseHeaders(200,body.length);
                 exchange.getResponseBody().write(body);
             } catch(Exception ignored) { }
             finally {exchange.close();}
+        }
+        private static String queryParameter(String raw,String name) {
+            return java.util.Arrays.stream(raw.split("&")).filter(part->part.startsWith(name+"="))
+                    .map(part->java.net.URLDecoder.decode(part.substring(name.length()+1),StandardCharsets.UTF_8))
+                    .findFirst().orElseThrow();
         }
         @Override public void close(){server.stop(0);executor.shutdownNow();}
     }

@@ -85,6 +85,58 @@ function parseObjectJson(raw: string, label: string): JsonObject {
   return value as JsonObject;
 }
 
+type SutThresholdBindingChoice = {
+  alias: string;
+  profileId: string;
+  label: string;
+  metrics: Record<string, unknown>[];
+};
+
+function sutThresholdBindingChoices(profiles: Array<Record<string, unknown>>, raw: string): SutThresholdBindingChoice[] {
+  let observability: Record<string, unknown>;
+  try { observability = parseObjectJson(raw || '{}', 'SUT Metrics observability'); }
+  catch { return []; }
+  const profileById = new Map(profiles.map(profile => [String(profile.id), profile]));
+  const aliases = new Set<string>();
+  const duplicateAliases = new Set<string>();
+  const choices: SutThresholdBindingChoice[] = [];
+  const collections = Array.isArray(observability.collections) ? observability.collections : [];
+  for (const value of collections) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const binding = value as Record<string, unknown>;
+    const profileId = typeof binding.profile === 'string' ? binding.profile : '';
+    const profile = profileById.get(profileId);
+    if (!profile) continue;
+    const alias = typeof binding.id === 'string' ? binding.id : profileId;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(alias)) continue;
+    if (aliases.has(alias)) {
+      duplicateAliases.add(alias);
+      continue;
+    }
+    if (profile.kind === 'base') {
+      const targets = Array.isArray(binding.targets) ? binding.targets : [];
+      if (typeof binding.source !== 'string' || !binding.source || !targets.length
+        || !targets.every(target => typeof (target as Record<string, unknown> | null)?.id === 'string'
+          && typeof (target as Record<string, unknown> | null)?.type === 'string')) continue;
+    } else if (profile.kind !== 'composite' || !Array.isArray(profile.includes) || !profile.includes.length) continue;
+    const metricProfiles = profile.kind === 'base'
+      ? [profile]
+      : (profile.includes as Array<Record<string, unknown>>).map(include => profileById.get(String(include.profile))).filter(Boolean) as Array<Record<string, unknown>>;
+    const candidates = metricProfiles.flatMap(metricProfile => {
+      const rows = Array.isArray(metricProfile.metricCatalog) ? metricProfile.metricCatalog
+        : Array.isArray(metricProfile.metrics) ? metricProfile.metrics : [];
+      return rows.filter((metric): metric is Record<string, unknown> => Boolean(metric && typeof metric === 'object' && !Array.isArray(metric)));
+    });
+    const counts = new Map<string, number>();
+    for (const metric of candidates) if (typeof metric.id === 'string') counts.set(metric.id, (counts.get(metric.id) || 0) + 1);
+    const metrics = candidates.filter(metric => typeof metric.id === 'string' && counts.get(metric.id) === 1);
+    if (!metrics.length) continue;
+    aliases.add(alias);
+    choices.push({ alias, profileId, label: `${String(profile.name || profileId)} · ${alias}`, metrics });
+  }
+  return choices.filter(choice => !duplicateAliases.has(choice.alias));
+}
+
 function parseThinkTime(value: ThinkTime): string | { min: string; max: string } | undefined {
   if (typeof value === 'string') return value.trim() || undefined;
   const min = value.min.trim();
@@ -434,7 +486,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
             thresholds: JSON.stringify(asObject(nextPolicy.thresholds), null, 2),
             evidence: JSON.stringify(asObject(nextPolicy.evidence), null, 2),
             seed: nextPolicy.seed == null ? '' : String(nextPolicy.seed),
-            observability: '{}',
+            observability: JSON.stringify(asObject(nextPolicy.observability), null, 2),
           });
         }
       })
@@ -652,14 +704,12 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   }
   function addSutThresholdRule() {
     setSutThresholdEditorError('');
-    const profile = sutMetricsProfiles.find(item => String(item.id) === sutThresholdProfile);
-    const metrics = Array.isArray(profile?.metricCatalog) ? profile.metricCatalog
-      : Array.isArray(profile?.metrics) ? profile.metrics : [];
-    const metric = metrics.find(value => value && typeof value === 'object' && String((value as Record<string, unknown>).id) === sutThresholdMetric) as Record<string, unknown> | undefined;
+    const bindingChoice = thresholdBindings.find(item => item.alias === sutThresholdProfile);
+    const metric = bindingChoice?.metrics.find(value => String(value.id) === sutThresholdMetric);
     const maximumText = sutThresholdMaximum.trim();
     const maximum = maximumText ? Number(maximumText) : Number.NaN;
-    if (!profile || !metric || !Number.isFinite(maximum)) {
-      setSutThresholdEditorError('Choose a registered base profile and metric, then enter a finite maximum.');
+    if (!bindingChoice || !metric || !Number.isFinite(maximum)) {
+      setSutThresholdEditorError('Choose a complete resolved profile binding and metric, then enter a finite maximum.');
       return;
     }
     try {
@@ -667,25 +717,21 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       const collections = Array.isArray(observability.collections)
         ? observability.collections.filter(value => value && typeof value === 'object' && !Array.isArray(value)).map(value => ({ ...(value as Record<string, unknown>) }))
         : [];
-      let binding = collections.find(value => value.profile === profile.id);
-      if (!binding) {
-        binding = { id: profile.id, profile: profile.id };
-        collections.push(binding);
-      }
-      const bindingAlias = typeof binding.id === 'string' ? binding.id : String(binding.profile);
+      const bindingExists = collections.some(value => (typeof value.id === 'string' ? value.id : String(value.profile)) === bindingChoice.alias
+        && String(value.profile) === bindingChoice.profileId);
+      if (!bindingExists) throw new Error('The selected binding is no longer present in the observability configuration.');
       const rules = Array.isArray(observability.thresholds)
         ? observability.thresholds.filter(value => value && typeof value === 'object' && !Array.isArray(value)).map(value => ({ ...(value as Record<string, unknown>) }))
         : [];
-      const stem = `sut-${String(profile.id)}-${String(metric.id)}`.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80);
+      const stem = `sut-${bindingChoice.alias}-${String(metric.id)}`.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80);
       let id = stem, suffix = 2;
       while (rules.some(rule => rule.id === id)) {
         const ending = `-${suffix++}`;
         id = `${stem.slice(0, 80 - ending.length)}${ending}`;
       }
-      rules.push({ id, profile: bindingAlias, metric: metric.id, max: maximum, unit: metric.unit,
+      rules.push({ id, profile: bindingChoice.alias, metric: metric.id, max: maximum, unit: metric.unit,
         window: 'steady', targets: 'all', minimumCoverage: 0.95, onInsufficientData: 'NOT_EVALUATED', required: true });
       observability.schemaVersion = 'att-load-observability/v1';
-      observability.collections = collections;
       observability.thresholds = rules;
       updateAdvanced('observability', JSON.stringify(observability, null, 2));
     } catch (failure) {
@@ -698,10 +744,9 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
 
   const preview = draft?.previewYaml || (draft?.preview ? JSON.stringify(draft.preview, null, 2) : '');
   const hasLiveDraft = Boolean(draft && Date.parse(draft.expiresAt) > Date.now());
-  const thresholdProfiles = sutMetricsProfiles.filter(profile => Array.isArray(profile.metricCatalog) || Array.isArray(profile.metrics));
-  const selectedThresholdProfile = thresholdProfiles.find(profile => String(profile.id) === sutThresholdProfile);
-  const selectedThresholdMetrics = Array.isArray(selectedThresholdProfile?.metricCatalog) ? selectedThresholdProfile.metricCatalog
-    : Array.isArray(selectedThresholdProfile?.metrics) ? selectedThresholdProfile.metrics : [];
+  const thresholdBindings = sutThresholdBindingChoices(sutMetricsProfiles, advanced.observability);
+  const selectedThresholdBinding = thresholdBindings.find(binding => binding.alias === sutThresholdProfile);
+  const selectedThresholdMetrics = selectedThresholdBinding?.metrics || [];
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter'
@@ -841,25 +886,26 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
             <JsonArrayField label="Package-relative Testdata paths" value={advanced.testdata} onChange={value => updateAdvanced('testdata', value)} />
             <JsonObjectField label="SUT Metrics observability binding (att-load-observability/v1)" value={advanced.observability} onChange={value => updateAdvanced('observability', value)} />
           </div>
-          {thresholdProfiles.length > 0 && <fieldset className="att-sut-threshold-editor">
+          {sutMetricsProfiles.length > 0 && <fieldset className="att-sut-threshold-editor">
             <legend>Add a SUT maximum rule</legend>
-            <div className="att-load-grid">
-              <label>Base Metrics Profile<select value={sutThresholdProfile} onChange={event => {
+            {thresholdBindings.length === 0 ? <p className="att-help">Add a complete source and target binding for a registered profile in the observability JSON above before creating a rule. Composite profile bindings can use their distinct metrics here.</p> : <>
+              <div className="att-load-grid">
+              <label>Resolved Metrics Binding<select value={sutThresholdProfile} onChange={event => {
                 const next = event.target.value; setSutThresholdProfile(next);
-                const profile = thresholdProfiles.find(item => String(item.id) === next);
-                const rows = Array.isArray(profile?.metricCatalog) ? profile.metricCatalog : Array.isArray(profile?.metrics) ? profile.metrics : [];
+                const rows = thresholdBindings.find(item => item.alias === next)?.metrics || [];
                 setSutThresholdMetric(rows.length && rows[0] && typeof rows[0] === 'object' ? String((rows[0] as Record<string, unknown>).id || '') : '');
-              }}><option value="">Choose profile</option>{thresholdProfiles.map(profile => <option key={String(profile.id)} value={String(profile.id)}>{String(profile.name || profile.id)}</option>)}</select></label>
-              <label>Metric<select value={sutThresholdMetric} onChange={event => setSutThresholdMetric(event.target.value)} disabled={!selectedThresholdProfile}>
+              }}><option value="">Choose binding</option>{thresholdBindings.map(binding => <option key={binding.alias} value={binding.alias}>{binding.label}</option>)}</select></label>
+              <label>Metric<select value={sutThresholdMetric} onChange={event => setSutThresholdMetric(event.target.value)} disabled={!selectedThresholdBinding}>
                 <option value="">Choose metric</option>{selectedThresholdMetrics.map(value => {
                   const metric = value && typeof value === 'object' ? value as Record<string, unknown> : {};
                   return <option key={String(metric.id)} value={String(metric.id)}>{String(metric.title || metric.id)} · {String(metric.unit || '')}</option>;
                 })}
               </select></label>
               <label>Maximum value<input type="number" step="any" value={sutThresholdMaximum} onChange={event => setSutThresholdMaximum(event.target.value)} /></label>
-            </div>
-            <p className="att-help">Adds a required maximum ≤ rule over actual STEADY samples for every bound target. The default minimum coverage is 95%; finish the profile source and target binding in the JSON above.</p>
-            <button type="button" onClick={addSutThresholdRule} disabled={!sutThresholdProfile || !sutThresholdMetric}>Add maximum rule</button>
+              </div>
+              <p className="att-help">Adds a required maximum ≤ rule for the selected resolved binding over actual STEADY samples. The default minimum coverage is 95%.</p>
+              <button type="button" onClick={addSutThresholdRule} disabled={!sutThresholdProfile || !sutThresholdMetric}>Add maximum rule</button>
+            </>}
             {sutThresholdEditorError && <p role="alert" className="att-inline-error">{sutThresholdEditorError}</p>}
           </fieldset>}
           <p className="att-help">Bind only registered Metrics Profile IDs. Prometheus URLs and credentials are configured by a Server administrator and cannot be submitted in a scenario.</p>

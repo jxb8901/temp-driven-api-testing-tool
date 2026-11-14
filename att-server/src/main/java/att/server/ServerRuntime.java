@@ -1387,7 +1387,8 @@ final class ServerRuntime implements AutoCloseable {
 
     Map<String,Object> sutPerformanceAcceptance(String id,String principal,boolean admin,JsonNode result) throws Exception {
         Map<String,Object> row=store.get(id);
-        if(row==null||!"load".equals(row.get("command")))throw new NotFoundException();
+        if(row==null)throw new NotFoundException();
+        if(!"load".equals(row.get("command")))return null;
         Map<String,Object> snapshot=sutMetrics.snapshotForJob(id);
         List<Map<String,Object>> rules=snapshot==null?List.of():sutMaps(snapshot.get("thresholds"));
         if(snapshot==null||rules.isEmpty())return null;

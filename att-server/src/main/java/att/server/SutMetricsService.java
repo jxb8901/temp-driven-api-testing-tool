@@ -8,6 +8,7 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
@@ -327,12 +328,15 @@ final class SutMetricsService implements AutoCloseable {
             if (!ID.matcher(id).matches() || !ids.add(id)) throw new IllegalArgumentException("SUT threshold ids must be valid and unique.");
             String metricId = requiredText(rule, "metric");
             String selectedProfile = nullableText(rule.get("profile"));
+            boolean selectedBindingAlias = selectedProfile != null && queries.stream()
+                    .anyMatch(query -> selectedProfile.equals(query.get("bindingId")));
             List<Map<String, Object>> matches = new ArrayList<>();
             for (Map<String, Object> query : queries) {
                 if (!metricId.equals(query.get("metricId"))) continue;
-                if (selectedProfile != null && !selectedProfile.equals(query.get("bindingId"))
-                        && !selectedProfile.equals(query.get("profilePath"))
-                        && !selectedProfile.equals(query.get("profile"))) continue;
+                if (selectedProfile != null && (selectedBindingAlias
+                        ? !selectedProfile.equals(query.get("bindingId"))
+                        : !selectedProfile.equals(query.get("profilePath"))
+                        && !selectedProfile.equals(query.get("profile")))) continue;
                 matches.add(query);
             }
             if (matches.isEmpty()) throw new IllegalArgumentException("SUT threshold " + id + " refers to an unknown profile or metric.");
@@ -346,7 +350,7 @@ final class SutMetricsService implements AutoCloseable {
                 bindingAliases.add(String.valueOf(query.get("bindingId")));
                 queryIds.add(String.valueOf(query.get("id")));
             }
-            if (profilePaths.size() > 1)
+            if (profilePaths.size() > 1 || bindingAliases.size() > 1 && !selectedBindingAlias)
                 throw new IllegalArgumentException("SUT threshold " + id + " is ambiguous; select an effective profile binding or profile path.");
             if (kinds.size() != 1 || !Set.of("gauge", "rate").contains(kinds.iterator().next()))
                 throw new IllegalArgumentException("SUT threshold " + id + " supports sampled gauge and rate metrics only.");
@@ -436,7 +440,7 @@ final class SutMetricsService implements AutoCloseable {
             writeThresholdEvaluation(jobId, snapshot, fields("state", "PENDING", "complete", Boolean.FALSE,
                     "attempt", 0, "createdAt", now.toString(), "updatedAt", now.toString(),
                     "collectionState", "PENDING", "effectiveRules", snapshot.get("thresholds"),
-                    "sutThresholds", null, "diagnostics", List.of()));
+                    "diagnostics", List.of()));
         }
     }
 
@@ -503,7 +507,7 @@ final class SutMetricsService implements AutoCloseable {
         return record;
     }
 
-    private void writeThresholdEvaluation(String jobId, Map<String, Object> snapshot, Map<String, Object> update) throws Exception {
+    void writeThresholdEvaluation(String jobId, Map<String, Object> snapshot, Map<String, Object> update) throws Exception {
         SnapshotEnvelope envelope = snapshotEnvelope(jobId);
         if (envelope == null || !String.valueOf(snapshot.get("snapshotId")).equals(envelope.snapshot().get("snapshotId")))
             throw new IllegalStateException("The SUT threshold evaluation does not match its immutable Job snapshot.");
@@ -515,6 +519,7 @@ final class SutMetricsService implements AutoCloseable {
         record.put("effectiveRules", snapshot.get("thresholds"));
         record.putIfAbsent("createdAt", Instant.now().toString());
         record.put("updatedAt", Instant.now().toString());
+        if (record.get("sutThresholds") == null) record.remove("sutThresholds");
         validateThresholdEvaluation(record, jobId, envelope);
         Path directory = jobMetricsDirectory(jobId);
         Files.createDirectories(directory);
@@ -627,14 +632,29 @@ final class SutMetricsService implements AutoCloseable {
                                         Map<String, Object> collection, int attempt) {
         boolean retry = false;
         try {
+            long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(MAX_THRESHOLD_EVALUATION_MILLIS);
             List<Map<String, Object>> queries = listOfMaps(snapshot.get("queries"));
+            Set<String> thresholdQueryIds = new LinkedHashSet<>();
+            for (Map<String, Object> rule : listOfMaps(snapshot.get("thresholds")))
+                thresholdQueryIds.addAll(listOfStrings(rule.get("queryIds")));
             Map<String, Map<String, Object>> observations = new LinkedHashMap<>();
+            long selectedBytes = 0L;
             for (Map<String, Object> entry : listOfMaps(collection.get("files"))) {
-                Map<String, Object> observation = readSeriesFile(jobId, entry);
-                observations.put(String.valueOf(entry.get("queryId")), observation);
+                String queryId = String.valueOf(entry.get("queryId"));
+                if (!thresholdQueryIds.contains(queryId)) continue;
+                SutThresholdEvaluator.checkDeadline(deadline);
+                long fileBytes = entry.get("lengthBytes") instanceof Number length ? length.longValue() : -1L;
+                if (fileBytes < 0 || fileBytes > MAX_JOB_COLLECTION_BYTES - selectedBytes) continue;
+                selectedBytes += fileBytes;
+                try {
+                    observations.put(queryId, readSeriesFile(jobId, entry, deadline));
+                } catch (SutThresholdEvaluator.EvaluationTimeoutException timeout) {
+                    throw timeout;
+                } catch (Exception unavailable) {
+                    // Missing or corrupt evidence makes this subject unevaluable; other valid subjects still count.
+                }
             }
             long step = durationSeconds(String.valueOf(collection.get("step")), "step");
-            long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(MAX_THRESHOLD_EVALUATION_MILLIS);
             Map<String, Object> result = SutThresholdEvaluator.evaluate(listOfMaps(snapshot.get("thresholds")), queries,
                     observations, listOfMaps(collection.get("phaseWindows")), step, deadline);
             String state = String.valueOf(result.get("status"));
@@ -671,11 +691,11 @@ final class SutMetricsService implements AutoCloseable {
         } catch (Exception ignored) { }
     }
 
-    private Map<String, Object> evaluationError(Map<String, Object> snapshot, String collectionState,
-                                               String code, String message, int attempt) {
+    Map<String, Object> evaluationError(Map<String, Object> snapshot, String collectionState,
+                                        String code, String message, int attempt) {
         boolean finalAttempt = attempt >= 2;
         return fields("state", finalAttempt ? "ERROR" : "PENDING", "complete", finalAttempt, "attempt", Math.min(2, attempt),
-                "collectionState", collectionState, "evaluatedAt", Instant.now().toString(), "sutThresholds", null,
+                "collectionState", collectionState, "evaluatedAt", Instant.now().toString(),
                 "diagnostics", List.of(fields("code", code, "message", message == null ? "Evaluation failed." : message.substring(0, Math.min(240, message.length())))));
     }
 
@@ -1480,7 +1500,9 @@ final class SutMetricsService implements AutoCloseable {
             if ("enum".equals(type) && allowed.isEmpty()) throw new IllegalArgumentException("enum profile parameters require allowedValues.");
             Object defaultValue = definition.get("default"); if (defaultValue != null) defaultValue = validateTyped(type, defaultValue);
             if (defaultValue != null && !allowed.isEmpty() && !allowed.contains(defaultValue)) throw new IllegalArgumentException("Parameter default is outside allowedValues.");
-            out.put(entry.getKey(), fields("type", type, "required", bool(definition.get("required")), "default", defaultValue, "allowedValues", allowed));
+            Map<String, Object> normalized = fields("type", type, "required", bool(definition.get("required")), "default", defaultValue);
+            if (!allowed.isEmpty()) normalized.put("allowedValues", allowed);
+            out.put(entry.getKey(), normalized);
         }
         return out;
     }
@@ -1652,6 +1674,20 @@ final class SutMetricsService implements AutoCloseable {
         return false;
     }
 
+    private static void normalizeStoredEmptyAllowedValues(Map<String, Object> profile) {
+        Map<String, Object> definitions = objectOrEmpty(profile.get("params"));
+        for (Map.Entry<String, Object> entry : definitions.entrySet()) {
+            if (!(entry.getValue() instanceof Map<?, ?> rawDefinition)) continue;
+            Map<String, Object> definition = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> field : rawDefinition.entrySet())
+                if (field.getKey() instanceof String name) definition.put(name, field.getValue());
+            if (definition.get("allowedValues") instanceof List<?> values && values.isEmpty())
+                definition.remove("allowedValues");
+            definitions.put(entry.getKey(), definition);
+        }
+        profile.put("params", definitions);
+    }
+
     private void loadCatalog() throws Exception {
         synchronized (catalogLock) {
             if (!Files.exists(catalogPath, LinkOption.NOFOLLOW_LINKS)) return;
@@ -1674,6 +1710,7 @@ final class SutMetricsService implements AutoCloseable {
             sources = loadedSources;
             for (JsonNode item : root.path("profiles")) {
                 Map<String, Object> value = json.convertValue(item, Map.class);
+                normalizeStoredEmptyAllowedValues(value);
                 if (loadedProfiles.putIfAbsent(String.valueOf(value.get("id")), value) != null)
                     throw new IllegalArgumentException("SUT Metrics catalog contains a duplicate Metrics Profile id.");
             }
@@ -1906,14 +1943,23 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private Map<String, Object> readSeriesFile(String jobId, Map<String, Object> entry) throws Exception {
+        return readSeriesFile(jobId, entry, Long.MAX_VALUE);
+    }
+
+    private Map<String, Object> readSeriesFile(String jobId, Map<String, Object> entry, long deadline) throws Exception {
+        SutThresholdEvaluator.checkDeadline(deadline);
         String relative = String.valueOf(entry.get("path"));
         if (!relative.matches("series-[0-9]{4}\\.json")) throw new IllegalArgumentException("Unsafe SUT Metrics sidecar path.");
         Path root = jobMetricsDirectory(jobId).toRealPath(), file = root.resolve(relative).normalize();
         if (!file.startsWith(root) || Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
-                || Files.size(file) != ((Number) entry.get("lengthBytes")).longValue() || !sha256(file).equals(entry.get("sha256")))
+                || Files.size(file) != ((Number) entry.get("lengthBytes")).longValue())
             throw new IllegalStateException("SUT Metrics companion sidecar failed integrity verification.");
         if (Files.size(file) > MAX_SERIES_FILE_BYTES) throw new IllegalStateException("SUT Metrics companion sidecar exceeds its read limit.");
-        return json.readValue(file.toFile(), Map.class);
+        if (!sha256(file, deadline).equals(entry.get("sha256")))
+            throw new IllegalStateException("SUT Metrics companion sidecar failed integrity verification.");
+        try (InputStream input = new DeadlineInputStream(Files.newInputStream(file), deadline)) {
+            return json.readValue(input, Map.class);
+        }
     }
 
     private Path jobMetricsDirectory(String jobId) {
@@ -2175,6 +2221,7 @@ final class SutMetricsService implements AutoCloseable {
         } finally { Files.deleteIfExists(temporary); }
     }
     private static String sha256(Path path) throws Exception { try (InputStream input = Files.newInputStream(path)) { MessageDigest digest = MessageDigest.getInstance("SHA-256"); byte[] buffer = new byte[8192]; int read; while ((read = input.read(buffer)) >= 0) if (read > 0) digest.update(buffer, 0, read); return hex(digest.digest()); } }
+    private static String sha256(Path path, long deadline) throws Exception { try (InputStream input = new DeadlineInputStream(Files.newInputStream(path), deadline)) { MessageDigest digest = MessageDigest.getInstance("SHA-256"); byte[] buffer = new byte[8192]; int read; while ((read = input.read(buffer)) >= 0) if (read > 0) digest.update(buffer, 0, read); return hex(digest.digest()); } }
     private static String sha256(byte[] bytes) { try { return hex(MessageDigest.getInstance("SHA-256").digest(bytes)); } catch (Exception impossible) { throw new IllegalStateException(impossible); } }
     private String sha256Json(Object value) {
         try { return sha256(json.writeValueAsBytes(value)); }
@@ -2187,6 +2234,18 @@ final class SutMetricsService implements AutoCloseable {
     @Override public void close() { collectionScheduler.shutdownNow(); collectors.shutdownNow(); evaluators.shutdownNow(); previews.shutdownNow(); bodyReaders.shutdownNow(); scheduledCollections.clear(); evaluatingJobs.clear(); previewFlights.clear(); previewCache.clear(); clients.clear(); }
     static final class CapacityException extends RuntimeException { CapacityException(String message) { super(message); } }
     static final class SutMetricsTimeoutException extends RuntimeException { SutMetricsTimeoutException(String message) { super(message); } }
+    private static final class DeadlineInputStream extends FilterInputStream {
+        private final long deadlineNanos;
+        DeadlineInputStream(InputStream input, long deadlineNanos) { super(input); this.deadlineNanos = deadlineNanos; }
+        @Override public int read() throws java.io.IOException {
+            SutThresholdEvaluator.checkDeadline(deadlineNanos);
+            return super.read();
+        }
+        @Override public int read(byte[] buffer, int offset, int length) throws java.io.IOException {
+            SutThresholdEvaluator.checkDeadline(deadlineNanos);
+            return super.read(buffer, offset, length);
+        }
+    }
     private static final class ManifestWriteLock {
         final ReentrantLock lock = new ReentrantLock();
         int users;

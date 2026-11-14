@@ -199,6 +199,7 @@ final class SutThresholdEvaluator {
         long originMillis = ceilEpochSecond(queryStart) * 1000L;
         long startMillis = ceilEpochMillis(start);
         long endMillis = end.toEpochMilli();
+        // Prometheus query_range places samples on a step-aligned grid from queryStart.
         long firstIndex = -Math.floorDiv(-(startMillis - originMillis), stepMillis);
         long firstSample = originMillis + firstIndex * stepMillis;
         return firstSample > endMillis ? 0L : Math.floorDiv(endMillis - firstSample, stepMillis) + 1L;
@@ -219,7 +220,7 @@ final class SutThresholdEvaluator {
         catch (NumberFormatException invalid) { return 0L; }
     }
 
-    private static void checkDeadline(long deadlineNanos) {
+    static void checkDeadline(long deadlineNanos) {
         if (Thread.currentThread().isInterrupted() || System.nanoTime() > deadlineNanos) throw new EvaluationTimeoutException();
     }
 

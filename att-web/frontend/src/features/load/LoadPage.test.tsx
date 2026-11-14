@@ -55,8 +55,19 @@ async function click(element: Element) {
 describe('LoadPage React feature', () => {
   it('adds a profile-bound steady maximum rule from the SUT threshold editor', async () => {
     const api = makeApi();
-    api.listSutMetricProfiles = vi.fn(async () => ({ items: [{ id: 'profile-os', name: 'OS metrics', kind: 'base',
-      metricCatalog: [{ id: 'cpu', title: 'CPU utilization', unit: 'percent', kind: 'gauge' }] }] }));
+    api.getLoadPolicy = vi.fn(async () => ({
+      model: 'virtualUsers' as const,
+      policy: { schemaVersion: 'att-load/v1.6', load: { warmup: '5s', rampUp: '10s', duration: '30s', rampDown: '5s' },
+        observability: { schemaVersion: 'att-load-observability/v1', collections: [
+          { id: 'payments-preset', profile: 'preset-os' },
+        ] } },
+      redacted: true,
+    }));
+    api.listSutMetricProfiles = vi.fn(async () => ({ items: [
+      { id: 'profile-os', name: 'OS metrics', kind: 'base',
+        metricCatalog: [{ id: 'cpu', title: 'CPU utilization', unit: 'percent', kind: 'gauge' }] },
+      { id: 'preset-os', name: 'Platform preset', kind: 'composite', includes: [{ profile: 'profile-os', alias: 'host' }] },
+    ] }));
     await act(async () => root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>vi.fn())} as never}><LoadPage
       api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="" environments={['SIT']} inlineLoadEnabled
       onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}
@@ -64,8 +75,8 @@ describe('LoadPage React feature', () => {
     await flush();
     const advanced = [...host.querySelectorAll('details')].find(item => item.querySelector('summary')?.textContent?.includes('Advanced scenario settings'))!;
     advanced.open = true;
-    const profile = [...host.querySelectorAll('label')].find(label => label.textContent?.includes('Base Metrics Profile'))?.querySelector('select') as HTMLSelectElement;
-    await act(async () => { profile.value = 'profile-os'; profile.dispatchEvent(new Event('change', { bubbles: true })); });
+    const profile = [...host.querySelectorAll('label')].find(label => label.textContent?.includes('Resolved Metrics Binding'))?.querySelector('select') as HTMLSelectElement;
+    await act(async () => { profile.value = 'payments-preset'; profile.dispatchEvent(new Event('change', { bubbles: true })); });
     await flush();
     const thresholdEditor = host.querySelector('.att-sut-threshold-editor')!;
     const maximum = thresholdEditor.querySelector('input[type="number"]') as HTMLInputElement;
@@ -79,11 +90,18 @@ describe('LoadPage React feature', () => {
     await flush();
     await click(addRule);
     await flush();
-    const editor = [...host.querySelectorAll('.att-json-field')].find(item => item.textContent?.includes('SUT Metrics observability binding'))?.querySelector('.cm-content');
+    const observabilityField = () => [...host.querySelectorAll('.att-json-field')]
+      .find(item => item.querySelector(':scope > span')?.textContent?.startsWith('SUT Metrics observability binding'));
+    await vi.waitFor(() => expect(observabilityField()?.querySelector('.cm-content')).not.toBeNull());
+    const editor = observabilityField()?.querySelector('.cm-content');
     expect(editor?.textContent).toContain('cpu');
+    expect(editor?.textContent).toContain('payments-preset');
     expect(editor?.textContent).toContain('minimumCoverage');
     expect(editor?.textContent).toContain('0.95');
     expect(editor?.textContent).toContain('NOT_EVALUATED');
+    const observability = JSON.parse(editor?.textContent || '{}');
+    expect(observability.collections).toEqual([{ id: 'payments-preset', profile: 'preset-os' }]);
+    expect(observability.thresholds[0].profile).toBe('payments-preset');
   });
 
   it('inherits retained root pacing defaults and leaves unavailable workload values empty', () => {
