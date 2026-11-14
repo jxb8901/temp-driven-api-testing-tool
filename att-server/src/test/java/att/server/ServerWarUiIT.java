@@ -228,6 +228,26 @@ class ServerWarUiIT {
             assertEquals("cold",validateDispatch,"Public Validate must retain its durable cold one-shot semantics");
             assertFalse(Files.exists(pkg.resolve("tools/started")),"Public Validate must not invoke package Tools");
             if(prewarm)assertEquals(validateLease,awaitPrewarmedPids(runtime).get(0),"Validate must leave the READY RUN/DEBUG Worker untouched");
+            assertEquals("att-validation-records/v1",getJson(port,api+"/version",auth).path("validationRecordsApiVersion").asText());
+            JsonNode asyncAccepted=apiJsonResponse(port,"POST",api+"/validations",auth,origin,
+                    Map.of("command","validate","targetKind","template","packageId","parity","target","PARITY"),202);
+            String validationId=asyncAccepted.path("validationId").asText();
+            long validationDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);JsonNode validationRecord;
+            do {
+                validationRecord=getJson(port,api+"/validations/"+validationId,auth);
+                if(!List.of("QUEUED","RUNNING").contains(validationRecord.path("status").asText()))break;
+                Thread.sleep(25);
+            } while(System.nanoTime()<validationDeadline);
+            assertEquals("COMPLETED",validationRecord.path("status").asText(),validationRecord.toString());
+            assertEquals("PASS",validationRecord.path("overallStatus").asText(),validationRecord.toString());
+            assertEquals("att-validation/v1",validationRecord.path("report").path("schemaVersion").asText());
+            JsonNode validationList=getJson(port,api+"/validations?limit=100",auth);
+            assertTrue(java.util.stream.StreamSupport.stream(validationList.path("items").spliterator(),false)
+                    .anyMatch(item->validationId.equals(item.path("validationId").asText())));
+            assertFalse(java.util.stream.StreamSupport.stream(validationList.path("items").spliterator(),false)
+                    .anyMatch(item->item.has("report")),
+                    "List responses must leave potentially large reports on the record endpoint");
+            if(prewarm)assertEquals(validateLease,awaitPrewarmedPids(runtime).get(0),"Validation records must leave the READY RUN/DEBUG Worker untouched");
             return new PackagedWarModeCapture(run,debug,failedRun,failedDebug,cancelledRun,cancelledDebug,timedOutRun,timedOutDebug);
         } finally {try{tomcat.stop();}finally{tomcat.destroy();}}
     }

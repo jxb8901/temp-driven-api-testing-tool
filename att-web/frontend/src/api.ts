@@ -20,7 +20,7 @@ import type {
   SchedulePreviewInput,
 } from './features/schedules/types';
 import { normalizeSchedule, scheduleTransport } from './features/schedules/types';
-import type { ValidationReportData, ValidationRequest } from './features/validation/types';
+import type { ValidationRecord, ValidationRecordPage, ValidationReportData, ValidationRequest } from './features/validation/types';
 
 export interface ServerJobStorageMetrics {
   enabled?: boolean;
@@ -311,6 +311,20 @@ export const api = {
   async validateResource(input: ValidationRequest, signal?: AbortSignal): Promise<ValidationReportData> {
     const report = await postJson<unknown>('validation', { command: 'validate', ...input }, signal);
     return requireValidationReport(report);
+  },
+  submitValidation(input: ValidationRequest): Promise<ValidationRecord> {
+    return postJson<ValidationRecord>('validations', { command: 'validate', ...input });
+  },
+  async getValidationRecord(validationId: string, signal?: AbortSignal): Promise<ValidationRecord> {
+    const record = await request<ValidationRecord>('validations/' + encodeURIComponent(validationId), { signal });
+    if (record.report) record.report = requireValidationReport(record.report);
+    return record;
+  },
+  listValidationRecords(input: { packageId?: string; scope?: string; limit?: number; cursor?: string } = {}, signal?: AbortSignal): Promise<ValidationRecordPage> {
+    return request('validations' + queryString({ packageId: input.packageId, scope: input.scope, limit: input.limit, cursor: input.cursor }), { signal });
+  },
+  cancelValidation(validationId: string): Promise<ValidationRecord> {
+    return postJson<ValidationRecord>('validations/' + encodeURIComponent(validationId) + '/cancel', {});
   },
   getJobs(signal?: AbortSignal): Promise<ApiEnvelope<JobSummary>> {
     return request<ApiEnvelope<JobSummary>>('jobs', { signal });

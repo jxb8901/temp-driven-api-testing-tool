@@ -10,6 +10,7 @@ import { contextRelativeReturnTo } from './contextPaths';
 import { applyUiLocale, clearStoredUiLocalePreference, detectUiLocale, readUiLocale, readStoredUiLocalePreference, readUiLocalePreference, saveUiLocalePreference, type UiLocale, type UiLocalePreference } from './uiLocale';
 import { ChangePasswordDialog } from './ChangePasswordDialog';
 import type { LocalAuthUser } from './types';
+import type { ValidationRecord } from './features/validation/types';
 import { JobConsoleProvider } from './features/load/JobConsoleProvider';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
@@ -292,6 +293,7 @@ export function AppShell({
   const [authContextKey,setAuthContextKey]=useState('');
   const [canRevealConfigurationFields, setCanRevealConfigurationFields] = useState(false);
   const [accessCapabilities, setAccessCapabilities] = useState<AccessCapabilities>({ operate: false, accountManage: false, systemSettingsWrite: false, configurationAdmin: false });
+  const [activeValidationRecord, setActiveValidationRecord] = useState<ValidationRecord | null>(null);
   const [capabilitiesResolved, setCapabilitiesResolved] = useState(false);
   const inspectionSessionEpoch = useSyncExternalStore(inspectionCache.subscribeSession, () => inspectionCache.sessionEpoch);
   useLayoutEffect(() => { inspectionCache.select(selectedPackage, selectedEnvironment); }, [selectedPackage, selectedEnvironment]);
@@ -318,6 +320,25 @@ export function AppShell({
   const versionStatus = serverVersion.status === 'ready' ? 'Connected'
     : serverVersion.status === 'error' ? 'Unavailable' : 'Connecting…';
   const versionData = serverVersion.status === 'ready' ? serverVersion.data : null;
+  useEffect(() => {
+    setActiveValidationRecord(null);
+    if (!accessCapabilities.operate || versionData?.validationRecordsApiVersion !== 'att-validation-records/v1') {
+      return;
+    }
+    let active = true;
+    const refresh = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const page = await api.listValidationRecords({ limit: 100 });
+        if (active) setActiveValidationRecord(page.items.find(item => item.status === 'QUEUED' || item.status === 'RUNNING') || page.items[0] || null);
+      } catch { /* The shell keeps the last visible state while the API is temporarily unavailable. */ }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5000);
+    const onVisibility = () => { if (document.visibilityState === 'visible') void refresh(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility); };
+  }, [accessCapabilities.operate, authContextKey, versionData?.validationRecordsApiVersion]);
   const applyThemePreference = (preference: ThemePreference) => {
     setThemePreference(preference);
     setTheme(preference==='system'?(window.matchMedia?.('(prefers-color-scheme: dark)').matches?'dark':'light'):preference);
@@ -617,6 +638,12 @@ export function AppShell({
             <a className="nav-link" href="#/validate?scope=config" data-nav="validation" aria-current={activeNav === 'validation' ? 'page' : undefined} onClick={link('#/validate?scope=config')}>
               <span className="nav-icon" aria-hidden="true">✓</span><span className="nav-label">{uiLocale === 'zh-Hant' ? '驗證' : 'Validate'}</span>
             </a>
+            {activeValidationRecord && <a className="nav-link att-validation-running-link" href={formatRoute({ kind: 'validation', validationId: activeValidationRecord.validationId })}
+              onClick={link(formatRoute({ kind: 'validation', validationId: activeValidationRecord.validationId }))}>
+              <span className="nav-icon" aria-hidden="true">◷</span><span className="nav-label">{uiLocale === 'zh-Hant'
+                ? `${activeValidationRecord.status === 'QUEUED' ? '驗證排隊中' : activeValidationRecord.status === 'RUNNING' ? '驗證執行中' : '最近驗證'} · ${activeValidationRecord.packageId || 'Runtime'}`
+                : `${activeValidationRecord.status === 'QUEUED' ? 'Validation queued' : activeValidationRecord.status === 'RUNNING' ? 'Validation running' : 'Recent validation'} · ${activeValidationRecord.packageId || 'Runtime'}`}</span>
+            </a>}
             <a className="nav-link" href={loadHref} data-nav="load-testing" aria-current={activeNav === 'load-testing' ? 'page' : undefined} onClick={link(loadHref)}>
               <span className="nav-icon" aria-hidden="true">⌁</span><span className="nav-label">Load testing</span>
             </a>

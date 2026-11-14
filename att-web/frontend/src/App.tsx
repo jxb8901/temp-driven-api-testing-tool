@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState } 
 import { api } from './api';
 import { AppShell, useAppShellContext } from './AppShell';
 import { DashboardPage } from './DashboardPage';
-import { formatRoute, useNavigationGuard, useRouteState, type AppRoute, type ResourceRoute, type ValidationRouteState, type ValidationScope } from './router';
+import { formatRoute, useNavigationGuard, useRouteState, type AppRoute, type ValidationRouteState, type ValidationScope } from './router';
 import { appReducer, initialAppState, latestServerJobWindow, serverCapabilities } from './state';
 import { RunPage } from './features/run/RunPage';
 // explorer.css stays eager: TypedSidecarForm and ConfigurationExplorer use it
@@ -14,6 +14,7 @@ const LoadPage = lazy(() => import('./features/load/LoadPage').then(module => ({
 const JobsPage = lazy(() => import('./features/load/JobsPage').then(module => ({ default: module.JobsPage })));
 const MonitoringPage = lazy(() => import('./features/monitoring/MonitoringPage').then(module => ({ default: module.MonitoringPage })));
 const ValidationWorkspacePage = lazy(() => import('./features/validation/ValidationWorkspacePage').then(module => ({ default: module.ValidationWorkspacePage })));
+const ValidationPanel = lazy(() => import('./features/validation/ValidationPanel').then(module => ({ default: module.ValidationPanel })));
 const QuickLoadPage = lazy(() => import('./features/load/QuickLoadPage').then(module => ({ default: module.QuickLoadPage })));
 const LoadCatalogPage = lazy(() => import('./features/load/LoadCatalogPage').then(module => ({ default: module.LoadCatalogPage })));
 const LoadResourceDetailPage = lazy(() => import('./features/load/LoadResourceDetailPage').then(module => ({ default: module.LoadResourceDetailPage })));
@@ -24,6 +25,7 @@ import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspa
 import { PackageManifestWorkspace } from './features/explorer/PackageManifestWorkspace';
 import { PackageTestdataWorkspace } from './features/explorer/PackageTestdataCatalog';
 import { PackageSafeSourceFileViewer } from './features/explorer/PackageSafeSourceFileViewer';
+import type { ValidationRequest } from './features/validation/types';
 const LoadTestingPage = lazy(() => import('./features/load/LoadTestingPage').then(module => ({ default: module.LoadTestingPage })));
 const SavedLoadScenarios = lazy(() => import('./features/load/SavedLoadScenarios').then(module => ({ default: module.SavedLoadScenarios })));
 const LoadTemplateBuilder = lazy(() => import('./features/load/LoadTemplateBuilder').then(module => ({ default: module.LoadTemplateBuilder })));
@@ -38,7 +40,8 @@ function asError(value: unknown): Error {
 
 const loadJobsApi: LoadJobsApi = api;
 
-function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSchedule, packageRegistrationState, registered, packageLabel }: {
+function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSchedule, packageRegistrationState, registered, packageLabel,
+  onValidateContext }: {
   route: Extract<AppRoute, { kind: 'package' }>;
   inlineLoadEnabled: boolean;
   schedulingEnabled: boolean;
@@ -46,6 +49,7 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
   packageRegistrationState: 'loading' | 'ready' | 'error';
   registered: boolean;
   packageLabel: string;
+  onValidateContext(request: ValidationRequest, title: string): void;
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
@@ -86,9 +90,13 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
   const onRunBatch = useCallback(() => {
     navigation.navigate({ kind: 'run', packageId, environment, batch: true });
   }, [navigation.navigate, packageId, environment]);
-  const onValidateTarget = useCallback((scope: ValidationScope, target: string, resource?: ResourceRoute) => {
-    navigation.navigate({ kind: 'validation', scope, packageId, environment, target, resource });
-  }, [navigation.navigate, packageId, environment]);
+  const onValidateTarget = useCallback((scope: ValidationScope, target: string) => {
+    onValidateContext({ targetKind: scope as 'case' | 'suite' | 'template' | 'flow' | 'tool', packageId,
+      ...(environment ? { environment } : {}), target }, `${scope === 'suite' ? 'Suite' : scope} · ${target}`);
+  }, [onValidateContext, packageId, environment]);
+  const onValidatePackage = useCallback(() => {
+    onValidateContext({ targetKind: 'package', packageId, ...(environment ? { environment } : {}) }, `Package · ${packageLabel}`);
+  }, [onValidateContext, packageId, packageLabel, environment]);
   const onScheduleDebug = useCallback<NonNullable<ExplorerPageProps['onScheduleDebug']>>((input) => {
     return onSchedule(input);
   }, [onSchedule]);
@@ -120,7 +128,8 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
     onResourceRouteChange={onResourceRouteChange}
     onJobAccepted={onJobAccepted}
     onRunTarget={target => onRunTarget({ packageId, ...target })}
-    onValidateTarget={(scope, target, resource) => onValidateTarget(scope, target, resource)}
+    onValidateTarget={(scope, target) => onValidateTarget(scope, target)}
+    onValidatePackage={onValidatePackage}
     onRunBatch={onRunBatch}
     onOpenQuickLoad={inlineLoadEnabled ? onOpenQuickLoad : undefined}
     onScheduleDebug={schedulingEnabled ? onScheduleDebug : undefined}
@@ -203,8 +212,9 @@ function LoadRouteView({ packageId, templateId, environment: initialEnvironment,
   </Suspense>;
 }
 
-function ConfigurationRouteView({ route }: {
+function ConfigurationRouteView({ route, onValidateContext }: {
   route: Extract<ReturnType<typeof useRouteState>['route'], { kind: 'configuration' }>;
+  onValidateContext(request: ValidationRequest, title: string): void;
 }) {
   const workspace = useAppShellContext();
   const [showManifest, setShowManifest] = useState(route.view === 'package-manifest');
@@ -225,13 +235,13 @@ function ConfigurationRouteView({ route }: {
     navigation.navigate({ kind: 'package', packageId: route.packageId || '', resource });
   }, [navigation.navigate, route.packageId]);
   const onValidateConfiguration = useCallback(() => {
-    navigation.navigate({ kind: 'validation', scope: 'config' });
-  }, [navigation.navigate]);
+    onValidateContext({ targetKind: 'config' }, 'Shared Runtime Config');
+  }, [onValidateContext]);
   const onValidatePackageConfiguration = useCallback(() => {
     if (!route.packageId) return;
-    navigation.navigate({ kind: 'validation', scope: 'config', packageId: route.packageId,
-      ...(selectedEnvironment ? { environment: selectedEnvironment } : {}) });
-  }, [navigation.navigate, route.packageId, selectedEnvironment]);
+    onValidateContext({ targetKind: 'config', packageId: route.packageId,
+      ...(selectedEnvironment ? { environment: selectedEnvironment } : {}) }, `${route.packageId} effective Config`);
+  }, [onValidateContext, route.packageId, selectedEnvironment]);
   return <>
     <nav className="configuration-scope" aria-label="Configuration ownership">
       <button type="button" aria-pressed={showManifest} disabled={!route.packageId} onClick={() => navigation.navigate({ ...route, view: 'package-manifest' })}>Package Configuration</button>
@@ -376,6 +386,28 @@ export default function App() {
   const [workspaceResolution, setWorkspaceResolution] = useState<{key: string; environment?: string; error?: boolean}>({key: ''});
   const workspaceResolutionError = Boolean(selectedPackage && workspaceResolution.key === `${selectedPackage}\n${selectedEnvironment}` && workspaceResolution.error);
   const [catalogEnvironment, setCatalogEnvironment] = useState('');
+  const currentRouteKey = formatRoute(navigation.route);
+  const [contextValidation, setContextValidation] = useState<{ routeKey: string; request: ValidationRequest; title: string } | null>(null);
+  const supportsValidationRecords = state.serverVersion.status === 'ready'
+    && state.serverVersion.data.validationRecordsApiVersion === 'att-validation-records/v1';
+  const previousRouteKey = useRef(currentRouteKey);
+  useEffect(() => {
+    if (previousRouteKey.current !== currentRouteKey) {
+      previousRouteKey.current = currentRouteKey;
+      setContextValidation(null);
+    }
+  }, [currentRouteKey]);
+  const onValidateContext = useCallback((request: ValidationRequest, title: string) => {
+    if (supportsValidationRecords) {
+      setContextValidation({ routeKey: currentRouteKey, request, title });
+      return;
+    }
+    if ('all' in request) return;
+    navigation.navigate({ kind: 'validation', scope: request.targetKind,
+      ...(request.packageId ? { packageId: request.packageId } : {}),
+      ...(request.environment ? { environment: request.environment } : {}),
+      ...('target' in request ? { target: request.target } : {}) });
+  }, [currentRouteKey, navigation.navigate, supportsValidationRecords]);
   useEffect(() => { try { sessionStorage.setItem('att.workspace.context', JSON.stringify(workspaceContext)); } catch { /* In-memory context remains usable. */ } }, [workspaceContext]);
   useEffect(() => {
     const controller = new AbortController();
@@ -512,12 +544,17 @@ export default function App() {
   } else if (navigation.route.kind === 'monitoring') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Monitoring…</div>}><MonitoringPage /></Suspense>;
   } else if (navigation.route.kind === 'validation') {
-    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation workspace…</div>}>
-      <ValidationWorkspacePage api={api} packages={state.packages}
-        serverVersion={state.serverVersion}
-        route={navigation.route as ValidationRouteState} onRouteChange={route => navigation.navigate(route)}
-        onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
-    </Suspense>;
+    content = navigation.route.validationId
+      ? <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation record…</div>}>
+          <ValidationPanel key={navigation.route.validationId} validationId={navigation.route.validationId}
+            onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
+        </Suspense>
+      : <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation workspace…</div>}>
+          <ValidationWorkspacePage api={api} packages={state.packages}
+            serverVersion={state.serverVersion}
+            route={navigation.route as ValidationRouteState} onRouteChange={route => navigation.navigate(route)}
+            onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
+        </Suspense>;
   } else if (navigation.route.kind === 'run') {
     content = <RunPage key={`${navigation.route.packageId || ''}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.environment || ''}:${navigation.route.batch ? 'batch' : ''}:${navigation.route.replaySourceJobId || ''}:${navigation.route.replayDraftId || ''}`}
       packageId={runPackageId} initialTarget={navigation.route.target} initialBatchMode={navigation.route.batch} initialEnvironment={runEnvironment}
@@ -550,7 +587,7 @@ export default function App() {
   } else if (navigation.route.kind === 'settings') {
     content = <Suspense fallback={<div role="status">Loading settings...</div>}><SettingsPage /></Suspense>;
   } else if (navigation.route.kind === 'configuration') {
-    content = <ConfigurationRouteView route={navigation.route} />;
+    content = <ConfigurationRouteView route={navigation.route} onValidateContext={onValidateContext} />;
   } else if (navigation.route.kind === 'quick-load') {
     content = <QuickLoadRouteView key={`${navigation.route.packageId}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.templateId || ''}:${navigation.route.model || ''}`}
       route={navigation.route} inlineLoadEnabled={capabilities.inlineLoadEnabled}
@@ -572,6 +609,7 @@ export default function App() {
         packageRegistrationState={state.packages.status}
         registered={Boolean(registeredPackage)}
         packageLabel={registeredPackage?.name || packageRoute.packageId}
+        onValidateContext={onValidateContext}
       />
     </Suspense>;
   } else {
@@ -603,8 +641,10 @@ export default function App() {
           onSchedule={onSchedule}
           onOpenDetail={(item, environment, returnTo) => navigation.navigate({ kind: 'load-resource', packageId: item.packageId,
             resourceId: item.resourceId, environment, returnTo })}
-          onOpenValidation={(item, environment) => navigation.navigate({ kind: 'validation', scope: 'load',
-            packageId: item.packageId, environment, target: item.path })} /></LoadTestingPage></Suspense>;
+          onOpenValidation={(item, environment) => onValidateContext(
+            { targetKind: 'load', packageId: item.packageId, ...(environment ? { environment } : {}), target: item.path },
+            `LOAD Scenario · ${item.path}`)} />
+      </LoadTestingPage></Suspense>;
   }
 
   return (
@@ -625,6 +665,12 @@ export default function App() {
       onJobAccepted={onJobAccepted}
     >
       {content}
+      {contextValidation?.routeKey === currentRouteKey && <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation…</div>}>
+        <ValidationPanel key={`${contextValidation.title}:${JSON.stringify(contextValidation.request)}`}
+          request={contextValidation.request} title={contextValidation.title} onClose={() => setContextValidation(null)}
+          onOpenRecord={validationId => navigation.navigate({ kind: 'validation', validationId })}
+          onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
+      </Suspense>}
     </AppShell>
   );
 }

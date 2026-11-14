@@ -9,10 +9,14 @@
 | 方法 | 路徑 | 結果 |
 |---|---|---|
 | `POST` | `/api/v1/validation` | 同步回傳 `att-validation/v1` report；不建立 Job。 |
+| `POST` | `/api/v1/validations` | 接受持久非同步 validation record；回傳 `202`。 |
+| `GET` | `/api/v1/validations/{validationId}` | 讀取 owner 範圍內的 record 及 report。 |
+| `GET` | `/api/v1/validations` | 列出已驗證用戶近期的有限筆 record。 |
+| `POST` | `/api/v1/validations/{validationId}/cancel` | 取消 owner 的排隊中或執行中 record。 |
 
 支援此 route 及 report contract 的 Server 會在 `GET /api/v1/version` 宣告 `validationApiVersion: "att-validation/v1"`。Studio 會先檢查此 marker，再啟用 **Read-only validation**。若 marker 不存在或版本不同，代表 Server build 沒有宣告所需 capability。
 
-此 route 會透過有界 inspection Worker 呼叫既有 Server validator。它不會執行 business action、提交 RUN/LOAD 工作、建立或保存 draft、建立 Schedule 或保存 snapshot。在 Studio 取消時會中止 browser request 並丟棄較晚回傳的結果；Server 仍會套用已設定的 validation 時間及資源上限。
+兩種 submit route 都會透過有界 inspection Worker 呼叫既有 Server validator，並採用相同 typed request contract。它們不會執行 business action、提交 RUN/LOAD 工作、建立 execution draft、建立 Schedule 或保存 snapshot。同步 route 仍供相容 client 使用；需要保存進度及結果供之後恢復時，請使用非同步 route。
 
 ## Request
 
@@ -76,3 +80,31 @@ Validation finding 會放在 report body；HTTP `200` 不代表所有檢查均�
 | `504` | 唯讀 validation 超過時限。 |
 
 Studio 範圍選擇、上下文入口、report 檢視及取消行為請參閱 [Studio Read-only validation](../studio/validation.zh.md)。
+
+## 持久非同步 record
+
+`POST /api/v1/validations` 接受與同步 route 相同的 JSON 欄位。Server 先將標準化 plan 及初始 `QUEUED` record 寫入資料庫，再回傳 HTTP `202`、`validationId` 及 `Location` header。Admission 會保留既有有界 inspection 容量；佇列已滿時回傳 `503`。
+
+Record 包含 typed plan identity、生命週期狀態、計時、選用的安全 source revision、安全錯誤資訊，以及完成後的 `att-validation/v1` report。它不會保存提交的 source text、任意 filesystem path 或 client 提供的 configuration。讀取或列出時，Server 會再次檢查已註冊 Package 及 Environment 權限。Record 只供 owner 存取；installation-wide record 另需 system-administrator 權限。List endpoint 不會列出其他 owner 的 record。
+
+`GET /api/v1/validations` 接受選用的 `packageId`、`scope`、`limit` 及不透明 `cursor` query parameter。`limit` 預設為 `20`，範圍為 `1` 至 `100`。Response 包含 `items` 及 `nextCursor`；list item 不含 report body。結果採用有限筆數，並依最新提交時間排序。已撤銷或不可用的 Package 或 Environment 不會出現在結果中。
+
+`GET /api/v1/validations/{validationId}` 會在可用時回傳 record 及 report。`POST /api/v1/validations/{validationId}/cancel` 會在 Server 端取消排隊中或執行中的 record。若 record 已結束，request 會回傳目前狀態。關閉 browser view、切換 route 或停止 polling 不會取消 record；只有明確呼叫此 endpoint 才會要求取消。
+
+Transport state 與 report outcome 分開表示：
+
+| Record state | 意義 |
+|---|---|
+| `QUEUED` | 持久 admission 成功，正在等候 inspection slot。 |
+| `RUNNING` | 既有 validator 正在執行；phase 可能無法取得。 |
+| `COMPLETED` | 已產生 report；請讀取 `overallStatus`、`complete` 及 `exitCode`。 |
+| `FAILED` | Server 無法產生 report。 |
+| `TIMED_OUT` | 已達設定的 inspection 時限。 |
+| `CANCELLED` | Owner 要求 Server 端取消。 |
+| `INTERRUPTED` | Server shutdown 中斷 validation。 |
+
+Report result 仍是 `PASS`、`INVALID` 或 `PARTIAL`。只有 `overallStatus: PASS`、`complete: true` 及 `exitCode: 0` 才代表通過。API 會把 `applicability` 設為 `UNVERIFIED`；歷史 PASS 不能證明目前 source 沒有變更。只有 validator 提供安全 revision digest 時才會包含 `sourceRevision`。
+
+預設保留 record 七日。可在 `att-server.yaml` 設定 `server.validationRecords.enabled`、`retentionDays`、`maxRecords`、`maxTotalSizeMb` 及 `maxRecordBytes`，調整保留時間與儲存上限。預設為啟用、`7` 日、`5000` 筆、`64` MiB 及每筆 `2097152` bytes。若 `maxTotalSizeMb` 低於每筆預設上限，系統會調低每筆預設值以符合總上限。系統會刪除過期或最舊的終止 record 以符合上限，不會淘汰作用中的 record。若記錄庫沒有空間，admission 會回傳 `503`。此功能及 inspection Worker 啟用時，`/api/v1/version` 會宣告 `validationRecordsApiVersion: "att-validation-records/v1"`。
+
+Server 啟動時，狀態仍為 `QUEUED` 或 `RUNNING` 的 record 會轉成 `INTERRUPTED`。已完成 record 會保留給同一個已驗證 owner，直到保留期限或儲存清理移除。保留 record ID 的 route 或 bookmark，可在重新導覽或重載 browser 後開啟 report。

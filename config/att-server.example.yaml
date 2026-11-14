@@ -83,6 +83,13 @@ server:
     # safeTextSources:
     #   default:
     #     - tools/payment-check.sh
+  # Server-owned async validation records, retained for the owner across Studio navigation and Server restarts.
+  validationRecords:
+    enabled: true
+    retentionDays: 7
+    maxRecords: 5000
+    maxTotalSizeMb: 64
+    maxRecordBytes: 2097152
   # Origin equality checking is disabled by default; local cookie auth still requires CSRF.
   security:
     checkCrossOrigin: false

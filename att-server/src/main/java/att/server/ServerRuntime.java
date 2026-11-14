@@ -45,6 +45,7 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
@@ -63,6 +64,7 @@ final class ServerRuntime implements AutoCloseable {
     static final Pattern QUICK_LOAD_DRAFT_ID=Pattern.compile("L[0-9A-F]{32}");
     static final Pattern ADVANCED_LOAD_DRAFT_ID=Pattern.compile("A[0-9A-F]{32}");
     static final Pattern CATALOG_LOAD_DRAFT_ID=Pattern.compile("C[0-9A-F]{32}");
+    static final Pattern VALIDATION_ID=Pattern.compile("V[0-9A-F]{32}");
     private static final Pattern INLINE_LOAD_DURATION=Pattern.compile("^([0-9]+)(ms|s|m|h)$");
     private static final Pattern INLINE_LOAD_RATE=Pattern.compile("^([1-9][0-9]*(?:\\.[0-9]+)?)/(s|m)$");
     static final int MAX_ACTIVE_DRAFTS=128, MAX_DRAFTS_PER_PRINCIPAL=16;
@@ -80,11 +82,25 @@ final class ServerRuntime implements AutoCloseable {
         final Map<String,Object> scenario;final String revisionDigest,model;final boolean containsSensitiveValues,containsSensitiveAuthoredValues;
         ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model,boolean containsSensitiveValues,boolean containsSensitiveAuthoredValues){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;this.containsSensitiveValues=containsSensitiveValues;this.containsSensitiveAuthoredValues=containsSensitiveAuthoredValues;}
     }
+    private static final class ValidationPlan {
+        final JsonNode input;final boolean all;final String scope,target,packageId,environment;
+        ValidationPlan(JsonNode input,boolean all,String scope,String target,String packageId,String environment) {
+            this.input=input;this.all=all;this.scope=scope;this.target=target;this.packageId=packageId;this.environment=environment;
+        }
+    }
+    private static final class ValidationExecution {
+        final String id,actor,requestId;final ValidationPlan plan;final long submittedNanos;
+        final AtomicBoolean released=new AtomicBoolean(),inspectionSlotReserved=new AtomicBoolean(true);volatile long startedNanos;volatile ValidationTask task;
+        ValidationExecution(String id,String actor,String requestId,ValidationPlan plan,long submittedNanos) {
+            this.id=id;this.actor=actor;this.requestId=requestId;this.plan=plan;this.submittedNanos=submittedNanos;
+        }
+    }
     final ServerConfig config;
     final JobStore store;
     private final LoadProgressPersistence loadProgressPersistence;
     final AuthService auth;
     final ThreadPoolExecutor workers,streams,inspectors;
+    private final ThreadPoolExecutor validationExecutor;
     private final ThreadPoolExecutor eventCompactions=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(1024),r->{Thread t=new Thread(r,"att-server-event-compactor");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
     private final ThreadPoolExecutor eventNotifications=new ThreadPoolExecutor(2,2,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(4096),r->{Thread t=new Thread(r,"att-server-event-dispatch");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
     private static final int TERMINAL_EVENT_CACHE_MAX_ENTRIES=16;
@@ -126,6 +142,9 @@ final class ServerRuntime implements AutoCloseable {
     private final AtomicLong archiveRetries=new AtomicLong();
     private final Semaphore loadSlots,admissionSlots;
     private final Semaphore inspectionTaskSlots;
+    private final Semaphore validationAdmissionSlots;
+    private final ConcurrentHashMap<String,ValidationExecution> validationExecutions=new ConcurrentHashMap<>();
+    private final ThreadLocal<ValidationExecution> reservedValidationInspection=new ThreadLocal<>();
     final Semaphore streamSlots=new Semaphore(MAX_STREAM_OBSERVERS,true);
     private final ScheduledExecutorService retention;
     private final ScheduledExecutorService artifactMaintenance;
@@ -207,12 +226,22 @@ final class ServerRuntime implements AutoCloseable {
         inspectionWatchdogs=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-watchdog");t.setDaemon(true);return t;});
         inspectionWarmup=config.inspection.enabled&&config.inspection.warmup.enabled()
                 ?java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"att-server-inspector-warmup");t.setDaemon(true);return t;}):null;
+        int validationThreads=Math.min(config.inspection.maxConcurrent,config.validationRecords.maxRecords);
+        int validationQueueCapacity=config.validationRecords.enabled&&config.inspection.enabled
+                ?Math.min(config.inspection.queuedLimit,Math.max(0,config.validationRecords.maxRecords-validationThreads)):0;
+        validationAdmissionSlots=new Semaphore(Math.max(1,validationThreads+validationQueueCapacity),true);
+        java.util.concurrent.BlockingQueue<Runnable> validationQueue=validationQueueCapacity==0
+                ?new SynchronousQueue<>():new ArrayBlockingQueue<>(validationQueueCapacity);
+        validationExecutor=new ThreadPoolExecutor(validationThreads,validationThreads,0,TimeUnit.MILLISECONDS,validationQueue,
+                r->{Thread t=new Thread(r,"att-server-validation");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         try {
+        store.interruptActiveValidationRecords(clock.instant());
         recover();reconcileDeletingJobsSafely();cleanupExpiredJobsSafely();recoverArtifactArchivesSafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
         if(config.jobStorage.enabled){if(!skipInitialStorageSweep)cleanupJobStorageSafely();retention.scheduleWithFixedDelay(this::cleanupJobStorageSafely,config.jobStorage.cleanupIntervalMinutes,config.jobStorage.cleanupIntervalMinutes,TimeUnit.MINUTES);}
         artifactMaintenance.scheduleWithFixedDelay(this::recoverArtifactArchivesSafely,5,5,TimeUnit.MINUTES);
         artifactMaintenance.scheduleWithFixedDelay(this::reconcileWorkerReleases,1,1,TimeUnit.SECONDS);
         retention.scheduleWithFixedDelay(this::expireDraftsSafely,1,1,TimeUnit.MINUTES);
+        retention.scheduleWithFixedDelay(this::cleanupValidationRecordsSafely,1,1,TimeUnit.HOURS);
         retention.scheduleWithFixedDelay(this::cleanupRequestedDeletionsSafely,5,5,TimeUnit.SECONDS);
         targetIndexMaintenance.scheduleWithFixedDelay(()->{
             if(closing)return;
@@ -2395,27 +2424,9 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     Map<String,Object> validateVNext(JsonNode input,String principal) throws Exception {
-        if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON validation plan is required");
-        Set<String> allowedFields=Set.of("command","targetKind","target","packageId","environment","all");
-        java.util.Iterator<String> fields=input.fieldNames();while(fields.hasNext())if(!allowedFields.contains(fields.next()))
-            throw new IllegalArgumentException("Remote validation accepts only typed targets and always uses Server-owned configuration");
-        String command=optionalText(input,"command");
-        if(!"validate".equals(command))throw new IllegalArgumentException("Only validate plans are accepted by this endpoint");
-        boolean all=input.path("all").asBoolean(false);
-        String targetKind=optionalText(input,"targetKind"),target=optionalText(input,"target"),packageId=optionalText(input,"packageId"),environment=optionalText(input,"environment");
-        if(all) {
-            if(targetKind!=null||target!=null||packageId!=null||environment!=null)
-                throw new IllegalArgumentException("validate --all cannot be combined with a target, Package, or Environment");
-            return validateAllVNext();
-        }
-        String scope=targetKind==null?"config":targetKind;
-        if(!List.of("config","package","case","suite","template","flow","tool","load").contains(scope))
-            throw new IllegalArgumentException("Unsupported validation scope");
-        if("config".equals(scope)&&target!=null)throw new IllegalArgumentException("validate config does not take a target");
-        if(!"config".equals(scope)&&packageId==null)throw new IllegalArgumentException("Remote validation requires a registered -p/--package ID");
-        if(List.of("case","suite","template","flow","tool","load").contains(scope)&&(target==null||target.isBlank()))
-            throw new IllegalArgumentException("Selected validation requires a target");
-        if("config".equals(scope)&&target!=null)throw new IllegalArgumentException("validate config does not take a target");
+        ValidationPlan plan=validationPlan(input);
+        if(plan.all)return validateAllVNext();
+        String scope=plan.scope,target=plan.target,packageId=plan.packageId,environment=plan.environment;
         Path root=null;
         if(packageId!=null) {root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);}
         if(environment!=null) {
@@ -2434,6 +2445,275 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> result=validationWorkerReport(executeInspection(workerRoot,request));
         result.put("requestId",request.jobId);
         return result;
+    }
+
+    private ValidationPlan validationPlan(JsonNode input) {
+        if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON validation plan is required");
+        Set<String> allowedFields=Set.of("command","targetKind","target","packageId","environment","all");
+        java.util.Iterator<String> fields=input.fieldNames();while(fields.hasNext())if(!allowedFields.contains(fields.next()))
+            throw new IllegalArgumentException("Remote validation accepts only typed targets and always uses Server-owned configuration");
+        if(input.has("all")&&!input.path("all").isBoolean())throw new IllegalArgumentException("all must be a boolean");
+        String command=optionalText(input,"command");
+        if(!"validate".equals(command))throw new IllegalArgumentException("Only validate plans are accepted by this endpoint");
+        boolean all=input.path("all").asBoolean(false);
+        String targetKind=optionalText(input,"targetKind"),target=optionalText(input,"target");
+        String packageId=optionalText(input,"packageId"),environment=optionalText(input,"environment");
+        if(all&&(targetKind!=null||target!=null||packageId!=null||environment!=null))
+            throw new IllegalArgumentException("validate --all cannot be combined with a target, Package, or Environment");
+        String scope=targetKind==null?"config":targetKind;
+        if(!all&&!List.of("config","package","case","suite","template","flow","tool","load").contains(scope))
+            throw new IllegalArgumentException("Unsupported validation scope");
+        if("config".equals(scope)&&target!=null)throw new IllegalArgumentException("validate config does not take a target");
+        if(!all&& !"config".equals(scope)&&packageId==null)throw new IllegalArgumentException("Remote validation requires a registered -p/--package ID");
+        if(!all&&List.of("case","suite","template","flow","tool","load").contains(scope)&&(target==null||target.isBlank()))
+            throw new IllegalArgumentException("Selected validation requires a target");
+        if(packageId!=null)packageId=safeText(packageId,64,"packageId");
+        if(environment!=null)environment=safeText(environment,32,"environment");
+        if(target!=null)target=List.of("suite","load").contains(scope)?safeRelative(target,scope):safeText(target,512,"target");
+        ObjectNode normalized=JSON.createObjectNode();normalized.put("command","validate");
+        if(all)normalized.put("all",true);else normalized.put("targetKind",scope);
+        if(packageId!=null)normalized.put("packageId",packageId);if(environment!=null)normalized.put("environment",environment);
+        if(target!=null)normalized.put("target",target);
+        return new ValidationPlan(normalized,all,scope,target,packageId,environment);
+    }
+
+    Map<String,Object> submitValidation(JsonNode input,String actor,String requestId) throws Exception {
+        if(!config.inspection.enabled||!config.validationRecords.enabled)throw new NotFoundException();
+        if(actor==null||actor.isBlank()||RequestIdentity.ANONYMOUS.equals(actor))throw new IllegalArgumentException("An authenticated request identity is required for Server-owned validation records");
+        ValidationPlan plan=validationPlan(input);
+        validateValidationSubmission(plan);
+        plan=captureDefaultValidationEnvironment(plan);
+        Map<String,Object> active=store.activeValidationRecord(actor,plan.all,plan.scope,plan.packageId,plan.target,plan.environment);
+        if(active!=null) {
+            verifyValidationRecordAccess(active);
+            return publicValidationRecord(active,true);
+        }
+        String planJson=JSON.writeValueAsString(plan.input);
+        if(!validationAdmissionSlots.tryAcquire())throw new InspectionCapacityException();
+        if(!inspectionTaskSlots.tryAcquire()){validationAdmissionSlots.release();throw new InspectionCapacityException();}
+        String id="V"+UUID.randomUUID().toString().replace("-","").toUpperCase(java.util.Locale.ROOT);
+        long submittedNanos=System.nanoTime();String submittedAt=clock.instant().toString();
+        ValidationExecution execution=new ValidationExecution(id,actor,requestId,plan,submittedNanos);
+        boolean persisted=false;
+        try {
+            admissionLifecycle.readLock().lock();
+            try {
+                if(closing)throw new InspectionCapacityException();
+                String duplicateId=store.createValidationRecord(id,actor,plan.all,plan.scope,plan.packageId,plan.target,plan.environment,
+                        requestId,submittedAt,planJson,config.validationRecords,clock.instant());
+                if(duplicateId!=null) {
+                    Map<String,Object> duplicate=store.validationRecord(duplicateId,actor);
+                    if(duplicate==null)throw new NotFoundException();
+                    verifyValidationRecordAccess(duplicate);
+                    releaseValidationAdmission(execution);
+                    return publicValidationRecord(duplicate,true);
+                }
+                persisted=true;
+                ValidationTask task=new ValidationTask(execution);execution.task=task;validationExecutions.put(id,execution);
+                try {validationExecutor.execute(task);}
+                catch(RejectedExecutionException full) {
+                    validationExecutions.remove(id,execution);store.deleteValidationRecord(id,actor);
+                    throw new InspectionCapacityException();
+                }
+            } finally {admissionLifecycle.readLock().unlock();}
+            Map<String,Object> initial=new LinkedHashMap<>();initial.put("validationId",id);initial.put("actor",actor);initial.put("all",plan.all);
+            initial.put("scope",plan.scope);initial.put("packageId",plan.packageId);initial.put("target",plan.target);
+            initial.put("environment",plan.environment);initial.put("status","QUEUED");initial.put("phase","QUEUED");
+            initial.put("requestId",requestId);initial.put("submittedAt",submittedAt);
+            return publicValidationRecord(initial,false);
+        } catch(Exception failure) {
+            if(persisted)try{store.deleteValidationRecord(id,actor);}catch(Exception cleanup){failure.addSuppressed(cleanup);}
+            validationExecutions.remove(id);releaseValidationAdmission(execution);
+            throw failure;
+        }
+    }
+
+    private void validateValidationSubmission(ValidationPlan plan) throws Exception {
+        if(plan.all)return;
+        if(plan.packageId!=null) {
+            Path root=packageRoot(plan.packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+            if(plan.environment!=null)config.packageConfiguration.authorizeEnvironment(plan.environment,true);
+        }
+    }
+
+    private ValidationPlan captureDefaultValidationEnvironment(ValidationPlan plan) throws Exception {
+        if(plan.all||plan.packageId==null||plan.environment!=null)return plan;
+        Path root=packageRoot(plan.packageId);
+        if(root==null)return plan;
+        try {
+            Object value=resolveExecutionConfiguration(plan.packageId,root,null).get("environment");
+            if(value instanceof String environment&&environment.matches("[A-Za-z][A-Za-z0-9_-]{0,31}"))
+                return new ValidationPlan(plan.input,plan.all,plan.scope,plan.target,plan.packageId,environment);
+        } catch(InspectionConfigurationException invalid) {
+            // Preserve async validation's report path when configuration cannot supply an effective Environment.
+        }
+        return plan;
+    }
+
+    private final class ValidationTask extends FutureTask<Void> {
+        private final ValidationExecution execution;
+        ValidationTask(ValidationExecution execution) {
+            super(()->{runValidation(execution);return null;});this.execution=execution;
+        }
+        @Override public void run(){try{super.run();}finally{endValidationExecution(execution);}}
+    }
+
+    private void runValidation(ValidationExecution execution) {
+        long started=System.nanoTime();long queueMs=elapsedMillis(execution.submittedNanos,started);
+        reservedValidationInspection.set(execution);
+        try {
+            if(!store.startValidationRecord(execution.id,clock.instant().toString(),queueMs))return;
+            execution.startedNanos=started;
+            String state="COMPLETED",errorCode=null,errorMessage=null;String reportJson=null;
+            try {
+                Map<String,Object> report=validateVNext(execution.plan.input,execution.actor);
+                String environment=null,revision=null;Object rawContext=report.get("context");
+                if(rawContext instanceof Map<?,?> context) {
+                    Object env=context.get("environment");if(env instanceof String value&&value.matches("[A-Za-z][A-Za-z0-9_-]{0,31}"))environment=value;
+                    for(String key:List.of("sourceRevision","revisionDigest","packageRevision","runtimeConfigRevision","configurationRevision")) {
+                        Object value=context.get(key);if(value instanceof String digest&&digest.matches("[A-Fa-f0-9]{32,128}")){revision=digest;break;}
+                    }
+                }
+                store.validationSourceContext(execution.id,environment,revision);
+                reportJson=JSON.writeValueAsString(report);
+            }
+            catch(Exception failure) {
+                if(failure instanceof InspectionTimeoutException) {state="TIMED_OUT";errorCode="ATT-SERVER-INSPECTION-TIMEOUT";errorMessage="Read-only validation exceeded the Server time limit";}
+                else if(failure instanceof InterruptedException||Thread.currentThread().isInterrupted()) {state="INTERRUPTED";errorCode="ATT-SERVER-VALIDATION-INTERRUPTED";errorMessage="Validation was interrupted before a complete report was available";}
+                else if(failure instanceof InspectionCapacityException) {state="FAILED";errorCode="ATT-SERVER-INSPECTION-CAPACITY";errorMessage="Validation Worker capacity became unavailable before execution";}
+                else if(failure instanceof NotFoundException) {state="FAILED";errorCode="ATT-SERVER-NOT-FOUND";errorMessage="The registered Package or selected validation target is unavailable";}
+                else if(failure instanceof PackageConfigurationPolicy.EnvironmentDeniedException) {state="FAILED";errorCode="ATT-PACKAGE-ENVIRONMENT-DENIED";errorMessage="The selected Environment is no longer authorized";}
+                else if(failure instanceof IllegalArgumentException) {state="FAILED";errorCode="ATT-SERVER-INVALID-REQUEST";errorMessage="The typed validation plan is no longer valid";}
+                else {state="FAILED";errorCode="ATT-SERVER-VALIDATION-FAILED";errorMessage="Read-only validation could not be completed";}
+            }
+            long finished=System.nanoTime();long executionMs=elapsedMillis(started,finished);
+            store.finishValidationRecord(execution.id,state,clock.instant().toString(),queueMs,executionMs,
+                    elapsedMillis(execution.submittedNanos,finished),reportJson,errorCode,errorMessage,config.validationRecords);
+        } catch(Exception persistenceFailure) {
+            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).log(java.util.logging.Level.WARNING,
+                    "Unable to persist validation record state id="+execution.id,persistenceFailure);
+        } finally {
+            reservedValidationInspection.remove();
+            if(execution.inspectionSlotReserved.compareAndSet(true,false))inspectionTaskSlots.release();
+            if(Thread.currentThread().isInterrupted())Thread.currentThread().interrupt();
+        }
+    }
+
+    private static long elapsedMillis(long startNanos,long endNanos) {
+        if(startNanos<=0||endNanos<=startNanos)return 0L;return TimeUnit.NANOSECONDS.toMillis(endNanos-startNanos);
+    }
+
+    private void endValidationExecution(ValidationExecution execution) {
+        validationExecutions.remove(execution.id,execution);releaseValidationAdmission(execution);
+    }
+
+    private void releaseValidationAdmission(ValidationExecution execution) {
+        if(execution.inspectionSlotReserved.compareAndSet(true,false))inspectionTaskSlots.release();
+        if(execution.released.compareAndSet(false,true))validationAdmissionSlots.release();
+    }
+
+    Map<String,Object> validationRecord(String id,String actor) throws Exception {
+        requireValidationRecords();validateValidationId(id);
+        Map<String,Object> record=store.validationRecord(id,actor);if(record==null)throw new NotFoundException();
+        verifyValidationRecordAccess(record);
+        return publicValidationRecord(record,true);
+    }
+
+    boolean validationRecordRequiresAdmin(String id,String actor) throws Exception {
+        requireValidationRecords();validateValidationId(id);
+        Map<String,Object> record=store.validationRecord(id,actor);if(record==null)throw new NotFoundException();
+        verifyValidationRecordAccess(record);return Boolean.TRUE.equals(record.get("all"));
+    }
+
+    Map<String,Object> listValidationRecords(String actor,String packageId,String scope,int limit,String cursor,boolean includeAll) throws Exception {
+        requireValidationRecords();
+        if(packageId!=null)packageId=safeText(packageId,64,"packageId");
+        if(scope!=null&&!List.of("config","package","case","suite","template","flow","tool","load").contains(scope))
+            throw new IllegalArgumentException("Unsupported validation scope filter");
+        if(limit<1||limit>100)throw new IllegalArgumentException("limit must be from 1 to 100");
+        String beforeAt=null,beforeId=null;
+        if(cursor!=null&&!cursor.isBlank()) {
+            if(cursor.length()>512)throw new IllegalArgumentException("Invalid validation cursor");
+            try {
+                String decoded=new String(Base64.getUrlDecoder().decode(cursor),StandardCharsets.UTF_8);int split=decoded.indexOf('\n');
+                if(split<1||split!=decoded.lastIndexOf('\n'))throw new IllegalArgumentException();
+                beforeAt=Instant.parse(decoded.substring(0,split)).toString();beforeId=decoded.substring(split+1);validateValidationId(beforeId);
+            } catch(Exception invalid){throw new IllegalArgumentException("Invalid validation cursor");}
+        }
+        List<Map<String,Object>> rows=store.validationRecords(actor,packageId,scope,includeAll,beforeAt,beforeId,limit+1);
+        boolean hasMore=rows.size()>limit;if(hasMore)rows=rows.subList(0,limit);
+        List<Map<String,Object>> items=new ArrayList<>();for(Map<String,Object> row:rows) {
+            try {verifyValidationRecordAccess(row);items.add(publicValidationRecord(row,false));}
+            catch(NotFoundException|PackageConfigurationPolicy.EnvironmentDeniedException inaccessible) { /* Authorization was revoked; do not return a stale record. */ }
+        }
+        Map<String,Object> response=new LinkedHashMap<>();response.put("items",items);
+        response.put("nextCursor",hasMore&&!rows.isEmpty()?encodeValidationCursor(rows.get(rows.size()-1)):null);
+        return response;
+    }
+
+    Map<String,Object> cancelValidation(String id,String actor) throws Exception {
+        requireValidationRecords();validateValidationId(id);
+        Map<String,Object> current=store.validationRecord(id,actor);if(current==null)throw new NotFoundException();verifyValidationRecordAccess(current);
+        String state=String.valueOf(current.get("status"));
+        if("QUEUED".equals(state)||"RUNNING".equals(state)) {
+            ValidationExecution execution=validationExecutions.get(id);long now=System.nanoTime();
+            long queueMs=execution==null?number(current.get("queueElapsedMs")):execution.startedNanos>0
+                    ?elapsedMillis(execution.submittedNanos,execution.startedNanos):elapsedMillis(execution.submittedNanos,now);
+            long executionMs=execution==null?number(current.get("executionElapsedMs")):execution.startedNanos>0
+                    ?elapsedMillis(execution.startedNanos,now):0L;
+            long totalMs=execution==null?number(current.get("totalElapsedMs")):elapsedMillis(execution.submittedNanos,now);
+            Map<String,Object> cancelled=store.cancelValidationRecord(id,actor,clock.instant().toString(),queueMs,executionMs,totalMs);
+            if(execution!=null&&execution.task!=null&&execution.task.cancel(true)&&validationExecutor.remove(execution.task))endValidationExecution(execution);
+            return publicValidationRecord(cancelled,true);
+        }
+        return publicValidationRecord(current,true);
+    }
+
+    private static long number(Object value) {return value instanceof Number?((Number)value).longValue():0L;}
+    private void requireValidationRecords() {if(!config.inspection.enabled||!config.validationRecords.enabled)throw new NotFoundException();}
+    private static void validateValidationId(String id) {if(id==null||!VALIDATION_ID.matcher(id).matches())throw new NotFoundException();}
+    private void verifyValidationRecordAccess(Map<String,Object> record) throws Exception {
+        String packageId=(String)record.get("packageId"),environment=(String)record.get("environment");
+        if(packageId!=null) {Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);}
+        if(packageId!=null&&environment!=null)config.packageConfiguration.authorizeEnvironment(environment,true);
+    }
+
+    private Map<String,Object> publicValidationRecord(Map<String,Object> record,boolean includeReport) {
+        if(record==null)throw new NotFoundException();Map<String,Object> out=new LinkedHashMap<>();
+        for(String key:List.of("validationId","scope","packageId","target","environment","status","phase","requestId",
+                "submittedAt","startedAt","finishedAt","queueElapsedMs","executionElapsedMs","totalElapsedMs","sourceRevision","errorCode","error")) {
+            Object value=record.get(key);if(value!=null)out.put(key,value);
+        }
+        if(Boolean.TRUE.equals(record.get("all")))out.put("all",true);
+        out.put("applicability","UNVERIFIED");
+        String state=String.valueOf(record.get("status"));ValidationExecution execution=validationExecutions.get(String.valueOf(record.get("validationId")));
+        if(execution!=null&&("QUEUED".equals(state)||"RUNNING".equals(state))) {
+            long now=System.nanoTime();long queue=execution.startedNanos>0?elapsedMillis(execution.submittedNanos,execution.startedNanos):elapsedMillis(execution.submittedNanos,now);
+            long active=execution.startedNanos>0?elapsedMillis(execution.startedNanos,now):0L;
+            out.put("queueElapsedMs",queue);out.put("executionElapsedMs",active);out.put("totalElapsedMs",elapsedMillis(execution.submittedNanos,now));
+        }
+        if(includeReport&&record.get("report") instanceof Map<?,?>)out.put("report",record.get("report"));
+        if(record.get("report") instanceof Map<?,?> report&&report.get("overallStatus")!=null)out.put("overallStatus",report.get("overallStatus"));
+        return out;
+    }
+
+    private static String encodeValidationCursor(Map<String,Object> row) {
+        String raw=String.valueOf(row.get("submittedAt"))+"\n"+row.get("validationId");
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void interruptValidationExecutions() {
+        try {store.interruptActiveValidationRecords(clock.instant());}
+        catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).log(java.util.logging.Level.WARNING,"Unable to persist interrupted validations during shutdown",failure);}
+        for(ValidationExecution execution:validationExecutions.values())if(execution.task!=null) {
+            execution.task.cancel(true);if(validationExecutor.remove(execution.task))endValidationExecution(execution);
+        }
+    }
+
+    private void cleanupValidationRecordsSafely() {
+        if(closing||!config.validationRecords.enabled)return;
+        try {store.deleteExpiredValidationRecords(clock.instant().minusMillis(TimeUnit.DAYS.toMillis(config.validationRecords.retentionDays)));}
+        catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to clean expired validation records: "+safeMessage(failure));}
     }
 
     private Map<String,Object> validateAllVNext() throws Exception {
@@ -2922,7 +3202,10 @@ final class ServerRuntime implements AutoCloseable {
     }
     private Map<String,Object> executeInspection(Path root,WorkerRequest request) throws Exception {
         long queuedAt=System.nanoTime();
-        if(!inspectionTaskSlots.tryAcquire())throw new InspectionCapacityException();
+        ValidationExecution reserved=reservedValidationInspection.get();
+        boolean useReserved=reserved!=null&&reserved.inspectionSlotReserved.compareAndSet(true,false);
+        if(useReserved)reservedValidationInspection.remove();
+        else if(!inspectionTaskSlots.tryAcquire())throw new InspectionCapacityException();
         InspectionTask task=new InspectionTask(request,inspectionTaskSequence.getAndIncrement(),queuedAt,root);
         try { inspectors.execute(task); }
         catch(RejectedExecutionException full){task.releaseSlot();throw new InspectionCapacityException();}
@@ -5376,20 +5659,21 @@ final class ServerRuntime implements AutoCloseable {
     @Override public synchronized void close() {
         admissionLifecycle.writeLock().lock();
         try {if(closing)return;closing=true;}finally{admissionLifecycle.writeLock().unlock();}
+        interruptValidationExecutions();
         if(inspectionWarmup!=null)inspectionWarmup.shutdownNow();
         manifestPublisher.close();
         if(executionWorkers!=null)executionWorkers.close();
         if(loadScheduleScheduler!=null)loadScheduleScheduler.close();
         retention.shutdownNow();artifactMaintenance.shutdownNow();targetIndexMaintenance.shutdownNow();inspectionWatchdogs.shutdownNow();
         synchronized(draftLock){runDrafts.clear();debugDrafts.clear();quickLoadDrafts.clear();advancedLoadDrafts.clear();catalogLoadDrafts.clear();scheduleExecutionReviews.clear();replayReviews.clear();}
-        inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();
+        validationExecutor.shutdownNow();inspectors.shutdownNow();workers.shutdownNow();streams.shutdownNow();
         for(InspectionWorker worker:inspectionWorkerPool)worker.close();
         for(Job j:jobs.values())if(j.process!=null) {
             try {if(j.processFence!=null){j.processFence.observe();rememberWorkerProcesses(j,j.processFence);}stopWorkerTree(j);finishQuietly(j,"ERROR",143,"ATT-SERVER-INTERRUPTED","Server shutdown interrupted the Worker");}
             catch(Exception ignored){if(j.processFence!=null)j.processFence.force();else forceTree(j.process);}
         }
         for(Process process:inspectionProcesses.keySet())if(process.isAlive())forceTree(process);
-        terminateExecutor(workers,"workers");terminateExecutor(inspectors,"inspectors");terminateExecutor(streams,"SSE streams");
+        terminateExecutor(validationExecutor,"validations");terminateExecutor(workers,"workers");terminateExecutor(inspectors,"inspectors");terminateExecutor(streams,"SSE streams");
         terminateExecutor(targetIndexMaintenance,"target indexing");terminateExecutor(retention,"retention");terminateExecutor(artifactMaintenance,"artifact maintenance");terminateExecutor(inspectionWatchdogs,"inspection watchdogs");
         if(inspectionWarmup!=null)terminateExecutor(inspectionWarmup,"inspection warmup");
         for(Job job:jobs.values())if(!job.terminal()) {
