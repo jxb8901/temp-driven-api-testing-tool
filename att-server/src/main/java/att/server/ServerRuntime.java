@@ -4945,6 +4945,10 @@ final class ServerRuntime implements AutoCloseable {
         } catch(Exception invalid) { return Map.of("schemaVersion","att-load-report-publication/v2","state","FAILED","reason","invalid_metadata"); }
     }
     Map<String,Object> loadReportV2Status(String id,String principal,boolean admin) throws Exception {
+        Map<String,Object> job=store.get(id);
+        if(job==null)throw new NotFoundException();
+        requireJobOwner(id,principal);
+        if(!"load".equals(job.get("command")))return null;
         authorizeLoadReportV2(id,principal,admin);
         Map<String,Object> pointer=readLoadReportV2Pointer(id);
         Map<String,Object> snapshot=sutMetrics.snapshotForJob(id);

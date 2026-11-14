@@ -150,7 +150,8 @@ public final class ApiServlet extends HttpServlet {
                 boolean admin;
                 try {admin=systemAdminCapability(req,principal);}
                 catch(Exception unavailable){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return;}
-                response.put("loadReportV2",runtime.loadReportV2Status(segment(path,2),principal,admin));
+                Map<String,Object> loadReportV2=runtime.loadReportV2Status(segment(path,2),principal,admin);
+                if(loadReportV2!=null)response.put("loadReportV2",loadReportV2);
                 response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;
             }
             if(path.matches("/jobs/[^/]+/replay-draft/[^/]+")){

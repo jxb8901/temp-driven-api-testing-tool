@@ -412,7 +412,10 @@ class ServerWarUiIT {
                 if("load".equals(command)) {
                     assertTrue(overview.path("reportPath").isTextual(),overview.toString());
                     assertTrue(index.path("primaryReports").findValuesAsText("path").contains(overview.path("reportPath").asText()),overview.toString());
-                } else assertTrue(overview.path("reportPath").isNull(),overview.toString());
+                } else {
+                    assertTrue(overview.path("reportPath").isNull(),overview.toString());
+                    assertFalse(overview.has("loadReportV2"),"Non-LOAD Jobs must not expose LOAD report status");
+                }
                 JsonNode journal=getJson(port,api+"/monitoring/jobs/"+id+"/journal",peer);
                 assertEquals(id,journal.path("jobId").asText());assertTrue(journal.path("metricsAvailable").isBoolean());
                 if(journal.path("metricsAvailable").asBoolean())assertTrue(journal.path("journalBytes").isIntegralNumber(),journal.toString());
