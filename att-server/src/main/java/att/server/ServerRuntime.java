@@ -1395,7 +1395,12 @@ final class ServerRuntime implements AutoCloseable {
         try { sutMetrics.authorizeSnapshot(snapshot,principal,admin); }
         catch(NotFoundException denied) { return null; }
 
-        Map<String,Object> evaluation=sutMetrics.thresholdEvaluationStatus(id);
+        Map<String,Object> evaluation;
+        try { evaluation=sutMetrics.thresholdEvaluationStatus(id); }
+        catch(Exception unavailable) {
+            evaluation=sutMetrics.evaluationError(snapshot,"UNAVAILABLE","THRESHOLD_EVALUATION_UNAVAILABLE",
+                    "The persisted SUT threshold evaluation is unavailable.",2);
+        }
         String externalState=String.valueOf(evaluation.getOrDefault("state","PENDING"));
         Map<String,Object> sutThresholds=evaluation.get("sutThresholds") instanceof Map<?,?> values
                 ?JSON.convertValue(values,Map.class):Map.of();

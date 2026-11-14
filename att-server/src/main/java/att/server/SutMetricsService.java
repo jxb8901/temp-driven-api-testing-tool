@@ -93,6 +93,7 @@ final class SutMetricsService implements AutoCloseable {
     private final Set<String> allowedPrometheusHosts;
     private final Function<String, String> secretResolver;
     private final Consumer<Path> afterManifestPublication;
+    private final Consumer<String> beforeThresholdEvidenceRead;
     private final Object catalogLock = new Object();
     private final ConcurrentHashMap<String, ManifestWriteLock> manifestWriteLocks = new ConcurrentHashMap<>();
     private Map<String, Map<String, Object>> sources = new LinkedHashMap<>();
@@ -126,12 +127,18 @@ final class SutMetricsService implements AutoCloseable {
 
     SutMetricsService(Path dataDir, Set<String> allowedPrometheusHosts, Function<String, String> secretResolver,
                       Consumer<Path> afterManifestPublication) throws Exception {
+        this(dataDir, allowedPrometheusHosts, secretResolver, afterManifestPublication, ignored -> { });
+    }
+
+    SutMetricsService(Path dataDir, Set<String> allowedPrometheusHosts, Function<String, String> secretResolver,
+                      Consumer<Path> afterManifestPublication, Consumer<String> beforeThresholdEvidenceRead) throws Exception {
         this.dataDir = dataDir.toAbsolutePath().normalize();
         this.jobsRoot = this.dataDir.resolve("jobs");
         this.catalogPath = this.dataDir.resolve("sut-metrics-catalog.json");
         this.allowedPrometheusHosts = normalizeAllowedHosts(allowedPrometheusHosts);
         this.secretResolver = java.util.Objects.requireNonNull(secretResolver, "secretResolver");
         this.afterManifestPublication = java.util.Objects.requireNonNull(afterManifestPublication, "afterManifestPublication");
+        this.beforeThresholdEvidenceRead = java.util.Objects.requireNonNull(beforeThresholdEvidenceRead, "beforeThresholdEvidenceRead");
         loadCatalog();
         recoverInterruptedCollections();
         recoverThresholdEvaluations();
@@ -638,6 +645,10 @@ final class SutMetricsService implements AutoCloseable {
             for (Map<String, Object> rule : listOfMaps(snapshot.get("thresholds")))
                 thresholdQueryIds.addAll(listOfStrings(rule.get("queryIds")));
             Map<String, Map<String, Object>> observations = new LinkedHashMap<>();
+            List<Map<String, Object>> phaseWindows = listOfMaps(collection.get("phaseWindows"));
+            Map<String, Object> steadyPhase = phaseWindows.stream()
+                    .filter(phase -> "STEADY".equals(phase.get("phase"))).findFirst().orElse(null);
+            long step = durationSeconds(String.valueOf(collection.get("step")), "step");
             long selectedBytes = 0L;
             for (Map<String, Object> entry : listOfMaps(collection.get("files"))) {
                 String queryId = String.valueOf(entry.get("queryId"));
@@ -647,28 +658,23 @@ final class SutMetricsService implements AutoCloseable {
                 if (fileBytes < 0 || fileBytes > MAX_JOB_COLLECTION_BYTES - selectedBytes) continue;
                 selectedBytes += fileBytes;
                 try {
-                    observations.put(queryId, readSeriesFile(jobId, entry, deadline));
+                    beforeThresholdEvidenceRead.accept(queryId);
+                    Map<String, Object> observation = readSeriesFile(jobId, entry, deadline);
+                    observations.put(queryId, observation);
+                    if (SutThresholdEvaluator.hasProvenViolation(listOfMaps(snapshot.get("thresholds")), queryId,
+                            observation, steadyPhase, deadline)) {
+                        persistThresholdEvaluationResult(jobId, snapshot, collection, attempt, queries,
+                                observations, phaseWindows, step, deadline);
+                        return;
+                    }
                 } catch (SutThresholdEvaluator.EvaluationTimeoutException timeout) {
                     throw timeout;
                 } catch (Exception unavailable) {
                     // Missing or corrupt evidence makes this subject unevaluable; other valid subjects still count.
                 }
             }
-            long step = durationSeconds(String.valueOf(collection.get("step")), "step");
-            Map<String, Object> result = SutThresholdEvaluator.evaluate(listOfMaps(snapshot.get("thresholds")), queries,
-                    observations, listOfMaps(collection.get("phaseWindows")), step, deadline);
-            String state = String.valueOf(result.get("status"));
-            Map<String, Object> completeness = fields("complete", Boolean.TRUE,
-                    "ruleCount", listOfMaps(snapshot.get("thresholds")).size(),
-                    "requiredRuleCount", result.get("requiredThresholdCount"),
-                    "targetCount", listOfMaps(result.get("targets")).size(),
-                    "notEvaluatedTargetCount", listOfMaps(result.get("targets")).stream()
-                            .filter(target -> "NOT_EVALUATED".equals(target.get("status"))).count());
-            Map<String, Object> finalRecord = fields("state", state, "complete", Boolean.TRUE,
-                    "attempt", attempt, "collectionState", collection.get("state"), "collectionUpdatedAt", collection.get("updatedAt"),
-                    "evaluatedAt", Instant.now().toString(), "window", fields("phase", "steady", "phaseWindows", collection.get("phaseWindows"), "step", collection.get("step")),
-                    "completeness", completeness, "sutThresholds", result, "diagnostics", List.of());
-            writeThresholdEvaluation(jobId, snapshot, finalRecord);
+            persistThresholdEvaluationResult(jobId, snapshot, collection, attempt, queries,
+                    observations, phaseWindows, step, deadline);
         } catch (SutThresholdEvaluator.EvaluationTimeoutException timeout) {
             retry = attempt < 2;
             writeEvaluationFailure(jobId, snapshot, collection, attempt, "EVALUATION_TIMEOUT", timeout.getMessage());
@@ -682,6 +688,28 @@ final class SutMetricsService implements AutoCloseable {
             try { collectionScheduler.schedule(() -> scheduleThresholdEvaluation(jobId), 1, TimeUnit.SECONDS); }
             catch (java.util.concurrent.RejectedExecutionException ignored) { }
         }
+    }
+
+    private void persistThresholdEvaluationResult(String jobId, Map<String, Object> snapshot,
+                                                 Map<String, Object> collection, int attempt,
+                                                 List<Map<String, Object>> queries,
+                                                 Map<String, Map<String, Object>> observations,
+                                                 List<Map<String, Object>> phaseWindows,
+                                                 long step, long deadline) throws Exception {
+        Map<String, Object> result = SutThresholdEvaluator.evaluate(listOfMaps(snapshot.get("thresholds")), queries,
+                observations, phaseWindows, step, deadline);
+        String state = String.valueOf(result.get("status"));
+        Map<String, Object> completeness = fields("complete", Boolean.TRUE,
+                "ruleCount", listOfMaps(snapshot.get("thresholds")).size(),
+                "requiredRuleCount", result.get("requiredThresholdCount"),
+                "targetCount", listOfMaps(result.get("targets")).size(),
+                "notEvaluatedTargetCount", listOfMaps(result.get("targets")).stream()
+                        .filter(target -> "NOT_EVALUATED".equals(target.get("status"))).count());
+        Map<String, Object> finalRecord = fields("state", state, "complete", Boolean.TRUE,
+                "attempt", attempt, "collectionState", collection.get("state"), "collectionUpdatedAt", collection.get("updatedAt"),
+                "evaluatedAt", Instant.now().toString(), "window", fields("phase", "steady", "phaseWindows", collection.get("phaseWindows"), "step", collection.get("step")),
+                "completeness", completeness, "sutThresholds", result, "diagnostics", List.of());
+        writeThresholdEvaluation(jobId, snapshot, finalRecord);
     }
 
     private void writeEvaluationFailure(String jobId, Map<String, Object> snapshot, Map<String, Object> collection,

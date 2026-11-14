@@ -90,11 +90,17 @@ final class SutThresholdEvaluator {
         if (start == null || end == null || !end.isAfter(start))
             return subject(rule, query, source, profile, target, window, "NOT_EVALUATED", null, null,
                     0, 0, 0.0, null, null, "The actual STEADY phase interval is invalid.");
-        Set<Long> timestamps = new HashSet<>();
+        List<Map<String, Object>> seriesRows = maps(observation.get("series"));
         Double peak = null;
         Instant peakAt = null, firstAt = null, lastAt = null;
+        long expected = expectedSamples(phase, stepSeconds, observation);
+        long observed = Long.MAX_VALUE;
+        double coverage = seriesRows.isEmpty() || expected == 0 ? 0.0 : 1.0;
+        boolean coversStart = !seriesRows.isEmpty(), coversEnd = !seriesRows.isEmpty();
         long examined = 0;
-        for (Map<String, Object> series : maps(observation.get("series"))) {
+        for (Map<String, Object> series : seriesRows) {
+            Set<Long> timestamps = new HashSet<>();
+            Instant seriesFirstAt = null, seriesLastAt = null;
             for (Map<String, Object> sample : maps(series.get("samples"))) {
                 if ((examined++ & 1023L) == 0L) checkDeadline(deadlineNanos);
                 Instant at = instant(sample.get("timestamp"));
@@ -102,21 +108,26 @@ final class SutThresholdEvaluator {
                 if (at == null || !(value instanceof Number number) || !Double.isFinite(number.doubleValue())
                         || at.isBefore(start) || at.isAfter(end)) continue;
                 timestamps.add(at.toEpochMilli());
-                if (firstAt == null || at.isBefore(firstAt)) firstAt = at;
-                if (lastAt == null || at.isAfter(lastAt)) lastAt = at;
+                if (seriesFirstAt == null || at.isBefore(seriesFirstAt)) seriesFirstAt = at;
+                if (seriesLastAt == null || at.isAfter(seriesLastAt)) seriesLastAt = at;
                 if (peak == null || number.doubleValue() > peak) { peak = number.doubleValue(); peakAt = at; }
             }
+            observed = Math.min(observed, timestamps.size());
+            coverage = expected == 0 ? 0.0 : Math.min(coverage, Math.min(1.0, (double) timestamps.size() / (double) expected));
+            if (seriesFirstAt != null && (firstAt == null || seriesFirstAt.isBefore(firstAt))) firstAt = seriesFirstAt;
+            if (seriesLastAt != null && (lastAt == null || seriesLastAt.isAfter(lastAt))) lastAt = seriesLastAt;
+            long tolerance = Math.max(stepSeconds * 2L, 30L);
+            coversStart &= seriesFirstAt != null && !seriesFirstAt.isAfter(start.plusSeconds(tolerance));
+            coversEnd &= seriesLastAt != null && !seriesLastAt.isBefore(end.minusSeconds(tolerance));
         }
-        long expected = expectedSamples(phase, stepSeconds, observation);
-        long observed = timestamps.size();
-        double coverage = expected == 0 ? 0.0 : Math.min(1.0, (double) observed / (double) expected);
-        long tolerance = Math.max(stepSeconds * 2L, 30L);
-        boolean coversStart = firstAt != null && !firstAt.isAfter(start.plusSeconds(tolerance));
-        boolean coversEnd = lastAt != null && !lastAt.isBefore(end.minusSeconds(tolerance));
+        if (observed == Long.MAX_VALUE) observed = 0;
         Map<String, Object> observationBody = map(observation.get("observation"));
         Map<String, Object> availability = map(observationBody.get("availability"));
         String availabilityState = String.valueOf(availability.get("state"));
         String freshness = String.valueOf(availability.get("freshness"));
+        Object reportedSeriesCount = map(availability.get("coverage")).get("seriesCount");
+        boolean completeSeriesMembership = reportedSeriesCount instanceof Number count
+                && count.intValue() == seriesRows.size();
         boolean partial = "PARTIAL".equals(availabilityState);
         boolean stale = "STALE".equals(freshness);
         boolean availabilityUnknown = !"AVAILABLE".equals(availabilityState) || !"FRESH".equals(freshness);
@@ -129,6 +140,9 @@ final class SutThresholdEvaluator {
         } else if (peak == null) {
             status = "NOT_EVALUATED";
             reason = "No valid samples fall inside the requested STEADY window.";
+        } else if (!completeSeriesMembership) {
+            status = "NOT_EVALUATED";
+            reason = "The normalized series membership does not match the pinned observation metadata.";
         } else if (availabilityUnknown) {
             status = "NOT_EVALUATED";
             reason = partial ? "The pinned observation is partial."
@@ -146,6 +160,33 @@ final class SutThresholdEvaluator {
         }
         return subject(rule, query, source, profile, target, window, status, peak, peakAt, observed,
                 expected, coverage, firstAt, lastAt, reason);
+    }
+
+    static boolean hasProvenViolation(List<Map<String, Object>> rules, String queryId,
+                                      Map<String, Object> observation, Map<String, Object> phase,
+                                      long deadlineNanos) {
+        if (observation == null || phase == null) return false;
+        Instant start = instant(phase.get("startAt")), end = instant(phase.get("endAt"));
+        if (start == null || end == null || !end.isAfter(start)) return false;
+        List<Double> limits = new ArrayList<>();
+        for (Map<String, Object> rule : rules) {
+            if (!list(rule.get("queryIds")).contains(queryId) || !(rule.get("value") instanceof Number value)
+                    || !Double.isFinite(value.doubleValue())) continue;
+            limits.add(value.doubleValue());
+        }
+        if (limits.isEmpty()) return false;
+        long examined = 0;
+        for (Map<String, Object> series : maps(observation.get("series"))) {
+            for (Map<String, Object> sample : maps(series.get("samples"))) {
+                if ((examined++ & 1023L) == 0L) checkDeadline(deadlineNanos);
+                Instant at = instant(sample.get("timestamp"));
+                Object rawValue = sample.get("value");
+                if (at == null || !(rawValue instanceof Number value) || !Double.isFinite(value.doubleValue())
+                        || at.isBefore(start) || at.isAfter(end)) continue;
+                for (double limit : limits) if (value.doubleValue() > limit) return true;
+            }
+        }
+        return false;
     }
 
     private static Map<String, Object> missingSubject(Map<String, Object> rule, String queryId, String reason,

@@ -47,6 +47,40 @@ class SutThresholdEvaluatorTest {
         assertEquals("sut-2", map(targets(result).get(1).get("target")).get("id"));
     }
 
+    @Test void alternatingLabelSeriesGapsCannotCombineIntoCompleteCoverage() {
+        Map<String, Object> phase = phase(START, START.plusSeconds(60));
+        Map<String, Object> split = observation(START, List.of());
+        split.put("series", List.of(
+                fields("labels", Map.of("instance", "sut-1", "pod", "a"), "samples", List.of(
+                        sample(START, 90.0), sample(START.plusSeconds(30), 90.0), sample(START.plusSeconds(60), 90.0))),
+                fields("labels", Map.of("instance", "sut-1", "pod", "b"), "samples", List.of(
+                        sample(START.plusSeconds(15), 90.0), sample(START.plusSeconds(45), 90.0)))));
+        reportSeriesCount(split, 2);
+
+        Map<String, Object> result = evaluate(List.of(rule("cpu", 90.0, List.of("q1"))),
+                List.of(query("q1", "sut-1")), Map.of("q1", split), phase);
+
+        assertEquals("NOT_EVALUATED", result.get("status"));
+        assertEquals("NOT_EVALUATED", targets(result).get(0).get("status"));
+        assertEquals(0.4, ((Number) map(targets(result).get(0).get("coverage")).get("ratio")).doubleValue());
+
+        Map<String, Object> violating = observation(START, List.of());
+        violating.put("series", List.of(
+                fields("labels", Map.of("pod", "a"), "samples", List.of(sample(START.plusSeconds(30), 90.1))),
+                fields("labels", Map.of("pod", "b"), "samples", List.of(sample(START.plusSeconds(15), 90.0)))));
+        Map<String, Object> violation = evaluate(List.of(rule("cpu", 90.0, List.of("q1"))),
+                List.of(query("q1", "sut-1")), Map.of("q1", violating), phase);
+        assertEquals("NOT_MET", violation.get("status"));
+        assertEquals("NOT_MET", targets(violation).get(0).get("status"));
+
+        Map<String, Object> missingMembership = observation(START, regularSamples(START, 60, 90.0));
+        reportSeriesCount(missingMembership, 2);
+        Map<String, Object> incomplete = evaluate(List.of(rule("cpu", 90.0, List.of("q1"))),
+                List.of(query("q1", "sut-1")), Map.of("q1", missingMembership), phase);
+        assertEquals("NOT_EVALUATED", incomplete.get("status"));
+        assertEquals("NOT_EVALUATED", targets(incomplete).get(0).get("status"));
+    }
+
     @Test void stalePartialAndUnknownFreshnessCannotProduceMet() {
         Map<String, Object> phase = phase(START, START.plusSeconds(60));
         List<Map<String, Object>> points = regularSamples(START, 60, 90.0);
@@ -110,8 +144,19 @@ class SutThresholdEvaluatorTest {
     private static Map<String, Object> observation(Instant queryStart, List<Map<String, Object>> samples,
                                                   String state, String freshness) {
         return fields("observation", fields("window", fields("queryStart", queryStart.toString()),
-                        "availability", fields("state", state, "freshness", freshness)),
+                        "availability", fields("state", state, "freshness", freshness,
+                                "coverage", fields("seriesCount", 1))),
                 "series", List.of(fields("samples", samples)));
+    }
+
+    private static void reportSeriesCount(Map<String, Object> observation, int count) {
+        Map<String, Object> observationBody = map(observation.get("observation"));
+        Map<String, Object> availability = map(observationBody.get("availability"));
+        Map<String, Object> coverage = map(availability.get("coverage"));
+        coverage.put("seriesCount", count);
+        availability.put("coverage", coverage);
+        observationBody.put("availability", availability);
+        observation.put("observation", observationBody);
     }
 
     private static List<Map<String, Object>> regularSamples(Instant start, long duration, double value) {

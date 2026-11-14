@@ -533,6 +533,41 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void timeoutOnSecondSubjectCannotEraseAnAlreadyProvenViolation() throws Exception {
+        Path data = temp.resolve("threshold-timeout-after-violation");
+        String jobId = "J0000000000000094";
+        AtomicInteger evidenceReads = new AtomicInteger();
+        AtomicBoolean secondSubjectTimedOut = new AtomicBoolean();
+        Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(60);
+        Map<String, Object> configured = scenario(List.of(map("id", "platform", "profile", "base", "source", "prom",
+                "targets", List.of(map("id", "sut-a", "type", "app"), map("id", "sut-b", "type", "app")))), "1m", "1m", "15s");
+        configured.put("thresholds", List.of(map("id", "cpu-max-90", "profile", "platform", "metric", "metric-1",
+                "max", 90.0, "unit", "count", "minimumCoverage", 0.95)));
+        try (PrometheusFixture fixture = new PrometheusFixture(raw -> thresholdResponse(raw, 90.1));
+             SutMetricsService service = new SutMetricsService(data, Set.of("127.0.0.1"), reference -> null,
+                     ignored -> { }, queryId -> {
+                         if (evidenceReads.incrementAndGet() == 2) {
+                             secondSubjectTimedOut.set(true);
+                             throw new SutThresholdEvaluator.EvaluationTimeoutException();
+                         }
+                     })) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            service.writeSnapshot(jobId, snapshot);
+            service.jobFinished(jobId, startedAt, finishedAt,
+                    List.of(phase("STEADY", startedAt.plusSeconds(10), finishedAt.minusSeconds(10), true)));
+
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, jobId);
+            assertEquals(1, evidenceReads.get(), "The proven violation should finalize before the later subject is read.");
+            assertFalse(secondSubjectTimedOut.get());
+            assertEquals("NOT_MET", evaluation.get("state"));
+            List<Map<String, Object>> targets = maps(maps(object(evaluation.get("sutThresholds")).get("items")).get(0).get("targets"));
+            assertEquals(1, targets.stream().filter(target -> "NOT_MET".equals(target.get("status"))).count());
+            assertEquals(1, targets.stream().filter(target -> "NOT_EVALUATED".equals(target.get("status"))).count());
+        }
+    }
+
     @Test void pendingAndErrorThresholdRecordsMatchThePublishedSchemaWithoutNullResults() throws Exception {
         Path data = temp.resolve("threshold-evaluation-schema");
         String jobId = "J0000000000000093";

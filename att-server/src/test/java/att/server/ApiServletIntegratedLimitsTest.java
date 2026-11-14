@@ -321,8 +321,39 @@ class ApiServletIntegratedLimitsTest {
             JsonNode sutTargets = acceptance.path("sutThresholds").path("items").path(0).path("targets");
             assertEquals("NOT_MET", sutTargets.get(0).path("status").asText());
             assertEquals("sut-a", sutTargets.get(0).path("target").path("id").asText());
-            assertEquals("MET", sutTargets.get(1).path("status").asText());
+            assertEquals("NOT_EVALUATED", sutTargets.get(1).path("status").asText());
             assertEquals("sut-b", sutTargets.get(1).path("target").path("id").asText());
+        }
+    }
+
+    @Test void corruptExternalEvaluationDoesNotBreakNativeLoadResultRoute() throws Exception {
+        Path packages = Files.createDirectories(temp.resolve("sut-threshold-corrupt-result-packages"));
+        createPackage(packages.resolve("p"));
+        String jobId = "J0000000000000735";
+        try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.0);
+             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-threshold-corrupt-result-data",
+                     DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-threshold-corrupt-result-libs"), true)) {
+            Map<String, Object> snapshot = twoTargetThresholdSnapshot(runtime, fixture, true);
+            seedLoadJob(runtime, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
+            Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(30);
+            runtime.sutMetrics.jobFinished(jobId, startedAt, finishedAt,
+                    List.of(Map.of("phase", "STEADY", "startAt", startedAt.plusSeconds(10).toString(),
+                            "endAt", finishedAt.toString(), "measured", true)));
+            awaitThresholdEvaluation(runtime, jobId);
+            Path evaluation = runtime.config.dataDir.resolve("jobs").resolve(jobId)
+                    .resolve("sut-metrics/threshold-evaluation.json");
+            Files.writeString(evaluation, "{truncated");
+
+            Captured response = invokeAs(servlet(runtime), "GET", "/jobs/" + jobId + "/result",
+                    Collections.emptyMap(), new byte[0], "alice", Set.of(runtime.config.authorization.userRole));
+            JsonNode body = ServerRuntime.JSON.readTree(response.body());
+            JsonNode acceptance = body.path("performanceAcceptance");
+            assertEquals(200, response.status, response.bodyText());
+            assertEquals("MET", body.path("result").path("summary").path("performance").path("verdict").asText());
+            assertEquals("ERROR", acceptance.path("externalEvaluationStatus").asText());
+            assertEquals("NOT_EVALUATED", acceptance.path("performanceVerdict").asText());
+            assertEquals("THRESHOLD_EVALUATION_UNAVAILABLE",
+                    acceptance.path("externalEvaluation").path("diagnostics").path(0).path("code").asText());
         }
     }
 
