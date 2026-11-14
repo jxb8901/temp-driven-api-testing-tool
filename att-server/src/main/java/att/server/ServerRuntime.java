@@ -109,6 +109,7 @@ final class ServerRuntime implements AutoCloseable {
     private final Set<String> requestedArtifactRetries=ConcurrentHashMap.newKeySet();
     private final Set<String> pendingLoadReportV2Jobs=ConcurrentHashMap.newKeySet();
     private final Set<String> requestedLoadReportV2Jobs=ConcurrentHashMap.newKeySet();
+    private final Object loadReportV2ScheduleLock=new Object();
     private final java.util.concurrent.locks.ReentrantReadWriteLock artifactLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
     /** Pages of {@link JobStore#STORAGE_CANDIDATE_PAGE} examined in one size sweep. Tests lower this to hit the boundary. */
@@ -5035,7 +5036,6 @@ final class ServerRuntime implements AutoCloseable {
 
     void refreshLoadReportV2(String id) {
         if(id==null||!JOB_ID.matcher(id).matches()||closing)return;
-        try { store.loadReportRecoveryNeeded(id,true); } catch(Exception ignored) { }
         scheduleLoadReportV2(id);
     }
 
@@ -5052,14 +5052,34 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void scheduleLoadReportV2(String id) {
         if(closing)return;
-        if(loadReportV2Writers==null){requestedLoadReportV2Jobs.add(id);return;}
-        if(!pendingLoadReportV2Jobs.add(id)){requestedLoadReportV2Jobs.add(id);return;}
-        requestedLoadReportV2Jobs.remove(id);
+        Map<String,Object> pointer=readLoadReportV2Pointer(id);
+        boolean previousAttemptFailed="FAILED".equals(pointer.get("state"))
+                ||("READY".equals(pointer.get("state"))&&"FAILED".equals(pointer.get("lastAttemptState")));
+        if(previousAttemptFailed&&!retryIsDue(pointer,clock.instant())) {
+            synchronized(loadReportV2ScheduleLock) {
+                try { store.markLoadReportPublicationPending(id); }
+                catch(Exception ignored) { }
+                requestedLoadReportV2Jobs.remove(id);
+            }
+            return;
+        }
+        synchronized(loadReportV2ScheduleLock) {
+            try { store.markLoadReportPublicationPending(id); }
+            catch(Exception failed) { requestedLoadReportV2Jobs.add(id);return; }
+            if(loadReportV2Writers==null){requestedLoadReportV2Jobs.add(id);return;}
+            if(!pendingLoadReportV2Jobs.add(id)){requestedLoadReportV2Jobs.add(id);return;}
+            requestedLoadReportV2Jobs.remove(id);
+        }
         try { loadReportV2Writers.execute(()->publishLoadReportV2(id)); }
-        catch(RejectedExecutionException full) { pendingLoadReportV2Jobs.remove(id);requestedLoadReportV2Jobs.add(id); }
+        catch(RejectedExecutionException full) {
+            synchronized(loadReportV2ScheduleLock) {
+                pendingLoadReportV2Jobs.remove(id);requestedLoadReportV2Jobs.add(id);
+            }
+        }
     }
     private void publishLoadReportV2(String id) {
         artifactLifecycle.readLock().lock();
+        boolean publicationFailed=false;
         try {
             Map<String,Object> job=store.get(id);
             if(job==null||!"load".equals(job.get("command"))){store.loadReportRecoveryNeeded(id,false);return;}
@@ -5095,8 +5115,9 @@ final class ServerRuntime implements AutoCloseable {
             if(publication.performanceVerdict()!=null)pointer.put("performanceVerdict",publication.performanceVerdict());
             pointer.put("updatedAt",clock.instant().toString());
             writeLoadReportV2Status(id,pointer);
-            store.loadReportRecoveryNeeded(id,unresolvedVerdict(publication.externalEvaluationStatus()));
+            store.completeLoadReportPublication(id,unresolvedVerdict(publication.externalEvaluationStatus()));
         } catch(Exception failure) {
+            publicationFailed=true;
             try {
                 Map<String,Object> prior=readLoadReportV2Pointer(id);
                 int retryCount=Math.min(30,retryCount(prior)+1);
@@ -5106,14 +5127,21 @@ final class ServerRuntime implements AutoCloseable {
                 failed.put("retryCount",retryCount);
                 failed.put("nextRetryAt",clock.instant().plusSeconds(loadReportRetryDelaySeconds(retryCount)).toString());
                 writeLoadReportV2Status(id,failed);
-                store.loadReportRecoveryNeeded(id,true);
+                store.markLoadReportPublicationPending(id);
             } catch(Exception ignored) { }
             java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Offline SUT report publication failed for Job "+id);
         } finally {
-            pendingLoadReportV2Jobs.remove(id);
+            boolean reschedule;
+            synchronized(loadReportV2ScheduleLock) {
+                pendingLoadReportV2Jobs.remove(id);
+                boolean wasRequested=requestedLoadReportV2Jobs.remove(id);
+                reschedule=wasRequested&&!publicationFailed;
+                if(reschedule)try { store.markLoadReportPublicationPending(id); } catch(Exception ignored) { }
+            }
             artifactLifecycle.readLock().unlock();
             pruneLoadReportV2Snapshots(id);
-            if(requestedLoadReportV2Jobs.remove(id))scheduleLoadReportV2(id);
+            if(reschedule)scheduleLoadReportV2(id);
+            for(String requested:List.copyOf(requestedLoadReportV2Jobs))scheduleLoadReportV2(requested);
         }
     }
     private static Map<String,Object> copyReportV2State(Map<String,Object> previous,String state,String lastAttemptState) {
@@ -5145,15 +5173,19 @@ final class ServerRuntime implements AutoCloseable {
                     String currentDigest=SutMetricsOfflineReportPublisher.verdictRecordSha256(id,config.dataDir.resolve("jobs").resolve(id));
                     String publishedDigest=nullableText(pointer.get("verdictRecordSha256"));
                     if(!java.util.Objects.equals(currentDigest,publishedDigest)) { refreshLoadReportV2(id); continue; }
-                    if(unresolvedVerdict(String.valueOf(pointer.getOrDefault("externalEvaluationStatus","NOT_PROVIDED")))) {
-                        if("FAILED".equals(pointer.get("lastAttemptState"))&&retryIsDue(pointer,now))scheduleLoadReportV2(id);
-                    } else if("FAILED".equals(pointer.get("lastAttemptState"))) {
+                    if("FAILED".equals(pointer.get("lastAttemptState"))) {
                         if(retryIsDue(pointer,now))scheduleLoadReportV2(id);
-                    } else store.loadReportRecoveryNeeded(id,false);
+                        else store.markLoadReportPublicationPending(id);
+                    } else store.completeLoadReportPublication(id,
+                            unresolvedVerdict(String.valueOf(pointer.getOrDefault("externalEvaluationStatus","NOT_PROVIDED"))));
                 } else if(!retryIsDue(pointer,now)) {
+                    store.markLoadReportPublicationPending(id);
                     continue;
                 } else scheduleLoadReportV2(id);
-            } catch(Exception ignored) { if(retryIsDue(pointer,now))scheduleLoadReportV2(id); }
+            } catch(Exception ignored) {
+                if(retryIsDue(pointer,now))scheduleLoadReportV2(id);
+                else store.markLoadReportPublicationPending(id);
+            }
         }
         return ids.size();
     }

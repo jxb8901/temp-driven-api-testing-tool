@@ -631,6 +631,29 @@ class ServerJobStorageTest {
         } finally { runtime.close(); }
     }
 
+    @Test void legacyLoadReportRecoveryCandidatesRemainEligibleForRetention() throws Exception {
+        try(ServerRuntime runtime=runtime("legacy-report-recovery",null,Clock.systemUTC())) {
+            Instant finished=Instant.now().minus(Duration.ofDays(60));
+            java.util.ArrayList<String> ids=new java.util.ArrayList<>();
+            for(int index=1;index<=130;index++) {
+                String id=String.format("J%016X",index);
+                seedRow(runtime,id,"load","PASS",finished,false);
+                runtime.store.loadReportRecoveryNeeded(id,true);
+                ids.add(id);
+            }
+            assertEquals(64,runtime.store.loadReportRecoveryJobIds("",64).size(),"Legacy inspection remains bounded in pages.");
+            assertEquals(130,runtime.store.expiredJobIds(Instant.now().minus(Duration.ofDays(runtime.config.jobRetentionDays))).size());
+            assertEquals(130,runtime.store.storageCandidates().size());
+
+            String manuallyDeleted=ids.get(0);
+            assertTrue(runtime.store.markManualDeleting(manuallyDeleted,"operator"),
+                    "The legacy recovery cursor must not hold manual deletion while it inspects the history.");
+            assertTrue(runtime.reconcileDeletingJobs());
+            runtime.cleanupExpiredJobs();
+            for(String id:ids)assertFalse(runtime.store.jobRowExists(id),id);
+        }
+    }
+
     private Map<String, Object> storage(ServerRuntime runtime) throws Exception {
         @SuppressWarnings("unchecked") Map<String, Object> storage = (Map<String, Object>) runtime.counts().get("jobStorage");
         return storage;

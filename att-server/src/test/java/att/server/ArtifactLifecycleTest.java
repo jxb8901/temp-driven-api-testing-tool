@@ -100,6 +100,7 @@ class ArtifactLifecycleTest {
                     "snapshotId","snapshot-1","queries",List.of()));
             runtime.sutMetrics.jobFinished(id,null,null);
             awaitLoadReport(runtime,id,"FAILED","user-a");
+            assertTrue(runtime.store.loadReportPublicationPending(id));
             assertEquals(1,reportAttempts.get());
             Path current=config.dataDir.resolve("jobs").resolve(id).resolve("load-report-publications/v2/current.json");
             var failedPointer=ServerRuntime.JSON.readTree(current.toFile());
@@ -116,6 +117,7 @@ class ArtifactLifecycleTest {
             assertEquals(0,restarted.recoverLoadReportV2(),"The startup recovery page advanced the cursor; the next sweep wraps it.");
             assertEquals(1,restarted.recoverLoadReportV2());
             Map<String,Object> ready=awaitLoadReport(restarted,id,"READY","user-a");
+            awaitLoadReportRetentionPending(restarted,id,false);
             String previousPublication=String.valueOf(ready.get("publicationId"));
             Path previousArchive=config.dataDir.resolve("jobs").resolve(id).resolve("load-report-publications/v2/snapshots")
                     .resolve(previousPublication+".zip");
@@ -128,6 +130,7 @@ class ArtifactLifecycleTest {
                     "externalEvaluationStatus","MET","performanceVerdict","MET")),StandardCharsets.UTF_8);
             restarted.loadVerdictPublished(id);
             assertTrue(refreshedReportEntered.await(5,TimeUnit.SECONDS),"Verdict publication must trigger a report refresh.");
+            assertTrue(restarted.store.loadReportPublicationPending(id));
 
             try(ServerRuntime.ArtifactRead previous=restarted.openLoadReportV2Archive(id,"user-a",true)) {
                 assertTrue(previous.length()>0,"The previous READY report remains downloadable while its replacement is built.");
@@ -151,9 +154,36 @@ class ArtifactLifecycleTest {
             assertNotEquals(previousPublication,finalized.get("publicationId"));
             assertEquals("MET",finalized.get("externalEvaluationStatus"));
             assertEquals("MET",finalized.get("performanceVerdict"));
+            awaitLoadReportRetentionPending(restarted,id,false);
             assertTrue(Files.isRegularFile(previousArchive),"The previous immutable snapshot is retained after the replacement is ready.");
         } finally {
             releaseRefreshedReport.countDown();
+        }
+    }
+
+    @Test void readyReportsWithMissingOrPendingVerdictsRemainEligibleForRetention() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            Job missingVerdict=publishReadyLoadReport(runtime,"J0000000000000811",null);
+            Map<String,Object> missingStatus=runtime.loadReportV2Status(missingVerdict.id,"user-a",true);
+            assertEquals("NOT_PROVIDED",missingStatus.get("externalEvaluationStatus"));
+            assertFalse(runtime.store.loadReportPublicationPending(missingVerdict.id));
+            missingVerdict.finishedAt=Instant.now().minus(java.time.Duration.ofDays(40));runtime.store.update(missingVerdict);
+            runtime.cleanupExpiredJobs();
+            assertFalse(runtime.store.jobRowExists(missingVerdict.id),"An optional absent verdict must not fence age retention.");
+
+            Job pendingVerdict=publishReadyLoadReport(runtime,"J0000000000000812","PENDING");
+            Map<String,Object> pendingStatus=runtime.loadReportV2Status(pendingVerdict.id,"user-a",true);
+            assertEquals("PENDING",pendingStatus.get("externalEvaluationStatus"));
+            assertFalse(runtime.store.loadReportPublicationPending(pendingVerdict.id));
+            pendingVerdict.finishedAt=Instant.now().minus(java.time.Duration.ofDays(40));runtime.store.update(pendingVerdict);
+            runtime.cleanupExpiredJobs();
+            assertFalse(runtime.store.jobRowExists(pendingVerdict.id),"An optional pending verdict must not fence age retention.");
+
+            Job manual=publishReadyLoadReport(runtime,"J0000000000000813",null);
+            assertEquals("NOT_PROVIDED",runtime.loadReportV2Status(manual.id,"user-a",true).get("externalEvaluationStatus"));
+            assertTrue(runtime.store.markManualDeleting(manual.id,"operator"),"A READY report with no verdict remains manually deletable.");
+            assertTrue(runtime.reconcileDeletingJobs());
+            assertFalse(runtime.store.jobRowExists(manual.id));
         }
     }
 
@@ -701,6 +731,39 @@ class ArtifactLifecycleTest {
             Thread.sleep(20);
         } while(System.nanoTime()<deadline);
         fail("Expected offline report state "+expected+" but got "+status);return Map.of();
+    }
+
+    private void awaitLoadReportRetentionPending(ServerRuntime runtime,String id,boolean expected) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        boolean pending;
+        do {
+            pending=runtime.store.loadReportPublicationPending(id);
+            if(pending==expected)return;
+            Thread.sleep(10);
+        } while(System.nanoTime()<deadline);
+        fail("Expected publication pending="+expected+" but got "+pending+"; status="+
+                runtime.loadReportV2Status(id,"user-a",true)+"; pointer="+
+                Files.readString(runtime.config.dataDir.resolve("jobs").resolve(id).resolve("load-report-publications/v2/current.json"))+
+                "; currentVerdict="+SutMetricsOfflineReportPublisher.verdictRecordSha256(id,runtime.config.dataDir.resolve("jobs").resolve(id)));
+    }
+
+    private Job publishReadyLoadReport(ServerRuntime runtime,String id,String externalEvaluationStatus) throws Exception {
+        Job job=job(runtime,id,"PASS","load");
+        Files.writeString(runtime.outputDirectoryForJob(id).resolve("native.txt"),"native evidence");
+        runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
+        runtime.sutMetrics.writeSnapshot(id,Map.of("schemaVersion",SutMetricsService.SNAPSHOT_SCHEMA,
+                "snapshotId","snapshot-"+id,"queries",List.of()));
+        if(externalEvaluationStatus!=null) {
+            Path verdict=runtime.config.dataDir.resolve("jobs").resolve(id).resolve("load-verdict/v1/manifest.json");
+            Files.createDirectories(verdict.getParent());
+            Files.writeString(verdict,ServerRuntime.JSON.writeValueAsString(Map.of(
+                    "schemaVersion","att-load-verdict/v1","jobId",id,
+                    "externalEvaluationStatus",externalEvaluationStatus)),StandardCharsets.UTF_8);
+        }
+        runtime.sutMetrics.jobFinished(id,null,null);
+        awaitLoadReport(runtime,id,"READY","user-a");
+        awaitLoadReportRetentionPending(runtime,id,false);
+        return job;
     }
 
     private void awaitState(ServerRuntime runtime,String id,String expected) throws Exception {
