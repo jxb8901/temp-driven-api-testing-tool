@@ -1550,6 +1550,33 @@ Server 會將正規化規則固定在 Job 的 SUT snapshot，並把 post-run 結
 
 Scenario authoring、完整 rule 欄位、coverage 條件及 Studio evidence 見 [Studio Load testing](interfaces/studio/load-testing.zh.md#sut-metrics)。
 
+##### 單次呼叫業務指標
+
+Base profile 可用一個已配置的 `call` 定義業務指標，代替 PromQL。所有 LOAD work drain 完成後，ATT 會透過所選 package 現有的 DBHelper 或 Package Tool configuration，對每個展開後的 metric binding 執行一次。預設為 job scope；workload scope 必須指定 LOAD scenario 中完全相符的一個 `workloadId`。系統不會展開多個 targets、輪詢或隱式重試。DBHelper call 使用既有 helper configuration、bind parameters 和 connection limits。由於 ATT 無法判斷 Package Tool code 是否有 side effects，使用 Package Tool 必須設定 `sideEffectsAcknowledged: true`。
+
+~~~json
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "active-sessions",
+  "kind": "base",
+  "category": "db",
+  "metrics": [
+    {
+      "id": "active",
+      "title": "Active sessions",
+      "unit": "count",
+      "kind": "gauge",
+      "call": "#{db.reporting.scalar(sql='select count(*) from active_sessions')}",
+      "sampling": "afterDrain"
+    }
+  ]
+}
+~~~
+
+設定 `sampling: windowQuery` 和 `window: steady`，即可在 drain 後執行一次 call，並透過 `EXEC.OBSERVATION.WINDOW_START` 和 `EXEC.OBSERVATION.WINDOW_END` 讀取實際 STEADY bounds。Aggregation 由 query author 定義；成功回傳數值不代表已完整覆蓋該 interval。Map 或 list result 必須使用明確 `valuePath`，例如 `rows[0].active`；解析後必須是單一有限數字。Server 會在 Job admission 時固定 package 和 Runtime Config revision；若任一 revision 改變，就不會執行 call。Calls 在有界的 Server worker pool 中執行，不會佔用 LOAD worker。Call 失敗、timeout、revision 過期或結果非數字會記錄為 unavailable，並評估為 `NOT_EVALUATED`；不會代入零值，也不會改變 Worker result。Binding validation 和 live preview 都不會執行 business call。
+
+Business metric 支援 `max <= value` threshold。`afterDrain` metric 使用 `window: afterDrain`；`windowQuery` metric 使用 `window: steady`。這些單值規則不使用 `minimumCoverage`。
+
 Summary 的 `thresholds` object 中，`status` 和 `performanceVerdict` 是 authoritative tri-state 欄位，值為 `MET`、`NOT_MET` 或 `NOT_EVALUATED`。Optional `legacyPassed` boolean 維持舊有 `passed()` 語義：已配置但無法評估的 threshold 為 false，未配置 threshold 時為 true。Consumer 應使用 tri-state 欄位，區分 evidence 不完整與 threshold 未達標。
 
 Summary 會將 generator observation 與 SUT outcome 分開。`metrics.generator` 包含 sampled heap used/committed/maximum、觀察到的 peak live threads、GC count/time，以及 JVM 支援時的 process CPU。Sampling 限制為每 100 ms 至多一次，較短暫的 peak 可能錯過。`schedulerWakeups`、`submitLag*` 與 `workerQueueDepth*` 描述 scheduler pressure；arrival drops 與 SUT error 分開。`resources.http` 會按 HTTP helper 報告 active/idle/waiting 與觀察到的 peak connections，並與 DB、MQ、Render pool/plan diagnostics 並列；`resources.resourceMetricSamples` 顯示 rate-limited resource observations 的數量。`resources.executionIds` 顯示 custom execution-ID reservation 數量。Testdata mapping/selection counts 位於 `resources.generator.testdata`；解讀方式和 implementation limits 見 [Load Generator Telemetry](system-design/load-telemetry.zh.md)。
@@ -3359,7 +3386,7 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 
 ### 離線 SUT Metrics 報告
 
-完成的 LOAD 若有 SUT collection evidence，可另外發佈獨立版本化的離線報告 archive。Publisher 會驗證來源 manifest 及每個 observation sidecar，逐 byte 保留原本 sealed native archive，並以不可變 snapshot 發佈。`att-load-report-extension/v2` manifest 會引用 source-neutral 的 `att-load-offline-observations/v1` record；其 `att-load-offline-observation/v1` entries 記錄 source、metric、profile、target、UTC window、phase、單位、sample resolution、coverage、gaps、diagnostics、checksums 及有界 chart preview。完整 series sidecar 仍使用 normalized `att-sut-metrics-observation/v1` contract。Partial 或 unavailable source data 會明確標示，不會改變 native Job result。
+完成的 LOAD 若有 SUT collection evidence，可另外發佈獨立版本化的離線報告 archive。Publisher 會驗證來源 manifest 及每個 observation sidecar，逐 byte 保留原本 sealed native archive，並以不可變 snapshot 發佈。`att-load-report-extension/v2` manifest 會引用 source-neutral 的 `att-load-offline-observations/v1` record。`att-load-offline-observation/v1` entries 記錄 source、metric、profile、target、UTC window、phase、單位、quality 和 checksum；time-series 會提供有界 chart preview，business metric 則提供單一數值。完整 sidecar 仍使用 normalized `att-sut-metrics-observation/v1` contract。Partial 或 unavailable source data 會明確標示，不會改變 native Job result。
 
 報告可在沒有 network access 時使用，並採用 restrictive Content Security Policy。報告不會評估 performance threshold。如有獨立版本化的 `att-load-verdict/v1` record，報告只顯示其 evaluation state 與 evidence reference，不會重新計算 verdict。只有在驗證發佈成功後，才可透過 authenticated Job download route 取得 archive。
 
