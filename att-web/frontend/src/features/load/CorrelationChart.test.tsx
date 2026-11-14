@@ -58,4 +58,32 @@ describe('CorrelationChart time rendering', () => {
     expect(ticks[0]).toContain('13 Nov 2026');
     expect(ticks.some(tick => tick.includes('14 Nov 2026'))).toBe(true);
   });
+
+  it('draws downsampled LOAD bins independently without strokes across omitted bins', async () => {
+    const start = Date.parse('2026-11-13T12:00:00Z');
+    const pointCount = 1501;
+    const durationMs = 60_000;
+    const end = start + pointCount * durationMs;
+    const loadPoints = Array.from({ length: pointCount }, (_, index) => {
+      const x = start + index * durationMs;
+      return { x, y: 10 + index % 7, durationMs, visibleStart: x, visibleEnd: x + durationMs };
+    });
+    await act(async () => root.render(<CorrelationChart
+      loadPoints={loadPoints}
+      sutPoints={[{ x: start + durationMs / 2, y: 20 }, { x: end - 1, y: 30 }]}
+      loadMetric={metric} sutUnit="%" loadResolution={durationMs} sutResolution={durationMs}
+      boundaries={[]} domain={[start, end]}
+    />));
+
+    const strokes = Array.from(host.querySelectorAll<SVGPathElement>('path.att-correlation-load-line'));
+    expect(strokes).toHaveLength(1200);
+    const spans = strokes.map(stroke => {
+      const match = /^M(-?(?:\d+(?:\.\d*)?|\.\d+)),-?(?:\d+(?:\.\d*)?|\.\d+)H(-?(?:\d+(?:\.\d*)?|\.\d+))$/.exec(stroke.getAttribute('d') || '');
+      expect(match).not.toBeNull();
+      return Number(match?.[2]) - Number(match?.[1]);
+    });
+    const nativeBinWidth = (960 - 82 - 82) * durationMs / (pointCount * durationMs);
+    expect(Math.max(...spans)).toBeCloseTo(nativeBinWidth, 6);
+    expect(host.textContent).toContain('1200/1501 LOAD points');
+  });
 });
