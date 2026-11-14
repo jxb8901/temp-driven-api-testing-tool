@@ -13,8 +13,8 @@ describe('LOAD and SUT correlation series', () => {
     ]);
 
     expect(points).toEqual([
-      { x: 1500, y: 2, durationMs: 1000, partialPhase: true, partialRange: false, cohortSamples: 0 },
-      { x: 2500, y: 3, durationMs: 1000, partialPhase: false, partialRange: false, cohortSamples: 0 },
+      { x: 1500, y: 2, durationMs: 1000, visibleStart: 2000, visibleEnd: 2500, partialPhase: true, partialRange: false, cohortSamples: 0 },
+      { x: 2500, y: 3, durationMs: 1000, visibleStart: 2500, visibleEnd: 3500, partialPhase: false, partialRange: false, cohortSamples: 0 },
     ]);
     expect(points).toHaveLength(2);
   });
@@ -27,8 +27,8 @@ describe('LOAD and SUT correlation series', () => {
     ], { id: 'completedRate', field: 'completedRate', label: 'Completed TPS', unit: 'requests/s' }, 'all', [], 30_000, 90_000);
 
     expect(points).toEqual([
-      { x: 0, y: 2, durationMs: 60_000, partialPhase: false, partialRange: true, cohortSamples: 0 },
-      { x: 60_000, y: 3, durationMs: 60_000, partialPhase: false, partialRange: true, cohortSamples: 0 },
+      { x: 0, y: 2, durationMs: 60_000, visibleStart: 30_000, visibleEnd: 60_000, partialPhase: false, partialRange: true, cohortSamples: 0 },
+      { x: 60_000, y: 3, durationMs: 60_000, visibleStart: 60_000, visibleEnd: 90_000, partialPhase: false, partialRange: true, cohortSamples: 0 },
     ]);
     // Retained bin values and durations are unchanged; the display discloses that each bin is partial.
     expect(points.map(point => [point.y, point.durationMs])).toEqual([[2, 60_000], [3, 60_000]]);

@@ -8,9 +8,10 @@ const MAX_CHART_POINTS = 1200;
 const NUMBER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
 const UTC_TIME = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 const UTC_TICK = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+const UTC_DATE = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', day: '2-digit', month: 'short', year: 'numeric' });
 
 type PhaseBoundary = { phase: string; windowStartEpochMs: number; windowEndEpochMs: number };
-type Point = { x: number; y: number; durationMs?: number; partialPhase?: boolean; partialRange?: boolean; cohortSamples?: number };
+type Point = { x: number; y: number; durationMs?: number; visibleStart?: number; visibleEnd?: number; partialPhase?: boolean; partialRange?: boolean; cohortSamples?: number };
 type LoadMetric = { id: string; field: string; label: string; unit: string; percentile?: boolean; rate?: boolean };
 
 const LOAD_METRICS: LoadMetric[] = [
@@ -103,7 +104,11 @@ export function selectLoadPoints(points: unknown[], metric: LoadMetric, phase: s
     if (rangeOverlap <= 0) return [];
     const phaseOverlapMs = selectedBoundary ? phaseOverlap(x, binEnd, selectedBoundary) : durationMs;
     if (phaseOverlapMs <= 0) return [];
+    const visibleStart = Math.max(x, start, selectedBoundary?.windowStartEpochMs ?? Number.NEGATIVE_INFINITY);
+    const visibleEnd = Math.min(binEnd, end, selectedBoundary?.windowEndEpochMs ?? Number.POSITIVE_INFINITY);
+    if (visibleStart >= visibleEnd) return [];
     return [{ x, y, durationMs,
+      visibleStart, visibleEnd,
       partialPhase: Boolean(selectedBoundary && phaseOverlapMs < durationMs),
       partialRange: rangeOverlap < durationMs,
       cohortSamples: numeric(item.latencySampleCount) ?? 0 }];
@@ -635,7 +640,7 @@ function CorrelationSummary({ metric, loadPoints, sutPoints, loadResolution, sut
   </dl>;
 }
 
-function CorrelationChart({ loadPoints, sutPoints, loadMetric, sutUnit, loadResolution, sutResolution, boundaries, domain }: {
+export function CorrelationChart({ loadPoints, sutPoints, loadMetric, sutUnit, loadResolution, sutResolution, boundaries, domain }: {
   loadPoints: Point[]; sutPoints: Point[]; loadMetric: LoadMetric; sutUnit: string; loadResolution: number | null; sutResolution: number | null;
   boundaries: PhaseBoundary[]; domain?: [number, number];
 }) {
@@ -643,8 +648,10 @@ function CorrelationChart({ loadPoints, sutPoints, loadMetric, sutUnit, loadReso
   const plotWidth = width - left - right; const plotHeight = height - top - bottom;
   const minOf = (points: Point[]) => points.reduce((min, point) => Math.min(min, point.x), Number.POSITIVE_INFINITY);
   const maxOf = (points: Point[]) => points.reduce((max, point) => Math.max(max, point.x), Number.NEGATIVE_INFINITY);
-  let minX = domain?.[0] ?? Math.min(minOf(loadPoints), minOf(sutPoints));
-  let maxX = domain?.[1] ?? Math.max(maxOf(loadPoints), maxOf(sutPoints));
+  const loadStart = loadPoints.reduce((min, point) => Math.min(min, point.visibleStart ?? point.x), Number.POSITIVE_INFINITY);
+  const loadEnd = loadPoints.reduce((max, point) => Math.max(max, point.visibleEnd ?? point.x + (point.durationMs || 0)), Number.NEGATIVE_INFINITY);
+  let minX = domain?.[0] ?? Math.min(loadStart, minOf(sutPoints));
+  let maxX = domain?.[1] ?? Math.max(loadEnd, maxOf(sutPoints));
   if (minX === maxX) { minX -= Math.max(loadResolution || 0, sutResolution || 0, 1000) / 2; maxX += Math.max(loadResolution || 0, sutResolution || 0, 1000) / 2; }
   let minLoad = loadPoints.reduce((min, point) => Math.min(min, point.y), Number.POSITIVE_INFINITY); let maxLoad = loadPoints.reduce((max, point) => Math.max(max, point.y), Number.NEGATIVE_INFINITY);
   let minSut = sutPoints.reduce((min, point) => Math.min(min, point.y), Number.POSITIVE_INFINITY); let maxSut = sutPoints.reduce((max, point) => Math.max(max, point.y), Number.NEGATIVE_INFINITY);
@@ -671,17 +678,30 @@ function CorrelationChart({ loadPoints, sutPoints, loadMetric, sutUnit, loadReso
           <text x={left - 8} y={gy + 4} textAnchor="end">{NUMBER.format(loadValue)}</text><text x={width - right + 8} y={gy + 4}>{NUMBER.format(sutValue)}</text></g>;
       })}
       <g clipPath="url(#att-correlation-plot)">
-        {loadDisplay.segments.map((segment, index) => segment.length > 1
-          ? <path key={`load-${index}`} d={segment.map((point, pointIndex) => `${pointIndex ? 'L' : 'M'}${x(point.x)},${yLoad(point.y)}`).join(' ')} className="att-correlation-load-line" />
-          : <circle key={`load-${index}`} cx={x(segment[0]!.x)} cy={yLoad(segment[0]!.y)} r="2.5" className="att-correlation-load-point" />)}
+        {loadDisplay.segments.map((segment, index) => {
+          const visible = segment.flatMap(point => {
+            const start = Math.max(point.visibleStart ?? point.x, minX);
+            const end = Math.min(point.visibleEnd ?? point.x + (point.durationMs || 0), maxX);
+            return end > start ? [{ point, start, end }] : [];
+          });
+          if (!visible.length) return null;
+          const path = visible.map((entry, pointIndex) => pointIndex === 0
+            ? `M${x(entry.start)},${yLoad(entry.point.y)}H${x(entry.end)}`
+            : `L${x(entry.start)},${yLoad(visible[pointIndex - 1]!.point.y)}V${yLoad(entry.point.y)}H${x(entry.end)}`).join(' ');
+          return <path key={`load-${index}`} d={path} className="att-correlation-load-line">
+            <title>ATT LOAD native-bin value shown over its visible interval; reported value and rate denominator remain for the full bin.</title>
+          </path>;
+        })}
         {sutDisplay.segments.map((segment, index) => segment.length > 1
           ? <path key={`sut-${index}`} d={segment.map((point, pointIndex) => `${pointIndex ? 'L' : 'M'}${x(point.x)},${ySut(point.y)}`).join(' ')} className="att-correlation-sut-line" />
           : <circle key={`sut-${index}`} cx={x(segment[0]!.x)} cy={ySut(segment[0]!.y)} r="2.5" className="att-correlation-sut-point" />)}
       </g>
-      {Array.from({ length: 5 }, (_, index) => {
-        const tick = minX + index / 4 * (maxX - minX);
+      {Array.from({ length: 5 }, (_, index) => minX + index / 4 * (maxX - minX)).map((tick, index, ticks) => {
+        const day = new Date(tick).toISOString().slice(0, 10);
+        const previousDay = index ? new Date(ticks[index - 1]!).toISOString().slice(0, 10) : null;
+        const label = index === 0 || day !== previousDay ? `${UTC_DATE.format(tick)} ${UTC_TICK.format(tick)}` : UTC_TICK.format(tick);
         return <g key={index}><line x1={x(tick)} x2={x(tick)} y1={top + plotHeight} y2={top + plotHeight + 5} className="att-correlation-grid" />
-          <text x={x(tick)} y={height - 23} textAnchor="middle">{UTC_TICK.format(tick)}</text></g>;
+          <text className="att-correlation-time-tick" x={x(tick)} y={height - 23} textAnchor="middle">{label}</text></g>;
       })}
       <text transform={`translate(18 ${top + plotHeight / 2}) rotate(-90)`} textAnchor="middle">{loadMetric.label} ({loadMetric.unit})</text>
       <text transform={`translate(${width - 18} ${top + plotHeight / 2}) rotate(90)`} textAnchor="middle">Selected SUT metric ({sutUnit})</text>
@@ -692,6 +712,6 @@ function CorrelationChart({ loadPoints, sutPoints, loadMetric, sutUnit, loadReso
       <line x1={left + 20} x2={left + 48} y1={19} y2={19} className="att-correlation-load-line" /><text x={left + 54} y={23}>ATT LOAD</text>
       <line x1={width - right - 145} x2={width - right - 117} y1={19} y2={19} className="att-correlation-sut-line" /><text x={width - right - 111} y={23}>SUT</text>
     </svg>
-    <figcaption>UTC event-bin start for ATT LOAD; actual sample timestamps for SUT. Chart displays {loadDisplay.total}/{loadPoints.length} LOAD points and {sutDisplay.total}/{sutPoints.length} SUT points. Lines break at estimated missing intervals; values are not interpolated.</figcaption>
+    <figcaption>ATT LOAD native-bin values span each visible part of their interval and retain full-bin denominators; SUT values use actual sample timestamps (UTC). Chart displays {loadDisplay.total}/{loadPoints.length} LOAD points and {sutDisplay.total}/{sutPoints.length} SUT points. SUT lines break at estimated missing intervals; values are not interpolated.</figcaption>
   </figure>;
 }
