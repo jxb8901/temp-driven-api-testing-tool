@@ -81,7 +81,8 @@ class ClosedVuSchedulerTest {
             return result(request.iterationId(), ResultStatus.PASS);
         };
 
-        ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, runner, "run-19", events::add, fake.timing());
+        ClosedVuScheduler scheduler = new ClosedVuScheduler(scenario, runner, "run-19", events::add,
+                fake.timingWithWorkerSchedulingWindow());
         LoadRunResult result = scheduler.run();
         List<LoadEvent> completions = new ArrayList<LoadEvent>();
         for (LoadEvent event : events) if (event.completed()) completions.add(event);
@@ -199,6 +200,15 @@ class ClosedVuSchedulerTest {
             return new LoadSchedulerTiming(now::get, millis -> {
                 if (millis > 0L) now.addAndGet(millis);
                 Thread.yield();
+            });
+        }
+
+        LoadSchedulerTiming timingWithWorkerSchedulingWindow() {
+            return new LoadSchedulerTiming(now::get, millis -> {
+                long before = now.get();
+                // Do not fast-forward the simulated run before its asynchronous worker can complete.
+                Thread.sleep(50L);
+                if (millis > 0L && now.get() == before) now.addAndGet(millis);
             });
         }
 
