@@ -846,11 +846,11 @@ describe('JobsPage React feature', () => {
     const cases: Array<[string, string]> = [
       ['DISABLED', 'SUT Metrics are not configured for this LOAD Job.'],
       ['PENDING', 'SUT Metrics are waiting for LOAD execution or the post-run collection worker.'],
-      ['COLLECTING', 'Prometheus post-run collection is in progress.'],
+      ['COLLECTING', 'Post-run SUT Metrics collection is in progress.'],
       ['READY', 'Collection is ready, but no metric series are present in this page.'],
       ['PARTIAL', 'Some metrics are available; other queries returned no data or could not be collected.'],
       ['NO_DATA', 'No SUT samples are available yet for this time window.'],
-      ['UNAVAILABLE', 'Prometheus did not return any SUT metric samples for this window.'],
+      ['UNAVAILABLE', 'No SUT metric observations were collected for this Job.'],
       ['FAILED', 'SUT Metrics collection failed. The LOAD execution verdict is unchanged.'],
     ];
     const getMetrics = vi.fn(async (jobId: string): Promise<SutMetricsJobResponse> => {
