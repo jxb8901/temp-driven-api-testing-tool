@@ -66,6 +66,7 @@ final class SutMetricsService implements AutoCloseable {
     static final String COLLECTION_SCHEMA = "att-sut-metrics-manifest/v1";
     static final String SERIES_SCHEMA = "att-sut-metrics-series/v1";
     static final String OBSERVATION_SCHEMA = "att-sut-metrics-observation/v1";
+    static final String OFFLINE_OBSERVATION_SCHEMA = "att-load-offline-observation/v1";
     static final String MANIFEST_INTEGRITY_SCHEMA = "att-sut-metrics-manifest-integrity/v1";
     static final String THRESHOLD_EVALUATION_SCHEMA = "att-sut-threshold-evaluation/v1";
     private static final String MANIFEST_INTEGRITY_FIELD = "_integrity";
@@ -838,7 +839,7 @@ final class SutMetricsService implements AutoCloseable {
                 Map<String, Object> query = queryMetadataById(snapshot, String.valueOf(file.get("queryId")));
                 List<Map<String, Object>> series = listOfMaps(safeSeries.get("series"));
                 List<Map<String, Object>> preview = chartPreview(series, 96);
-                observations.add(fields("schemaVersion", OBSERVATION_SCHEMA, "kind", "timeseries",
+                observations.add(fields("schemaVersion", OFFLINE_OBSERVATION_SCHEMA, "kind", "timeseries",
                         "source", fields("id", file.get("sourceId"), "name", query.get("sourceName")),
                         "metric", fields("id", file.get("metricId"), "name", file.get("title"),
                                 "category", file.get("category"), "unit", file.get("unit")),

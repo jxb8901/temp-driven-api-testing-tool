@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:api-schema:load-offline-observations:v1",
+  "$comment": "Server-owned offline report contract; not registered in the Engine schema catalog.",
+  "title": "ATT offline SUT observations",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "jobId",
+    "snapshotId",
+    "state",
+    "complete",
+    "window",
+    "sampleResolution",
+    "coverage",
+    "queries",
+    "observations",
+    "diagnostics",
+    "sourceManifestSha256",
+    "extensions"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "att-load-offline-observations/v1" },
+    "jobId": { "type": "string", "pattern": "^J[A-F0-9]{16}$" },
+    "snapshotId": { "type": ["string", "null"] },
+    "state": {
+      "type": "string",
+      "enum": ["DISABLED", "PENDING", "COLLECTING", "READY", "PARTIAL", "UNAVAILABLE", "FAILED"]
+    },
+    "complete": { "type": "boolean" },
+    "window": { "$ref": "#/$defs/window" },
+    "sampleResolution": { "type": ["string", "null"] },
+    "coverage": { "type": "object" },
+    "queries": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/query" }
+    },
+    "observations": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/observation" }
+    },
+    "diagnostics": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/diagnostic" }
+    },
+    "sourceManifestSha256": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["thresholdVerdict", "correlation", "futureObservationTypes"],
+      "properties": {
+        "thresholdVerdict": {
+          "type": "object",
+          "required": ["schemaVersion", "state", "reference"],
+          "properties": {
+            "schemaVersion": { "const": "att-load-verdict/v1" },
+            "state": { "type": "string" },
+            "reference": { "const": "load-verdict/v1/manifest.json" }
+          }
+        },
+        "correlation": {
+          "type": "object",
+          "required": ["schemaVersion", "state"],
+          "properties": {
+            "schemaVersion": { "const": "att-load-correlation/v1" },
+            "state": { "const": "NOT_INCLUDED" }
+          }
+        },
+        "futureObservationTypes": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 64 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "time": { "type": ["string", "null"], "format": "date-time" },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startAt", "endAt", "phaseWindows"],
+      "properties": {
+        "startAt": { "$ref": "#/$defs/time" },
+        "endAt": { "$ref": "#/$defs/time" },
+        "phaseWindows": { "type": "array", "maxItems": 64, "items": { "type": "object" } }
+      }
+    },
+    "query": {
+      "type": "object",
+      "required": ["id", "profile", "profilePath", "sourceId", "targetId", "metricId", "unit"],
+      "properties": {
+        "id": { "type": "string", "maxLength": 512 },
+        "profile": { "type": "string", "maxLength": 128 },
+        "profilePath": { "type": "string", "maxLength": 256 },
+        "sourceId": { "type": "string", "maxLength": 128 },
+        "sourceName": { "type": ["string", "null"], "maxLength": 120 },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "targetType": { "type": "string", "maxLength": 128 },
+        "metricId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 128 },
+        "unit": { "type": "string", "maxLength": 64 },
+        "kind": { "type": "string", "maxLength": 64 },
+        "sourceRevision": { "$ref": "#/$defs/digest" },
+        "profileRevision": { "$ref": "#/$defs/digest" },
+        "targetRevision": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "kind", "source", "metric", "profile", "target", "window",
+        "sampleResolution", "coverage", "quality", "path", "sourceSha256", "sha256",
+        "lengthBytes", "seriesCount", "sampleCount", "preview"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "att-load-offline-observation/v1" },
+        "kind": { "const": "timeseries" },
+        "source": { "type": "object" },
+        "metric": { "type": "object" },
+        "profile": { "type": "object" },
+        "target": { "type": "object" },
+        "window": { "$ref": "#/$defs/window" },
+        "sampleResolution": { "type": ["string", "null"] },
+        "coverage": { "type": "object" },
+        "quality": { "type": "object" },
+        "path": { "type": "string", "pattern": "^report/v2/sut-metrics/observations/observation-[0-9]{4}\\.json$" },
+        "sourceSha256": { "$ref": "#/$defs/digest" },
+        "sha256": { "$ref": "#/$defs/digest" },
+        "lengthBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "seriesCount": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "sampleCount": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "preview": { "type": "array", "maxItems": 256, "items": { "type": "object" } }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "maxLength": 128 },
+        "message": { "type": "string", "maxLength": 1024 },
+        "queryId": { "type": "string", "maxLength": 512 }
+      }
+    }
+  }
+}

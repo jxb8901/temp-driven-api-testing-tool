@@ -60,17 +60,10 @@ For extracted `file://` reports, the browser controls how linked file types open
 |---|---|---|
 | GET | `/jobs/{jobId}/artifacts?offset=0&limit=100` | Archive state, paginated entries, primary reports and safe omissions |
 | GET | `/jobs/{jobId}/artifacts/archive.zip` | Verified finalized ZIP attachment |
-| GET | `/jobs/{jobId}/load-report/v2/archive.zip` | Separately verified offline LOAD report ZIP |
 | GET | `/jobs/{jobId}/artifacts/view/{entryPath}` | Manifest-approved HTML/CSS or inline text; directory-preserving relative links |
 | POST | `/jobs/{jobId}/artifacts/retry` | Schedule a terminal Job's retry while private source remains available |
 
 Every route requires the shared OPERATE capability. Active USER accounts can access other USERs' approved Job archives; creator identity remains audit metadata. ADMIN-only accounts have no implicit operational access. Authentication, disabled-account checks, local CSRF and configured Origin policy apply. Responses use private/no-store caching; loose-file download routes return 404. Pending or unavailable archive reads return `ATT-SERVER-ARCHIVE-UNAVAILABLE` (409); exhausted read capacity returns `ATT-SERVER-ARTIFACT-CAPACITY` (503).
-
-### Offline LOAD SUT report extension
-
-`GET /jobs/{jobId}/artifacts/status` includes `loadReportV2`. A `READY` publication exposes `GET /jobs/{jobId}/load-report/v2/archive.zip`; the Server applies the caller's normal Job access and pinned SUT Metrics source permissions, verifies the report ZIP, and returns an authenticated `private, no-store` attachment. The separately versioned ZIP contains the static `report/v2/index.html`, `report/v2/manifest.json`, and source-neutral `att-load-offline-observations/v1` metadata with verified series sidecars. It preserves the native report and does not modify `artifacts.zip` or its manifest.
-
-The offline page presents Job status, collection state, metric/source/profile/target metadata, UTC and phase windows, resolution, coverage, gaps, diagnostics, and bounded SVG chart previews. Full observations remain in the verified JSON sidecars. Partial and unavailable collection states are explicit. The report performs no network requests and computes no threshold verdict; if a separate `att-load-verdict/v1` record is present, it is displayed as supplied. Report publication failure does not change the LOAD Job or native archive status.
 
 ### Recover and expire archives
 
@@ -202,3 +195,9 @@ Case log structured entries use YAML. The human log records each normal Action a
 Multiline String values nested in structured entries are shown as readable YAML block content. ATT preserves their LF, CRLF or lone-CR separators and does not parse, trim or reformat the business text. Raw process and user content also keeps its original line endings. The live console mirror uses the same rendered log text as the persisted `case.log`.
 
 ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or INVALID with `【!!!!!】`. Search for that marker to find abnormal blocks; PASS, SKIPPED and informational blocks remain unmarked.
+
+## Offline SUT metrics report
+
+A completed LOAD with SUT collection evidence can publish a separate, versioned offline report archive. The publisher verifies the source manifest and each observation sidecar, preserves the original sealed native archive byte-for-byte, and publishes an immutable snapshot. Its `att-load-report-extension/v2` manifest references the source-neutral `att-load-offline-observations/v1` record, whose `att-load-offline-observation/v1` entries carry source, metric, profile, target, UTC window, phase, units, sample resolution, coverage, gaps, diagnostics, checksums, and bounded chart previews. Full series sidecars retain the normalized `att-sut-metrics-observation/v1` contract. Partial or unavailable source data is reported explicitly and does not change the native Job result.
+
+The report works without network access and uses a restrictive Content Security Policy. It does not evaluate performance thresholds. If a separately versioned `att-load-verdict/v1` record is supplied, the report displays its recorded evaluation state and evidence reference without recalculating the verdict. The archive is available through the authenticated Job download route only after verified publication.
