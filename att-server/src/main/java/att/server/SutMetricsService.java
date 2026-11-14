@@ -56,6 +56,8 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -69,6 +71,7 @@ final class SutMetricsService implements AutoCloseable {
     interface BusinessCallSession extends AutoCloseable {
         Object execute(Map<String, Object> query, Instant executionStartedAt, Instant executionFinishedAt,
                        Instant steadyStart, Instant steadyEnd, Instant observedAt) throws Exception;
+        default void cancel() throws Exception { close(); }
         @Override void close() throws Exception;
     }
     interface BusinessCallExecutor {
@@ -91,6 +94,10 @@ final class SutMetricsService implements AutoCloseable {
     static final long MAX_COLLECTION_WINDOW_SECONDS = 26L * 60 * 60;
     static final long MAX_THRESHOLD_EVALUATION_MILLIS = 30_000L;
     static final long MAX_BUSINESS_CALL_MILLIS = 60_000L;
+    static final int MAX_BUSINESS_CALLS_PER_JOB = 16;
+    static final long MAX_BUSINESS_CALL_TOTAL_MILLIS = 120_000L;
+    private static final String BUSINESS_CALL_PAYLOAD_SCHEMA = "att-sut-business-call-payload/v1";
+    private static final long MAX_BUSINESS_CALL_PAYLOAD_BYTES = 2L * 1024 * 1024;
     static final long MAX_SEGMENT_SECONDS = 6L * 60 * 60;
     static final long MAX_JOB_COLLECTION_BYTES = 64L * 1024 * 1024;
     static final long MAX_JOB_SAMPLES = 1_500_000L;
@@ -114,6 +121,8 @@ final class SutMetricsService implements AutoCloseable {
     private final Consumer<Path> afterManifestPublication;
     private final Consumer<String> beforeThresholdEvidenceRead;
     private volatile BusinessCallExecutor businessCallExecutor;
+    private volatile BusinessCallLimits businessCallLimits = new BusinessCallLimits(MAX_BUSINESS_CALLS_PER_JOB,
+            MAX_BUSINESS_CALL_TOTAL_MILLIS, MAX_BUSINESS_CALL_MILLIS);
     private final Object catalogLock = new Object();
     private final ConcurrentHashMap<String, ManifestWriteLock> manifestWriteLocks = new ConcurrentHashMap<>();
     private Map<String, Map<String, Object>> sources = new LinkedHashMap<>();
@@ -266,6 +275,27 @@ final class SutMetricsService implements AutoCloseable {
         return resolveScenario(observability, principal, admin, null);
     }
 
+    boolean scenarioRequiresBusinessCallContext(Map<String, Object> observability) {
+        Object rawCollections = observability == null ? null : observability.get("collections");
+        if (!(rawCollections instanceof List<?> collectionList)) return false;
+        synchronized (catalogLock) {
+            for (Object rawBinding : collectionList) {
+                if (!(rawBinding instanceof Map<?, ?> binding) || !(binding.get("profile") instanceof String profileId)) continue;
+                if (profileRequiresBusinessCallContext(profiles.get(profileId))) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean profileRequiresBusinessCallContext(Map<String, Object> profile) {
+        if (profile == null) return false;
+        if ("base".equals(profile.get("kind")))
+            return listOfMaps(profile.get("metrics")).stream().anyMatch(metric -> metric.containsKey("call"));
+        for (Map<String, Object> include : listOfMaps(profile.get("includes")))
+            if (profileRequiresBusinessCallContext(profiles.get(String.valueOf(include.get("profile"))))) return true;
+        return false;
+    }
+
     Map<String, Object> resolveScenario(Map<String, Object> observability, String principal, boolean admin,
                                         BusinessCallContext callContext) {
         if (observability == null) return null;
@@ -364,7 +394,10 @@ final class SutMetricsService implements AutoCloseable {
                 "createdAt", Instant.now().toString(), "collection", safeCollection, "livePreview", safeLive,
                 "provenance", provenance, "queries", expanded, "sources", pinnedSources, "execution", execution, "thresholds", thresholdRules,
                 "budgets", fields("metrics", expanded.size(),
-                        "targets", targets.size(), "maxWindowSeconds", MAX_COLLECTION_WINDOW_SECONDS));
+                        "targets", targets.size(), "maxWindowSeconds", MAX_COLLECTION_WINDOW_SECONDS,
+                        "maxBusinessCalls", MAX_BUSINESS_CALLS_PER_JOB,
+                        "maxBusinessCallTotalMillis", MAX_BUSINESS_CALL_TOTAL_MILLIS,
+                        "maxBusinessCallMillis", MAX_BUSINESS_CALL_MILLIS));
     }
 
     private List<Map<String, Object>> normalizeThresholdRules(Object raw, List<Map<String, Object>> queries) {
@@ -498,22 +531,46 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     void writeSnapshot(String jobId, Map<String, Object> snapshot) throws Exception {
+        withManifestWriteLock(jobId, () -> {
+            writeSnapshotLocked(jobId, snapshot);
+            return null;
+        });
+    }
+
+    private void writeSnapshotLocked(String jobId, Map<String, Object> snapshot) throws Exception {
         Path directory = jobMetricsDirectory(jobId);
         Files.createDirectories(directory);
+        Map<String, String> businessCalls = businessCallsByQueryId(snapshot);
+        Map<String, Object> safeSnapshot = redactBusinessCalls(snapshot);
+        String executionPayloadSha256 = null;
+        Path executionPayload = directory.resolve("business-calls.json");
+        if (!businessCalls.isEmpty()) {
+            List<Map<String, Object>> calls = new ArrayList<>();
+            businessCalls.forEach((queryId, call) -> calls.add(fields("queryId", queryId, "call", call)));
+            byte[] payloadBytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(fields(
+                    "schemaVersion", BUSINESS_CALL_PAYLOAD_SCHEMA, "jobId", jobId,
+                    "snapshotId", snapshot.get("snapshotId"), "calls", calls));
+            if (payloadBytes.length > MAX_BUSINESS_CALL_PAYLOAD_BYTES)
+                throw new IllegalArgumentException("The private business-call execution payload exceeds its storage limit.");
+            atomicBytes(executionPayload, payloadBytes);
+            executionPayloadSha256 = sha256(payloadBytes);
+        } else {
+            Files.deleteIfExists(executionPayload);
+        }
         Map<String, Object> initialManifest = fields("schemaVersion", COLLECTION_SCHEMA, "state", "PENDING", "complete", Boolean.FALSE,
-                "jobId", jobId, "snapshotId", snapshot.get("snapshotId"), "createdAt", Instant.now().toString(), "updatedAt", Instant.now().toString(),
-                "queries", queryMetadata(snapshot), "files", List.of(), "diagnostics", List.of());
+                "jobId", jobId, "snapshotId", safeSnapshot.get("snapshotId"), "createdAt", Instant.now().toString(), "updatedAt", Instant.now().toString(),
+                "queries", queryMetadata(safeSnapshot), "files", List.of(), "diagnostics", List.of());
         byte[] initialManifestBytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(initialManifest);
-        Map<String, Object> content = fields("schemaVersion", SNAPSHOT_SCHEMA, "snapshot", snapshot,
-                "snapshotSha256", sha256(json.writeValueAsBytes(snapshot)), "jobId", jobId,
-                "initialManifestSha256", sha256(initialManifestBytes));
+        Map<String, Object> content = fields("schemaVersion", SNAPSHOT_SCHEMA, "snapshot", safeSnapshot,
+                "snapshotSha256", sha256(json.writeValueAsBytes(safeSnapshot)), "executionPayloadSha256", executionPayloadSha256,
+                "jobId", jobId, "initialManifestSha256", sha256(initialManifestBytes));
         atomicJson(directory.resolve("snapshot.json"), content);
         writeManifest(directory, initialManifest);
-        if (!listOfMaps(snapshot.get("thresholds")).isEmpty()) {
+        if (!listOfMaps(safeSnapshot.get("thresholds")).isEmpty()) {
             Instant now = Instant.now();
-            writeThresholdEvaluation(jobId, snapshot, fields("state", "PENDING", "complete", Boolean.FALSE,
+            writeThresholdEvaluation(jobId, safeSnapshot, fields("state", "PENDING", "complete", Boolean.FALSE,
                     "attempt", 0, "createdAt", now.toString(), "updatedAt", now.toString(),
-                    "collectionState", "PENDING", "effectiveRules", snapshot.get("thresholds"),
+                    "collectionState", "PENDING", "effectiveRules", safeSnapshot.get("thresholds"),
                     "diagnostics", List.of()));
         }
     }
@@ -522,12 +579,36 @@ final class SutMetricsService implements AutoCloseable {
         businessCallExecutor = executor;
     }
 
+    void setBusinessCallLimitsForTesting(int maxCalls, long totalMillis, long callMillis) {
+        if (maxCalls < 1 || totalMillis < 1 || callMillis < 1) throw new IllegalArgumentException("Business-call test limits must be positive.");
+        businessCallLimits = new BusinessCallLimits(maxCalls, totalMillis, callMillis);
+    }
+
     Map<String, Object> snapshotForJob(String jobId) throws Exception {
         SnapshotEnvelope envelope = snapshotEnvelope(jobId);
         return envelope == null ? null : envelope.snapshot();
     }
 
+    private Map<String, Object> snapshotForExecution(String jobId) throws Exception {
+        SnapshotEnvelope envelope = snapshotEnvelope(jobId);
+        if (envelope == null) return null;
+        Map<String, Object> snapshot = json.convertValue(envelope.snapshot(), Map.class);
+        List<Map<String, Object>> queries = mutableQueryMaps(snapshot.get("queries"));
+        for (Map<String, Object> query : queries) {
+            if (!"business-call".equals(query.get("observationType"))) continue;
+            String queryId = String.valueOf(query.get("id"));
+            String call = envelope.businessCalls().get(queryId);
+            if (call == null) throw new IllegalStateException("The private business-metric execution payload is incomplete.");
+            query.put("call", call);
+        }
+        return snapshot;
+    }
+
     private SnapshotEnvelope snapshotEnvelope(String jobId) throws Exception {
+        return withManifestWriteLock(jobId, () -> snapshotEnvelopeLocked(jobId));
+    }
+
+    private SnapshotEnvelope snapshotEnvelopeLocked(String jobId) throws Exception {
         Path file = jobMetricsDirectory(jobId).resolve("snapshot.json");
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(file)) return null;
         if (Files.size(file) > MAX_MANIFEST_BYTES) throw new IllegalStateException("The immutable SUT Metrics Job snapshot exceeds its read limit.");
@@ -538,7 +619,72 @@ final class SutMetricsService implements AutoCloseable {
                 || !digest.equals(sha256(json.writeValueAsBytes(snapshot)))
                 || wrapper.hasNonNull("jobId") && !jobId.equals(wrapper.path("jobId").asText()))
             throw new IllegalStateException("The immutable SUT Metrics Job snapshot failed integrity verification.");
-        return new SnapshotEnvelope(json.convertValue(snapshot, Map.class), digest, wrapper.path("initialManifestSha256").asText(null));
+        Map<String, Object> persistedSnapshot = json.convertValue(snapshot, Map.class);
+        String payloadDigest = wrapper.path("executionPayloadSha256").asText(null);
+        Map<String, String> businessCalls = payloadDigest == null
+                ? businessCallsByQueryId(persistedSnapshot) : readBusinessCallPayload(jobId, persistedSnapshot, payloadDigest);
+        Map<String, Object> safeSnapshot = redactBusinessCalls(persistedSnapshot);
+        return new SnapshotEnvelope(safeSnapshot, digest, wrapper.path("initialManifestSha256").asText(null), businessCalls);
+    }
+
+    private Map<String, String> readBusinessCallPayload(String jobId, Map<String, Object> snapshot, String expectedDigest) throws Exception {
+        Path file = jobMetricsDirectory(jobId).resolve("business-calls.json");
+        if (!expectedDigest.matches("[a-f0-9]{64}") || Files.isSymbolicLink(file)
+                || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || Files.size(file) > MAX_BUSINESS_CALL_PAYLOAD_BYTES
+                || !expectedDigest.equals(sha256(file)))
+            throw new IllegalStateException("The private business-metric execution payload failed integrity verification.");
+        JsonNode payload = json.readTree(file.toFile());
+        if (!BUSINESS_CALL_PAYLOAD_SCHEMA.equals(payload.path("schemaVersion").asText())
+                || !jobId.equals(payload.path("jobId").asText())
+                || !String.valueOf(snapshot.get("snapshotId")).equals(payload.path("snapshotId").asText()))
+            throw new IllegalStateException("The private business-metric execution payload does not match its Job snapshot.");
+        Map<String, String> calls = new LinkedHashMap<>();
+        JsonNode rows = payload.path("calls");
+        if (!rows.isArray() || rows.size() > MAX_EXPANDED_QUERIES)
+            throw new IllegalStateException("The private business-metric execution payload exceeds its call limit.");
+        for (JsonNode row : rows) {
+            String queryId = row.path("queryId").asText(null), call = row.path("call").asText(null);
+            if (queryId == null || call == null || call.isBlank() || call.length() > 4096
+                    || calls.putIfAbsent(queryId, call) != null)
+                throw new IllegalStateException("The private business-metric execution payload contains an invalid call.");
+        }
+        Set<String> expectedIds = new LinkedHashSet<>();
+        for (Map<String, Object> query : listOfMaps(snapshot.get("queries")))
+            if ("business-call".equals(query.get("observationType"))) expectedIds.add(String.valueOf(query.get("id")));
+        if (!expectedIds.equals(calls.keySet()))
+            throw new IllegalStateException("The private business-metric execution payload does not match its Job queries.");
+        return calls;
+    }
+
+    private Map<String, Object> redactBusinessCalls(Map<String, Object> snapshot) {
+        Map<String, Object> safe = json.convertValue(snapshot, Map.class);
+        List<Map<String, Object>> queries = mutableQueryMaps(safe.get("queries"));
+        for (Map<String, Object> query : queries) if ("business-call".equals(query.get("observationType"))) {
+            query.remove("call");
+            query.remove("query");
+            query.remove("parameters");
+            query.remove("arguments");
+        }
+        return safe;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> mutableQueryMaps(Object value) {
+        if (!(value instanceof List<?> rows)) return new ArrayList<>();
+        List<Map<String, Object>> result = new ArrayList<>(rows.size());
+        for (Object row : rows) if (row instanceof Map<?, ?> map) result.add((Map<String, Object>) map);
+        return result;
+    }
+
+    private static Map<String, String> businessCallsByQueryId(Map<String, Object> snapshot) {
+        Map<String, String> calls = new LinkedHashMap<>();
+        for (Map<String, Object> query : listOfMaps(snapshot.get("queries"))) {
+            if (!"business-call".equals(query.get("observationType"))) continue;
+            Object call = query.get("call"), id = query.get("id");
+            if (id instanceof String queryId && call instanceof String text && !text.isBlank() && text.length() <= 4096)
+                calls.put(queryId, text);
+        }
+        return calls;
     }
 
     Map<String, Object> collectionStatus(String jobId) throws Exception {
@@ -1136,7 +1282,7 @@ final class SutMetricsService implements AutoCloseable {
 
     void jobFinished(String jobId, Instant startedAt, Instant finishedAt, List<Map<String, Object>> phaseWindows) {
         try {
-            Map<String, Object> snapshot = snapshotForJob(jobId);
+            Map<String, Object> snapshot = snapshotForExecution(jobId);
             if (snapshot == null) return;
             if (startedAt == null || finishedAt == null || !finishedAt.isAfter(startedAt)) {
                 updateState(jobId, "UNAVAILABLE", "A trustworthy LOAD execution window was not available.", List.of());
@@ -1266,7 +1412,9 @@ final class SutMetricsService implements AutoCloseable {
         List<Map<String, Object>> fileEntries = new ArrayList<>();
         List<Map<String, Object>> diagnostics = new ArrayList<>();
         long totalBytes = 0, totalSamples = 0, queriesSucceeded = 0, queriesFailed = 0, queriesEmpty = 0, queriesPartial = 0;
-        long businessCallCount = 0, businessCallDurationMs = 0L;
+        long businessCallSubmitted = 0, businessCallStarted = 0, businessCallSucceeded = 0;
+        long businessCallFailed = 0, businessCallTimedOut = 0, businessCallSkipped = 0, businessCallDurationMs = 0L;
+        BusinessCallLimits callLimits = businessCallLimits;
         long stepSeconds = durationSeconds(String.valueOf(objectOrEmpty(snapshot.get("collection")).get("step")), "step");
         long afterSeconds = durationSeconds(String.valueOf(objectOrEmpty(snapshot.get("collection")).get("after")), "after");
         Map<String, Long> sourceSampleCounts = new HashMap<>();
@@ -1275,12 +1423,36 @@ final class SutMetricsService implements AutoCloseable {
             directory = jobMetricsDirectory(jobId); Files.createDirectories(directory);
             List<Map<String, Object>> queries = listOfMaps(snapshot.get("queries"));
             queryRequestBudgets(snapshot, queries, Duration.between(start, end).getSeconds());
-            boolean businessCallTimedOut = false;
+            boolean businessCallStopped = false;
+            long firstBusinessCallNanos = 0L;
             for (int index = 0; index < queries.size(); index++) {
                 Map<String, Object> query = queries.get(index);
+                boolean businessCall = "business-call".equals(query.get("observationType"));
+                boolean businessCallSubmittedThisQuery = false;
+                boolean businessCallSkippedThisQuery = false;
+                boolean businessCallSucceededThisQuery = false;
+                AtomicBoolean executionStarted = new AtomicBoolean();
+                AtomicBoolean cancellationRequested = new AtomicBoolean();
+                AtomicReference<BusinessCallSession> activeSession = new AtomicReference<>();
+                long callAttemptNanos = 0L;
                 try {
-                    if ("business-call".equals(query.get("observationType"))) {
-                        if (businessCallTimedOut) throw new BusinessCallNotExecutedException();
+                    if (businessCall) {
+                        long nowNanos = System.nanoTime();
+                        if (firstBusinessCallNanos == 0L) firstBusinessCallNanos = nowNanos;
+                        long elapsedBusinessMillis = TimeUnit.NANOSECONDS.toMillis(nowNanos - firstBusinessCallNanos);
+                        if (businessCallStopped || businessCallSubmitted >= callLimits.maxCalls()
+                                || elapsedBusinessMillis >= callLimits.totalMillis()) {
+                            businessCallSkipped++; businessCallSkippedThisQuery = true; businessCallStopped = true;
+                            queriesFailed++;
+                            String code = businessCallSubmitted >= callLimits.maxCalls()
+                                    || elapsedBusinessMillis >= callLimits.totalMillis()
+                                    ? "BUSINESS_CALL_BUDGET_EXCEEDED" : "BUSINESS_CALL_NOT_EXECUTED";
+                            diagnostics.add(fields("queryId", query.get("id"), "code", code,
+                                    "message", code.equals("BUSINESS_CALL_BUDGET_EXCEEDED")
+                                            ? "The per-Job business-call count or wall-clock budget was reached; remaining business calls were skipped."
+                                            : "This call was skipped after business-call collection was stopped."));
+                            continue;
+                        }
                         BusinessCallExecutor executor = businessCallExecutor;
                         if (executor == null) throw new IllegalStateException("Server-owned business-call execution is unavailable.");
                         Instant callRequestedAt = Instant.now();
@@ -1288,25 +1460,50 @@ final class SutMetricsService implements AutoCloseable {
                                 .filter(phase -> "STEADY".equals(phase.get("phase"))).findFirst().orElse(null);
                         Instant steadyStart = steady == null ? null : parseInstant(nullableText(steady.get("startAt")));
                         Instant steadyEnd = steady == null ? null : parseInstant(nullableText(steady.get("endAt")));
-                        long callStarted = System.nanoTime();
+                        callAttemptNanos = System.nanoTime();
+                        long remainingMillis = callLimits.totalMillis()
+                                - TimeUnit.NANOSECONDS.toMillis(callAttemptNanos - firstBusinessCallNanos);
+                        long callTimeoutMillis = Math.min(callLimits.callMillis(), remainingMillis);
+                        if (callTimeoutMillis <= 0L) {
+                            businessCallSkipped++; businessCallSkippedThisQuery = true; businessCallStopped = true;
+                            queriesFailed++;
+                            diagnostics.add(fields("queryId", query.get("id"), "code", "BUSINESS_CALL_BUDGET_EXCEEDED",
+                                    "message", "The per-Job business-call wall-clock budget was reached; remaining business calls were skipped."));
+                            continue;
+                        }
                         Future<Object> call = businessCallWorkers.submit(() -> {
-                            try (BusinessCallSession metricSession = executor.open(jobId, snapshot)) {
-                                return metricSession.execute(query, executionStartedAt, executionFinishedAt,
+                            BusinessCallSession metricSession = executor.open(jobId, snapshot);
+                            activeSession.set(metricSession);
+                            if (cancellationRequested.get()) cancelBusinessCallSession(metricSession);
+                            try (BusinessCallSession closeableSession = metricSession) {
+                                executionStarted.set(true);
+                                return closeableSession.execute(query, executionStartedAt, executionFinishedAt,
                                         steadyStart, steadyEnd, callRequestedAt);
                             }
                         });
+                        businessCallSubmitted++; businessCallSubmittedThisQuery = true;
                         Object rawValue;
-                        try { rawValue = call.get(MAX_BUSINESS_CALL_MILLIS, TimeUnit.MILLISECONDS); }
+                        try { rawValue = call.get(callTimeoutMillis, TimeUnit.MILLISECONDS); }
                         catch (TimeoutException timeout) {
+                            cancellationRequested.set(true);
                             call.cancel(true);
-                            throw new TimeoutException("Business metric call exceeded its 60-second execution limit.");
+                            cancelBusinessCallSession(activeSession.get());
+                            businessCallStopped = true;
+                            throw new TimeoutException("Business metric call exceeded its per-call or per-Job execution budget.");
+                        } catch (InterruptedException interrupted) {
+                            cancellationRequested.set(true);
+                            call.cancel(true);
+                            cancelBusinessCallSession(activeSession.get());
+                            businessCallStopped = true;
+                            Thread.currentThread().interrupt();
+                            throw interrupted;
                         } catch (java.util.concurrent.ExecutionException failed) {
                             Throwable cause = failed.getCause() == null ? failed : failed.getCause();
                             if (cause instanceof Exception exception) throw exception;
                             throw new IllegalStateException("Business metric call failed.", cause);
                         }
                         Instant observedAt = Instant.now();
-                        long callDurationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - callStarted);
+                        long callDurationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - callAttemptNanos);
                         double numericValue = numericMetricValue(rawValue, nullableText(query.get("valuePath")));
                         String sampling = String.valueOf(query.get("sampling"));
                         Map<String, Object> observationWindow;
@@ -1348,7 +1545,8 @@ final class SutMetricsService implements AutoCloseable {
                             throw new CollectionBudgetExceededException("The per-Job SUT Metrics artifact budget was exceeded.");
                         String name = String.format(Locale.ROOT, "series-%04d.json", index);
                         atomicBytes(directory.resolve(name), bytes); totalBytes += bytes.length;
-                        queriesSucceeded++; businessCallCount++; businessCallDurationMs += callDurationMs;
+                        queriesSucceeded++;
+                        businessCallSucceededThisQuery = true;
                         fileEntries.add(fields("queryId", query.get("id"), "metricId", query.get("metricId"), "title", query.get("title"),
                                 "profile", query.get("profile"), "profilePath", query.get("profilePath"), "category", query.get("category"),
                                 "targetId", query.get("targetId"), "targetType", query.get("targetType"),
@@ -1425,11 +1623,23 @@ final class SutMetricsService implements AutoCloseable {
                     break;
                 } catch (Exception failure) {
                     queriesFailed++;
-                    boolean businessCall = "business-call".equals(query.get("observationType"));
-                    if (businessCall && failure instanceof TimeoutException) businessCallTimedOut = true;
+                    if (businessCall && failure instanceof TimeoutException) {
+                        businessCallTimedOut++;
+                        businessCallStopped = true;
+                    }
+                    if (businessCall && failure instanceof InterruptedException) businessCallStopped = true;
                     diagnostics.add(fields("queryId", query.get("id"),
                             "code", businessCall ? safeBusinessCallFailureCode(failure) : safeFailureCode(failure),
                             "message", businessCall ? safeBusinessCallFailureMessage(failure) : safeFailureMessage(failure)));
+                } finally {
+                    if (businessCall && !businessCallSkippedThisQuery) {
+                        if (businessCallSucceededThisQuery) businessCallSucceeded++;
+                        else businessCallFailed++;
+                        if (businessCallSubmittedThisQuery) {
+                            if (executionStarted.get()) businessCallStarted++;
+                            businessCallDurationMs += TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - callAttemptNanos);
+                        }
+                    }
                 }
             }
             String state = queriesFailed > 0 ? (queriesSucceeded == 0 ? "FAILED" : "PARTIAL")
@@ -1441,7 +1651,10 @@ final class SutMetricsService implements AutoCloseable {
                     "phaseWindows", phaseWindows,
                     "coverage", fields("queryCount", queries.size(), "successfulQueries", queriesSucceeded,
                             "emptyQueries", queriesEmpty, "partialQueries", queriesPartial, "failedQueries", queriesFailed, "sampleCount", totalSamples,
-                            "businessCallCount", businessCallCount, "businessCallDurationMs", businessCallDurationMs,
+                            "businessCallCount", businessCallStarted, "businessCallSubmitted", businessCallSubmitted,
+                            "businessCallStarted", businessCallStarted, "businessCallSucceeded", businessCallSucceeded,
+                            "businessCallFailed", businessCallFailed, "businessCallTimedOut", businessCallTimedOut,
+                            "businessCallSkipped", businessCallSkipped, "businessCallDurationMs", businessCallDurationMs,
                             "artifactBytes", totalBytes), "queries", queryMetadata(snapshot), "files", fileEntries,
                     "diagnostics", diagnostics);
             writeManifest(directory, manifest);
@@ -1451,14 +1664,15 @@ final class SutMetricsService implements AutoCloseable {
         }
     }
 
-    private static double numericMetricValue(Object raw, String valuePath) {
+    static double numericMetricValue(Object raw, String valuePath) {
         Object value = raw;
         if (valuePath != null) {
-            Object root = raw instanceof List<?> ? fields("rows", raw) : raw;
-            Matcher matcher = Pattern.compile("([A-Za-z_][A-Za-z0-9_]*)|\\[([0-9]{1,6})\\]").matcher(valuePath);
+            value = raw instanceof List<?> ? fields("rows", raw) : raw;
+            Matcher matcher = Pattern.compile("\\.?([A-Za-z_][A-Za-z0-9_]*)|\\[([0-9]{1,6})\\]").matcher(valuePath);
             int position = 0;
             while (matcher.find()) {
-                if (matcher.start() != position) throw new IllegalArgumentException("Business metric valuePath is invalid.");
+                if (matcher.start() != position || matcher.start() == 0 && valuePath.charAt(0) == '.')
+                    throw new IllegalArgumentException("Business metric valuePath is invalid.");
                 if (matcher.group(1) != null) {
                     if (!(value instanceof Map<?, ?> map)) throw new IllegalArgumentException("Business metric valuePath did not resolve through an object.");
                     String wanted = matcher.group(1);
@@ -2447,16 +2661,23 @@ final class SutMetricsService implements AutoCloseable {
 
     void writeManifest(Path directory, Map<String, Object> manifest) throws Exception {
         String jobId = directory.getParent().getFileName().toString();
+        boolean published = withManifestWriteLock(jobId, () -> {
+            writeManifestLocked(directory, manifest);
+            return true;
+        });
+        if (published && Set.of("READY", "PARTIAL", "UNAVAILABLE", "FAILED").contains(manifest.get("state")))
+            scheduleThresholdEvaluation(jobId);
+    }
+
+    private <T> T withManifestWriteLock(String jobId, LockedOperation<T> operation) throws Exception {
         ManifestWriteLock lock = manifestWriteLocks.compute(jobId, (key, existing) -> {
             ManifestWriteLock selected = existing == null ? new ManifestWriteLock() : existing;
             selected.users++;
             return selected;
         });
         lock.lock.lock();
-        boolean published = false;
         try {
-            writeManifestLocked(directory, manifest);
-            published = true;
+            return operation.run();
         } finally {
             lock.lock.unlock();
             manifestWriteLocks.compute(jobId, (key, current) -> {
@@ -2464,8 +2685,6 @@ final class SutMetricsService implements AutoCloseable {
                 return --lock.users == 0 ? null : lock;
             });
         }
-        if (published && Set.of("READY", "PARTIAL", "UNAVAILABLE", "FAILED").contains(manifest.get("state")))
-            scheduleThresholdEvaluation(jobId);
     }
 
     private void writeManifestLocked(Path directory, Map<String, Object> manifest) throws Exception {
@@ -2924,6 +3143,10 @@ final class SutMetricsService implements AutoCloseable {
         if (failure instanceof RejectedExecutionException) return "BUSINESS_CALL_CAPACITY_EXCEEDED";
         return "BUSINESS_CALL_FAILED";
     }
+    private static void cancelBusinessCallSession(BusinessCallSession session) {
+        if (session == null) return;
+        try { session.cancel(); } catch (Exception ignored) { }
+    }
     private static String safeBusinessCallFailureMessage(Exception failure) {
         return switch (safeBusinessCallFailureCode(failure)) {
             case "BUSINESS_CALL_NOT_EXECUTED" -> "This call was skipped after an earlier business metric call timed out.";
@@ -2994,9 +3217,12 @@ final class SutMetricsService implements AutoCloseable {
         final ReentrantLock lock = new ReentrantLock();
         int users;
     }
+    @FunctionalInterface private interface LockedOperation<T> { T run() throws Exception; }
     private static final class CollectionBudgetExceededException extends IllegalArgumentException {
         CollectionBudgetExceededException(String message) { super(message); }
     }
     private record CacheEntry(long expiresAtNanos, Map<String, Object> value) { }
-    private record SnapshotEnvelope(Map<String, Object> snapshot, String snapshotSha256, String initialManifestSha256) { }
+    private record BusinessCallLimits(int maxCalls, long totalMillis, long callMillis) { }
+    private record SnapshotEnvelope(Map<String, Object> snapshot, String snapshotSha256, String initialManifestSha256,
+                                   Map<String, String> businessCalls) { }
 }
