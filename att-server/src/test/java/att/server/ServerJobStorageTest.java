@@ -654,6 +654,41 @@ class ServerJobStorageTest {
         }
     }
 
+    @Test void failedOptionalLoadReportRetriesDoNotFenceAgeManualOrStorageRetention() throws Exception {
+        ServerRuntimeTestSupport.MutableClock clock=new ServerRuntimeTestSupport.MutableClock(Instant.now());
+        ServerRuntime.ArtifactPublisher publisher=(output,archive,validator)->{
+            if(archive.toString().contains("load-report-publications"))throw new java.io.IOException("persistent optional report failure");
+            return ArtifactArchive.build(output,archive,validator);
+        };
+        try(ServerRuntime runtime=runtime("failed-report-retention",quota(0),clock,1,publisher)) {
+            Job aged=publishFailedLoadReport(runtime,"J0000000000000931");
+            Job manual=publishFailedLoadReport(runtime,"J0000000000000932");
+            Job storagePressure=publishFailedLoadReport(runtime,"J0000000000000933");
+
+            clock.advance(Duration.ofSeconds(6));
+            runtime.recoverLoadReportV2();
+            awaitFailedLoadReport(runtime,aged.id,2);
+            awaitFailedLoadReport(runtime,manual.id,2);
+            awaitFailedLoadReport(runtime,storagePressure.id,2);
+            for(String id:List.of(aged.id,manual.id,storagePressure.id)) {
+                assertTrue(runtime.store.loadReportRecoveryJobIds("",64).contains(id),id+" remains scheduled for bounded retry");
+                assertFalse(runtime.store.loadReportPublicationPending(id),id+" is not pending during retry backoff");
+            }
+
+            aged.finishedAt=Instant.now().minus(Duration.ofDays(40));runtime.store.update(aged);
+            runtime.cleanupExpiredJobs();
+            assertFalse(runtime.store.jobRowExists(aged.id),"Age retention deletes a report whose optional publisher keeps failing.");
+
+            assertTrue(runtime.store.markManualDeleting(manual.id,"operator"),"Manual deletion remains available during report retry backoff.");
+            assertTrue(runtime.reconcileDeletingJobs());
+            assertFalse(runtime.store.jobRowExists(manual.id));
+
+            writeBytes(jobDir(runtime,storagePressure.id).resolve("retention-pressure.bin"),mib(4));
+            runtime.cleanupJobStorage();
+            assertFalse(runtime.store.jobRowExists(storagePressure.id),"Storage pressure can reclaim a Job during report retry backoff.");
+        }
+    }
+
     private Map<String, Object> storage(ServerRuntime runtime) throws Exception {
         @SuppressWarnings("unchecked") Map<String, Object> storage = (Map<String, Object>) runtime.counts().get("jobStorage");
         return storage;
@@ -661,6 +696,47 @@ class ServerJobStorageTest {
 
     private static List<Map<String, Object>> listed(List<Map<String, Object>> rows, String id) {
         return rows.stream().filter(row -> id.equals(row.get("jobId"))).toList();
+    }
+
+    private Job publishFailedLoadReport(ServerRuntime runtime,String id) throws Exception {
+        Path directory=Files.createDirectories(jobDir(runtime,id));
+        Path output=Files.createDirectories(runtime.outputDirectoryForJob(id));
+        Files.writeString(output.resolve("native.txt"),"native evidence");
+        Job job=new Job(id,"load","p","ci",new att.server.api.WorkerRequest(),new JobEvents(directory.resolve("events.jsonl"),100));
+        job.status="PASS";job.finishedAt=Instant.now();runtime.store.insert(job,"{}");runtime.store.update(job);
+        runtime.scheduleArtifactArchive(id);
+        awaitNativeArchive(runtime,id);
+        runtime.sutMetrics.writeSnapshot(id,Map.of("schemaVersion",SutMetricsService.SNAPSHOT_SCHEMA,
+                "snapshotId","snapshot-"+id,"queries",List.of()));
+        runtime.sutMetrics.jobFinished(id,null,null);
+        awaitFailedLoadReport(runtime,id,1);
+        runtime.refreshLoadReportV2(id);
+        awaitFailedLoadReport(runtime,id,1);
+        return job;
+    }
+
+    private void awaitNativeArchive(ServerRuntime runtime,String id) throws Exception {
+        long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        do {
+            if("READY".equals(runtime.artifactIndex(id).get("archiveStatus")))return;
+            Thread.sleep(10);
+        } while(System.nanoTime()<deadline);
+        fail("Native archive did not become READY for "+id);
+    }
+
+    private void awaitFailedLoadReport(ServerRuntime runtime,String id,int minimumRetries) throws Exception {
+        long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        Path pointer=jobDir(runtime,id).resolve("load-report-publications/v2/current.json");
+        do {
+            if(Files.isRegularFile(pointer)) {
+                var status=ServerRuntime.JSON.readTree(pointer.toFile());
+                if("FAILED".equals(status.path("state").asText())
+                        &&status.path("retryCount").asInt()>=minimumRetries
+                        &&!runtime.store.loadReportPublicationPending(id))return;
+            }
+            Thread.sleep(10);
+        } while(System.nanoTime()<deadline);
+        fail("Optional report retry did not defer its retention fence for "+id);
     }
 
     private Path seed(ServerRuntime runtime, String id, String status, Instant finished, boolean recovery, long bytes) throws Exception {

@@ -5057,7 +5057,7 @@ final class ServerRuntime implements AutoCloseable {
                 ||("READY".equals(pointer.get("state"))&&"FAILED".equals(pointer.get("lastAttemptState")));
         if(previousAttemptFailed&&!retryIsDue(pointer,clock.instant())) {
             synchronized(loadReportV2ScheduleLock) {
-                try { store.markLoadReportPublicationPending(id); }
+                try { store.deferLoadReportPublicationRetry(id); }
                 catch(Exception ignored) { }
                 requestedLoadReportV2Jobs.remove(id);
             }
@@ -5127,8 +5127,9 @@ final class ServerRuntime implements AutoCloseable {
                 failed.put("retryCount",retryCount);
                 failed.put("nextRetryAt",clock.instant().plusSeconds(loadReportRetryDelaySeconds(retryCount)).toString());
                 writeLoadReportV2Status(id,failed);
-                store.markLoadReportPublicationPending(id);
             } catch(Exception ignored) { }
+            try { store.deferLoadReportPublicationRetry(id); }
+            catch(Exception ignored) { }
             java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Offline SUT report publication failed for Job "+id);
         } finally {
             boolean reschedule;
@@ -5175,16 +5176,16 @@ final class ServerRuntime implements AutoCloseable {
                     if(!java.util.Objects.equals(currentDigest,publishedDigest)) { refreshLoadReportV2(id); continue; }
                     if("FAILED".equals(pointer.get("lastAttemptState"))) {
                         if(retryIsDue(pointer,now))scheduleLoadReportV2(id);
-                        else store.markLoadReportPublicationPending(id);
+                        else store.deferLoadReportPublicationRetry(id);
                     } else store.completeLoadReportPublication(id,
                             unresolvedVerdict(String.valueOf(pointer.getOrDefault("externalEvaluationStatus","NOT_PROVIDED"))));
                 } else if(!retryIsDue(pointer,now)) {
-                    store.markLoadReportPublicationPending(id);
+                    store.deferLoadReportPublicationRetry(id);
                     continue;
                 } else scheduleLoadReportV2(id);
             } catch(Exception ignored) {
                 if(retryIsDue(pointer,now))scheduleLoadReportV2(id);
-                else store.markLoadReportPublicationPending(id);
+                else store.deferLoadReportPublicationRetry(id);
             }
         }
         return ids.size();

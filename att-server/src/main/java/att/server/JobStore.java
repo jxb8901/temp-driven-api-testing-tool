@@ -1013,6 +1013,11 @@ final class JobStore implements AutoCloseable {
             p.setString(1,id);p.executeUpdate();
         }
     }
+    synchronized void deferLoadReportPublicationRetry(String id) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET load_report_recovery=TRUE,load_report_publication_pending=FALSE WHERE job_id=? AND command='load'")) {
+            p.setString(1,id);p.executeUpdate();
+        }
+    }
     synchronized void completeLoadReportPublication(String id,boolean recoveryNeeded) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE jobs SET load_report_recovery=?,load_report_publication_pending=FALSE WHERE job_id=? AND command='load'")) {
             p.setBoolean(1,recoveryNeeded);p.setString(2,id);p.executeUpdate();
