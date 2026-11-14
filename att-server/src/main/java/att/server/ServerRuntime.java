@@ -2767,11 +2767,20 @@ final class ServerRuntime implements AutoCloseable {
                 boolean began=false;
                 try {
                     dbHelpers.beginCase();began=true;
-                    att.exec.ToolInvocationResult invocation=engine.executeToolAttempt(
-                            String.valueOf(query.get("call")),context,log,
-                            "SUT_METRIC_"+String.valueOf(query.get("metricId")),null,"",false,true);
-                    if(!businessMetricInvocationSucceeded(invocation))
+                    att.exec.ToolInvocationResult invocation;
+                    try {
+                        invocation=engine.executeToolAttempt(String.valueOf(query.get("call")),context,log,
+                                "SUT_METRIC_"+String.valueOf(query.get("metricId")),null,"",false,true);
+                    } catch (att.exec.ToolExecutionException failure) {
+                        if (businessMetricNativeTimeout(failure))
+                            throw new SutMetricsService.BusinessCallNativeTimeoutException();
+                        throw failure;
+                    }
+                    if(!businessMetricInvocationSucceeded(invocation)) {
+                        if (businessMetricInvocationTimedOut(invocation))
+                            throw new SutMetricsService.BusinessCallNativeTimeoutException();
                         throw new IllegalStateException("The configured Package Tool reported a failed business metric call.");
+                    }
                     Object result=invocation.output();
                     List<att.core.ValidationResult> finalized=dbHelpers.finishCase(context,log);began=false;
                     if(finalized.stream().anyMatch(item->item.status()==att.core.ResultStatus.ERROR))
@@ -2800,6 +2809,51 @@ final class ServerRuntime implements AutoCloseable {
         if ("ERROR".equalsIgnoreCase(String.valueOf(status)) || "TIMEOUT".equalsIgnoreCase(String.valueOf(status))) return false;
         Object exitCode = details.get("exitCode");
         return !(exitCode instanceof Number) || ((Number) exitCode).intValue() == 0;
+    }
+
+    static boolean businessMetricNativeTimeout(Exception failure) {
+        return failure instanceof att.exec.ToolExecutionException toolFailure
+                && "TIMEOUT".equalsIgnoreCase(toolFailure.category());
+    }
+
+    static boolean businessMetricInvocationTimedOut(att.exec.ToolInvocationResult result) {
+        if (result == null) return false;
+        Map<String, Object> invocation = result.invocation();
+        if (invocation != null) {
+            if (businessMetricTimeoutCode(invocation.get("status"))) return true;
+            int[] budget = {256};
+            if (hasBusinessMetricTimeoutEvidence(invocation.get("DB"), 0, budget)
+                    || hasBusinessMetricTimeoutEvidence(invocation.get("TOOL"), 0, budget)) return true;
+        }
+        Object output = result.output();
+        if (output instanceof Map<?, ?> outputMap)
+            return hasBusinessMetricTimeoutEvidence(outputMap.get("error"), 0, new int[]{64});
+        return false;
+    }
+
+    private static boolean hasBusinessMetricTimeoutEvidence(Object value, int depth, int[] remaining) {
+        if (value == null || depth > 10 || remaining[0]-- <= 0) return false;
+        if (value instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                Object child = entry.getValue();
+                if (("type".equalsIgnoreCase(key) || "status".equalsIgnoreCase(key)
+                        || "category".equalsIgnoreCase(key)) && businessMetricTimeoutCode(child)) return true;
+                if (!"input".equalsIgnoreCase(key) && !"parameters".equalsIgnoreCase(key)
+                        && !"sql".equalsIgnoreCase(key) && !"message".equalsIgnoreCase(key)
+                        && hasBusinessMetricTimeoutEvidence(child, depth + 1, remaining)) return true;
+            }
+        } else if (value instanceof Iterable<?> values) {
+            for (Object child : values)
+                if (hasBusinessMetricTimeoutEvidence(child, depth + 1, remaining)) return true;
+        }
+        return false;
+    }
+
+    private static boolean businessMetricTimeoutCode(Object value) {
+        if (!(value instanceof String code)) return false;
+        String normalized = code.toUpperCase(java.util.Locale.ROOT);
+        return "TIMEOUT".equals(normalized) || normalized.endsWith("_TIMEOUT");
     }
 
     private static Set<String> workloadIds(Map<String,Object> scenario) {

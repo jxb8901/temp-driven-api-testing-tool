@@ -78,6 +78,12 @@ final class SutMetricsService implements AutoCloseable {
     interface BusinessCallExecutor {
         BusinessCallSession open(String jobId, Map<String, Object> snapshot) throws Exception;
     }
+    static final class BusinessCallNativeTimeoutException extends Exception {
+        BusinessCallNativeTimeoutException() { super("The configured business metric call timed out."); }
+    }
+    static final class BusinessCallBudgetTimeoutException extends TimeoutException {
+        BusinessCallBudgetTimeoutException() { super("The business metric collector budget expired."); }
+    }
     static final String OBSERVABILITY_SCHEMA = "att-load-observability/v1";
     static final String SNAPSHOT_SCHEMA = "att-sut-metrics-snapshot/v1";
     static final String COLLECTION_SCHEMA = "att-sut-metrics-manifest/v1";
@@ -97,6 +103,7 @@ final class SutMetricsService implements AutoCloseable {
     static final long MAX_BUSINESS_CALL_MILLIS = 60_000L;
     static final int MAX_BUSINESS_CALLS_PER_JOB = 16;
     static final long MAX_BUSINESS_CALL_TOTAL_MILLIS = 120_000L;
+    static final long MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS = 120_000L;
     private static final String BUSINESS_CALL_PAYLOAD_SCHEMA = "att-sut-business-call-payload/v1";
     private static final int BUSINESS_CALL_PENDING = 0, BUSINESS_CALL_EXECUTING = 1, BUSINESS_CALL_CANCELLED = 2;
     private static final long MAX_BUSINESS_CALL_PAYLOAD_BYTES = 2L * 1024 * 1024;
@@ -1419,7 +1426,8 @@ final class SutMetricsService implements AutoCloseable {
         List<Map<String, Object>> diagnostics = new ArrayList<>();
         long totalBytes = 0, totalSamples = 0, queriesSucceeded = 0, queriesFailed = 0, queriesEmpty = 0, queriesPartial = 0;
         long businessCallSubmitted = 0, businessCallStarted = 0, businessCallSucceeded = 0;
-        long businessCallFailed = 0, businessCallTimedOut = 0, businessCallSkipped = 0, businessCallDurationMs = 0L;
+        long businessCallFailed = 0, businessCallTimedOut = 0, businessCallNativeTimedOut = 0;
+        long businessCallBudgetTimedOut = 0, businessCallSkipped = 0, businessCallDurationMs = 0L;
         BusinessCallLimits callLimits = businessCallLimits;
         long stepSeconds = durationSeconds(String.valueOf(objectOrEmpty(snapshot.get("collection")).get("step")), "step");
         long afterSeconds = durationSeconds(String.valueOf(objectOrEmpty(snapshot.get("collection")).get("after")), "after");
@@ -1500,7 +1508,7 @@ final class SutMetricsService implements AutoCloseable {
                             if (previousState == BUSINESS_CALL_EXECUTING)
                                 cancelBusinessCallSession(activeSession.get());
                             businessCallStopped = true;
-                            throw new TimeoutException("Business metric call exceeded its per-call or per-Job execution budget.");
+                            throw new BusinessCallBudgetTimeoutException();
                         } catch (InterruptedException interrupted) {
                             int previousState = callExecutionState.getAndSet(BUSINESS_CALL_CANCELLED);
                             call.cancel(true);
@@ -1518,11 +1526,14 @@ final class SutMetricsService implements AutoCloseable {
                         long callDurationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - callAttemptNanos);
                         double numericValue = numericMetricValue(rawValue, nullableText(query.get("valuePath")));
                         String sampling = String.valueOf(query.get("sampling"));
+                        long delayFromExecutionEndMs = Math.max(0L, Duration.between(executionFinishedAt, observedAt).toMillis());
+                        boolean staleAfterDrain = "afterDrain".equals(sampling)
+                                && delayFromExecutionEndMs > MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS;
                         Map<String, Object> observationWindow;
                         if ("afterDrain".equals(sampling)) {
                             observationWindow = fields("kind", "after-drain", "executionStartedAt", executionStartedAt.toString(),
                                     "executionFinishedAt", executionFinishedAt.toString(), "observedAt", observedAt.toString(),
-                                    "delayFromExecutionEndMs", Math.max(0L, Duration.between(executionFinishedAt, observedAt).toMillis()));
+                                    "delayFromExecutionEndMs", delayFromExecutionEndMs);
                         } else {
                             if (steadyStart == null || steadyEnd == null || !steadyEnd.isAfter(steadyStart))
                                 throw new IllegalStateException("The actual STEADY interval is unavailable for a windowQuery business metric.");
@@ -1540,8 +1551,11 @@ final class SutMetricsService implements AutoCloseable {
                                 "metric", fields("id", query.get("metricId"), "name", query.get("title"), "category", query.get("category"),
                                         "unit", query.get("unit"), "kind", query.get("kind")),
                                 "window", observationWindow,
-                                "availability", fields("state", "AVAILABLE", "freshness", "FRESH", "quality", quality,
-                                        "collectionDurationMs", callDurationMs, "diagnostics", List.of()),
+                                "availability", fields("state", "AVAILABLE", "freshness", staleAfterDrain ? "STALE" : "FRESH", "quality", quality,
+                                        "collectionDurationMs", callDurationMs, "diagnostics", staleAfterDrain
+                                                ? List.of(fields("code", "BUSINESS_CALL_STALE_AFTER_DRAIN",
+                                                        "message", "The afterDrain business snapshot exceeded the 120000 ms freshness limit and is marked stale."))
+                                                : List.of()),
                                 "provenance", fields("provider", "att-call", "sourceType", query.get("sourceType"),
                                         "sourceName", query.get("callName"), "jobId", jobId,
                                         "snapshotId", snapshot.get("snapshotId"), "queryId", query.get("id"),
@@ -1635,8 +1649,11 @@ final class SutMetricsService implements AutoCloseable {
                     break;
                 } catch (Exception failure) {
                     queriesFailed++;
-                    if (businessCall && failure instanceof TimeoutException) {
+                    if (businessCall && (failure instanceof TimeoutException
+                            || failure instanceof BusinessCallNativeTimeoutException)) {
                         businessCallTimedOut++;
+                        if (failure instanceof BusinessCallBudgetTimeoutException) businessCallBudgetTimedOut++;
+                        else businessCallNativeTimedOut++;
                         businessCallStopped = true;
                     }
                     if (businessCall && failure instanceof InterruptedException) businessCallStopped = true;
@@ -1666,6 +1683,8 @@ final class SutMetricsService implements AutoCloseable {
                             "businessCallCount", businessCallStarted, "businessCallSubmitted", businessCallSubmitted,
                             "businessCallStarted", businessCallStarted, "businessCallSucceeded", businessCallSucceeded,
                             "businessCallFailed", businessCallFailed, "businessCallTimedOut", businessCallTimedOut,
+                            "businessCallNativeTimedOut", businessCallNativeTimedOut,
+                            "businessCallBudgetTimedOut", businessCallBudgetTimedOut,
                             "businessCallSkipped", businessCallSkipped, "businessCallDurationMs", businessCallDurationMs,
                             "artifactBytes", totalBytes), "queries", queryMetadata(snapshot), "files", fileEntries,
                     "diagnostics", diagnostics);
@@ -3147,6 +3166,8 @@ final class SutMetricsService implements AutoCloseable {
     }
     private static String safeBusinessCallFailureCode(Exception failure) {
         if (failure instanceof BusinessCallNotExecutedException) return "BUSINESS_CALL_NOT_EXECUTED";
+        if (failure instanceof BusinessCallBudgetTimeoutException) return "BUSINESS_CALL_BUDGET_TIMEOUT";
+        if (failure instanceof BusinessCallNativeTimeoutException) return "BUSINESS_CALL_TIMEOUT";
         if (failure instanceof TimeoutException) return "BUSINESS_CALL_TIMEOUT";
         String message = failure.getMessage() == null ? "" : failure.getMessage().toLowerCase(Locale.ROOT);
         if (message.contains("runtime config changed")) return "BUSINESS_CALL_CONFIG_CHANGED";
@@ -3163,6 +3184,7 @@ final class SutMetricsService implements AutoCloseable {
         return switch (safeBusinessCallFailureCode(failure)) {
             case "BUSINESS_CALL_NOT_EXECUTED" -> "This call was skipped after an earlier business metric call timed out.";
             case "BUSINESS_CALL_TIMEOUT" -> "Business metric call exceeded its execution limit; call details are withheld.";
+            case "BUSINESS_CALL_BUDGET_TIMEOUT" -> "The collector's per-call or per-Job time budget expired; call details are withheld.";
             case "BUSINESS_CALL_CONFIG_CHANGED" -> "The pinned Runtime Config changed before collection; the business metric was not executed.";
             case "BUSINESS_CALL_PACKAGE_CHANGED" -> "The pinned Package revision changed or is unavailable; the business metric was not executed.";
             case "BUSINESS_CALL_WINDOW_UNAVAILABLE" -> "The selected workload or actual STEADY interval is unavailable for this business metric.";
