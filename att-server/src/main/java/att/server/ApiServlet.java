@@ -182,7 +182,13 @@ public final class ApiServlet extends HttpServlet {
             }
             if(path.startsWith("/jobs/")&&path.contains("/artifacts/"))throw new ServerRuntime.NotFoundException();
             if(path.matches("/jobs/[^/]+/artifacts")){String id=segment(path,2);Map<String,Object> listing=runtime.artifactIndex(id,parseOffset(req.getParameter("offset")),parseConfigurationLimit(req.getParameter("limit")));listing.put("requestId",requestId);json(res,200,listing);return;}
-            if(path.matches("/jobs/[^/]+/result")){Map<String,Object> result=runtime.resultRecord(segment(path,2));result.put("requestId",requestId);json(res,200,result);return;}
+            if(path.matches("/jobs/[^/]+/result")){
+                String id=segment(path,2);Map<String,Object> result=runtime.resultRecord(id);
+                boolean admin=systemAdminCapability(req,principal);
+                Map<String,Object> acceptance=runtime.sutPerformanceAcceptance(id,principal,admin,(JsonNode)result.get("result"));
+                if(acceptance!=null)result.put("performanceAcceptance",acceptance);
+                result.put("requestId",requestId);json(res,200,result);return;
+            }
             if(path.matches("/jobs/[^/]+")){Map<String,Object> view=runtime.jobRecord(segment(path,2));view.put("requestId",requestId);json(res,200,view);return;}
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
         } catch(JobStore.TargetSearchPendingException e){res.setHeader("Retry-After","2");error(res,503,"ATT-SERVER-TARGET-SEARCH-PENDING","Historical target search is being prepared. No partial results were returned. Use job: followed by the full Job ID for exact lookup, or retry Refresh jobs shortly.",requestId);}

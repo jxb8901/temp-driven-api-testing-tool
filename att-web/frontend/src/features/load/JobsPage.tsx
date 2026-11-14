@@ -69,6 +69,12 @@ function dateTime(value?: string | null): string {
   return Number.isFinite(time) ? DATE_TIME_FORMATTER.format(time) : value;
 }
 
+function utcTimestamp(value?: string | null): string {
+  if (!value) return 'Not reported';
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? new Date(time).toISOString() : value;
+}
+
 function numericRows(value: unknown, prefix = '', depth = 0, rows: Array<[string, number]> = []): Array<[string, number]> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || depth > 4 || rows.length >= 100) return rows;
   Object.entries(value as Record<string, unknown>).forEach(([key, child]) => {
@@ -590,6 +596,68 @@ function unique(values: Array<string | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b));
 }
 
+function shouldPollEvaluation(stateValue: unknown, attemptValue: unknown): boolean {
+  const state = String(stateValue || '');
+  if (state === 'PENDING' || state === 'EVALUATING') return true;
+  return state === 'ERROR' && typeof attemptValue === 'number' && attemptValue < 2;
+}
+
+function shouldPollExternalEvaluation(acceptance?: Record<string, unknown>): boolean {
+  const details = acceptance?.externalEvaluation && typeof acceptance.externalEvaluation === 'object'
+    ? acceptance.externalEvaluation as Record<string, unknown> : {};
+  return shouldPollEvaluation(acceptance?.externalEvaluationStatus, details.attempt);
+}
+
+function SutAcceptanceSummary({ acceptance }: { acceptance?: Record<string, unknown> }) {
+  if (!acceptance) return null;
+  const evaluation = acceptance.externalEvaluation && typeof acceptance.externalEvaluation === 'object'
+    ? acceptance.externalEvaluation as Record<string, unknown> : {};
+  const sut = acceptance.sutThresholds && typeof acceptance.sutThresholds === 'object'
+    ? acceptance.sutThresholds as Record<string, unknown> : {};
+  const rules = Array.isArray(sut.items) ? sut.items as Array<Record<string, unknown>> : [];
+  const reason = typeof evaluation.reason === 'string' ? evaluation.reason : null;
+  return <section className="att-sut-acceptance" aria-label="SUT performance acceptance">
+    <h4>SUT performance acceptance</h4>
+    <dl>
+      <div><dt>Execution status</dt><dd>{String(acceptance.executionStatus || 'Not reported')}</dd></div>
+      <div><dt>Native performance verdict</dt><dd>{String(acceptance.nativePerformanceVerdict || 'NOT_EVALUATED')}</dd></div>
+      <div><dt>SUT evaluation</dt><dd>{String(acceptance.externalEvaluationStatus || 'PENDING')}</dd></div>
+      <div><dt>Combined performance verdict</dt><dd>{String(acceptance.performanceVerdict || 'PENDING')}</dd></div>
+    </dl>
+    {reason && <p role="status">{reason}</p>}
+    {Boolean(evaluation.evaluatedAt) && <p>Evaluated {dateTime(String(evaluation.evaluatedAt))}; collection state {String(evaluation.collectionState || 'unknown')}.</p>}
+    {rules.length > 0 && <div className="att-table-scroll" tabIndex={0} role="region" aria-label="SUT threshold rules and target evidence">
+      <table><caption>SUT threshold evaluation by source target</caption><thead><tr><th>Rule</th><th>Target</th><th>UTC window / resolution</th><th>Observed maximum / peak time</th><th>Limit</th><th>Coverage</th><th>Source, profile and target revisions</th><th>Result</th></tr></thead>
+        <tbody>{rules.flatMap((rule, ruleIndex) => (Array.isArray(rule.targets) ? rule.targets as Array<Record<string, unknown>> : []).map((target, targetIndex) => {
+          const targetIdentity = target.target && typeof target.target === 'object' ? target.target as Record<string, unknown> : {};
+          const source = target.source && typeof target.source === 'object' ? target.source as Record<string, unknown> : {};
+          const window = target.window && typeof target.window === 'object' ? target.window as Record<string, unknown> : {};
+          const coverage = target.coverage && typeof target.coverage === 'object' ? target.coverage as Record<string, unknown> : {};
+          const threshold = target.threshold && typeof target.threshold === 'object' ? target.threshold as Record<string, unknown> : {};
+          const actual = typeof target.actual === 'number' ? `${METRIC_NUMBER_FORMATTER.format(target.actual)} ${String(target.unit || rule.unit || '')}` : 'Not available';
+          const limit = typeof threshold.value === 'number' ? `≤ ${METRIC_NUMBER_FORMATTER.format(threshold.value)} ${String(threshold.unit || rule.unit || '')}` : 'Not available';
+          const ratio = typeof coverage.ratio === 'number' ? `${METRIC_NUMBER_FORMATTER.format(coverage.ratio * 100)}% (${String(coverage.sampleCount ?? 0)} / ${String(coverage.expectedSampleCount ?? 0)})` : 'Not available';
+          const profile = String(target.profile || rule.profile || 'profile');
+          const provenance = `${String(source.name || source.id || 'source')} · source rev ${String(source.revision || 'unknown')} · ${profile} rev ${String(target.profileRevision || 'unknown')} · target rev ${String(targetIdentity.revision || 'unknown')}`;
+          return <tr key={`${String(rule.id || ruleIndex)}-${String(target.queryId || targetIndex)}`}>
+            <th scope="row">{String(rule.id || target.ruleId || 'SUT rule')} · {String(rule.metricName || rule.metricId || target.metricId || '')}</th>
+            <td>{String(targetIdentity.id || 'Unknown')} · {String(targetIdentity.type || 'target')} · {String(source.id || 'source')}</td>
+            <td><time dateTime={typeof window.startAt === 'string' ? window.startAt : undefined}>{utcTimestamp(typeof window.startAt === 'string' ? window.startAt : null)}</time> — <time dateTime={typeof window.endAt === 'string' ? window.endAt : undefined}>{utcTimestamp(typeof window.endAt === 'string' ? window.endAt : null)}</time><small>{String(target.sampleResolution || window.step || 'Resolution unknown')}</small></td>
+            <td>{actual}{typeof target.peakObservedAt === 'string' ? <small><time dateTime={target.peakObservedAt}>{utcTimestamp(target.peakObservedAt)}</time></small> : null}</td>
+            <td>{limit}</td><td>{ratio}</td><td>{provenance}<small>{String(target.profilePath || rule.profilePath || '')}</small></td>
+            <td>{String(target.status || rule.status || 'NOT_EVALUATED')}<small>{String(target.reason || '')}</small></td>
+          </tr>;
+        }))}</tbody>
+      </table>
+    </div>}
+    {rules.length === 0 && ['PENDING', 'EVALUATING'].includes(String(acceptance.externalEvaluationStatus))
+      && <p role="status">Threshold results will appear after the post-run collection window is evaluated.</p>}
+    {Array.isArray(evaluation.diagnostics) && evaluation.diagnostics.length > 0 && <details><summary>Evaluation diagnostics</summary><ul>
+      {(evaluation.diagnostics as Array<Record<string, unknown>>).slice(0, 4).map((item, index) => <li key={`${String(item.code || 'evaluation')}-${index}`}>{String(item.code || 'Evaluation issue')}: {String(item.message || 'No further detail.')}</li>)}
+    </ul></details>}
+  </section>;
+}
+
 function CompactLoadSummary({ payload, archiveState, archiveMessage, archiveOverview, archiveHint }: { payload: JobResultResponse | null; archiveState?: ReportAvailability; archiveMessage?: string; archiveOverview?: JobArtifactOverview | null; archiveHint?: string }) {
   const summary = loadTerminalSummary(payload);
   if (!summary) return null;
@@ -600,6 +668,7 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage, archiveOver
   const root = primaryLoadError(payload);
   const secondaryWarnings = secondaryLoadWarnings(payload);
   const archive = summary.archive && typeof summary.archive === 'object' ? summary.archive as Record<string, unknown> : {};
+  const acceptance = payload?.performanceAcceptance;
   const overviewState = archiveOverview?.archiveStatus === 'READY' ? archiveOverview.reportAvailability : archiveOverview?.archiveStatus;
   const reportedState = overviewState || (typeof archiveState === 'string' && archiveState !== 'idle' ? archiveState : String(archive.reportAvailability || archive.status || 'PENDING'));
   const availabilityText: Record<string, string> = {
@@ -653,6 +722,7 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage, archiveOver
     </>}
     {!archiveOverview?.summaryVerified && archiveHint && <p>Initial report path hint (unverified): <code>{archiveHint}</code></p>}
     <p className="att-load-performance-note">Execution status and performance verdict are separate. PASS describes execution; configured performance checks have their own verdict.</p>
+    <SutAcceptanceSummary acceptance={acceptance} />
     {root && <section aria-label="LOAD root-cause diagnosis" role="alert">
       <h4>{String(root.code || 'LOAD runtime error')}</h4><p>{String(root.summary || 'The LOAD ended with ERROR.')}</p>
     </section>}
@@ -1061,7 +1131,9 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
           const value = await fetchCollection(jobId, { offset: 0, limit: 4, targetId: targetFilter || undefined, profilePath: profileFilter || undefined, signal: controller.signal });
           if (disposed || controller.signal.aborted) return;
           setResponse(value); setQueryDefinitions(value.collection?.queries || []); setNextOffset(typeof value.nextOffset === 'number' ? value.nextOffset : null);
+          const evaluationState = String(value.thresholdEvaluation?.state || 'DISABLED');
           if (['PENDING', 'COLLECTING'].includes(String(value.state || value.collection?.state))) schedule(5_000);
+          else if (shouldPollEvaluation(evaluationState, value.thresholdEvaluation?.attempt)) schedule(2_000);
         }
       } catch (failure) {
         if (disposed || controller.signal.aborted) return;
@@ -1125,7 +1197,7 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
 
   return <section className="att-job-panel att-sut-metrics-panel" role="tabpanel" id="job-panel-sutMetrics" aria-labelledby="job-tab-sutMetrics" hidden={hidden} tabIndex={0}>
     <h2>SUT Metrics</h2>
-    <p className="att-help">Prometheus metrics for the selected system under test. Live preview is read-only, refreshed every 30 seconds, and does not affect the LOAD verdict.</p>
+    <p className="att-help">Prometheus metrics for the selected system under test. Live preview is read-only and does not itself change acceptance. Configured rules produce a separate persisted performance verdict.</p>
     {queries.length > 0 && <div className="att-sut-metrics-filters" aria-label="SUT Metrics filters">
       <label>Target<select value={targetFilter} onChange={event => setTargetFilter(event.target.value)}><option value="">All targets</option>{targets.map(target => <option key={target} value={target}>{target}</option>)}</select></label>
       <label>Profile<select value={profileFilter} onChange={event => setProfileFilter(event.target.value)}><option value="">All profiles</option>{profiles.map(profile => <option key={profile} value={profile}>{profile}</option>)}</select></label>
@@ -1139,6 +1211,7 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
       {freshness && <div><dt>Last source query</dt><dd>{dateTime(freshness)}</dd></div>}
       {sampleCount !== undefined && <div><dt>Samples in preview</dt><dd>{METRIC_NUMBER_FORMATTER.format(sampleCount)}</dd></div>}
     </dl>
+    <SutAcceptanceSummary acceptance={(response as SutMetricsJobResponse | null)?.performanceAcceptance} />
     {state === 'DISABLED' && <p role="status">SUT Metrics are not configured for this LOAD Job.</p>}
     {state === 'PENDING' && <p role="status" aria-busy={loading}>SUT Metrics are waiting for LOAD execution or the post-run collection worker.</p>}
     {state === 'COLLECTING' && <p role="status" aria-busy="true">Prometheus post-run collection is in progress. The LOAD execution result is independent of this status.</p>}
@@ -1313,6 +1386,34 @@ function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedul
     });
     return () => controller.abort();
   }, [api, jobId, detailRefresh, terminalRefresh]);
+
+  useEffect(() => {
+    if (!shouldPollExternalEvaluation(result?.performanceAcceptance) || !['overview', 'results'].includes(activeTab)) return;
+    let disposed = false;
+    let timer: number | undefined;
+    let controller: AbortController | null = null;
+    const schedule = () => {
+      if (!disposed && !document.hidden) timer = window.setTimeout(() => void refresh(), 10_000);
+    };
+    const refresh = async () => {
+      if (disposed || document.hidden) return;
+      controller = new AbortController();
+      try {
+        const value = await api.getJobResult(jobId, controller.signal);
+        if (disposed || controller.signal.aborted) return;
+        setResult(value);
+        if (shouldPollExternalEvaluation(value.performanceAcceptance)) schedule();
+      } catch { if (!disposed && !controller.signal.aborted) schedule(); }
+    };
+    const visibility = () => {
+      if (document.hidden) { if (timer !== undefined) window.clearTimeout(timer); controller?.abort(); }
+      else void refresh();
+    };
+    schedule();
+    document.addEventListener('visibilitychange', visibility);
+    return () => { disposed = true; if (timer !== undefined) window.clearTimeout(timer); controller?.abort(); document.removeEventListener('visibilitychange', visibility); };
+  }, [api, jobId, result?.performanceAcceptance?.externalEvaluationStatus,
+    (result?.performanceAcceptance?.externalEvaluation as Record<string, unknown> | undefined)?.attempt, activeTab]);
 
   useEffect(() => {
     if (statusSnapshot.eventRevision === 0) return;

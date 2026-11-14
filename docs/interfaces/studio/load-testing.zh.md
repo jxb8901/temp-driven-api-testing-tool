@@ -64,16 +64,30 @@ HTTPS Data Source host 必須與 Server 的 `ATT_SUT_METRICS_ALLOWED_HOSTS` 環�
 observability:
   schemaVersion: att-load-observability/v1
   collections:
-    - profile: profile-platform
+    - id: platform
+      profile: profile-platform
+      source: prom-main
+      targets: [{id: app-1, type: app}]
   collection: { mode: post-run, before: 5m, after: 2m, step: 30s }
   livePreview: { enabled: true, refreshInterval: 30s, defaultRange: 15m }
+  thresholds:
+    - id: cpu-steady-90
+      profile: platform
+      metric: cpu_utilization
+      max: 90
+      unit: percent
+      minimumCoverage: 0.95
 ~~~
+
+Rule 的 metric ID 和 unit 必須存在所選 base profile。規則使用實際 UTC `STEADY` phase interval，並對每個 source target 分別評估 sampled maximum，不會將 target 數值平均。最大值等於 90 時為 `MET`；任何有效 sample 高於 90，即使其他 sample 缺失，仍為 `NOT_MET`。缺少、過舊、部分或覆蓋不足的資料會是 `NOT_EVALUATED`，除非已有有效 sample 證明超標。規則只支援 `max`、`<=`、`steady` 及 `targets: all`；預設最低 coverage 為 95%。
+
+Server 會將正規化規則、metric binding、revision 和 target 固定在每個 Job snapshot。Collection 完成後，有界的非同步 evaluator 會寫入 `jobs/<JOB_ID>/sut-metrics/threshold-evaluation.json`；Server 重啟後會恢復中斷或可重試的 evaluation。此版本化記錄獨立於 Worker result，不會修改 execution status 或 native LOAD threshold summary。已授權的 `GET /api/v1/jobs/{id}/result` 會加入 `performanceAcceptance`，回報 `executionStatus`、`nativeLoadThresholds`、`sutThresholds`、`externalEvaluationStatus` 及 combined `performanceVerdict`。Results 與 SUT Metrics 會顯示每個 target 的 peak、limit、sample count、coverage 及原因。Post-run evidence 尚未就緒時，external state 和 combined verdict 會保持 pending。
 
 LOAD Job Details 的 **SUT Metrics** 分頁會顯示 source、target、profile、coverage、sample freshness，以及 min/average/max。LOAD 執行期間，分頁每 30 秒向 Server 取得受限、只讀、以 snapshot 為準的 preview。可以選擇 target、profile 及 5 分鐘至 4 小時的 range。切換至其他 Job 分頁或瀏覽器文件隱藏時，系統會停止 polling。LOAD 完成後，分頁會讀取獨立 `jobs/<JOB_ID>/sut-metrics/` 目錄內有 checksum 的 sidecar，不會修改已封存的 LOAD report 或 artifact archive。Post-run collection 使用實際 LOAD execution 和 phase 時間，列出 RAMP_UP/WARMUP/STEADY/RAMP_DOWN/DRAIN 邊界，並加上設定的 before／after 範圍。待 after window 加上一個 query step 經過後才會查詢 Prometheus。若查詢有樣本，只有最新可用 sample 在 LOAD 完成後，且距 window end 不超過既有 `max(2 × step, 30 秒)` freshness tolerance 時才會標示 READY；缺少 post-finish 樣本或尾端覆蓋過舊則標示 PARTIAL。成功但沒有資料的結果維持 NO_DATA。長時間範圍會拆成最多六小時的請求，總 collection window 上限為 26 小時。
 
 Post-run sidecar 使用版本化、provider-neutral 的 `att-sut-metrics-observation/v1` contract，記錄 effective binding、安全的 source/profile/target revision hash、metric unit/kind、UTC execution/query window、step、phase window、freshness、sample coverage/gaps、availability 及已遮蔽的 provenance。Mutable collection manifest 會綁定 Job 和 immutable snapshot，並在同一個 atomically published file 內嵌有上限的 integrity history。Server 重啟時會讀取完整的 manifest 狀態，並明確恢復中斷的 `COLLECTING` 工作。空結果維持 `NO_DATA`，不會補成零。
 
-Collection 狀態包括 `PENDING`、`COLLECTING`、`READY`、`PARTIAL`、`UNAVAILABLE` 及 `FAILED`；live metric 另會顯示 `STALE`、`NO_DATA` 或 unavailable。這些狀態不會改變 LOAD 結果或 verdict。**SUT Metrics** 分頁維持獨立檢視，也不會評估 SUT thresholds。
+Collection 狀態包括 `PENDING`、`COLLECTING`、`READY`、`PARTIAL`、`UNAVAILABLE` 及 `FAILED`；live metric 另會顯示 `STALE`、`NO_DATA` 或 unavailable。Collection 狀態本身不會改變 Worker result 或 native verdict。已配置的 SUT rule 會在 evaluation 後透過獨立的 combined performance acceptance 生效，不會把 SUT 數值疊加至 TPS／latency。
 
 ## 對照 LOAD 與 SUT metrics
 

@@ -19,6 +19,7 @@ schemas:
   att-sut-metrics-manifest-integrity/v1: att-sut-metrics-manifest-integrity-v1.schema.json
   att-sut-metrics-series/v1: att-sut-metrics-series-v1.schema.json
   att-sut-metrics-observation/v1: att-sut-metrics-observation-v1.schema.json
+  att-sut-threshold-evaluation/v1: att-sut-threshold-evaluation-v1.schema.json
   att-load/v1.8: history/att-load-v1.8.schema.json
   att-load/v1.7: history/att-load-v1.7.schema.json
   att-load/v1.6: history/att-load-v1.6.schema.json

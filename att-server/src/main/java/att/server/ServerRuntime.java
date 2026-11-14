@@ -1367,6 +1367,9 @@ final class ServerRuntime implements AutoCloseable {
             if(terminal(id))return sutFields("schemaVersion","att-sut-metrics-live/v1","state","ENDED","jobId",id,
                     "snapshotId",snapshot.get("snapshotId"),"items",List.of(),"message","LOAD has ended; use the post-run collection.");
             Map<String,Object> preview=sutMetrics.livePreview(id,principal,admin,started,range,step,targetId,profilePath);
+            Map<String,Object> result=resultRecord(id);
+            Map<String,Object> acceptance=sutPerformanceAcceptance(id,principal,admin,(JsonNode)result.get("result"));
+            if(acceptance!=null)preview.put("performanceAcceptance",acceptance);
             return preview;
         }
         Map<String,Object> page=sutMetrics.readCollectionPage(id,offset,limit,queryId,targetId,profilePath);
@@ -1374,7 +1377,109 @@ final class ServerRuntime implements AutoCloseable {
         response.put("state",page.get("manifest") instanceof Map<?,?> manifest?manifest.get("state"):"PENDING");
         response.put("jobId",id);response.put("snapshotId",snapshot.get("snapshotId"));
         response.put("livePreview",snapshot.get("livePreview"));response.put("collection",page.get("manifest"));
-        response.put("items",page.get("items"));response.put("nextOffset",page.get("nextOffset"));return response;
+        response.put("items",page.get("items"));response.put("nextOffset",page.get("nextOffset"));
+        response.put("thresholdEvaluation",thresholdEvaluationOrUnavailable(id,snapshot));
+        Map<String,Object> result=resultRecord(id);
+        Map<String,Object> acceptance=sutPerformanceAcceptance(id,principal,admin,(JsonNode)result.get("result"));
+        if(acceptance!=null)response.put("performanceAcceptance",acceptance);
+        return response;
+    }
+
+    Map<String,Object> sutPerformanceAcceptance(String id,String principal,boolean admin,JsonNode result) throws Exception {
+        Map<String,Object> row=store.get(id);
+        if(row==null)throw new NotFoundException();
+        if(!"load".equals(row.get("command")))return null;
+        Map<String,Object> snapshot=null;
+        boolean snapshotUnavailable=false;
+        try { snapshot=sutMetrics.snapshotForJob(id); }
+        catch(Exception unavailable) { snapshotUnavailable=true; }
+        List<Map<String,Object>> rules=snapshot==null?List.of():sutMaps(snapshot.get("thresholds"));
+        if(!snapshotUnavailable) {
+            if(snapshot==null||rules.isEmpty())return null;
+            try { sutMetrics.authorizeSnapshot(snapshot,principal,admin); }
+            catch(NotFoundException denied) { return null; }
+        }
+
+        Map<String,Object> evaluation=snapshotUnavailable
+                ?sutMetrics.evaluationError(null,"UNAVAILABLE","SUT_SNAPSHOT_UNAVAILABLE",
+                        "The immutable SUT Metrics Job snapshot is unavailable.",2)
+                :thresholdEvaluationOrUnavailable(id,snapshot);
+        String externalState=String.valueOf(evaluation.getOrDefault("state","PENDING"));
+        Map<String,Object> sutThresholds=evaluation.get("sutThresholds") instanceof Map<?,?> values
+                ?JSON.convertValue(values,Map.class):Map.of();
+        JsonNode summary=result==null?JSON.createObjectNode():result.path("summary");
+        JsonNode nativePerformance=summary.path("performance");
+        JsonNode nativeThresholdNode=summary.path("thresholds");
+        Map<String,Object> nativeThresholds=nativeThresholdNode.isObject()
+                ?new LinkedHashMap<>(JSON.convertValue(nativeThresholdNode,Map.class)):new LinkedHashMap<>();
+        boolean nativeConfigured=nativeThresholdNode.path("total").asInt(0)>0;
+        Map<String,Object> workloadThresholds=new LinkedHashMap<>();
+        JsonNode workloads=summary.path("workloads");
+        if(workloads.isObject()) {
+            var workloadFields=workloads.fields();
+            while(workloadFields.hasNext()) {
+                var workload=workloadFields.next();
+                JsonNode thresholds=workload.getValue().path("thresholds");
+                if(thresholds.path("total").asInt(0)>0) {
+                    nativeConfigured=true;
+                    workloadThresholds.put(workload.getKey(),JSON.convertValue(thresholds,Map.class));
+                }
+            }
+        }
+        if(!workloadThresholds.isEmpty())nativeThresholds.put("workloads",workloadThresholds);
+        String nativeVerdict=nativePerformanceVerdict(summary);
+        String executionStatus=summary.path("executionStatus").asText(nativePerformance.path("executionStatus").asText(
+                summary.path("execution").path("status").asText(String.valueOf(row.get("status")))));
+        boolean requiredRules=snapshotUnavailable||rules.stream().anyMatch(rule->!Boolean.FALSE.equals(rule.get("required")));
+        boolean active=!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(String.valueOf(row.get("status")));
+        int externalAttempt=evaluation.get("attempt") instanceof Number attempt?attempt.intValue():0;
+        String combined=combinedPerformanceVerdict(active,requiredRules,nativeConfigured,nativeVerdict,externalState,externalAttempt);
+        Map<String,Object> external=new LinkedHashMap<>();
+        for(String key:List.of("state","complete","attempt","collectionState","evaluatedAt","window","completeness","diagnostics"))
+            if(evaluation.containsKey(key))external.put(key,evaluation.get(key));
+        if("PENDING".equals(externalState)||"EVALUATING".equals(externalState))
+            external.put("reason","SUT threshold evaluation is waiting for complete post-run collection evidence.");
+        return sutFields("schemaVersion","att-load-performance-acceptance/v1","jobId",id,
+                "executionStatus",executionStatus,"nativePerformanceVerdict",nativeVerdict,
+                "nativeLoadThresholds",nativeThresholds,"externalEvaluationStatus",externalState,
+                "externalEvaluation",external,"sutThresholds",sutThresholds,
+                "performanceVerdict",combined);
+    }
+
+    private Map<String,Object> thresholdEvaluationOrUnavailable(String id,Map<String,Object> snapshot) {
+        try { return sutMetrics.thresholdEvaluationStatus(id); }
+        catch(Exception unavailable) {
+            return sutMetrics.evaluationError(snapshot,"UNAVAILABLE","THRESHOLD_EVALUATION_UNAVAILABLE",
+                    "The persisted SUT threshold evaluation is unavailable.",2);
+        }
+    }
+
+    static String nativePerformanceVerdict(JsonNode summary) {
+        JsonNode nativePerformance=summary==null?JSON.createObjectNode():summary.path("performance");
+        JsonNode thresholds=summary==null?JSON.createObjectNode():summary.path("thresholds");
+        return (summary==null?JSON.createObjectNode():summary).path("performanceVerdict").asText(
+                nativePerformance.path("verdict").asText(thresholds.path("performanceVerdict").asText("NOT_EVALUATED")));
+    }
+
+    static String combinedPerformanceVerdict(boolean executionActive,boolean requiredSutRules,
+                                             boolean nativeConfigured,String nativeVerdict,String externalState,
+                                             int externalAttempt) {
+        if("NOT_MET".equals(nativeVerdict)||"NOT_MET".equals(externalState))return "NOT_MET";
+        if(executionActive&&(requiredSutRules||nativeConfigured))return "PENDING";
+        if(requiredSutRules&&(Set.of("PENDING","EVALUATING").contains(externalState)
+                ||"ERROR".equals(externalState)&&externalAttempt<2))return "PENDING";
+        if(requiredSutRules&& !"MET".equals(externalState))return "NOT_EVALUATED";
+        if(nativeConfigured&&"PENDING".equals(nativeVerdict))return "PENDING";
+        if(nativeConfigured&& !"MET".equals(nativeVerdict))return "NOT_EVALUATED";
+        if(requiredSutRules||nativeConfigured)return "MET";
+        return "NOT_EVALUATED";
+    }
+
+    private static List<Map<String,Object>> sutMaps(Object value) {
+        if(!(value instanceof List<?> rows))return List.of();
+        List<Map<String,Object>> output=new ArrayList<>();
+        for(Object row:rows)if(row instanceof Map<?,?> map)output.add(JSON.convertValue(map,Map.class));
+        return output;
     }
     private Instant liveLoadStart(String id,Map<String,Object> row) {
         Job active=jobs.get(id);

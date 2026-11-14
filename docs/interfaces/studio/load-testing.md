@@ -58,16 +58,30 @@ An optional root-level `observability` object in `att-load/v1.9` binds registere
 observability:
   schemaVersion: att-load-observability/v1
   collections:
-    - profile: profile-platform
+    - id: platform
+      profile: profile-platform
+      source: prom-main
+      targets: [{id: app-1, type: app}]
   collection: { mode: post-run, before: 5m, after: 2m, step: 30s }
   livePreview: { enabled: true, refreshInterval: 30s, defaultRange: 15m }
+  thresholds:
+    - id: cpu-steady-90
+      profile: platform
+      metric: cpu_utilization
+      max: 90
+      unit: percent
+      minimumCoverage: 0.95
 ~~~
+
+The rule's metric ID and unit must exist in the selected base profile. Rules use the actual UTC `STEADY` phase interval and evaluate the sampled maximum separately for every source target; target values are never averaged. A maximum equal to 90 is `MET`; any valid sample above 90 is `NOT_MET`, even when other samples are missing. Missing, stale, partial, or under-covered data is `NOT_EVALUATED` unless a valid sample already proves a violation. Threshold rules support only `max` with `<=`, `steady`, and `targets: all`; the default minimum coverage is 95 percent.
+
+The Server pins normalized rules, metric bindings, revisions, and targets into each Job snapshot. After collection finishes, a bounded asynchronous evaluator writes `jobs/<JOB_ID>/sut-metrics/threshold-evaluation.json`; interrupted or retryable evaluations resume after Server restart. This is a separate versioned record and never changes the Worker result, execution status, or native LOAD threshold summary. Authorized `GET /api/v1/jobs/{id}/result` responses add `performanceAcceptance`, which reports `executionStatus`, `nativeLoadThresholds`, `sutThresholds`, `externalEvaluationStatus`, and the combined `performanceVerdict`. The Results and SUT Metrics views show per-target peaks, limits, sample counts, coverage, and reasons. While post-run evidence is pending, the external state and combined verdict remain pending.
 
 The optional **SUT Metrics** tab in LOAD Job Details shows source, target, profile, coverage, sample freshness, and min/average/max values. While a LOAD Job is running, the tab requests a bounded snapshot-only preview every 30 seconds. Choose a target, profile, and a range from 5 minutes to 4 hours. Polling stops while another Job tab is selected or the browser document is hidden. After LOAD completes, the tab reads checksummed sidecars from the separate `jobs/<JOB_ID>/sut-metrics/` directory; it does not edit the sealed LOAD report or artifact archive. Post-run collection uses actual LOAD execution and phase timestamps, reports RAMP_UP/WARMUP/STEADY/RAMP_DOWN/DRAIN boundaries, and adds the configured before/after windows. It waits until the after window plus one query step has elapsed before querying Prometheus. A populated query is READY only when its latest usable sample is after LOAD completion and within the existing `max(2 × step, 30 seconds)` freshness tolerance of the window end; missing or stale-tail coverage is PARTIAL. Empty successful results remain NO_DATA. Long ranges split into requests of at most six hours. The total collection window is limited to 26 hours.
 
 Each post-run sidecar follows the versioned provider-neutral `att-sut-metrics-observation/v1` contract. It records the effective binding, safe source/profile/target revision hashes, metric unit and kind, UTC execution/query windows, step, phase windows, freshness, sample coverage and gaps, availability, and redacted provenance. The mutable collection manifest is bound to the Job and immutable snapshot and embeds its bounded integrity history in the same atomically published file. Readers see a complete manifest state across a process restart, and interrupted `COLLECTING` work is recovered explicitly. Empty results remain `NO_DATA`; they are never filled with zero.
 
-Collection states are `PENDING`, `COLLECTING`, `READY`, `PARTIAL`, `UNAVAILABLE`, and `FAILED`; live metric statuses also distinguish `STALE`, `NO_DATA`, and unavailable queries. None of these states changes the LOAD result or verdict. The **SUT Metrics** tab remains a standalone view and does not evaluate SUT thresholds.
+Collection states are `PENDING`, `COLLECTING`, `READY`, `PARTIAL`, `UNAVAILABLE`, and `FAILED`; live metric statuses also distinguish `STALE`, `NO_DATA`, and unavailable queries. Collection state alone does not change the Worker result or native verdict. Configured SUT rules contribute through the separate combined performance acceptance after evaluation; they do not overlay SUT values on TPS or latency.
 
 ## Correlate LOAD and SUT metrics
 

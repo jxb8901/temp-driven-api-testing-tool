@@ -56,6 +56,30 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void thresholdRulesRequireAnExactAliasForRepeatedBaseProfileBindings() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(1); SutMetricsService service = new SutMetricsService(temp)) {
+            service.upsertSource(source("prom-a", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertSource(source("prom-b", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            Map<String, Object> configured = scenario(List.of(
+                    map("id", "primary", "profile", "base", "source", "prom-a", "targets", List.of(map("id", "sut-a", "type", "app"))),
+                    map("id", "replica", "profile", "base", "source", "prom-b", "targets", List.of(map("id", "sut-b", "type", "app")))),
+                    "1m", "1m", "15s");
+            configured.put("thresholds", List.of(map("id", "cpu-max", "profile", "base", "metric", "metric-1", "max", 90.0)));
+
+            assertThrows(IllegalArgumentException.class, () -> service.resolveScenario(configured, "alice"),
+                    "The base profile name must not silently select two source bindings.");
+            configured.put("thresholds", List.of(map("id", "cpu-max", "profile", "replica", "metric", "metric-1", "max", 90.0)));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            Map<String, Object> rule = maps(snapshot.get("thresholds")).get(0);
+            assertEquals("replica", rule.get("bindingId"));
+            assertEquals(1, ((List<?>) rule.get("queryIds")).size());
+            String selectedQueryId = String.valueOf(((List<?>) rule.get("queryIds")).get(0));
+            assertEquals("prom-b", maps(snapshot.get("queries")).stream()
+                    .filter(query -> selectedQueryId.equals(query.get("id"))).findFirst().orElseThrow().get("sourceId"));
+        }
+    }
+
     @Test void oneLevelCompositeBindsBaseProfilesAndOnlyDeclaredScenarioParameterOverridesAreAccepted() throws Exception {
         try (PrometheusFixture fixture = new PrometheusFixture(1); SutMetricsService service = new SutMetricsService(temp)) {
             service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
@@ -435,6 +459,173 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void postRunThresholdEvaluationPersistsPerTargetEvidenceAndRecoversAfterRestart() throws Exception {
+        Path data = temp.resolve("threshold-evaluation-recovery");
+        String jobId = "J0000000000000091";
+        Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(60);
+        Map<String, Object> configured = scenario(List.of(map("id", "platform", "profile", "base", "source", "prom",
+                "targets", List.of(map("id", "sut-1", "type", "app")))), "1m", "1m", "15s");
+        configured.put("thresholds", List.of(map("id", "cpu-steady-90", "profile", "platform", "metric", "metric-1",
+                "max", 90.0, "unit", "count", "minimumCoverage", 0.95)));
+        try (PrometheusFixture fixture = new PrometheusFixture(raw -> thresholdResponse(raw, 90.0));
+             SutMetricsService service = new SutMetricsService(data)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            assertEquals(1, maps(snapshot.get("thresholds")).size());
+            assertEquals("platform", maps(snapshot.get("queries")).get(0).get("bindingId"));
+            service.writeSnapshot(jobId, snapshot);
+            List<Map<String, Object>> phases = List.of(phase("STEADY", startedAt.plusSeconds(10), finishedAt.minusSeconds(10), true));
+
+            service.jobFinished(jobId, startedAt, finishedAt, phases);
+            assertEquals("READY", awaitManifest(service, jobId).get("state"));
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, jobId);
+            assertEquals("MET", evaluation.get("state"));
+            Map<String, Object> results = object(evaluation.get("sutThresholds"));
+            Map<String, Object> threshold = maps(results.get("items")).get(0);
+            Map<String, Object> target = maps(threshold.get("targets")).get(0);
+            assertEquals("MET", target.get("status"));
+            assertEquals(90.0, ((Number) target.get("actual")).doubleValue());
+            assertEquals(90.0, ((Number) object(target.get("threshold")).get("value")).doubleValue());
+            Path record = data.resolve("jobs").resolve(jobId).resolve("sut-metrics/threshold-evaluation.json");
+            assertTrue(Files.isRegularFile(record));
+            assertFalse(Files.readString(record).contains(fixture.url()));
+        }
+        try (SutMetricsService recovered = new SutMetricsService(data)) {
+            assertEquals("MET", recovered.thresholdEvaluationStatus(jobId).get("state"));
+        }
+    }
+
+    @Test void corruptUnrelatedTargetEvidenceDoesNotHideAProvenThresholdViolation() throws Exception {
+        Path data = temp.resolve("threshold-corrupt-subject");
+        String jobId = "J0000000000000092";
+        AtomicBoolean corrupted = new AtomicBoolean();
+        Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(60);
+        Map<String, Object> configured = scenario(List.of(map("id", "platform", "profile", "base", "source", "prom",
+                "targets", List.of(map("id", "sut-a", "type", "app"), map("id", "sut-b", "type", "app")))), "1m", "1m", "15s");
+        configured.put("thresholds", List.of(map("id", "cpu-max-90", "profile", "platform", "metric", "metric-1",
+                "max", 90.0, "unit", "count", "minimumCoverage", 0.95)));
+        try (PrometheusFixture fixture = new PrometheusFixture(raw -> thresholdResponse(raw, 90.1));
+             SutMetricsService service = new SutMetricsService(data, Set.of("127.0.0.1"), reference -> null, manifestPath -> {
+                 try {
+                     Map<String, Object> manifest = ServerRuntime.JSON.readValue(manifestPath.toFile(), Map.class);
+                     if (!"READY".equals(manifest.get("state")) || !corrupted.compareAndSet(false, true)) return;
+                     Map<String, Object> secondTarget = maps(manifest.get("files")).stream()
+                             .filter(file -> "sut-b".equals(file.get("targetId"))).findFirst().orElseThrow();
+                     Files.writeString(manifestPath.getParent().resolve(String.valueOf(secondTarget.get("path"))), "{}");
+                 } catch (Exception failure) { throw new IllegalStateException(failure); }
+             })) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            service.writeSnapshot(jobId, snapshot);
+            service.jobFinished(jobId, startedAt, finishedAt,
+                    List.of(phase("STEADY", startedAt.plusSeconds(10), finishedAt.minusSeconds(10), true)));
+
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, jobId);
+            assertTrue(corrupted.get(), "The second target sidecar should be corrupted before evaluation starts.");
+            assertEquals("NOT_MET", evaluation.get("state"));
+            List<Map<String, Object>> targets = maps(maps(object(evaluation.get("sutThresholds")).get("items")).get(0).get("targets"));
+            assertTrue(targets.stream().anyMatch(target -> "sut-a".equals(object(target.get("target")).get("id"))
+                    && "NOT_MET".equals(target.get("status"))), targets.toString());
+            assertTrue(targets.stream().anyMatch(target -> "sut-b".equals(object(target.get("target")).get("id"))
+                    && "NOT_EVALUATED".equals(target.get("status"))), targets.toString());
+        }
+    }
+
+    @Test void timeoutOnSecondSubjectCannotEraseAnAlreadyProvenViolation() throws Exception {
+        Path data = temp.resolve("threshold-timeout-after-violation");
+        String jobId = "J0000000000000094";
+        AtomicInteger evidenceReads = new AtomicInteger();
+        AtomicBoolean secondSubjectTimedOut = new AtomicBoolean();
+        Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(60);
+        Map<String, Object> configured = scenario(List.of(map("id", "platform", "profile", "base", "source", "prom",
+                "targets", List.of(map("id", "sut-a", "type", "app"), map("id", "sut-b", "type", "app")))), "1m", "1m", "15s");
+        configured.put("thresholds", List.of(map("id", "cpu-max-90", "profile", "platform", "metric", "metric-1",
+                "max", 90.0, "unit", "count", "minimumCoverage", 0.95)));
+        try (PrometheusFixture fixture = new PrometheusFixture(raw -> thresholdResponse(raw, 90.1));
+             SutMetricsService service = new SutMetricsService(data, Set.of("127.0.0.1"), reference -> null,
+                     ignored -> { }, queryId -> {
+                         if (evidenceReads.incrementAndGet() == 2) {
+                             secondSubjectTimedOut.set(true);
+                             throw new SutThresholdEvaluator.EvaluationTimeoutException();
+                         }
+                     })) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            service.writeSnapshot(jobId, snapshot);
+            service.jobFinished(jobId, startedAt, finishedAt,
+                    List.of(phase("STEADY", startedAt.plusSeconds(10), finishedAt.minusSeconds(10), true)));
+
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, jobId);
+            assertEquals(1, evidenceReads.get(), "The proven violation should finalize before the later subject is read.");
+            assertFalse(secondSubjectTimedOut.get());
+            assertEquals("NOT_MET", evaluation.get("state"));
+            List<Map<String, Object>> targets = maps(maps(object(evaluation.get("sutThresholds")).get("items")).get(0).get("targets"));
+            assertEquals(1, targets.stream().filter(target -> "NOT_MET".equals(target.get("status"))).count());
+            assertEquals(1, targets.stream().filter(target -> "NOT_EVALUATED".equals(target.get("status"))).count());
+        }
+    }
+
+    @Test void optionalViolationDoesNotShortCircuitLaterRequiredEvidence() throws Exception {
+        Path data = temp.resolve("threshold-optional-violation-before-required");
+        String jobId = "J0000000000000095";
+        Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(60);
+        Map<String, Object> configured = scenario(List.of(binding("prom", null)), "1m", "1m", "15s");
+        configured.put("thresholds", List.of(
+                map("id", "optional-first", "profile", "base", "metric", "metric-1", "max", 90.0,
+                        "unit", "count", "minimumCoverage", 0.95, "required", false),
+                map("id", "required-second", "profile", "base", "metric", "metric-2", "max", 90.0,
+                        "unit", "count", "minimumCoverage", 0.95, "required", true)));
+        try (PrometheusFixture fixture = new PrometheusFixture(raw ->
+                thresholdResponse(raw, "up".equals(queryParameter(raw, "query")) ? 90.1 : 90.0));
+             SutMetricsService service = new SutMetricsService(data)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(profileWithQueries("up", "process_cpu_seconds_total"));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            assertEquals(List.of("prom/base/sut-1/metric-1", "prom/base/sut-1/metric-2"),
+                    maps(snapshot.get("queries")).stream().map(query -> query.get("id")).toList());
+            service.writeSnapshot(jobId, snapshot);
+            service.jobFinished(jobId, startedAt, finishedAt,
+                    List.of(phase("STEADY", startedAt.plusSeconds(10), finishedAt.minusSeconds(10), true)));
+
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, jobId);
+            assertEquals("MET", evaluation.get("state"));
+            List<Map<String, Object>> items = maps(object(evaluation.get("sutThresholds")).get("items"));
+            assertEquals("NOT_MET", items.get(0).get("status"), "Optional evidence should still be evaluated.");
+            assertFalse((Boolean) items.get(0).get("required"));
+            assertEquals("MET", items.get(1).get("status"), "The later required subject must be evaluated.");
+            assertTrue((Boolean) items.get(1).get("required"));
+        }
+    }
+
+    @Test void pendingAndErrorThresholdRecordsMatchThePublishedSchemaWithoutNullResults() throws Exception {
+        Path data = temp.resolve("threshold-evaluation-schema");
+        String jobId = "J0000000000000093";
+        Path schema = Path.of("schemas/att-sut-threshold-evaluation-v1.schema.json");
+        try (PrometheusFixture fixture = new PrometheusFixture(1); SutMetricsService service = new SutMetricsService(data)) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(baseProfile("base", 1, false));
+            Map<String, Object> configured = scenario(List.of(map("id", "platform", "profile", "base", "source", "prom",
+                    "targets", List.of(map("id", "sut-1", "type", "app")))), "1m", "1m", "15s");
+            configured.put("thresholds", List.of(map("id", "cpu-max", "profile", "platform", "metric", "metric-1", "max", 90.0)));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
+            service.writeSnapshot(jobId, snapshot);
+            Path recordPath = data.resolve("jobs").resolve(jobId).resolve("sut-metrics/threshold-evaluation.json");
+            String pending = Files.readString(recordPath);
+            assertFalse(ServerRuntime.JSON.readTree(pending).has("sutThresholds"));
+            att.validation.JsonSchemaVerifier.verifyJson(schema, pending);
+
+            Map<String, Object> error = service.evaluationError(snapshot, "FAILED", "EVALUATION_FAILED", "bounded test error", 2);
+            service.writeThresholdEvaluation(jobId, snapshot, error);
+            String failed = Files.readString(recordPath);
+            assertEquals("ERROR", ServerRuntime.JSON.readTree(failed).path("state").asText());
+            assertFalse(ServerRuntime.JSON.readTree(failed).has("sutThresholds"));
+            att.validation.JsonSchemaVerifier.verifyJson(schema, failed);
+        }
+    }
+
     @Test void collectionManifestRejectsIdentityAndStateOrFileListTampering() throws Exception {
         try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::atWindowEndResponse);
              SutMetricsService service = new SutMetricsService(temp)) {
@@ -756,6 +947,19 @@ class SutMetricsServiceTest {
         return Map.of();
     }
 
+    private static Map<String, Object> awaitThresholdEvaluation(SutMetricsService service, String jobId) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        Map<String, Object> evaluation;
+        do {
+            evaluation = service.thresholdEvaluationStatus(jobId);
+            String state = String.valueOf(evaluation.get("state"));
+            if (Set.of("MET", "NOT_MET", "NOT_EVALUATED", "ERROR").contains(state)) return evaluation;
+            Thread.sleep(25);
+        } while (System.nanoTime() < deadline);
+        fail("SUT threshold evaluation did not finish before the test deadline.");
+        return Map.of();
+    }
+
     private static List<Map<String, Object>> maps(Object value) {
         return ServerRuntime.JSON.convertValue(value, ServerRuntime.JSON.getTypeFactory().constructCollectionType(List.class, Map.class));
     }
@@ -780,6 +984,19 @@ class SutMetricsServiceTest {
         return "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":["
                 + "{\"metric\":{\"instance\":\"sut-1\"},\"values\":[["
                 + String.format(Locale.ROOT, "%.3f", timestamp / 1000.0) + ",\"1.0\"]]}]}}";
+    }
+
+    private static String thresholdResponse(String raw, double value) {
+        long start = Instant.parse(queryParameter(raw, "start")).getEpochSecond();
+        long end = Instant.parse(queryParameter(raw, "end")).getEpochSecond();
+        long step = Long.parseLong(queryParameter(raw, "step").replace("s", ""));
+        StringBuilder samples = new StringBuilder();
+        for (long timestamp = start; timestamp <= end; timestamp += step) {
+            if (samples.length() > 0) samples.append(',');
+            samples.append('[').append(timestamp).append(",\"").append(value).append("\"]");
+        }
+        return "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":["
+                + "{\"metric\":{\"instance\":\"sut-1\"},\"values\":[" + samples + "]}]}}";
     }
 
     private static String sampleAtWindowEndOffsetResponse(String raw, long secondsBeforeEnd) {
