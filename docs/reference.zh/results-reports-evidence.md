@@ -54,10 +54,17 @@ ZIP download 在 JVM 的 OS temporary directory 建立 request-private snapshot�
 |---|---|---|
 | GET | `/jobs/{jobId}/artifacts?offset=0&limit=100` | Archive 狀態、分頁 entries、完整 primary reports 及安全 omissions |
 | GET | `/jobs/{jobId}/artifacts/archive.zip` | 已驗證的最終 ZIP attachment |
+| GET | `/jobs/{jobId}/load-report/v2/archive.zip` | 獨立驗證的離線 LOAD 報告 ZIP |
 | GET | `/jobs/{jobId}/artifacts/view/{entryPath}` | Manifest 核准的 HTML/CSS 或 inline text，保留相對目錄 |
 | POST | `/jobs/{jobId}/artifacts/retry` | 私有來源仍存在時，安排 terminal Job 重試發佈 |
 
 所有路徑均要求共用 OPERATE capability。Active USER 可存取其他 USER 建立的已核准 Job archives；creator 僅作 audit metadata。ADMIN-only 沒有隱含操作權限。Authentication、disabled-account 檢查、local CSRF 及設定的 Origin 政策均適用。回應使用 private/no-store；loose-file download 回傳 404。未完成或不可用 archive 回傳 `ATT-SERVER-ARCHIVE-UNAVAILABLE`（409）；read capacity 已滿則回傳 `ATT-SERVER-ARTIFACT-CAPACITY`（503）。
+
+### 離線 LOAD SUT 報告 extension
+
+`GET /jobs/{jobId}/artifacts/status` 包含 `loadReportV2`。發佈狀態為 `READY` 時，可使用 `GET /jobs/{jobId}/load-report/v2/archive.zip`；Server 會套用 caller 一般的 Job access 及該 Job 固定 SUT Metrics source 權限，驗證報告 ZIP，並以 authenticated `private, no-store` attachment 回傳。獨立版本化 ZIP 包含靜態 `report/v2/index.html`、`report/v2/manifest.json`、source-neutral `att-load-offline-observations/v1` metadata 及已驗證 series sidecar。它會保留原生報告，不會修改 `artifacts.zip` 或其 manifest。
+
+離線頁面會顯示 Job status、collection state、metric/source/profile/target metadata、UTC 及 phase windows、resolution、coverage、gaps、diagnostics 及有界 SVG chart previews。完整 observations 保存在已驗證 JSON sidecar。Partial 和 unavailable collection state 會明確顯示。報告不會發送 network request，也不會計算 threshold verdict；如有獨立 `att-load-verdict/v1` record，便只按其原值顯示。報告發佈失敗不會改變 LOAD Job 或原生 archive 狀態。
 
 ### Recovery 及 expiry
 

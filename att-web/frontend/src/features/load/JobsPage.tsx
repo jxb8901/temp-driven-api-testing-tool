@@ -6,7 +6,7 @@ import { StatusBadge } from './StatusBadge';
 import { ArchiveMetrics } from './ArchiveMetrics';
 import { CorrelationPanel } from './CorrelationPanel';
 import type { ArtifactArchiveMetrics } from './types';
-import { api as serverApi } from '../../api';
+import { api as serverApi, apiBaseUrl } from '../../api';
 import { artifactApi } from './artifactApi';
 import { memo, Profiler, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import './load.css';
@@ -239,7 +239,8 @@ function useJobArtifactOverview(api: LoadJobsApi, jobId: string, enabled: boolea
         const next = await features.getJobArtifactOverview(jobId, controller.signal);
         if (stopped || controller.signal.aborted || request !== controller) return;
         setValue(next); setError('');
-        pending = next.archiveStatus === 'PENDING' || next.archiveStatus === 'ARCHIVING';
+        pending = next.archiveStatus === 'PENDING' || next.archiveStatus === 'ARCHIVING'
+          || next.loadReportV2?.state === 'PENDING' || next.loadReportV2?.state === 'BUILDING';
         if (pending && polls < 31 && visible) {
           timer = setTimeout(() => { timer = undefined; void load(); }, 2000);
         }
@@ -721,6 +722,16 @@ function CompactLoadSummary({ payload, archiveState, archiveMessage, archiveOver
       {archiveOverview.archiveStatus === 'READY' && !archiveOverview.omissionReasonsAvailable && <p>Omission reasons are unavailable in this archive version.</p>}
     </>}
     {!archiveOverview?.summaryVerified && archiveHint && <p>Initial report path hint (unverified): <code>{archiveHint}</code></p>}
+    {archiveOverview?.loadReportV2 && <section aria-label="Versioned offline SUT report">
+      <h3>Offline SUT report</h3>
+      <p role="status">Publication: <strong>{archiveOverview.loadReportV2.state || 'UNKNOWN'}</strong>
+        {archiveOverview.loadReportV2.collectionState ? ` · SUT collection: ${archiveOverview.loadReportV2.collectionState}` : ''}
+        {archiveOverview.loadReportV2.externalEvaluationStatus ? ` · external evaluation: ${archiveOverview.loadReportV2.externalEvaluationStatus}` : ''}</p>
+      {archiveOverview.loadReportV2.state === 'READY' && payload?.job?.jobId && <p><a href={new URL(
+        `jobs/${encodeURIComponent(payload.job.jobId)}/load-report/v2/archive.zip`, apiBaseUrl()).toString()}>
+        Download verified offline report (ZIP)</a></p>}
+      <p>This versioned report preserves the original LOAD archive. It does not calculate thresholds or change the execution result.</p>
+    </section>}
     <p className="att-load-performance-note">Execution status and performance verdict are separate. PASS describes execution; configured performance checks have their own verdict.</p>
     <SutAcceptanceSummary acceptance={acceptance} />
     {root && <section aria-label="LOAD root-cause diagnosis" role="alert">

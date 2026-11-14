@@ -60,10 +60,17 @@ For extracted `file://` reports, the browser controls how linked file types open
 |---|---|---|
 | GET | `/jobs/{jobId}/artifacts?offset=0&limit=100` | Archive state, paginated entries, primary reports and safe omissions |
 | GET | `/jobs/{jobId}/artifacts/archive.zip` | Verified finalized ZIP attachment |
+| GET | `/jobs/{jobId}/load-report/v2/archive.zip` | Separately verified offline LOAD report ZIP |
 | GET | `/jobs/{jobId}/artifacts/view/{entryPath}` | Manifest-approved HTML/CSS or inline text; directory-preserving relative links |
 | POST | `/jobs/{jobId}/artifacts/retry` | Schedule a terminal Job's retry while private source remains available |
 
 Every route requires the shared OPERATE capability. Active USER accounts can access other USERs' approved Job archives; creator identity remains audit metadata. ADMIN-only accounts have no implicit operational access. Authentication, disabled-account checks, local CSRF and configured Origin policy apply. Responses use private/no-store caching; loose-file download routes return 404. Pending or unavailable archive reads return `ATT-SERVER-ARCHIVE-UNAVAILABLE` (409); exhausted read capacity returns `ATT-SERVER-ARTIFACT-CAPACITY` (503).
+
+### Offline LOAD SUT report extension
+
+`GET /jobs/{jobId}/artifacts/status` includes `loadReportV2`. A `READY` publication exposes `GET /jobs/{jobId}/load-report/v2/archive.zip`; the Server applies the caller's normal Job access and pinned SUT Metrics source permissions, verifies the report ZIP, and returns an authenticated `private, no-store` attachment. The separately versioned ZIP contains the static `report/v2/index.html`, `report/v2/manifest.json`, and source-neutral `att-load-offline-observations/v1` metadata with verified series sidecars. It preserves the native report and does not modify `artifacts.zip` or its manifest.
+
+The offline page presents Job status, collection state, metric/source/profile/target metadata, UTC and phase windows, resolution, coverage, gaps, diagnostics, and bounded SVG chart previews. Full observations remain in the verified JSON sidecars. Partial and unavailable collection states are explicit. The report performs no network requests and computes no threshold verdict; if a separate `att-load-verdict/v1` record is present, it is displayed as supplied. Report publication failure does not change the LOAD Job or native archive status.
 
 ### Recover and expire archives
 
