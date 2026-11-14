@@ -11,7 +11,12 @@
     <dependencies>
         <dependency><groupId>att</groupId><artifactId>att-server-api</artifactId><version>${project.version}</version></dependency>
         <!-- Business metrics execute one bounded post-run call through the existing Engine DBHelper/Tool APIs. -->
-        <dependency><groupId>att</groupId><artifactId>att-engine</artifactId><version>${project.version}</version></dependency>
+        <!-- Business-call execution uses the Engine DBHelper/Tool path, not its Excel import/report suite. -->
+        <dependency><groupId>att</groupId><artifactId>att-engine</artifactId><version>${project.version}</version>
+            <exclusions><exclusion><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId></exclusion></exclusions>
+        </dependency>
+        <!-- Server test fixtures exercise the Engine Excel/Archive helpers; keep those libraries out of the runtime WAR. -->
+        <dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId><scope>test</scope></dependency>
         <!-- ServerRuntime directly uses att.metrics/att.security classes, so keep the
              dependency explicit: the application-jar assembly only bundles direct deps. -->
         <dependency><groupId>att</groupId><artifactId>att-security</artifactId><version>${project.version}</version></dependency>
