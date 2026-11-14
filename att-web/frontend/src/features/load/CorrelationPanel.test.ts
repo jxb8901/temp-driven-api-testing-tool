@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { downsampleSegments, meanForLoadMetric, meanForSutMetric, missingIntervals, parseUtcInstant, selectLoadPoints, selectSutPoints, splitSeriesAtGaps } from './CorrelationPanel';
+import { downsampleSegments, exclusiveObservedEnd, meanForLoadMetric, meanForSutMetric, missingIntervals, parseUtcInstant, selectLoadPoints, selectSutPoints, splitSeriesAtGaps } from './CorrelationPanel';
 
 describe('LOAD and SUT correlation series', () => {
   it('selects bins by actual phase overlap and preserves partial boundary bins without filling missing bins', () => {
@@ -32,6 +32,31 @@ describe('LOAD and SUT correlation series', () => {
     ]);
     // Retained bin values and durations are unchanged; the display discloses that each bin is partial.
     expect(points.map(point => [point.y, point.durationMs])).toEqual([[2, 60_000], [3, 60_000]]);
+  });
+
+  it('keeps the latest SUT sample inside a preset window with an exclusive end', () => {
+    const samples = [
+      { timestamp: '1970-01-01T00:00:30.000Z', timestampEpochMs: 30_000, value: 10 },
+      { timestamp: '1970-01-01T00:00:45.000Z', timestampEpochMs: 45_000, value: 20 },
+    ];
+    const loadBins = [{ windowStartEpochMs: 0, durationMs: 30_000, completedRate: 2 }];
+    const end = exclusiveObservedEnd(loadBins, samples, 15_000, null);
+    const latest = selectSutPoints(samples, 'all', [], end - 15 * 60_000, end);
+
+    expect(end).toBe(60_000);
+    expect(latest.at(-1)).toEqual({ x: 45_000, y: 20 });
+  });
+
+  it('anchors a preset window after the end of the newest native LOAD bin', () => {
+    const samples = [{ timestamp: '1970-01-01T00:00:45.000Z', timestampEpochMs: 45_000, value: 20 }];
+    const loadBins = [{ windowStartEpochMs: 60_000, durationMs: 60_000, completedRate: 3 }];
+    const end = exclusiveObservedEnd(loadBins, samples, 15_000, null);
+    const latest = selectLoadPoints(loadBins, { id: 'completedRate', field: 'completedRate', label: 'Completed TPS', unit: 'requests/s' },
+      'all', [], end - 15 * 60_000, end);
+
+    expect(end).toBe(120_000);
+    expect(latest).toHaveLength(1);
+    expect(latest[0]?.visibleEnd).toBe(end);
   });
 
   it('uses UTC epoch sample times for phase and range selection', () => {

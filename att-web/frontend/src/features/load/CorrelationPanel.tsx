@@ -54,6 +54,23 @@ function timeOf(sample: SutMetricPoint): number {
   return Number.isFinite(sample.timestampEpochMs) ? sample.timestampEpochMs : Date.parse(sample.timestamp);
 }
 
+export function exclusiveObservedEnd(loadPoints: unknown[], sutSamples: SutMetricPoint[], sutResolutionMs: number | null, collectionWindowEndMs: number | null): number {
+  const latestLoadEnd = loadPoints.reduce<number>((latest, value) => {
+    const item = record(value);
+    const start = numeric(item?.windowStartEpochMs);
+    const duration = numeric(item?.durationMs);
+    const end = start === null || duration === null || duration <= 0 ? Number.NEGATIVE_INFINITY : start + duration;
+    return Number.isFinite(end) ? Math.max(latest, end) : latest;
+  }, Number.NEGATIVE_INFINITY);
+  const sutStep = Number.isFinite(sutResolutionMs) && sutResolutionMs! > 0 ? sutResolutionMs! : 1;
+  const latestSutEnd = sutSamples.reduce<number>((latest, sample) => {
+    const end = timeOf(sample) + sutStep;
+    return Number.isFinite(end) ? Math.max(latest, end) : latest;
+  }, Number.NEGATIVE_INFINITY);
+  return Math.max(latestLoadEnd, latestSutEnd,
+    Number.isFinite(collectionWindowEndMs) ? collectionWindowEndMs! : Number.NEGATIVE_INFINITY);
+}
+
 function labelsKey(series: SutMetricSeries, index: number): string {
   const labels = Object.entries(series.labels || {}).sort(([left], [right]) => left.localeCompare(right));
   return labels.length ? JSON.stringify(labels) : `series-${index}`;
@@ -447,14 +464,12 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   const loadMetric = LOAD_METRICS.find(candidate => candidate.id === loadMetricId) || LOAD_METRICS[0]!;
   const sutSamples = selectedInstance?.series.samples || [];
   const sutResolution = metricStepMilliseconds(collection?.collection?.step);
-  const latestLoadTime = rawLoadPoints.reduce<number>((latest, value) => {
-    const x = numeric(record(value)?.windowStartEpochMs);
-    return x === null ? latest : Math.max(latest, x);
-  }, Number.NEGATIVE_INFINITY);
   const latestCollectedSutTime = sutSamples.reduce<number>((latest, sample) => {
     const x = timeOf(sample);
     return Number.isFinite(x) ? Math.max(latest, x) : latest;
   }, Number.NEGATIVE_INFINITY);
+  const collectionWindowEnd = collection?.collection?.windowEnd;
+  const collectionWindowEndMs = collectionWindowEnd ? Date.parse(collectionWindowEnd) : Number.NaN;
   const loadObservedBounds = rawLoadPoints.reduce<{ first: number; last: number } | null>((bounds, value) => {
     const item = record(value);
     const start = numeric(item?.windowStartEpochMs);
@@ -464,7 +479,7 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
       ? { first: Math.min(bounds.first, start), last: Math.max(bounds.last, start + duration) }
       : { first: start, last: start + duration };
   }, null);
-  const maxTime = Math.max(latestLoadTime, latestCollectedSutTime);
+  const maxTime = exclusiveObservedEnd(rawLoadPoints, sutSamples, sutResolution, collectionWindowEndMs);
   const rangeSpan: Record<string, number> = { '15m': 900_000, '1h': 3_600_000, '6h': 21_600_000, '24h': 86_400_000 };
   const customStart = parseUtcInstant(customStartText);
   const customEnd = parseUtcInstant(customEndText);
@@ -486,10 +501,8 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   const phaseOptions = [...new Set(boundaries.map(boundary => boundary.phase))];
   const collectionManifest = collection?.collection;
   const collectionWindowStart = collectionManifest?.windowStart;
-  const collectionWindowEnd = collectionManifest?.windowEnd;
   const collectionCoverage = collectionWindowStart && collectionWindowEnd
     ? `${utcDateTime(collectionWindowStart)} to ${utcDateTime(collectionWindowEnd)}` : 'Not reported';
-  const collectionWindowEndMs = collectionWindowEnd ? Date.parse(collectionWindowEnd) : Number.NaN;
   const sampleTailOffset = Number.isFinite(latestCollectedSutTime) && Number.isFinite(collectionWindowEndMs)
     ? collectionWindowEndMs - latestCollectedSutTime : null;
   const sampleTailDescription = sampleTailOffset === null ? 'Not reported'
