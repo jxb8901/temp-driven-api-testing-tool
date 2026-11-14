@@ -170,6 +170,7 @@ class ArtifactLifecycleTest {
             for(int index=0;index<70;index++) {
                 String id=String.format("J%016X",index+1);
                 job(runtime,id,"PASS","load");
+                runtime.store.loadReportRecoveryNeeded(id,true);
             }
             List<String> first=runtime.store.loadReportRecoveryJobIds("",64);
             assertEquals(64,first.size());

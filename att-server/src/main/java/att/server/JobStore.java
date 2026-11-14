@@ -205,13 +205,13 @@ final class JobStore implements AutoCloseable {
         try(Connection c=connect()) {
             c.setAutoCommit(false);
             try {
-                try(PreparedStatement p=c.prepareStatement("INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,att_version,request_summary,schedule_occurrence_id,execution_spec,replay_unavailable,rerun_of_job_id,replay_intent,replay_owner,originating_schedule_id,target_identity,target_sort,target_group,environment,submission_source,schedule_owner,execution_principal,submitted_by,triggered_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
+                try(PreparedStatement p=c.prepareStatement("INSERT INTO jobs(job_id,command,package_id,principal,status,created_at,att_version,request_summary,schedule_occurrence_id,execution_spec,replay_unavailable,rerun_of_job_id,replay_intent,replay_owner,originating_schedule_id,target_identity,target_sort,target_group,environment,submission_source,schedule_owner,execution_principal,submitted_by,triggered_by,load_report_recovery) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
                     p.setString(1,job.id);p.setString(2,job.command);p.setString(3,job.packageId);p.setString(4,job.principal);p.setString(5,job.status);p.setString(6,job.createdAt.toString());p.setString(7,ServerBuildInfo.PRODUCT);p.setString(8,summary);p.setString(9,job.scheduleOccurrenceId);p.setString(10,job.executionSpec);p.setString(11,job.replayUnavailable);p.setString(12,job.rerunOfJobId);p.setString(13,job.replayIntent);p.setString(14,job.replayOwner);p.setString(15,job.originatingScheduleId);
                     var metadata=ServerRuntime.JSON.readTree(summary);var identity=metadata.path("targetIdentity");
                     p.setString(16,identity.isObject()?identity.toString():null);
                     p.setString(17,identity.hasNonNull("type")?identity.path("type").asText()+" · "+identity.path("id").asText():"Unknown target");
                     p.setString(18,identity.path("signature").asText("legacy"));p.setString(19,metadata.path("environment").asText(""));
-                    p.setString(20,job.submissionSource);p.setString(21,job.scheduleOwner);p.setString(22,job.executionPrincipal);p.setString(23,job.submittedBy);p.setString(24,job.triggeredBy);p.executeUpdate();
+                    p.setString(20,job.submissionSource);p.setString(21,job.scheduleOwner);p.setString(22,job.executionPrincipal);p.setString(23,job.submittedBy);p.setString(24,job.triggeredBy);p.setBoolean(25,false);p.executeUpdate();
                 }
                 writeSearchTargets(c,job.id,targets);
                 if(job.replayIntent!=null)try(PreparedStatement p=c.prepareStatement("INSERT INTO job_replay_intents(principal,intent_id,source_job_id,job_id,expires_at) VALUES(?,?,?,?,?)")) {
