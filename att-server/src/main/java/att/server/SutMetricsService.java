@@ -57,6 +57,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
@@ -97,6 +98,7 @@ final class SutMetricsService implements AutoCloseable {
     static final int MAX_BUSINESS_CALLS_PER_JOB = 16;
     static final long MAX_BUSINESS_CALL_TOTAL_MILLIS = 120_000L;
     private static final String BUSINESS_CALL_PAYLOAD_SCHEMA = "att-sut-business-call-payload/v1";
+    private static final int BUSINESS_CALL_PENDING = 0, BUSINESS_CALL_EXECUTING = 1, BUSINESS_CALL_CANCELLED = 2;
     private static final long MAX_BUSINESS_CALL_PAYLOAD_BYTES = 2L * 1024 * 1024;
     static final long MAX_SEGMENT_SECONDS = 6L * 60 * 60;
     static final long MAX_JOB_COLLECTION_BYTES = 64L * 1024 * 1024;
@@ -365,6 +367,10 @@ final class SutMetricsService implements AutoCloseable {
         }
         if (expanded.size() > MAX_EXPANDED_QUERIES || targets.size() > MAX_EXPANDED_TARGETS || metricIds.size() > MAX_EXPANDED_METRICS)
             throw new IllegalArgumentException("Resolved Metrics Profile exceeds the 64 metrics, 64 targets, or 256 query budget.");
+        long businessCallCount = expanded.stream().filter(query -> "business-call".equals(query.get("observationType"))).count();
+        if (businessCallCount > MAX_BUSINESS_CALLS_PER_JOB)
+            throw new IllegalArgumentException("Resolved Metrics Profile exceeds the " + MAX_BUSINESS_CALLS_PER_JOB
+                    + " business-call per-Job limit.");
         for (String sourceId : pinnedSources.keySet()) {
             Map<String, Object> source = pinnedSources.get(sourceId);
             if (sourceTargets.getOrDefault(sourceId, Set.of()).size() > sourceInt(source, "maxTargets"))
@@ -1432,7 +1438,7 @@ final class SutMetricsService implements AutoCloseable {
                 boolean businessCallSkippedThisQuery = false;
                 boolean businessCallSucceededThisQuery = false;
                 AtomicBoolean executionStarted = new AtomicBoolean();
-                AtomicBoolean cancellationRequested = new AtomicBoolean();
+                AtomicInteger callExecutionState = new AtomicInteger(BUSINESS_CALL_PENDING);
                 AtomicReference<BusinessCallSession> activeSession = new AtomicReference<>();
                 long callAttemptNanos = 0L;
                 try {
@@ -1474,8 +1480,12 @@ final class SutMetricsService implements AutoCloseable {
                         Future<Object> call = businessCallWorkers.submit(() -> {
                             BusinessCallSession metricSession = executor.open(jobId, snapshot);
                             activeSession.set(metricSession);
-                            if (cancellationRequested.get()) cancelBusinessCallSession(metricSession);
                             try (BusinessCallSession closeableSession = metricSession) {
+                                if (Thread.currentThread().isInterrupted()
+                                        || !callExecutionState.compareAndSet(BUSINESS_CALL_PENDING, BUSINESS_CALL_EXECUTING)) {
+                                    callExecutionState.set(BUSINESS_CALL_CANCELLED);
+                                    throw new BusinessCallNotExecutedException();
+                                }
                                 executionStarted.set(true);
                                 return closeableSession.execute(query, executionStartedAt, executionFinishedAt,
                                         steadyStart, steadyEnd, callRequestedAt);
@@ -1485,15 +1495,17 @@ final class SutMetricsService implements AutoCloseable {
                         Object rawValue;
                         try { rawValue = call.get(callTimeoutMillis, TimeUnit.MILLISECONDS); }
                         catch (TimeoutException timeout) {
-                            cancellationRequested.set(true);
+                            int previousState = callExecutionState.getAndSet(BUSINESS_CALL_CANCELLED);
                             call.cancel(true);
-                            cancelBusinessCallSession(activeSession.get());
+                            if (previousState == BUSINESS_CALL_EXECUTING)
+                                cancelBusinessCallSession(activeSession.get());
                             businessCallStopped = true;
                             throw new TimeoutException("Business metric call exceeded its per-call or per-Job execution budget.");
                         } catch (InterruptedException interrupted) {
-                            cancellationRequested.set(true);
+                            int previousState = callExecutionState.getAndSet(BUSINESS_CALL_CANCELLED);
                             call.cancel(true);
-                            cancelBusinessCallSession(activeSession.get());
+                            if (previousState == BUSINESS_CALL_EXECUTING)
+                                cancelBusinessCallSession(activeSession.get());
                             businessCallStopped = true;
                             Thread.currentThread().interrupt();
                             throw interrupted;

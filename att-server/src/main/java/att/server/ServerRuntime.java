@@ -2767,13 +2767,12 @@ final class ServerRuntime implements AutoCloseable {
                 boolean began=false;
                 try {
                     dbHelpers.beginCase();began=true;
-                    Object result=engine.executeCallUncached(String.valueOf(query.get("call")),context,log,
-                            "SUT_METRIC_"+String.valueOf(query.get("metricId")));
-                    if(result instanceof att.exec.ToolInvocationResult invocation) {
-                        if(!invocation.executionSuccess())
-                            throw new IllegalStateException("The configured Package Tool reported a failed business metric call.");
-                        result=invocation.output();
-                    }
+                    att.exec.ToolInvocationResult invocation=engine.executeToolAttempt(
+                            String.valueOf(query.get("call")),context,log,
+                            "SUT_METRIC_"+String.valueOf(query.get("metricId")),null,"",false,true);
+                    if(!invocation.executionSuccess())
+                        throw new IllegalStateException("The configured Package Tool reported a failed business metric call.");
+                    Object result=invocation.output();
                     List<att.core.ValidationResult> finalized=dbHelpers.finishCase(context,log);began=false;
                     if(finalized.stream().anyMatch(item->item.status()==att.core.ResultStatus.ERROR))
                         throw new IllegalStateException("DBHelper transaction finalization failed for the business metric call.");

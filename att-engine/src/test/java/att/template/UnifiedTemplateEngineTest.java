@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -26,6 +27,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -356,6 +358,32 @@ class UnifiedTemplateEngineTest {
         assertNull(context.resolve("ACTIONS.grouped"));
     }
 
+    @Test void commandBackedToolWithNumericStdoutAndNonzeroExitIsAnExecutionFailure() throws Exception {
+        String javaName = System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java";
+        Path java = Paths.get(System.getProperty("java.home"), "bin", javaName);
+        List<String> command = Arrays.asList(java.toString(), "-cp", System.getProperty("java.class.path"),
+                NumericOutputThenFail.class.getName());
+        ToolConfig tool = new ToolConfig("reporter", "reporter", "", "Reporter", "Prints a number then fails",
+                command, Collections.<String>emptyList(), "text", Collections.<String,ToolArgumentConfig>emptyMap(), null);
+        ToolInvoker invoker = new ToolInvoker(tempDir,
+                new FrameworkConfig(tempDir, tempDir, tempDir, "SIT", 10000, tempDir,
+                        Collections.singletonMap("reporter", tool), null, null));
+        UnifiedTemplateEngine engine = new UnifiedTemplateEngine(invoker);
+        CaseRuntimeContext context = new CaseRuntimeContext(new TestCase(2, "payment", "sheet", "TC001",
+                Collections.<String>emptyList(), new LinkedHashMap<String,Object>(), Collections.emptyMap(), null),
+                tempDir, "RUN-1", tempDir, tempDir.resolve("case.log"));
+        context.beginStage(new att.core.StageCaseData("invoke", "T", Collections.<String,Object>emptyMap()), "T", tempDir);
+
+        try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("numeric-failure.log"))) {
+            ToolInvocationResult result = engine.executeToolAttempt("#{reporter()}", context, log,
+                    "business-metric", null, "", false, true);
+            assertEquals("42", result.output());
+            assertFalse(result.executionSuccess());
+            assertEquals("ERROR", result.invocation().get("status"));
+            assertEquals(1, ((Number) result.invocation().get("exitCode")).intValue());
+        }
+    }
+
     @Test void typedCallResultsUseTheSameCoercionInRunDebugAndLoadContexts() throws Exception {
         Map<String, ToolArgumentConfig> arguments = new LinkedHashMap<String, ToolArgumentConfig>();
         arguments.put("count", new ToolArgumentConfig("count", "Count", "Count", true,
@@ -385,6 +413,14 @@ class UnifiedTemplateEngineTest {
         private Map<String,Object> input;
         CapturingInvoker(Path root){super(root,new FrameworkConfig(null,null,null,"SIT",10000,null,null,null,null));}
         @Override public ToolInvocationResult invokeAttempt(String invocationId,String toolName,Map<String,Object> input,CaseRuntimeContext context,CaseExecutionLog log,Long timeoutMs,String saveAs,boolean overwrite){this.input=input;return new ToolInvocationResult(toolName,invocationId,"ok",Collections.<String,Object>emptyMap());}
+    }
+
+    public static final class NumericOutputThenFail {
+        public static void main(String[] args) {
+            System.out.print("42\n");
+            System.out.flush();
+            System.exit(1);
+        }
     }
 
     private static final class CapturingRunner extends CommandRunner {

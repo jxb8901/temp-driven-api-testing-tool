@@ -343,7 +343,8 @@ public class ToolInvoker {
             throw new ToolExecutionException("TIMEOUT", "Tool timed out: " + toolName, invocation, Integer.valueOf(commandResult.exitCode()), null);
         }
         if (parseFailure != null) throw new ToolExecutionException("OUTPUT_PARSE", "Unable to parse Tool stdoutFormat " + tool.resultFormat() + " for " + toolName + ": " + redactSsh(parseFailure.getMessage(), target), invocation, Integer.valueOf(commandResult.exitCode()), parseFailure);
-        return new ToolInvocationResult(toolName, id, parsed, invocation, true,
+        boolean executionSuccess = !commandResult.timedOut() && commandResult.exitCode() == 0 && parseFailure == null;
+        return new ToolInvocationResult(toolName, id, parsed, invocation, executionSuccess,
                 ActionExecutionResult.evidence("tool", safeLogInvocation(toolInvocation, tool, resolvedInput, log)));
         } finally {
             String cleanupWarning = cleanupCapture(commandResult);

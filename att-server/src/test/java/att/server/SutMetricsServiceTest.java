@@ -1015,6 +1015,48 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void timedOutCallDoesNotExecuteWhenDelayedSessionOpenCompletes() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-open-timeout"))) {
+            service.setBusinessCallLimitsForTesting(1, 2_000, 250);
+            service.writeSnapshot(JOB_ID, businessSnapshot(List.of(
+                    businessQuery("late-open", "#{db.orders.scalar(sql='select 1')}", "DBHELPER", null, "afterDrain", null))));
+            CountDownLatch openEntered = new CountDownLatch(1), releaseOpen = new CountDownLatch(1);
+            AtomicInteger executed = new AtomicInteger(), closed = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, snapshot) -> {
+                openEntered.countDown();
+                boolean interrupted = false;
+                while (true) {
+                    try { releaseOpen.await(); break; }
+                    catch (InterruptedException ignored) { interrupted = true; }
+                }
+                if (interrupted) Thread.currentThread().interrupt();
+                return new SutMetricsService.BusinessCallSession() {
+                    @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                    Instant executionFinishedAt, Instant steadyStart,
+                                                    Instant steadyEnd, Instant observedAt) {
+                        executed.incrementAndGet(); return 1;
+                    }
+                    @Override public void close() { closed.incrementAndGet(); }
+                };
+            });
+            Instant finishedAt = Instant.now().minusSeconds(30);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            try {
+                assertTrue(openEntered.await(5, TimeUnit.SECONDS), "Session setup should begin before the call timeout.");
+                Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+                assertEquals("FAILED", manifest.get("state"));
+                assertEquals(1, object(manifest.get("coverage")).get("businessCallTimedOut"));
+                releaseOpen.countDown();
+                long closeDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (closed.get() == 0 && System.nanoTime() < closeDeadline) Thread.sleep(10);
+                assertEquals(0, executed.get(), "A session opened after timeout must never execute the call.");
+                assertEquals(1, closed.get());
+            } finally {
+                releaseOpen.countDown();
+            }
+        }
+    }
+
     @Test void businessCallCountBudgetSkipsCallsAfterTheConfiguredPerJobLimit() throws Exception {
         try (SutMetricsService service = new SutMetricsService(temp.resolve("business-count-budget"))) {
             service.setBusinessCallLimitsForTesting(1, 2_000, 1_000);
@@ -1042,6 +1084,20 @@ class SutMetricsServiceTest {
             assertEquals(1, coverage.get("businessCallSkipped"));
             assertEquals(1, executed.get());
             assertTrue(maps(manifest.get("diagnostics")).stream().anyMatch(d -> "BUSINESS_CALL_BUDGET_EXCEEDED".equals(d.get("code"))));
+        }
+    }
+
+    @Test void businessCallProfilesAbovePerJobLimitAreRejectedAtAdmission() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-admission-budget"))) {
+            List<Map<String, Object>> metrics = new ArrayList<>();
+            for (int index = 1; index <= SutMetricsService.MAX_BUSINESS_CALLS_PER_JOB + 1; index++)
+                metrics.add(map("id", "count-" + index, "title", "Count " + index, "unit", "count", "kind", "gauge",
+                        "call", "#{db.orders.scalar(sql='select " + index + "')}"));
+            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "over-budget",
+                    "name", "Over budget", "kind", "base", "category", "db", "metrics", metrics));
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> service.resolveScenario(scenario(List.of(map("profile", "over-budget")), "1m", "1m", "15s"), "alice"));
+            assertTrue(failure.getMessage().contains("16 business-call per-Job limit"));
         }
     }
 
