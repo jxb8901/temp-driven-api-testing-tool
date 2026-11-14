@@ -324,8 +324,8 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   const queries = collection?.collection?.queries || [];
   const profileOptions = [...new Set(queries.map(query => query.profilePath || query.profile || '').filter(Boolean))].sort();
   const targetOptions = [...new Set(queries.filter(query => !profileFilter || (query.profilePath || query.profile) === profileFilter).map(query => query.targetId).filter(Boolean))].sort();
-  const metricOptions = [...new Map(queries.filter(query => (!profileFilter || (query.profilePath || query.profile) === profileFilter)
-    && (!targetFilter || query.targetId === targetFilter)).map(query => [query.metricId, query.title || query.metricId])).entries()];
+  const metricOptions = [...new Map<string, string>(queries.filter(query => (!profileFilter || (query.profilePath || query.profile) === profileFilter)
+    && (!targetFilter || query.targetId === targetFilter)).map(query => [query.metricId, query.title || query.metricId] as const)).entries()];
   const filteredQueries = queries.filter(query => (!profileFilter || (query.profilePath || query.profile) === profileFilter)
     && (!targetFilter || query.targetId === targetFilter) && (!metricFilter || query.metricId === metricFilter));
   const selectedQuery = filteredQueries.find(query => query.id === queryFilter) || filteredQueries[0] || null;
@@ -377,6 +377,11 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   const partialBins = loadPoints.filter(point => point.partial).length;
   const phaseOptions = [...new Set(boundaries.map(boundary => boundary.phase))];
   const collectionState = String(collection?.state || collection?.collection?.state || (collectionLoading ? 'LOADING' : 'UNKNOWN'));
+  const collectionManifest = collection?.collection;
+  const collectionWindowStart = collectionManifest?.windowStart;
+  const collectionWindowEnd = collectionManifest?.windowEnd;
+  const collectionCoverage = collectionWindowStart && collectionWindowEnd
+    ? `${collectionWindowStart} to ${collectionWindowEnd} (UTC)` : 'Not reported';
 
   return <section className="att-job-panel att-correlation-panel" role="tabpanel" id="job-panel-correlation" aria-labelledby="job-tab-correlation" hidden={hidden} tabIndex={0}>
     <h2>Correlation</h2>
@@ -442,8 +447,7 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
           <div><dt>SUT metric and unit</dt><dd>{selectedItem?.title || selectedQuery.title || selectedQuery.metricId} · {selectedItem?.unit || selectedQuery.unit || 'unit not reported'}</dd></div>
           <div><dt>Collection resolution</dt><dd>{collection?.collection?.step || 'Not reported'}</dd></div>
           <div><dt>Last source query</dt><dd>{utcDateTime(collection?.collection?.updatedAt || collection?.collection?.createdAt)}</dd></div>
-          <div><dt>Collection coverage</dt><dd>{collection?.collection?.windowStart && collection.collection.windowEnd
-            ? `${collection.collection.windowStart} to ${collection.collection.windowEnd} (UTC)` : 'Not reported'}</dd></div>
+          <div><dt>Collection coverage</dt><dd>{collectionCoverage}</dd></div>
           <div><dt>Selected SUT series coverage</dt><dd>{selectedCoverage.firstSampleAt || selectedCoverage.lastSampleAt
             ? `${selectedCoverage.firstSampleAt || 'first sample not reported'} to ${selectedCoverage.lastSampleAt || 'last sample not reported'} (UTC); ${selectedCoverage.gapCount ?? 'gap count not reported'} reported gaps`
             : 'Not reported'}</dd></div>
