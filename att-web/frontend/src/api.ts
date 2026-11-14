@@ -451,6 +451,9 @@ export const api = {
   getJobSutMetrics(jobId: string, input: { offset?: number; limit?: number; queryId?: string; targetId?: string; profilePath?: string; signal?: AbortSignal } = {}): Promise<SutMetricsJobResponse> {
     return request<SutMetricsJobResponse>('jobs/' + encodeURIComponent(jobId) + '/sut-metrics' + queryString({ offset: input.offset, limit: input.limit, queryId: input.queryId, targetId: input.targetId, profilePath: input.profilePath }), { signal: input.signal });
   },
+  getJobSutMetricSeries(jobId: string, input: { offset?: number; limit?: number; queryId: string; targetId?: string; profilePath?: string; signal?: AbortSignal }): Promise<SutMetricsJobResponse> {
+    return request<SutMetricsJobResponse>('jobs/' + encodeURIComponent(jobId) + '/sut-metrics/series' + queryString({ offset: input.offset, limit: input.limit, queryId: input.queryId, targetId: input.targetId, profilePath: input.profilePath }), { signal: input.signal });
+  },
   getJobSutMetricsLive(jobId: string, input: { range?: string; step?: string; targetId?: string; profilePath?: string; signal?: AbortSignal } = {}): Promise<SutMetricsLiveResponse> {
     return request<SutMetricsLiveResponse>('jobs/' + encodeURIComponent(jobId) + '/sut-metrics/live' + queryString({ range: input.range || '15m', step: input.step || '30s', targetId: input.targetId, profilePath: input.profilePath }), { signal: input.signal });
   },

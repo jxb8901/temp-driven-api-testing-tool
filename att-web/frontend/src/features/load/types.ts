@@ -388,6 +388,7 @@ export interface LoadJobsApi {
   getJob(jobId: string, signal?: AbortSignal): Promise<JobView>;
   getJobResult(jobId: string, signal?: AbortSignal): Promise<JobResultResponse>;
   getJobSutMetrics?(jobId: string, input?: { offset?: number; limit?: number; queryId?: string; targetId?: string; profilePath?: string; signal?: AbortSignal }): Promise<SutMetricsJobResponse>;
+  getJobSutMetricSeries?(jobId: string, input: { offset?: number; limit?: number; queryId: string; targetId?: string; profilePath?: string; signal?: AbortSignal }): Promise<SutMetricsJobResponse>;
   getJobSutMetricsLive?(jobId: string, input?: { range?: string; step?: string; targetId?: string; profilePath?: string; signal?: AbortSignal }): Promise<SutMetricsLiveResponse>;
   getJobArtifacts(jobId: string, signal?: AbortSignal): Promise<JobArtifact[]>;
   getJobArtifactArchive?(jobId: string, offset?: number, signal?: AbortSignal): Promise<JobArtifactArchive>;

@@ -153,23 +153,74 @@ export function splitSeriesAtGaps(points: Point[], resolutionMs: number): Point[
 export function downsampleSegments(points: Point[], resolutionMs: number): { segments: Point[][]; total: number } {
   const sourceSegments = splitSeriesAtGaps(points, resolutionMs);
   if (points.length <= MAX_CHART_POINTS) return { segments: sourceSegments, total: points.length };
-  const segmentForPoint = new Array<number>(points.length);
-  let pointIndex = 0;
-  sourceSegments.forEach((segment, segmentIndex) => {
-    for (let index = 0; index < segment.length; index++) segmentForPoint[pointIndex++] = segmentIndex;
-  });
-  const sampled = Array.from({ length: MAX_CHART_POINTS }, (_, index) => {
-    const selectedIndex = Math.floor(index * (points.length - 1) / (MAX_CHART_POINTS - 1));
-    return { point: points[selectedIndex]!, segment: segmentForPoint[selectedIndex]! };
-  });
-  const segments: Point[][] = [];
-  let previousSegment = -1;
-  for (const selected of sampled) {
-    if (selected.segment !== previousSegment) segments.push([]);
-    segments[segments.length - 1]!.push(selected.point);
-    previousSegment = selected.segment;
+  const minimums = sourceSegments.map(segment => Math.min(segment.length, segment.length === 1 ? 1 : 2));
+  const minimumTotal = minimums.reduce((sum, count) => sum + count, 0);
+  if (minimumTotal > MAX_CHART_POINTS) {
+    // Pathological fragmentation can make preserving every pair of endpoints exceed the display cap.
+    const selected = sourceSegments.length <= MAX_CHART_POINTS
+      ? sourceSegments
+      : Array.from({ length: MAX_CHART_POINTS }, (_, index) => sourceSegments[Math.floor(index * (sourceSegments.length - 1) / (MAX_CHART_POINTS - 1))]!);
+    const segments = selected.map(segment => segment.length === 1 ? segment : [segment[Math.floor((segment.length - 1) / 2)]!]);
+    return { segments, total: segments.reduce((sum, segment) => sum + segment.length, 0) };
   }
-  return { segments, total: sampled.length };
+
+  const budgets = [...minimums];
+  const remaining = MAX_CHART_POINTS - minimumTotal;
+  const capacities = sourceSegments.map((segment, index) => segment.length - budgets[index]!);
+  const capacityTotal = capacities.reduce((sum, count) => sum + count, 0);
+  if (remaining > 0 && capacityTotal > 0) {
+    const shares = capacities.map(capacity => remaining * capacity / capacityTotal);
+    let allocated = 0;
+    shares.forEach((share, index) => {
+      const whole = Math.min(capacities[index]!, Math.floor(share));
+      budgets[index] += whole;
+      allocated += whole;
+    });
+    const remainders = shares.map((share, index) => ({ index, fraction: share - Math.floor(share) }))
+      .sort((left, right) => right.fraction - left.fraction);
+    for (const { index } of remainders) {
+      if (allocated >= remaining) break;
+      if (budgets[index]! < sourceSegments[index]!.length) { budgets[index]++; allocated++; }
+    }
+  }
+
+  const segments = sourceSegments.map((segment, index) => downsampleSegment(segment, budgets[index]!));
+  return { segments, total: segments.reduce((sum, segment) => sum + segment.length, 0) };
+}
+
+function downsampleSegment(segment: Point[], budget: number): Point[] {
+  if (segment.length <= budget) return segment;
+  if (budget <= 1) return [segment[0]!];
+  if (budget === 2) return [segment[0]!, segment.at(-1)!];
+
+  const selected = new Set<number>([0, segment.length - 1]);
+  if (budget === 3) {
+    const first = segment[0]!.y;
+    const last = segment.at(-1)!.y;
+    let extreme = 1;
+    for (let index = 2; index < segment.length - 1; index++) {
+      const currentDistance = Math.abs(segment[index]!.y - (first + (last - first) * index / (segment.length - 1)));
+      const extremeDistance = Math.abs(segment[extreme]!.y - (first + (last - first) * extreme / (segment.length - 1)));
+      if (currentDistance > extremeDistance) extreme = index;
+    }
+    selected.add(extreme);
+  } else {
+    const bucketCount = Math.floor((budget - 2) / 2);
+    const interiorCount = segment.length - 2;
+    for (let bucket = 0; bucket < bucketCount; bucket++) {
+      const start = 1 + Math.floor(bucket * interiorCount / bucketCount);
+      const end = 1 + Math.floor((bucket + 1) * interiorCount / bucketCount);
+      let minIndex = start;
+      let maxIndex = start;
+      for (let index = start + 1; index < end; index++) {
+        if (segment[index]!.y < segment[minIndex]!.y) minIndex = index;
+        if (segment[index]!.y > segment[maxIndex]!.y) maxIndex = index;
+      }
+      selected.add(minIndex);
+      selected.add(maxIndex);
+    }
+  }
+  return [...selected].sort((left, right) => left - right).map(index => segment[index]!);
 }
 
 function observedRange(points: Point[]) {
@@ -323,7 +374,7 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
         const value = await api.getJobSutMetrics(jobId, { offset: 0, limit: 1, signal: controller.signal });
         if (disposed || controller.signal.aborted) return;
         setCollection(value);
-        const state = String(value.state || value.collection?.state || 'UNKNOWN');
+        const state = String(value.collection?.state || value.state || 'UNKNOWN');
         if (state === 'PENDING' || state === 'COLLECTING') schedule(5000);
       } catch (error) {
         if (!disposed && !controller.signal.aborted) {
@@ -343,6 +394,8 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
     return () => { disposed = true; if (timer !== undefined) window.clearTimeout(timer); request?.abort(); document.removeEventListener('visibilitychange', visibility); };
   }, [api, jobId, hidden, activeLoad]);
 
+  const collectionState = String(collection?.collection?.state || collection?.state || (collectionLoading ? 'LOADING' : 'UNKNOWN'));
+  const collectionRevision = collection?.collection?.updatedAt || collection?.collection?.createdAt || '';
   const queries = collection?.collection?.queries || [];
   const profileOptions = [...new Set(queries.map(query => query.profilePath || query.profile || '').filter(Boolean))].sort();
   const targetOptions = [...new Set(queries.filter(query => !profileFilter || (query.profilePath || query.profile) === profileFilter).map(query => query.targetId).filter(Boolean))].sort();
@@ -354,21 +407,23 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   useEffect(() => { if (selectedQuery?.id !== queryFilter) setQueryFilter(selectedQuery?.id || ''); }, [selectedQuery?.id, queryFilter]);
 
   useEffect(() => {
-    if (hidden || activeLoad || !selectedQuery || !api.getJobSutMetrics) { setQueryResponse(null); setQueryResponseId(''); setQueryError(''); setQueryLoading(false); return; }
+    if (hidden || activeLoad || !selectedQuery) { setQueryResponse(null); setQueryResponseId(''); setQueryError(''); setQueryLoading(false); return; }
+    if (!['READY', 'PARTIAL'].includes(collectionState)) { setQueryResponse(null); setQueryResponseId(''); setQueryError(''); setQueryLoading(false); return; }
+    if (!api.getJobSutMetricSeries) { setQueryResponse(null); setQueryResponseId(''); setQueryError('This Server client does not support query-aware archived SUT series.'); setQueryLoading(false); return; }
     const controller = new AbortController();
     setQueryResponse(null); setQueryResponseId(''); setQueryError(''); setQueryLoading(true); setInstanceFilter('');
-    api.getJobSutMetrics(jobId, { offset: 0, limit: 1, queryId: selectedQuery.id, targetId: selectedQuery.targetId,
+    api.getJobSutMetricSeries(jobId, { offset: 0, limit: 1, queryId: selectedQuery.id, targetId: selectedQuery.targetId,
       profilePath: selectedQuery.profilePath || selectedQuery.profile || undefined, signal: controller.signal })
       .then(value => { if (!controller.signal.aborted) { setQueryResponse(value); setQueryResponseId(selectedQuery.id); } })
       .catch(error => { if (!controller.signal.aborted) setQueryError(error instanceof Error ? error.message : 'The selected SUT series could not be loaded.'); })
       .finally(() => { if (!controller.signal.aborted) setQueryLoading(false); });
     return () => controller.abort();
-  }, [api, jobId, hidden, activeLoad, selectedQuery?.id, selectedQuery?.targetId, selectedQuery?.profilePath, selectedQuery?.profile]);
+  }, [api, jobId, hidden, activeLoad, collectionState, collectionRevision, selectedQuery?.id, selectedQuery?.targetId, selectedQuery?.profilePath, selectedQuery?.profile]);
 
   const selectedItem: SutMetricItem | null = useMemo(() => {
     if (queryResponseId !== selectedQuery?.id) return null;
     const items = queryResponse?.items || [];
-    return items.find(item => item.queryId === selectedQuery?.id || item.id === selectedQuery?.id) || items[0] || null;
+    return items.find(item => item.queryId === selectedQuery?.id || item.id === selectedQuery?.id) || null;
   }, [queryResponse, queryResponseId, selectedQuery?.id]);
   const instances = (selectedItem?.series || []).map((series, index) => ({ series, index, key: labelsKey(series, index), label: instanceLabel(series, index) }));
   useEffect(() => { if (!instances.some(instance => instance.key === instanceFilter)) setInstanceFilter(instances[0]?.key || ''); }, [selectedItem, instanceFilter]);
@@ -388,14 +443,10 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
     const x = numeric(record(value)?.windowStartEpochMs);
     return x === null ? latest : Math.max(latest, x);
   }, Number.NEGATIVE_INFINITY);
-  const latestSutTime = sutSamples.reduce<number>((latest, sample) => {
+  const latestCollectedSutTime = sutSamples.reduce<number>((latest, sample) => {
     const x = timeOf(sample);
     return Number.isFinite(x) ? Math.max(latest, x) : latest;
   }, Number.NEGATIVE_INFINITY);
-  const earliestSutTime = sutSamples.reduce<number>((earliest, sample) => {
-    const x = timeOf(sample);
-    return Number.isFinite(x) ? Math.min(earliest, x) : earliest;
-  }, Number.POSITIVE_INFINITY);
   const loadObservedBounds = rawLoadPoints.reduce<{ first: number; last: number } | null>((bounds, value) => {
     const item = record(value);
     const start = numeric(item?.windowStartEpochMs);
@@ -405,7 +456,7 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
       ? { first: Math.min(bounds.first, start), last: Math.max(bounds.last, start + duration) }
       : { first: start, last: start + duration };
   }, null);
-  const maxTime = Math.max(latestLoadTime, latestSutTime);
+  const maxTime = Math.max(latestLoadTime, latestCollectedSutTime);
   const rangeSpan: Record<string, number> = { '15m': 900_000, '1h': 3_600_000, '6h': 21_600_000, '24h': 86_400_000 };
   const customStart = parseUtcInstant(customStartText);
   const customEnd = parseUtcInstant(customEndText);
@@ -418,25 +469,26 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
     : rangeFilter === 'all' || !Number.isFinite(maxTime) ? Number.POSITIVE_INFINITY : maxTime;
   const loadPoints = customRangeError ? [] : selectLoadPoints(rawLoadPoints, loadMetric, phaseFilter, boundaries, rangeStart, rangeEnd);
   const sutPoints = customRangeError ? [] : selectSutPoints(sutSamples, phaseFilter, boundaries, rangeStart, rangeEnd);
+  const latestSelectedSutTime = sutPoints.reduce((latest, point) => Math.max(latest, point.x), Number.NEGATIVE_INFINITY);
+  const earliestSelectedSutTime = sutPoints.reduce((earliest, point) => Math.min(earliest, point.x), Number.POSITIVE_INFINITY);
   const chartDomain = Number.isFinite(rangeStart) && Number.isFinite(rangeEnd) && rangeStart < rangeEnd
     ? [rangeStart, rangeEnd] as [number, number] : undefined;
   const partialBins = loadPoints.filter(point => point.partial).length;
   const phaseOptions = [...new Set(boundaries.map(boundary => boundary.phase))];
-  const collectionState = String(collection?.state || collection?.collection?.state || (collectionLoading ? 'LOADING' : 'UNKNOWN'));
   const collectionManifest = collection?.collection;
   const collectionWindowStart = collectionManifest?.windowStart;
   const collectionWindowEnd = collectionManifest?.windowEnd;
   const collectionCoverage = collectionWindowStart && collectionWindowEnd
     ? `${utcDateTime(collectionWindowStart)} to ${utcDateTime(collectionWindowEnd)}` : 'Not reported';
   const collectionWindowEndMs = collectionWindowEnd ? Date.parse(collectionWindowEnd) : Number.NaN;
-  const sampleTailOffset = Number.isFinite(latestSutTime) && Number.isFinite(collectionWindowEndMs)
-    ? collectionWindowEndMs - latestSutTime : null;
+  const sampleTailOffset = Number.isFinite(latestCollectedSutTime) && Number.isFinite(collectionWindowEndMs)
+    ? collectionWindowEndMs - latestCollectedSutTime : null;
   const sampleTailDescription = sampleTailOffset === null ? 'Not reported'
     : `${NUMBER.format(Math.abs(sampleTailOffset))} ms ${sampleTailOffset >= 0 ? 'before' : 'after'} requested collection-window end`;
   const loadCoverage = typeof timeSeries?.coverage === 'string' ? timeSeries.coverage : 'Not reported';
   const loadCapacity = numeric(timeSeries?.capacity);
-  const actualSutCoverage = Number.isFinite(earliestSutTime) && Number.isFinite(latestSutTime)
-    ? `${utcDateTime(new Date(earliestSutTime).toISOString())} to ${utcDateTime(new Date(latestSutTime).toISOString())}` : 'Not reported';
+  const actualSutCoverage = Number.isFinite(earliestSelectedSutTime) && Number.isFinite(latestSelectedSutTime)
+    ? `${utcDateTime(new Date(earliestSelectedSutTime).toISOString())} to ${utcDateTime(new Date(latestSelectedSutTime).toISOString())}` : 'Not reported';
   const sutMetricKind = selectedItem?.kind || selectedQuery?.kind || '';
   const sutFreshness = typeof selectedAvailability?.freshness === 'string' ? selectedAvailability.freshness : 'Not reported';
 
@@ -513,15 +565,16 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
           <div><dt>Profile</dt><dd>{selectedItem?.profilePath || selectedItem?.profile || selectedQuery.profilePath || selectedQuery.profile || 'Not reported'}</dd></div>
           <div><dt>SUT metric and unit</dt><dd>{selectedItem?.title || selectedQuery.title || selectedQuery.metricId} · {selectedItem?.unit || selectedQuery.unit || 'unit not reported'}</dd></div>
           <div><dt>SUT metric kind</dt><dd>{sutMetricKind || 'Not reported'}</dd></div>
-          <div><dt>SUT sample freshness</dt><dd>{sutFreshness}</dd></div>
+          <div><dt>SUT query freshness (entire collected series)</dt><dd>{sutFreshness}</dd></div>
           <div><dt>Collection resolution</dt><dd>{collection?.collection?.step || 'Not reported'}</dd></div>
           <div><dt>Collection manifest updated</dt><dd>{utcDateTime(collection?.collection?.updatedAt || collection?.collection?.createdAt)}</dd></div>
           <div><dt>Collection coverage</dt><dd>{collectionCoverage}</dd></div>
           <div><dt>Selected SUT instance</dt><dd>{selectedInstance?.label || 'Not reported'}</dd></div>
           <div><dt>Selected SUT series count</dt><dd>{instances.length}</dd></div>
           <div><dt>Selected SUT samples in range and phase</dt><dd>{sutPoints.length}</dd></div>
-          <div><dt>Latest selected SUT sample</dt><dd>{Number.isFinite(latestSutTime) ? utcDateTime(new Date(latestSutTime).toISOString()) : 'Not reported'}</dd></div>
-          <div><dt>Latest sample vs collection window end</dt><dd>{sampleTailDescription}</dd></div>
+          <div><dt>Latest selected SUT sample</dt><dd>{Number.isFinite(latestSelectedSutTime) ? utcDateTime(new Date(latestSelectedSutTime).toISOString()) : 'Not reported'}</dd></div>
+          <div><dt>Latest SUT sample (entire collected series)</dt><dd>{Number.isFinite(latestCollectedSutTime) ? utcDateTime(new Date(latestCollectedSutTime).toISOString()) : 'Not reported'}</dd></div>
+          <div><dt>Entire collected series latest sample vs collection window end</dt><dd>{sampleTailDescription}</dd></div>
           <div><dt>Selected SUT observed sample coverage</dt><dd>{actualSutCoverage}</dd></div>
           <div><dt>Selected SUT series coverage</dt><dd>{selectedCoverage.firstSampleAt || selectedCoverage.lastSampleAt
             ? `${selectedCoverage.firstSampleAt || 'first sample not reported'} to ${selectedCoverage.lastSampleAt || 'last sample not reported'} (UTC); ${selectedCoverage.gapCount ?? 'gap count not reported'} reported gaps`
@@ -530,7 +583,7 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
         </dl>
         {queryLoading && <p role="status" aria-busy="true">Loading the selected SUT query series…</p>}
       </>}
-      {selectedQuery && !queryLoading && !selectedItem && <p role="status">The selected query returned no SUT series for this collection.</p>}
+      {selectedQuery && ['READY', 'PARTIAL'].includes(collectionState) && !queryLoading && !selectedItem && <p role="status">The selected query returned no SUT series for this collection.</p>}
       {phaseFilter !== 'all' && !phaseOptions.includes(phaseFilter) && <p role="status">The archived report has no actual phase boundary for {phaseFilter}.</p>}
       {workloadId && !workloadLoading && workloadMetrics && !metricSeriesPoints(workloadMetrics).length && <p role="status">The selected workload archive has no native phase-aligned window points.</p>}
       {loadPoints.length > 0 && sutPoints.length > 0 && selectedQuery && !queryLoading && !customRangeError && <>

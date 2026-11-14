@@ -57,13 +57,14 @@ describe('LOAD and SUT correlation series', () => {
     expect(parseUtcInstant('2026-02-31T02:10:00Z')).toBeNull();
   });
 
-  it('keeps a 25-hour native series under the display cap without turning downsampled points into gaps', () => {
-    const points = Array.from({ length: 25 * 60 + 1 }, (_, index) => ({ x: index * 60_000, y: index }));
+  it('keeps a 25-hour native series under the display cap and preserves an isolated spike', () => {
+    const points = Array.from({ length: 25 * 60 + 1 }, (_, index) => ({ x: index * 60_000, y: 20 + index % 7 }));
+    points[745] = { x: 745 * 60_000, y: 99_999 };
     const displayed = downsampleSegments(points, 60_000);
-    expect(displayed.total).toBe(1200);
+    expect(displayed.total).toBeLessThanOrEqual(1200);
     expect(displayed.segments).toHaveLength(1);
-    expect(displayed.segments[0]).toHaveLength(1200);
     expect(displayed.segments[0]?.[0]).toEqual(points[0]);
     expect(displayed.segments[0]?.at(-1)).toEqual(points.at(-1));
+    expect(displayed.segments.flat()).toContain(points[745]);
   });
 });
