@@ -7,7 +7,8 @@
 - Add the Studio Read-only Validate workspace for shared/effective Config, registered Packages, Explorer resources, and executable LOAD Scenarios; advertise the `att-validation/v1` Server capability and report contract (#355).
 - Add Server-managed Prometheus sources and reusable SUT Metrics profiles to LOAD Jobs, with immutable per-Job snapshots, bounded post-run sidecars, on-demand live preview, and a dedicated Job Details tab (#348).
 - Add pinned per-target SUT maximum thresholds, coverage-aware asynchronous evaluation and recovery, durable versioned records, authorized combined LOAD performance acceptance, and Studio rule/evidence views (#351).
-- Preserve optional threshold evidence while short-circuiting only on required violations, keep native results and SUT Metrics available when external SUT evidence is corrupt, and allow bounded Server initialization time for the packaged-WAR first-request check (#351).
+- Short-circuit SUT evidence loading only after a proven required-rule violation; continue evaluating optional rules (#351).
+- Keep native LOAD results available when optional SUT snapshots are corrupt, and retain SUT collection evidence when threshold records are corrupt without inferring a combined MET verdict (#351).
 - Return the configured 413 size-limit response for oversized SUT Metrics requests and enforce Admin-only catalog writes.
 - Preserve live SUT Metrics cache coalescing, chronological coverage, explicit empty-result status, and timestamp-scaled chart gaps (#348).
 - Align #348 with the simplified two-form profile model: base profiles own only metric definitions and typed parameters; source/tenant/target bindings belong to direct Scenario bindings or one-level composite presets. Reject `extends`, derived profiles, nested composites, and incomplete preset bindings.
