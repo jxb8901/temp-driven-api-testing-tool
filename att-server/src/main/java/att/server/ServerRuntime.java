@@ -102,6 +102,7 @@ final class ServerRuntime implements AutoCloseable {
         return stripes;
     }
     private final ThreadPoolExecutor artifactWriters;
+    private final ThreadPoolExecutor loadReportV2Writers;
     private final ArtifactPublisher artifactPublisher;
     private final Semaphore artifactReadSlots=new Semaphore(MAX_ARTIFACT_READ_SLOTS,true);
     private final Set<String> pendingArtifactJobs=ConcurrentHashMap.newKeySet();
@@ -137,6 +138,7 @@ final class ServerRuntime implements AutoCloseable {
     private final java.util.concurrent.ConcurrentLinkedQueue<Job> deferredWorkerReleases=new java.util.concurrent.ConcurrentLinkedQueue<>();
     private final Set<String> deferredWorkerReleaseIds=ConcurrentHashMap.newKeySet();
     private String artifactRecoveryCursor="";
+    private String loadReportRecoveryCursor="";
     private final ScheduledExecutorService inspectionWatchdogs;
     private LoadScheduleScheduler loadScheduleScheduler;
     private final WorkerProcessLauncher processLauncher;
@@ -208,6 +210,10 @@ final class ServerRuntime implements AutoCloseable {
         workers=new ThreadPoolExecutor(config.maxConcurrent,config.maxConcurrent,0,TimeUnit.MILLISECONDS,queue,r->{Thread t=new Thread(r,"att-server-worker");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         streams=new ThreadPoolExecutor(0,MAX_STREAM_OBSERVERS,30,TimeUnit.SECONDS,new SynchronousQueue<>(),r->{Thread t=new Thread(r,"att-server-sse");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         artifactWriters=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<>(Math.max(1,config.queuedLimit+config.maxConcurrent)),r->{Thread t=new Thread(r,"att-server-artifact-writer");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+        loadReportV2Writers=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(Math.max(1,Math.min(32,config.maxConcurrent))),
+                r->{Thread t=new Thread(r,"att-server-load-report-v2-writer");t.setDaemon(true);return t;},
+                new ThreadPoolExecutor.AbortPolicy());
         for(String id:List.copyOf(requestedLoadReportV2Jobs))scheduleLoadReportV2(id);
         inspectionTaskSlots=new Semaphore(config.inspection.maxConcurrent+config.inspection.queuedLimit,true);
         java.util.concurrent.BlockingQueue<Runnable> inspectionQueue=new PriorityBlockingQueue<>();
@@ -4956,6 +4962,14 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> collection=sutMetrics.collectionStatus(id);
         if(pointer.isEmpty())return reportV2Status("PENDING",String.valueOf(collection.get("state")),null,null,null,null);
         String state=String.valueOf(pointer.getOrDefault("state","FAILED"));
+        if("READY".equals(state)) {
+            try {
+                String currentVerdict=SutMetricsOfflineReportPublisher.verdictRecordSha256(id,config.dataDir.resolve("jobs").resolve(id));
+                if(!java.util.Objects.equals(currentVerdict,nullableText(pointer.get("verdictRecordSha256"))))loadVerdictPublished(id);
+            } catch(Exception invalidVerdict) {
+                java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine("Offline SUT report verdict metadata is unavailable");
+            }
+        }
         String archiveName=nullableText(pointer.get("archiveName"));
         if("READY".equals(state)) {
             if(archiveName==null||!archiveName.matches("[a-f0-9]{64}\\.zip")
@@ -5013,41 +5027,59 @@ final class ServerRuntime implements AutoCloseable {
             return new ArtifactRead(archive,null,download);
         } catch(Exception failure) { artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure; }
     }
-    void refreshLoadReportV2(String id) { scheduleLoadReportV2(id); }
+    /**
+     * Issue #351 must call this immediately after atomically publishing a verdict manifest.
+     * The bounded recovery cursor also compares unresolved verdict digests to recover missed notifications.
+     */
+    void loadVerdictPublished(String id) { refreshLoadReportV2(id); }
+
+    void refreshLoadReportV2(String id) {
+        if(id==null||!JOB_ID.matcher(id).matches()||closing)return;
+        try { store.loadReportRecoveryNeeded(id,true); } catch(Exception ignored) { }
+        scheduleLoadReportV2(id);
+    }
+
     private void sutMetricsManifestPublished(Path manifestPath) {
         try {
             if(manifestPath==null||!"manifest.json".equals(manifestPath.getFileName().toString()))return;
             Path metricsDirectory=manifestPath.getParent();if(metricsDirectory==null||!"sut-metrics".equals(metricsDirectory.getFileName().toString()))return;
             Path jobDirectory=metricsDirectory.getParent();if(jobDirectory==null)return;
             String id=jobDirectory.getFileName().toString();if(!JOB_ID.matcher(id).matches())return;
-            if(artifactWriters==null){requestedLoadReportV2Jobs.add(id);return;}
+            if(loadReportV2Writers==null){requestedLoadReportV2Jobs.add(id);return;}
             Map<String,Object> collection=sutMetrics.collectionStatus(id);
-            if(Set.of("READY","PARTIAL","UNAVAILABLE","FAILED").contains(String.valueOf(collection.get("state"))))scheduleLoadReportV2(id);
+            if(Set.of("READY","PARTIAL","UNAVAILABLE","FAILED").contains(String.valueOf(collection.get("state"))))refreshLoadReportV2(id);
         } catch(Exception failed) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine("SUT report publication was deferred"); }
     }
     private void scheduleLoadReportV2(String id) {
         if(closing)return;
-        if(artifactWriters==null){requestedLoadReportV2Jobs.add(id);return;}
+        if(loadReportV2Writers==null){requestedLoadReportV2Jobs.add(id);return;}
         if(!pendingLoadReportV2Jobs.add(id)){requestedLoadReportV2Jobs.add(id);return;}
         requestedLoadReportV2Jobs.remove(id);
-        try { artifactWriters.execute(()->publishLoadReportV2(id)); }
+        try { loadReportV2Writers.execute(()->publishLoadReportV2(id)); }
         catch(RejectedExecutionException full) { pendingLoadReportV2Jobs.remove(id);requestedLoadReportV2Jobs.add(id); }
     }
     private void publishLoadReportV2(String id) {
         artifactLifecycle.readLock().lock();
         try {
             Map<String,Object> job=store.get(id);
-            if(job==null||!"load".equals(job.get("command"))||!terminal(id)||jobs.containsKey(id)||store.workerQuarantined(id))return;
-            Map<String,Object> snapshot=sutMetrics.snapshotForJob(id);if(snapshot==null)return;
+            if(job==null||!"load".equals(job.get("command"))){store.loadReportRecoveryNeeded(id,false);return;}
+            if(!terminal(id)||jobs.containsKey(id))return;
+            if(store.workerQuarantined(id)){store.loadReportRecoveryNeeded(id,false);return;}
+            Map<String,Object> snapshot=sutMetrics.snapshotForJob(id);
+            if(snapshot==null){store.loadReportRecoveryNeeded(id,false);return;}
             Map<String,Object> collection=sutMetrics.collectionStatus(id);
-            if(!Set.of("READY","PARTIAL","UNAVAILABLE","FAILED").contains(String.valueOf(collection.get("state"))))return;
+            if(!Set.of("READY","PARTIAL","UNAVAILABLE","FAILED").contains(String.valueOf(collection.get("state")))) {
+                store.loadReportRecoveryNeeded(id,false);return;
+            }
             Path nativeArchive=artifactArchivePath(id);
             if(!"READY".equals(readArchiveStatus(nativeArchive.resolveSibling("archive-status.json")).path("state").asText())
                     ||!Files.isRegularFile(nativeArchive,java.nio.file.LinkOption.NOFOLLOW_LINKS)||Files.isSymbolicLink(nativeArchive))return;
             Map<String,Object> previous=readLoadReportV2Pointer(id);
             boolean hasPrevious="READY".equals(previous.get("state"))&&previous.get("archiveName") instanceof String;
-            writeLoadReportV2Status(id,hasPrevious?copyReportV2State(previous,"READY","BUILDING"):reportV2Status(
-                    "BUILDING",String.valueOf(collection.get("state")),"PENDING",null,null,clock.instant().toString()));
+            Map<String,Object> building=hasPrevious?copyReportV2State(previous,"READY","BUILDING"):reportV2Status(
+                    "BUILDING",String.valueOf(collection.get("state")),"PENDING",null,null,clock.instant().toString());
+            building.put("retryCount",retryCount(previous));
+            writeLoadReportV2Status(id,building);
             Path root=loadReportV2Root(id);
             SutMetricsOfflineReportPublisher.Publication publication=SutMetricsOfflineReportPublisher.publish(
                     id,job,config.dataDir.resolve("jobs").resolve(id),nativeArchive,root,sutMetrics,artifactPublisher,
@@ -5058,14 +5090,23 @@ final class ServerRuntime implements AutoCloseable {
             pointer.put("archiveBytes",publication.archiveBytes());pointer.put("manifestSha256",publication.manifestSha256());
             pointer.put("nativeArchiveSha256",publication.nativeArchiveSha256());pointer.put("collectionState",publication.collectionState());
             pointer.put("externalEvaluationStatus",publication.externalEvaluationStatus());
+            pointer.put("verdictRecordSha256",publication.verdictRecordSha256());
+            pointer.put("retryCount",0);pointer.remove("nextRetryAt");
             if(publication.performanceVerdict()!=null)pointer.put("performanceVerdict",publication.performanceVerdict());
             pointer.put("updatedAt",clock.instant().toString());
             writeLoadReportV2Status(id,pointer);
+            store.loadReportRecoveryNeeded(id,unresolvedVerdict(publication.externalEvaluationStatus()));
         } catch(Exception failure) {
             try {
                 Map<String,Object> prior=readLoadReportV2Pointer(id);
-                if("READY".equals(prior.get("state")))writeLoadReportV2Status(id,copyReportV2State(prior,"READY","FAILED"));
-                else writeLoadReportV2Status(id,reportV2Status("FAILED",null,null,null,null,clock.instant().toString()));
+                int retryCount=Math.min(30,retryCount(prior)+1);
+                Map<String,Object> failed;
+                if("READY".equals(prior.get("state")))failed=copyReportV2State(prior,"READY","FAILED");
+                else failed=reportV2Status("FAILED",null,null,null,null,clock.instant().toString());
+                failed.put("retryCount",retryCount);
+                failed.put("nextRetryAt",clock.instant().plusSeconds(loadReportRetryDelaySeconds(retryCount)).toString());
+                writeLoadReportV2Status(id,failed);
+                store.loadReportRecoveryNeeded(id,true);
             } catch(Exception ignored) { }
             java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Offline SUT report publication failed for Job "+id);
         } finally {
@@ -5089,23 +5130,52 @@ final class ServerRuntime implements AutoCloseable {
             Files.move(temporary,target,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {Files.deleteIfExists(temporary);}
     }
+    synchronized int recoverLoadReportV2() throws Exception {
+        if(closing)return 0;
+        List<String> ids=store.loadReportRecoveryJobIds(loadReportRecoveryCursor,64);
+        if(ids.isEmpty()){loadReportRecoveryCursor="";return 0;}
+        Instant now=clock.instant();
+        for(String id:ids) {
+            loadReportRecoveryCursor=id;
+            Map<String,Object> pointer=Map.of();
+            try {
+                pointer=readLoadReportV2Pointer(id);
+                String state=String.valueOf(pointer.getOrDefault("state","PENDING"));
+                if("READY".equals(state)) {
+                    String currentDigest=SutMetricsOfflineReportPublisher.verdictRecordSha256(id,config.dataDir.resolve("jobs").resolve(id));
+                    String publishedDigest=nullableText(pointer.get("verdictRecordSha256"));
+                    if(!java.util.Objects.equals(currentDigest,publishedDigest)) { refreshLoadReportV2(id); continue; }
+                    if(unresolvedVerdict(String.valueOf(pointer.getOrDefault("externalEvaluationStatus","NOT_PROVIDED")))) {
+                        if("FAILED".equals(pointer.get("lastAttemptState"))&&retryIsDue(pointer,now))scheduleLoadReportV2(id);
+                    } else if("FAILED".equals(pointer.get("lastAttemptState"))) {
+                        if(retryIsDue(pointer,now))scheduleLoadReportV2(id);
+                    } else store.loadReportRecoveryNeeded(id,false);
+                } else if(!retryIsDue(pointer,now)) {
+                    continue;
+                } else scheduleLoadReportV2(id);
+            } catch(Exception ignored) { if(retryIsDue(pointer,now))scheduleLoadReportV2(id); }
+        }
+        return ids.size();
+    }
     private void recoverLoadReportV2Safely() {
-        if(closing)return;
-        Path root=config.dataDir.resolve("jobs");
-        if(!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS)||Files.isSymbolicLink(root))return;
-        try(var directories=Files.newDirectoryStream(root)) {
-            for(Path directory:directories) {
-                String id=directory.getFileName().toString();
-                if(!JOB_ID.matcher(id).matches()||!Files.isDirectory(directory,java.nio.file.LinkOption.NOFOLLOW_LINKS)||Files.isSymbolicLink(directory))continue;
-                try {
-                    Map<String,Object> job=store.get(id);if(job==null||!"load".equals(job.get("command"))||!terminal(id))continue;
-                    pruneLoadReportV2Snapshots(id);
-                    if(sutMetrics.snapshotForJob(id)==null)continue;
-                    Map<String,Object> pointer=readLoadReportV2Pointer(id);
-                    if(pointer.isEmpty()||Set.of("PENDING","BUILDING").contains(String.valueOf(pointer.get("state"))))scheduleLoadReportV2(id);
-                } catch(Exception ignored) { }
-            }
-        } catch(Exception failed) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine("Offline SUT report recovery scan will retry"); }
+        try { recoverLoadReportV2(); }
+        catch(Exception failed) { java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine("Offline SUT report recovery cursor will retry"); }
+    }
+    private static boolean unresolvedVerdict(String state) {
+        return Set.of("NOT_PROVIDED","PENDING","EVALUATING").contains(state);
+    }
+    private static int retryCount(Map<String,Object> pointer) {
+        Object value=pointer.get("retryCount");
+        return value instanceof Number number?Math.max(0,Math.min(30,number.intValue())):0;
+    }
+    private static long loadReportRetryDelaySeconds(int retryCount) {
+        int exponent=Math.max(0,Math.min(10,retryCount-1));
+        return Math.min(3600L,5L*(1L<<exponent));
+    }
+    private static boolean retryIsDue(Map<String,Object> pointer,Instant now) {
+        String next=nullableText(pointer.get("nextRetryAt"));
+        if(next==null)return true;
+        try{return !Instant.parse(next).isAfter(now);}catch(RuntimeException invalid){return true;}
     }
     private void pruneLoadReportV2Snapshots(String id) {
         if(!artifactLifecycle.writeLock().tryLock())return;
@@ -5900,7 +5970,8 @@ final class ServerRuntime implements AutoCloseable {
             catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}catch(Exception ignored){}
         }
         // Worker/SSE producers are quiescent before artifact writers and journal compactions drain.
-        artifactWriters.shutdown();terminateExecutor(artifactWriters,"artifact writers");
+        artifactWriters.shutdown();loadReportV2Writers.shutdown();
+        terminateExecutor(artifactWriters,"artifact writers");terminateExecutor(loadReportV2Writers,"LOAD report v2 writers");
         eventNotifications.shutdown();terminateExecutor(eventNotifications,"event notifications");
         eventCompactions.shutdown();terminateExecutor(eventCompactions,"event compactions");
         synchronized(terminalEventCacheLock){terminalEventCache.clear();terminalEventCacheWeight=0L;}

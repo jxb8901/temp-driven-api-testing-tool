@@ -137,17 +137,32 @@ class SutMetricsGrafanaOfflineReportIntegrationTest {
             Map<String, Object> inventory = ArtifactArchive.verify(reportArchive, true);
             assertTrue(maps(inventory.get("entries")).stream().anyMatch(entry ->
                     "report/v2/index.html".equals(entry.get("path"))));
-            assertArrayEquals("sealed native evidence".getBytes(StandardCharsets.UTF_8),
-                    ArtifactArchive.read(reportArchive, "sealed-native-evidence.txt"));
+            assertThrows(java.io.FileNotFoundException.class,
+                    () -> ArtifactArchive.read(reportArchive, "sealed-native-evidence.txt"),
+                    "The supplemental report archive must not duplicate the sealed native archive.");
 
             JsonNode report = ServerRuntime.JSON.readTree(ArtifactArchive.read(reportArchive, "report/v2/manifest.json"));
             assertEquals("att-load-report-extension/v2", report.path("schemaVersion").asText());
+            assertEquals(published.nativeArchiveSha256(), report.path("nativeArchive").path("sha256").asText());
             assertEquals("SUCCEEDED", report.path("executionStatus").asText());
             assertEquals("PARTIAL", report.path("collectionState").asText());
             assertEquals("PENDING", report.path("extensions").path("thresholdVerdict").path("externalEvaluationStatus").asText());
             assertEquals("NOT_INCLUDED", report.path("extensions").path("correlation").path("state").asText());
             assertEquals(2, report.path("observations").size());
             assertEquals("att-load-offline-observation/v1", report.path("observations").get(0).path("schemaVersion").asText());
+            Path offlineSchema = Path.of("schemas/api/att-load-offline-observations-v1.schema.json");
+            byte[] offlineManifest = ArtifactArchive.read(reportArchive, "report/v2/sut-metrics/manifest.json");
+            att.validation.JsonSchemaVerifier.verifyJson(offlineSchema, new String(offlineManifest, StandardCharsets.UTF_8));
+            com.fasterxml.jackson.databind.node.ObjectNode boundary =
+                    (com.fasterxml.jackson.databind.node.ObjectNode) ServerRuntime.JSON.readTree(offlineManifest);
+            if (boundary.path("observations").isArray() && !boundary.path("observations").isEmpty()) {
+                com.fasterxml.jackson.databind.node.ObjectNode observation =
+                        (com.fasterxml.jackson.databind.node.ObjectNode) boundary.path("observations").get(0);
+                observation.put("lengthBytes", SutMetricsService.MAX_SERIES_FILE_BYTES);
+                observation.put("seriesCount", 512);
+                att.validation.JsonSchemaVerifier.verifyJson(offlineSchema,
+                        ServerRuntime.JSON.writeValueAsString(boundary));
+            }
             assertTrue(report.path("observations").toString().contains("NO_DATA"));
             String html = new String(ArtifactArchive.read(reportArchive, "report/v2/index.html"), StandardCharsets.UTF_8);
             assertTrue(html.contains("Content-Security-Policy"));
@@ -168,6 +183,76 @@ class SutMetricsGrafanaOfflineReportIntegrationTest {
                     service, publisher, validator), "Report publication must reject changed SUT evidence.");
             assertArrayEquals(sealedArchiveBytes, Files.readAllBytes(nativeArchive));
         }
+    }
+
+    @Test void supplementalPublicationSucceedsBesideAMaximumSizeNativeArchiveWithoutCopyingIt() throws Exception {
+        Path nativeOutput = temp.resolve("maximum-native-output");
+        Files.createDirectories(nativeOutput);
+        int entryBytes = Math.toIntExact(ArtifactArchive.MAX_ENTRY_BYTES);
+        byte[] randomEntry = new byte[entryBytes];
+        new java.util.Random(350L).nextBytes(randomEntry);
+        for (int index = 0; index < randomEntry.length; index++) randomEntry[index] = (byte) ('a' + Byte.toUnsignedInt(randomEntry[index]) % 26);
+        for (int index = 0; index < 8; index++)
+            Files.write(nativeOutput.resolve(String.format("native-%02d.txt", index)), randomEntry);
+        Path nativeArchive = temp.resolve("maximum-artifacts.zip");
+        ArtifactArchive.build(nativeOutput, nativeArchive, (path, bytes) -> { });
+        long nativeBytes = maps(ArtifactArchive.verify(nativeArchive, true).get("entries")).stream()
+                .mapToLong(entry -> ((Number) entry.get("size")).longValue()).sum();
+        assertEquals(ArtifactArchive.MAX_TOTAL_BYTES, nativeBytes);
+
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("metrics"), Set.of(), reference -> null)) {
+            Path publicationRoot = temp.resolve("maximum-report-v2");
+            ServerRuntime.ArtifactPublisher publisher = (output, archive, validator) -> ArtifactArchive.build(output, archive, validator);
+            SutMetricsOfflineReportPublisher.Publication publication = SutMetricsOfflineReportPublisher.publish(
+                    JOB_ID, map("status", "SUCCEEDED"), temp.resolve("jobs").resolve(JOB_ID), nativeArchive,
+                    publicationRoot, service, publisher, (path, bytes) -> { });
+            Path reportArchive = publicationRoot.resolve("snapshots").resolve(publication.publicationId() + ".zip");
+            Map<String, Object> inventory = ArtifactArchive.verify(reportArchive, true);
+            List<Map<String, Object>> entries = maps(inventory.get("entries"));
+            assertTrue(entries.stream().allMatch(entry -> String.valueOf(entry.get("path")).startsWith("report/v2/")));
+            assertTrue(Files.size(reportArchive) < 1024 * 1024);
+            JsonNode manifest = ServerRuntime.JSON.readTree(ArtifactArchive.read(reportArchive, "report/v2/manifest.json"));
+            assertEquals(publication.nativeArchiveSha256(), manifest.path("nativeArchive").path("sha256").asText());
+        }
+    }
+
+    @Test void chartPreviewKeepsLabeledSeriesUsesUtcSpacingAndBreaksObservedGaps() throws Exception {
+        long start = 1_700_000_000_000L;
+        List<Map<String, Object>> source = List.of(
+                map("labels", Map.of("instance", "sut-a"), "samples", List.of(
+                        sample(start, 1), sample(start + 15_000, 2), sample(start + 45_000, 3))),
+                map("labels", Map.of("instance", "sut-b"), "samples", List.of(
+                        sample(start, 4), sample(start + 30_000, 5), sample(start + 45_000, 6))));
+        var previewMethod = SutMetricsService.class.getDeclaredMethod("chartPreview", List.class, int.class, String.class);
+        previewMethod.setAccessible(true);
+        List<Map<String, Object>> preview = maps(previewMethod.invoke(null, source, 96, "15s"));
+        assertEquals(2, preview.size());
+        assertEquals("sut-a", object(preview.get(0).get("labels")).get("instance"));
+        assertEquals("sut-b", object(preview.get(1).get("labels")).get("instance"));
+        List<Map<String, Object>> firstSamples = maps(preview.get(0).get("samples"));
+        List<Map<String, Object>> secondSamples = maps(preview.get(1).get("samples"));
+        assertEquals(start + 15_000, ((Number) firstSamples.get(1).get("timestampEpochMs")).longValue());
+        assertTrue(Boolean.TRUE.equals(firstSamples.get(2).get("gapBefore")));
+        assertTrue(Boolean.TRUE.equals(secondSamples.get(1).get("gapBefore")));
+
+        var renderMethod = SutMetricsOfflineReportPublisher.class.getDeclaredMethod(
+                "renderChart", List.class, String.class, String.class, Map.class, int.class);
+        renderMethod.setAccessible(true);
+        String html = (String) renderMethod.invoke(null, preview, "count", "15s",
+                map("startAt", Instant.ofEpochMilli(start).toString(),
+                    "endAt", Instant.ofEpochMilli(start + 60_000).toString()), 0);
+        assertTrue(html.contains("instance=sut-a"));
+        assertTrue(html.contains("instance=sut-b"));
+        assertTrue(html.contains("164.00,"), "x positions must use the UTC sample time rather than the array index.");
+        assertTrue(html.contains("476.00,"), "irregular intervals must retain their different horizontal spacing.");
+        assertTrue(html.split("<circle", -1).length - 1 >= 2, "Gaps must end one SVG segment and start another.");
+        assertTrue(html.split("<polyline", -1).length - 1 >= 2, "Both labeled series must be represented.");
+        assertTrue(preview.stream().mapToInt(item -> maps(item.get("samples")).size()).sum() <=
+                SutMetricsService.MAX_REPORT_PREVIEW_POINTS);
+    }
+
+    private static Map<String, Object> sample(long timestamp, double value) {
+        return map("timestamp", Instant.ofEpochMilli(timestamp).toString(), "timestampEpochMs", timestamp, "value", value);
     }
 
     private static Map<String, Object> source(String url) {

@@ -73,6 +73,112 @@ class ArtifactLifecycleTest {
         }
     }
 
+    @Test void failedLoadReportPublicationRetriesAfterRestartAndDoesNotBlockNativeArchives() throws Exception {
+        String id="J0000000000000801";
+        java.util.concurrent.atomic.AtomicInteger reportAttempts=new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.CountDownLatch refreshedReportEntered=new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch releaseRefreshedReport=new java.util.concurrent.CountDownLatch(1);
+        ServerRuntime.ArtifactPublisher publisher=(output,archive,validator)->{
+            if(archive.toString().contains("load-report-publications")) {
+                int attempt=reportAttempts.incrementAndGet();
+                if(attempt==1)throw new java.io.IOException("transient report writer failure");
+                if(attempt==3) {
+                    refreshedReportEntered.countDown();
+                    if(!releaseRefreshedReport.await(10,TimeUnit.SECONDS))throw new java.io.IOException("test did not release report publication");
+                }
+            }
+            return ArtifactArchive.build(output,archive,validator);
+        };
+        ServerRuntimeTestSupport.MutableClock clock=new ServerRuntimeTestSupport.MutableClock(Instant.parse("2026-11-14T00:00:00Z"));
+        ServerConfig config;
+        try(ServerRuntime runtime=runtime(publisher,clock)) {
+            config=runtime.config;
+            job(runtime,id,"PASS","load");
+            Files.writeString(runtime.outputDirectoryForJob(id).resolve("native.txt"),"native evidence");
+            runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
+            runtime.sutMetrics.writeSnapshot(id,Map.of("schemaVersion",SutMetricsService.SNAPSHOT_SCHEMA,
+                    "snapshotId","snapshot-1","queries",List.of()));
+            runtime.sutMetrics.jobFinished(id,null,null);
+            awaitLoadReport(runtime,id,"FAILED","user-a");
+            assertEquals(1,reportAttempts.get());
+            Path current=config.dataDir.resolve("jobs").resolve(id).resolve("load-report-publications/v2/current.json");
+            var failedPointer=ServerRuntime.JSON.readTree(current.toFile());
+            assertEquals(1,failedPointer.path("retryCount").asInt());
+            assertEquals(clock.instant().plusSeconds(5).toString(),failedPointer.path("nextRetryAt").asText());
+            assertEquals(List.of(id),runtime.store.loadReportRecoveryJobIds("",64));
+            assertEquals("PASS",runtime.jobRecord(id).get("status"),"Optional report publication must not change native job state.");
+        }
+
+        try(ServerRuntime restarted=runtime(config,publisher,clock)) {
+            Thread.sleep(100);
+            assertEquals(1,reportAttempts.get(),"A persisted retry must wait until its backoff expires after restart.");
+            clock.advance(java.time.Duration.ofSeconds(6));
+            assertEquals(0,restarted.recoverLoadReportV2(),"The startup recovery page advanced the cursor; the next sweep wraps it.");
+            assertEquals(1,restarted.recoverLoadReportV2());
+            Map<String,Object> ready=awaitLoadReport(restarted,id,"READY","user-a");
+            String previousPublication=String.valueOf(ready.get("publicationId"));
+            Path previousArchive=config.dataDir.resolve("jobs").resolve(id).resolve("load-report-publications/v2/snapshots")
+                    .resolve(previousPublication+".zip");
+            assertTrue(Files.isRegularFile(previousArchive));
+
+            Path verdict=config.dataDir.resolve("jobs").resolve(id).resolve("load-verdict/v1/manifest.json");
+            Files.createDirectories(verdict.getParent());
+            Files.writeString(verdict,ServerRuntime.JSON.writeValueAsString(Map.of(
+                    "schemaVersion","att-load-verdict/v1","jobId",id,
+                    "externalEvaluationStatus","MET","performanceVerdict","MET")),StandardCharsets.UTF_8);
+            restarted.loadVerdictPublished(id);
+            assertTrue(refreshedReportEntered.await(5,TimeUnit.SECONDS),"Verdict publication must trigger a report refresh.");
+
+            try(ServerRuntime.ArtifactRead previous=restarted.openLoadReportV2Archive(id,"user-a",true)) {
+                assertTrue(previous.length()>0,"The previous READY report remains downloadable while its replacement is built.");
+            }
+            Job unrelated=job(restarted,"J0000000000000802","PASS","run");
+            Files.writeString(restarted.outputDirectoryForJob(unrelated.id).resolve("native.txt"),"independent native archive");
+            restarted.scheduleArtifactArchive(unrelated.id);
+            awaitState(restarted,unrelated.id,"READY");
+
+            releaseRefreshedReport.countDown();
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+            Map<String,Object> finalized;
+            do {
+                finalized=restarted.loadReportV2Status(id,"user-a",true);
+                if(finalized!=null&&"READY".equals(finalized.get("state"))
+                        &&!previousPublication.equals(finalized.get("publicationId"))
+                        &&"MET".equals(finalized.get("performanceVerdict")))break;
+                Thread.sleep(20);
+            } while(System.nanoTime()<deadline);
+            assertEquals("READY",finalized.get("state"),finalized.toString());
+            assertNotEquals(previousPublication,finalized.get("publicationId"));
+            assertEquals("MET",finalized.get("externalEvaluationStatus"));
+            assertEquals("MET",finalized.get("performanceVerdict"));
+            assertTrue(Files.isRegularFile(previousArchive),"The previous immutable snapshot is retained after the replacement is ready.");
+        } finally {
+            releaseRefreshedReport.countDown();
+        }
+    }
+
+    @Test void loadReportRecoveryUsesAResumableSixtyFourJobBatchAndDedicatedWriter() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            java.lang.reflect.Field nativeField=ServerRuntime.class.getDeclaredField("artifactWriters");
+            java.lang.reflect.Field reportField=ServerRuntime.class.getDeclaredField("loadReportV2Writers");
+            nativeField.setAccessible(true);reportField.setAccessible(true);
+            var nativeWriter=(java.util.concurrent.ThreadPoolExecutor)nativeField.get(runtime);
+            var reportWriter=(java.util.concurrent.ThreadPoolExecutor)reportField.get(runtime);
+            assertNotSame(nativeWriter,reportWriter);
+            assertTrue(reportWriter.getQueue().remainingCapacity()<=32);
+
+            for(int index=0;index<70;index++) {
+                String id=String.format("J%016X",index+1);
+                job(runtime,id,"PASS","load");
+            }
+            List<String> first=runtime.store.loadReportRecoveryJobIds("",64);
+            assertEquals(64,first.size());
+            List<String> second=runtime.store.loadReportRecoveryJobIds(first.get(first.size()-1),64);
+            assertEquals(6,second.size());
+            assertTrue(runtime.store.loadReportRecoveryJobIds(second.get(second.size()-1),64).isEmpty());
+        }
+    }
+
     @Test void emptyArchiveHasRealZeroCountsButUnsupportedMeasurementsStayNull() throws Exception {
         try(ServerRuntime runtime=runtime()) {
             String id="J0000000000000001";job(runtime,id,"CANCELLED");
@@ -562,17 +668,38 @@ class ArtifactLifecycleTest {
         }
     }
 
-    private ServerRuntime runtime() throws Exception {
+    private ServerRuntime runtime() throws Exception { return runtime(null,java.time.Clock.systemUTC()); }
+
+    private ServerRuntime runtime(ServerRuntime.ArtifactPublisher publisher,java.time.Clock clock) throws Exception {
         Path packages=Files.createDirectories(temp.resolve("packages"));Path pkg=Files.createDirectories(packages.resolve("p"));
-        Path config=Files.writeString(temp.resolve("server.yaml"),"server:\n  dataDir: '"+temp.resolve("data")+"'\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 4\npackages:\n  allowedRoots:\n    - '"+packages+"'\n  entries:\n    p: '"+pkg+"'\n");
-        return new ServerRuntime(ServerConfig.load(config),Files.createDirectories(temp.resolve("libs")).toString());
+        Path configPath=Files.writeString(temp.resolve("server.yaml"),"server:\n  dataDir: '"+temp.resolve("data")+"'\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 4\npackages:\n  allowedRoots:\n    - '"+packages+"'\n  entries:\n    p: '"+pkg+"'\n");
+        ServerConfig config=ServerConfig.load(configPath);String libs=Files.createDirectories(temp.resolve("libs")).toString();
+        if(publisher==null)return new ServerRuntime(config,libs);
+        return new ServerRuntime(config,libs,ProcessBuilder::start,clock,publisher);
     }
 
-    private Job job(ServerRuntime runtime,String id,String state) throws Exception {
+    private ServerRuntime runtime(ServerConfig config,ServerRuntime.ArtifactPublisher publisher,java.time.Clock clock) throws Exception {
+        return new ServerRuntime(config,Files.createDirectories(temp.resolve("libs")).toString(),ProcessBuilder::start,clock,publisher);
+    }
+
+    private Job job(ServerRuntime runtime,String id,String state) throws Exception { return job(runtime,id,state,"run"); }
+
+    private Job job(ServerRuntime runtime,String id,String state,String command) throws Exception {
         Path output=Files.createDirectories(runtime.outputDirectoryForJob(id));
-        Job job=new Job(id,"run","p","user-a",new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
+        Job job=new Job(id,command,"p","user-a",new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
         runtime.store.insert(job,"{}");job.status=state;if(!"RUNNING".equals(state))job.finishedAt=Instant.now();runtime.store.update(job);
         return job;
+    }
+
+    private Map<String,Object> awaitLoadReport(ServerRuntime runtime,String id,String expected,String principal) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+        Map<String,Object> status=Map.of();
+        do {
+            status=runtime.loadReportV2Status(id,principal,true);
+            if(status!=null&&expected.equals(status.get("state")))return status;
+            Thread.sleep(20);
+        } while(System.nanoTime()<deadline);
+        fail("Expected offline report state "+expected+" but got "+status);return Map.of();
     }
 
     private void awaitState(ServerRuntime runtime,String id,String expected) throws Exception {

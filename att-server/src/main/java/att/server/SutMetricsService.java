@@ -82,6 +82,8 @@ final class SutMetricsService implements AutoCloseable {
     static final long MAX_JOB_SAMPLES = 1_500_000L;
     static final long MAX_LIVE_PREVIEW_SAMPLES = 100_000L;
     static final int MAX_SERIES_FILE_BYTES = 2 * 1024 * 1024;
+    static final int MAX_REPORT_PREVIEW_SERIES = 16;
+    static final int MAX_REPORT_PREVIEW_POINTS = 96;
     private static final Pattern ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,79}");
     private static final Pattern JOB_ID = Pattern.compile("J[0-9A-F]{16}");
     private static final Pattern PARAM = Pattern.compile("[A-Za-z][A-Za-z0-9_]{0,63}");
@@ -838,7 +840,7 @@ final class SutMetricsService implements AutoCloseable {
                 Files.write(output, reportBytes);
                 Map<String, Object> query = queryMetadataById(snapshot, String.valueOf(file.get("queryId")));
                 List<Map<String, Object>> series = listOfMaps(safeSeries.get("series"));
-                List<Map<String, Object>> preview = chartPreview(series, 96);
+                List<Map<String, Object>> preview = chartPreview(series, MAX_REPORT_PREVIEW_POINTS, String.valueOf(collection.get("step")));
                 observations.add(fields("schemaVersion", OFFLINE_OBSERVATION_SCHEMA, "kind", "timeseries",
                         "source", fields("id", file.get("sourceId"), "name", query.get("sourceName")),
                         "metric", fields("id", file.get("metricId"), "name", file.get("title"),
@@ -851,7 +853,7 @@ final class SutMetricsService implements AutoCloseable {
                         "quality", fields("status", file.get("queryStatus"), "gapCount", objectOrEmpty(file.get("coverage")).get("gapCount")),
                         "path", "report/v2/sut-metrics/observations/" + name,
                         "sourceSha256", file.get("sha256"), "sha256", sha256(reportBytes), "lengthBytes", reportBytes.length,
-                        "seriesCount", file.get("seriesCount"), "sampleCount", file.get("sampleCount"), "preview", preview));
+                        "seriesCount", file.get("seriesCount"), "sampleCount", file.get("sampleCount"), "previewOmittedSeriesCount", Math.max(0, series.size() - preview.size()), "preview", preview));
             }
         }
         byte[] sourceManifest = manifestBytes(jobId);
@@ -919,16 +921,55 @@ final class SutMetricsService implements AutoCloseable {
         return safe;
     }
 
-    private static List<Map<String, Object>> chartPreview(List<Map<String, Object>> series, int maximum) {
-        if (series.isEmpty()) return List.of();
-        List<Map<String, Object>> samples = listOfMaps(series.get(0).get("samples"));
-        if (samples.size() <= maximum) return samples;
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (int index = 0; index < maximum; index++) {
-            int selected = (int) Math.round(index * (samples.size() - 1.0) / (maximum - 1.0));
-            result.add(samples.get(selected));
+    private static List<Map<String, Object>> chartPreview(List<Map<String, Object>> series, int maximum, String sampleResolution) {
+        if (series.isEmpty() || maximum < 1) return List.of();
+        int shownSeries = Math.min(series.size(), Math.min(MAX_REPORT_PREVIEW_SERIES, maximum));
+        int pointsPerSeries = Math.max(1, maximum / shownSeries);
+        long expectedStepMillis;
+        try { expectedStepMillis = Math.multiplyExact(durationSeconds(sampleResolution, "sampleResolution"), 1000L); }
+        catch (RuntimeException invalid) { expectedStepMillis = 0L; }
+        List<Map<String, Object>> result = new ArrayList<>(shownSeries);
+        for (int seriesIndex = 0; seriesIndex < shownSeries; seriesIndex++) {
+            Map<String, Object> source = series.get(seriesIndex);
+            List<Map<String, Object>> samples = listOfMaps(source.get("samples"));
+            if (samples.isEmpty()) {
+                result.add(fields("labels", objectOrEmpty(source.get("labels")), "samples", List.of()));
+                continue;
+            }
+            int count = Math.min(samples.size(), pointsPerSeries);
+            List<Integer> selected = new ArrayList<>(count);
+            for (int point = 0; point < count; point++) {
+                int index = count == 1 ? 0 : (int) Math.round(point * (samples.size() - 1.0) / (count - 1.0));
+                if (selected.isEmpty() || selected.get(selected.size() - 1) != index) selected.add(index);
+            }
+            List<Map<String, Object>> previewSamples = new ArrayList<>(selected.size());
+            int previousIndex = -1;
+            for (int index : selected) {
+                Map<String, Object> sample = samples.get(index);
+                Map<String, Object> point = new LinkedHashMap<>();
+                if (sample.get("timestamp") instanceof String timestamp) point.put("timestamp", timestamp);
+                if (sample.get("timestampEpochMs") instanceof Number epoch) point.put("timestampEpochMs", epoch.longValue());
+                if (sample.get("value") instanceof Number value && Double.isFinite(value.doubleValue())) point.put("value", value.doubleValue());
+                point.put("gapBefore", previousIndex >= 0 && hasSampleGap(samples, previousIndex, index, expectedStepMillis));
+                previewSamples.add(point);
+                previousIndex = index;
+            }
+            result.add(fields("labels", objectOrEmpty(source.get("labels")), "samples", previewSamples));
         }
         return result;
+    }
+
+    private static boolean hasSampleGap(List<Map<String, Object>> samples, int previousSelected, int currentSelected,
+                                        long expectedStepMillis) {
+        if (expectedStepMillis < 1) return false;
+        long gapThreshold = expectedStepMillis + expectedStepMillis / 2;
+        for (int index = previousSelected + 1; index <= currentSelected; index++) {
+            Object previous = samples.get(index - 1).get("timestampEpochMs");
+            Object current = samples.get(index).get("timestampEpochMs");
+            if (previous instanceof Number before && current instanceof Number after
+                    && after.longValue() - before.longValue() > gapThreshold) return true;
+        }
+        return false;
     }
 
     private static List<Map<String, Object>> safeReportDiagnostics(Object value) {

@@ -117,7 +117,7 @@
       "required": [
         "schemaVersion", "kind", "source", "metric", "profile", "target", "window",
         "sampleResolution", "coverage", "quality", "path", "sourceSha256", "sha256",
-        "lengthBytes", "seriesCount", "sampleCount", "preview"
+        "lengthBytes", "seriesCount", "sampleCount", "previewOmittedSeriesCount", "preview"
       ],
       "properties": {
         "schemaVersion": { "const": "att-load-offline-observation/v1" },
@@ -133,10 +133,37 @@
         "path": { "type": "string", "pattern": "^report/v2/sut-metrics/observations/observation-[0-9]{4}\\.json$" },
         "sourceSha256": { "$ref": "#/$defs/digest" },
         "sha256": { "$ref": "#/$defs/digest" },
-        "lengthBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
-        "seriesCount": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "lengthBytes": { "type": "integer", "minimum": 1, "maximum": 2097152 },
+        "seriesCount": { "type": "integer", "minimum": 0, "maximum": 512 },
         "sampleCount": { "type": "integer", "minimum": 0, "maximum": 1000000 },
-        "preview": { "type": "array", "maxItems": 256, "items": { "type": "object" } }
+        "previewOmittedSeriesCount": { "type": "integer", "minimum": 0, "maximum": 512 },
+        "preview": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["labels", "samples"],
+            "properties": {
+              "labels": { "type": "object" },
+              "samples": {
+                "type": "array",
+                "maxItems": 96,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["timestamp", "timestampEpochMs", "value", "gapBefore"],
+                  "properties": {
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "timestampEpochMs": { "type": "integer" },
+                    "value": { "type": "number" },
+                    "gapBefore": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "diagnostic": {
