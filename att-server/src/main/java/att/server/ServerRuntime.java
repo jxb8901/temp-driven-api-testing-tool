@@ -822,9 +822,10 @@ final class ServerRuntime implements AutoCloseable {
                 }
                 Object rawObservability=scenario==null?null:scenario.get("observability");
                 if(rawObservability instanceof Map<?,?>) {
-                    SutMetricsService.BusinessCallContext callContext=businessCallContext(packageId,root,request.environment,
-                            request.expectedRevisionDigest,workloadIds(scenario));
-                    sutSnapshot=sutMetrics.resolveScenario(JSON.convertValue(rawObservability,Map.class),observationPrincipal,
+                    Map<String,Object> observability=JSON.convertValue(rawObservability,Map.class);
+                    SutMetricsService.BusinessCallContext callContext=sutMetrics.scenarioRequiresBusinessCallContext(observability)
+                            ?businessCallContext(packageId,root,request.environment,request.expectedRevisionDigest,workloadIds(scenario)):null;
+                    sutSnapshot=sutMetrics.resolveScenario(observability,observationPrincipal,
                             sutAdminPrincipal(observationPrincipal),callContext);
                 }
                 else if(rawObservability!=null)throw new IllegalArgumentException("scenario.observability must be an object.");
@@ -2197,9 +2198,10 @@ final class ServerRuntime implements AutoCloseable {
                 sutMetrics.authorizeSnapshot(pinnedSutSnapshot,principal,administrator||sutAdminPrincipal(principal));
                 sutSnapshot=pinnedSutSnapshot;
             } else {
-                SutMetricsService.BusinessCallContext callContext=businessCallContext(packageId,root,environment,
-                        (String)rawDigest,workloadIds(scenario));
-                sutSnapshot=sutMetrics.resolveScenario(JSON.convertValue(rawObservability,Map.class),principal,
+                Map<String,Object> observability=JSON.convertValue(rawObservability,Map.class);
+                SutMetricsService.BusinessCallContext callContext=sutMetrics.scenarioRequiresBusinessCallContext(observability)
+                        ?businessCallContext(packageId,root,environment,(String)rawDigest,workloadIds(scenario)):null;
+                sutSnapshot=sutMetrics.resolveScenario(observability,principal,
                         administrator||sutAdminPrincipal(principal),callContext);
             }
         }
@@ -2784,6 +2786,9 @@ final class ServerRuntime implements AutoCloseable {
             @Override public void close() throws Exception {
                 try { dbHelpers.closeAll();dbHelpers.close(); }
                 finally { log.close(); }
+            }
+            @Override public void cancel() throws Exception {
+                dbHelpers.closeAll();
             }
         };
     }
@@ -5254,7 +5259,8 @@ final class ServerRuntime implements AutoCloseable {
             } catch(Exception ignored) { }
             try { store.deferLoadReportPublicationRetry(id); }
             catch(Exception ignored) { }
-            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Offline SUT report publication failed for Job "+id);
+            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning(
+                    "Offline SUT report publication failed for Job "+id);
         } finally {
             boolean reschedule;
             synchronized(loadReportV2ScheduleLock) {
