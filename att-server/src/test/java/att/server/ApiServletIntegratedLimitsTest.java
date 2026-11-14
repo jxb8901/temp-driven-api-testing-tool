@@ -25,6 +25,7 @@ import java.security.Principal;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.ReentrantLock;
@@ -71,6 +72,69 @@ class ApiServletIntegratedLimitsTest {
             Captured retried=invoke(servlet,"GET","/packages/lilyzhou/load-catalog",Map.of("limit","100"),new byte[0]);
             assertEquals(200,retried.status,new String(retried.body(),StandardCharsets.UTF_8));
             assertEquals(0,ServerRuntime.JSON.readTree(retried.body()).path("items").size());
+            stopInspectionProcesses(runtime);
+        }
+    }
+
+    @Test void asynchronousValidationRecordIsDurableOwnerScopedAndCreatesNoJob() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("validation-record-packages"));
+        createPackage(packages.resolve("payments"));
+        Path libs=workerLibraries("validation-record-libs");
+        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"validation-record-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true)) {
+            ApiServlet servlet=servlet(runtime);
+            byte[] body="{\"command\":\"validate\",\"targetKind\":\"config\"}".getBytes(StandardCharsets.UTF_8);
+            Captured accepted=invokeAs(servlet,"POST","/validations",Map.of(),body,"alice");
+            JsonNode queued=ServerRuntime.JSON.readTree(accepted.body());
+            assertEquals(202,accepted.status,new String(accepted.body(),StandardCharsets.UTF_8));
+            assertTrue(queued.path("validationId").asText().matches("V[0-9A-F]{32}"));
+            String id=queued.path("validationId").asText();
+            assertEquals("QUEUED",queued.path("status").asText());
+            assertTrue(accepted.headers.get("Location").endsWith("/api/v1/validations/"+id));
+
+            Captured otherOwner=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"bob");
+            assertEquals(404,otherOwner.status,"Record identifiers must not disclose another owner's validation");
+            Captured list=invokeAs(servlet,"GET","/validations",Map.of("limit","10"),new byte[0],"alice");
+            JsonNode listed=ServerRuntime.JSON.readTree(list.body());
+            assertEquals(200,list.status,new String(list.body(),StandardCharsets.UTF_8));
+            assertEquals(id,listed.path("items").path(0).path("validationId").asText());
+            assertFalse(listed.path("items").path(0).has("report"),"List rows must not duplicate durable reports");
+
+            Captured result=null;long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+            while(System.nanoTime()<deadline) {
+                result=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
+                JsonNode record=ServerRuntime.JSON.readTree(result.body());
+                if(!List.of("QUEUED","RUNNING").contains(record.path("status").asText()))break;
+                Thread.sleep(25);
+            }
+            assertNotNull(result);
+            JsonNode completed=ServerRuntime.JSON.readTree(result.body());
+            assertEquals(200,result.status,new String(result.body(),StandardCharsets.UTF_8));
+            assertEquals("COMPLETED",completed.path("status").asText());
+            assertEquals("att-validation/v1",completed.path("report").path("schemaVersion").asText());
+            assertEquals(0,runtime.jobsFor("alice",null).size(),"Read-only validation must not create a Job");
+
+            ReentrantLock workerLock=inspectionWorkerLock(runtime);workerLock.lock();
+            try {
+                Captured secondAccepted=invokeAs(servlet,"POST","/validations",Map.of(),body,"alice");
+                String secondId=ServerRuntime.JSON.readTree(secondAccepted.body()).path("validationId").asText();
+                assertEquals(202,secondAccepted.status);
+                boolean sawRunning=false;long runningDeadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while(System.nanoTime()<runningDeadline) {
+                    JsonNode current=ServerRuntime.JSON.readTree(invokeAs(servlet,"GET","/validations/"+secondId,Map.of(),new byte[0],"alice").body());
+                    if("RUNNING".equals(current.path("status").asText())){sawRunning=true;break;}
+                    Thread.sleep(10);
+                }
+                assertTrue(sawRunning,"Validation should enter RUNNING while waiting for the held inspection Worker");
+                Captured duplicate=invokeAs(servlet,"POST","/validations",Map.of(),body,"alice");
+                JsonNode duplicateRecord=ServerRuntime.JSON.readTree(duplicate.body());
+                assertEquals(202,duplicate.status);
+                assertEquals(secondId,duplicateRecord.path("validationId").asText(),
+                        "Submitting the same active owner/context should return the existing durable record");
+                Captured cancelled=invokeAs(servlet,"POST","/validations/"+secondId+"/cancel",Map.of(),new byte[0],"alice");
+                JsonNode cancelledRecord=ServerRuntime.JSON.readTree(cancelled.body());
+                assertEquals(200,cancelled.status,new String(cancelled.body(),StandardCharsets.UTF_8));
+                assertEquals("CANCELLED",cancelledRecord.path("status").asText());
+            } finally {workerLock.unlock();}
             stopInspectionProcesses(runtime);
         }
     }
@@ -299,6 +363,11 @@ class ApiServletIntegratedLimitsTest {
 
     private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
                                   ServerRuntime.WorkerProcessLauncher launcher,Path libs) throws Exception {
+        return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,false);
+    }
+
+    private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
+                                  ServerRuntime.WorkerProcessLauncher launcher,Path libs,boolean authenticationRequired) throws Exception {
         Path yaml=temp.resolve(dataName+".yaml");
         StringBuilder entries=new StringBuilder();
         try(java.util.stream.Stream<Path> children=Files.list(packages)) {
@@ -307,7 +376,8 @@ class ApiServletIntegratedLimitsTest {
         }
         String config="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve(dataName))
                 +"\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
-                +"\n  maxRequestBytes: 1024\n  authenticationRequired: false\n  authorization:\n    allowAnonymousOperations: true\n"
+                +"\n  maxRequestBytes: 1024\n  authenticationRequired: "+authenticationRequired+"\n"
+                +(authenticationRequired?"":"  authorization:\n    allowAnonymousOperations: true\n")
                 +"  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 0\n    timeoutMs: "+timeout
                 +"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 0\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(packages)
                 +"\n  entries:\n"+entries;
@@ -348,6 +418,10 @@ class ApiServletIntegratedLimitsTest {
     }
 
     private Captured invoke(ApiServlet servlet,String method,String path,Map<String,String> parameters,byte[] body) throws Exception {
+        return invokeAs(servlet,method,path,parameters,body,"alice");
+    }
+
+    private Captured invokeAs(ApiServlet servlet,String method,String path,Map<String,String> parameters,byte[] body,String actor) throws Exception {
         ServletContext context=servlet.getServletContext();
         HttpServletRequest request=proxy(HttpServletRequest.class,(self,called,args)->{
             switch(called.getName()) {
@@ -358,7 +432,7 @@ class ApiServletIntegratedLimitsTest {
                 case "getParameter": return parameters.get(args[0]);
                 case "getHeader": return "X-Request-ID".equals(args[0])?"limits-test":null;
                 case "getContentType": return "application/json";
-                case "getUserPrincipal": return (Principal)()->"alice";
+                case "getUserPrincipal": return (Principal)()->actor;
                 case "isUserInRole": return runtimeRole(servlet,args[0]);
                 case "getInputStream": return input(body);
                 case "getRemoteAddr": return "127.0.0.1";
@@ -401,6 +475,11 @@ class ApiServletIntegratedLimitsTest {
     private static java.util.List<?> inspectionWorkers(ServerRuntime runtime) throws Exception {
         Field field=ServerRuntime.class.getDeclaredField("inspectionWorkerPool");field.setAccessible(true);
         return (java.util.List<?>)field.get(runtime);
+    }
+
+    private static ReentrantLock inspectionWorkerLock(ServerRuntime runtime) throws Exception {
+        Object worker=inspectionWorkers(runtime).get(0);Field field=worker.getClass().getDeclaredField("lock");field.setAccessible(true);
+        return (ReentrantLock)field.get(worker);
     }
 
     private static void stopInspectionProcesses(ServerRuntime runtime) throws Exception {

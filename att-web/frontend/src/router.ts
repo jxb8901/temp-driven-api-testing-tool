@@ -21,6 +21,7 @@ export interface LoadCatalogRouteState {
 export type ValidationScope = 'config' | 'package' | 'case' | 'suite' | 'template' | 'flow' | 'tool' | 'load';
 export interface ValidationRouteState {
   kind: 'validation';
+  validationId?: string;
   scope?: ValidationScope;
   packageId?: string;
   environment?: string;
@@ -94,6 +95,7 @@ export function parseRoute(hash: string): AppRoute {
   if (parts.length === 0) return { kind: 'dashboard' };
   if (parts[0] === 'monitoring' && parts.length === 1) return { kind: 'monitoring' };
   if (parts[0] === 'validate' && parts.length === 1) {
+    const rawValidationId = query.get('record');
     const rawScope = query.get('scope');
     const scope = rawScope && ['config', 'package', 'case', 'suite', 'template', 'flow', 'tool', 'load'].includes(rawScope)
       ? rawScope as ValidationScope : undefined;
@@ -108,7 +110,7 @@ export function parseRoute(hash: string): AppRoute {
       ? { type: resourceType, resourceId, ...(safeRouteValue(query.get('resourceLogicalId'), 512)
         ? { logicalId: safeRouteValue(query.get('resourceLogicalId'), 512)! } : {}) }
       : undefined;
-    return { kind: 'validation', ...(scope ? { scope } : {}), ...(packageId ? { packageId } : {}),
+    return { kind: 'validation', ...(rawValidationId && /^V[0-9A-F]{32}$/.test(rawValidationId) ? { validationId: rawValidationId } : {}), ...(scope ? { scope } : {}), ...(packageId ? { packageId } : {}),
       ...(environment !== undefined ? { environment } : {}), ...(target ? { target } : {}), ...(resource ? { resource } : {}) };
   }
   if (parts[0] === 'packages' && parts.length === 1) return { kind: 'packages' };
@@ -256,6 +258,7 @@ export function formatRoute(route: AppRoute): string {
     case 'monitoring': return '#/monitoring';
     case 'validation': {
       const query = new URLSearchParams();
+      if (route.validationId) query.set('record', route.validationId);
       if (route.scope) query.set('scope', route.scope);
       if (route.packageId) query.set('package', route.packageId);
       if (route.environment !== undefined) query.set('environment', route.environment);

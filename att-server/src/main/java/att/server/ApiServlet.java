@@ -61,7 +61,7 @@ public final class ApiServlet extends HttpServlet {
         try {
             if(path.startsWith("/auth/")){authGet(req,res,path,requestId);return;}
             if("/health".equals(path)){json(res,200,Map.of("status","UP","version",ServerBuildInfo.PRODUCT,"apiVersion",ServerApi.VERSION,"requestId",requestId));return;}
-            if("/version".equals(path)){Map<String,Object> version=new LinkedHashMap<>();version.put("version",ServerBuildInfo.PRODUCT);version.put("apiVersion",ServerApi.VERSION);version.put("validationApiVersion",ServerApi.VALIDATION_REPORT_VERSION);version.put("buildTime",ServerBuildInfo.BUILD_TIME);version.put("gitCommit",ServerBuildInfo.GIT_COMMIT);version.put("javaMinimum",17);version.put("inlineLoadEnabled",runtime.config.inlineLoad.enabled);version.put("loadSchedulingEnabled",runtime.config.scheduling.enabled);version.put("unifiedRunVersion",RunDefinition.VERSION);version.put("authMode",runtime.config.authMode);version.put("authenticationRequired",runtime.config.authenticationRequired);version.put("requestId",requestId);json(res,200,version);return;}
+            if("/version".equals(path)){Map<String,Object> version=new LinkedHashMap<>();version.put("version",ServerBuildInfo.PRODUCT);version.put("apiVersion",ServerApi.VERSION);version.put("validationApiVersion",ServerApi.VALIDATION_REPORT_VERSION);if(runtime.config.validationRecords.enabled&&runtime.config.inspection.enabled)version.put("validationRecordsApiVersion","att-validation-records/v1");version.put("buildTime",ServerBuildInfo.BUILD_TIME);version.put("gitCommit",ServerBuildInfo.GIT_COMMIT);version.put("javaMinimum",17);version.put("inlineLoadEnabled",runtime.config.inlineLoad.enabled);version.put("loadSchedulingEnabled",runtime.config.scheduling.enabled);version.put("unifiedRunVersion",RunDefinition.VERSION);version.put("authMode",runtime.config.authMode);version.put("authenticationRequired",runtime.config.authenticationRequired);version.put("requestId",requestId);json(res,200,version);return;}
             boolean resourceRequest=resourcePath(path);
             boolean loadCatalogRequest=path.matches("/packages/[^/]+/load-catalog(?:/(?:source|validate|detail))?");
             boolean configurationRequest=configurationPath(path);
@@ -69,6 +69,21 @@ public final class ApiServlet extends HttpServlet {
             if(loadSchedulePath(path)){scheduleGet(req,res,path,requestId);return;}
             boolean draftRequest=path.matches("/drafts/[DLAR][0-9A-F]{32}");
             String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+            if("/validations".equals(path)) {
+                if(!requireValidationIdentity(principal,res,requestId))return;
+                boolean admin=systemAdminCapability(req,principal);if(!admin&&!requireOperator(req,res,requestId))return;
+                Map<String,Object> response=runtime.listValidationRecords(principal,req.getParameter("packageId"),
+                        req.getParameter("scope"),parseValidationLimit(req.getParameter("limit")),req.getParameter("cursor"),admin);
+                response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;
+            }
+            if(path.matches("/validations/V[0-9A-F]{32}")) {
+                if(!requireValidationIdentity(principal,res,requestId))return;
+                String id=segment(path,2);boolean adminRecord=runtime.validationRecordRequiresAdmin(id,principal);
+                if(adminRecord){if(!requireSystemAdmin(req,res,requestId))return;}
+                else if(!requireOperator(req,res,requestId))return;
+                Map<String,Object> response=runtime.validationRecord(id,principal);response.put("requestId",requestId);
+                res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;
+            }
             if("/monitoring".equals(path)) {
                 if(!requireMonitoringRead(req,res,requestId))return;
                 res.setHeader("Cache-Control","no-store");json(res,200,runtime.monitoringSnapshot(requestId));return;
@@ -187,6 +202,8 @@ public final class ApiServlet extends HttpServlet {
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
         if(loadSchedulePath(path)){schedulePost(req,res,path,requestId,authorizationPrincipal);return;}
         if("/validation".equals(path)){validationPost(req,res,requestId,authorizationPrincipal);return;}
+        if("/validations".equals(path)){validationAsyncPost(req,res,requestId,authorizationPrincipal);return;}
+        if(path.matches("/validations/V[0-9A-F]{32}/cancel")) {validationCancelPost(req,res,path,requestId,authorizationPrincipal);return;}
         if(!requireOperator(req,res,requestId))return;
         if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,authorizationPrincipal);return;}
         if(path.matches("/packages/[^/]+/package-configuration/(?:drafts(?:/[^/]+/(?:validate|review|publish|discard))?|rollback)")) {
@@ -298,6 +315,52 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionResponseTooLargeException oversized){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Validation report exceeded the configured response limit",requestId);}
           catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
           catch(Exception failure){error(res,500,"ATT-SERVER-VALIDATION-FAILED","Read-only validation could not be completed",requestId);getServletContext().log("ATT Server validation failed id="+requestId,failure);}
+    }
+
+    private void validationAsyncPost(HttpServletRequest req,HttpServletResponse res,String requestId,String actor)throws IOException {
+        try {
+            if(RequestIdentity.ANONYMOUS.equals(actor)){error(res,403,"ATT-SERVER-AUTHENTICATION-REQUIRED","Server-owned validation records require an authenticated user identity",requestId);return;}
+            if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
+            if(!checkOrigin(req,res,requestId,false))return;
+            byte[] bytes=req.getInputStream().readNBytes(runtime.config.maxRequestBytes+1);
+            if(bytes.length>runtime.config.maxRequestBytes){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Validation request exceeds the configured size limit",requestId);return;}
+            JsonNode input;try{input=ServerRuntime.JSON.readTree(bytes);}catch(JsonProcessingException malformed){error(res,400,"ATT-SERVER-INVALID-REQUEST","Request body is not valid JSON",requestId);return;}
+            if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON validation plan is required");
+            if(input.path("all").asBoolean(false)){if(!requireSystemAdmin(req,res,requestId))return;}
+            else if(!requireOperator(req,res,requestId))return;
+            Map<String,Object> record=runtime.submitValidation(input,actor,requestId);
+            res.setHeader("Location",req.getContextPath()+"/api/v1/validations/"+record.get("validationId"));
+            res.setHeader("Cache-Control","private, no-store");json(res,202,record);
+        } catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","Registered Package or validation target was not found",requestId);}
+          catch(PackageConfigurationPolicy.EnvironmentDeniedException denied){error(res,403,"ATT-PACKAGE-ENVIRONMENT-DENIED",safeDetail(denied),requestId);}
+          catch(ServerRuntime.InspectionCapacityException full){res.setHeader("Retry-After","2");error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Validation queue capacity is full; retry shortly",requestId);}
+          catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+          catch(Exception failure){error(res,500,"ATT-SERVER-VALIDATION-FAILED","Read-only validation could not be admitted",requestId);getServletContext().log("ATT Server async validation admission failed id="+requestId,failure);}
+    }
+
+    private void validationCancelPost(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String actor)throws IOException {
+        try {
+            if(!requireValidationIdentity(actor,res,requestId))return;
+            if(!checkOrigin(req,res,requestId,false))return;
+            String id=segment(path,2);boolean adminRecord=runtime.validationRecordRequiresAdmin(id,actor);
+            if(adminRecord){if(!requireSystemAdmin(req,res,requestId))return;}
+            else if(!requireOperator(req,res,requestId))return;
+            Map<String,Object> record=runtime.cancelValidation(id,actor);record.put("requestId",requestId);
+            res.setHeader("Cache-Control","private, no-store");json(res,200,record);
+        } catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","Validation record was not found",requestId);}
+          catch(PackageConfigurationPolicy.EnvironmentDeniedException denied){error(res,404,"ATT-SERVER-NOT-FOUND","Validation record was not found",requestId);}
+          catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The validation could not be cancelled",requestId);getServletContext().log("ATT Server validation cancel failed id="+requestId,failure);}
+    }
+
+    private static int parseValidationLimit(String value) {
+        if(value==null||value.isBlank())return 20;
+        try {int parsed=Integer.parseInt(value);if(parsed<1||parsed>100)throw new NumberFormatException();return parsed;}
+        catch(NumberFormatException invalid){throw new IllegalArgumentException("limit must be from 1 to 100");}
+    }
+
+    private static boolean requireValidationIdentity(String actor,HttpServletResponse res,String requestId)throws IOException {
+        if(actor!=null&&!actor.isBlank()&&!RequestIdentity.ANONYMOUS.equals(actor))return true;
+        error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Validation records require an authenticated user identity",requestId);return false;
     }
     @Override protected void doDelete(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req),principal=principal(req);

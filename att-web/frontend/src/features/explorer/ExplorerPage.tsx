@@ -121,11 +121,12 @@ function ExplorerReference({ reference, onOpen, onOpenFile, sourceIdentity }: {
 
 export function ExplorerPage({ api, packageId, resourceRoute, environment,
   principalLabel = '', onResourceRouteChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad,
-  onRunTarget, onValidateTarget, onRunBatch, onScheduleDebug, onOpenConfigurationFile, onOpenTestdata, registerUnsavedChanges }: ExplorerPageProps) {
+  onRunTarget, onValidateTarget, onValidatePackage, onRunBatch, onScheduleDebug, onOpenConfigurationFile, onOpenTestdata, registerUnsavedChanges }: ExplorerPageProps) {
   const workspace = useContext(AppShellContext);
   const validationText = workspace?.uiLocale === 'zh-Hant'
     ? { case: '唯讀驗證 Case', resource: '唯讀驗證', suite: '唯讀驗證 Suite' }
     : { case: 'Read-only validate Case', resource: 'Read-only validate', suite: 'Read-only validate Suite' };
+  const validatePackageText = workspace?.uiLocale === 'zh-Hant' ? '唯讀驗證套件' : 'Read-only validate Package';
   const initialListState = useRef(savedExplorerList(packageId)).current;
   const [query, setQuery] = useState(initialListState.query);
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
@@ -482,7 +483,10 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
     <header className="att-explorer-page-heading">
       <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>{identity ? 'Resource details' : 'Package Explorer'}</h1>
         <p>{identity ? 'View the safe definition, source, and dependencies for this resource.' : 'Search, sort, and open resources. Choose an execution environment from the RUN or Quick LOAD editor.'}</p></div>
-      {!identity && onRunBatch && <button className="button button-primary" type="button" onClick={onRunBatch}>Batch RUN</button>}
+      {!identity && <div className="att-explorer-heading-actions">
+        {onValidatePackage && <button className="button button-quiet" type="button" onClick={onValidatePackage}>{validatePackageText}</button>}
+        {onRunBatch && <button className="button button-primary" type="button" onClick={onRunBatch}>Batch RUN</button>}
+      </div>}
     </header>
 
     <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}${identity ? '' : ' att-query-workspace'}`}>

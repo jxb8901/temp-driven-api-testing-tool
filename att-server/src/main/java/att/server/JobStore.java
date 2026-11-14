@@ -7,6 +7,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -111,6 +112,9 @@ final class JobStore implements AutoCloseable {
             s.execute("ALTER TABLE job_replay_intents ADD COLUMN IF NOT EXISTS expires_at BIGINT");
             s.execute("UPDATE job_replay_intents SET expires_at="+(System.currentTimeMillis()+REPLAY_INTENT_RETENTION.toMillis())+" WHERE expires_at IS NULL");
             s.execute("CREATE INDEX IF NOT EXISTS job_replay_intents_expiry_idx ON job_replay_intents(expires_at)");
+            s.execute("CREATE TABLE IF NOT EXISTS validation_records (validation_id VARCHAR(40) PRIMARY KEY, actor VARCHAR(256) NOT NULL, all_scope BOOLEAN DEFAULT FALSE NOT NULL, scope VARCHAR(16) NOT NULL, package_id VARCHAR(64), target VARCHAR(1024), environment VARCHAR(128), state VARCHAR(16) NOT NULL, phase VARCHAR(64), request_id VARCHAR(128) NOT NULL, submitted_at VARCHAR(40) NOT NULL, started_at VARCHAR(40), finished_at VARCHAR(40), queue_elapsed_ms BIGINT, execution_elapsed_ms BIGINT, total_elapsed_ms BIGINT, source_revision VARCHAR(128), plan_json CLOB NOT NULL, report_json CLOB, error_code VARCHAR(80), error_message VARCHAR(512), record_bytes BIGINT NOT NULL)");
+            s.execute("CREATE INDEX IF NOT EXISTS validation_records_owner_page_idx ON validation_records(actor,submitted_at,validation_id)");
+            s.execute("CREATE INDEX IF NOT EXISTS validation_records_retention_idx ON validation_records(state,submitted_at)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS replay_unavailable VARCHAR(240)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS rerun_of_job_id VARCHAR(80)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS replay_intent VARCHAR(80)");
@@ -945,6 +949,202 @@ final class JobStore implements AutoCloseable {
     synchronized void saveAuthSession(String tokenHash,String login,String csrf,long now,long expiry) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("INSERT INTO auth_sessions(token_hash,login_id,csrf_token,created_at,last_seen,absolute_expiry) VALUES(?,?,?,?,?,?)")){p.setString(1,tokenHash);p.setString(2,login);p.setString(3,csrf);p.setLong(4,now);p.setLong(5,now);p.setLong(6,expiry);p.executeUpdate();}}
     synchronized Map<String,String> authSession(String hash,long now,long idleMillis) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT s.login_id,s.csrf_token,s.last_seen,s.absolute_expiry,u.display_name,u.role,u.active FROM auth_sessions s JOIN auth_users u ON u.login_id=s.login_id WHERE s.token_hash=?")){p.setString(1,hash);try(ResultSet r=p.executeQuery()){if(!r.next())return null;long seen=r.getLong(3),expiry=r.getLong(4);if(!r.getBoolean(7)||now>expiry||now-seen>idleMillis){deleteAuthSession(hash);return null;}try(Connection touchConnection=connect();PreparedStatement touch=touchConnection.prepareStatement("UPDATE auth_sessions SET last_seen=? WHERE token_hash=?")){touch.setLong(1,now);touch.setString(2,hash);touch.executeUpdate();}Map<String,String> m=new LinkedHashMap<>();m.put("loginId",r.getString(1));m.put("csrfToken",r.getString(2));m.put("displayName",r.getString(5));m.put("role",r.getString(6));return m;}}
+    }
+
+    /** Insert a durable QUEUED validation record before its task is offered to the bounded executor. */
+    synchronized String createValidationRecord(String id,String actor,boolean all,String scope,String packageId,String target,
+            String environment,String requestId,String submittedAt,String planJson,ServerConfig.ValidationRecords limits,
+            Instant now) throws Exception {
+        long bytes=validationRecordBytes(planJson,null);
+        if(bytes>limits.maxRecordBytes)throw new IllegalArgumentException("Validation request exceeds the configured record size limit");
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                deleteExpiredValidationRecords(c,now.minus(Duration.ofDays(limits.retentionDays)));
+                try(PreparedStatement duplicate=c.prepareStatement("SELECT validation_id FROM validation_records WHERE actor=? AND all_scope=? AND scope=? AND ((package_id=?) OR (package_id IS NULL AND ? IS NULL)) AND ((target=?) OR (target IS NULL AND ? IS NULL)) AND ((environment=?) OR (environment IS NULL AND ? IS NULL)) AND state IN ('QUEUED','RUNNING') ORDER BY submitted_at DESC,validation_id DESC LIMIT 1")) {
+                    duplicate.setString(1,actor);duplicate.setBoolean(2,all);duplicate.setString(3,scope);
+                    duplicate.setString(4,packageId);duplicate.setString(5,packageId);duplicate.setString(6,target);duplicate.setString(7,target);
+                    duplicate.setString(8,environment);duplicate.setString(9,environment);
+                    try(ResultSet row=duplicate.executeQuery()) {
+                        if(row.next()){String existing=row.getString(1);c.commit();return existing;}
+                    }
+                }
+                while(validationRecordCountOver(c,limits.maxRecords,limits.maxTotalBytes,bytes)) {
+                    String oldest=oldestTerminalValidationId(c);
+                    if(oldest==null)throw new ServerRuntime.InspectionCapacityException();
+                    try(PreparedStatement delete=c.prepareStatement("DELETE FROM validation_records WHERE validation_id=? AND state NOT IN ('QUEUED','RUNNING')")) {
+                        delete.setString(1,oldest);if(delete.executeUpdate()==0)continue;
+                    }
+                }
+                try(PreparedStatement p=c.prepareStatement("INSERT INTO validation_records(validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,plan_json,record_bytes) VALUES(?,?,?,?,?,?,?,'QUEUED','QUEUED',?,?,?,?)")) {
+                    p.setString(1,id);p.setString(2,actor);p.setBoolean(3,all);p.setString(4,scope);p.setString(5,packageId);
+                    p.setString(6,target);p.setString(7,environment);p.setString(8,requestId);p.setString(9,submittedAt);
+                    p.setString(10,planJson);p.setLong(11,bytes);p.executeUpdate();
+                }
+                c.commit();return null;
+            } catch(Exception failure) {c.rollback();throw failure;}
+        }
+    }
+
+    synchronized void deleteValidationRecord(String id,String actor) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM validation_records WHERE validation_id=? AND actor=? AND state='QUEUED'")) {
+            p.setString(1,id);p.setString(2,actor);p.executeUpdate();
+        }
+    }
+
+    synchronized Map<String,Object> activeValidationRecord(String actor,boolean all,String scope,String packageId,String target,
+            String environment) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,report_json,error_code,error_message,plan_json,record_bytes FROM validation_records WHERE actor=? AND all_scope=? AND scope=? AND ((package_id=?) OR (package_id IS NULL AND ? IS NULL)) AND ((target=?) OR (target IS NULL AND ? IS NULL)) AND ((environment=?) OR (environment IS NULL AND ? IS NULL)) AND state IN ('QUEUED','RUNNING') ORDER BY submitted_at DESC,validation_id DESC LIMIT 1")) {
+            p.setString(1,actor);p.setBoolean(2,all);p.setString(3,scope);p.setString(4,packageId);p.setString(5,packageId);
+            p.setString(6,target);p.setString(7,target);p.setString(8,environment);p.setString(9,environment);
+            try(ResultSet row=p.executeQuery()){return row.next()?readValidationRecord(row,true):null;}
+        }
+    }
+
+    synchronized Map<String,Object> validationRecord(String id,String actor) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,report_json,error_code,error_message,plan_json,record_bytes FROM validation_records WHERE validation_id=? AND actor=?")) {
+            p.setString(1,id);p.setString(2,actor);try(ResultSet r=p.executeQuery()){return r.next()?readValidationRecord(r,true):null;}
+        }
+    }
+
+    synchronized List<Map<String,Object>> validationRecords(String actor,String packageId,String scope,boolean includeAll,
+            String beforeAt,String beforeId,int limit) throws Exception {
+        StringBuilder sql=new StringBuilder("SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,report_json,error_code,error_message,plan_json,record_bytes FROM validation_records WHERE actor=?");
+        if(packageId!=null)sql.append(" AND package_id=?");if(scope!=null)sql.append(" AND scope=?");if(!includeAll)sql.append(" AND all_scope=FALSE");
+        if(beforeAt!=null)sql.append(" AND (submitted_at<? OR (submitted_at=? AND validation_id<?))");
+        sql.append(" ORDER BY submitted_at DESC,validation_id DESC LIMIT ?");
+        List<Map<String,Object>> out=new ArrayList<>();
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql.toString())) {
+            int n=1;p.setString(n++,actor);if(packageId!=null)p.setString(n++,packageId);if(scope!=null)p.setString(n++,scope);
+            if(beforeAt!=null){p.setString(n++,beforeAt);p.setString(n++,beforeAt);p.setString(n++,beforeId);}p.setInt(n,limit);
+            try(ResultSet r=p.executeQuery()){while(r.next())out.add(readValidationRecord(r,false));}
+        }
+        return out;
+    }
+
+    synchronized boolean startValidationRecord(String id,String startedAt,long queueElapsedMs) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE validation_records SET state='RUNNING',phase=NULL,started_at=?,queue_elapsed_ms=? WHERE validation_id=? AND state='QUEUED'")) {
+            p.setString(1,startedAt);p.setLong(2,queueElapsedMs);p.setString(3,id);return p.executeUpdate()==1;
+        }
+    }
+
+    synchronized void validationSourceContext(String id,String environment,String sourceRevision) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE validation_records SET environment=COALESCE(?,environment),source_revision=? WHERE validation_id=? AND state='RUNNING'")) {
+            p.setString(1,environment);p.setString(2,sourceRevision);p.setString(3,id);p.executeUpdate();
+        }
+    }
+
+    synchronized boolean finishValidationRecord(String id,String state,String finishedAt,long queueElapsedMs,
+            long executionElapsedMs,long totalElapsedMs,String reportJson,String errorCode,String errorMessage,
+            ServerConfig.ValidationRecords limits) throws Exception {
+        if(!Set.of("COMPLETED","FAILED","TIMED_OUT","INTERRUPTED").contains(state))
+            throw new IllegalArgumentException("Invalid terminal validation state");
+        long bytes=validationRecordBytes(null,reportJson);
+        if(bytes>limits.maxRecordBytes){
+            state="FAILED";reportJson=null;errorCode="ATT-SERVER-VALIDATION-RECORD-LIMIT";
+            errorMessage="The safe validation report exceeded the configured record size limit";
+            bytes=validationRecordBytes(null,null);
+        }
+        long additionalBytes=bytes-validationRecordBytes(null,null);
+        try(Connection c=connect()) {
+            c.setAutoCommit(false);
+            try {
+                long currentBytes;
+                try(PreparedStatement current=c.prepareStatement("SELECT record_bytes FROM validation_records WHERE validation_id=? AND state IN ('QUEUED','RUNNING')")) {
+                    current.setString(1,id);try(ResultSet row=current.executeQuery()) {
+                        if(!row.next()){c.rollback();return false;}currentBytes=row.getLong(1);
+                    }
+                }
+                if(currentBytes+additionalBytes>limits.maxRecordBytes) {
+                    state="FAILED";reportJson=null;errorCode="ATT-SERVER-VALIDATION-RECORD-LIMIT";
+                    errorMessage="The safe validation report exceeded the configured record size limit";
+                    additionalBytes=0;
+                }
+                while(additionalBytes>0&&validationRecordTotalOver(c,limits.maxTotalBytes,additionalBytes)) {
+                    String oldest=oldestTerminalValidationId(c,id);
+                    if(oldest==null) {
+                        state="FAILED";reportJson=null;errorCode="ATT-SERVER-VALIDATION-RECORD-CAPACITY";
+                        errorMessage="The safe validation report could not fit within the configured record storage limit";
+                        additionalBytes=0;
+                        break;
+                    }
+                    try(PreparedStatement delete=c.prepareStatement("DELETE FROM validation_records WHERE validation_id=? AND state NOT IN ('QUEUED','RUNNING')")) {
+                        delete.setString(1,oldest);if(delete.executeUpdate()==0)continue;
+                    }
+                }
+                try(PreparedStatement p=c.prepareStatement("UPDATE validation_records SET state=?,phase=NULL,finished_at=?,queue_elapsed_ms=?,execution_elapsed_ms=?,total_elapsed_ms=?,report_json=?,error_code=?,error_message=?,record_bytes=record_bytes+? WHERE validation_id=? AND state IN ('QUEUED','RUNNING')")) {
+            p.setString(1,state);p.setString(2,finishedAt);p.setLong(3,Math.max(0,queueElapsedMs));
+            p.setLong(4,Math.max(0,executionElapsedMs));p.setLong(5,Math.max(0,totalElapsedMs));p.setString(6,reportJson);
+                    p.setString(7,errorCode);p.setString(8,bounded(errorMessage==null?"":errorMessage,512));p.setLong(9,additionalBytes);p.setString(10,id);
+                    boolean updated=p.executeUpdate()==1;c.commit();return updated;
+                }
+            } catch(Exception failure) {c.rollback();throw failure;}
+        }
+    }
+
+    synchronized Map<String,Object> cancelValidationRecord(String id,String actor,String finishedAt,long queueElapsedMs,
+            long executionElapsedMs,long totalElapsedMs) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE validation_records SET state='CANCELLED',phase=NULL,finished_at=?,queue_elapsed_ms=?,execution_elapsed_ms=?,total_elapsed_ms=?,error_code='ATT-SERVER-VALIDATION-CANCELLED',error_message='Validation was cancelled by the owner' WHERE validation_id=? AND actor=? AND state IN ('QUEUED','RUNNING')")) {
+            p.setString(1,finishedAt);p.setLong(2,Math.max(0,queueElapsedMs));p.setLong(3,Math.max(0,executionElapsedMs));
+            p.setLong(4,Math.max(0,totalElapsedMs));p.setString(5,id);p.setString(6,actor);p.executeUpdate();
+        }
+        return validationRecord(id,actor);
+    }
+
+    synchronized void interruptActiveValidationRecords(Instant now) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("UPDATE validation_records SET state='INTERRUPTED',phase=NULL,finished_at=?,error_code='ATT-SERVER-VALIDATION-INTERRUPTED',error_message='Validation was interrupted by Server restart' WHERE state IN ('QUEUED','RUNNING')")) {
+            p.setString(1,now.toString());p.executeUpdate();
+        }
+    }
+
+    synchronized int deleteExpiredValidationRecords(Instant before) throws Exception {
+        try(Connection c=connect()) {return deleteExpiredValidationRecords(c,before);}
+    }
+
+    private static int deleteExpiredValidationRecords(Connection c,Instant before) throws Exception {
+        try(PreparedStatement p=c.prepareStatement("DELETE FROM validation_records WHERE submitted_at<? AND state NOT IN ('QUEUED','RUNNING')")) {
+            p.setString(1,before.toString());return p.executeUpdate();
+        }
+    }
+
+    private static boolean validationRecordCountOver(Connection c,int maxRecords,long maxBytes,long additionalBytes) throws Exception {
+        try(Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COUNT(*),COALESCE(SUM(record_bytes),0) FROM validation_records")) {
+            r.next();return r.getLong(1)>=maxRecords||r.getLong(2)+additionalBytes>maxBytes;
+        }
+    }
+
+    private static String oldestTerminalValidationId(Connection c) throws Exception {return oldestTerminalValidationId(c,null);}
+
+    private static String oldestTerminalValidationId(Connection c,String excludingId) throws Exception {
+        String sql="SELECT validation_id FROM validation_records WHERE state NOT IN ('QUEUED','RUNNING')"+(excludingId==null?"":" AND validation_id<>?")+" ORDER BY submitted_at,validation_id LIMIT 1";
+        try(PreparedStatement s=c.prepareStatement(sql)) {
+            if(excludingId!=null)s.setString(1,excludingId);
+            try(ResultSet r=s.executeQuery()) {
+            return r.next()?r.getString(1):null;
+            }
+        }
+    }
+
+    private static boolean validationRecordTotalOver(Connection c,long maxBytes,long additionalBytes) throws Exception {
+        try(Statement s=c.createStatement();ResultSet r=s.executeQuery("SELECT COALESCE(SUM(record_bytes),0) FROM validation_records")) {
+            r.next();return r.getLong(1)+additionalBytes>maxBytes;
+        }
+    }
+
+    private static long validationRecordBytes(String planJson,String reportJson) {
+        return 512L+(planJson==null?0:planJson.getBytes(StandardCharsets.UTF_8).length)
+                +(reportJson==null?0:reportJson.getBytes(StandardCharsets.UTF_8).length);
+    }
+
+    @SuppressWarnings("unchecked") private static Map<String,Object> readValidationRecord(ResultSet r,boolean includeReport) throws Exception {
+        Map<String,Object> m=new LinkedHashMap<>();m.put("validationId",r.getString(1));m.put("actor",r.getString(2));
+        m.put("all",r.getBoolean(3));m.put("scope",r.getString(4));m.put("packageId",r.getString(5));m.put("target",r.getString(6));
+        m.put("environment",r.getString(7));m.put("status",r.getString(8));m.put("phase",r.getString(9));m.put("requestId",r.getString(10));
+        m.put("submittedAt",r.getString(11));m.put("startedAt",r.getString(12));m.put("finishedAt",r.getString(13));
+        m.put("queueElapsedMs",r.getObject(14));m.put("executionElapsedMs",r.getObject(15));m.put("totalElapsedMs",r.getObject(16));
+        m.put("sourceRevision",r.getString(17));String report=r.getString(18);m.put("errorCode",r.getString(19));m.put("error",r.getString(20));
+        if(includeReport&&report!=null)m.put("report",(Map<String,Object>)ServerRuntime.JSON.readValue(report,Map.class));
+        if(r.getString(21)!=null)m.put("planJson",r.getString(21));m.put("recordBytes",r.getLong(22));return m;
     }
     synchronized void deleteAuthSession(String hash) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM auth_sessions WHERE token_hash=?")){p.setString(1,hash);p.executeUpdate();}}
     synchronized void revokeAuthSessions(String login) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM auth_sessions WHERE login_id=?")){p.setString(1,login);p.executeUpdate();}}

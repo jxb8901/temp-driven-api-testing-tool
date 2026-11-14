@@ -127,4 +127,10 @@ describe('ATT hash route contract', () => {
     expect(parseRoute('#/configuration/payments?configurationReferenceId=bad%2Ftoken'))
       .not.toHaveProperty('configurationReferenceId');
   });
+
+  it('round-trips only well-formed durable validation record links', () => {
+    const route = { kind: 'validation', validationId: 'V0123456789ABCDEF0123456789ABCDEF' } as const;
+    expect(parseRoute(formatRoute(route))).toEqual(route);
+    expect(parseRoute('#/validate?record=Vnot-a-record')).toEqual({ kind: 'validation' });
+  });
 });

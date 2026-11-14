@@ -16,7 +16,7 @@ ATT Server 在 `<Tomcat context path>/ui/` 提供靜態瀏覽器主控台，例�
 
 主控台會列出已設定的邏輯套件 ID 與近期持久化工作。選擇套件後可提交 Run、Debug、Load 或 Validate，接著開啟工作以追蹤進度、檢視終端結果與安全診斷、取消執行中的工作，或下載邏輯 artifact。套件資源欄位使用相對於所選套件的邏輯路徑。UI 不接受或顯示 `PACKAGE_ROOT` 或 Server 儲存路徑。Artifacts 分頁顯示封存狀態，並從經驗證的 ZIP 預覽報告及文字。**Download Artifacts (.zip)** 是唯一下載操作；HTML 報告使用隔離的檢視器。詳見 [Artifact 發布與復原](../../reference/results-reports-evidence.md#att-server-job-artifact-publication)。 工作深層連結（例如 `/ui/jobs/J10045`）會轉址至標準 hash route，並透過公開 API 與 SSE 重新載入工作狀態。
 
-`#/validate` 的 **Validate** 工作區提供 shared/effective Config、已註冊 Package、所選 Explorer resource 及可執行 LOAD Scenario 的同步唯讀檢查。只有用戶選取 **Run Validation** 後，才會呼叫 `POST /api/v1/validation`；RUN/LOAD draft 及 Job workflow 維持既有行為。`/version` 宣告 `validationApiVersion: "att-validation/v1"` 後，Studio 才會啟用此 action。詳見[唯讀 validation](validation.zh.md)。
+`#/validate` 的 **Validate** 工作區提供 shared/effective Config、已註冊 Package、所選 Explorer resource 及可執行 LOAD Scenario 的同步唯讀檢查。Configuration、Explorer 及 LOAD Catalog 的上下文 action 使用 `POST /api/v1/validations` 建立持久非同步 record；離開頁面及 Server restart 後，owner 仍可恢復結果。同步 form 使用 `POST /api/v1/validation`。RUN/LOAD draft 及 Job workflow 維持既有行為。詳見[唯讀 validation](validation.zh.md)。
 
 瀏覽器只使用公開的同源 `/api/v1` REST 與 SSE 契約。REST 請求與原生 `EventSource` 使用瀏覽器管理的容器驗證。SSE 重新連線使用瀏覽器標準 `Last-Event-ID` 行為；重新整理工作頁面時會從 Server 重新載入工作狀態與保留事件。關閉瀏覽器分頁不會取消工作。取消前需要確認，UI 會等候 Server 回報終端狀態。
 

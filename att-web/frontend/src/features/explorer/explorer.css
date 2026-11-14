@@ -19,6 +19,7 @@
   align-items: end;
   gap: var(--att-space-4, 1rem);
 }
+.att-explorer-heading-actions { display: flex; flex-wrap: wrap; gap: var(--att-space-2, .5rem); }
 .att-explorer-page-heading > div > p,
 .att-config-heading p { color: var(--att-color-muted, #526171); margin: 0; }
 .att-explorer-breadcrumb { font-size: .8rem; margin: 0 0 var(--att-space-1, .25rem) !important; }
