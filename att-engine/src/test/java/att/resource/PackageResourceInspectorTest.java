@@ -103,8 +103,16 @@ class PackageResourceInspectorTest {
         writeUtf8(unrelated,"generated artifact one\n");
         try(PackageResourceInspector inspector=new PackageResourceInspector(root,root.resolve("config/config.yaml"),"SIT",
                 Collections.<String>emptyList(),65536,262144,true)) {
+            inspector.inspect("list",null,null,null,0,20);
+            assertEquals(0,inspector.validationSourceRevisionBuildCount(),
+                    "Ordinary Explorer inspection must not hash validation-only Testdata descriptors");
+            assertTrue(inspector.validationSourceRevisionDigest(false).matches("[a-f0-9]{64}"));
+            assertEquals(0,inspector.validationSourceRevisionBuildCount(),
+                    "Shared Config applicability does not need the Package Testdata fingerprint");
             String first=inspector.validationSourceRevisionDigest(true);
             assertTrue(first.matches("[a-f0-9]{64}"));
+            assertEquals(1,inspector.validationSourceRevisionBuildCount(),
+                    "The Package Testdata fingerprint is built only after Package validation asks for it");
             long builds=inspector.indexBuildCount();
             assertEquals(first,inspector.validationSourceRevisionDigest(true));
             assertEquals(builds,inspector.indexBuildCount(),"Repeated validation detail reads reuse the unchanged watched index");
@@ -125,6 +133,40 @@ class PackageResourceInspectorTest {
             String manifestRevision=inspector.validationSourceRevisionDigest(true);
             assertTrue(manifestRevision==null||!changed.equals(manifestRevision),
                     "A manifest edit is unverified until refresh or yields a new fingerprint if the watcher already rebuilt the index");
+        }
+    }
+
+    @Test void externalSharedConfigChildChangesInvalidateSharedAndPackageValidationRevisions() throws Exception {
+        Path root=packageWithTemplate("validation-external-config","EXTERNAL","description: shared config watcher");
+        Path runtimeRoot=Files.createDirectories(temp.resolve("validation-external-runtime/config"));
+        Path config=runtimeRoot.resolve("config.yaml");
+        Path helper=Files.createDirectories(runtimeRoot.resolve("dbhelpers/sit")).resolve("orders.yaml");
+        writeUtf8(config,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT:\n"
+                +"    dbhelpers: [config/dbhelpers/sit/orders.yaml]\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
+        writeUtf8(helper,"schemaVersion: att-dbhelper/v2.6\nid: orders\nname: Orders\ndescription: first revision\n"
+                +"connection: {url: 'jdbc:postgresql://localhost/orders'}\n");
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,config,"SIT",
+                Collections.<String>emptyList(),65536,262144,true)) {
+            String sharedFirst=inspector.validationSourceRevisionDigest(false);
+            String packageFirst=inspector.validationSourceRevisionDigest(true);
+            assertTrue(sharedFirst.matches("[a-f0-9]{64}"));
+            assertTrue(packageFirst.matches("[a-f0-9]{64}"));
+            long builds=inspector.indexBuildCount();
+
+            writeUtf8(helper,"schemaVersion: att-dbhelper/v2.6\nid: orders\nname: Orders\ndescription: revised child helper\n"
+                    +"connection: {url: 'jdbc:postgresql://changed-host/orders'}\n");
+            String sharedChanged=sharedFirst,packageChanged=packageFirst;
+            long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+            while((sharedFirst.equals(sharedChanged)||packageFirst.equals(packageChanged))&&System.nanoTime()<deadline) {
+                Thread.sleep(10);
+                sharedChanged=inspector.validationSourceRevisionDigest(false);
+                packageChanged=inspector.validationSourceRevisionDigest(true);
+            }
+            assertNotEquals(sharedFirst,sharedChanged,
+                    "A helper edit under an external Runtime Config root must invalidate Shared Config applicability");
+            assertNotEquals(packageFirst,packageChanged,
+                    "A helper edit under an external Runtime Config root must invalidate Package applicability");
+            assertTrue(inspector.indexBuildCount()>builds,"The external Config watcher must rebuild its indexed revision");
         }
     }
 

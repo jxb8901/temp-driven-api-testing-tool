@@ -80,6 +80,11 @@ class ApiServletIntegratedLimitsTest {
         Path packages=Files.createDirectories(temp.resolve("validation-record-packages"));
         createPackage(packages.resolve("payments"));
         Path runtimeConfig=sharedRuntimeConfig();
+        Path sharedHelper=Files.createDirectories(runtimeConfig.getParent().resolve("dbhelpers/sit")).resolve("orders.yaml");
+        Files.writeString(sharedHelper,sharedDbHelper("initial helper"));
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+                +"environments:\n  SIT:\n    dbhelpers: [config/dbhelpers/sit/orders.yaml]\ntimeoutMs: 10000\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
         Path libs=workerLibraries("validation-record-libs");
         try(ServerRuntime runtime=runtime(packages,runtimeConfig,"validation-record-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true,1)) {
             ApiServlet servlet=servlet(runtime);
@@ -134,6 +139,34 @@ class ApiServletIntegratedLimitsTest {
             Files.writeString(runtimeConfig,Files.readString(runtimeConfig)+"\n# changed after validation\n");
             Captured stale=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
             assertEquals("STALE",ServerRuntime.JSON.readTree(stale.body()).path("applicability").asText());
+
+            Files.writeString(sharedHelper,sharedDbHelper("edited external child helper"));
+            Captured sharedHelperStale=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
+            assertEquals("STALE",ServerRuntime.JSON.readTree(sharedHelperStale.body()).path("applicability").asText(),
+                    "A shared Runtime Config helper edit must stale a completed Shared Config validation");
+
+            long packageAdmissionDeadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while(validationAdmission.availablePermits()==0&&System.nanoTime()<packageAdmissionDeadline)Thread.sleep(5);
+            byte[] packageBody="{\"command\":\"validate\",\"targetKind\":\"config\",\"packageId\":\"payments\"}"
+                    .getBytes(StandardCharsets.UTF_8);
+            Captured packageAccepted=invokeAs(servlet,"POST","/validations",Map.of(),packageBody,"alice");
+            assertEquals(202,packageAccepted.status,new String(packageAccepted.body(),StandardCharsets.UTF_8));
+            String packageValidationId=ServerRuntime.JSON.readTree(packageAccepted.body()).path("validationId").asText();
+            Captured packageResult=null;long packageDeadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+            while(System.nanoTime()<packageDeadline) {
+                packageResult=invokeAs(servlet,"GET","/validations/"+packageValidationId,Map.of(),new byte[0],"alice");
+                JsonNode record=ServerRuntime.JSON.readTree(packageResult.body());
+                if(!List.of("QUEUED","RUNNING").contains(record.path("status").asText()))break;
+                Thread.sleep(25);
+            }
+            assertNotNull(packageResult);
+            JsonNode packageCompleted=ServerRuntime.JSON.readTree(packageResult.body());
+            assertEquals("COMPLETED",packageCompleted.path("status").asText());
+            assertEquals("CURRENT",packageCompleted.path("applicability").asText());
+            Files.writeString(sharedHelper,sharedDbHelper("edited again for Package validation"));
+            Captured packageHelperStale=invokeAs(servlet,"GET","/validations/"+packageValidationId,Map.of(),new byte[0],"alice");
+            assertEquals("STALE",ServerRuntime.JSON.readTree(packageHelperStale.body()).path("applicability").asText(),
+                    "A shared Runtime Config helper edit must stale a completed Package validation");
 
             ReentrantLock workerLock=inspectionWorkerLock(runtime);workerLock.lock();
             java.util.concurrent.CountDownLatch blockerStarted=new java.util.concurrent.CountDownLatch(1);
@@ -488,6 +521,14 @@ class ApiServletIntegratedLimitsTest {
         Path root=Files.createDirectories(temp.resolve("shared-runtime-config/config"));
         return Files.writeString(root.resolve("config.yaml"),"schemaVersion: att-config/v2.13\nenvironment: SIT\n"
                 +"environments:\n  SIT: {}\ntimeoutMs: 10000\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
+    }
+
+    private static String sharedDbHelper(String description) {
+        return "schemaVersion: att-dbhelper/v2.6\nid: orders\nname: Orders\ndescription: " + description + "\n"
+                + "connection:\n  url: 'jdbc:postgresql://localhost/orders'\n  username: test\n  password: test\n"
+                + "  driverClass: org.postgresql.Driver\n  readOnly: false\n  isolation: readCommitted\n"
+                + "  properties: {sslMode: disable}\nstatement: {timeoutSeconds: 30}\n"
+                + "transaction: {scope: case, onEnd: rollback}\nevidence: {sql: full, parameters: masked}\n";
     }
 
     private Path workerLibraries(String name) throws Exception {
