@@ -29,16 +29,19 @@ async function main() {
     return (body.items || []).map(item => item.jobId).sort();
   });
   const waitForRecordReport = async validationId => {
-    await page.waitForFunction(async id => {
-      const response = await fetch(new URL(`../api/v1/validations/${encodeURIComponent(id)}`, document.baseURI), { cache: 'no-store' });
-      if (!response.ok) return false;
-      const record = await response.json();
-      return Boolean(record.report) || ['COMPLETED', 'FAILED', 'TIMED_OUT', 'INTERRUPTED', 'CANCELLED'].includes(record.status);
-    }, validationId, { timeout: 60000 });
-    const response = await page.request.get(`${origin}/tools/att/api/v1/validations/${encodeURIComponent(validationId)}`);
-    assert.equal(response.status(), 200, `Validation record ${validationId} should remain readable after completion`);
-    const record = await response.json();
-    assert.ok(record.report, `Validation record ${validationId} completed as ${record.status} without a report: ${JSON.stringify(record)}`);
+    const url = `${origin}/tools/att/api/v1/validations/${encodeURIComponent(validationId)}`;
+    const deadline = Date.now() + 60000;
+    let record;
+    while (Date.now() < deadline) {
+      const response = await page.request.get(url, { headers: { 'Cache-Control': 'no-cache' } });
+      assert.equal(response.status(), 200, `Validation record ${validationId} should remain readable while polling`);
+      record = await response.json();
+      if (record.report) break;
+      assert.ok(['QUEUED', 'RUNNING'].includes(record.status),
+        `Validation record ${validationId} ended as ${record.status} without a report: ${JSON.stringify(record)}`);
+      await page.waitForTimeout(250);
+    }
+    assert.ok(record?.report, `Validation record ${validationId} did not produce a report within 60 seconds: ${JSON.stringify(record)}`);
     await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
     return record;
   };
