@@ -212,18 +212,31 @@ final class SutMetricsOfflineReportPublisher {
             for (Map<String, Object> observation : observations) {
                 Map<String, Object> metric = map(observation.get("metric")), source = map(observation.get("source"));
                 Map<String, Object> profile = map(observation.get("profile")), target = map(observation.get("target"));
+                Map<String, Object> quality = map(observation.get("quality"));
                 html.append("<article><h3>").append(escape(String.valueOf(metric.getOrDefault("name", metric.get("id"))))).append("</h3><dl>")
                         .append(row("Source", source.getOrDefault("name", source.get("id"))))
                         .append(row("Metric / unit", String.valueOf(metric.getOrDefault("id", "")) + " · " + String.valueOf(metric.getOrDefault("unit", "unspecified"))))
                         .append(row("Profile", profile.getOrDefault("path", profile.get("id"))))
                         .append(row("Target", String.valueOf(target.getOrDefault("type", "target")) + " · " + String.valueOf(target.getOrDefault("id", "unknown"))))
-                        .append(row("UTC window", windowText(observation.get("window"))))
-                        .append(row("Resolution / coverage", String.valueOf(observation.get("sampleResolution")) + " · " + jsonText(observation.get("coverage"))))
-                        .append(row("Status / gaps", String.valueOf(map(observation.get("quality")).get("status")) + " · " + String.valueOf(map(observation.get("quality")).getOrDefault("gapCount", "unknown"))))
-                        .append("</dl>").append(renderChart(maps(observation.get("preview")), String.valueOf(metric.getOrDefault("unit", "")),
-                                String.valueOf(observation.get("sampleResolution")), map(observation.get("window")),
-                                ((Number) observation.getOrDefault("previewOmittedSeriesCount", 0)).intValue()))
-                        .append("<p><a href=\"").append(escape(String.valueOf(observation.get("path")).substring("report/v2/".length())))
+                        .append(row("UTC window", windowText(observation.get("window"))));
+                if ("business-value".equals(observation.get("kind"))) {
+                    html.append(row("Observed value", String.valueOf(observation.get("value")) + " " + String.valueOf(metric.getOrDefault("unit", ""))))
+                            .append(row("Sampling", quality.get("sampling")))
+                            .append(row("Status", quality.get("status")))
+                            .append(row("Call duration", quality.get("collectionDurationMs") + " ms"))
+                            .append("</dl><p class=\"muted\">")
+                            .append("windowQuery".equals(quality.get("sampling"))
+                                    ? "This author-defined query returned one value; completion does not prove exhaustive coverage."
+                                    : "This is one server-collected snapshot after LOAD drain.")
+                            .append("</p>");
+                } else {
+                    html.append(row("Resolution / coverage", String.valueOf(observation.get("sampleResolution")) + " · " + jsonText(observation.get("coverage"))))
+                            .append(row("Status / gaps", String.valueOf(quality.get("status")) + " · " + String.valueOf(quality.getOrDefault("gapCount", "unknown"))))
+                            .append("</dl>").append(renderChart(maps(observation.get("preview")), String.valueOf(metric.getOrDefault("unit", "")),
+                                    String.valueOf(observation.get("sampleResolution")), map(observation.get("window")),
+                                    ((Number) observation.getOrDefault("previewOmittedSeriesCount", 0)).intValue()));
+                }
+                html.append("<p><a href=\"").append(escape(String.valueOf(observation.get("path")).substring("report/v2/".length())))
                         .append("\">Open the verified observation JSON</a></p></article>");
             }
         }

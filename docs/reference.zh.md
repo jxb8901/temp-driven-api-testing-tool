@@ -1550,6 +1550,77 @@ Server 會將正規化規則固定在 Job 的 SUT snapshot，並把 post-run 結
 
 Scenario authoring、完整 rule 欄位、coverage 條件及 Studio evidence 見 [Studio Load testing](interfaces/studio/load-testing.zh.md#sut-metrics)。
 
+##### 單次呼叫業務指標
+
+Base profile 可使用已配置的 `call` 定義業務指標，代替 PromQL。LOAD drain 後，ATT 會透過所選 package 現有的 DBHelper 或 Package Tool configuration，對每個 call group 執行一次。預設為 Job scope；單一 Workload binding 必須指定完全相符的 `workloadId`；以列對照的輸出則使用 LOAD scenario 中不可變的 Workload 和 mix identity。ATT 不會 fan-out 呼叫、輪詢、重試，或從 target ID 推斷 identity。DBHelper call 使用既有 helper configuration、bind parameters 和 connection limits。由於 ATT 無法判斷 Package Tool code 是否有 side effects，使用 Package Tool 必須設定 `sideEffectsAcknowledged: true`。
+
+~~~json
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "active-sessions",
+  "kind": "base",
+  "category": "db",
+  "metrics": [
+    {
+      "id": "active",
+      "title": "Active sessions",
+      "unit": "count",
+      "kind": "gauge",
+      "call": "#{db.reporting.scalar(sql='select count(*) from active_sessions')}",
+      "sampling": "afterDrain"
+    }
+  ]
+}
+~~~
+
+如一次 query 或 Package Tool invocation 回傳多個數值欄位或資料列，請使用 `outputs`。每個 output 分別設定 metric ID、title、result column、unit 和 kind。以下設定以一次 DBHelper query，將兩個固定欄位對應至不同 counter metric：
+
+~~~json
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "transaction-summary",
+  "kind": "base",
+  "category": "db",
+  "metrics": [{
+    "id": "transaction-query",
+    "call": "#{db.reporting.query(sql='select workload_id, mix_id, success, failure from transaction_summary')}",
+    "sampling": "afterDrain",
+    "mapping": {
+      "rows": "rows",
+      "workloadColumn": "WORKLOAD_ID",
+      "mixColumn": "MIX_ID"
+    },
+    "outputs": [
+      {"id": "successful_transactions", "title": "Successful transactions", "column": "SUCCESS", "unit": "transactions", "kind": "counter"},
+      {"id": "failed_transactions", "title": "Failed transactions", "column": "FAILURE", "unit": "transactions", "kind": "counter"}
+    ]
+  }]
+}
+~~~
+
+Result path 預設為 `rows`，也可指定 `payload.rows` 等有界 object/list path。若沒有 `workloadColumn`，Job-wide binding 必須恰好回傳一列。設定 `workloadColumn` 但不設定 `mixColumn` 時，每列都會對應至 Workload scope，mixed Workload 亦然。若 query 回傳跨 mix slot 的 aggregate，必須由 query 或 Tool 明確計算；ATT 會保留 Workload scope，不會將數值複製或歸屬至個別 slot。每個 Workload 最多只能有一列。設定 `mixColumn` 可用 `workloadId` 和 `mixId` 配對 mix slot，並且必須同時設定 `workloadColumn`。缺少或未知 mix ID 的 row 會保持未歸屬並記錄於 mapping diagnostics；其他已明確對應的 slot 仍可用。ATT 不會以 target ID、動態 pivot、模糊 join 或隱式 aggregation 對照資料列。欄位名稱和 ID 值必須完全相符。
+
+每個 call group 最多可有 64 個 output 及 4,096 列 result。每個 Job 最多執行 16 次實際呼叫，每次最多 60 秒，所有呼叫合計最多 120 秒。回傳列只保存在記憶體；sidecar 和報告會保存各個數值 output 及 mapping diagnostics，不保存 raw rows。無效欄位只影響該 metric 和 subject。Call 失敗或 timeout 會令同一 group 的所有 outputs unavailable。重複、未知、缺少或有歧義的 rows 會保留為 diagnostics；每個預期的 Workload/mix output 仍會出現在結果中。Partial 或 unavailable value 不會替換為零。
+
+設定 `sampling: windowQuery` 和 `window: steady`，即可在 drain 後執行一次 call，並透過 `EXEC.OBSERVATION.WINDOW_START` 和 `EXEC.OBSERVATION.WINDOW_END` 讀取實際 STEADY bounds。Aggregation 由 query author 定義；成功回傳數值不代表已完整覆蓋該 interval。單一輸出的 map 或 list result 必須使用明確 `valuePath`，例如 `rows[0].active`；解析後必須是單一有限數字。Server 會在 Job admission 時固定 package 和 Runtime Config revision；若任一 revision 改變，就不會執行 call。Calls 在有界的 Server worker pool 中執行，不會佔用 LOAD worker。After-drain value 只有在 LOAD 完成後三分鐘內收集才會視為 fresh；此上限不會隨 Prometheus after buffer 增加，較遲的 value 會標示 stale。Call 失敗、timeout、過期或結果非數字會評估為 `NOT_EVALUATED`；不會代入零值，也不會改變 Worker result。Binding validation 和 live preview 都不會執行 business call。
+
+Business metric（包括 numeric counter）支援 `max <= value` threshold。`afterDrain` metric 使用 `window: afterDrain`；`windowQuery` metric 使用 `window: steady`。這些單值規則不使用 `minimumCoverage`。省略 `subjects` 或設定 `all` 會評估所有預期 subject。若要指定 Workload 或 mix，請將 `subjects` 設為明確清單；mix selector 必須同時包含不可變 ID：
+
+~~~yaml
+thresholds:
+  - id: mobile-success-limit
+    profile: transaction-summary
+    metric: successful_transactions
+    max: 1000
+    unit: transactions
+    subjects:
+      - scope: mix
+        workloadId: checkout
+        mixId: mobile
+~~~
+
+每個 selector 必須恰好解析至一個已固定的 Job、Workload 或 Workload/mix metric identity。同一 metric ID 在多個 Workload 中會保留為不同 threshold result。缺少、過期、partial 或有歧義的 mapping 會得到 `NOT_EVALUATED`，除非另一個有效的已選 subject 證明 `NOT_MET`。
+
 Summary 的 `thresholds` object 中，`status` 和 `performanceVerdict` 是 authoritative tri-state 欄位，值為 `MET`、`NOT_MET` 或 `NOT_EVALUATED`。Optional `legacyPassed` boolean 維持舊有 `passed()` 語義：已配置但無法評估的 threshold 為 false，未配置 threshold 時為 true。Consumer 應使用 tri-state 欄位，區分 evidence 不完整與 threshold 未達標。
 
 Summary 會將 generator observation 與 SUT outcome 分開。`metrics.generator` 包含 sampled heap used/committed/maximum、觀察到的 peak live threads、GC count/time，以及 JVM 支援時的 process CPU。Sampling 限制為每 100 ms 至多一次，較短暫的 peak 可能錯過。`schedulerWakeups`、`submitLag*` 與 `workerQueueDepth*` 描述 scheduler pressure；arrival drops 與 SUT error 分開。`resources.http` 會按 HTTP helper 報告 active/idle/waiting 與觀察到的 peak connections，並與 DB、MQ、Render pool/plan diagnostics 並列；`resources.resourceMetricSamples` 顯示 rate-limited resource observations 的數量。`resources.executionIds` 顯示 custom execution-ID reservation 數量。Testdata mapping/selection counts 位於 `resources.generator.testdata`；解讀方式和 implementation limits 見 [Load Generator Telemetry](system-design/load-telemetry.zh.md)。
@@ -3359,7 +3430,7 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 
 ### 離線 SUT Metrics 報告
 
-完成的 LOAD 若有 SUT collection evidence，可另外發佈獨立版本化的離線報告 archive。Publisher 會驗證來源 manifest 及每個 observation sidecar，逐 byte 保留原本 sealed native archive，並以不可變 snapshot 發佈。`att-load-report-extension/v2` manifest 會引用 source-neutral 的 `att-load-offline-observations/v1` record；其 `att-load-offline-observation/v1` entries 記錄 source、metric、profile、target、UTC window、phase、單位、sample resolution、coverage、gaps、diagnostics、checksums 及有界 chart preview。完整 series sidecar 仍使用 normalized `att-sut-metrics-observation/v1` contract。Partial 或 unavailable source data 會明確標示，不會改變 native Job result。
+完成的 LOAD 若有 SUT collection evidence，可另外發佈獨立版本化的離線報告 archive。Publisher 會驗證來源 manifest 及每個 observation sidecar，逐 byte 保留原本 sealed native archive，並以不可變 snapshot 發佈。`att-load-report-extension/v2` manifest 會引用 source-neutral 的 `att-load-offline-observations/v1` record。`att-load-offline-observation/v1` entries 記錄 source、metric、profile、target、UTC window、phase、單位、quality 和 checksum；time-series 會提供有界 chart preview，business metric 則提供單一數值、scope、不可變 Workload/mix identity、call-group metadata、mapping quality 及 unmatched-row count。Unavailable value 會保留為 null。完整 sidecar 仍使用 normalized `att-sut-metrics-observation/v1` contract。Partial 或 unavailable source data 會明確標示，不會改變 native Job result。
 
 報告可在沒有 network access 時使用，並採用 restrictive Content Security Policy。報告不會評估 performance threshold。如有獨立版本化的 `att-load-verdict/v1` record，報告只顯示其 evaluation state 與 evidence reference，不會重新計算 verdict。只有在驗證發佈成功後，才可透過 authenticated Job download route 取得 archive。
 

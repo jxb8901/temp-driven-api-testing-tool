@@ -109,10 +109,7 @@
       "items": {
         "type": "object",
         "required": [
-          "id",
-          "title",
-          "unit",
-          "query"
+          "id"
         ],
         "additionalProperties": false,
         "properties": {
@@ -133,6 +130,7 @@
               "seconds",
               "milliseconds",
               "count",
+              "transactions",
               "ratio",
               "cores",
               "custom"
@@ -163,8 +161,377 @@
             "not": {
               "pattern": ";"
             }
+          },
+          "call": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "sampling": {
+            "enum": [
+              "afterDrain",
+              "windowQuery"
+            ]
+          },
+          "window": {
+            "anyOf": [
+              {
+                "const": "steady"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "valuePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[[0-9]{1,6}\\]){0,16}$"
+          },
+          "sideEffectsAcknowledged": {
+            "type": "boolean"
+          },
+          "mapping": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "rows": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[[0-9]{1,6}\\]){0,16}$"
+              },
+              "workloadColumn": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+              },
+              "mixColumn": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "required": [
+                    "mixColumn"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "workloadColumn"
+                  ]
+                }
+              }
+            ]
+          },
+          "callGroupId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+          },
+          "column": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+          },
+          "multiOutput": {
+            "const": true
+          },
+          "outputs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "title",
+                "column",
+                "unit"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "column": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                },
+                "unit": {
+                  "enum": [
+                    "percent",
+                    "bytes",
+                    "bytes_per_second",
+                    "seconds",
+                    "milliseconds",
+                    "count",
+                    "transactions",
+                    "ratio",
+                    "cores",
+                    "custom"
+                  ]
+                },
+                "kind": {
+                  "enum": [
+                    "gauge",
+                    "rate",
+                    "counter",
+                    "histogram"
+                  ]
+                },
+                "category": {
+                  "enum": [
+                    "os",
+                    "jvm",
+                    "app",
+                    "db",
+                    "mq",
+                    "custom"
+                  ]
+                }
+              }
+            }
           }
-        }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "id",
+              "title",
+              "unit",
+              "query"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "call"
+                  ]
+                },
+                {
+                  "required": [
+                    "sampling"
+                  ]
+                },
+                {
+                  "required": [
+                    "window"
+                  ]
+                },
+                {
+                  "required": [
+                    "valuePath"
+                  ]
+                },
+                {
+                  "required": [
+                    "sideEffectsAcknowledged"
+                  ]
+                },
+                {
+                  "required": [
+                    "outputs"
+                  ]
+                },
+                {
+                  "required": [
+                    "mapping"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "id",
+              "title",
+              "unit",
+              "call",
+              "sampling"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "query"
+                  ]
+                },
+                {
+                  "required": [
+                    "outputs"
+                  ]
+                },
+                {
+                  "required": [
+                    "mapping"
+                  ]
+                }
+              ]
+            },
+            "if": {
+              "properties": {
+                "sampling": {
+                  "const": "windowQuery"
+                }
+              },
+              "required": [
+                "sampling"
+              ]
+            },
+            "then": {
+              "required": [
+                "window"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "window"
+                ]
+              }
+            }
+          },
+          {
+            "required": [
+              "id",
+              "call",
+              "sampling",
+              "outputs"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "query"
+                  ]
+                },
+                {
+                  "required": [
+                    "title"
+                  ]
+                },
+                {
+                  "required": [
+                    "unit"
+                  ]
+                },
+                {
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "required": [
+                    "category"
+                  ]
+                },
+                {
+                  "required": [
+                    "valuePath"
+                  ]
+                }
+              ]
+            },
+            "if": {
+              "properties": {
+                "sampling": {
+                  "const": "windowQuery"
+                }
+              },
+              "required": [
+                "sampling"
+              ]
+            },
+            "then": {
+              "required": [
+                "window"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "window"
+                ]
+              }
+            }
+          },
+          {
+            "required": [
+              "id",
+              "title",
+              "unit",
+              "kind",
+              "category",
+              "call",
+              "sampling",
+              "window",
+              "sideEffectsAcknowledged",
+              "mapping",
+              "callGroupId",
+              "column",
+              "multiOutput"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "query"
+                  ]
+                },
+                {
+                  "required": [
+                    "outputs"
+                  ]
+                }
+              ]
+            },
+            "if": {
+              "properties": {
+                "sampling": {
+                  "const": "windowQuery"
+                }
+              },
+              "required": [
+                "sampling"
+              ]
+            },
+            "then": {
+              "properties": {
+                "window": {
+                  "const": "steady"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "window": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
       }
     },
     "includes": {
@@ -174,9 +541,7 @@
       "items": {
         "type": "object",
         "required": [
-          "profile",
-          "source",
-          "targets"
+          "profile"
         ],
         "additionalProperties": false,
         "properties": {
@@ -214,8 +579,98 @@
                 "number"
               ]
             }
+          },
+          "scope": {
+            "enum": [
+              "job",
+              "workload"
+            ]
+          },
+          "workloadId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
           }
-        }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "source",
+              "targets"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "scope"
+                  ]
+                },
+                {
+                  "required": [
+                    "workloadId"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "scope": {
+                "enum": [
+                  "job",
+                  "workload"
+                ]
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "source"
+                  ]
+                },
+                {
+                  "required": [
+                    "tenant"
+                  ]
+                },
+                {
+                  "required": [
+                    "targets"
+                  ]
+                },
+                {
+                  "required": [
+                    "parameters"
+                  ]
+                }
+              ]
+            },
+            "if": {
+              "properties": {
+                "scope": {
+                  "const": "workload"
+                }
+              },
+              "required": [
+                "scope"
+              ]
+            },
+            "then": {
+              "required": [
+                "workloadId"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "workloadId"
+                ]
+              }
+            }
+          }
+        ]
       }
     }
   },

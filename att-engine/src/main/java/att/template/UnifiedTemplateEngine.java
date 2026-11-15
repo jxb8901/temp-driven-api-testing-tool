@@ -462,6 +462,12 @@ public class UnifiedTemplateEngine {
         return executeCall(call, context, log, invocationId, false);
     }
 
+    /** Executes one uncached primary call for a server-owned business observation. */
+    public Object executeCallUncached(String call, CaseRuntimeContext context, CaseExecutionLog log,
+                                      String invocationId) throws Exception {
+        return executeCall(call, context, log, invocationId, false, null, null, "", "", false, true);
+    }
+
     public att.exec.ToolInvocationResult executeToolAttempt(String call, CaseRuntimeContext context, CaseExecutionLog log, String invocationId, Long timeoutMs, String saveAs) throws Exception {
         Object result = executeCall(call, context, log, invocationId, true, null, timeoutMs, saveAs, "", false, false);
         return (att.exec.ToolInvocationResult) result;

@@ -113,13 +113,11 @@
         "metricId",
         "metricName",
         "unit",
-        "kind",
         "reduction",
         "operator",
         "value",
         "window",
         "targets",
-        "minimumCoverage",
         "onInsufficientData",
         "required",
         "queryIds"
@@ -152,7 +150,8 @@
         "kind": {
           "enum": [
             "gauge",
-            "rate"
+            "rate",
+            "counter"
           ]
         },
         "reduction": {
@@ -165,15 +164,16 @@
           "type": "number"
         },
         "window": {
-          "const": "steady"
+          "enum": [
+            "steady",
+            "afterDrain"
+          ]
         },
         "targets": {
-          "const": "all"
-        },
-        "minimumCoverage": {
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "maximum": 1
+          "enum": [
+            "all",
+            "selected"
+          ]
         },
         "onInsufficientData": {
           "const": "NOT_EVALUATED"
@@ -187,9 +187,62 @@
           "items": {
             "type": "string"
           }
+        },
+        "sampling": {
+          "enum": [
+            "afterDrain",
+            "windowQuery"
+          ]
+        },
+        "subjects": {
+          "oneOf": [
+            {
+              "const": "all"
+            },
+            {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/thresholdSubject"
+              }
+            }
+          ]
+        },
+        "minimumCoverage": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "maximum": 1.0
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "kind",
+            "window",
+            "minimumCoverage",
+            "targets"
+          ],
+          "not": {
+            "required": [
+              "sampling"
+            ]
+          }
+        },
+        {
+          "required": [
+            "kind",
+            "window",
+            "sampling",
+            "targets"
+          ],
+          "not": {
+            "required": [
+              "minimumCoverage"
+            ]
+          }
+        }
+      ]
     },
     "evaluationWindow": {
       "type": "object",
@@ -349,6 +402,23 @@
           "items": {
             "$ref": "#/$defs/targetResult"
           }
+        },
+        "selection": {
+          "oneOf": [
+            {
+              "const": "all"
+            },
+            {
+              "const": "selected"
+            },
+            {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/thresholdSubject"
+              }
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -417,7 +487,10 @@
           "type": "object"
         },
         "sampleResolution": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "threshold": {
           "type": "object"
@@ -447,6 +520,45 @@
         "reason": {
           "type": "string",
           "maxLength": 240
+        },
+        "scope": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "job",
+            "workload",
+            "mix",
+            null
+          ]
+        },
+        "workloadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mixId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mappingStatus": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 32
+        },
+        "unmatchedRowCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 4096
         }
       },
       "additionalProperties": false
@@ -468,6 +580,30 @@
         }
       },
       "additionalProperties": false
+    },
+    "thresholdSubject": {
+      "type": "object",
+      "required": [
+        "scope"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "enum": [
+            "job",
+            "workload",
+            "mix"
+          ]
+        },
+        "workloadId": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "mixId": {
+          "type": "string",
+          "maxLength": 80
+        }
+      }
     }
   }
 }

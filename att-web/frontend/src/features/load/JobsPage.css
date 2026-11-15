@@ -21,7 +21,7 @@
 .att-sut-metric-card header p, .att-sut-metric-coverage { color: var(--att-muted, #5f6873); font-size: .875rem; margin: .35rem 0 0; }
 .att-sut-metric-query-status { border: 1px solid currentColor; border-radius: 1rem; font-size: .75rem; padding: .1rem .55rem; white-space: nowrap; }
 .att-sut-metric-query-status-ready { color: #14713b; }
-.att-sut-metric-query-status-no_data, .att-sut-metric-query-status-unavailable, .att-sut-metric-query-status-stale { color: #7a4e00; }
+.att-sut-metric-query-status-no_data, .att-sut-metric-query-status-unavailable, .att-sut-metric-query-status-stale, .att-sut-metric-query-status-partial, .att-sut-metric-query-status-not_evaluated { color: #7a4e00; }
 .att-sut-metric-query-status-failed { color: #a12222; }
 .att-sut-metric-summary { display: flex; flex-wrap: wrap; gap: .4rem 1.5rem; margin: .75rem 0 0; }
 .att-sut-metric-summary > div { min-width: 7rem; }

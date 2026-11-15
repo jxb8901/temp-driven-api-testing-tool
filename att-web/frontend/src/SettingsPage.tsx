@@ -134,10 +134,23 @@ export function SettingsPage() {
 }
 
 function SutMetricsAdminPanel() {
+  const { uiLocale } = useAppShellContext();
+  const zh = uiLocale === 'zh-Hant';
   const [sources, setSources] = useState<Array<Record<string, unknown>>>([]);
   const [profiles, setProfiles] = useState<Array<Record<string, unknown>>>([]);
   const [sourceJson, setSourceJson] = useState(JSON.stringify(EMPTY_SUT_SOURCE, null, 2));
   const [profileJson, setProfileJson] = useState(JSON.stringify(EMPTY_SUT_PROFILE, null, 2));
+  const [mappedGroupId, setMappedGroupId] = useState('transaction-query');
+  const [mappedCall, setMappedCall] = useState("#{db.orders.query(sql='select workload_id, mix_id, success, failure from transaction_summary')}");
+  const [mappedRowsPath, setMappedRowsPath] = useState('rows');
+  const [mappedWorkloadColumn, setMappedWorkloadColumn] = useState('WORKLOAD_ID');
+  const [mappedMixColumn, setMappedMixColumn] = useState('MIX_ID');
+  const [mappedSampling, setMappedSampling] = useState<'afterDrain' | 'windowQuery'>('afterDrain');
+  const [mappedToolAcknowledged, setMappedToolAcknowledged] = useState(false);
+  const [mappedOutputs, setMappedOutputs] = useState([
+    { id: 'success_transactions', title: 'Successful transactions', column: 'SUCCESS', unit: 'transactions', kind: 'counter' },
+    { id: 'failed_transactions', title: 'Failed transactions', column: 'FAILURE', unit: 'transactions', kind: 'counter' },
+  ]);
   const [bindingJson, setBindingJson] = useState(JSON.stringify(EMPTY_SUT_BINDING, null, 2));
   const [preview, setPreview] = useState<unknown>(null);
   const [message, setMessage] = useState('');
@@ -168,10 +181,33 @@ function SutMetricsAdminPanel() {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be a JSON object.`);
     return value as Record<string, unknown>;
   }
+  function addMappedBusinessCall() {
+    try {
+      const profile = parseEditor(profileJson, 'Metrics Profile');
+      const metrics = Array.isArray(profile.metrics) ? profile.metrics : [];
+      const mapping: Record<string, string> = { rows: mappedRowsPath.trim() || 'rows' };
+      if (mappedWorkloadColumn.trim()) mapping.workloadColumn = mappedWorkloadColumn.trim();
+      if (mappedMixColumn.trim()) mapping.mixColumn = mappedMixColumn.trim();
+      const group = {
+        id: mappedGroupId.trim(), call: mappedCall.trim(), sampling: mappedSampling,
+        ...(mappedSampling === 'windowQuery' ? { window: 'steady' } : {}),
+        sideEffectsAcknowledged: mappedToolAcknowledged,
+        mapping,
+        outputs: mappedOutputs.map(output => ({ ...output })),
+      };
+      setProfileJson(JSON.stringify({ ...profile, metrics: [...metrics, group] }, null, 2));
+      setMessage(zh ? '多指標 business call 已加入 JSON 草稿；請檢視並儲存 Metrics Profile。' : 'Multi-output business call added to the JSON draft. Review and save the Metrics Profile.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : (zh ? '無法建立 business call JSON。' : 'Could not build the business call JSON.'));
+    }
+  }
+  function updateMappedOutput(index: number, key: keyof typeof mappedOutputs[number], value: string) {
+    setMappedOutputs(current => current.map((output, row) => row === index ? { ...output, [key]: value } : output));
+  }
 
   return <section className="panel att-settings-section att-sut-metrics-admin" aria-labelledby="sut-metrics-admin-title">
     <div className="att-settings-section-heading"><div><h2 id="sut-metrics-admin-title">SUT Metrics administration</h2>
-      <p className="att-settings-help">Register approved Prometheus or Grafana sources and versioned metrics profiles. Grafana uses one pinned Prometheus datasource UID through its fixed query endpoint and a service-account secret. HTTPS hosts must exactly match ATT_SUT_METRICS_ALLOWED_HOSTS; HTTP is limited to loopback. Secret values are read from ATT_SECRET_* environment variables and are never returned by the API.</p></div></div>
+      <p className="att-settings-help">Register approved Prometheus or Grafana sources and versioned metrics profiles. Profiles may define one DBHelper or Package Tool call group with multiple numeric outputs; Package Tools require sideEffectsAcknowledged: true. Validate and live preview never execute calls. Grafana uses one pinned Prometheus datasource UID through its fixed query endpoint and a service-account secret. HTTPS hosts must exactly match ATT_SUT_METRICS_ALLOWED_HOSTS; HTTP is limited to loopback. Secret values are read from ATT_SECRET_* environment variables and are never returned by the API.</p></div></div>
     {message && <p role="status" aria-live="polite">{message}</p>}
     <section aria-labelledby="sut-sources-title"><h3 id="sut-sources-title">SUT Metrics Data Sources</h3>
       <ul className="att-sut-catalog-list">{sources.map(source => <li key={String(source.id)}><strong>{String(source.name || source.id)}</strong> <code>{String(source.id)}</code>
@@ -188,6 +224,37 @@ function SutMetricsAdminPanel() {
         <button type="button" disabled={busy} onClick={() => setProfileJson(JSON.stringify(profile, null, 2))}>Edit JSON</button>
         <button type="button" disabled={busy} onClick={() => void run(() => api.deleteSutMetricProfile(String(profile.id)), `Metrics Profile ${String(profile.id)} deleted.`)}>Delete</button>
       </li>)}</ul>
+      <fieldset className="att-sut-mapped-call-editor">
+        <legend>{zh ? '多指標 business call 對照' : 'Multi-output business call mapping'}</legend>
+        <p className="att-settings-help">{zh
+          ? '一次執行 DBHelper query 或 Package Tool，將明確資料欄位對應至多個數值 metric。Workload 和 Mix 欄位必須使用 LOAD 中不可變的 workloadId／mixId；未知或重複的列會保留為診斷資料。'
+          : 'Run one DBHelper query or Package Tool and map explicit result columns to numeric metrics. Workload and Mix columns must use immutable LOAD workloadId and mixId values; unknown or duplicate rows remain diagnostic.'}</p>
+        <label>{zh ? 'Call group ID' : 'Call group ID'}<input value={mappedGroupId} onChange={event => setMappedGroupId(event.target.value)} /></label>
+        <label>{zh ? 'DBHelper／Package Tool call' : 'DBHelper / Package Tool call'}<textarea value={mappedCall} onChange={event => setMappedCall(event.target.value)} rows={3} spellCheck={false} /></label>
+        <label>{zh ? '結果列路徑' : 'Result rows path'}<input value={mappedRowsPath} onChange={event => setMappedRowsPath(event.target.value)} /></label>
+        <label>{zh ? 'Workload ID 欄位（選填）' : 'Workload ID column (optional)'}<input value={mappedWorkloadColumn} onChange={event => setMappedWorkloadColumn(event.target.value)} /></label>
+        <label>{zh ? 'Mix ID 欄位（選填）' : 'Mix ID column (optional)'}<input value={mappedMixColumn} onChange={event => setMappedMixColumn(event.target.value)} /></label>
+        <label>{zh ? '取樣方式' : 'Sampling'}<select value={mappedSampling} onChange={event => setMappedSampling(event.target.value as 'afterDrain' | 'windowQuery')}>
+          <option value="afterDrain">afterDrain</option><option value="windowQuery">windowQuery · steady</option>
+        </select></label>
+        <label className="att-sut-mapped-call-check"><input type="checkbox" checked={mappedToolAcknowledged} onChange={event => setMappedToolAcknowledged(event.target.checked)} />
+          {zh ? '已確認 Package Tool 可能有副作用' : 'Acknowledge possible Package Tool side effects'}</label>
+        <div className="att-sut-mapped-call-outputs"><strong>{zh ? 'Metric 輸出' : 'Metric outputs'}</strong>
+          {mappedOutputs.map((output, index) => <fieldset key={index}>
+            <legend>{zh ? `輸出 ${index + 1}` : `Output ${index + 1}`}</legend>
+            <label>ID<input value={output.id} onChange={event => updateMappedOutput(index, 'id', event.target.value)} /></label>
+            <label>{zh ? '標題' : 'Title'}<input value={output.title} onChange={event => updateMappedOutput(index, 'title', event.target.value)} /></label>
+            <label>{zh ? '結果欄位' : 'Result column'}<input value={output.column} onChange={event => updateMappedOutput(index, 'column', event.target.value)} /></label>
+            <label>{zh ? '單位' : 'Unit'}<input value={output.unit} onChange={event => updateMappedOutput(index, 'unit', event.target.value)} /></label>
+            <label>{zh ? '種類' : 'Kind'}<select value={output.kind} onChange={event => updateMappedOutput(index, 'kind', event.target.value)}>
+              <option value="gauge">gauge</option><option value="rate">rate</option><option value="counter">counter</option>
+            </select></label>
+            {mappedOutputs.length > 1 && <button type="button" disabled={busy} onClick={() => setMappedOutputs(current => current.filter((_, row) => row !== index))}>{zh ? '移除輸出' : 'Remove output'}</button>}
+          </fieldset>)}
+          <button type="button" disabled={busy || mappedOutputs.length >= 64} onClick={() => setMappedOutputs(current => [...current, { id: '', title: '', column: '', unit: 'count', kind: 'gauge' }])}>{zh ? '新增輸出' : 'Add output'}</button>
+        </div>
+        <button type="button" disabled={busy} onClick={addMappedBusinessCall}>{zh ? '加入 JSON 草稿' : 'Add mapping to JSON draft'}</button>
+      </fieldset>
       <label>Metrics Profile JSON<textarea value={profileJson} onChange={event => setProfileJson(event.target.value)} rows={16} spellCheck={false} /></label>
       <button type="button" disabled={busy} onClick={() => void run(() => api.saveSutMetricProfile(parseEditor(profileJson, 'Metrics Profile')), 'Metrics Profile saved and dependency graph validated.')}>Save Metrics Profile</button>
     </section>

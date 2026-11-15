@@ -929,8 +929,8 @@ class ServerWarUiIT {
             assertNull(archive.getJarEntry("WEB-INF/classes/att/server/ApiServlet.class"),
                     "ATT application classes must not be duplicated in WEB-INF/classes");
             assertFalse(archive.stream().map(JarEntry::getName).anyMatch(name ->
-                    name.matches("WEB-INF/lib/att-(server-api|web|worker|engine)-[^/]+\\.jar")),
-                    "ATT module jars must be combined into the versioned att-server jar");
+                    name.matches("WEB-INF/lib/att-(server-api|web|worker)-[^/]+\\.jar")),
+                    "ATT Server API, Web, and Worker jars must be combined into the versioned att-server jar; Engine remains a runtime module dependency");
             Set<String> entries = new HashSet<>();
             try (JarInputStream app = new JarInputStream(archive.getInputStream(application))) {
                 JarEntry entry;
