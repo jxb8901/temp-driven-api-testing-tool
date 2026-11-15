@@ -701,12 +701,12 @@ export function AppShell({
                   {route.packageId && <Breadcrumb label="Advanced Load" navigate={navigate} />}
                 </>}
                 {route.kind === 'jobs' && <>
-                  <Breadcrumb label="Jobs and results" href={route.jobId ? '#/jobs' : undefined} navigate={navigate} />
+                  <Breadcrumb label={uiLocale === 'zh-Hant' ? '工作與結果' : 'Jobs and results'} href={route.jobId ? '#/jobs' : undefined} navigate={navigate} />
                   {!route.jobId && route.tab === 'validations' && <Breadcrumb label={uiLocale === 'zh-Hant' ? '驗證' : 'Validations'} navigate={navigate} />}
                   {route.jobId && <Breadcrumb label={'Job ' + route.jobId} navigate={navigate} />}
                 </>}
                 {route.kind === 'validation' && <>
-                  <Breadcrumb label="Jobs and results" href="#/jobs?tab=validations" navigate={navigate} />
+                  <Breadcrumb label={uiLocale === 'zh-Hant' ? '工作與結果' : 'Jobs and results'} href="#/jobs?tab=validations" navigate={navigate} />
                   <Breadcrumb label={route.validationId ? (uiLocale === 'zh-Hant' ? '驗證記錄' : 'Validation record') : (uiLocale === 'zh-Hant' ? '驗證' : 'Validate')} navigate={navigate} />
                 </>}
                 {route.kind === 'schedules' && <Breadcrumb label="Schedules" navigate={navigate} />}

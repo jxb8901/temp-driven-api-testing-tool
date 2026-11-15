@@ -18,6 +18,7 @@ import { useJobEventStatus, useJobEventStream, type JobStreamConnection } from '
 import { plannedWorkloadDuration, workloadPacing } from './loadWorkloadSummary';
 import { ValidationHistory } from '../validation/ValidationHistory';
 import { JobsResultsTabs } from './JobsResultsTabs';
+import { useAppShellContext } from '../../AppShell';
 
 function executionType(job: JobSummary): string { return job.executionType || (job.command === 'debug' ? 'run' : job.command); }
 
@@ -1012,11 +1013,12 @@ export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, me
 });
 
 export function JobsPage(props: JobsFeatureProps) {
+  const locale = useAppShellContext().uiLocale;
   if (props.jobId) return <JobDetail key={props.jobId} {...props} jobId={props.jobId} />;
   const selectedTab = props.jobsTab === 'validations' ? 'validations' : 'jobs';
   return <main className="page-content att-jobs-page att-query-workspace">
-    <header className="att-feature-header"><div><p className="att-eyebrow">Jobs and results</p>
-      <h1>{selectedTab === 'validations' ? 'Validations' : 'Jobs'}</h1></div>
+    <header className="att-feature-header"><div><p className="att-eyebrow">{locale === 'zh-Hant' ? '工作與結果' : 'Jobs and results'}</p>
+      <h1>{selectedTab === 'validations' ? (locale === 'zh-Hant' ? '驗證' : 'Validations') : (locale === 'zh-Hant' ? '工作' : 'Jobs')}</h1></div>
       <JobsResultsTabs selected={selectedTab} onSelect={tab => props.onJobsTabChange?.(tab)} />
     </header>
     <div className="att-jobs-workspace-panel" role="tabpanel" id="jobs-results-tabpanel"
