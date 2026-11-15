@@ -1475,7 +1475,6 @@ final class SutMetricsService implements AutoCloseable {
                         }
                         BusinessCallExecutor executor = businessCallExecutor;
                         if (executor == null) throw new IllegalStateException("Server-owned business-call execution is unavailable.");
-                        Instant callRequestedAt = Instant.now();
                         Map<String, Object> steady = phaseWindows.stream()
                                 .filter(phase -> "STEADY".equals(phase.get("phase"))).findFirst().orElse(null);
                         Instant steadyStart = steady == null ? null : parseInstant(nullableText(steady.get("startAt")));
@@ -1500,9 +1499,10 @@ final class SutMetricsService implements AutoCloseable {
                                     callExecutionState.set(BUSINESS_CALL_CANCELLED);
                                     throw new BusinessCallNotExecutedException();
                                 }
+                                Instant callStartedAt = Instant.now();
                                 executionStarted.set(true);
                                 return closeableSession.execute(query, executionStartedAt, executionFinishedAt,
-                                        steadyStart, steadyEnd, callRequestedAt);
+                                        steadyStart, steadyEnd, callStartedAt);
                             }
                         });
                         businessCallSubmitted++; businessCallSubmittedThisQuery = true;
