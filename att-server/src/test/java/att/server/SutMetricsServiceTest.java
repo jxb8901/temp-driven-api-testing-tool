@@ -1214,7 +1214,7 @@ class SutMetricsServiceTest {
             service.upsertProfile(baseProfile("base", 1, false));
             service.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='select count(*)')}"));
             Map<String, Object> configured = scenario(List.of(binding("prom", null), map("profile", "business")),
-                    "1m", "2m", "30s");
+                    "1m", "1h", "5m");
             configured.put("thresholds", List.of(map("id", "count-max", "profile", "business", "metric", "count", "max", 10.0)));
             Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
             service.writeSnapshot(JOB_ID, snapshot);
@@ -1228,7 +1228,7 @@ class SutMetricsServiceTest {
                 @Override public void close() { }
             });
 
-            long expectedPrometheusDelayMillis = (2 * 60L + 30L) * 1000L;
+            long expectedPrometheusDelayMillis = (60L * 60L + 5L * 60L) * 1000L;
             Instant finishedAt = Instant.now().minusMillis(SutMetricsService.MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS
                     + expectedPrometheusDelayMillis + 30_000L);
             service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
@@ -1242,7 +1242,7 @@ class SutMetricsServiceTest {
             Map<String, Object> window = object(observation.get("window"));
             Map<String, Object> availability = object(observation.get("availability"));
             long actualDelay = ((Number) window.get("delayFromExecutionEndMs")).longValue();
-            assertTrue(actualDelay > SutMetricsService.MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS + expectedPrometheusDelayMillis);
+            assertTrue(actualDelay > expectedPrometheusDelayMillis);
             assertEquals("STALE", availability.get("freshness"));
             assertEquals("BUSINESS_CALL_STALE_AFTER_DRAIN", maps(availability.get("diagnostics")).get(0).get("code"));
             Map<String, Object> evaluation = awaitThresholdEvaluation(service, JOB_ID);
@@ -1273,7 +1273,7 @@ class SutMetricsServiceTest {
                 @Override public void close() { }
             });
 
-            Instant finishedAt = Instant.now().minusSeconds(200);
+            Instant finishedAt = Instant.now().minusSeconds(160);
             service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
             Map<String, Object> manifest = awaitManifest(service, JOB_ID);
             assertEquals("READY", manifest.get("state"));
@@ -1360,6 +1360,381 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void oneMultiOutputCallMapsEachColumnToItsExactMixAndThresholdSelection() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-multi-output"))) {
+            service.upsertProfile(multiOutputBusinessProfile("business"));
+            List<SutMetricsService.WorkloadSubject> subjects = multiMixSubjects("checkout");
+            Map<String, Object> configured = scenario(List.of(map("profile", "business")), "1m", "1s", "15s");
+            configured.put("thresholds", List.of(map("id", "mobile-success-max", "profile", "business",
+                    "metric", "success", "max", 10.0, "subjects", List.of(map("scope", "mix",
+                            "workloadId", "checkout", "mixId", "mobile")))));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice", false,
+                    multiOutputBusinessContext(subjects));
+            List<Map<String, Object>> queries = maps(snapshot.get("queries"));
+            assertEquals(4, queries.size());
+            assertEquals(1, queries.stream().map(query -> query.get("callGroupId")).distinct().count());
+            assertEquals(Set.of("web", "mobile"), queries.stream().map(query -> query.get("mixId")).collect(java.util.stream.Collectors.toSet()));
+            Map<String, Object> rule = maps(snapshot.get("thresholds")).get(0);
+            assertEquals("selected", rule.get("targets"));
+            assertEquals(1, ((List<?>) rule.get("queryIds")).size());
+            Map<String, Object> selectedQuery = queries.stream().filter(query -> query.get("id").equals(((List<?>) rule.get("queryIds")).get(0))).findFirst().orElseThrow();
+            assertEquals("checkout", selectedQuery.get("workloadId"));
+            assertEquals("mobile", selectedQuery.get("mixId"));
+            assertEquals("same-target", selectedQuery.get("targetId"));
+
+            AtomicInteger invocations = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    invocations.incrementAndGet();
+                    return map("rowCount", 2, "rows", List.of(
+                            map("WORKLOAD_ID", "checkout", "MIX_ID", "web", "SUCCESS", 20, "FAILURE", 2),
+                            map("WORKLOAD_ID", "checkout", "MIX_ID", "mobile", "SUCCESS", 8, "FAILURE", 0)));
+                }
+                @Override public void close() { }
+            });
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(60);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("READY", manifest.get("state"));
+            assertEquals(1, invocations.get());
+            List<Map<String, Object>> items = maps(service.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items"));
+            assertEquals(4, items.size());
+            assertEquals(1, items.stream().map(item -> item.get("callGroupId")).distinct().count());
+            assertEquals(1, items.stream().map(item -> item.get("callCount")).distinct().count());
+            assertEquals(1, items.stream().map(item -> item.get("mappingStatus")).distinct().count());
+            Map<String, Object> webSuccess = items.stream().filter(item -> "web".equals(item.get("mixId")) && "success".equals(item.get("metricId"))).findFirst().orElseThrow();
+            assertEquals(20.0, webSuccess.get("value"));
+            att.validation.JsonSchemaVerifier.verifyJson(Path.of("schemas/att-sut-metrics-observation-v1.schema.json"),
+                    ServerRuntime.JSON.writeValueAsString(webSuccess));
+            Map<String, Object> mobileFailure = items.stream().filter(item -> "mobile".equals(item.get("mixId")) && "failure".equals(item.get("metricId"))).findFirst().orElseThrow();
+            assertEquals(0.0, mobileFailure.get("value"));
+
+            Map<String, Object> offline = service.writeOfflineReportEvidence(JOB_ID, temp.resolve("offline-report"));
+            List<Map<String, Object>> offlineItems = maps(offline.get("observations"));
+            Map<String, Object> offlineMobile = offlineItems.stream().filter(item -> "mobile".equals(item.get("mixId"))
+                    && "success".equals(object(item.get("metric")).get("id"))).findFirst().orElseThrow();
+            assertEquals("checkout", offlineMobile.get("workloadId"));
+            assertEquals(1, offlineMobile.get("callCount"));
+            assertEquals("MAPPED", offlineMobile.get("mappingStatus"));
+            att.validation.JsonSchemaVerifier.verifyJson(Path.of("schemas/api/att-load-offline-observations-v1.schema.json"),
+                    ServerRuntime.JSON.writeValueAsString(offline));
+
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, JOB_ID);
+            assertEquals("MET", evaluation.get("state"));
+            Map<String, Object> evaluatedRule = maps(object(evaluation.get("sutThresholds")).get("items")).get(0);
+            assertEquals("MET", evaluatedRule.get("status"));
+            List<Map<String, Object>> evaluatedTargets = maps(evaluatedRule.get("targets"));
+            assertEquals(1, evaluatedTargets.size());
+            assertEquals("mobile", evaluatedTargets.get(0).get("mixId"));
+            assertEquals(8.0, evaluatedTargets.get(0).get("actual"));
+        }
+    }
+
+    @Test void oneJobWideResultRowProducesSeveralIndependentMetrics() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-multi-output-one-row"))) {
+            Map<String, Object> group = map("id", "transaction-query",
+                    "call", "#{db.orders.query(sql='select total_txns, success_txns, failed_txns, pending_txns from transaction_summary')}",
+                    "sampling", "afterDrain", "mapping", map("rows", "rows"),
+                    "outputs", List.of(
+                            map("id", "total", "title", "Total transactions", "column", "TOTAL_TXNS", "unit", "transactions", "kind", "counter"),
+                            map("id", "success", "title", "Successful transactions", "column", "SUCCESS_TXNS", "unit", "transactions", "kind", "counter"),
+                            map("id", "failure", "title", "Failed transactions", "column", "FAILED_TXNS", "unit", "transactions", "kind", "counter"),
+                            map("id", "pending", "title", "Pending transactions", "column", "PENDING_TXNS", "unit", "transactions", "kind", "gauge")));
+            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "business-row",
+                    "name", "Business row", "kind", "base", "category", "db", "metrics", List.of(group)));
+            Map<String, Object> snapshot = service.resolveScenario(
+                    scenario(List.of(map("profile", "business-row")), "1m", "1s", "15s"), "alice", false,
+                    multiOutputBusinessContext(multiMixSubjects("checkout")));
+            AtomicInteger invocations = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    invocations.incrementAndGet();
+                    return map("rowCount", 1, "rows", List.of(map("TOTAL_TXNS", 10_000, "SUCCESS_TXNS", 9_900,
+                            "FAILED_TXNS", 60, "PENDING_TXNS", 40)));
+                }
+                @Override public void close() { }
+            });
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(30);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("READY", manifest.get("state"));
+            assertEquals(1, invocations.get());
+            List<Map<String, Object>> items = maps(service.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items"));
+            assertEquals(4, items.size());
+            assertEquals(Set.of("total", "success", "failure", "pending"),
+                    items.stream().map(item -> String.valueOf(item.get("metricId"))).collect(java.util.stream.Collectors.toSet()));
+            assertEquals(10_000.0, items.stream().filter(item -> "total".equals(item.get("metricId"))).findFirst().orElseThrow().get("value"));
+            assertEquals(9_900.0, items.stream().filter(item -> "success".equals(item.get("metricId"))).findFirst().orElseThrow().get("value"));
+            assertEquals(60.0, items.stream().filter(item -> "failure".equals(item.get("metricId"))).findFirst().orElseThrow().get("value"));
+            assertEquals(40.0, items.stream().filter(item -> "pending".equals(item.get("metricId"))).findFirst().orElseThrow().get("value"));
+            assertTrue(items.stream().allMatch(item -> "JOB_SHARED".equals(item.get("mappingStatus"))));
+            assertTrue(items.stream().allMatch(item -> item.get("workloadId") == null && item.get("mixId") == null),
+                    "The unpartitioned Job result stays shared despite configured Workload/mix subjects.");
+            Map<String, Object> total = items.stream().filter(item -> "total".equals(item.get("metricId"))).findFirst().orElseThrow();
+            Map<String, Object> pending = items.stream().filter(item -> "pending".equals(item.get("metricId"))).findFirst().orElseThrow();
+            assertEquals("transactions", total.get("unit"));
+            assertEquals("counter", total.get("kind"));
+            assertEquals("transactions", pending.get("unit"));
+            assertEquals("gauge", pending.get("kind"));
+        }
+    }
+
+    @Test void fixedWorkloadRowsUseExactWorkloadIdsEvenWhenTargetsAreShared() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-multi-output-fixed-workloads"))) {
+            Map<String, Object> group = map("id", "workload-query",
+                    "call", "#{db.orders.query(sql='select workload_id, success from transaction_summary')}",
+                    "sampling", "afterDrain",
+                    "mapping", map("rows", "rows", "workloadColumn", "WORKLOAD_ID"),
+                    "outputs", List.of(map("id", "success", "title", "Successful transactions",
+                            "column", "SUCCESS", "unit", "transactions", "kind", "counter")));
+            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "business-fixed-workloads",
+                    "name", "Business fixed Workloads", "kind", "base", "category", "db", "metrics", List.of(group)));
+            List<SutMetricsService.WorkloadSubject> subjects = List.of(
+                    new SutMetricsService.WorkloadSubject("outbound", null, "template", "shared-target", false),
+                    new SutMetricsService.WorkloadSubject("inbound", null, "template", "shared-target", false));
+            Map<String, Object> configured = scenario(List.of(map("profile", "business-fixed-workloads")), "1m", "1s", "15s");
+            configured.put("thresholds", List.of(map("id", "success-max", "profile", "business-fixed-workloads",
+                    "metric", "success", "max", 5_500.0)));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice", false,
+                    multiOutputBusinessContext(subjects));
+            AtomicInteger invocations = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    invocations.incrementAndGet();
+                    return map("rowCount", 2, "rows", List.of(map("WORKLOAD_ID", "outbound", "SUCCESS", 5_000),
+                            map("WORKLOAD_ID", "inbound", "SUCCESS", 6_000)));
+                }
+                @Override public void close() { }
+            });
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(60);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("READY", manifest.get("state"));
+            assertEquals(1, invocations.get());
+            List<Map<String, Object>> items = maps(service.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items"));
+            assertEquals(2, items.size());
+            Map<String, Object> outbound = items.stream().filter(item -> "outbound".equals(item.get("workloadId"))).findFirst().orElseThrow();
+            Map<String, Object> inbound = items.stream().filter(item -> "inbound".equals(item.get("workloadId"))).findFirst().orElseThrow();
+            assertEquals(5_000.0, outbound.get("value"));
+            assertEquals(6_000.0, inbound.get("value"));
+            assertEquals("MAPPED", outbound.get("mappingStatus"));
+            assertEquals("MAPPED", inbound.get("mappingStatus"));
+            assertEquals("shared-target", outbound.get("targetId"));
+            assertEquals("shared-target", inbound.get("targetId"));
+
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, JOB_ID);
+            assertEquals("NOT_MET", evaluation.get("state"), "The passing Workload must not hide a violation from the other Workload.");
+            Map<String, Object> rule = maps(object(evaluation.get("sutThresholds")).get("items")).get(0);
+            assertEquals("NOT_MET", rule.get("status"));
+            List<Map<String, Object>> targets = maps(rule.get("targets"));
+            assertEquals(2, targets.size());
+            assertEquals(Set.of("MET", "NOT_MET"), targets.stream().map(target -> String.valueOf(target.get("status")))
+                    .collect(java.util.stream.Collectors.toSet()));
+        }
+    }
+
+    @Test void missingExpectedMixRemainsUnevaluatedUnlessAnotherSelectedMixProvesViolation() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-multi-output-missing-mix"))) {
+            service.upsertProfile(multiOutputBusinessProfile("business"));
+            Map<String, Object> configured = scenario(List.of(map("profile", "business")), "1m", "1s", "15s");
+            configured.put("thresholds", List.of(map("id", "success-max", "profile", "business",
+                    "metric", "success", "max", 30.0)));
+            SutMetricsService.BusinessCallContext callContext = multiOutputBusinessContext(multiMixSubjects("checkout"));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice", false, callContext);
+            AtomicInteger invocations = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    invocations.incrementAndGet();
+                    return map("rowCount", 1, "rows", List.of(
+                            map("WORKLOAD_ID", "checkout", "MIX_ID", "web", "SUCCESS", 20, "FAILURE", 2)));
+                }
+                @Override public void close() { }
+            });
+            Instant finishedAt = Instant.now().minusSeconds(60);
+            service.writeSnapshot(JOB_ID, snapshot);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("PARTIAL", manifest.get("state"));
+            List<Map<String, Object>> items = maps(service.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items"));
+            assertEquals(4, items.size());
+            Map<String, Object> mobileSuccess = items.stream().filter(item -> "mobile".equals(item.get("mixId"))
+                    && "success".equals(item.get("metricId"))).findFirst().orElseThrow();
+            assertNull(mobileSuccess.get("value"));
+            assertEquals("NOT_EVALUATED", mobileSuccess.get("queryStatus"));
+            assertEquals("BUSINESS_MAPPING_SUBJECT_MISSING",
+                    maps(object(object(mobileSuccess.get("observation")).get("availability")).get("diagnostics")).get(0).get("code"));
+            Map<String, Object> firstEvaluation = awaitThresholdEvaluation(service, JOB_ID);
+            assertEquals("NOT_EVALUATED", firstEvaluation.get("state"));
+            assertEquals("NOT_EVALUATED", maps(object(firstEvaluation.get("sutThresholds")).get("items")).get(0).get("status"));
+
+            String violatingJobId = "J0000000000000002";
+            configured.put("thresholds", List.of(map("id", "success-max", "profile", "business",
+                    "metric", "success", "max", 10.0)));
+            Map<String, Object> violatingSnapshot = service.resolveScenario(configured, "alice", false, callContext);
+            service.writeSnapshot(violatingJobId, violatingSnapshot);
+            service.jobFinished(violatingJobId, finishedAt.minusSeconds(60), finishedAt);
+            awaitManifest(service, violatingJobId);
+            Map<String, Object> violatingEvaluation = awaitThresholdEvaluation(service, violatingJobId);
+            assertEquals("NOT_MET", violatingEvaluation.get("state"),
+                    "A valid violation from one selected mix must take precedence over another mix's missing value.");
+            assertEquals("NOT_MET", maps(object(violatingEvaluation.get("sutThresholds")).get("items")).get(0).get("status"));
+            assertEquals(2, invocations.get(), "One shared call runs for each Job, regardless of output/subject count.");
+        }
+    }
+
+    @Test void multiOutputRowsAboveTheBoundAreRejectedWithoutPersistingRawRows() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-multi-output-row-bound"))) {
+            Map<String, Object> group = map("id", "bounded-query",
+                    "call", "#{db.orders.query(sql='select workload_id, mix_id, success from transaction_summary')}",
+                    "sampling", "afterDrain",
+                    "mapping", map("rows", "rows", "workloadColumn", "WORKLOAD_ID", "mixColumn", "MIX_ID"),
+                    "outputs", List.of(map("id", "success", "title", "Successful transactions",
+                            "column", "SUCCESS", "unit", "transactions", "kind", "counter")));
+            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "business-row-bound",
+                    "name", "Business row bound", "kind", "base", "category", "db", "metrics", List.of(group)));
+            Map<String, Object> snapshot = service.resolveScenario(
+                    scenario(List.of(map("profile", "business-row-bound")), "1m", "1s", "15s"), "alice", false,
+                    multiOutputBusinessContext(multiMixSubjects("checkout")));
+            List<Map<String, Object>> oversizedRows = new ArrayList<>(SutMetricsService.MAX_BUSINESS_RESULT_ROWS + 1);
+            for (int index = 0; index <= SutMetricsService.MAX_BUSINESS_RESULT_ROWS; index++)
+                oversizedRows.add(map("WORKLOAD_ID", "checkout", "MIX_ID", "web", "SUCCESS", "RAW_ROW_SENTINEL_" + index));
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    return map("rowCount", oversizedRows.size(), "rows", oversizedRows);
+                }
+                @Override public void close() { }
+            });
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(60);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("FAILED", manifest.get("state"));
+            List<Map<String, Object>> items = maps(service.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items"));
+            assertEquals(2, items.size(), "The expected Workload/mix subjects remain visible when the row bound is exceeded.");
+            assertTrue(items.stream().allMatch(item -> item.get("value") == null
+                    && "NOT_EVALUATED".equals(item.get("queryStatus"))
+                    && "INVALID".equals(item.get("mappingStatus"))
+                    && Integer.valueOf(SutMetricsService.MAX_BUSINESS_RESULT_ROWS).equals(item.get("unmatchedRowCount"))));
+            for (Map<String, Object> item : maps(manifest.get("files"))) {
+                Path sidecar = temp.resolve("business-multi-output-row-bound").resolve("jobs").resolve(JOB_ID)
+                        .resolve("sut-metrics").resolve(String.valueOf(item.get("path")));
+                String serialized = new String(Files.readAllBytes(sidecar), StandardCharsets.UTF_8);
+                assertFalse(serialized.contains("RAW_ROW_SENTINEL"), "Raw DB rows must not be persisted in the sidecar.");
+                Map<String, Object> sidecarJson = ServerRuntime.JSON.readValue(serialized, Map.class);
+                att.validation.JsonSchemaVerifier.verifyJson(Path.of("schemas/att-sut-metrics-observation-v1.schema.json"), serialized);
+                Map<String, Object> availability = object(object(sidecarJson.get("observation")).get("availability"));
+                assertEquals("BUSINESS_MAPPING_ROW_LIMIT_EXCEEDED", maps(availability.get("diagnostics")).get(0).get("code"));
+            }
+            Map<String, Object> offline = service.writeOfflineReportEvidence(JOB_ID, temp.resolve("offline-row-bound-report"));
+            att.validation.JsonSchemaVerifier.verifyJson(Path.of("schemas/api/att-load-offline-observations-v1.schema.json"),
+                    ServerRuntime.JSON.writeValueAsString(offline));
+        }
+    }
+
+    @Test void invalidOutputColumnDoesNotInvalidateSiblingsAndFailedCallInvalidatesEveryOutput() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-multi-output-failures"))) {
+            service.upsertProfile(multiOutputBusinessProfile("business"));
+            Map<String, Object> configured = scenario(List.of(map("profile", "business")), "1m", "1s", "15s");
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice", false,
+                    multiOutputBusinessContext(multiMixSubjects("checkout")));
+            AtomicInteger invocations = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    invocations.incrementAndGet();
+                    return map("rowCount", 2, "rows", List.of(
+                            map("WORKLOAD_ID", "checkout", "MIX_ID", "web", "SUCCESS", 20, "FAILURE", "invalid"),
+                            map("WORKLOAD_ID", "checkout", "MIX_ID", "mobile", "SUCCESS", 8, "FAILURE", 0)));
+                }
+                @Override public void close() { }
+            });
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(60);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("PARTIAL", manifest.get("state"));
+            assertEquals(1, invocations.get());
+            List<Map<String, Object>> items = maps(service.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items"));
+            Map<String, Object> webSuccess = items.stream().filter(item -> "web".equals(item.get("mixId")) && "success".equals(item.get("metricId"))).findFirst().orElseThrow();
+            Map<String, Object> webFailure = items.stream().filter(item -> "web".equals(item.get("mixId")) && "failure".equals(item.get("metricId"))).findFirst().orElseThrow();
+            assertEquals(20.0, webSuccess.get("value"));
+            assertNull(webFailure.get("value"));
+            assertEquals("NOT_EVALUATED", webFailure.get("queryStatus"));
+            assertEquals("BUSINESS_METRIC_VALUE_INVALID", maps(object(object(webFailure.get("observation")).get("availability")).get("diagnostics")).get(0).get("code"));
+            assertEquals(8.0, items.stream().filter(item -> "mobile".equals(item.get("mixId")) && "success".equals(item.get("metricId"))).findFirst().orElseThrow().get("value"));
+
+            String failedJob = "J0000000000000002";
+            AtomicInteger failedInvocations = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    failedInvocations.incrementAndGet();
+                    throw new IllegalStateException("database unavailable");
+                }
+                @Override public void close() { }
+            });
+            service.writeSnapshot(failedJob, snapshot);
+            service.jobFinished(failedJob, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> failedManifest = awaitManifest(service, failedJob);
+            assertEquals("FAILED", failedManifest.get("state"));
+            assertEquals(1, failedInvocations.get());
+            List<Map<String, Object>> failedItems = maps(service.readCollectionPage(failedJob, 0, 16, null, null, null).get("items"));
+            assertEquals(4, failedItems.size());
+            assertTrue(failedItems.stream().allMatch(item -> item.get("value") == null && "UNAVAILABLE".equals(item.get("queryStatus"))));
+        }
+    }
+
+    @Test void duplicateAndUnknownBusinessRowsKeepExpectedSubjectsAndDiagnostics() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-multi-output-row-errors"))) {
+            service.upsertProfile(multiOutputBusinessProfile("business"));
+            Map<String, Object> snapshot = service.resolveScenario(
+                    scenario(List.of(map("profile", "business")), "1m", "1s", "15s"), "alice", false,
+                    multiOutputBusinessContext(multiMixSubjects("checkout")));
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    return map("rowCount", 4, "rows", List.of(
+                            map("WORKLOAD_ID", "checkout", "MIX_ID", "web", "SUCCESS", 20, "FAILURE", 2),
+                            map("WORKLOAD_ID", "checkout", "MIX_ID", "web", "SUCCESS", 21, "FAILURE", 3),
+                            map("WORKLOAD_ID", "checkout", "MIX_ID", "mobile", "SUCCESS", 8, "FAILURE", 0),
+                            map("WORKLOAD_ID", "unknown", "MIX_ID", "outside", "SUCCESS", 1, "FAILURE", 0)));
+                }
+                @Override public void close() { }
+            });
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(60);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("PARTIAL", manifest.get("state"));
+            List<Map<String, Object>> items = maps(service.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items"));
+            assertEquals(4, items.size(), "Every pinned Workload/mix and output remains represented.");
+            Map<String, Object> web = items.stream().filter(item -> "web".equals(item.get("mixId")) && "success".equals(item.get("metricId"))).findFirst().orElseThrow();
+            assertNull(web.get("value"));
+            assertEquals("BUSINESS_MAPPING_DUPLICATE", maps(object(object(web.get("observation")).get("availability")).get("diagnostics")).get(0).get("code"));
+            Map<String, Object> mobile = items.stream().filter(item -> "mobile".equals(item.get("mixId")) && "success".equals(item.get("metricId"))).findFirst().orElseThrow();
+            assertEquals(8.0, mobile.get("value"));
+            assertEquals("PARTIAL", mobile.get("mappingStatus"));
+            assertEquals(2, mobile.get("unmatchedRowCount"));
+            assertEquals("BUSINESS_MAPPING_UNMATCHED_ROWS", maps(object(object(mobile.get("observation")).get("availability")).get("diagnostics")).get(0).get("code"));
+        }
+    }
+
     @Test void businessCallContextAdmissionOnlyLooksAtSelectedProfiles() throws Exception {
         try (SutMetricsService service = new SutMetricsService(temp)) {
             service.upsertProfile(baseProfile("prom", 1, false));
@@ -1395,6 +1770,40 @@ class SutMetricsServiceTest {
     private static Map<String, Object> businessProfile(String id, String call) {
         return map("schemaVersion", "att-sut-metrics-profile/v1", "id", id, "name", id, "kind", "base", "category", "db",
                 "metrics", List.of(map("id", "count", "title", "Count", "unit", "count", "kind", "gauge", "call", call)));
+    }
+
+    private static Map<String, Object> multiOutputBusinessProfile(String id) {
+        return map("schemaVersion", "att-sut-metrics-profile/v1", "id", id, "name", id, "kind", "base", "category", "db",
+                "metrics", List.of(map("id", "transaction-query",
+                        "call", "#{db.orders.query(sql='select workload_id, mix_id, success, failure from transaction_summary')}",
+                        "sampling", "afterDrain",
+                        "mapping", map("rows", "rows", "workloadColumn", "WORKLOAD_ID", "mixColumn", "MIX_ID"),
+                        "outputs", List.of(
+                                map("id", "success", "title", "Successful transactions", "column", "SUCCESS", "unit", "transactions", "kind", "counter"),
+                                map("id", "failure", "title", "Failed transactions", "column", "FAILURE", "unit", "transactions", "kind", "counter")))));
+    }
+
+    private static List<SutMetricsService.WorkloadSubject> multiMixSubjects(String workloadId) {
+        return List.of(new SutMetricsService.WorkloadSubject(workloadId, "web", "tool", "same-target", true),
+                new SutMetricsService.WorkloadSubject(workloadId, "mobile", "tool", "same-target", true));
+    }
+
+    private static SutMetricsService.BusinessCallContext multiOutputBusinessContext(
+            List<SutMetricsService.WorkloadSubject> workloadSubjects) {
+        att.config.DbHelperConfig db = new att.config.DbHelperConfig("orders", "Orders", null,
+                "jdbc:h2:mem:sut_multi_output", "sa", "", "org.h2.Driver", Map.of(), true,
+                "driverDefault", 30, "iteration", "rollback", 100, 1024, 8192,
+                null, null, 20, 0, 2000L, null);
+        att.config.FrameworkConfig frameworkConfig = new att.config.FrameworkConfig(
+                Path.of("output"), Path.of("report"), Path.of("logs"), "TEST", 30_000,
+                Path.of("templates"), Path.of("testcases"), Map.of(), Map.of("orders", db), Map.of(), Map.of(), Map.of(),
+                null, null, List.of(), "", "", List.of(), List.of(), 1, "ignore", "", false,
+                att.config.ProcessOutputConfig.defaults(), List.of());
+        Set<String> workloadIds = workloadSubjects.stream().map(SutMetricsService.WorkloadSubject::workloadId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        return new SutMetricsService.BusinessCallContext("pkg", Path.of("package"), Path.of("runtime-config.yaml"),
+                Path.of("."), "TEST", "a".repeat(64), "b".repeat(64), workloadIds,
+                workloadSubjects, frameworkConfig);
     }
 
     private static Map<String,Object> profileWithQueries(String... queries) {

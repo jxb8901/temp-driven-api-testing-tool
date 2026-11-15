@@ -871,6 +871,46 @@ describe('JobsPage React feature', () => {
     expect(host.querySelector('#job-panel-sutMetrics details')?.textContent).toContain('PROMETHEUS_TIMEOUT');
   });
 
+  it('shows mapped business metric subjects, invocation count, and row diagnostics', async () => {
+    const getMetrics = vi.fn(async (): Promise<SutMetricsJobResponse> => ({
+      state: 'PARTIAL', collection: { state: 'PARTIAL', queries: [], diagnostics: [] }, items: [{
+        queryId: 'att-call/profile/settlement/mix-1/success_transactions', metricId: 'success_transactions',
+        title: 'Successful transactions', category: 'db', targetId: 'settlement', targetType: 'mix', unit: 'transactions',
+        value: 12, queryStatus: 'PARTIAL', scope: 'mix', workloadId: 'settlement', mixId: 'mix-1',
+        callGroupId: 'att-call/profile/settlement/transaction-query', callCount: 1,
+        mappingStatus: 'PARTIAL', unmatchedRowCount: 1,
+        observation: { kind: 'timed-snapshot', window: { observedAt: '2026-10-13T09:50:00Z' }, provenance: {
+          sourceType: 'DBHELPER', sourceName: 'orders', callGroupId: 'att-call/profile/settlement/transaction-query',
+        }, availability: {
+          state: 'PARTIAL', freshness: 'FRESH', collectionDurationMs: 34, mappingStatus: 'PARTIAL', callCount: 1,
+          unmatchedRowCount: 1, diagnostics: [{ code: 'BUSINESS_MAPPING_UNMATCHED_ROWS', message: 'One result row was not mapped.' }],
+        } },
+      }, {
+        queryId: 'att-call/profile/settlement/mix-1/failed_transactions', metricId: 'failed_transactions',
+        title: 'Failed transactions', category: 'db', targetId: 'settlement', targetType: 'mix', unit: 'transactions',
+        value: null, queryStatus: 'NOT_EVALUATED', scope: 'mix', workloadId: 'settlement', mixId: 'mix-1',
+        callGroupId: 'att-call/profile/settlement/transaction-query', callCount: 1,
+        mappingStatus: 'INVALID_VALUE', unmatchedRowCount: 0,
+        observation: { kind: 'timed-snapshot', availability: {
+          state: 'NOT_EVALUATED', freshness: 'UNKNOWN', collectionDurationMs: 34, mappingStatus: 'INVALID_VALUE', callCount: 1,
+          unmatchedRowCount: 0, diagnostics: [{ code: 'BUSINESS_METRIC_VALUE_INVALID', message: 'The output column was not numeric.' }],
+        } },
+      }],
+    }));
+    const api = makeApi({ getJobSutMetrics: getMetrics });
+    await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={false} hidden={false} />));
+    await advance();
+    expect(host.querySelector('#job-panel-sutMetrics')?.textContent).toContain('Mix mix-1 · Workload settlement');
+    expect(host.querySelector('#job-panel-sutMetrics')?.textContent).toContain('Mapping qualityPARTIAL');
+    expect(host.querySelector('#job-panel-sutMetrics')?.textContent).toContain('Calls executed1');
+    expect(host.querySelector('#job-panel-sutMetrics')?.textContent).toContain('Unmatched rows1');
+    expect(host.querySelector('#job-panel-sutMetrics')?.textContent).toContain('Call sourceDBHELPER · orders');
+    expect(host.querySelector('#job-panel-sutMetrics')?.textContent).toContain('Collected at (UTC)2026-10-13T09:50:00.000Z');
+    expect(host.querySelector('#job-panel-sutMetrics')?.textContent).toContain('BUSINESS_MAPPING_UNMATCHED_ROWS');
+    expect(host.querySelector('#job-panel-sutMetrics')?.textContent).toContain('INVALID_VALUE');
+    expect(host.querySelector('#job-panel-sutMetrics')?.textContent).toContain('BUSINESS_METRIC_VALUE_INVALID');
+  });
+
   it('cancels SUT Metrics reads when its Job Details tab is hidden and resumes when reopened', async () => {
     const pending = deferred<SutMetricsLiveResponse>();
     const signals: AbortSignal[] = [];

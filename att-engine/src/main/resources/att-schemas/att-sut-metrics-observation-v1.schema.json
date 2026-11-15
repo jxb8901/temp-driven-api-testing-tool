@@ -293,7 +293,9 @@
               "enum": [
                 "AVAILABLE",
                 "PARTIAL",
-                "NO_DATA"
+                "NO_DATA",
+                "UNAVAILABLE",
+                "NOT_EVALUATED"
               ]
             },
             "freshness": {
@@ -328,14 +330,31 @@
               }
             },
             "quality": {
-              "enum": [
-                "SINGLE_VALUE",
-                "AUTHOR_DEFINED_WINDOW_QUERY"
-              ]
+              "type": "string",
+              "maxLength": 64
             },
             "collectionDurationMs": {
               "type": "integer",
               "minimum": 0
+            },
+            "mappingStatus": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "unmatchedRowCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4096
+            },
+            "callCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "callSubmitted": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1
             }
           }
         },
@@ -380,6 +399,37 @@
             },
             "runtimeConfigRevision": {
               "$ref": "#/$defs/revision"
+            },
+            "callGroupId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "scope": {
+              "enum": [
+                "job",
+                "workload",
+                "mix"
+              ]
+            },
+            "workloadId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 80
+            },
+            "mixId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 80
+            },
+            "association": {
+              "enum": [
+                "user-authored-mapping",
+                "explicit-binding"
+              ]
             }
           }
         }
@@ -437,7 +487,59 @@
       }
     },
     "value": {
-      "type": "number"
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "callGroupId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "scope": {
+      "enum": [
+        "job",
+        "workload",
+        "mix"
+      ]
+    },
+    "workloadId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 80
+    },
+    "mixId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 80
+    },
+    "callCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "mappingStatus": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "unmatchedRowCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4096
+    },
+    "queryStatus": {
+      "enum": [
+        "READY",
+        "PARTIAL",
+        "STALE",
+        "UNAVAILABLE",
+        "NOT_EVALUATED"
+      ]
     }
   },
   "$defs": {

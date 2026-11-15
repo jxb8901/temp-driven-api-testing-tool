@@ -255,7 +255,9 @@ export interface SutMetricQueryMetadata {
 export interface SutMetricItem {
   id?: string; queryId?: string; profile?: string; profilePath?: string; metricId: string; title: string; category?: string; targetId: string; targetType?: string; kind?: string;
   sourceId?: string; sourceName?: string; unit: string; queryStatus?: string; observation?: Record<string, unknown>; series?: SutMetricSeries[];
-  value?: number; coverage?: Record<string, unknown>; error?: string;
+  value?: number | null; coverage?: Record<string, unknown>; error?: string;
+  scope?: 'job' | 'workload' | 'mix'; workloadId?: string | null; mixId?: string | null;
+  callGroupId?: string; callCount?: number; mappingStatus?: string; unmatchedRowCount?: number;
 }
 export interface SutMetricsManifest {
   schemaVersion?: string; state?: string; complete?: boolean; createdAt?: string; updatedAt?: string;

@@ -26,19 +26,33 @@
     "queryId": {
       "type": "string"
     },
-    "profile": { "type": "string" },
-    "profilePath": { "type": "string" },
-    "sourceId": { "type": "string" },
-    "sourceName": { "type": "string" },
+    "profile": {
+      "type": "string"
+    },
+    "profilePath": {
+      "type": "string"
+    },
+    "sourceId": {
+      "type": "string"
+    },
+    "sourceName": {
+      "type": "string"
+    },
     "metricId": {
       "type": "string"
     },
-    "title": { "type": "string" },
-    "category": { "type": "string" },
+    "title": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string"
+    },
     "targetId": {
       "type": "string"
     },
-    "targetType": { "type": "string" },
+    "targetType": {
+      "type": "string"
+    },
     "unit": {
       "type": "string"
     },
@@ -83,6 +97,58 @@
           }
         }
       }
+    },
+    "callGroupId": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "scope": {
+      "enum": [
+        "job",
+        "workload",
+        "mix"
+      ]
+    },
+    "workloadId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mixId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "callCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "mappingStatus": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "unmatchedRowCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4096
+    },
+    "value": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "queryStatus": {
+      "enum": [
+        "READY",
+        "PARTIAL",
+        "STALE",
+        "UNAVAILABLE",
+        "NOT_EVALUATED"
+      ]
     }
   }
 }

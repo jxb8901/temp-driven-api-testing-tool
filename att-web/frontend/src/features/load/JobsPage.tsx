@@ -1302,30 +1302,56 @@ const SutMetricCard = memo(function SutMetricCard({ item, range, rangeStart, ran
   const chronologicalPoints = [...visiblePoints].sort((left, right) => metricPointTime(left) - metricPointTime(right));
   const firstVisible = chronologicalPoints[0]?.timestamp || coverage.firstSampleAt;
   const latestVisible = chronologicalPoints[chronologicalPoints.length - 1]?.timestamp || coverage.lastSampleAt;
-  const status = item.queryStatus || (count ? 'READY' : 'NO_DATA');
+  const businessValue = typeof item.value === 'number' && Number.isFinite(item.value);
+  const status = item.queryStatus || (businessValue
+    ? String((item.observation?.availability as Record<string, unknown> | undefined)?.freshness === 'STALE' ? 'STALE' : 'READY')
+    : count ? 'READY' : String((item.observation?.availability as Record<string, unknown> | undefined)?.state || 'NO_DATA'));
   const observationWindow = item.observation?.window && typeof item.observation.window === 'object'
     ? item.observation.window as Record<string, unknown> : {};
   const availability = item.observation?.availability && typeof item.observation.availability === 'object'
     ? item.observation.availability as Record<string, unknown> : {};
+  const provenance = item.observation?.provenance && typeof item.observation.provenance === 'object'
+    ? item.observation.provenance as Record<string, unknown> : {};
   const observedAt = observationWindow.observedAt || observationWindow.completedAt;
-  const businessValue = typeof item.value === 'number' && Number.isFinite(item.value);
+  const callGroupId = item.callGroupId || (typeof provenance.callGroupId === 'string' ? provenance.callGroupId : undefined);
+  const mappingStatus = item.mappingStatus || availability.mappingStatus;
+  const unmatchedRowCount = item.unmatchedRowCount ?? availability.unmatchedRowCount;
+  const callCount = item.callCount ?? availability.callCount;
+  const observationDiagnostics = Array.isArray(availability.diagnostics)
+    ? availability.diagnostics.filter((diagnostic): diagnostic is Record<string, unknown> => Boolean(diagnostic) && typeof diagnostic === 'object') : [];
+  const callSourceName = typeof provenance.sourceName === 'string' ? provenance.sourceName : undefined;
+  const callSourceType = typeof provenance.sourceType === 'string' ? provenance.sourceType : undefined;
+  const queryStart = typeof observationWindow.queryStart === 'string' ? observationWindow.queryStart : undefined;
+  const queryEnd = typeof observationWindow.queryEnd === 'string' ? observationWindow.queryEnd : undefined;
+  const subjectLabel = item.scope === 'mix' ? `Mix ${item.mixId || 'unknown'} · Workload ${item.workloadId || 'unknown'}`
+    : item.scope === 'workload' ? `Workload ${item.workloadId || item.targetId}`
+      : item.scope === 'job' ? 'Job-wide' : undefined;
   return <article className="att-sut-metric-card">
-    <header><div><h3>{item.title || item.metricId}</h3><p>{item.category || 'SUT'} · {item.targetType || 'target'} {item.targetId} · {item.unit}{item.profilePath ? ` · ${item.profilePath}` : ''}</p></div>
+    <header><div><h3>{item.title || item.metricId}</h3><p>{item.category || 'SUT'} · {item.targetType || 'target'} {item.targetId} · {item.unit}{item.profilePath ? ` · ${item.profilePath}` : ''}{subjectLabel ? ` · ${subjectLabel}` : ''}</p></div>
       <span className={`att-sut-metric-query-status att-sut-metric-query-status-${status.toLowerCase()}`}>{status}</span></header>
     {item.error && <p role="status">{item.error}</p>}
     {status === 'NOT_COLLECTED_LIVE' && <p role="status">Business calls run once after LOAD drain and are not executed by live preview.</p>}
-    {businessValue && <>
-      <dl className="att-sut-metric-summary"><div><dt>Observed value</dt><dd>{METRIC_NUMBER_FORMATTER.format(item.value!)} {item.unit}</dd></div>
+    {(businessValue || callGroupId || item.scope) && <>
+      <dl className="att-sut-metric-summary">{businessValue && <div><dt>Observed value</dt><dd>{METRIC_NUMBER_FORMATTER.format(item.value!)} {item.unit}</dd></div>}
         <div><dt>Observation type</dt><dd>{String(item.observation?.kind || 'business metric')}</dd></div>
-        {typeof observedAt === 'string' && <div><dt>Collected at</dt><dd>{dateTime(observedAt)}</dd></div>}
+        {typeof observedAt === 'string' && <div><dt>Collected at (UTC)</dt><dd><code>{utcTimestamp(observedAt)}</code></dd></div>}
+        {queryStart && queryEnd && <div><dt>Query window (UTC)</dt><dd><code>{utcTimestamp(queryStart)} – {utcTimestamp(queryEnd)}</code></dd></div>}
         {typeof availability.collectionDurationMs === 'number' && <div><dt>Call duration</dt><dd>{METRIC_NUMBER_FORMATTER.format(availability.collectionDurationMs)} ms</dd></div>}
+        {item.scope && <div><dt>Subject scope</dt><dd>{subjectLabel || item.scope}</dd></div>}
+        {callGroupId && <div><dt>Call group</dt><dd><code>{callGroupId}</code></dd></div>}
+        {callSourceName && <div><dt>Call source</dt><dd>{callSourceType ? `${callSourceType} · ` : ''}<code>{callSourceName}</code></dd></div>}
+        {typeof callCount === 'number' && <div><dt>Calls executed</dt><dd>{METRIC_NUMBER_FORMATTER.format(callCount)}</dd></div>}
+        {typeof mappingStatus === 'string' && <div><dt>Mapping quality</dt><dd>{mappingStatus}</dd></div>}
+        {typeof unmatchedRowCount === 'number' && <div><dt>Unmatched rows</dt><dd>{METRIC_NUMBER_FORMATTER.format(unmatchedRowCount)}</dd></div>}
       </dl>
-      {item.observation?.kind === 'timed-snapshot' && <p role="note">This is one snapshot after LOAD drain. It does not represent steady-window coverage.</p>}
-      {item.observation?.kind === 'window-aggregate' && <p role="note">This value comes from an author-defined query over the recorded STEADY interval; a successful query does not prove exhaustive coverage.</p>}
+      {businessValue && item.observation?.kind === 'timed-snapshot' && <p role="note">This is one snapshot after LOAD drain. It does not represent steady-window coverage.</p>}
+      {businessValue && item.observation?.kind === 'window-aggregate' && <p role="note">This value comes from an author-defined query over the recorded STEADY interval; a successful query does not prove exhaustive coverage.</p>}
     </>}
     {status === 'STALE' && <p role="status">The latest sample is older than the live freshness window.</p>}
     {!count && !businessValue && status !== 'UNAVAILABLE' && status !== 'NOT_COLLECTED_LIVE' && <p role="status">No samples were returned for this metric and time window.</p>}
     {status === 'UNAVAILABLE' && <p role="status">This metric query is unavailable.</p>}
+    {status === 'NOT_EVALUATED' && !businessValue && <p role="status">This metric has no usable mapped value.</p>}
+    {observationDiagnostics.length > 0 && <details><summary>Metric quality diagnostics ({observationDiagnostics.length})</summary><ul>{observationDiagnostics.slice(0, 12).map((diagnostic, index) => <li key={`${String(diagnostic.code || 'issue')}-${index}`}>{String(diagnostic.code || 'Metric issue')}: {String(diagnostic.message || 'No additional detail.')}</li>)}</ul></details>}
     {paths.length > 0 && <svg className="att-sut-metric-chart" role="img" aria-label={`${item.title} for ${item.targetId}`} viewBox="0 0 820 220">
       <path d="M0 190 H800 M0 105 H800 M0 20 H800" className="att-sut-metric-grid" />
       {paths.map(line => <path key={line.index} d={line.path} className={`att-sut-metric-line att-sut-metric-line-${line.index % 8}`} />)}

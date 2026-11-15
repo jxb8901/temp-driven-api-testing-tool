@@ -824,7 +824,7 @@ final class ServerRuntime implements AutoCloseable {
                 if(rawObservability instanceof Map<?,?>) {
                     Map<String,Object> observability=JSON.convertValue(rawObservability,Map.class);
                     SutMetricsService.BusinessCallContext callContext=sutMetrics.scenarioRequiresBusinessCallContext(observability)
-                            ?businessCallContext(packageId,root,request.environment,request.expectedRevisionDigest,workloadIds(scenario)):null;
+                            ?businessCallContext(packageId,root,request.environment,request.expectedRevisionDigest,workloadSubjects(scenario)):null;
                     sutSnapshot=sutMetrics.resolveScenario(observability,observationPrincipal,
                             sutAdminPrincipal(observationPrincipal),callContext);
                 }
@@ -2200,7 +2200,7 @@ final class ServerRuntime implements AutoCloseable {
             } else {
                 Map<String,Object> observability=JSON.convertValue(rawObservability,Map.class);
                 SutMetricsService.BusinessCallContext callContext=sutMetrics.scenarioRequiresBusinessCallContext(observability)
-                        ?businessCallContext(packageId,root,environment,(String)rawDigest,workloadIds(scenario)):null;
+                        ?businessCallContext(packageId,root,environment,(String)rawDigest,workloadSubjects(scenario)):null;
                 sutSnapshot=sutMetrics.resolveScenario(observability,principal,
                         administrator||sutAdminPrincipal(principal),callContext);
             }
@@ -2687,7 +2687,7 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private SutMetricsService.BusinessCallContext businessCallContext(String packageId,Path root,String environment,
-                                                                       String packageRevision,Set<String> workloadIds) throws Exception {
+                                                                       String packageRevision,List<SutMetricsService.WorkloadSubject> workloadSubjects) throws Exception {
         validatePackageRoot(root);
         String pinnedRevision=packageRevision;
         if(pinnedRevision==null||pinnedRevision.isBlank()) {
@@ -2706,7 +2706,9 @@ final class ServerRuntime implements AutoCloseable {
             throw new IllegalStateException("The shared Runtime Config changed while business metrics were being admitted.");
         return new SutMetricsService.BusinessCallContext(packageId,root,config.runtimeConfigPath,
                 ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),environment,pinnedRevision,
-                pinnedRuntimeRevision,workloadIds==null?Set.of():Set.copyOf(workloadIds),frameworkConfig);
+                pinnedRuntimeRevision,workloadSubjects==null?Set.of():workloadSubjects.stream()
+                        .map(SutMetricsService.WorkloadSubject::workloadId).collect(java.util.stream.Collectors.toUnmodifiableSet()),
+                workloadSubjects==null?List.of():List.copyOf(workloadSubjects),frameworkConfig);
     }
 
     private String runtimeConfigRevision() throws Exception {
@@ -2756,7 +2758,7 @@ final class ServerRuntime implements AutoCloseable {
                 values.put("MODE",sampling);values.put("EXECUTION_STARTED_AT",executionStartedAt.toString());
                 values.put("EXECUTION_FINISHED_AT",executionFinishedAt.toString());
                 values.put("CALL_STARTED_AT",callStartedAt.toString());
-                values.put("WORKLOAD_ID",query.get("workloadId"));
+                values.put("WORKLOAD_ID",query.containsKey("callWorkloadId")?query.get("callWorkloadId"):query.get("workloadId"));
                 if("windowQuery".equals(sampling)) {
                     if(steadyStart==null||steadyEnd==null||!steadyEnd.isAfter(steadyStart))
                         throw new IllegalStateException("The actual STEADY interval is unavailable for a windowQuery business metric.");
@@ -2862,6 +2864,35 @@ final class ServerRuntime implements AutoCloseable {
         if(raw instanceof List<?> rows) for(Object row:rows) if(row instanceof Map<?,?> map&&map.get("id") instanceof String id)ids.add(id);
         if(ids.isEmpty())ids.add("default");
         return Set.copyOf(ids);
+    }
+
+    private static List<SutMetricsService.WorkloadSubject> workloadSubjects(Map<String,Object> scenario) {
+        List<SutMetricsService.WorkloadSubject> subjects=new ArrayList<>();
+        Object raw=scenario==null?null:scenario.get("workloads");
+        if(raw instanceof List<?> rows) for(Object row:rows) {
+            if(!(row instanceof Map<?,?> workload)||!(workload.get("id") instanceof String workloadId))continue;
+            Object rawMix=workload.get("mix");
+            if(rawMix instanceof List<?> mix&&!mix.isEmpty()) {
+                for(Object rawEntry:mix) if(rawEntry instanceof Map<?,?> entry&&entry.get("id") instanceof String mixId) {
+                    Map<?,?> target=entry.get("target") instanceof Map<?,?> map?map:Map.of();
+                    subjects.add(new SutMetricsService.WorkloadSubject(workloadId,mixId,
+                            target.get("type") instanceof String type?type:null,
+                            target.get("id") instanceof String targetId?targetId:null,true));
+                }
+            } else {
+                Map<?,?> target=workload.get("target") instanceof Map<?,?> map?map:Map.of();
+                subjects.add(new SutMetricsService.WorkloadSubject(workloadId,null,
+                        target.get("type") instanceof String type?type:null,
+                        target.get("id") instanceof String targetId?targetId:null,false));
+            }
+        }
+        if(subjects.isEmpty()) {
+            Map<?,?> target=scenario!=null&&scenario.get("target") instanceof Map<?,?> map?map:Map.of();
+            subjects.add(new SutMetricsService.WorkloadSubject("default",null,
+                    target.get("type") instanceof String type?type:null,
+                    target.get("id") instanceof String targetId?targetId:null,false));
+        }
+        return List.copyOf(subjects);
     }
 
     private void requireLiveDraft(DebugDraft draft) {
