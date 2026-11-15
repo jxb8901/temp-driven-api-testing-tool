@@ -1,8 +1,8 @@
 schemaVersion: att-flow/v3.6
 id: common.identity.v1
-name: Identity
-description: V3.4.2 Flow reading canonical source metadata in its own Action scope.
+name: Execution Identity
+description: Prefer the source Case ID when available, with the execution ID as a cross-mode fallback.
 actions:
   identityValue:
     type: tool
-    call: "#{misc.string(value=${META.SOURCE.caseId})}"
+    call: "#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}"

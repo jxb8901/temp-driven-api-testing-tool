@@ -81,6 +81,17 @@ describe('ATT hash route contract', () => {
     expect(invalidAction).not.toHaveProperty('sourceReference.actionId');
   });
 
+  it('preserves grouped Tool manifest references and caller navigation in Package source-file routes', () => {
+    const callingSource = { kind: 'package', packageId: 'default', environment: 'SIT', resource: {
+      type: 'tool', resourceId: 'fpp.inspectFiles', logicalId: 'fpp.inspectFiles', tab: 'source' as const,
+    } } as const;
+    const route = { kind: 'package', packageId: 'default', view: 'source-file', environment: 'SIT',
+      filePath: 'tools/fpp/tool-group.yaml', fileOrigin: 'tools/fpp/inspectFiles.yaml',
+      sourceReference: { type: 'tool', resourceId: 'fpp.inspectFiles', referenceId: 'f'.repeat(64), returnTab: 'source' as const },
+      returnTo: formatRoute(callingSource) } as const;
+    expect(parseRoute(formatRoute(route))).toEqual(route);
+  });
+
   it('round-trips safe resource-source references and rejects malformed reference tokens', () => {
     const route = {
       kind: 'configuration', packageId: 'payments', filePath: 'templates/payment/payload/request.xml',
@@ -126,5 +137,11 @@ describe('ATT hash route contract', () => {
     expect(parseRoute(formatRoute(route))).toEqual(route);
     expect(parseRoute('#/configuration/payments?configurationReferenceId=bad%2Ftoken'))
       .not.toHaveProperty('configurationReferenceId');
+  });
+
+  it('round-trips only well-formed durable validation record links', () => {
+    const route = { kind: 'validation', validationId: 'V0123456789ABCDEF0123456789ABCDEF' } as const;
+    expect(parseRoute(formatRoute(route))).toEqual(route);
+    expect(parseRoute('#/validate?record=Vnot-a-record')).toEqual({ kind: 'validation' });
   });
 });

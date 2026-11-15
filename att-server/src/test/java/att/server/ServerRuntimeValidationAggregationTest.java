@@ -68,6 +68,15 @@ class ServerRuntimeValidationAggregationTest {
         assertTrue(message.contains("skipped 1 remaining registered Packages"));
     }
 
+    @Test void validationSourceApplicabilityRequiresAComparableRevision() {
+        String current="a".repeat(64),changed="b".repeat(64);
+        assertEquals("CURRENT",ServerRuntime.validationApplicability(current,current));
+        assertEquals("STALE",ServerRuntime.validationApplicability(current,changed));
+        assertEquals("UNVERIFIED",ServerRuntime.validationApplicability(null,current));
+        assertEquals("UNVERIFIED",ServerRuntime.validationApplicability(current,null));
+        assertEquals("UNVERIFIED",ServerRuntime.validationApplicability("unknown",current));
+    }
+
     private static void assertInvalidAndIncomplete(Map<String,Object> report) {
         assertEquals("INVALID",report.get("overallStatus"));
         assertEquals(Boolean.FALSE,report.get("complete"));

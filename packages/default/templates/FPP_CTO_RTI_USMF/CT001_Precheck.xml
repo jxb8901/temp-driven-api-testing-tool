@@ -1,6 +1,6 @@
 <Txn>
     <TxHeader>
-        <TxDate>#{sysdate("yyyyMMdd")}</TxDate>
+        <TxDate>#{date.sysdate("yyyyMMdd")}</TxDate>
         <TxTime>#{systimestamp("HHmmss")}</TxTime>
     </TxHeader>
     <TxBody>

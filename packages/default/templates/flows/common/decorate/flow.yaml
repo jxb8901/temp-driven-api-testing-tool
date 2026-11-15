@@ -1,12 +1,12 @@
 schemaVersion: att-flow/v3.6
 id: common.decorate.v1
 name: Decorate Value
-description: V3.4.2 scope-local Flow assignment and explicit variable publication.
+description: Decorate the source Case ID when present, or the execution ID for cross-mode calls.
 actions:
   decoratedValue:
     type: assign
     name: decoratedResult
-    expression: "${META.SOURCE.caseId}-done"
+    expression: "#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}-done"
   auditDecoration:
     type: log
     message: "Decorated ${EXEC.VARS.decoratedResult}"

@@ -1,8 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { AppShell, useAppShellContext } from './AppShell';
 import { DashboardPage } from './DashboardPage';
-import { formatRoute, useNavigationGuard, useRouteState, type AppRoute, type ResourceRoute, type ValidationRouteState, type ValidationScope } from './router';
+import { formatRoute, useNavigationGuard, useRouteState, type AppRoute, type ValidationRouteState, type ValidationScope } from './router';
 import { appReducer, initialAppState, latestServerJobWindow, serverCapabilities } from './state';
 import { RunPage } from './features/run/RunPage';
 // explorer.css stays eager: TypedSidecarForm and ConfigurationExplorer use it
@@ -14,6 +14,7 @@ const LoadPage = lazy(() => import('./features/load/LoadPage').then(module => ({
 const JobsPage = lazy(() => import('./features/load/JobsPage').then(module => ({ default: module.JobsPage })));
 const MonitoringPage = lazy(() => import('./features/monitoring/MonitoringPage').then(module => ({ default: module.MonitoringPage })));
 const ValidationWorkspacePage = lazy(() => import('./features/validation/ValidationWorkspacePage').then(module => ({ default: module.ValidationWorkspacePage })));
+const ValidationPanel = lazy(() => import('./features/validation/ValidationPanel').then(module => ({ default: module.ValidationPanel })));
 const QuickLoadPage = lazy(() => import('./features/load/QuickLoadPage').then(module => ({ default: module.QuickLoadPage })));
 const LoadCatalogPage = lazy(() => import('./features/load/LoadCatalogPage').then(module => ({ default: module.LoadCatalogPage })));
 const LoadResourceDetailPage = lazy(() => import('./features/load/LoadResourceDetailPage').then(module => ({ default: module.LoadResourceDetailPage })));
@@ -24,6 +25,7 @@ import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspa
 import { PackageManifestWorkspace } from './features/explorer/PackageManifestWorkspace';
 import { PackageTestdataWorkspace } from './features/explorer/PackageTestdataCatalog';
 import { PackageSafeSourceFileViewer } from './features/explorer/PackageSafeSourceFileViewer';
+import type { ValidationRecord, ValidationRequest } from './features/validation/types';
 const LoadTestingPage = lazy(() => import('./features/load/LoadTestingPage').then(module => ({ default: module.LoadTestingPage })));
 const SavedLoadScenarios = lazy(() => import('./features/load/SavedLoadScenarios').then(module => ({ default: module.SavedLoadScenarios })));
 const LoadTemplateBuilder = lazy(() => import('./features/load/LoadTemplateBuilder').then(module => ({ default: module.LoadTemplateBuilder })));
@@ -37,8 +39,141 @@ function asError(value: unknown): Error {
 }
 
 const loadJobsApi: LoadJobsApi = api;
+const CONTEXT_VALIDATIONS_STORAGE_KEY = 'att.validation.contexts.v1';
+const MAX_REMEMBERED_VALIDATION_CONTEXTS = 32;
+type ContextValidation = { routeKey: string; request: ValidationRequest; title: string; submitOnOpen: boolean };
 
-function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSchedule, packageRegistrationState, registered, packageLabel }: {
+function isContextValidation(value: unknown): value is ContextValidation {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<ContextValidation>;
+  if (typeof item.routeKey !== 'string' || !item.routeKey || item.routeKey.length > 4096
+      || /[\u0000-\u001f\u007f]/.test(item.routeKey)
+      || typeof item.title !== 'string' || !item.title || item.title.length > 1024
+      || !item.request || typeof item.request !== 'object') return false;
+  const request = item.request as { targetKind?: unknown; packageId?: unknown; environment?: unknown; target?: unknown };
+  const scope = String(request.targetKind);
+  if (!['config', 'package', 'case', 'suite', 'template', 'flow', 'tool', 'load'].includes(scope)) return false;
+  if (request.packageId !== undefined && (typeof request.packageId !== 'string' || request.packageId.length > 128)) return false;
+  if (request.environment !== undefined && (typeof request.environment !== 'string' || request.environment.length > 32)) return false;
+  if (request.target !== undefined && (typeof request.target !== 'string' || request.target.length > 512)) return false;
+  if (scope !== 'config' && (typeof request.packageId !== 'string' || !request.packageId)) return false;
+  if (['case', 'suite', 'template', 'flow', 'tool', 'load'].includes(scope)
+      && (typeof request.target !== 'string' || !request.target)) return false;
+  if (['config', 'package'].includes(scope) && request.target !== undefined) return false;
+  return true;
+}
+
+function contextValidationStorageKey(authContextKey: string): string {
+  return `${CONTEXT_VALIDATIONS_STORAGE_KEY}.${encodeURIComponent(authContextKey)}`;
+}
+
+function readRememberedValidationContexts(storageKey: string): ContextValidation[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return uniqueContextValidations(parsed.filter(isContextValidation).map(item => ({ ...item, submitOnOpen: false })));
+  } catch { return []; }
+}
+
+function contextValidationKey(value: Pick<ContextValidation, 'routeKey' | 'request'>): string {
+  return `${value.routeKey}\n${JSON.stringify(value.request)}`;
+}
+
+function uniqueContextValidations(values: ContextValidation[]): ContextValidation[] {
+  const seen = new Set<string>();
+  return [...values].reverse().filter(value => {
+    const key = contextValidationKey(value);
+    if (seen.has(key)) return false;
+    seen.add(key);return true;
+  }).reverse().slice(-MAX_REMEMBERED_VALIDATION_CONTEXTS);
+}
+
+type ValidationContextState = {
+  contextValidation?: ContextValidation;
+  onValidateContext(request: ValidationRequest, title: string): void;
+  rememberContextValidation(record: ValidationRecord): void;
+  closeContextValidation(): void;
+};
+
+function ValidationContextCache({ routeKey, supportsValidationRecords, navigate, children }: {
+  routeKey: string;
+  supportsValidationRecords: boolean;
+  navigate(route: AppRoute): void;
+  children(state: ValidationContextState): ReactNode;
+}) {
+  const shell = useAppShellContext();
+  const authContextKey = shell.authContextKey || '';
+  const identityReady = Boolean(authContextKey && !authContextKey.startsWith('auth:') && shell.accessCapabilities.operate);
+  const storageKey = identityReady ? contextValidationStorageKey(authContextKey) : '';
+  const [saved, setSaved] = useState<{ owner: string | null; values: ContextValidation[] }>(() => identityReady
+    ? { owner: authContextKey, values: readRememberedValidationContexts(storageKey) }
+    : { owner: null, values: [] });
+  const cacheReady = identityReady && saved.owner === authContextKey;
+  const contextValidations = cacheReady ? saved.values : [];
+  const contextValidation = [...contextValidations].reverse().find(value => value.routeKey === routeKey);
+  const previousRouteKey = useRef(routeKey);
+
+  useEffect(() => {
+    try { localStorage.removeItem(CONTEXT_VALIDATIONS_STORAGE_KEY); } catch { /* Legacy unscoped records are never restored. */ }
+  }, []);
+  useEffect(() => {
+    if (!identityReady) { setSaved({ owner: null, values: [] }); return; }
+    setSaved({ owner: authContextKey, values: readRememberedValidationContexts(storageKey) });
+  }, [authContextKey, identityReady, storageKey]);
+  useEffect(() => {
+    if (!cacheReady) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(saved.values.map(value => ({ ...value, submitOnOpen: false }))));
+    } catch { /* Server-owned validation records remain recoverable from their contextual action. */ }
+  }, [cacheReady, saved.owner, saved.values, storageKey]);
+  useEffect(() => {
+    if (previousRouteKey.current !== routeKey) {
+      previousRouteKey.current = routeKey;
+      setSaved(current => current.owner === authContextKey
+        ? { ...current, values: current.values.map(value => value.submitOnOpen ? { ...value, submitOnOpen: false } : value) }
+        : current);
+    }
+  }, [authContextKey, routeKey]);
+
+  const onValidateContext = useCallback((request: ValidationRequest, title: string) => {
+    if (supportsValidationRecords) {
+      if (!cacheReady) return;
+      const value: ContextValidation = { routeKey, request, title, submitOnOpen: true };
+      const key = contextValidationKey(value);
+      setSaved(current => current.owner === authContextKey
+        ? { ...current, values: uniqueContextValidations([...current.values.filter(item => contextValidationKey(item) !== key), value]) }
+        : current);
+      return;
+    }
+    if ('all' in request) return;
+    navigate({ kind: 'validation', scope: request.targetKind,
+      ...(request.packageId ? { packageId: request.packageId } : {}),
+      ...(request.environment ? { environment: request.environment } : {}),
+      ...('target' in request ? { target: request.target } : {}) });
+  }, [authContextKey, cacheReady, navigate, routeKey, supportsValidationRecords]);
+  const rememberContextValidation = useCallback((record: ValidationRecord) => {
+    if (!cacheReady || !record.environment) return;
+    setSaved(current => current.owner === authContextKey ? { ...current, values: uniqueContextValidations(current.values.map(value => {
+      const request = value.request;
+      if ('all' in request || request.environment || request.targetKind !== record.scope
+          || (request.packageId || undefined) !== record.packageId
+          || (('target' in request ? request.target : undefined) || undefined) !== record.target) return value;
+      return { ...value, request: { ...request, environment: record.environment }, submitOnOpen: false };
+    })) } : current);
+  }, [authContextKey, cacheReady]);
+  const closeContextValidation = useCallback(() => {
+    if (!cacheReady || !contextValidation) return;
+    const key = contextValidationKey(contextValidation);
+    setSaved(current => current.owner === authContextKey
+      ? { ...current, values: current.values.filter(value => contextValidationKey(value) !== key) }
+      : current);
+  }, [authContextKey, cacheReady, contextValidation]);
+
+  return <>{children({ contextValidation, onValidateContext, rememberContextValidation, closeContextValidation })}</>;
+}
+
+function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSchedule, packageRegistrationState, registered, packageLabel,
+  onValidateContext }: {
   route: Extract<AppRoute, { kind: 'package' }>;
   inlineLoadEnabled: boolean;
   schedulingEnabled: boolean;
@@ -46,6 +181,7 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
   packageRegistrationState: 'loading' | 'ready' | 'error';
   registered: boolean;
   packageLabel: string;
+  onValidateContext(request: ValidationRequest, title: string): void;
 }) {
   const workspace = useAppShellContext();
   const navigation = useNavigationGuard();
@@ -86,9 +222,13 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
   const onRunBatch = useCallback(() => {
     navigation.navigate({ kind: 'run', packageId, environment, batch: true });
   }, [navigation.navigate, packageId, environment]);
-  const onValidateTarget = useCallback((scope: ValidationScope, target: string, resource?: ResourceRoute) => {
-    navigation.navigate({ kind: 'validation', scope, packageId, environment, target, resource });
-  }, [navigation.navigate, packageId, environment]);
+  const onValidateTarget = useCallback((scope: ValidationScope, target: string) => {
+    onValidateContext({ targetKind: scope as 'case' | 'suite' | 'template' | 'flow' | 'tool', packageId,
+      ...(environment ? { environment } : {}), target }, `${scope === 'suite' ? 'Suite' : scope} · ${target}`);
+  }, [onValidateContext, packageId, environment]);
+  const onValidatePackage = useCallback(() => {
+    onValidateContext({ targetKind: 'package', packageId, ...(environment ? { environment } : {}) }, `Package · ${packageLabel}`);
+  }, [onValidateContext, packageId, packageLabel, environment]);
   const onScheduleDebug = useCallback<NonNullable<ExplorerPageProps['onScheduleDebug']>>((input) => {
     return onSchedule(input);
   }, [onSchedule]);
@@ -104,7 +244,7 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
   if (route.view === 'source-file') return <>
     {contextNotice}
     <PackageSafeSourceFileViewer api={api} packageId={packageId} filePath={route.filePath} fileOrigin={route.fileOrigin}
-      sourceReference={route.sourceReference} onBack={() => navigation.navigate(route.returnTo || formatRoute({ kind: 'package', packageId,
+      sourceReference={route.sourceReference} locale={workspace.uiLocale} onBack={() => navigation.navigate(route.returnTo || formatRoute({ kind: 'package', packageId,
         ...(route.sourceReference ? { resource: { type: route.sourceReference.type, resourceId: route.sourceReference.resourceId, tab: route.sourceReference.returnTab || 'source' as const, ...(route.sourceReference.actionId ? { actionId: route.sourceReference.actionId } : {}) } } : {}) }))}
       onOpenFile={(path, origin, sourceReference) => navigation.navigate({ kind: 'package', packageId, view: 'source-file', environment,
         filePath: path, fileOrigin: origin, sourceReference: { ...sourceReference, returnTab: route.sourceReference?.returnTab || 'source', ...(route.sourceReference?.actionId ? { actionId: route.sourceReference.actionId } : {}) }, returnTo: formatRoute(route) })} />
@@ -120,7 +260,8 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
     onResourceRouteChange={onResourceRouteChange}
     onJobAccepted={onJobAccepted}
     onRunTarget={target => onRunTarget({ packageId, ...target })}
-    onValidateTarget={(scope, target, resource) => onValidateTarget(scope, target, resource)}
+    onValidateTarget={(scope, target) => onValidateTarget(scope, target)}
+    onValidatePackage={onValidatePackage}
     onRunBatch={onRunBatch}
     onOpenQuickLoad={inlineLoadEnabled ? onOpenQuickLoad : undefined}
     onScheduleDebug={schedulingEnabled ? onScheduleDebug : undefined}
@@ -203,8 +344,9 @@ function LoadRouteView({ packageId, templateId, environment: initialEnvironment,
   </Suspense>;
 }
 
-function ConfigurationRouteView({ route }: {
+function ConfigurationRouteView({ route, onValidateContext }: {
   route: Extract<ReturnType<typeof useRouteState>['route'], { kind: 'configuration' }>;
+  onValidateContext(request: ValidationRequest, title: string): void;
 }) {
   const workspace = useAppShellContext();
   const [showManifest, setShowManifest] = useState(route.view === 'package-manifest');
@@ -225,13 +367,13 @@ function ConfigurationRouteView({ route }: {
     navigation.navigate({ kind: 'package', packageId: route.packageId || '', resource });
   }, [navigation.navigate, route.packageId]);
   const onValidateConfiguration = useCallback(() => {
-    navigation.navigate({ kind: 'validation', scope: 'config' });
-  }, [navigation.navigate]);
+    onValidateContext({ targetKind: 'config' }, 'Shared Runtime Config');
+  }, [onValidateContext]);
   const onValidatePackageConfiguration = useCallback(() => {
     if (!route.packageId) return;
-    navigation.navigate({ kind: 'validation', scope: 'config', packageId: route.packageId,
-      ...(selectedEnvironment ? { environment: selectedEnvironment } : {}) });
-  }, [navigation.navigate, route.packageId, selectedEnvironment]);
+    onValidateContext({ targetKind: 'config', packageId: route.packageId,
+      ...(selectedEnvironment ? { environment: selectedEnvironment } : {}) }, `${route.packageId} effective Config`);
+  }, [onValidateContext, route.packageId, selectedEnvironment]);
   return <>
     <nav className="configuration-scope" aria-label="Configuration ownership">
       <button type="button" aria-pressed={showManifest} disabled={!route.packageId} onClick={() => navigation.navigate({ ...route, view: 'package-manifest' })}>Package Configuration</button>
@@ -376,6 +518,9 @@ export default function App() {
   const [workspaceResolution, setWorkspaceResolution] = useState<{key: string; environment?: string; error?: boolean}>({key: ''});
   const workspaceResolutionError = Boolean(selectedPackage && workspaceResolution.key === `${selectedPackage}\n${selectedEnvironment}` && workspaceResolution.error);
   const [catalogEnvironment, setCatalogEnvironment] = useState('');
+  const currentRouteKey = formatRoute(navigation.route);
+  const supportsValidationRecords = state.serverVersion.status === 'ready'
+    && state.serverVersion.data.validationRecordsApiVersion === 'att-validation-records/v1';
   useEffect(() => { try { sessionStorage.setItem('att.workspace.context', JSON.stringify(workspaceContext)); } catch { /* In-memory context remains usable. */ } }, [workspaceContext]);
   useEffect(() => {
     const controller = new AbortController();
@@ -506,18 +651,24 @@ export default function App() {
       ? selectedEnvironment : ''
   );
 
-  let content;
+  const renderContent = (onValidateContext: (request: ValidationRequest, title: string) => void): ReactNode => {
+  let content: ReactNode;
   if (navigation.route.kind === 'dashboard') {
     content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'monitoring') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Monitoring…</div>}><MonitoringPage /></Suspense>;
   } else if (navigation.route.kind === 'validation') {
-    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation workspace…</div>}>
-      <ValidationWorkspacePage api={api} packages={state.packages}
-        serverVersion={state.serverVersion}
-        route={navigation.route as ValidationRouteState} onRouteChange={route => navigation.navigate(route)}
-        onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
-    </Suspense>;
+    content = navigation.route.validationId
+      ? <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation record…</div>}>
+          <ValidationPanel key={navigation.route.validationId} validationId={navigation.route.validationId}
+            onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
+        </Suspense>
+      : <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation workspace…</div>}>
+          <ValidationWorkspacePage api={api} packages={state.packages}
+            serverVersion={state.serverVersion}
+            route={navigation.route as ValidationRouteState} onRouteChange={route => navigation.navigate(route)}
+            onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
+        </Suspense>;
   } else if (navigation.route.kind === 'run') {
     content = <RunPage key={`${navigation.route.packageId || ''}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.environment || ''}:${navigation.route.batch ? 'batch' : ''}:${navigation.route.replaySourceJobId || ''}:${navigation.route.replayDraftId || ''}`}
       packageId={runPackageId} initialTarget={navigation.route.target} initialBatchMode={navigation.route.batch} initialEnvironment={runEnvironment}
@@ -550,7 +701,7 @@ export default function App() {
   } else if (navigation.route.kind === 'settings') {
     content = <Suspense fallback={<div role="status">Loading settings...</div>}><SettingsPage /></Suspense>;
   } else if (navigation.route.kind === 'configuration') {
-    content = <ConfigurationRouteView route={navigation.route} />;
+    content = <ConfigurationRouteView route={navigation.route} onValidateContext={onValidateContext} />;
   } else if (navigation.route.kind === 'quick-load') {
     content = <QuickLoadRouteView key={`${navigation.route.packageId}:${navigation.route.target?.type || ''}:${navigation.route.target?.resourceId || ''}:${navigation.route.templateId || ''}:${navigation.route.model || ''}`}
       route={navigation.route} inlineLoadEnabled={capabilities.inlineLoadEnabled}
@@ -572,6 +723,7 @@ export default function App() {
         packageRegistrationState={state.packages.status}
         registered={Boolean(registeredPackage)}
         packageLabel={registeredPackage?.name || packageRoute.packageId}
+        onValidateContext={onValidateContext}
       />
     </Suspense>;
   } else {
@@ -603,9 +755,13 @@ export default function App() {
           onSchedule={onSchedule}
           onOpenDetail={(item, environment, returnTo) => navigation.navigate({ kind: 'load-resource', packageId: item.packageId,
             resourceId: item.resourceId, environment, returnTo })}
-          onOpenValidation={(item, environment) => navigation.navigate({ kind: 'validation', scope: 'load',
-            packageId: item.packageId, environment, target: item.path })} /></LoadTestingPage></Suspense>;
+          onOpenValidation={(item, environment) => onValidateContext(
+            { targetKind: 'load', packageId: item.packageId, ...(environment ? { environment } : {}), target: item.path },
+            `LOAD Scenario · ${item.path}`)} />
+      </LoadTestingPage></Suspense>;
   }
+  return content;
+  };
 
   return (
     <AppShell
@@ -624,7 +780,19 @@ export default function App() {
       workspaceNotice={selectedPackage && state.packages.status === 'ready' && !state.packages.data.some(item => item.packageId === selectedPackage) ? 'The selected Workspace Package is no longer available. Choose another Package.' : workspaceProfilesStatus === 'error' ? 'Workspace profiles could not be loaded. Check the selected Package.' : workspaceProfilesStatus === 'ready' && selectedEnvironment && !workspaceEnvironments.includes(selectedEnvironment) ? 'The selected Workspace Environment is no longer active for this Package. Choose another environment.' : workspaceResolutionError ? 'Workspace Environment could not be resolved. Validate the execution configuration before use.' : ''}
       onJobAccepted={onJobAccepted}
     >
-      {content}
+      <ValidationContextCache routeKey={currentRouteKey} supportsValidationRecords={supportsValidationRecords} navigate={navigation.navigate}>
+        {({ contextValidation, onValidateContext, rememberContextValidation, closeContextValidation }) => <>
+          {renderContent(onValidateContext)}
+          {supportsValidationRecords && contextValidation && <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation…</div>}>
+            <ValidationPanel key={`${contextValidation.routeKey}:${contextValidation.title}:${JSON.stringify(contextValidation.request)}`}
+              request={contextValidation.request} title={contextValidation.title}
+              onClose={closeContextValidation}
+              submitOnOpen={contextValidation.submitOnOpen} onRecordLoaded={rememberContextValidation}
+              onOpenRecord={validationId => navigation.navigate({ kind: 'validation', validationId })}
+              onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
+          </Suspense>}
+        </>}
+      </ValidationContextCache>
     </AppShell>
   );
 }

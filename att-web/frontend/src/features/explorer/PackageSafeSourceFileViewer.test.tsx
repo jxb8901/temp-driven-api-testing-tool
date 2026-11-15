@@ -23,6 +23,41 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); })
 async function flush() { await act(async () => { await Promise.resolve(); await Promise.resolve(); }); }
 
 describe('PackageSafeSourceFileViewer', () => {
+  it('distinguishes a missing route token from a Server denial and does not offer a futile retry', async () => {
+    const getResourceSourceFile = vi.fn(async () => { throw Object.assign(new Error('restricted'), { status: 403 }); });
+    const api = { getResourceSourceFile } as unknown as ExplorerApi;
+    await act(async () => root.render(<PackageSafeSourceFileViewer api={api} packageId="default" filePath="tools/fpp/tool-group.yaml"
+      onBack={vi.fn()} onOpenFile={vi.fn()} />));
+    await flush();
+    expect(host.textContent).toContain('missing a valid Server-issued source reference');
+    expect(host.textContent).toContain('Retry cannot recreate a missing reference');
+    expect(getResourceSourceFile).not.toHaveBeenCalled();
+    expect([...host.querySelectorAll<HTMLButtonElement>('button')].some(button => button.textContent === 'Retry source')).toBe(false);
+
+    await act(async () => root.render(<PackageSafeSourceFileViewer api={api} packageId="default" filePath="tools/fpp/tool-group.yaml"
+      sourceReference={{ type: 'tool', resourceId: 'fpp.inspectFiles', referenceId: 'f'.repeat(64) }} onBack={vi.fn()} onOpenFile={vi.fn()} />));
+    await flush();
+    expect(getResourceSourceFile).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toContain('You do not have access to this safe Package file projection.');
+    expect([...host.querySelectorAll<HTMLButtonElement>('button')].some(button => button.textContent === 'Retry source')).toBe(true);
+  });
+
+  it('requests a Tool group manifest with the original server token and origin', async () => {
+    const referenceId = 'd'.repeat(64);
+    const getResourceSourceFile = vi.fn(async () => ({ available: true, logicalPath: 'tools/fpp/tool-group.yaml',
+      format: 'yaml', projectionKind: 'original', text: 'id: fpp\n' }));
+    const api = { getResourceSourceFile } as unknown as ExplorerApi;
+    await act(async () => root.render(<PackageSafeSourceFileViewer api={api} packageId="default"
+      filePath="tools/fpp/tool-group.yaml" fileOrigin="tools/fpp/inspectFiles.yaml"
+      sourceReference={{ type: 'tool', resourceId: 'fpp.inspectFiles', referenceId }}
+      onBack={vi.fn()} onOpenFile={vi.fn()} />));
+    await flush();
+    expect(getResourceSourceFile).toHaveBeenCalledWith({ packageId: 'default', type: 'tool', resourceId: 'fpp.inspectFiles' },
+      referenceId, expect.any(AbortSignal), 'tools/fpp/inspectFiles.yaml');
+    expect(host.querySelector('.att-source-path code')?.textContent).toBe('tools/fpp/tool-group.yaml');
+    expect(host.textContent).toContain('id: fpp');
+  });
+
   it('loads by the Server-issued reference and offers safe nested navigation', async () => {
     const referenceId = 'a'.repeat(64);
     const nestedReferenceId = 'b'.repeat(64);
@@ -35,7 +70,7 @@ describe('PackageSafeSourceFileViewer', () => {
     await flush();
     expect(getResourceSourceFile).toHaveBeenCalledWith({ packageId: 'payments', type: 'flow', resourceId: 'checkout' }, referenceId,
       expect.any(AbortSignal), 'templates/payment/flow.yaml');
-    expect(host.querySelector('h1')?.textContent).toBe('templates/payment/request.xml');
+    expect(host.querySelector('.att-source-path code')?.textContent).toBe('templates/payment/request.xml');
     expect(host.querySelector('pre')?.textContent).toContain('&{./headers.json}');
     expect(host.textContent).toContain('View referenced file');
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'View referenced file')?.click());

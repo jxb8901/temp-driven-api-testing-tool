@@ -67,7 +67,7 @@ This flag is accepted only by standalone `debug`. ATT prints a warning before ex
 
 Bootstrap values may use initialized execution identity, `EXEC.INPUT`, `EXEC.LOAD` when present, other `EXEC.VARS.<name>` entries, and stable project/source/target/template metadata. `EXEC.ACTIONS`, action-local `output`, and invocation-scoped metadata are not available. Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are blocked; safe pure built-ins use the normal ATT parser. Repeatable `--set` namespaces are `input.path=value`, `vars.path=value`, and Tool-only `arg.name=value`. Values are parsed as safe YAML; nested maps and numeric list indexes are supported where the destination accepts them. For example, `--set 'vars.refNo=${EXEC.INPUT.refNo}'` changes the raw definition before evaluation.
 
-Without `--input`, ATT looks for `debug.yaml` beside a selected Template or Flow and for `config/tools/<group>.debug.yaml` for a grouped Tool (`config/tools/<localKey>.debug.yaml` for an ungrouped Tool). When no default sidecar exists, supply `--input`; an explicit `--input` replaces auto-discovery. `--env` uses the same environment resolver as Run/Validate/Load before target validation.
+Without `--input`, ATT looks for `debug.yaml` beside a selected Template or Flow and for the package-relative `tools/debug/<tool-id>.yaml` sidecar for a Tool. For example, `fpp.invokeApi` uses `tools/debug/fpp.invokeApi.yaml`. When no default sidecar exists, supply `--input`; an explicit `--input` replaces auto-discovery. `--env` uses the same environment resolver as Run/Validate/Load before target validation.
 
 Debug performs target-scoped validation: it validates the selected Template/Flow dependency closure or Tool contract, rather than requiring unrelated workbooks. Template and Flow debug use the same Action/Flow scope rules as Run. Tool debug constructs the same configured Tool invocation contract.
 
@@ -89,7 +89,7 @@ Debug does not create or update normal `latest-run.yaml`. Exit codes are `0` PAS
 
 ## Debug troubleshooting and MQ payload paths
 
-When a debug target cannot be resolved, check the target kind and identifier first, then use `--input <path>` to remove sidecar discovery from the diagnosis. Template and Flow debug discover `<target directory>/debug.yaml`; grouped Tool debug discovers `config/tools/<group>.debug.yaml`. The selected target's dependency closure is validated, so an unrelated workbook or Case file is not a prerequisite.
+When a debug target cannot be resolved, check the target kind and identifier first, then use `--input <path>` to remove sidecar discovery from the diagnosis. Template and Flow debug discover `<target directory>/debug.yaml`; Tool debug discovers `tools/debug/<tool-id>.yaml` under the selected Package. The selected target's dependency closure is validated, so an unrelated workbook or Case file is not a prerequisite.
 
 Use the same `&{package-relative-file}` expression in Debug, Run and Load, then pass its UTF-8 String as HTTP `body`, MQ `payload`, or SSH upload `payload`. These Resource Helpers do not resolve separate local paths. Validation resolves package files before external I/O; obsolete HTTP/MQ `file`, SSH upload `localPath`, and SSH `download` calls are rejected.
 
@@ -144,7 +144,7 @@ inputs:
 
 Run it with `./att.sh debug flow common.compose.v1`. Flow inputs are available as `${EXEC.INPUT.source}` and, when there is no same-named Case value, as the compatibility alias `${EXEC.INPUT.source}`.
 
-Grouped Tool sidecar (`config/tools/fpp.debug.yaml` for `fpp.invokeApi`):
+Grouped Tool sidecar (`tools/debug/fpp.invokeApi.yaml` for `fpp.invokeApi`):
 
 ```yaml
 schemaVersion: att-debug/v1.2
@@ -161,7 +161,7 @@ tools:
 
 Run it with `./att.sh debug tool fpp.invokeApi`. The `invokeApi` key is the group-local Tool key. Values must be scalar or list values accepted by the Tool descriptor; map literals are not supported by the standalone Tool adapter.
 
-Ungrouped Tool sidecar (`config/tools/invokePaymentApi.debug.yaml`):
+Ungrouped Tool sidecar (`tools/debug/invokePaymentApi.yaml`):
 
 ```yaml
 schemaVersion: att-debug/v1.2

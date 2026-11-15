@@ -453,6 +453,11 @@ public final class WorkerMain {
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",Collections.<String,Object>singletonMap("revisionDigest",inspector.executionRevisionDigest())));
             }
+            if("validation-revision".equals(r.inspectionAction)) {
+                String revision=inspector.validationSourceRevisionDigest(r.registeredPackageId!=null);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",Collections.<String,Object>singletonMap("sourceRevision",revision)));
+            }
             if("prewarm-eligibility".equals(r.inspectionAction)) {
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspector.prewarmEligibility()));
@@ -530,6 +535,7 @@ public final class WorkerMain {
 
     private OperationResult validateVNext(WorkerRequest request,Path packageRoot,Path configPath) throws Exception {
         String scope=request.validationScope==null?"config":request.validationScope;
+        String sourceRevisionBefore=Boolean.TRUE.equals(request.all)?null:validationSourceRevision(request,packageRoot,configPath);
         Path runtimeRoot=RuntimeConfigPath.root(configPath);
         boolean packageCheck=request.registeredPackageId!=null;
         att.validation.PackageValidationBudget.Result packageBudget=null;
@@ -543,7 +549,7 @@ public final class WorkerMain {
                 "package".equals(scope)||Boolean.TRUE.equals(request.all),permittedEnvironments);
         if(request.registeredPackageId!=null)report.context("packageId",request.registeredPackageId);
         report.context("environment",request.environment);
-        if("config".equals(scope)) return validationResult(report,request);
+        if("config".equals(scope)) return validationResult(report,request,sourceRevisionBefore,packageRoot,configPath);
         if("package".equals(scope)) {
             if(packageBudgetExceeded) {
                 report.context("validationWorkUnits",packageBudget.entries());
@@ -551,7 +557,7 @@ public final class WorkerMain {
                 Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-LIMIT");
                 diagnostic.put("severity","WARNING");diagnostic.put("source","packages/"+request.registeredPackageId);
                 diagnostic.put("field","resources");diagnostic.put("message","Package inventory exceeded the bounded read-only scan budget; its full validation was skipped");
-                skipped.diagnostic(diagnostic);return validationResult(report,request);
+                skipped.diagnostic(diagnostic);return validationResult(report,request,sourceRevisionBefore,packageRoot,configPath);
             }
             List<String> profiles;
             try {
@@ -564,7 +570,7 @@ public final class WorkerMain {
                 Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-INCOMPLETE");
                 diagnostic.put("severity","ERROR");diagnostic.put("source","config/config.yaml");diagnostic.put("field","environments");
                 diagnostic.put("message","Environment profiles could not be enumerated, so full Package inventory checks could not finish");
-                incomplete.diagnostic(diagnostic);return validationResult(report,request);
+                incomplete.diagnostic(diagnostic);return validationResult(report,request,sourceRevisionBefore,packageRoot,configPath);
             }
             if(profiles.isEmpty())profiles=Collections.singletonList(null);
             if(packageBudget!=null)report.context("validationWorkUnits",packageBudget.entries()*(profiles.size()+2L));
@@ -591,7 +597,7 @@ public final class WorkerMain {
                     inventory.diagnostic(diagnostic);report.exitCode(2);
                 }
             }
-            return validationResult(report,request);
+            return validationResult(report,request,sourceRevisionBefore,packageRoot,configPath);
         }
         if("case".equals(scope)||"suite".equals(scope)||"cases".equals(scope)) {
             att.server.api.AttValidationReport.Section selected=report.addSection("Selected Cases / dependency closure",request.inspectionPath,"PASS");
@@ -602,7 +608,7 @@ public final class WorkerMain {
                     request.environment,suites,path(request.suiteDirectory),cases,set(request.tags),set(request.excludeTags),false,"selected"));
             addValidationDiagnostics(selected,result.diagnostics());if(result.exitCode()!=0)selected.status("FAIL");
             if(report.exitCode()==0&&result.exitCode()!=0)report.exitCode(2);
-            return validationResult(report,request);
+            return validationResult(report,request,sourceRevisionBefore,packageRoot,configPath);
         }
         att.server.api.AttValidationReport.Section selected=report.addSection("Selected Resource / dependency closure",request.inspectionPath,"PASS");
         String validationStep="resource inspection";
@@ -668,7 +674,7 @@ public final class WorkerMain {
                         selected.diagnostic(diagnostic);
                     }
                 }
-            } finally {inspector.close();}
+            } finally {if(!inspectionDaemon)inspector.close();}
         } catch(Exception invalid) {
             selected.status("FAIL");
             Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-VALIDATION-TARGET-INVALID");
@@ -679,6 +685,23 @@ public final class WorkerMain {
             selected.diagnostic(diagnostic);
         }
         if(report.exitCode()==0&&"FAIL".equals(selected.status()))report.exitCode(2);
+        return validationResult(report,request,sourceRevisionBefore,packageRoot,configPath);
+    }
+
+    private String validationSourceRevision(WorkerRequest request,Path packageRoot,Path configPath) {
+        try {
+            PackageResourceInspector inspector=resourceInspector(packageRoot,configPath,request);
+            String revision=inspector.validationSourceRevisionDigest(request.registeredPackageId!=null);
+            return revision!=null&&revision.matches("[a-f0-9]{64}")?revision:null;
+        } catch(Exception unavailable) { return null; }
+    }
+
+    private OperationResult validationResult(att.server.api.AttValidationReport report,WorkerRequest request,
+                                             String sourceRevisionBefore,Path packageRoot,Path configPath) {
+        if(sourceRevisionBefore!=null) {
+            String sourceRevisionAfter=validationSourceRevision(request,packageRoot,configPath);
+            if(sourceRevisionBefore.equals(sourceRevisionAfter))report.context("sourceRevision",sourceRevisionBefore);
+        }
         return validationResult(report,request);
     }
 

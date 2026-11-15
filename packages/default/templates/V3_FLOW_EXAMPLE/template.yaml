@@ -1,6 +1,6 @@
 schemaVersion: att-template/v3.6
 name: V3_FLOW_EXAMPLE
-description: V3.4.2 Template composing isolated Flow Action scopes.
+description: Template composing isolated Flow Action scopes across Run, Debug and Load.
 actions:
   compose:
     type: flow
@@ -10,8 +10,8 @@ actions:
     type: assert
     description: Verify the explicit EXEC.VARS value published by the Flow.
     assert: >-
-      #{${META.SOURCE.caseId} in [${META.SOURCE.caseId}]
-        and ${EXEC.VARS.decoratedResult} == #{concat(${META.SOURCE.caseId}, '-done')}
+      #{#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})} in [#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}]
+        and ${EXEC.VARS.decoratedResult} == #{str.concat(#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}, '-done')}
         and (1 + 2 * 3) == 7}
-    expected: "${META.SOURCE.caseId}-done"
+    expected: "#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}-done"
     actual: "${EXEC.VARS.decoratedResult}"
