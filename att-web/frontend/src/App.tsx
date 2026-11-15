@@ -112,7 +112,7 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
   if (route.view === 'source-file') return <>
     {contextNotice}
     <PackageSafeSourceFileViewer api={api} packageId={packageId} filePath={route.filePath} fileOrigin={route.fileOrigin}
-      sourceReference={route.sourceReference} onBack={() => navigation.navigate(route.returnTo || formatRoute({ kind: 'package', packageId,
+      sourceReference={route.sourceReference} locale={workspace.uiLocale} onBack={() => navigation.navigate(route.returnTo || formatRoute({ kind: 'package', packageId,
         ...(route.sourceReference ? { resource: { type: route.sourceReference.type, resourceId: route.sourceReference.resourceId, tab: route.sourceReference.returnTab || 'source' as const, ...(route.sourceReference.actionId ? { actionId: route.sourceReference.actionId } : {}) } } : {}) }))}
       onOpenFile={(path, origin, sourceReference) => navigation.navigate({ kind: 'package', packageId, view: 'source-file', environment,
         filePath: path, fileOrigin: origin, sourceReference: { ...sourceReference, returnTab: route.sourceReference?.returnTab || 'source', ...(route.sourceReference?.actionId ? { actionId: route.sourceReference.actionId } : {}) }, returnTo: formatRoute(route) })} />

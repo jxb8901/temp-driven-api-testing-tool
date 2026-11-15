@@ -1,6 +1,6 @@
 # ATT environment profile examples
 
-ATT uses `att-config/v2.13` profiles to select resource and testdata descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. The active DBHelper, MQHelper, HTTPHelper, SSHHelper, Tool Group and Testdata schemas are listed in [the active schema matrix](../../docs/reference/appendices/schema-matrix.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
+ATT uses `att-config/v2.13` profiles to select shared Helper and Testdata descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. Business Tools are owned by their Package under `packages/<id>/tools/`; they are not registered through global `tools` or `toolGroups` entries. The active DBHelper, MQHelper, HTTPHelper, SSHHelper, Package Tool Group and Testdata schemas are listed in [the active schema matrix](../../docs/reference/appendices/schema-matrix.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
 
 ## Shared configuration and profile bindings
 
@@ -12,8 +12,6 @@ schemaVersion: att-config/v2.13
 environment: SIT
 templates: {root: templates}
 testcase: {root: testcase}
-toolGroups:
-  - config/tools/orders.yaml
 environments:
   SIT:
     dbhelpers: [config/dbhelpers/sit/orders.yaml]
@@ -24,7 +22,7 @@ environments:
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-Keep the package's normal `report`, `run`, `execution`, global `tools` and `toolGroups` entries in the common config. Only move environment-specific resource and testdata descriptor paths into profiles. HTTP and SSH bindings use the same `httphelpers` and `sshhelpers` list pattern. Testdata descriptors contain package-local records, not environment secrets.
+Keep the package's normal `report`, `run`, and `execution` settings in the common config. Only move environment-specific Helper and Testdata descriptor paths into profiles. HTTP and SSH bindings use the same `httphelpers` and `sshhelpers` list pattern. Testdata descriptors contain package-local records, not environment secrets. For example, `packages/default/tools/orders/tool-group.yaml` owns the Package's order Tools; only the shared `orders` DBHelper binding changes by environment.
 
 ## Stable logical helper IDs
 

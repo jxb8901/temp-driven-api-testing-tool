@@ -95,7 +95,7 @@ On Windows, `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not in
 | `./att.sh debug` | Discover runnable Tools, Templates, and Flows; show only existing default sidecars |
 | `./att.sh debug template <id>` | Execute one Template; auto-discover `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | Execute one canonical Flow; auto-discover `<flow-dir>/debug.yaml` |
-| `./att.sh debug tool <id>` | Execute one Tool; auto-discover `config/tools/<group>.debug.yaml` |
+| `./att.sh debug tool <id>` | Execute one Package Tool; auto-discover `tools/debug/<tool-id>.yaml` |
 | `./att.sh debug <type> <id> --input <file>` | Override the target's auto-discovered debug input |
 | `./att.sh debug <type> <id> --set input.path=<yaml-value>` | Override a typed `EXEC.INPUT` value; repeatable |
 | `./att.sh debug tool <id> --set arg.name=<yaml-value>` | Override one Tool argument; repeatable |

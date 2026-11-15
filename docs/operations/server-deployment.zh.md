@@ -38,7 +38,7 @@ att/                              # ATT_HOME
     tools/                        # package-local scripts
 ```
 
-遷移舊版平面 Local 安裝前先備份，並將新版 archive 解壓到暫存目錄。保留一份經管理員審核的共用 `config/config.yaml`，並將共用 Tool/helper descriptors 放在 ATT_HOME 的 `config/`。若舊安裝的不同 package 使用不同設定，請先人工合併；ATT runtime 不會選擇或合併 package 內的設定。請勿將舊 schema 複製至 ATT_HOME 或 Package：runtime validation 只使用版本相符的 ATT Engine JAR 內嵌 registry，既有 `ATT_HOME/schemas/` 目錄會被忽略。將 `testcase/`、`templates/`、`load/`、頂層 `tools/`、`sql/` 及 Testdata descriptors 放到各自已註冊的 Package。Package scripts 位於 `packages/<id>/tools/`，與 ATT_HOME `config/tools/` 的共用 Tool 定義分開。遷移 runtime 設定時排除 `att-server.example.yaml` 及 `att-server.yaml`。既有 active Server config 應留在 `ATT_HOME/config/att-server.yaml` 或受保護的外部路徑。在新 Package 通過驗證及執行前，保留舊的平面目錄。將 Server registry entries 更新至 Package root，並為 Tomcat 設定 `ATT_HOME` 或 `-Datt.home`。Server state 必須留在 Package root 以外；Local archive 不包含 `data/` 或 active Server config。
+遷移舊版平面 Local 安裝前先備份，並將新版 archive 解壓到暫存目錄。保留一份經管理員審核的共用 `config/config.yaml`，供 runtime 設定及共用 Helpers 使用；將業務 Tool descriptors 移入各自已註冊的 Package，放在 `packages/<id>/tools/`。若舊安裝的不同 package 使用不同設定，請先人工合併；ATT runtime 不會選擇或合併 package 內的設定。請勿將舊 schema 複製至 ATT_HOME 或 Package：runtime validation 只使用版本相符的 ATT Engine JAR 內嵌 registry，既有 `ATT_HOME/schemas/` 目錄會被忽略。將 `testcase/`、`templates/`、`load/`、頂層 `tools/`、`sql/` 及 Testdata descriptors 放到各自已註冊的 Package，並保留 `packages/<id>/tools/` 內的 Package scripts。遷移 runtime 設定時排除 `att-server.example.yaml` 及 `att-server.yaml`。既有 active Server config 應留在 `ATT_HOME/config/att-server.yaml` 或受保護的外部路徑。在新 Package 通過驗證及執行前，保留舊的平面目錄。將 Server registry entries 更新至 Package root，並為 Tomcat 設定 `ATT_HOME` 或 `-Datt.home`。Server state 必須留在 Package root 以外；Local archive 不包含 `data/` 或 active Server config。
 
 ## 發行與相容性
 

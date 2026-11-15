@@ -28,6 +28,12 @@ class JobStoreValidationRecordTest {
                 config.validationRecords,now);
     }
 
+    private static void create(JobStore store,ServerConfig config,String id,String actor,String scope,String packageId,
+            String plan,Instant now) throws Exception {
+        store.createValidationRecord(id,actor,false,scope,packageId,null,null,"request-364",now.toString(),plan,
+                config.validationRecords,now);
+    }
+
     @Test void perRecordDefaultFitsWhenAnOperatorLowersTheAggregateLimit() throws Exception {
         ServerConfig config=config("small-total","    maxTotalSizeMb: 1\n");
         assertEquals(1024*1024,config.validationRecords.maxRecordBytes);
@@ -61,7 +67,7 @@ class JobStoreValidationRecordTest {
         Instant now=Instant.parse("2026-11-14T10:00:00Z");
         try(JobStore store=new JobStore(config)) {
             create(store,config,first,"alice","x".repeat(700_000),now);
-            create(store,config,second,"alice","y".repeat(300_000),now.plusSeconds(1));
+            create(store,config,second,"alice","package","payments","y".repeat(300_000),now.plusSeconds(1));
             assertTrue(store.startValidationRecord(first,now.plusSeconds(2).toString(),10));
             assertTrue(store.finishValidationRecord(first,"COMPLETED",now.plusSeconds(3).toString(),10,20,30,
                     "z".repeat(200_000),null,null,config.validationRecords));

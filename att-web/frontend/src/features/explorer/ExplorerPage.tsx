@@ -572,7 +572,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
                 : <CodeEditor value={detailText} language="json" label="Safe resource definition" readOnly sourcePath={detail?.sourcePath} fileReferences={[]} />}
           </section>
           {sourceIdentity && <section id="att-explorer-panel-source" role="tabpanel" aria-labelledby="att-explorer-tab-source" hidden={tab !== 'source'}>
-            <SourceViewer api={api} identity={sourceIdentity} available={detail?.sourceAvailable === true} active={tab === 'source'} resource={detail} onFileReference={onOpenConfigurationFile} />
+            <SourceViewer api={api} identity={sourceIdentity} available={detail?.sourceAvailable === true} active={tab === 'source'} resource={detail} onFileReference={onOpenConfigurationFile} locale={workspace?.uiLocale} />
           </section>}
           <section id="att-explorer-panel-relations" role="tabpanel" aria-labelledby="att-explorer-tab-relations" hidden={tab !== 'relations'}>
             <div className="att-relation-columns">

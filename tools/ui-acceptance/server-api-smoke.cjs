@@ -33,11 +33,14 @@ async function main() {
   const consoleErrors = [];
   const navigationEvents = [];
   const inspectionRequests = [];
+  const packageResourceRequests = [];
   page.on('response', response => {
     if (/\/(load-catalog|configuration|load-templates)(?:[/?]|$)/.test(response.url())) inspectionRequests.push(`${response.status()} ${new URL(response.url()).pathname}`);
+    if (/\/packages\/payments\/resources\//.test(response.url())) packageResourceRequests.push(`${response.request().method()} ${response.status()} ${new URL(response.url()).pathname}${new URL(response.url()).search}`);
   });
   page.on('requestfailed', request => {
     if (/\/(load-catalog|configuration|load-templates)(?:[/?]|$)/.test(request.url())) inspectionRequests.push(`${request.failure()?.errorText} ${new URL(request.url()).pathname}`);
+    if (/\/packages\/payments\/resources\//.test(request.url())) packageResourceRequests.push(`${request.failure()?.errorText} ${request.method()} ${new URL(request.url()).pathname}${new URL(request.url()).search}`);
   });
   page.on('pageerror', error => pageErrors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
@@ -101,7 +104,7 @@ async function main() {
     const visualFileResponsePromise = page.waitForResponse(response =>
       response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
     await visualFileLinks.getByRole('button', { name: 'View file', exact: true }).click();
-    await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
+    await page.locator('.att-source-path code').getByText('templates/SCHEDULED/payload/request.xml', { exact: true }).waitFor();
     const visualFileResponse = await visualFileResponsePromise;
     assert.equal(visualFileResponse.status(), 200, 'the Action file link must use the authorized Package viewer');
     assert.equal(new URL(visualFileResponse.url()).searchParams.get('origin'), 'templates/flows/reference/flow.yaml');
@@ -119,17 +122,66 @@ async function main() {
     assert.equal(await actionNodes.nth(2).getAttribute('aria-pressed'), 'true');
     await page.getByRole('region', { name: 'Referenced files for action inspectAgain' })
       .getByRole('button', { name: 'View file' }).click();
-    await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
+    await page.locator('.att-source-path code').getByText('templates/SCHEDULED/payload/request.xml', { exact: true }).waitFor();
     assert.ok(page.url().includes('sourceAction=inspectAgain'), 'the safe file URL should carry the selected Action');
     await page.goBack();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
     await page.waitForFunction(() => document.querySelector('.att-action-list [aria-pressed="true"] .att-action-name')?.textContent === 'inspectAgain');
     assert.ok(page.url().includes('action=inspectAgain'), 'Back should restore the originating Action in the URL');
     await page.goForward();
-    await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
+    await page.locator('.att-source-path code').getByText('templates/SCHEDULED/payload/request.xml', { exact: true }).waitFor();
     await page.goBack();
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
     assert.equal(await actionNodes.nth(2).getAttribute('aria-pressed'), 'true');
+
+    // A grouped Package Tool's compact Group manifest link must reuse the
+    // Server-issued reference and survive a reload plus browser history.
+    const groupedToolsResponse = await page.request.get(`${origin}/tools/att/api/v1/packages/payments/resources?type=tool&limit=100`);
+    assert.equal(groupedToolsResponse.status(), 200, 'the authenticated Tool catalog must be available');
+    const groupedTools = await groupedToolsResponse.json();
+    const groupedTool = groupedTools.items.find(resource => resource.logicalId === 'fpp.inspectFiles');
+    assert.ok(groupedTool?.resourceId, 'the fixture must expose the grouped FPP Tool through its opaque resource ID');
+    const groupedToolRoute = `${origin}/tools/att/ui/index.html#/packages/payments/resources/tool/${encodeURIComponent(groupedTool.resourceId)}?tab=source`;
+    await page.goto(groupedToolRoute);
+    await page.getByRole('heading', { name: 'Inspect files' }).waitFor();
+    await page.getByRole('tab', { name: 'Source' }).waitFor();
+    await page.locator('.att-source-path code').getByText('tools/fpp/inspectFiles.yaml', { exact: true }).waitFor();
+    await page.locator('.att-code-editor .cm-content').getByText('id: inspectFiles', { exact: false }).waitFor();
+    const groupedToolSourceResponse = await page.request.get(`${origin}/tools/att/api/v1/packages/payments/resources/tool/${encodeURIComponent(groupedTool.resourceId)}/source`);
+    assert.equal(groupedToolSourceResponse.status(), 200, 'the authenticated Tool source projection endpoint must be available');
+    const groupedToolProjection = await groupedToolSourceResponse.json();
+    assert.equal(groupedToolProjection.logicalPath, 'tools/fpp/inspectFiles.yaml');
+    const manifestReference = groupedToolProjection.fileReferences.find(reference =>
+      reference.logicalPath === 'tools/fpp/tool-group.yaml' && reference.available !== false);
+    assert.ok(manifestReference?.referenceId, 'the Tool source should receive a Server-issued manifest reference');
+    const manifestResponsePromise = page.waitForResponse(response =>
+      response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
+    await page.getByRole('button', { name: 'Open Group manifest source tools/fpp/tool-group.yaml' }).click();
+    const manifestResponse = await manifestResponsePromise;
+    assert.equal(manifestResponse.status(), 200);
+    assert.equal(new URL(manifestResponse.url()).searchParams.get('referenceId'), manifestReference.referenceId,
+      'navigation must reuse the original opaque reference');
+    assert.equal(new URL(manifestResponse.url()).searchParams.get('origin'), 'tools/fpp/inspectFiles.yaml');
+    assert.match(page.url(), /sourceType=tool/);
+    assert.ok(page.url().includes('sourceReferenceId=' + manifestReference.referenceId),
+      'the deep link must preserve the reference across reload');
+    await page.locator('.att-source-path code').getByText('tools/fpp/tool-group.yaml', { exact: true }).waitFor();
+    await page.locator('.att-code-editor .cm-content').getByText('id: fpp', { exact: false }).waitFor();
+    await page.reload();
+    await page.locator('.att-source-path code').getByText('tools/fpp/tool-group.yaml', { exact: true }).waitFor();
+    await page.goBack();
+    await page.getByRole('heading', { name: 'Inspect files' }).waitFor();
+    await page.locator('.att-source-path code').getByText('tools/fpp/inspectFiles.yaml', { exact: true }).waitFor();
+    await page.goForward();
+    await page.locator('.att-source-path code').getByText('tools/fpp/tool-group.yaml', { exact: true }).waitFor();
+    const flowCatalogResponse = await page.request.get(`${origin}/tools/att/api/v1/packages/payments/resources?type=flow&limit=100`);
+    assert.equal(flowCatalogResponse.status(), 200, 'the authenticated Flow catalog must be available');
+    const flowCatalog = await flowCatalogResponse.json();
+    const referenceFlow = flowCatalog.items.find(resource => resource.logicalId === 'reference.flow.v1');
+    assert.ok(referenceFlow?.resourceId, 'the fixture Flow must expose its opaque resource ID');
+    await page.goto(`${origin}/tools/att/ui/index.html#/packages/payments/resources/flow/${encodeURIComponent(referenceFlow.resourceId)}?action=inspectAgain`);
+    await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
+    await page.waitForFunction(() => document.querySelector('.att-action-list [aria-pressed="true"] .att-action-name')?.textContent === 'inspectAgain');
 
     await page.getByRole('tab', { name: 'Dependencies' }).click();
     await page.getByRole('button', { name: 'templates/SCHEDULED/payload/request.xml', exact: true }).waitFor();
@@ -141,7 +193,7 @@ async function main() {
     // Dependencies may be served by the authorized inspection cache, with no HTTP
     // response event. Assert the safe viewer content rather than a second request.
     await page.getByRole('button', { name: 'templates/SCHEDULED/payload/request.xml', exact: true }).click();
-    await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor();
+    await page.locator('.att-source-path code').getByText('templates/SCHEDULED/payload/request.xml', { exact: true }).waitFor();
     await page.locator('.att-package-source-file .att-code-editor .cm-content')
       .getByText('safe payload', { exact: false }).waitFor();
     assert.ok((await page.locator('.att-package-source-file').innerText()).includes('safe payload'),
@@ -175,6 +227,7 @@ async function main() {
     await page.getByRole('tabpanel', { name: 'Source' }).getByText('Code viewer ready.').waitFor();
     const editor = page.locator('.att-explorer-source .cm-editor');
     await editor.waitFor();
+    const activePageNonce = await page.locator('script[nonce]').evaluate(script => script.nonce);
     const editorState = await editor.evaluate(element => {
       const content = element.querySelector('.cm-content');
       const keyToken = content?.querySelector('.att-token-property');
@@ -191,7 +244,7 @@ async function main() {
     assert.equal(editorState.text, flowSourceProjection.text.replace(/\r\n?/g, '\n'),
       'CodeMirror may render normalized line separators while retaining every displayed YAML line');
     assert.ok(editorState.height > 0, 'CodeMirror must have visible layout under the production CSP');
-    assert.ok(editorState.generatedStyles.length > 0 && editorState.generatedStyles.every(nonce => nonce === pageNonce), 'generated editor styles must carry the page nonce');
+    assert.ok(editorState.generatedStyles.length > 0 && editorState.generatedStyles.every(nonce => nonce === activePageNonce), 'generated editor styles must carry the current document nonce');
     assert.ok(editorState.keyText && editorState.keyColor !== editorState.editorColor,
       `YAML keys must have visible syntax color in the light theme: ${JSON.stringify(editorState)}`);
     await editor.locator('xpath=ancestor::section[contains(@class,"att-code-editor")]').getByRole('button', { name: 'Copy' }).click();
@@ -225,7 +278,7 @@ async function main() {
     // entry; do not require a second network response to show authorized content.
     await fileLink.click();
     try {
-      await page.getByRole('heading', { name: 'templates/SCHEDULED/payload/request.xml', level: 1 }).waitFor({ timeout: 10000 });
+      await page.locator('.att-source-path code').getByText('templates/SCHEDULED/payload/request.xml', { exact: true }).waitFor({ timeout: 10000 });
     } catch (error) {
       const headings = await page.locator('h1').allTextContents();
       const body = (await page.locator('body').innerText()).slice(0, 1200);
@@ -489,7 +542,7 @@ async function main() {
     process.stdout.write('Packaged-WAR Playwright API smoke passed under /tools/att; source references, Configuration, Testdata, and Quick Load used the real Server API.\n');
   } catch (error) {
     const state = await page.locator('.att-load-catalog').innerText({ timeout: 1000 }).catch(() => 'Catalog not mounted');
-    throw new Error(`${error.message}\nInspection requests: ${JSON.stringify(inspectionRequests)}\nCatalog state: ${state}`);
+    throw new Error(`${error.message}\nInspection requests: ${JSON.stringify(inspectionRequests)}\nPackage resource requests: ${JSON.stringify(packageResourceRequests)}\nPage errors: ${pageErrors.join(' | ')}\nCatalog state: ${state}`);
   } finally {
     await context.close();
     await browser.close();

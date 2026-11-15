@@ -214,6 +214,20 @@
 .att-explorer-source { display: grid; gap: var(--att-space-2, .5rem); }
 .att-source-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--att-space-2, .5rem); }
 .att-source-toolbar > span { margin-right: auto; font-weight: 650; }
+.att-source-toolbar-primary { align-items: center; min-width: 0; }
+.att-source-path { display: flex; flex: 1 1 22rem; align-items: center; flex-wrap: wrap; gap: .4rem .65rem; min-width: 0; }
+.att-source-path code { min-width: 0; overflow-wrap: anywhere; color: var(--att-color-text, #17212b); font-size: .88rem; }
+.att-source-path button,
+.att-source-related-file { min-height: 36px; }
+.att-source-toolbar .att-source-toolbar-metadata { margin-right: auto; color: var(--att-color-muted, #526171); font-size: .84rem; font-weight: 600; }
+.att-source-toolbar .att-source-related-file { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .25rem .45rem; padding: .25rem .4rem; border: 0; background: transparent; color: var(--att-color-primary, #0866c6); font-size: .84rem; }
+.att-source-related-file code { color: inherit; overflow-wrap: anywhere; }
+.att-source-details { min-width: 0; border-top: 1px solid var(--att-color-border, #cbd5e1); }
+.att-source-details summary { min-height: 40px; padding: .55rem .2rem; color: var(--att-color-primary, #0866c6); cursor: pointer; font-size: .875rem; font-weight: 600; }
+.att-source-details dl { display: grid; gap: .3rem; margin: 0 0 .65rem; }
+.att-source-details dl > div { display: grid; grid-template-columns: minmax(7rem, .28fr) minmax(0, 1fr); gap: .25rem .75rem; padding-top: .35rem; border-top: 1px solid var(--att-color-border, #cbd5e1); }
+.att-source-details dt { color: var(--att-color-muted, #526171); font-size: .82rem; font-weight: 650; }
+.att-source-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .att-source-viewport { height: 30rem; overflow: auto; border: 1px solid var(--att-color-border, #cbd5e1); background: #101923; color: #eef4f8; contain: strict; }
 .att-source-line { display: flex; min-width: max-content; font: 14px/20px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
 .att-source-line-number { flex: 0 0 4rem; padding-right: var(--att-space-2, .5rem); text-align: right; color: #9aabb8; background: #17232e; user-select: none; }

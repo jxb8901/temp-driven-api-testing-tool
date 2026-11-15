@@ -228,7 +228,7 @@ readDate:
    ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS002
    ```
 
-這會調用 `config/tools/sample.yaml` 中已提交的 `sample.getAcDate`。它是本地 command-backed Tool，因此仍然不需要外部服務。
+這會調用 Package 所有的 `sample.getAcDate` Tool，描述檔位於 `packages/default/tools/sample/getAcDate.yaml`。它是本地 command-backed Tool，因此仍然不需要外部服務。
 
 ### 預期結果
 

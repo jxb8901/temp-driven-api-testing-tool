@@ -67,7 +67,7 @@ Descriptor path 相對於 package root，並使用一般 `att-testdata/v1.0` 格
 
 Bootstrap value 可使用已初始化 execution identity、`EXEC.INPUT`、有提供時的 `EXEC.LOAD`、其他 `EXEC.VARS.<name>`，以及穩定 project/source/target/template metadata。`EXEC.ACTIONS`、action-local `output`、invocation-scoped metadata 不可用。Tool/DB/MQ/HTTP/SSH/process/filesystem 或 stateful calls 會被拒絕；安全純 built-in 使用 ATT 一般 parser。可重複使用 `--set input.path=value`、`--set vars.path=value`，以及僅限 Tool 的 `--set arg.name=value`。值以 safe YAML 解析；可用巢狀 map 及數字 list index。例：`--set 'vars.refNo=${EXEC.INPUT.refNo}'` 會在 evaluation 前修改原始定義。
 
-未指定 `--input` 時，Template/Flow 會在旁邊尋找 `debug.yaml`；grouped Tool 會查找 `config/tools/<group>.debug.yaml`，ungrouped Tool 使用 `config/tools/<localKey>.debug.yaml`。沒有 default sidecar 時請使用 `--input`；明確的 `--input` 會取代 auto-discovery。`--env` 在 target validation 之前使用與 Run/Validate/Load 相同的 environment resolver。
+未指定 `--input` 時，Template/Flow 會在旁邊尋找 `debug.yaml`；Tool 會在所選 Package 中查找相對路徑 `tools/debug/<tool-id>.yaml`。例如 `fpp.invokeApi` 使用 `tools/debug/fpp.invokeApi.yaml`。沒有 default sidecar 時請使用 `--input`；明確的 `--input` 會取代 auto-discovery。`--env` 在 target validation 之前使用與 Run/Validate/Load 相同的 environment resolver。
 
 Debug 執行 target-scoped validation：只驗證 selected Template/Flow dependency closure 或 Tool contract，不要求無關 workbook。Template/Flow debug 使用與 Run 相同的 Action/Flow scope rule；Tool debug 使用相同 configured Tool invocation contract。
 
@@ -89,7 +89,7 @@ Debug 不建立或更新普通 `latest-run.yaml`。Exit code：`0` PASS、`1` FA
 
 ## Debug 排錯與 MQ payload 路徑
 
-當 debug target 無法解析時，先確認 target kind 及 identifier，再用 `--input <path>` 排除 sidecar discovery 因素。Template/Flow debug 會尋找 `<target directory>/debug.yaml`；grouped Tool debug 會尋找 `config/tools/<group>.debug.yaml`。只會驗證 selected target 的 dependency closure，因此不需要無關 workbook 或 Case 檔案。
+當 debug target 無法解析時，先確認 target kind 及 identifier，再用 `--input <path>` 排除 sidecar discovery 因素。Template/Flow debug 會尋找 `<target directory>/debug.yaml`；Tool debug 會在所選 Package 中尋找 `tools/debug/<tool-id>.yaml`。只會驗證 selected target 的 dependency closure，因此不需要無關 workbook 或 Case 檔案。
 
 Debug、Run、Load 都使用相同的 `&{package-relative-file}` expression，再將 UTF-8 String 傳入 HTTP `body`、MQ `payload` 或 SSH upload `payload`。這些 Resource Helper 不會解析各自的 local path。Validation 會在外部 I/O 前解析 package file；舊 HTTP/MQ `file`、SSH upload `localPath` 及 SSH `download` call 均會被拒絕。
 
@@ -158,7 +158,7 @@ inputs:
 
 Flow 可用 `${EXEC.INPUT.source}` 讀取 `inputs`；如果沒有名為 `inputs` 的業務字段，舊定義仍可用只讀兼容視圖 `${CASE.inputs.source}`，但不會把整棵 `inputs` 子樹重復寫入 `EXEC.INPUT`。
 
-分組 Tool sidecar（`fpp.invokeApi` 對應 `config/tools/fpp.debug.yaml`）：
+分組 Tool sidecar（`fpp.invokeApi` 對應 `tools/debug/fpp.invokeApi.yaml`）：
 
 ```yaml
 schemaVersion: att-debug/v1.2
@@ -181,7 +181,7 @@ tools:
 
 `invokeApi` 是 Tool group 內的 local key；參數值必須是 Tool descriptor 接受的 scalar 或 list。Standalone Tool adapter 不接受用 map literal 表示普通 Tool 參數。
 
-未分組 Tool sidecar（`config/tools/invokePaymentApi.debug.yaml`）：
+未分組 Tool sidecar（`tools/debug/invokePaymentApi.yaml`）：
 
 ```yaml
 schemaVersion: att-debug/v1.2

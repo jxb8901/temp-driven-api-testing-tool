@@ -125,7 +125,7 @@ export function parseRoute(hash: string): AppRoute {
       const sourceResourceId = safeRouteValue(query.get('sourceResourceId'), 512);
       const referenceId = query.get('sourceReferenceId');
       const sourceReturnTab = query.get('sourceReturnTab');
-      const sourceReference = sourceType && ['template', 'flow'].includes(sourceType) && sourceResourceId
+      const sourceReference = sourceType && ['template', 'flow', 'tool'].includes(sourceType) && sourceResourceId
         && referenceId && /^[0-9a-f]{64}$/.test(referenceId)
         ? { type: sourceType as ResourceSourceReferenceRoute['type'], resourceId: sourceResourceId, referenceId,
           ...(sourceReturnTab === 'definition' || sourceReturnTab === 'source' || sourceReturnTab === 'relations'

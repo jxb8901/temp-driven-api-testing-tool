@@ -228,7 +228,7 @@ readDate:
    ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS002
    ```
 
-This calls the checked-in `sample.getAcDate` Tool from `config/tools/sample.yaml`. It is a local command-backed example, so the tutorial remains offline.
+This calls the checked-in, Package-owned `sample.getAcDate` Tool from `packages/default/tools/sample/getAcDate.yaml`. It is a local command-backed example, so the tutorial remains offline.
 
 ### Expected result
 

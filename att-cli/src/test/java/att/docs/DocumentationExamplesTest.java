@@ -17,12 +17,15 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Release-gate coverage for the real assets cited by the end-user documentation. */
@@ -73,8 +76,12 @@ class DocumentationExamplesTest {
         assertAsset(root, "config/dbhelpers/uat/orders.yaml");
         assertAsset(root, "config/mqhelpers/sit/payment.yaml");
         assertAsset(root, "config/mqhelpers/uat/payment.yaml");
-        assertAsset(root, "config/tools/sample.yaml");
-        assertAsset(root, "config/tools/orders-db.yaml");
+        assertAsset(root, "packages/default/tools/sample/tool-group.yaml");
+        assertAsset(root, "packages/default/tools/sample/getAcDate.yaml");
+        assertAsset(root, "packages/default/tools/orders/tool-group.yaml");
+        assertAsset(root, "packages/default/tools/orders/findByDate.yaml");
+        assertAsset(root, "packages/default/tools/fpp/tool-group.yaml");
+        assertAsset(root, "packages/default/tools/fpp/inspectFiles.yaml");
         assertAsset(root, "packages/default/testdata/accounts.yaml");
 
         for (String environment : Arrays.asList("SIT", "UAT")) {
@@ -90,10 +97,46 @@ class DocumentationExamplesTest {
             assertEquals(0, result.exitCode, result.stderr);
         }
 
-        String commandBacked = read(root.resolve("config/tools/sample.yaml"));
-        String callBacked = read(root.resolve("config/tools/orders-db.yaml"));
-        assertTrue(commandBacked.contains("command:"), "sample.yaml must remain the documented command-backed Tool example");
-        assertTrue(callBacked.contains("call:"), "orders-db.yaml must remain the documented call-backed Tool example");
+        String commandBacked = read(root.resolve("packages/default/tools/sample/getAcDate.yaml"));
+        String callBacked = read(root.resolve("packages/default/tools/orders/findByDate.yaml"));
+        assertTrue(commandBacked.contains("command:"), "sample.getAcDate must remain the documented Package-owned command-backed Tool example");
+        assertTrue(callBacked.contains("call:"), "orders.findByDate must remain the documented Package-owned call-backed Tool example");
+        String commonConfig = read(root.resolve("config/config.yaml"));
+        assertFalse(Pattern.compile("(?m)^\\s*(tools|toolGroups):").matcher(commonConfig).find(),
+                "Default Package must not depend on global Tool registration");
+        for (String obsolete : Arrays.asList("config/tools/fpp.yaml", "config/tools/orders-db.yaml", "config/tools/sample.yaml"))
+            assertFalse(Files.exists(root.resolve(obsolete)), "Obsolete global Tool group remains: " + obsolete);
+    }
+
+    @Test
+    void defaultPackageSchemaVersionsMatchTheCurrentEngineRegistry() throws Exception {
+        Path root = Paths.get("").toAbsolutePath().normalize();
+        Path packageRoot = root.resolve("packages/default");
+        Map<String, Integer> actual = new TreeMap<String, Integer>();
+        try (java.util.stream.Stream<Path> files = Files.walk(packageRoot)) {
+            for (Path file : (Iterable<Path>) files.filter(Files::isRegularFile)
+                    .filter(path -> path.toString().endsWith(".yaml") || path.toString().endsWith(".yml"))::iterator) {
+                Object value = YamlSupport.parser().load(read(file));
+                assertTrue(value instanceof Map, "Package YAML must be a mapping: " + packageRoot.relativize(file));
+                Object schemaVersion = ((Map<?, ?>) value).get("schemaVersion");
+                assertTrue(schemaVersion instanceof String,
+                        "Package YAML must declare schemaVersion: " + packageRoot.relativize(file));
+                String version = (String) schemaVersion;
+                JsonSchemaVerifier.verify(SchemaFiles.resolveVersion(root, version), value);
+                actual.put(version, Integer.valueOf(actual.containsKey(version) ? actual.get(version).intValue() + 1 : 1));
+            }
+        }
+
+        Map<String, Integer> expected = new TreeMap<String, Integer>();
+        expected.put("att-debug/v1.2", Integer.valueOf(1));
+        expected.put("att-flow/v3.6", Integer.valueOf(3));
+        expected.put("att-package/v1", Integer.valueOf(1));
+        expected.put("att-sidecar/v2.2", Integer.valueOf(3));
+        expected.put("att-template/v3.6", Integer.valueOf(10));
+        expected.put("att-testdata/v1.0", Integer.valueOf(1));
+        expected.put("att-tool-group/v3.0", Integer.valueOf(3));
+        expected.put("att-tool/v1", Integer.valueOf(21));
+        assertEquals(expected, actual, "default Package schema inventory changed; audit and update this gate deliberately");
     }
 
     @Test

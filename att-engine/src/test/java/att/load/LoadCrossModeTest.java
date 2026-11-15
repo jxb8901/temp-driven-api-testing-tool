@@ -49,6 +49,95 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LoadCrossModeTest {
     @TempDir Path temp;
 
+    @Test void defaultNestedFlowIdentityUsesSourceCaseOrLoadExecutionIdentityAcrossModes() throws Exception {
+        Path project = fixture();
+        Path defaultPackage = findDefaultPackageRoot();
+        for (String path : Arrays.asList(
+                "templates/V3_FLOW_EXAMPLE/template.yaml",
+                "templates/flows/common/compose/flow.yaml",
+                "templates/flows/common/identity/flow.yaml",
+                "templates/flows/common/decorate/flow.yaml")) {
+            Path destination = project.resolve(path);
+            Files.createDirectories(destination.getParent());
+            Files.copy(defaultPackage.resolve(path), destination);
+        }
+        write(project, "templates/V3_FLOW_EXAMPLE/debug.yaml", "schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"),
+                "SIT", 10000, project.resolve("templates"), Collections.<String, ToolConfig>emptyMap(), null, null);
+        StageTemplate template = new StageTemplateLoader(project, config.templatesRoot(), false).loadSelected("V3_FLOW_EXAMPLE");
+        FlowRegistry flows = new FlowRegistry(project, config.templatesRoot(), false);
+
+        CaseRuntimeContext runContext = testcaseContext(project, template, Collections.<String, Object>emptyMap());
+        Files.createDirectories(runContext.caseOutputDirectory());
+        List<att.core.ValidationResult> run;
+        try (CaseExecutionLog log = new CaseExecutionLog(runContext.caseOutputDirectory().resolve("case.log"))) {
+            run = new StageTemplateRunner(new UnifiedTemplateEngine(null), flows).execute("testcase", template, runContext, log);
+        }
+        assertEquals(ResultStatus.PASS, run.get(0).status(), String.valueOf(run.get(0).diagnostic()));
+        assertEquals(String.valueOf(runContext.resolve("META.SOURCE.caseId")) + "-done",
+                runContext.resolve("EXEC.VARS.decoratedResult"));
+
+        DebugEngine.Result debug = new DebugEngine(project, config).run(att.core.ExecutionOptionsTestSupport.parse(new String[]{
+                "debug", "template", "V3_FLOW_EXAMPLE", "--output-dir",
+                temp.resolve("cross-mode-debug-root").toString(), "--format", "json"}));
+        assertEquals(ResultStatus.PASS, debug.status(), String.valueOf(debug.diagnostic()));
+        assertTrue(debug.executionId() != null && !debug.executionId().isEmpty());
+
+        LoadScenarioLoader loader = new LoadScenarioLoader(project);
+        Map<String, Object> overrides = new java.util.LinkedHashMap<String, Object>();
+        overrides.put("users", Integer.valueOf(1));
+        overrides.put("duration", "100ms");
+        LoadScenario scenario = new LoadScenarioBuilder(loader).buildQuickLoad("virtualUsers", "template",
+                "V3_FLOW_EXAMPLE", Collections.<String, Object>emptyMap(), loader.loadQuickLoadPolicy("virtualUsers"),
+                overrides, Collections.<String, Object>emptyMap());
+        LoadTarget target = new LoadTargetResolver(project, config).resolve(scenario);
+        new LoadTargetValidator(project, config).validate(scenario, target);
+        IterationResult load = new IterationExecutor(project, config, target).execute(
+                IterationRequest.closed("cross-mode-nested-flow-load", "nested-flow-iteration", 1,
+                        "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+        assertEquals(ResultStatus.PASS, load.status(), String.valueOf(load.diagnostic()));
+        assertEquals(load.executionId() + "-done", load.context().resolve("EXEC.VARS.decoratedResult"));
+        assertEquals(load.executionId(), CaseRuntimeContext.getPath(load.context().caseTree(),
+                "STAGES.LOAD.TEMPLATE.ACTIONS.compose.flow.actions.identityFlow.flow.actions.identityValue.output.result"));
+
+        Path advancedScenarioFile = write(project, "cross-mode-advanced-load.yaml", "schemaVersion: att-load/v1.9\nworkloads:\n"
+                + "  - id: nested-flow\n    target: {type: template, id: V3_FLOW_EXAMPLE}\n"
+                + "    load: {users: 1, duration: 100ms}\n");
+        LoadScenario advancedScenario = new LoadScenarioLoader(project).load(advancedScenarioFile);
+        LoadTarget advancedTarget = new LoadTargetResolver(project, config).resolve(advancedScenario);
+        new LoadTargetValidator(project, config).validate(advancedScenario, advancedTarget);
+        IterationResult advancedLoad = new IterationExecutor(project, config, advancedTarget).execute(
+                IterationRequest.closed("cross-mode-advanced-load", "nested-flow-advanced-iteration", 1,
+                        "STEADY", Instant.now(), "VU-1", advancedScenario.inputs()));
+        assertEquals(ResultStatus.PASS, advancedLoad.status(), String.valueOf(advancedLoad.diagnostic()));
+        assertEquals(advancedLoad.executionId() + "-done", advancedLoad.context().resolve("EXEC.VARS.decoratedResult"));
+        assertEquals(advancedLoad.executionId(), CaseRuntimeContext.getPath(advancedLoad.context().caseTree(),
+                "STAGES.LOAD.TEMPLATE.ACTIONS.compose.flow.actions.identityFlow.flow.actions.identityValue.output.result"));
+    }
+
+    @Test void loadExplainsModeSpecificTestCaseIdentityAtTheSourceAction() throws Exception {
+        Path project = fixture();
+        Path source = findDefaultPackageRoot().resolve("templates/PAYMENT_ROLLBACK/template.yaml");
+        Path destination = project.resolve("templates/PAYMENT_ROLLBACK/template.yaml");
+        Files.createDirectories(destination.getParent());
+        Files.copy(source, destination);
+        LoadScenarioLoader loader = new LoadScenarioLoader(project);
+        LoadScenario scenario = new LoadScenarioBuilder(loader).buildQuickLoad("virtualUsers", "template",
+                "PAYMENT_ROLLBACK", Collections.<String, Object>emptyMap(), loader.loadQuickLoadPolicy("virtualUsers"),
+                Collections.<String, Object>emptyMap(), Collections.<String, Object>emptyMap());
+        LoadTarget target = new LoadTargetResolver(project, config()).resolve(scenario);
+        new LoadTargetValidator(project, config()).validate(scenario, target);
+        IterationResult load = new IterationExecutor(project, config(), target).execute(
+                IterationRequest.closed("case-id-load", "case-id-load-1", 1, "STEADY", Instant.now(), "VU-1", scenario.inputs()));
+
+        assertEquals(ResultStatus.ERROR, load.status());
+        assertNotNull(load.diagnostic());
+        assertEquals("rollbackSummary", load.diagnostic().action());
+        assertTrue(load.diagnostic().summary().contains("META.SOURCE.caseId"), load.diagnostic().toString());
+        assertTrue(load.diagnostic().suggestion().contains("available only in Run and Debug"), load.diagnostic().toString());
+        assertTrue(load.diagnostic().suggestion().contains("business/TestCase ID explicitly through EXEC.INPUT"), load.diagnostic().toString());
+    }
+
     @Test void mqReplyTimeoutAndReplayGateRemainConsistentInRunDebugAndLoad() throws Exception {
         Path project = fixture();
         write(project, "templates/SHARED/template.yaml", "schemaVersion: att-template/v3.6\n"
@@ -696,6 +785,14 @@ class LoadCrossModeTest {
                 + "  flowLog:\n    type: log\n    message: \"flow=${EXEC.INPUT.value}\"\n");
         write(project, "templates/SHARED/debug.yaml", "schemaVersion: att-debug/v1.2\ninputs:\n  value: shared-value\n");
         return project;
+    }
+
+    private Path findDefaultPackageRoot() throws Exception {
+        for (Path candidate = Paths.get("").toAbsolutePath().normalize(); candidate != null; candidate = candidate.getParent()) {
+            Path packageRoot = candidate.resolve("packages/default");
+            if (Files.isDirectory(packageRoot.resolve("templates/V3_FLOW_EXAMPLE"))) return packageRoot;
+        }
+        throw new IllegalStateException("Could not locate the checked-in packages/default resources");
     }
 
     private Path write(Path project, String relative, String content) throws Exception {
