@@ -216,6 +216,65 @@ class SutMetricsGrafanaOfflineReportIntegrationTest {
         }
     }
 
+    @Test void offlineBusinessCoverageCountsOnlyValidMultiOutputValues() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp, Set.of(), reference -> null)) {
+            Map<String, Object> group = map("id", "report-query", "call", "#{reporter(summary='private')}",
+                    "sampling", "afterDrain", "sideEffectsAcknowledged", true,
+                    "outputs", List.of(
+                            map("id", "success", "title", "Successful transactions", "column", "SUCCESS",
+                                    "unit", "transactions", "kind", "counter"),
+                            map("id", "failure", "title", "Failed transactions", "column", "FAILURE",
+                                    "unit", "transactions", "kind", "counter")));
+            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "offline-business",
+                    "name", "Offline business", "kind", "base", "category", "app", "metrics", List.of(group)));
+            Map<String, Object> snapshot = service.resolveScenario(
+                    scenario(List.of(map("profile", "offline-business"))), "alice", false);
+            AtomicInteger invocations = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    invocations.incrementAndGet();
+                    return map("rowCount", 1, "rows", List.of(map("SUCCESS", 20, "FAILURE", null)));
+                }
+                @Override public void close() { }
+            });
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(60);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            Map<String, Object> collection = awaitCollection(service, JOB_ID);
+            assertEquals("PARTIAL", collection.get("state"));
+            assertEquals(1, invocations.get(), "Both outputs share the same business call.");
+
+            Path nativeOutput = temp.resolve("offline-business-native-output");
+            Files.createDirectories(nativeOutput);
+            Files.writeString(nativeOutput.resolve("sealed.txt"), "native evidence", StandardCharsets.UTF_8);
+            Path nativeArchive = temp.resolve("offline-business-artifacts.zip");
+            ArtifactArchive.build(nativeOutput, nativeArchive, (path, bytes) -> { });
+            Path publicationRoot = temp.resolve("offline-business-report");
+            ServerRuntime.ArtifactPublisher publisher = (output, archive, validator) ->
+                    ArtifactArchive.build(output, archive, validator);
+            SutMetricsOfflineReportPublisher.Publication published = SutMetricsOfflineReportPublisher.publish(
+                    JOB_ID, map("status", "SUCCEEDED"), temp.resolve("jobs").resolve(JOB_ID), nativeArchive,
+                    publicationRoot, service, publisher, (path, bytes) -> { });
+
+            Path reportArchive = publicationRoot.resolve("snapshots").resolve(published.publicationId() + ".zip");
+            JsonNode offlineManifest = ServerRuntime.JSON.readTree(ArtifactArchive.read(
+                    reportArchive, "report/v2/sut-metrics/manifest.json"));
+            List<Map<String, Object>> observations = maps(offlineManifest.path("observations"));
+            Map<String, Object> valid = observations.stream().filter(observation ->
+                    "success".equals(object(observation.get("metric")).get("id"))).findFirst().orElseThrow();
+            assertEquals(20.0, valid.get("value"));
+            assertEquals(1, object(valid.get("coverage")).get("valueCount"));
+
+            Map<String, Object> invalid = observations.stream().filter(observation ->
+                    "failure".equals(object(observation.get("metric")).get("id"))).findFirst().orElseThrow();
+            assertNull(invalid.get("value"));
+            assertEquals(0, object(invalid.get("coverage")).get("valueCount"));
+            assertEquals("NOT_EVALUATED", object(invalid.get("quality")).get("status"));
+        }
+    }
+
     @Test void chartPreviewKeepsLabeledSeriesUsesUtcSpacingAndBreaksObservedGaps() throws Exception {
         long start = 1_700_000_000_000L;
         List<Map<String, Object>> source = List.of(

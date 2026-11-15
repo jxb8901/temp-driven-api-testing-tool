@@ -1551,7 +1551,7 @@ Scenario authoring, the complete rule shape, coverage requirements, and Studio e
 
 ##### Single-call business metrics
 
-A base profile may define a business metric with one configured `call` instead of PromQL. ATT executes each expanded metric binding once after all LOAD work drains, through the selected package's existing DBHelper or Package Tool configuration. A job-scoped binding is the default; a workload-scoped binding requires one exact `workloadId` from the LOAD scenario. No target fan-out, polling, or implicit retry is performed. DBHelper calls use the existing helper configuration, bind parameters, and connection limits. A Package Tool requires `sideEffectsAcknowledged: true` because ATT cannot determine whether package code has side effects.
+A base profile can define a business metric with a configured `call` instead of PromQL. ATT runs each expanded call group once after LOAD drains, through the selected package's existing DBHelper or Package Tool configuration. The default scope is Job-wide. A single-workload binding requires one exact `workloadId`; row-mapped outputs use the immutable Workload and mix identities from the LOAD scenario. ATT does not fan out calls, poll, retry, or infer identity from a target ID. DBHelper calls use the existing helper configuration, bind parameters, and connection limits. A Package Tool requires `sideEffectsAcknowledged: true` because ATT cannot determine whether package code has side effects.
 
 ~~~json
 {
@@ -1572,9 +1572,53 @@ A base profile may define a business metric with one configured `call` instead o
 }
 ~~~
 
-Set `sampling: windowQuery` and `window: steady` to make one post-drain call with the actual STEADY bounds available as `EXEC.OBSERVATION.WINDOW_START` and `EXEC.OBSERVATION.WINDOW_END`. The query author defines the aggregation; a returned value does not prove exhaustive coverage. A map or list result requires an explicit `valuePath` such as `rows[0].active`, and the resolved value must be one finite number. The Server pins the package and Runtime Config revisions at Job admission and refuses execution if either changes. Calls run in a bounded Server worker pool, outside LOAD workers. A failed, timed-out, stale, or non-numeric call is recorded as unavailable and evaluates to `NOT_EVALUATED`; it is never substituted with zero and does not change the Worker result. Binding validation and live preview never execute a business call.
+Use `outputs` when one query or Package Tool invocation returns several numeric columns or rows. Each output declares its own metric ID, title, result column, unit, and kind. The following profile runs one DBHelper query and maps its two fixed columns to separate counter metrics:
 
-Business metrics support `max <= value` thresholds. Use `window: afterDrain` for an `afterDrain` metric or `window: steady` for a `windowQuery` metric. These single-value rules do not use `minimumCoverage`.
+~~~json
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "transaction-summary",
+  "kind": "base",
+  "category": "db",
+  "metrics": [{
+    "id": "transaction-query",
+    "call": "#{db.reporting.query(sql='select workload_id, mix_id, success, failure from transaction_summary')}",
+    "sampling": "afterDrain",
+    "mapping": {
+      "rows": "rows",
+      "workloadColumn": "WORKLOAD_ID",
+      "mixColumn": "MIX_ID"
+    },
+    "outputs": [
+      {"id": "successful_transactions", "title": "Successful transactions", "column": "SUCCESS", "unit": "transactions", "kind": "counter"},
+      {"id": "failed_transactions", "title": "Failed transactions", "column": "FAILURE", "unit": "transactions", "kind": "counter"}
+    ]
+  }]
+}
+~~~
+
+The result path defaults to `rows`. It may select a bounded object/list path such as `payload.rows`. Without `workloadColumn`, the result must contain exactly one row for a Job-wide binding. With `workloadColumn` and no `mixColumn`, each row maps to Workload scope, including for a mixed Workload. If the query returns an aggregate across mix slots, define that aggregation in the query or Tool; ATT keeps the result at Workload scope and does not copy it to individual slots. There must be at most one row per Workload. Add `mixColumn` to identify a mix slot by the pair `workloadId` and `mixId`; it requires `workloadColumn`. A row with a missing or unknown mix ID remains unassociated and is reported in mapping diagnostics, while independently mapped slots remain available. ATT does not use target IDs, dynamic pivots, fuzzy joins, or implicit aggregation to associate rows. Column names and ID values must match exactly.
+
+Each call group supports up to 64 outputs and 4,096 result rows. The Job supports at most 16 actual calls, with a 60-second per-call limit and a 120-second total call budget. ATT keeps returned rows in memory only; sidecars and reports store each numeric output and mapping diagnostics, not the raw rows. An invalid output column affects that metric and subject only. A failed or timed-out call makes every output in its group unavailable. Duplicate, unknown, missing, and ambiguous rows remain visible as diagnostics, and every expected Workload/mix output remains present. Partial or unavailable values are never replaced with zero.
+
+Set `sampling: windowQuery` and `window: steady` to make one post-drain call with the actual STEADY bounds available as `EXEC.OBSERVATION.WINDOW_START` and `EXEC.OBSERVATION.WINDOW_END`. The query author defines the aggregation; a returned value does not prove exhaustive coverage. A single-output map or list result requires an explicit `valuePath` such as `rows[0].active`, and the resolved value must be one finite number. The Server pins the package and Runtime Config revisions at Job admission and refuses execution if either changes. Calls run in a bounded Server worker pool, outside LOAD workers. After-drain values are fresh only when collected within three minutes of LOAD completion, independent of the Prometheus after buffer; later values are marked stale. A failed, timed-out, stale, or non-numeric call evaluates to `NOT_EVALUATED`; it is never substituted with zero and does not change the Worker result. Binding validation and live preview never execute a business call.
+
+Business metrics support `max <= value` thresholds, including numeric counters. Use `window: afterDrain` for an `afterDrain` metric or `window: steady` for a `windowQuery` metric. These single-value rules do not use `minimumCoverage`. Omit `subjects` or set it to `all` to evaluate every expected subject. For an exact Workload or mix selection, provide `subjects` as a list; a mix selector must include both immutable IDs:
+
+~~~yaml
+thresholds:
+  - id: mobile-success-limit
+    profile: transaction-summary
+    metric: successful_transactions
+    max: 1000
+    unit: transactions
+    subjects:
+      - scope: mix
+        workloadId: checkout
+        mixId: mobile
+~~~
+
+Every selector must resolve to exactly one pinned Job, Workload, or Workload/mix metric identity. A metric ID shared across several Workloads remains distinct in the threshold results. Missing, stale, partial, or ambiguous mappings produce `NOT_EVALUATED` unless another valid selected subject proves `NOT_MET`.
 
 In the summary's `thresholds` object, `status` and `performanceVerdict` are authoritative and use `MET`, `NOT_MET` or `NOT_EVALUATED`. `legacyPassed` is an optional compatibility boolean that retains the previous `passed()` semantics: it is false when configured thresholds are unevaluable and true when no thresholds are configured. Consumers should use the tri-state fields to distinguish incomplete evidence from a missed threshold.
 
@@ -3513,7 +3557,7 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 
 ### Offline SUT metrics report
 
-A completed LOAD with SUT collection evidence can publish a separate, versioned offline report archive. The publisher verifies the source manifest and each observation sidecar, preserves the original sealed native archive byte-for-byte, and publishes an immutable snapshot. Its `att-load-report-extension/v2` manifest references the source-neutral `att-load-offline-observations/v1` record. The `att-load-offline-observation/v1` entries carry source, metric, profile, target, UTC window, phase, units, quality, checksums, and either bounded chart previews for time series or one numeric value for a business metric. Full sidecars retain the normalized `att-sut-metrics-observation/v1` contract. Partial or unavailable source data is reported explicitly and does not change the native Job result.
+A completed LOAD with SUT collection evidence can publish a separate, versioned offline report archive. The publisher verifies the source manifest and each observation sidecar, preserves the original sealed native archive byte-for-byte, and publishes an immutable snapshot. Its `att-load-report-extension/v2` manifest references the source-neutral `att-load-offline-observations/v1` record. The `att-load-offline-observation/v1` entries carry source, metric, profile, target, UTC window, phase, units, quality, checksums, and bounded chart previews for time series or one numeric value plus scope, immutable Workload/mix identity, call-group metadata, mapping quality, and unmatched-row count for a business metric. Unavailable values remain null; full sidecars retain the normalized `att-sut-metrics-observation/v1` contract. Partial or unavailable source data is reported explicitly and does not change the native Job result.
 
 The report works without network access and uses a restrictive Content Security Policy. It does not evaluate performance thresholds. If a separately versioned `att-load-verdict/v1` record is supplied, the report displays its recorded evaluation state and evidence reference without recalculating the verdict. The archive is available through the authenticated Job download route only after verified publication.
 

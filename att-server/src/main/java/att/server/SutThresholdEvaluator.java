@@ -59,7 +59,7 @@ final class SutThresholdEvaluator {
                     "profilePath", rule.get("profilePath"), "metricId", rule.get("metricId"),
                     "metricName", rule.get("metricName"), "unit", rule.get("unit"),
                     "reduction", rule.get("reduction"), "operator", rule.get("operator"),
-                    "value", rule.get("value"), "required", required, "status", status,
+                    "value", rule.get("value"), "required", required, "selection", rule.getOrDefault("subjects", "all"), "status", status,
                     "targets", ruleSubjects);
             ruleResults.add(summary);
         }
@@ -203,9 +203,13 @@ final class SutThresholdEvaluator {
                 "profilePath", query.get("profilePath"), "metricId", rule.get("metricId"), "metricName", query.get("title"),
                 "unit", rule.get("unit"), "required", rule.get("required"), "source", source,
                 "profileRevision", query.get("profileRevision"), "target", target,
+                "sampleResolution", null, "peakObservedAt", null,
+                "coverage", fields("valueCount", actual == null ? 0 : 1),
+                "scope", query.get("scope"), "workloadId", query.get("workloadId"), "mixId", query.get("mixId"),
                 "window", fields("name", rule.get("window"), "kind", observation.get("kind"),
                         "startAt", window.get("queryStart"), "endAt", window.get("queryEnd"),
                         "observedAt", window.get("observedAt"), "completedAt", window.get("completedAt")),
+                "mappingStatus", availability.get("mappingStatus"), "unmatchedRowCount", availability.get("unmatchedRowCount"),
                 "threshold", fields("reduction", rule.get("reduction"), "operator", rule.get("operator"),
                         "value", rule.get("value"), "unit", rule.get("unit")),
                 "actual", actual, "collectionDurationMs", availability.get("collectionDurationMs"),
@@ -215,6 +219,9 @@ final class SutThresholdEvaluator {
     private static String businessObservationIssue(Map<String, Object> rule, String sampling,
                                                     Map<String, Object> availability, Map<String, Object> window,
                                                     Map<String, Object> steadyPhase) {
+        if (availability.containsKey("mappingStatus")
+                && !Set.of("JOB_SHARED", "USER_ATTRIBUTED", "MAPPED").contains(availability.get("mappingStatus")))
+            return "The result rows were not completely and unambiguously mapped to the selected subject.";
         String configuredWindow = String.valueOf(rule.get("window"));
         if ("afterDrain".equals(sampling)) {
             Instant observedAt = instant(window.get("observedAt"));
@@ -285,7 +292,7 @@ final class SutThresholdEvaluator {
                 "profilePath", rule.get("profilePath"), "profileRevision", null,
                 "sourceId", null, "sourceName", null, "sourceRevision", null,
                 "targetId", null, "targetType", null, "targetRevision", null,
-                "title", rule.get("metricName"));
+                "title", rule.get("metricName"), "scope", null, "workloadId", null, "mixId", null);
         Map<String, Object> source = fields("id", null, "name", null, "revision", null);
         Map<String, Object> profile = fields("id", rule.get("profile"),
                 "path", rule.get("profilePath"), "revision", null);
@@ -304,6 +311,7 @@ final class SutThresholdEvaluator {
                 "profile", rule.get("profile"), "profilePath", query.get("profilePath"), "metricId", rule.get("metricId"),
                 "metricName", query.get("title"), "unit", rule.get("unit"), "required", rule.get("required"),
                 "source", source, "profileRevision", profile.get("revision"), "target", target,
+                "scope", query.get("scope"), "workloadId", query.get("workloadId"), "mixId", query.get("mixId"),
                 "window", window, "sampleResolution", String.valueOf(stepSeconds(window)) + "s",
                 "threshold", fields("reduction", rule.get("reduction"), "operator", rule.get("operator"),
                         "value", rule.get("value"), "unit", rule.get("unit")),

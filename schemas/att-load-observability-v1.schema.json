@@ -287,6 +287,21 @@
         },
         "required": {
           "type": "boolean"
+        },
+        "subjects": {
+          "oneOf": [
+            {
+              "const": "all"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/sutThresholdSubject"
+              }
+            }
+          ]
         }
       },
       "oneOf": [
@@ -325,6 +340,83 @@
               "max"
             ]
           }
+        }
+      ]
+    },
+    "sutThresholdSubject": {
+      "type": "object",
+      "required": [
+        "scope"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "enum": [
+            "job",
+            "workload",
+            "mix"
+          ]
+        },
+        "workloadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+        },
+        "mixId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "scope": {
+              "const": "job"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "workloadId"
+                ]
+              },
+              {
+                "required": [
+                  "mixId"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "scope": {
+              "const": "workload"
+            }
+          },
+          "required": [
+            "workloadId"
+          ],
+          "not": {
+            "required": [
+              "mixId"
+            ]
+          }
+        },
+        {
+          "properties": {
+            "scope": {
+              "const": "mix"
+            }
+          },
+          "required": [
+            "workloadId",
+            "mixId"
+          ]
         }
       ]
     }

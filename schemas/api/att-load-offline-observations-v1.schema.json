@@ -172,6 +172,12 @@
         "endAt": {
           "$ref": "#/$defs/time"
         },
+        "observedAt": {
+          "$ref": "#/$defs/time"
+        },
+        "completedAt": {
+          "$ref": "#/$defs/time"
+        },
         "phaseWindows": {
           "type": "array",
           "maxItems": 64,
@@ -252,6 +258,29 @@
         },
         "targetRevision": {
           "$ref": "#/$defs/digest"
+        },
+        "scope": {
+          "enum": [
+            "job",
+            "workload",
+            "mix"
+          ]
+        },
+        "workloadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mixId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "callGroupId": {
+          "type": "string",
+          "maxLength": 512
         }
       }
     },
@@ -392,7 +421,47 @@
           }
         },
         "value": {
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "job",
+            "workload",
+            "mix"
+          ]
+        },
+        "workloadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mixId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "callGroupId": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "callCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "mappingStatus": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "unmatchedRowCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096
         }
       },
       "oneOf": [
