@@ -837,7 +837,10 @@ class ServerWarUiIT {
             tomcat = startScheduledWar(war, users);
             int port = tomcat.getConnector().getLocalPort();
             String resourceRoute = api + "/packages/payments/resources?type=template&query=DEGRADED";
-            HttpURLConnection baselineResponse = open(port, resourceRoute, auth);
+            // The cold inspection Worker can need the configured inspection timeout to
+            // start on a busy CI runner; keep this first catalog read from timing out
+            // before the Server's own 30-second inspection deadline is reached.
+            HttpURLConnection baselineResponse = open(port, resourceRoute, auth, 30000);
             String baselineRevision;
             JsonNode baseline;
             try (var input = baselineResponse.getInputStream()) {
@@ -1789,9 +1792,13 @@ class ServerWarUiIT {
     }
 
     private static HttpURLConnection open(int port, String path, String authorization) throws Exception {
+        return open(port, path, authorization, 3000);
+    }
+
+    private static HttpURLConnection open(int port, String path, String authorization, int readTimeout) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL("http://127.0.0.1:" + port + path).openConnection();
         connection.setConnectTimeout(3000);
-        connection.setReadTimeout(3000);
+        connection.setReadTimeout(readTimeout);
         if (authorization != null) connection.setRequestProperty("Authorization", authorization);
         return connection;
     }
