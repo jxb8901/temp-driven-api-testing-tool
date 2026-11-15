@@ -379,12 +379,14 @@ async function main() {
     const firstReference = page.getByRole('link', { name: 'Open package file ./payloads/request.xml' });
     await firstReference.waitFor();
     await firstReference.click();
-    await page.getByRole('heading', { name: 'templates/checkout/payloads/request.xml', level: 1 }).waitFor();
+    await page.getByRole('heading', { name: 'Safe Package file', level: 1 }).waitFor();
+    await page.locator('.att-package-source-file .att-source-path code').getByText('templates/checkout/payloads/request.xml', { exact: true }).waitFor();
     assert.equal(await page.locator('.att-package-source-file .att-code-language').innerText(), 'XML');
     await page.locator('.att-package-source-file .att-code-status').getByText('Code viewer ready.').waitFor();
     const nestedReference = page.getByRole('link', { name: 'Open package file ./refs/child.json' });
     await nestedReference.waitFor();
     await nestedReference.click();
+    await page.locator('.att-package-source-file .att-source-path code').getByText('templates/checkout/payloads/refs/child.json', { exact: true }).waitFor();
     await page.getByText('{"ok":true}', { exact: true }).waitFor();
     assert.deepEqual(referenceRequests, [
       { referenceId: resourceReferenceId, origin: 'templates/checkout/template.yaml' },
@@ -400,7 +402,7 @@ async function main() {
     await page.getByRole('heading', { name: 'empty' }).waitFor();
     await page.getByRole('tab', { name: 'Visual' }).focus();
     await page.keyboard.press('ArrowRight');
-    await page.getByText('Safe source is empty.').waitFor();
+    await page.getByText('Safe projection is empty.').waitFor();
     assert.equal(await page.locator('.att-explorer-source .att-code-editor').count(), 0, 'an empty source does not mount a copy toolbar');
 
     await page.goto(`${base}#/configuration/payments?tab=compare`);

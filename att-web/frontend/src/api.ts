@@ -21,7 +21,7 @@ import type {
   SchedulePreviewInput,
 } from './features/schedules/types';
 import { normalizeSchedule, scheduleTransport } from './features/schedules/types';
-import type { ValidationReportData, ValidationRequest } from './features/validation/types';
+import type { ValidationRecord, ValidationRecordPage, ValidationReportData, ValidationRequest } from './features/validation/types';
 
 export interface ServerJobStorageMetrics {
   enabled?: boolean;
@@ -336,6 +336,25 @@ export const api = {
   async validateResource(input: ValidationRequest, signal?: AbortSignal): Promise<ValidationReportData> {
     const report = await postJson<unknown>('validation', { command: 'validate', ...input }, signal);
     return requireValidationReport(report);
+  },
+  submitValidation(input: ValidationRequest): Promise<ValidationRecord> {
+    return postJson<ValidationRecord>('validations', { command: 'validate', ...input });
+  },
+  async getValidationRecord(validationId: string, signal?: AbortSignal): Promise<ValidationRecord> {
+    const record = await request<ValidationRecord>('validations/' + encodeURIComponent(validationId), { signal });
+    if (record.report) record.report = requireValidationReport(record.report);
+    return record;
+  },
+  getValidationRecordSummary(signal?: AbortSignal): Promise<{ record: ValidationRecord | null; requestId?: string }> {
+    return request('validations/summary', { signal });
+  },
+  listValidationRecords(input: { packageId?: string; scope?: string; target?: string; environment?: string;
+    matchContext?: boolean; limit?: number; cursor?: string } = {}, signal?: AbortSignal): Promise<ValidationRecordPage> {
+    return request('validations' + queryString({ packageId: input.packageId, scope: input.scope, target: input.target,
+      environment: input.environment, matchContext: input.matchContext, limit: input.limit, cursor: input.cursor }), { signal });
+  },
+  cancelValidation(validationId: string): Promise<ValidationRecord> {
+    return postJson<ValidationRecord>('validations/' + encodeURIComponent(validationId) + '/cancel', {});
   },
   getJobs(signal?: AbortSignal): Promise<ApiEnvelope<JobSummary>> {
     return request<ApiEnvelope<JobSummary>>('jobs', { signal });

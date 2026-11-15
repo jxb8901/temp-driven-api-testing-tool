@@ -44,6 +44,7 @@ import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -79,6 +80,7 @@ public final class PackageResourceInspector implements AutoCloseable {
     private static final int MAX_NESTED_SOURCE_DEPTH = 8;
     private static final int MAX_NESTED_SOURCE_FILES = 256;
     private static final int MAX_RESOURCES = 20000;
+    private static final int MAX_VALIDATION_SOURCE_FILES = 1000;
     private static final int MAX_WORKBOOKS = 500;
     private static final long MAX_TOTAL_WORKBOOK_BYTES = 128L * 1024L * 1024L;
     private static final int MAX_CONFIG_BYTES = 1024 * 1024;
@@ -124,6 +126,7 @@ public final class PackageResourceInspector implements AutoCloseable {
     private volatile PackageWatch packageWatch;
     private volatile boolean cacheUnavailable;
     private volatile long indexBuildCount;
+    private volatile long validationSourceRevisionBuildCount;
 
     public PackageResourceInspector(Path packageRoot, Path configPath, String environment,
                                     Collection<String> safeTextSources,
@@ -991,7 +994,10 @@ public final class PackageResourceInspector implements AutoCloseable {
             if (cached != null && cachedIndexVersion == version) { InspectionMetrics.JVM.add(INDEX_HIT, 1); return cached; }
             InspectionMetrics.JVM.add(INDEX_MISS, 1);
             Index built = buildIndex();
-            try { watch.registerFileParents(built.files); }
+            try {
+                watch.registerFileParents(built.files);
+                watch.registerFileParents(built.validationSourceFiles);
+            }
             catch (Exception unavailable) {
                 cacheUnavailable = true;
                 close();
@@ -1016,6 +1022,7 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private Index buildIndexContents() throws Exception {
         Index index = new Index();
+        FileStamp configStampBefore=validationConfigStamp();
         Path configFile = resolveConfigFile();
         long configBytes = Files.size(configFile);
         if (configBytes > MAX_CONFIG_BYTES) throw new ResourceLimitException("resourceInspector.maxConfigBytes", MAX_CONFIG_BYTES, configBytes);
@@ -1041,7 +1048,15 @@ public final class PackageResourceInspector implements AutoCloseable {
         indexQuickLoadPolicies(index);
         resolveReferences(index, config);
         resolveReadiness(index, config);
-        index.revisionDigest = digestFiles(index.files, index.debugSidecars, index.quickLoadPolicies);
+        att.config.PackageConfig manifest=att.config.PackageConfig.load(packageRoot);
+        index.packageManifestDigest=manifest.digest();
+        Map<Path,FileStamp> sharedConfigStamps=sharedConfigFileStamps(index.sharedConfigFiles);
+        index.revisionDigest = digestFiles(index.files, index.debugSidecars, index.quickLoadPolicies,manifest);
+        index.sharedConfigStamps=sharedConfigStamps;
+        index.sharedConfigStable=sharedConfigStamps!=null&&sameFileStamps(sharedConfigStamps);
+        FileStamp configStampAfter=validationConfigStamp();
+        index.configStamp=configStampAfter;
+        index.validationConfigStable=configStampBefore.equals(configStampAfter);
         Collections.sort(index.ordered, new Comparator<Resource>() {
             @Override public int compare(Resource left, Resource right) {
                 return left.resourceId.compareTo(right.resourceId);
@@ -1654,6 +1669,85 @@ public final class PackageResourceInspector implements AutoCloseable {
     /** Revision used to bind a validated functional selection to package content. */
     public String executionRevisionDigest() throws Exception { return refreshedIndexForVerification().revisionDigest; }
 
+    /** Reuses the bounded, watched inventory for read-only validation source applicability. */
+    public String validationSourceRevisionDigest(boolean packageValidation) throws Exception {
+        Index index=index();
+        FileStamp currentConfigStamp;
+        try { currentConfigStamp=validationConfigStamp(); }
+        catch(Exception unavailable) { return null; }
+        if(!index.validationConfigStable||!index.sharedConfigStable
+                ||!index.configStamp.equals(currentConfigStamp)||!sharedConfigSourcesUnchanged(index)) {
+            cachedIndex=null;cachedIndexVersion=Long.MIN_VALUE;
+            index=index();
+            try {
+                if(!index.validationConfigStable||!index.sharedConfigStable
+                        ||!index.configStamp.equals(validationConfigStamp())||!sharedConfigSourcesUnchanged(index))return null;
+            } catch(Exception unavailable) { return null; }
+        }
+        if(!packageValidation)return index.revisionDigest;
+        try {
+            att.config.PackageConfig current=att.config.PackageConfig.load(packageRoot);
+            if(!index.packageManifestDigest.equals(current.digest())||!validationSourceFilesUnchanged(index)) {
+                cachedIndex=null;cachedIndexVersion=Long.MIN_VALUE;
+                index=index();
+                if(!index.validationConfigStable||!index.sharedConfigStable
+                        ||!sharedConfigSourcesUnchanged(index)
+                        ||!index.packageManifestDigest.equals(att.config.PackageConfig.load(packageRoot).digest()))return null;
+                current=att.config.PackageConfig.load(packageRoot);
+            }
+            synchronized(index) {
+                if(!index.validationSourceRevisionComputed) {
+                    index.validationSourceRevisionComputed=true;
+                    validationSourceRevisionBuildCount++;
+                    index.validationSourceRevisionDigest=validationSourceRevision(index,current);
+                    try { packageWatch().registerFileParents(index.validationSourceFiles); }
+                    catch(Exception unavailable) { /* bounded file stamps still guard these descriptors */ }
+                }
+                if(index.validationSourceRevisionDigest==null
+                        ||!index.packageManifestDigest.equals(att.config.PackageConfig.load(packageRoot).digest())
+                        ||!sharedConfigSourcesUnchanged(index)||!validationSourceFilesUnchanged(index))return null;
+                return index.validationSourceRevisionDigest;
+            }
+        } catch(Exception changedOrUnavailable) { return null; }
+    }
+
+    private boolean sharedConfigSourcesUnchanged(Index index) {
+        return index.sharedConfigStable&&sameFileStamps(index.sharedConfigStamps);
+    }
+
+    private boolean validationSourceFilesUnchanged(Index index) {
+        return sameFileStamps(index.validationSourceStamps);
+    }
+
+    private Map<Path,FileStamp> sharedConfigFileStamps(Set<Path> files) {
+        try {
+            Map<Path,FileStamp> stamps=new LinkedHashMap<Path,FileStamp>();
+            for(Path file:files)stamps.put(file,fileStamp(file));
+            return Collections.unmodifiableMap(stamps);
+        } catch(Exception unavailable) { return null; }
+    }
+
+    private boolean sameFileStamps(Map<Path,FileStamp> expected) {
+        if(expected==null)return false;
+        try {
+            for(Map.Entry<Path,FileStamp> source:expected.entrySet())
+                if(!source.getValue().equals(fileStamp(source.getKey())))return false;
+            return true;
+        } catch(Exception changedOrUnavailable) { return false; }
+    }
+
+    private FileStamp validationConfigStamp() throws Exception {
+        Path authored=RuntimeConfigPath.resolve(configPath,packageRoot).toAbsolutePath().normalize();
+        return fileStamp(authored);
+    }
+
+    private static FileStamp fileStamp(Path file) throws Exception {
+        if(Files.isSymbolicLink(file))throw new IllegalArgumentException("Validation source is a symbolic link");
+        BasicFileAttributes attributes=Files.readAttributes(file,BasicFileAttributes.class,LinkOption.NOFOLLOW_LINKS);
+        if(!attributes.isRegularFile())throw new IllegalArgumentException("Validation source is not a regular file");
+        return new FileStamp(attributes.size(),attributes.lastModifiedTime(),attributes.fileKey());
+    }
+
     /** Internal capability uses the same fresh revision boundary as draft admission. */
     public Map<String,Object> prewarmEligibility() throws Exception {
         Index index=refreshedIndexForVerification();
@@ -1764,6 +1858,7 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     long indexBuildCount() { return indexBuildCount; }
+    long validationSourceRevisionBuildCount() { return validationSourceRevisionBuildCount; }
 
     public int watchedDirectoryCount() {
         PackageWatch watch = packageWatch;
@@ -2880,13 +2975,12 @@ public final class PackageResourceInspector implements AutoCloseable {
     }
 
     private String digestFiles(Set<Path> files, Map<String, Path> debugSidecars,
-                               Map<String, Path> quickLoadPolicies) throws Exception {
+                               Map<String, Path> quickLoadPolicies,att.config.PackageConfig manifest) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         digest.update(utf8("ATT_ENGINE=" + att.Version.PRODUCT + ":" + att.Version.GIT_COMMIT));
         digest.update((byte) 0);
         digest.update(utf8("ATT_SCHEMA_REGISTRY=" + att.validation.SchemaFiles.registryDigest()));
         digest.update((byte) 0);
-        att.config.PackageConfig manifest = att.config.PackageConfig.load(packageRoot);
         digest.update(utf8("ATT_PACKAGE_MANIFEST=" + manifest.present() + ":" + manifest.digest()));
         digest.update((byte) 0);
         FrameworkConfig effectiveConfig = new FrameworkConfigLoader().loadDiscovery(resolveConfigFile(), runtimeConfigRoot, packageRoot, environment);
@@ -2931,6 +3025,59 @@ public final class PackageResourceInspector implements AutoCloseable {
             digest.update((byte) 0xff);
         }
         return hex(digest.digest());
+    }
+
+    private String validationSourceRevision(Index index,att.config.PackageConfig manifest) {
+        try {
+            Set<Path> sources=new TreeSet<Path>();
+            Set<String> logicalPaths=new TreeSet<String>();
+            for(List<Path> layer:manifest.descriptorLayers())for(Path authored:layer) {
+                String logical=packageRoot.relativize(authored.toAbsolutePath().normalize()).toString().replace('\\','/');
+                if(!logicalPaths.add(logical))continue;
+                if(logicalPaths.size()>MAX_VALIDATION_SOURCE_FILES)return null;
+                Path candidate=resources.internalCandidate(authored);
+                rejectSymlinkComponents(candidate);
+                if(!Files.isRegularFile(candidate,LinkOption.NOFOLLOW_LINKS))return null;
+                Path canonical=candidate.toRealPath();
+                if(!canonical.startsWith(packageRoot))return null;
+                sources.add(canonical);
+            }
+            MessageDigest digest=MessageDigest.getInstance("SHA-256");
+            digest.update(utf8("ATT_VALIDATION_INDEX="+index.revisionDigest));digest.update((byte)0);
+            digest.update(utf8("ATT_VALIDATION_MANIFEST="+manifest.digest()));digest.update((byte)0);
+            long total=0;byte[] buffer=new byte[8192];Map<Path,FileStamp> stamps=new LinkedHashMap<Path,FileStamp>();
+            for(Path source:sources) {
+                String logical=packageRoot.relativize(source).toString().replace('\\','/');
+                digest.update(utf8(logical));digest.update((byte)0);
+                FileStamp before=fileStamp(source);
+                try(InputStream input=Files.newInputStream(source,LinkOption.NOFOLLOW_LINKS)) {
+                    int read;
+                    while((read=input.read(buffer))!=-1) {
+                        total+=read;if(total>MAX_REVISION_BYTES)return null;
+                        digest.update(buffer,0,read);
+                    }
+                }
+                FileStamp after=fileStamp(source);if(!before.equals(after))return null;stamps.put(source,after);
+                digest.update((byte)0xff);
+            }
+            index.validationSourceFiles=Collections.unmodifiableSet(sources);
+            index.validationSourceStamps=Collections.unmodifiableMap(stamps);
+            return hex(digest.digest());
+        } catch(Exception unavailable) {
+            index.validationSourceFiles=Collections.emptySet();
+            return null;
+        }
+    }
+
+    private void rejectSymlinkComponents(Path path) throws Exception {
+        Path canonicalRoot=packageRoot.toAbsolutePath().normalize();
+        Path normalized=path.toAbsolutePath().normalize();
+        if(!normalized.startsWith(canonicalRoot))throw new IllegalArgumentException("Validation source is outside the Package");
+        Path cursor=canonicalRoot;
+        for(Path part:canonicalRoot.relativize(normalized)) {
+            cursor=cursor.resolve(part);
+            if(Files.isSymbolicLink(cursor))throw new IllegalArgumentException("Validation source contains a symbolic link");
+        }
     }
 
     private void indexQuickLoadPolicies(Index index) {
@@ -3018,7 +3165,9 @@ public final class PackageResourceInspector implements AutoCloseable {
                 if (!Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)) continue;
                 bytes += Files.size(candidate);
                 if (bytes > MAX_CONFIG_TREE_BYTES) throw new ResourceLimitException("resourceInspector.maxConfigTreeBytes", MAX_CONFIG_TREE_BYTES, bytes);
-                index.files.add(configResources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE).canonicalPath());
+                Path canonical=configResources.fromInternalPath(candidate, PackageResourceResolver.Kind.FILE).canonicalPath();
+                index.files.add(canonical);
+                index.sharedConfigFiles.add(canonical);
             }
         }
     }
@@ -3088,6 +3237,7 @@ public final class PackageResourceInspector implements AutoCloseable {
     private static final class PackageWatch implements AutoCloseable {
         private static final int MAX_WATCHED_DIRECTORIES = 20000;
         private final Path root;
+        private final Set<Path> allowedRoots = new TreeSet<Path>();
         private final WatchService service;
         private final Map<WatchKey, Path> directories = new HashMap<WatchKey, Path>();
         private final Set<Path> watchedDirectories = new HashSet<Path>();
@@ -3097,12 +3247,18 @@ public final class PackageResourceInspector implements AutoCloseable {
 
         PackageWatch(Path root, WatchRoots roots) throws Exception {
             this.root = root.toRealPath();
+            allowedRoots.add(this.root);
             this.service = FileSystems.getDefault().newWatchService();
             try {
                 for (Path candidate : roots.recursive) {
-                    if (candidate == null || !candidate.startsWith(this.root)) continue;
-                    if (Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS)) registerTree(candidate);
-                    else if (candidate.getParent() != null) registerTree(candidate.getParent());
+                    if (candidate == null || Files.isSymbolicLink(candidate)) continue;
+                    Path canonical=candidate.toRealPath();
+                    if (Files.isDirectory(canonical, LinkOption.NOFOLLOW_LINKS)) {
+                        allowedRoots.add(canonical);
+                        registerTree(canonical);
+                    } else if (canonical.getParent() != null && isAllowed(canonical.getParent())) {
+                        registerTree(canonical.getParent());
+                    }
                 }
                 for (Path candidate : roots.direct) registerDirectory(candidate);
             } catch (Exception failure) {
@@ -3160,7 +3316,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                 Object context = event.context();
                 if (context instanceof Path && event.kind() == StandardWatchEventKinds.ENTRY_CREATE) {
                     Path child = directory.resolve((Path) context);
-                    if (Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS)) {
+                    if (Files.isDirectory(child, LinkOption.NOFOLLOW_LINKS) && isAllowed(child)) {
                         try { registerTree(child); }
                         catch (Exception ignored) { /* the create event still invalidates the old snapshot */ }
                     }
@@ -3175,7 +3331,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         }
 
         private synchronized void registerTree(Path start) throws Exception {
-            if (!start.startsWith(root) || Files.isSymbolicLink(start)) return;
+            if (!isAllowed(start) || Files.isSymbolicLink(start)) return;
             Files.walkFileTree(start, new SimpleFileVisitor<Path>() {
                 @Override public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes)
                         throws java.io.IOException {
@@ -3195,13 +3351,15 @@ public final class PackageResourceInspector implements AutoCloseable {
         synchronized void registerFileParents(Collection<Path> files) throws Exception {
             for (Path file : files) {
                 Path parent = file.getParent();
-                if (parent == null || !parent.startsWith(root) || Files.isSymbolicLink(parent)) continue;
+                if (parent == null || !isAllowed(parent)) continue;
+                while(parent!=null&&!Files.isDirectory(parent,LinkOption.NOFOLLOW_LINKS))parent=parent.getParent();
+                if(parent==null||!isAllowed(parent)||Files.isSymbolicLink(parent))continue;
                 registerDirectory(parent);
             }
         }
 
         private void registerDirectory(Path directory) throws Exception {
-            if (!directory.startsWith(root) || Files.isSymbolicLink(directory)
+            if (!isAllowed(directory) || Files.isSymbolicLink(directory)
                     || watchedDirectories.contains(directory) || !Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) return;
             if (directories.size() >= MAX_WATCHED_DIRECTORIES) throw new java.io.IOException("Package has too many directories to watch");
             WatchKey key = directory.register(service,
@@ -3210,6 +3368,11 @@ public final class PackageResourceInspector implements AutoCloseable {
                     StandardWatchEventKinds.ENTRY_DELETE);
             directories.put(key, directory);
             watchedDirectories.add(directory);
+        }
+
+        private boolean isAllowed(Path path) {
+            for(Path allowed:allowedRoots)if(path.startsWith(allowed))return true;
+            return false;
         }
 
         @Override public void close() {
@@ -3235,9 +3398,17 @@ public final class PackageResourceInspector implements AutoCloseable {
         final List<Resource> ordered = new ArrayList<Resource>();
         final List<Map<String, Object>> diagnostics = new ArrayList<Map<String, Object>>();
         final Set<Path> files = new TreeSet<Path>();
+        final Set<Path> sharedConfigFiles=new TreeSet<Path>();
+        Map<Path,FileStamp> sharedConfigStamps=Collections.emptyMap();
+        boolean sharedConfigStable;
+        boolean validationConfigStable;
+        boolean validationSourceRevisionComputed;
+        Set<Path> validationSourceFiles=Collections.emptySet();
+        Map<Path,FileStamp> validationSourceStamps=Collections.emptyMap();
         final Map<String, Path> debugSidecars = new TreeMap<String, Path>();
         final Map<String, Path> quickLoadPolicies = new TreeMap<String, Path>();
-        String revisionDigest;
+        String revisionDigest,validationSourceRevisionDigest,packageManifestDigest;
+        FileStamp configStamp;
         boolean prewarmCompatible;
 
         void add(Resource resource) {
@@ -3253,6 +3424,19 @@ public final class PackageResourceInspector implements AutoCloseable {
             if ("tool".equals(type)) return toolAliases.get(key);
             return null;
         }
+    }
+
+    private static final class FileStamp {
+        final long size;
+        final FileTime modified;
+        final Object fileKey;
+        FileStamp(long size,FileTime modified,Object fileKey) { this.size=size;this.modified=modified;this.fileKey=fileKey; }
+        @Override public boolean equals(Object value) {
+            if(!(value instanceof FileStamp))return false;
+            FileStamp other=(FileStamp)value;
+            return size==other.size&&modified.equals(other.modified)&&java.util.Objects.equals(fileKey,other.fileKey);
+        }
+        @Override public int hashCode() { return java.util.Objects.hash(size,modified,fileKey); }
     }
 
     private static final class Resource {

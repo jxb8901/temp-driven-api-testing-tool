@@ -22,6 +22,9 @@
 - Serialize manifest writes per Job while keeping reads independent across Jobs.
 - Add a read-only Correlation view to LOAD Job details for comparing selected native LOAD metrics with a post-run SUT query over UTC time, with workload, phase, time-range, and SUT-series filters (#349).
 - Preserve native-bin and source-gap semantics in Correlation charts, including partial-range bins, extrema-aware downsampling, a 1,200-point cap, selected-versus-displayed counts, and no value extension across bins omitted by downsampling (#349).
+- Add owner-scoped asynchronous validation records with bounded retention, status/list/cancel APIs, restart recovery, and contextual Studio validation that survives navigation and reload while preserving the synchronous validation contract (#364, #367).
+- Preserve authorized opaque source references for Tool Group manifests and improve Explorer source presentation with compact related-manifest links (#365, #366, #367).
+- Remove duplicate legacy global Tool Groups after auditing their Package-owned equivalents, verify the default Package schema inventory, and fix shared Flow identity across Run, Debug, Quick Load, and Advanced Load (#368, #367).
 
 # Changelog
 

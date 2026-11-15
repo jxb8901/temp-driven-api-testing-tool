@@ -303,6 +303,7 @@ export interface ExplorerPageProps {
   onResourceRouteChange: (route: (Omit<ResourceIdentity, 'packageId'> & { logicalId?: string; tab?: 'definition' | 'source' | 'relations'; actionId?: string }) | null) => void;
   onRunTarget?: (target: { type: string; resourceId: string; logicalId?: string }) => void;
   onValidateTarget?: (scope: Extract<ValidationScope, 'case' | 'suite' | 'template' | 'flow' | 'tool'>, target: string, resource?: ResourceRoute) => void;
+  onValidatePackage?: () => void;
   onRunBatch?: () => void;
   onJobAccepted: (jobId: string) => void;
   onPrincipalLabelChange?: (label: string) => void;

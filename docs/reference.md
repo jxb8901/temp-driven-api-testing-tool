@@ -697,6 +697,12 @@ Standalone Debug bootstrap values are mapped into these canonical roots: `inputs
 
 EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing diagnostics stay in evidence-only DIAG.load, which is not an expression root.
 
+`CASE.environment` contains the selected environment profile in Run, Debug and Load and is available before business Actions. `CASE.status` and `CASE.durationMs` describe a completed or failed execution; they are lifecycle/result fields, not portable inputs for an Action that is still running. The default `PAYMENT_ROLLBACK` example reads `CASE.status` only in its Run/Debug flow.
+
+For a reusable Flow that needs the source TestCase ID when one exists and an execution identity in every mode, use `#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}`. This preserves the TestCase or synthetic Debug Case ID in Run and Debug and uses the Load iteration's `EXEC.ID` when `META.SOURCE.caseId` is absent. These values are not interchangeable when a business or TestCase identifier is required; pass that identifier through an explicit input contract or keep the resource mode-specific.
+
+The default Package's `PAYMENT_PREPARE`, `PAYMENT_INVOKE`, `PAYMENT_VERIFY`, `PAYMENT_ROLLBACK`, `PAYMENT_CLEANUP`, `FPP_CTO_RTI_USMF`, `FPP_D3I_BATCH_SIT`, and local-payment integration examples require a business TestCase ID and are intended for Run/Debug. Do not use them as Quick or Advanced Load targets without adding an explicit business-ID input contract; Load's `EXEC.ID` is an iteration ID. If an unsupported Load call evaluates a required `${META.SOURCE.caseId}`, ATT reports the source Action and explains which Load identity is available.
+
 ### META field inventory and lifecycle
 
 The public META root contains `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER`. `META.PACKAGE_ROOT` and `CASE.outputDirectory` were removed from the author Context. Use `&{logical/package/resource}` to read package content and `EXEC.OUTPUT_DIR` for execution output. Legacy `META.PROJECT.id` and `META.PROJECT.root` are removed with no compatibility alias. Package resources use logical package-relative names; only `EXEC.OUTPUT_DIR` exposes an execution path. META contains descriptive fields only. A path may be absent when its component is not active.
@@ -1193,7 +1199,7 @@ This flag is accepted only by standalone `debug`. ATT prints a warning before ex
 
 Bootstrap values may use initialized execution identity, `EXEC.INPUT`, `EXEC.LOAD` when present, other `EXEC.VARS.<name>` entries, and stable project/source/target/template metadata. `EXEC.ACTIONS`, action-local `output`, and invocation-scoped metadata are not available. Tool/DB/MQ/HTTP/SSH/process/filesystem or stateful calls are blocked; safe pure built-ins use the normal ATT parser. Repeatable `--set` namespaces are `input.path=value`, `vars.path=value`, and Tool-only `arg.name=value`. Values are parsed as safe YAML; nested maps and numeric list indexes are supported where the destination accepts them. For example, `--set 'vars.refNo=${EXEC.INPUT.refNo}'` changes the raw definition before evaluation.
 
-Without `--input`, ATT looks for `debug.yaml` beside a selected Template or Flow and for `config/tools/<group>.debug.yaml` for a grouped Tool (`config/tools/<localKey>.debug.yaml` for an ungrouped Tool). When no default sidecar exists, supply `--input`; an explicit `--input` replaces auto-discovery. `--env` uses the same environment resolver as Run/Validate/Load before target validation.
+Without `--input`, ATT looks for `debug.yaml` beside a selected Template or Flow and for the package-relative `tools/debug/<tool-id>.yaml` sidecar for a Tool. For example, `fpp.invokeApi` uses `tools/debug/fpp.invokeApi.yaml`. When no default sidecar exists, supply `--input`; an explicit `--input` replaces auto-discovery. `--env` uses the same environment resolver as Run/Validate/Load before target validation.
 
 Debug performs target-scoped validation: it validates the selected Template/Flow dependency closure or Tool contract, rather than requiring unrelated workbooks. Template and Flow debug use the same Action/Flow scope rules as Run. Tool debug constructs the same configured Tool invocation contract.
 
@@ -1215,7 +1221,7 @@ Debug does not create or update normal `latest-run.yaml`. Exit codes are `0` PAS
 
 #### Debug troubleshooting and MQ payload paths
 
-When a debug target cannot be resolved, check the target kind and identifier first, then use `--input <path>` to remove sidecar discovery from the diagnosis. Template and Flow debug discover `<target directory>/debug.yaml`; grouped Tool debug discovers `config/tools/<group>.debug.yaml`. The selected target's dependency closure is validated, so an unrelated workbook or Case file is not a prerequisite.
+When a debug target cannot be resolved, check the target kind and identifier first, then use `--input <path>` to remove sidecar discovery from the diagnosis. Template and Flow debug discover `<target directory>/debug.yaml`; Tool debug discovers `tools/debug/<tool-id>.yaml` under the selected Package. The selected target's dependency closure is validated, so an unrelated workbook or Case file is not a prerequisite.
 
 Use the same `&{package-relative-file}` expression in Debug, Run and Load, then pass its UTF-8 String as HTTP `body`, MQ `payload`, or SSH upload `payload`. These Resource Helpers do not resolve separate local paths. Validation resolves package files before external I/O; obsolete HTTP/MQ `file`, SSH upload `localPath`, and SSH `download` calls are rejected.
 
@@ -1270,7 +1276,7 @@ inputs:
 
 Run it with `./att.sh debug flow common.compose.v1`. Flow inputs are available as `${EXEC.INPUT.source}` and, when there is no same-named Case value, as the compatibility alias `${EXEC.INPUT.source}`.
 
-Grouped Tool sidecar (`config/tools/fpp.debug.yaml` for `fpp.invokeApi`):
+Grouped Tool sidecar (`tools/debug/fpp.invokeApi.yaml` for `fpp.invokeApi`):
 
 ```yaml
 schemaVersion: att-debug/v1.2
@@ -1287,7 +1293,7 @@ tools:
 
 Run it with `./att.sh debug tool fpp.invokeApi`. The `invokeApi` key is the group-local Tool key. Values must be scalar or list values accepted by the Tool descriptor; map literals are not supported by the standalone Tool adapter.
 
-Ungrouped Tool sidecar (`config/tools/invokePaymentApi.debug.yaml`):
+Ungrouped Tool sidecar (`tools/debug/invokePaymentApi.yaml`):
 
 ```yaml
 schemaVersion: att-debug/v1.2
@@ -3183,7 +3189,7 @@ On Windows, `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not in
 | `./att.sh debug` | Discover runnable Tools, Templates, and Flows; show only existing default sidecars |
 | `./att.sh debug template <id>` | Execute one Template; auto-discover `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | Execute one canonical Flow; auto-discover `<flow-dir>/debug.yaml` |
-| `./att.sh debug tool <id>` | Execute one Tool; auto-discover `config/tools/<group>.debug.yaml` |
+| `./att.sh debug tool <id>` | Execute one Package Tool; auto-discover `tools/debug/<tool-id>.yaml` |
 | `./att.sh debug <type> <id> --input <file>` | Override the target's auto-discovered debug input |
 | `./att.sh debug <type> <id> --set input.path=<yaml-value>` | Override a typed `EXEC.INPUT` value; repeatable |
 | `./att.sh debug tool <id> --set arg.name=<yaml-value>` | Override one Tool argument; repeatable |

@@ -233,12 +233,19 @@ describe('Explorer source viewer', () => {
     const source = '# authored comment\r\n\r\ncall: >-\r\n  #{upper(value="x")}\r\nliteral: \'\\\\n\'\r\n';
     const clipboardWrite = vi.fn<(text: string) => Promise<void>>(async () => {});
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboardWrite } });
-    const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, text: source, format: 'yaml', projectionKind: 'original' })) });
+    const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, text: source, format: 'yaml', logicalPath: 'templates/checkout/template.yaml', projectionKind: 'original' })) });
     const identity: ResourceIdentity = { packageId: 'payments', type: 'template', resourceId: 'checkout' };
     await render(<SourceViewer api={api} identity={identity} available active />);
 
-    expect(container.querySelector('.att-source-toolbar')?.textContent).toContain('Original source');
+    const toolbar = container.querySelector('.att-source-toolbar')!;
+    expect(toolbar.textContent).toContain('templates/checkout/template.yaml');
+    expect(toolbar.textContent).toContain('YAML');
+    expect(toolbar.textContent).toContain('Original');
+    expect(toolbar.textContent).not.toContain('Original source');
     expect(container.querySelector('.att-code-editor pre')?.textContent).toBe(source);
+    click(button('Copy path'));
+    await settle();
+    expect(clipboardWrite).toHaveBeenLastCalledWith('templates/checkout/template.yaml');
     click(button('Copy displayed source'));
     expect(clipboardWrite).toHaveBeenLastCalledWith(source);
 
@@ -246,6 +253,30 @@ describe('Explorer source viewer', () => {
     await render(<SourceViewer api={sanitizedApi} identity={identity} available active />);
     expect(container.querySelector('.att-source-toolbar')?.textContent).toContain('Sanitized projection');
     expect(container.textContent).toContain('Sanitized projection');
+  });
+
+  it('localizes the compact source toolbar and accessibility labels to Traditional Chinese', async () => {
+    const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, logicalPath: 'templates/demo.yaml',
+      format: 'yaml', projectionKind: 'original', text: 'name: demo\n' })) });
+    const identity: ResourceIdentity = { packageId: 'payments', type: 'template', resourceId: 'demo' };
+    await render(<SourceViewer api={api} identity={identity} available active locale="zh-Hant" />);
+    const toolbar = container.querySelector('.att-source-toolbar');
+    expect(toolbar?.textContent).toContain('templates/demo.yaml');
+    expect(toolbar?.textContent).toContain('YAML · 2 行 · 原始來源');
+    expect(container.querySelector('.att-explorer-source')?.getAttribute('aria-label')).toBe('資源來源');
+    expect([...container.querySelectorAll<HTMLButtonElement>('button')].some(button => button.textContent === '複製路徑')).toBe(true);
+  });
+
+  it('localizes the compact source toolbar and accessibility labels to Traditional Chinese', async () => {
+    const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, logicalPath: 'templates/demo.yaml',
+      format: 'yaml', projectionKind: 'original', text: 'name: demo\n' })) });
+    const identity: ResourceIdentity = { packageId: 'payments', type: 'template', resourceId: 'demo' };
+    await render(<SourceViewer api={api} identity={identity} available active locale="zh-Hant" />);
+    const toolbar = container.querySelector('.att-source-toolbar');
+    expect(toolbar?.textContent).toContain('templates/demo.yaml');
+    expect(toolbar?.textContent).toContain('YAML · 2 行 · 原始來源');
+    expect(container.querySelector('.att-explorer-source')?.getAttribute('aria-label')).toBe('資源來源');
+    expect([...container.querySelectorAll<HTMLButtonElement>('button')].some(button => button.textContent === '複製路徑')).toBe(true);
   });
 
   it('explains Tool source provenance and distinguishes no standalone source from policy denial', async () => {
@@ -256,8 +287,8 @@ describe('Explorer source viewer', () => {
         provenance: { toolGroupId: 'billing', toolName: 'Lookup' } }),
     }} />);
     expect(container.textContent).toContain('No standalone source file');
-    expect(container.textContent).toContain('Package-local Tool: lookup');
-    expect(container.textContent).toContain('Name: Lookup');
+    expect(container.querySelector<HTMLDetailsElement>('.att-source-details')?.open).toBe(false);
+    expect(container.textContent).not.toContain('Name: Lookup');
     expect(container.textContent).not.toContain('Tool Group:');
     expect(container.textContent).not.toContain('Source is not available for this resource');
 
@@ -279,7 +310,11 @@ describe('Explorer source viewer', () => {
       resource={resource('tool', 'billing.lookup', { logicalId: 'billing.lookup', provenance: { toolGroupId: 'billing', toolName: 'Lookup', toolGroupManifest: manifestPath } })}
       onFileReference={openReference} />);
 
-    click(button('Open Group manifest source'));
+    const groupLink = container.querySelector<HTMLButtonElement>('[aria-label="Open Group manifest source tools/billing/tool-group.yaml"]');
+    expect(groupLink?.textContent).toContain('Group manifest');
+    expect(container.querySelector('.att-source-toolbar')?.textContent).toContain('tools/billing/lookup.yaml');
+    expect(container.querySelector('.att-code-editor')!.compareDocumentPosition(container.querySelector('.att-source-details')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await act(async () => groupLink?.click());
     expect(openReference).toHaveBeenCalledWith(manifestPath, 'tools/billing/lookup.yaml', {
       type: 'tool', resourceId: 'billing.lookup', referenceId, returnTab: 'source',
     });
@@ -313,7 +348,7 @@ describe('Explorer source viewer', () => {
     const identity: ResourceIdentity = { packageId: 'payments', type: 'flow', resourceId: 'empty' };
     const api = apiWith({ getSafeSource: vi.fn(async () => ({ available: true, text: '', format: 'yaml' })) });
     await render(<SourceViewer api={api} identity={identity} available active />);
-    expect(container.textContent).toContain('Safe source is empty.');
+    expect(container.textContent).toContain('Safe projection is empty.');
     expect(container.querySelector('.att-code-editor')).toBeNull();
 
     const authApi = apiWith({ getSafeSource: vi.fn(async () => { throw Object.assign(new Error('token=must-not-display'), { status: 401 }); }) });

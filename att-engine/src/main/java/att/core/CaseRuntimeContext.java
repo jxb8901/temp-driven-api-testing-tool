@@ -381,6 +381,8 @@ public final class CaseRuntimeContext {
         String suggestion = nearest == null
                 ? "Check the case-sensitive field name and whether the stage/action output is available at this point."
                 : "Use '${" + nearest + "}' if that is the intended Context variable; Context names are case-sensitive.";
+        if ("load".equals(mode) && "META.SOURCE.caseId".equals(lookupPath))
+            suggestion = "META.SOURCE.caseId is available only in Run and Debug. Use '${EXEC.ID}' only when a Load iteration ID is intended; pass a business/TestCase ID explicitly through EXEC.INPUT when that meaning is required.";
         throw new att.validation.DiagnosticException(att.validation.DiagnosticCodes.CONTEXT_INVALID,
                 "Unknown Context variable '${" + diagnosticPath + "}'", detail.toString(), null, diagnosticPath, null, null,
                 null, null, null, suggestion, null);

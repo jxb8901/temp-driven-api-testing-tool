@@ -12,12 +12,14 @@ async function main() {
   const context = await browser.newContext({ httpCredentials: { username, password, send: 'always' }, viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
   const validationRequests = [];
+  const validationRecordRequests = [];
   const otherWrites = [];
   page.on('request', request => {
     if (!request.url().includes('/tools/att/api/v1/')) return;
     if (request.method() !== 'POST') return;
     const pathname = new URL(request.url()).pathname;
-    if (pathname.endsWith('/validation')) validationRequests.push(request);
+    if (pathname.endsWith('/api/v1/validation')) validationRequests.push(request);
+    else if (pathname.endsWith('/api/v1/validations')) validationRecordRequests.push(request);
     else otherWrites.push(`${request.method()} ${pathname}`);
   });
   const getJobIds = async () => page.evaluate(async () => {
@@ -26,6 +28,25 @@ async function main() {
     const body = await response.json();
     return (body.items || []).map(item => item.jobId).sort();
   });
+  const waitForRecordReport = async validationId => {
+    const url = `${origin}/tools/att/api/v1/validations/${encodeURIComponent(validationId)}`;
+    const deadline = Date.now() + 60000;
+    let record;
+    while (Date.now() < deadline) {
+      const response = await page.request.get(url, { headers: { 'Cache-Control': 'no-cache' } });
+      assert.equal(response.status(), 200, `Validation record ${validationId} should remain readable while polling`);
+      record = await response.json();
+      if (record.report) break;
+      assert.ok(['QUEUED', 'RUNNING'].includes(record.status),
+        `Validation record ${validationId} ended as ${record.status} without a report: ${JSON.stringify(record)}`);
+      await page.waitForTimeout(250);
+    }
+    assert.ok(record?.report, `Validation record ${validationId} did not produce a report within 60 seconds: ${JSON.stringify(record)}`);
+    await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
+    return record;
+  };
+  const nextRecordSubmission = () => page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname.endsWith('/api/v1/validations'));
 
   try {
     const versionResponse = await page.request.get(`${origin}/tools/att/api/v1/version`);
@@ -54,64 +75,58 @@ async function main() {
 
     await page.goto(`${origin}/tools/att/ui/index.html#/configuration/payments`);
     await page.getByRole('heading', { name: 'Configuration', level: 1, exact: true }).waitFor();
-    const sharedConfigResponsePromise = page.waitForResponse(response => response.request().method() === 'POST'
-      && new URL(response.url()).pathname.endsWith('/api/v1/validation'));
+    const beforeSharedConfig = await getJobIds();
+    const sharedConfigResponsePromise = nextRecordSubmission();
     await page.getByRole('button', { name: 'Read-only validate Shared Config', exact: true }).click();
-    await page.getByRole('heading', { name: 'Validate', level: 1 }).waitFor();
-    await page.getByRole('button', { name: 'Run Validation', exact: true }).click();
     const sharedConfigResponse = await sharedConfigResponsePromise;
-    assert.equal(sharedConfigResponse.status(), 200);
+    assert.equal(sharedConfigResponse.status(), 202);
     assert.deepEqual(await sharedConfigResponse.request().postDataJSON(), { command: 'validate', targetKind: 'config' },
       'the Shared Configuration shortcut must validate global Config without inheriting a selected Package');
-    await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
+    const sharedConfigInitial = await sharedConfigResponse.json();
+    const sharedConfigRecord = await waitForRecordReport(sharedConfigInitial.validationId);
+    assert.equal(sharedConfigRecord.report.schemaVersion, 'att-validation/v1');
+    assert.equal(sharedConfigRecord.report.scope, 'CONFIG');
+    assert.deepEqual(await getJobIds(), beforeSharedConfig, 'Shared Config validation must not add a persisted Job');
 
     await page.goto(`${origin}/tools/att/ui/index.html#/configuration/payments`);
     await page.getByRole('button', { name: 'Read-only validate payments effective Config', exact: true }).waitFor();
-    const packageConfigResponsePromise = page.waitForResponse(response => response.request().method() === 'POST'
-      && new URL(response.url()).pathname.endsWith('/api/v1/validation'));
+    const beforePackageConfig = await getJobIds();
+    const packageConfigResponsePromise = nextRecordSubmission();
     await page.getByRole('button', { name: 'Read-only validate payments effective Config', exact: true }).click();
-    await page.getByRole('heading', { name: 'Validate', level: 1 }).waitFor();
-    await page.waitForFunction(() => !document.querySelector('button[type="submit"]')?.disabled);
-    await page.getByRole('button', { name: 'Run Validation', exact: true }).click();
     const packageConfigResponse = await packageConfigResponsePromise;
-    assert.equal(packageConfigResponse.status(), 200);
+    assert.equal(packageConfigResponse.status(), 202);
     assert.deepEqual(await packageConfigResponse.request().postDataJSON(), {
-      command: 'validate', targetKind: 'config', packageId: 'payments', environment: 'SIT',
-    }, 'Package-effective Config validation must use the explicitly selected Package and Server default Environment');
-    const packageConfigReport = await packageConfigResponse.json();
-    assert.equal(packageConfigReport.schemaVersion, 'att-validation/v1');
-    assert.equal(packageConfigReport.scope, 'CONFIG_PACKAGE');
-    assert.equal(packageConfigReport.context.environment, 'SIT');
-    try {
-      await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor({ timeout: 5000 });
-    } catch {
-      const uiError = await page.locator('.att-validation-error').textContent();
-      throw new Error(`Packaged Server report ${packageConfigReport.scope}/${packageConfigReport.overallStatus} was not rendered; UI error: ${uiError || 'none'}`);
-    }
+      command: 'validate', targetKind: 'config', packageId: 'payments',
+    }, 'Package-effective Config validation must keep the selected Package in its submission context');
+    const packageConfigInitial = await packageConfigResponse.json();
+    const packageConfigRecord = await waitForRecordReport(packageConfigInitial.validationId);
+    assert.equal(packageConfigRecord.environment, 'SIT', 'the Server must capture the Package default Environment into the durable record');
+    assert.equal(packageConfigRecord.report.schemaVersion, 'att-validation/v1');
+    assert.equal(packageConfigRecord.report.scope, 'CONFIG_PACKAGE');
+    assert.equal(packageConfigRecord.report.context.environment, 'SIT');
+    assert.deepEqual(await getJobIds(), beforePackageConfig, 'Package-effective Config validation must not add a persisted Job');
 
     await page.goto(`${origin}/tools/att/ui/index.html#/packages/payments`);
     await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
     await page.getByRole('button', { name: 'Reference Flow' }).click();
     const detailActions = page.locator('.att-explorer-detail-actions');
-    await detailActions.getByRole('button', { name: 'Read-only validate', exact: true }).click();
-    await page.waitForURL(url => url.hash.startsWith('#/validate?scope=flow'));
-    await page.getByRole('heading', { name: 'Validate', level: 1 }).waitFor();
-    const target = new URLSearchParams(page.url().split('#')[1].split('?')[1]).get('target');
+    await detailActions.getByRole('button', { name: 'Read-only validate', exact: true }).waitFor();
+    const resourceRoute = page.url().split('#')[1] || '';
+    const routeMatch = resourceRoute.match(/\/resources\/[^/]+\/([^/?]+)/);
+    const target = routeMatch ? decodeURIComponent(routeMatch[1]) : '';
     assert.ok(target, 'Explorer context should carry the selected canonical resource ID');
-    await page.waitForFunction(() => !document.querySelector('button[type="submit"]')?.disabled);
     const beforeFlow = await getJobIds();
-    const flowResponsePromise = page.waitForResponse(response => response.request().method() === 'POST'
-      && new URL(response.url()).pathname.endsWith('/api/v1/validation'));
-    await page.getByRole('button', { name: 'Run Validation', exact: true }).click();
+    const flowResponsePromise = nextRecordSubmission();
+    await detailActions.getByRole('button', { name: 'Read-only validate', exact: true }).click();
     const flowResponse = await flowResponsePromise;
-    assert.equal(flowResponse.status(), 200);
-    const flowReport = await flowResponse.json();
-    assert.equal(flowReport.schemaVersion, 'att-validation/v1');
-    assert.equal(flowReport.scope, 'CONFIG_PACKAGE');
+    assert.equal(flowResponse.status(), 202);
     assert.deepEqual(await flowResponse.request().postDataJSON(), {
       command: 'validate', targetKind: 'flow', packageId: 'payments', target,
     });
-    await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
+    const flowInitial = await flowResponse.json();
+    const flowRecord = await waitForRecordReport(flowInitial.validationId);
+    assert.equal(flowRecord.report.schemaVersion, 'att-validation/v1');
+    assert.equal(flowRecord.report.scope, 'CONFIG_PACKAGE');
     assert.deepEqual(await getJobIds(), beforeFlow, 'resource validation must not add a persisted Job');
 
     const invalidCatalogResponse = await page.request.get(`${origin}/tools/att/api/v1/packages/payments/resources?type=template&query=STUDIO_INVALID&limit=100`);
@@ -206,7 +221,8 @@ async function main() {
     assert.deepEqual(await getJobIds(), beforePackageValidation, 'Package validation must not add a persisted Job');
 
     assert.deepEqual(otherWrites, [], 'the read-only UI flow must not POST drafts, jobs, or schedules');
-    assert.equal(validationRequests.length, 7);
+    assert.equal(validationRequests.length, 4, 'the manual validation workspace keeps its synchronous report contract');
+    assert.equal(validationRecordRequests.length, 3, 'Shared Config, effective Config, and Explorer context use durable validation records');
     process.stdout.write('Packaged-WAR validation checks passed under /tools/att: real Config and Flow reports, invalid resource and dependency-closure diagnostics, Package-wide authorized source navigation, and no Job or draft writes.\n');
   } finally {
     await context.close();

@@ -92,7 +92,7 @@ mvn -DskipTests -pl att-cli -am compile
 | `./att.sh debug` | 發現可運行的 Tool、Template 和 Flow；只顯示實際存在的默認 sidecar |
 | `./att.sh debug template <id>` | 執行一個 Template；自動發現 `<template-dir>/debug.yaml` |
 | `./att.sh debug flow <id>` | 執行一個規範 Flow；自動發現 `<flow-dir>/debug.yaml` |
-| `./att.sh debug tool <id>` | 執行一個 Tool；自動發現 `config/tools/<group>.debug.yaml` |
+| `./att.sh debug tool <id>` | 執行一個 Package Tool；自動發現 `tools/debug/<tool-id>.yaml` |
 | `./att.sh debug <type> <id> --input <file>` | 覆蓋目標自動發現的 debug 輸入 |
 | `./att.sh debug <type> <id> --set input.path=<yaml-value>` | 覆蓋 typed `EXEC.INPUT` 值；可重復使用 |
 | `./att.sh debug tool <id> --set arg.name=<yaml-value>` | 覆蓋一個 Tool argument；可重復使用 |

@@ -37,6 +37,7 @@ public final class ServerConfig {
     public final List<Path> allowedRoots;
     public final List<Path> workerLibraryDirs;
     public final Inspection inspection;
+    public final ValidationRecords validationRecords;
     public final InlineLoad inlineLoad;
     public final Scheduling scheduling;
     public final Authorization authorization;
@@ -49,7 +50,7 @@ public final class ServerConfig {
     private ServerConfig(Path sourceFile, Path dataDir, Path runtimeConfigPath, Path javaExecutable, int maxConcurrent, int queuedLimit,
                          int maxConcurrentLoad, int gracefulStopMs, int jobRetentionDays,
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
-                         int maxEventsPerJob, long maxEventJournalBytes, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ArchiveCompression archiveCompression, ExecutionPool executionPool, PackageConfigurationPolicy packageConfiguration) {
+                         int maxEventsPerJob, long maxEventJournalBytes, int maxArtifacts, boolean authenticationRequired, String authMode, Security security, Map<String, Path> packages, List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection, ValidationRecords validationRecords, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization, JobStorage jobStorage, LiveOutput liveOutput, ArchiveCompression archiveCompression, ExecutionPool executionPool, PackageConfigurationPolicy packageConfiguration) {
         this.sourceFile=sourceFile;this.dataDir=dataDir; this.runtimeConfigPath=runtimeConfigPath; this.javaExecutable=javaExecutable; this.maxConcurrent=maxConcurrent;
         this.queuedLimit=queuedLimit; this.maxConcurrentLoad=maxConcurrentLoad; this.gracefulStopMs=gracefulStopMs;this.jobRetentionDays=jobRetentionDays;
         this.workerHeapInitialMb=workerHeapInitialMb;this.workerHeapMaxMb=workerHeapMaxMb;
@@ -61,6 +62,7 @@ public final class ServerConfig {
         this.allowedRoots=List.copyOf(allowedRoots);
         this.workerLibraryDirs=List.copyOf(workerLibraryDirs);
         this.inspection=inspection;
+        this.validationRecords=validationRecords;
         this.inlineLoad=inlineLoad;
         this.scheduling=scheduling;
         this.authorization=authorization;
@@ -161,6 +163,7 @@ public final class ServerConfig {
         Security security=security(server.get("security"));
         Authorization authorization=authorization(server.get("authorization"),authenticationRequired);
         Inspection inspection=inspection(server.get("inspection"),resolved,runtimeConfig,authorization.adminRole);
+        ValidationRecords validationRecords=validationRecords(server.get("validationRecords"));
         InlineLoad inlineLoad=inlineLoad(server.get("inlineLoad"));
         Scheduling scheduling=scheduling(server.get("scheduling"),authenticationRequired,load,inspection.enabled,authorization.adminRole);
         Path candidateData=canonicalFuturePath(data);
@@ -182,7 +185,7 @@ public final class ServerConfig {
         if (initializeDataDirectory) {
             privateDirectory(realData);privateDirectory(realData.resolve("db"));privateDirectory(realData.resolve("jobs"));
         }
-        return new ServerConfig(configFile,realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,eventJournalBytes,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,inlineLoad,scheduling,authorization,jobStorage,liveOutput,archiveCompression,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")));
+        return new ServerConfig(configFile,realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,events,eventJournalBytes,artifacts,authenticationRequired,authMode,security,resolved,allowed,workerLibraries,inspection,validationRecords,inlineLoad,scheduling,authorization,jobStorage,liveOutput,archiveCompression,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")));
     }
 
     public static final class ArchiveCompression {
@@ -640,6 +643,40 @@ public final class ServerConfig {
                 || ((Number)value).longValue()<1 || ((Number)value).longValue()>maximum)
             throw new IllegalArgumentException("server.liveOutput."+key+" must be an integer between 1 and "+maximum);
         return ((Number)value).intValue();
+    }
+
+    /** Durable Server-owned validation record retention limits. */
+    public static final class ValidationRecords {
+        public final boolean enabled;
+        public final int retentionDays, maxRecords, maxRecordBytes;
+        public final long maxTotalBytes;
+        private ValidationRecords(boolean enabled,int retentionDays,int maxRecords,long maxTotalBytes,int maxRecordBytes) {
+            this.enabled=enabled;this.retentionDays=retentionDays;this.maxRecords=maxRecords;
+            this.maxTotalBytes=maxTotalBytes;this.maxRecordBytes=maxRecordBytes;
+        }
+    }
+
+    private static ValidationRecords validationRecords(Object node) {
+        Map<?,?> values=node==null?Collections.emptyMap():map(node,"server.validationRecords");
+        for(Object key:values.keySet())if(!Set.of("enabled","retentionDays","maxRecords","maxTotalSizeMb","maxRecordBytes").contains(key))
+            throw new IllegalArgumentException("server.validationRecords contains an unknown setting");
+        boolean enabled=boolValue(values,"enabled",true);
+        int retentionDays=intValue(values,"retentionDays",7,1,3650);
+        int maxRecords=intValue(values,"maxRecords",5000,1,1000000);
+        long maxTotalBytes=longMb(values,"maxTotalSizeMb",64L);
+        int maxRecordBytes=intValue(values,"maxRecordBytes",(int)Math.min(2097152L,maxTotalBytes),1024,8388608);
+        if(maxRecordBytes>maxTotalBytes)throw new IllegalArgumentException("server.validationRecords.maxRecordBytes must not exceed the total validation-record byte cap");
+        return new ValidationRecords(enabled,retentionDays,maxRecords,maxTotalBytes,maxRecordBytes);
+    }
+
+    private static long longMb(Map<?,?> values,String key,long fallback) {
+        if(!values.containsKey(key))return fallback*1024L*1024L;
+        Object value=values.get(key);
+        if(!(value instanceof Number number))throw new IllegalArgumentException("server.validationRecords."+key+" must be an integer");
+        double exact=number.doubleValue();
+        long maxMiB=10240L;
+        if(exact!=Math.rint(exact)||exact<1||exact>maxMiB)throw new IllegalArgumentException("server.validationRecords."+key+" must be an integer MiB from 1 to 10240");
+        return number.longValue()*1024L*1024L;
     }
 
     /** Size quota for {@code server.dataDir/jobs}. Disabled unless explicitly configured. */

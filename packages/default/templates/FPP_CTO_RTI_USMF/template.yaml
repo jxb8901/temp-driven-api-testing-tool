@@ -15,7 +15,7 @@ actions:
   buildTxnSeq:
     type: assign
     name: TxnSeq
-    expression: ATT000${META.SOURCE.caseId}#{sysdate('yyyyMMdd')}#{sample.getSeq(6)}
+    expression: ATT000${META.SOURCE.caseId}#{date.sysdate('yyyyMMdd')}#{sample.getSeq(6)}
 
   preparePrecheckRequest:
     type: assign

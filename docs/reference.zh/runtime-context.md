@@ -24,6 +24,12 @@ Standalone Debug bootstrap value 會映射到這些 canonical root：`inputs` �
 
 EXEC.LOAD 只公開穩定 identity。Scheduler counter、queue state 與 timing diagnostics 留在 evidence-only DIAG.load，不能作為 expression root。
 
+`CASE.environment` 是目前選用的 Environment profile，在 Run、Debug 與 Load 中均會於業務 Action 前提供。`CASE.status` 與 `CASE.durationMs` 描述已完成或失敗的執行；它們是生命週期／結果欄位，不是仍在執行中的 Action 可攜帶輸入。預設的 `PAYMENT_ROLLBACK` 範例只在 Run／Debug 流程中讀取 `CASE.status`。
+
+若 reusable Flow 在有來源 TestCase ID 時要使用該 ID，並在所有模式都有 execution identity，可使用 `#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}`。Run 和 Debug 會保留 TestCase 或 synthetic Debug Case ID；當 Load 沒有 `META.SOURCE.caseId` 時，則使用 Load iteration 的 `EXEC.ID`。兩者在需要 business 或 TestCase ID 時不可互換；請透過明確的 input contract 傳入該 ID，或將 Resource 限制於支援的模式。
+
+Default Package 的 `PAYMENT_PREPARE`、`PAYMENT_INVOKE`、`PAYMENT_VERIFY`、`PAYMENT_ROLLBACK`、`PAYMENT_CLEANUP`、`FPP_CTO_RTI_USMF`、`FPP_D3I_BATCH_SIT` 及本地付款 integration examples 需要 business TestCase ID，預期用於 Run/Debug。沒有加入明確的 business-ID input contract 前，請勿將它們用作 Quick 或 Advanced Load target；Load 的 `EXEC.ID` 是 iteration ID。若不支援的 Load 呼叫讀取必要的 `${META.SOURCE.caseId}`，ATT 會指出來源 Action，並說明可用的 Load identity。
+
 ## META 欄位清單與生命週期
 
 公開 META root 包含 `SOURCE`、`TARGET`、`TEMPLATE`、`FLOW`、`TOOL`、`DBHELPER`、`MQHELPER`、`HTTPHELPER` 和 `SSHHELPER`。`META.PACKAGE_ROOT` 和 `CASE.outputDirectory` 已從 author Context 移除。讀取 package content 請使用 `&{logical/package/resource}`；execution output 請使用 `EXEC.OUTPUT_DIR`。舊有 `META.PROJECT.id` 與 `META.PROJECT.root` 已移除，不提供相容 alias。Package resource 使用 package-relative logical name；只有 `EXEC.OUTPUT_DIR` 公開 execution path。META 只包含描述欄位；元件在目前 mode/scope 尚未 active 時，相應路徑可能不存在。

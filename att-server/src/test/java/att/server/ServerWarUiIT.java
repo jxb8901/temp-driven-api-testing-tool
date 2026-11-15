@@ -228,6 +228,31 @@ class ServerWarUiIT {
             assertEquals("cold",validateDispatch,"Public Validate must retain its durable cold one-shot semantics");
             assertFalse(Files.exists(pkg.resolve("tools/started")),"Public Validate must not invoke package Tools");
             if(prewarm)assertEquals(validateLease,awaitPrewarmedPids(runtime).get(0),"Validate must leave the READY RUN/DEBUG Worker untouched");
+            assertEquals("att-validation-records/v1",getJson(port,api+"/version",auth).path("validationRecordsApiVersion").asText());
+            JsonNode templateCatalog=getJson(port,api+"/packages/parity/resources?type=template&limit=100",auth);
+            JsonNode parityTemplate=null;
+            for(JsonNode item:templateCatalog.path("items"))if("PARITY".equals(item.path("logicalId").asText()))parityTemplate=item;
+            assertNotNull(parityTemplate,templateCatalog.toString());
+            JsonNode asyncAccepted=apiJsonResponse(port,"POST",api+"/validations",auth,origin,
+                    Map.of("command","validate","targetKind","template","packageId","parity",
+                            "target",parityTemplate.path("resourceId").asText()),202);
+            String validationId=asyncAccepted.path("validationId").asText();
+            long validationDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);JsonNode validationRecord;
+            do {
+                validationRecord=getJson(port,api+"/validations/"+validationId,auth);
+                if(!List.of("QUEUED","RUNNING").contains(validationRecord.path("status").asText()))break;
+                Thread.sleep(25);
+            } while(System.nanoTime()<validationDeadline);
+            assertEquals("COMPLETED",validationRecord.path("status").asText(),validationRecord.toString());
+            assertEquals("PASS",validationRecord.path("overallStatus").asText(),validationRecord.toString());
+            assertEquals("att-validation/v1",validationRecord.path("report").path("schemaVersion").asText());
+            JsonNode validationList=getJson(port,api+"/validations?limit=100",auth);
+            assertTrue(java.util.stream.StreamSupport.stream(validationList.path("items").spliterator(),false)
+                    .anyMatch(item->validationId.equals(item.path("validationId").asText())));
+            assertFalse(java.util.stream.StreamSupport.stream(validationList.path("items").spliterator(),false)
+                    .anyMatch(item->item.has("report")),
+                    "List responses must leave potentially large reports on the record endpoint");
+            if(prewarm)assertEquals(validateLease,awaitPrewarmedPids(runtime).get(0),"Validation records must leave the READY RUN/DEBUG Worker untouched");
             return new PackagedWarModeCapture(run,debug,failedRun,failedDebug,cancelledRun,cancelledDebug,timedOutRun,timedOutDebug);
         } finally {try{tomcat.stop();}finally{tomcat.destroy();}}
     }
@@ -815,9 +840,9 @@ class ServerWarUiIT {
             tomcat = startScheduledWar(war, users);
             int port = tomcat.getConnector().getLocalPort();
             String resourceRoute = api + "/packages/payments/resources?type=template&query=DEGRADED";
-            // The first resource request can overlap lazy ServerRuntime startup in the
-            // packaged WAR. Keep its wait bounded, but allow that initialization to finish
-            // on slower release runners before failing the integration check.
+            // The first resource request can overlap lazy ServerRuntime startup and cold
+            // inspection Worker startup in the packaged WAR. Keep its wait bounded while
+            // allowing initialization to finish on slower release runners.
             HttpURLConnection baselineResponse = open(port, resourceRoute, auth, 30_000);
             String baselineRevision;
             JsonNode baseline;
@@ -1270,6 +1295,7 @@ class ServerWarUiIT {
         Path loads = Files.createDirectories(packageRoot.resolve("load"));
         Files.createDirectories(packageRoot.resolve("testcase"));
         Path nestedTool = Files.createDirectories(packageRoot.resolve("tools/mq")).resolve("check-queue.sh");
+        Path fppTools = Files.createDirectories(packageRoot.resolve("tools/fpp"));
         Path configRoot = Files.createDirectories(localHome.resolve("config"));
         Files.writeString(configRoot.resolve("config.yaml"),
                 "schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments:\n  SIT: {}\n  UAT: {}\n"
@@ -1280,6 +1306,13 @@ class ServerWarUiIT {
         Files.writeString(packageRoot.resolve("tools/checkQueue.yaml"),
                 "schemaVersion: att-tool/v1\nid: checkQueue\nname: Check queue\n"
                 +"description: Nested Tool script default source\ncommand: [bash, tools/mq/check-queue.sh]\n"
+                +"stdoutFormat: text\narguments: {}\n");
+        Files.writeString(fppTools.resolve("tool-group.yaml"),
+                "schemaVersion: att-tool-group/v3.0\nid: fpp\nname: FPP reference tools\n"
+                +"description: Grouped Package Tool source navigation fixture\ntools: [inspectFiles.yaml]\n");
+        Files.writeString(fppTools.resolve("inspectFiles.yaml"),
+                "schemaVersion: att-tool/v1\nid: inspectFiles\nname: Inspect files\n"
+                +"description: Read-only source navigation fixture\ncommand: [bash, tools/mq/check-queue.sh]\n"
                 +"stdoutFormat: text\narguments: {}\n");
         Files.writeString(nestedTool, "#!/bin/sh\n# package-local script source\necho safe\n");
         Files.writeString(packageRoot.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata: {descriptors: [testdata/generated.yaml]}\n");
@@ -1361,8 +1394,8 @@ class ServerWarUiIT {
     private void runServerUiPlaywright(String origin) throws Exception {
         Path output = temp.resolve("server-ui-playwright.log");
         runServerUiPlaywrightScript(origin, "server-api-smoke.cjs", output);
-        runServerUiPlaywrightScript(origin, "validation-server-smoke.cjs", temp.resolve("validation-server-playwright.log"));
         if ("1".equals(System.getenv("ATT_UI_EXPLORER_ONLY"))) return;
+        runServerUiPlaywrightScript(origin, "validation-server-smoke.cjs", temp.resolve("validation-server-playwright.log"));
         runServerUiPlaywrightScript(origin, "saved-scenario-server.cjs", temp.resolve("saved-scenario-playwright.log"));
     }
 

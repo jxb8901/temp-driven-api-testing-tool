@@ -705,8 +705,12 @@ def check_critical_examples():
         "config/dbhelpers/uat/orders.yaml",
         "config/mqhelpers/sit/payment.yaml",
         "config/mqhelpers/uat/payment.yaml",
-        "config/tools/sample.yaml",
-        "config/tools/orders-db.yaml",
+        "packages/default/tools/sample/tool-group.yaml",
+        "packages/default/tools/sample/getAcDate.yaml",
+        "packages/default/tools/orders/tool-group.yaml",
+        "packages/default/tools/orders/findByDate.yaml",
+        "packages/default/tools/fpp/tool-group.yaml",
+        "packages/default/tools/fpp/inspectFiles.yaml",
     )
     for rel in assets:
         if not (ROOT / rel).is_file():
@@ -714,12 +718,18 @@ def check_critical_examples():
     if not (DOCS / "example-contracts.json").is_file():
         fail("missing tagged example contract manifest: docs/example-contracts.json")
 
-    command_group = ROOT / "config/tools/sample.yaml"
-    call_group = ROOT / "config/tools/orders-db.yaml"
-    if command_group.is_file() and "command:" not in read(command_group):
-        fail("config/tools/sample.yaml must remain a command-backed Tool documentation example")
-    if call_group.is_file() and "call:" not in read(call_group):
-        fail("config/tools/orders-db.yaml must remain a call-backed Tool documentation example")
+    command_tool = ROOT / "packages/default/tools/sample/getAcDate.yaml"
+    call_tool = ROOT / "packages/default/tools/orders/findByDate.yaml"
+    if command_tool.is_file() and "command:" not in read(command_tool):
+        fail("packages/default/tools/sample/getAcDate.yaml must remain a command-backed Tool documentation example")
+    if call_tool.is_file() and "call:" not in read(call_tool):
+        fail("packages/default/tools/orders/findByDate.yaml must remain a call-backed Tool documentation example")
+    common_config = read(ROOT / "config/config.yaml")
+    if re.search(r"(?m)^\s*(tools|toolGroups):", common_config):
+        fail("config/config.yaml must not register the default Package Tools globally")
+    for obsolete in ("config/tools/fpp.yaml", "config/tools/orders-db.yaml", "config/tools/sample.yaml"):
+        if (ROOT / obsolete).exists():
+            fail("obsolete global Tool group remains active: %s" % obsolete)
 
     test = ROOT / "att-cli/src/test/java/att/docs/DocumentationExamplesTest.java"
     if not test.is_file():
@@ -729,7 +739,7 @@ def check_critical_examples():
         for rel in ("packages/default/testcase/payment2.xlsx", "packages/default/templates/PAYMENT_INVOKE/debug.yaml",
                     "examples/load/closed-smoke.yaml", "examples/load/arrival-smoke.yaml",
                     "config/environments/sit.yaml", "config/environments/uat.yaml",
-                    "config/mqhelpers/sit/payment.yaml", "config/tools/orders-db.yaml"):
+                    "config/mqhelpers/sit/payment.yaml", "packages/default/tools/orders/findByDate.yaml"):
             if rel not in test_text:
                 fail("DocumentationExamplesTest does not regression-protect documented asset: %s" % rel)
         for contract in ("docs/example-contracts.json", "SchemaFiles.resolveVersion",
