@@ -1061,6 +1061,52 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void businessCallStartedAtIsCapturedAfterSessionSetup() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-call-start-time"))) {
+            service.setBusinessCallLimitsForTesting(1, 3_000, 2_000);
+            service.writeSnapshot(JOB_ID, businessSnapshot(List.of(
+                    businessQuery("slow-open", "#{db.orders.scalar(sql='select 1')}", "DBHELPER", null, "afterDrain", null))));
+            CountDownLatch openEntered = new CountDownLatch(1), releaseOpen = new CountDownLatch(1);
+            AtomicReference<Instant> openCompletedAt = new AtomicReference<>();
+            AtomicReference<Instant> callStartedAt = new AtomicReference<>();
+            AtomicReference<Instant> executeEnteredAt = new AtomicReference<>();
+            service.setBusinessCallExecutor((jobId, snapshot) -> {
+                openEntered.countDown();
+                if (!releaseOpen.await(5, TimeUnit.SECONDS))
+                    throw new IllegalStateException("The test did not release the delayed business-call session.");
+                openCompletedAt.set(Instant.now());
+                return new SutMetricsService.BusinessCallSession() {
+                    @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                    Instant executionFinishedAt, Instant steadyStart,
+                                                    Instant steadyEnd, Instant observedAt) {
+                        callStartedAt.set(observedAt);
+                        executeEnteredAt.set(Instant.now());
+                        return 1;
+                    }
+                    @Override public void close() { }
+                };
+            });
+
+            Instant finishedAt = Instant.now().minusSeconds(30);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+            try {
+                assertTrue(openEntered.await(5, TimeUnit.SECONDS), "Session setup should begin before execution.");
+                Thread.sleep(75);
+            } finally {
+                releaseOpen.countDown();
+            }
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+
+            assertEquals("READY", manifest.get("state"));
+            assertNotNull(openCompletedAt.get());
+            assertNotNull(callStartedAt.get());
+            assertFalse(callStartedAt.get().isBefore(openCompletedAt.get()),
+                    "CALL_STARTED_AT must be captured after the delayed session setup finishes.");
+            assertFalse(callStartedAt.get().isAfter(executeEnteredAt.get()),
+                    "CALL_STARTED_AT must be captured immediately before invoking the business call.");
+        }
+    }
+
     @Test void businessCallCountBudgetSkipsCallsAfterTheConfiguredPerJobLimit() throws Exception {
         try (SutMetricsService service = new SutMetricsService(temp.resolve("business-count-budget"))) {
             service.setBusinessCallLimitsForTesting(1, 2_000, 1_000);
