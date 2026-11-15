@@ -10,6 +10,12 @@
 
 *Static UI-shell baseline capture with sample Job activity; the version badge belongs to the screenshot baseline.*
 
+## Jobs and Validations
+
+The top-level **Jobs and results** workspace has **Jobs** and **Validations** tabs. The Jobs list and its existing filters, pagination, replay actions, and Job details remain available under **Jobs**. Open the history at `#/jobs?tab=validations` to browse the authenticated owner's validation records. The list uses bounded, metadata-only pages of 50 records and filters by lifecycle status, Package, Environment, and scope. It shows the stored outcome (`PASS`, `INVALID`, or `PARTIAL`) separately from transport state; source applicability stays `UNVERIFIED` until a record is opened.
+
+Choose **View details** to load the selected record's full detail. From that detail, refresh or cancel active work, revalidate a finished record, or return to its matching Configuration, Explorer, or LOAD context. The list polls only while the page is visible and contains active records; hiding the page pauses polling. Opening or closing a record does not cancel Server work. If the Server does not advertise asynchronous validation records, the tab explains that history is unavailable.
+
 ## Job workspace
 
 ### Detach and restore a Job console

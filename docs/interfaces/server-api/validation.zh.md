@@ -29,7 +29,7 @@
 |---|---|
 | `command` | 必填，必須是 `validate`。 |
 | `targetKind` | 選填，預設為 `config`。支援 `config`、`package`、`case`、`suite`、`template`、`flow`、`tool` 及 `load` 範圍。 |
-| `target` | 選定 resource 範圍必填。Case 使用 logical Case ID；Suite 及 LOAD 使用 package-relative path；Template、Flow 及 Tool 使用 Server 的 canonical package-local resource ID。`config` 及 `package` 不接受此欄位。 |
+| `target` | 選定 resource 範圍必填。Case、Template、Flow 及 Tool 使用 Server 簽發的 package-local resource ID；Suite 及 LOAD 使用 package-relative path。`config` 及 `package` 不接受此欄位。 |
 | `packageId` | `package` 及選定 resource 範圍必填。`config` 可選；提供時會選取該已註冊 Package 的生效 Config。不提供則驗證 Server Runtime Config。 |
 | `environment` | Package 範圍的 active Environment Profile，選填。省略時由 Server 解析 Package 的 effective/default Environment，並放入 report context。Server 會套用設定的授權政策。 |
 | `all` | 選填 boolean。設為 `true` 會驗證整個安裝範圍。不可與 `targetKind`、`target`、`packageId` 或 `environment` 同時提供；此範圍需要 system-administrator 權限，Studio 不會提供此功能。 |
@@ -88,9 +88,9 @@ Studio 範圍選擇、上下文入口、report 檢視及取消行為請參閱 [S
 
 Record 包含 typed plan identity、生命週期狀態、計時、選用的安全 source revision、安全錯誤資訊，以及完成後的 `att-validation/v1` report。它不會保存提交的 source text、任意 filesystem path 或 client 提供的 configuration。讀取或列出時，Server 會再次檢查已註冊 Package 及 Environment 權限。Record 只供 owner 存取；installation-wide record 另需 system-administrator 權限。List endpoint 不會列出其他 owner 的 record。
 
-`GET /api/v1/validations` 接受選用的 `packageId`、`scope`、`target`、`environment`、`matchContext`、`limit` 及不透明 `cursor` query parameter。`matchContext=true` 會精確比對 scope、Package（包含沒有 Package）、target（包含沒有 target）及 Environment（省略時使用目前 effective default），供上下文記錄恢復使用；建議同時指定 `limit=1`。`limit` 預設為 `20`，範圍為 `1` 至 `100`。Response 包含 `items` 及 `nextCursor`；list item 不含 report 或 plan CLOB。結果採用有限筆數，並依最新提交時間排序。已撤銷或不可用的 Package 或 Environment 不會出現在結果中。
+`GET /api/v1/validations` 接受選用的 `packageId`、`scope`、`target`、`environment`、`status`、`matchContext`、`limit` 及不透明 `cursor` query parameter。不使用 `matchContext` 時，`packageId`、`scope`、`environment` 及 `status` 會篩選 owner 的 record；`status` 接受 `QUEUED`、`RUNNING`、`COMPLETED`、`FAILED`、`TIMED_OUT`、`CANCELLED` 或 `INTERRUPTED`。`matchContext=true` 會精確比對 scope、Package（包含沒有 Package）、target（包含沒有 target）及 Environment（省略時使用目前 effective default），供上下文記錄恢復使用；建議同時指定 `limit=1`。`limit` 預設為 `20`，範圍為 `1` 至 `100`。Response 包含 `items` 及 `nextCursor`；list item 不含 report 或 plan CLOB，但可包含已保存的 `overallStatus`。Metadata-only list 結果中的 applicability 為 `UNVERIFIED`。結果採用有限筆數，並依最新提交時間排序。已撤銷或不可用的 Package 或 Environment 不會出現在結果中。
 
-`GET /api/v1/validations/summary` 回傳 owner 最新的作用中 validation；若沒有作用中記錄，則回傳最新 owner 記錄的 metadata-only `record`。Studio shell 使用此 route；response 不含 report 或 plan。
+`GET /api/v1/validations/summary` 回傳 owner 最新的作用中 validation；若沒有作用中記錄，則回傳最新 owner 記錄的 metadata-only `record`。此 route 仍供 API client 使用，不含 report 或 plan；Studio history 改用分頁 list route。
 
 `GET /api/v1/validations/{validationId}` 會在可用時回傳 record 及 report。`POST /api/v1/validations/{validationId}/cancel` 會在 Server 端取消排隊中或執行中的 record。若 record 已結束，request 會回傳目前狀態。關閉 browser view、切換 route 或停止 polling 不會取消 record；只有明確呼叫此 endpoint 才會要求取消。
 

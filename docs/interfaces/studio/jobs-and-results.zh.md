@@ -10,6 +10,12 @@
 
 *浮動主控台靜態 UI shell 基線截圖，使用示例 Job 資料；圖中版本標籤屬於截圖基線。*
 
+## Jobs 與 Validations
+
+頂層 **Jobs and results** 工作區提供 **工作**及 **驗證**分頁。**工作**仍保留原有 Jobs 清單、篩選、分頁、重播操作及 Job 詳情。前往 `#/jobs?tab=validations` 可瀏覽目前已驗證 owner 的 validation record。清單以每頁 50 筆的有界 metadata-only request 載入，並可按生命週期狀態、Package、Environment 及 scope 篩選。清單會將儲存的結果（`PASS`、`INVALID` 或 `PARTIAL`）與 transport state 分開顯示；開啟 record 前，source applicability 保持 `UNVERIFIED`。
+
+選擇 **檢視詳細資料**會載入所選 record 的完整詳細資料。詳細頁可重新整理、取消作用中的工作、重新驗證已完成記錄，或返回相符的 Configuration、Explorer 或 LOAD 情境。頁面可見且目前頁有作用中記錄時，清單才會 polling；頁面隱藏時會暫停。開啟或關閉 record 不會取消 Server 工作。若 Server 未宣告非同步 validation record capability，分頁會明確說明無法使用歷史記錄。
+
 ## Job workspace
 
 ### 分離及還原 Job 主控台

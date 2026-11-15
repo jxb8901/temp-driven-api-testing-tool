@@ -10,7 +10,6 @@ import { contextRelativeReturnTo } from './contextPaths';
 import { applyUiLocale, clearStoredUiLocalePreference, detectUiLocale, readUiLocale, readStoredUiLocalePreference, readUiLocalePreference, saveUiLocalePreference, type UiLocale, type UiLocalePreference } from './uiLocale';
 import { ChangePasswordDialog } from './ChangePasswordDialog';
 import type { LocalAuthUser } from './types';
-import type { ValidationRecord } from './features/validation/types';
 import { JobConsoleProvider } from './features/load/JobConsoleProvider';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
@@ -108,7 +107,7 @@ function routeLink(event: MouseEvent<HTMLAnchorElement>, action: () => void) {
 function routeTitle(route: AppRoute, locale: UiLocale): string {
   if (route.kind === 'dashboard') return 'Dashboard';
   if (route.kind === 'monitoring') return 'Monitoring';
-  if (route.kind === 'validation') return locale === 'zh-Hant' ? '驗證' : 'Validate';
+  if (route.kind === 'validation') return locale === 'zh-Hant' ? '驗證記錄' : 'Validation record';
   if (route.kind === 'run') return 'Run';
   if (route.kind === 'packages') return 'Explorer';
   if (route.kind === 'package') return route.view === 'testdata' ? 'Testdata' : route.view === 'source-file' ? route.filePath?.split('/').pop() || 'Package source' : route.resource ? route.resource.resourceId : route.packageId;
@@ -125,7 +124,7 @@ function routeTitle(route: AppRoute, locale: UiLocale): string {
 }
 
 function activeNavigation(route: AppRoute): string {
-  if (route.kind === 'validation') return 'validation';
+  if (route.kind === 'validation') return 'jobs';
   if (route.kind === 'monitoring') return 'monitoring';
   if (route.kind === 'run' || route.kind === 'packages' || route.kind === 'package') return 'explorer';
   if (route.kind === 'configuration') return 'configuration';
@@ -156,10 +155,8 @@ function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, access
     { label: 'Monitoring', description: 'Live server health and capacity', route: { kind: 'monitoring' } },
     { label: 'Explorer', description: 'Choose a package, browse resources, and run targets', route: selectedPackage ? { kind: 'package', packageId: selectedPackage } : { kind: 'packages' } },
     { label: 'Configuration', description: 'Inspect shared runtime configuration', route: selectedPackage ? { kind: 'configuration', packageId: selectedPackage } : { kind: 'configuration' } },
-    { label: uiLocale === 'zh-Hant' ? '驗證' : 'Validate', description: uiLocale === 'zh-Hant'
-      ? '唯讀驗證 Config、Package 及所選 resource' : 'Run bounded, read-only validation for Config, Packages, and selected resources', route: { kind: 'validation', scope: 'config' } },
     { label: 'Load testing', description: 'Create a validated Load job', route: { kind: 'load' } },
-    { label: 'Jobs and results', description: 'Inspect recent jobs', route: { kind: 'jobs' } },
+    { label: 'Jobs and results', description: 'Inspect Jobs and validation history', route: { kind: 'jobs' } },
     ...(showScheduledLoad ? [{ label: 'Schedules', description: 'Manage RUN and LOAD schedules', route: { kind: 'schedules' } as AppRoute }] : []),
     { label: 'Settings', description: 'Appearance and keyboard help', route: { kind: 'settings' } },
   ] : accessCapabilities.accountManage ? [
@@ -293,7 +290,6 @@ export function AppShell({
   const [authContextKey,setAuthContextKey]=useState('');
   const [canRevealConfigurationFields, setCanRevealConfigurationFields] = useState(false);
   const [accessCapabilities, setAccessCapabilities] = useState<AccessCapabilities>({ operate: false, accountManage: false, systemSettingsWrite: false, configurationAdmin: false });
-  const [activeValidationRecord, setActiveValidationRecord] = useState<ValidationRecord | null>(null);
   const [capabilitiesResolved, setCapabilitiesResolved] = useState(false);
   const inspectionSessionEpoch = useSyncExternalStore(inspectionCache.subscribeSession, () => inspectionCache.sessionEpoch);
   useLayoutEffect(() => { inspectionCache.select(selectedPackage, selectedEnvironment); }, [selectedPackage, selectedEnvironment]);
@@ -320,25 +316,6 @@ export function AppShell({
   const versionStatus = serverVersion.status === 'ready' ? 'Connected'
     : serverVersion.status === 'error' ? 'Unavailable' : 'Connecting…';
   const versionData = serverVersion.status === 'ready' ? serverVersion.data : null;
-  useEffect(() => {
-    setActiveValidationRecord(null);
-    if (!accessCapabilities.operate || versionData?.validationRecordsApiVersion !== 'att-validation-records/v1') {
-      return;
-    }
-    let active = true;
-    const refresh = async () => {
-      if (document.visibilityState !== 'visible') return;
-      try {
-        const summary = await api.getValidationRecordSummary();
-        if (active) setActiveValidationRecord(summary.record);
-      } catch { /* The shell keeps the last visible state while the API is temporarily unavailable. */ }
-    };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 5000);
-    const onVisibility = () => { if (document.visibilityState === 'visible') void refresh(); };
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility); };
-  }, [accessCapabilities.operate, authContextKey, versionData?.validationRecordsApiVersion]);
   const applyThemePreference = (preference: ThemePreference) => {
     setThemePreference(preference);
     setTheme(preference==='system'?(window.matchMedia?.('(prefers-color-scheme: dark)').matches?'dark':'light'):preference);
@@ -635,15 +612,6 @@ export function AppShell({
             <a className="nav-link" href={configurationHref} data-nav="configuration" aria-current={activeNav === 'configuration' ? 'page' : undefined} onClick={link(configurationHref)}>
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Configuration</span>
             </a>
-            <a className="nav-link" href="#/validate?scope=config" data-nav="validation" aria-current={activeNav === 'validation' ? 'page' : undefined} onClick={link('#/validate?scope=config')}>
-              <span className="nav-icon" aria-hidden="true">✓</span><span className="nav-label">{uiLocale === 'zh-Hant' ? '驗證' : 'Validate'}</span>
-            </a>
-            {activeValidationRecord && <a className="nav-link att-validation-running-link" href={formatRoute({ kind: 'validation', validationId: activeValidationRecord.validationId })}
-              onClick={link(formatRoute({ kind: 'validation', validationId: activeValidationRecord.validationId }))}>
-              <span className="nav-icon" aria-hidden="true">◷</span><span className="nav-label">{uiLocale === 'zh-Hant'
-                ? `${activeValidationRecord.status === 'QUEUED' ? '驗證排隊中' : activeValidationRecord.status === 'RUNNING' ? '驗證執行中' : '最近驗證'} · ${activeValidationRecord.packageId || 'Runtime'}`
-                : `${activeValidationRecord.status === 'QUEUED' ? 'Validation queued' : activeValidationRecord.status === 'RUNNING' ? 'Validation running' : 'Recent validation'} · ${activeValidationRecord.packageId || 'Runtime'}`}</span>
-            </a>}
             <a className="nav-link" href={loadHref} data-nav="load-testing" aria-current={activeNav === 'load-testing' ? 'page' : undefined} onClick={link(loadHref)}>
               <span className="nav-icon" aria-hidden="true">⌁</span><span className="nav-label">Load testing</span>
             </a>
@@ -734,7 +702,12 @@ export function AppShell({
                 </>}
                 {route.kind === 'jobs' && <>
                   <Breadcrumb label="Jobs and results" href={route.jobId ? '#/jobs' : undefined} navigate={navigate} />
+                  {!route.jobId && route.tab === 'validations' && <Breadcrumb label={uiLocale === 'zh-Hant' ? '驗證' : 'Validations'} navigate={navigate} />}
                   {route.jobId && <Breadcrumb label={'Job ' + route.jobId} navigate={navigate} />}
+                </>}
+                {route.kind === 'validation' && <>
+                  <Breadcrumb label="Jobs and results" href="#/jobs?tab=validations" navigate={navigate} />
+                  <Breadcrumb label={route.validationId ? (uiLocale === 'zh-Hant' ? '驗證記錄' : 'Validation record') : (uiLocale === 'zh-Hant' ? '驗證' : 'Validate')} navigate={navigate} />
                 </>}
                 {route.kind === 'schedules' && <Breadcrumb label="Schedules" navigate={navigate} />}
                 {route.kind === 'settings' && <Breadcrumb label="Settings" navigate={navigate} />}

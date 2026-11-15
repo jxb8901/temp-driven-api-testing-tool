@@ -16,6 +16,8 @@ import { JobConsoleView } from './JobConsoleView';
 import { useJobConsole } from './JobConsoleContext';
 import { useJobEventStatus, useJobEventStream, type JobStreamConnection } from './useJobEventStream';
 import { plannedWorkloadDuration, workloadPacing } from './loadWorkloadSummary';
+import { ValidationHistory } from '../validation/ValidationHistory';
+import { JobsResultsTabs } from './JobsResultsTabs';
 
 function executionType(job: JobSummary): string { return job.executionType || (job.command === 'debug' ? 'run' : job.command); }
 
@@ -1010,7 +1012,21 @@ export const MetricsPanel = memo(function MetricsPanel({ job, payload = null, me
 });
 
 export function JobsPage(props: JobsFeatureProps) {
-  return props.jobId ? <JobDetail key={props.jobId} {...props} jobId={props.jobId} /> : <JobsList {...props} />;
+  if (props.jobId) return <JobDetail key={props.jobId} {...props} jobId={props.jobId} />;
+  const selectedTab = props.jobsTab === 'validations' ? 'validations' : 'jobs';
+  return <main className="page-content att-jobs-page att-query-workspace">
+    <header className="att-feature-header"><div><p className="att-eyebrow">Jobs and results</p>
+      <h1>{selectedTab === 'validations' ? 'Validations' : 'Jobs'}</h1></div>
+      <JobsResultsTabs selected={selectedTab} onSelect={tab => props.onJobsTabChange?.(tab)} />
+    </header>
+    <div className="att-jobs-workspace-panel" role="tabpanel" id="jobs-results-tabpanel"
+      aria-labelledby={`jobs-results-tab-${selectedTab}`} tabIndex={0}>
+      {selectedTab === 'validations'
+        ? <ValidationHistory active supported={Boolean(props.validationRecordsSupported)}
+            onOpenRecord={validationId => props.onOpenValidationRecord?.(validationId)} />
+        : <JobsList {...props} />}
+    </div>
+  </main>;
 }
 
 function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedule, onEditSchedule, initialTab, onTabChange, standalone }: JobsFeatureProps & { jobId: string }) {

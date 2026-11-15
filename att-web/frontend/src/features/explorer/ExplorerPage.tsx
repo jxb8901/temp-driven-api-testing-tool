@@ -123,10 +123,13 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
   principalLabel = '', onResourceRouteChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad,
   onRunTarget, onValidateTarget, onValidatePackage, onRunBatch, onScheduleDebug, onOpenConfigurationFile, onOpenTestdata, registerUnsavedChanges }: ExplorerPageProps) {
   const workspace = useContext(AppShellContext);
+  const locale = workspace?.uiLocale || 'en';
   const validationText = workspace?.uiLocale === 'zh-Hant'
-    ? { case: '唯讀驗證 Case', resource: '唯讀驗證', suite: '唯讀驗證 Suite' }
-    : { case: 'Read-only validate Case', resource: 'Read-only validate', suite: 'Read-only validate Suite' };
-  const validatePackageText = workspace?.uiLocale === 'zh-Hant' ? '唯讀驗證套件' : 'Read-only validate Package';
+    ? { case: '驗證案例', resource: '驗證', suite: '驗證套件集' }
+    : { case: 'Validate Case', resource: 'Validate', suite: 'Validate Suite' };
+  const validatePackageText = locale === 'zh-Hant' ? '驗證套件' : 'Validate Package';
+  const validationHelp = locale === 'zh-Hant'
+    ? '唯讀檢查，不會執行測試或建立 Job。' : 'Read-only inspection; this does not run tests or create a Job.';
   const initialListState = useRef(savedExplorerList(packageId)).current;
   const [query, setQuery] = useState(initialListState.query);
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
@@ -483,30 +486,48 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
     <header className="att-explorer-page-heading">
       <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>{identity ? 'Resource details' : 'Package Explorer'}</h1>
         <p>{identity ? 'View the safe definition, source, and dependencies for this resource.' : 'Search, sort, and open resources. Choose an execution environment from the RUN or Quick LOAD editor.'}</p></div>
-      {!identity && <div className="att-explorer-heading-actions">
-        {onValidatePackage && <button className="button button-quiet" type="button" onClick={onValidatePackage}>{validatePackageText}</button>}
-        {onRunBatch && <button className="button button-primary" type="button" onClick={onRunBatch}>Batch RUN</button>}
-      </div>}
     </header>
 
     <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}${identity ? '' : ' att-query-workspace'}`}>
       <aside className="att-explorer-navigation" aria-label="Resource navigation" hidden={Boolean(identity)}>
-        {onOpenTestdata && <nav className="att-explorer-view-nav" aria-label="Package Explorer views"><button type="button" onClick={onOpenTestdata}>Testdata</button></nav>}
         <section className="att-query-filter-panel" aria-label="Resource filters">
           <h2>Resources</h2>
           <div className="att-query-filter-grid">
             <label>Search resources <input type="search" value={query} maxLength={200} onChange={event => { resetListPosition(); setQuery(event.currentTarget.value); }} /></label>
-            <div className="att-explorer-categories" role="tablist" aria-label="Resource categories">
+            <div className="att-explorer-type-filter">
+              <span>{locale === 'zh-Hant' ? '資源類型' : 'Resource Type'}</span>
+              <div className="att-explorer-categories" role="radiogroup" aria-label={locale === 'zh-Hant' ? '資源類型篩選' : 'Resource Type filters'}
+              title={locale === 'zh-Hant' ? '選取類型以篩選目前清單。' : 'Select a type to filter the current resource list.'}
+              onKeyDown={event => {
+                const values = ['all', 'case', 'template', 'flow', 'tool'] as const;
+                const current = values.indexOf(typeFilter as typeof values[number]);
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? values.length - 1
+                  : event.key === 'ArrowRight' ? (current + 1) % values.length
+                    : event.key === 'ArrowLeft' ? (current + values.length - 1) % values.length : -1;
+                if (next < 0) return;
+                event.preventDefault();
+                resetListPosition(); setTypeFilter(values[next]);
+                event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
+              }}>
               {([
                 ['all', 'All'], ['case', 'Test Cases'], ['template', 'Templates'], ['flow', 'Flows'], ['tool', 'Tools'],
-              ] as Array<[ResourceSummary['type'] | 'all', string]>).map(([value, label]) =>
-                <button key={value} type="button" role="tab" aria-selected={typeFilter === value}
-                  onClick={() => { resetListPosition(); setTypeFilter(value); }}>{label}</button>)}
+              ] as Array<[ResourceSummary['type'] | 'all', string]>).map(([value, englishLabel]) => {
+                const label = locale === 'zh-Hant'
+                  ? ({ All: '全部', 'Test Cases': '測試案例', Templates: '範本', Flows: '流程', Tools: '工具' } as Record<string, string>)[englishLabel]
+                  : englishLabel;
+                return <button key={value} type="button" role="radio" aria-checked={typeFilter === value}
+                  tabIndex={typeFilter === value ? 0 : -1}
+                  onClick={() => { resetListPosition(); setTypeFilter(value); }}>{label}</button>;
+              })}
+              </div>
             </div>
           </div>
-          <div className="att-query-filter-actions">
-            <button className="button button-quiet" type="button" onClick={() => { resetListPosition(); setQuery(''); setTypeFilter('all'); }}>Clear filters</button>
-            <button className="button button-quiet" type="button" disabled={loadingResources} onClick={() => (inspectionCache.clear(), setResourceRefresh(value => value + 1))}>Refresh resources</button>
+          <div className="att-query-filter-actions att-explorer-resource-actions" role="group" aria-label={locale === 'zh-Hant' ? '資源操作' : 'Resource actions'}>
+            <button className="button button-quiet" type="button" onClick={() => { resetListPosition(); setQuery(''); setTypeFilter('all'); }}>{locale === 'zh-Hant' ? '清除篩選條件' : 'Clear filters'}</button>
+            <button className="button button-quiet" type="button" disabled={loadingResources} onClick={() => (inspectionCache.clear(), setResourceRefresh(value => value + 1))}>{locale === 'zh-Hant' ? '重新整理資源' : 'Refresh resources'}</button>
+            {onValidatePackage && <button className="button button-quiet" type="button" title={validationHelp} onClick={onValidatePackage}>{validatePackageText}</button>}
+            {onRunBatch && <button className="button button-primary" type="button" onClick={onRunBatch}>{locale === 'zh-Hant' ? '執行測試案例…' : 'Run Test Cases…'}</button>}
+            {onOpenTestdata && <button className="button button-quiet" type="button" onClick={onOpenTestdata}>Testdata</button>}
           </div>
         </section>
         <section className="att-query-results-panel" aria-label="Resource results">
@@ -542,11 +563,11 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
           <div className="att-explorer-detail-actions">
             {onRunTarget && detail?.state !== 'invalid' && <button className="button button-primary" type="button" onClick={() => onRunTarget({ type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId })}>Run</button>}
             {onValidateTarget && detail && detail.type === 'case' && detail.logicalId && <button className="button button-quiet" type="button"
-              onClick={() => onValidateTarget('case', detail.resourceId, { type: 'case', resourceId: detail.resourceId, logicalId: detail.logicalId })}>{validationText.case}</button>}
+              title={validationHelp} onClick={() => onValidateTarget('case', detail.resourceId, { type: 'case', resourceId: detail.resourceId, logicalId: detail.logicalId })}>{validationText.case}</button>}
             {onValidateTarget && detail && detail.type !== 'case' && <button className="button button-quiet" type="button"
-              onClick={() => onValidateTarget(detail.type, detail.resourceId, { type: detail.type, resourceId: detail.resourceId, logicalId: detail.logicalId })}>{validationText.resource}</button>}
+              title={validationHelp} onClick={() => onValidateTarget(detail.type, detail.resourceId, { type: detail.type, resourceId: detail.resourceId, logicalId: detail.logicalId })}>{validationText.resource}</button>}
             {onValidateTarget && detail?.type === 'case' && safeSuiteTarget(detail.provenance?.suite) && <button className="button button-quiet" type="button"
-              onClick={() => onValidateTarget('suite', safeSuiteTarget(detail.provenance?.suite)!, { type: 'case', resourceId: detail.resourceId, logicalId: detail.logicalId })}>{validationText.suite}</button>}
+              title={validationHelp} onClick={() => onValidateTarget('suite', safeSuiteTarget(detail.provenance?.suite)!, { type: 'case', resourceId: detail.resourceId, logicalId: detail.logicalId })}>{validationText.suite}</button>}
             {onOpenQuickLoad && detail?.state !== 'invalid' && ['template','flow','tool'].includes(identity.type) && <button className="button button-quiet" type="button" onClick={() => onOpenQuickLoad({ packageId, type: identity.type, resourceId: identity.resourceId, logicalId: detail?.logicalId })}>Quick LOAD</button>}
           </div>
           {detailLoading && <p role="status">Loading resource detail…</p>}

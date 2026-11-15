@@ -162,7 +162,7 @@ describe('App Dashboard job refresh', () => {
     };
 
     await act(async () => root.render(<App />)); await settle();
-    await clickButton('Read-only validate Shared Config');
+    await clickButton('Validate Shared Config');
     await vi.waitFor(() => expect(submitted).toHaveLength(1));
     await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'));
     expect(host.textContent).toContain('V11111111111111111111111111111111');
@@ -170,7 +170,7 @@ describe('App Dashboard job refresh', () => {
 
     await navigate('#/');
     await navigate('#/configuration/payments?environment=SIT');
-    await clickButton('Read-only validate payments effective Config');
+    await clickButton('Validate Effective Config');
     await vi.waitFor(() => expect(submitted).toHaveLength(2));
     await vi.waitFor(() => expect(host.textContent).toContain('V22222222222222222222222222222222'));
     expect(host.textContent).toContain('V22222222222222222222222222222222');
@@ -205,7 +205,7 @@ describe('App Dashboard job refresh', () => {
     window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/configuration');
 
     await act(async () => root.render(<App />)); await settle();
-    const validate = [...host.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Read-only validate Shared Config');
+    const validate = [...host.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Validate Shared Config');
     expect(validate).toBeTruthy();
     await act(async () => { validate!.click(); await Promise.resolve(); }); await settle();
     await vi.waitFor(() => expect(host.textContent).toContain(userARecord.validationId));

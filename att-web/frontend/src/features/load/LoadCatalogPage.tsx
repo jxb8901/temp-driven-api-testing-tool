@@ -443,10 +443,13 @@ function CatalogActionControls({ item, actionKey, environmentDraft, environmentP
   onValidate(): void; onOpenValidation?(): void; onValidateTemplate(): void; onRunNow(): void; onSchedule(): void; onQuickLoad(): void; onView(): void;
 }): React.JSX.Element {
   const reasons = getDisabledReasons(item);
-  const readOnlyValidationLabel = locale === 'zh-Hant' ? '唯讀驗證' : 'Read-only validate';
+  const readOnlyValidationLabel = locale === 'zh-Hant' ? '驗證' : 'Validate';
+  const readOnlyValidationHelp = locale === 'zh-Hant'
+    ? '唯讀檢查 Scenario，不會執行 LOAD 流量或建立 Job。' : 'Read-only Scenario inspection; it does not send LOAD traffic or create a Job.';
   return <>
     <div className="att-load-catalog-actions">
       {item.kind === 'scenario' && onOpenValidation && <button className="button button-quiet" type="button"
+        title={readOnlyValidationHelp}
         aria-label={`${readOnlyValidationLabel} ${item.path} · ${environmentDraft || (locale === 'zh-Hant' ? '套件預設值' : 'Package default')}`}
         onClick={onOpenValidation}>{readOnlyValidationLabel}</button>}
       {item.kind === 'scenario' && <button className="button button-quiet" type="button" aria-label={`Validate ${item.path} for ${environmentDraft || 'Package default'}`}
