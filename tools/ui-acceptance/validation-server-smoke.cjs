@@ -57,8 +57,10 @@ async function main() {
       const rect = status.getBoundingClientRect();
       return document.activeElement === heading && rect.top >= 0 && rect.bottom <= window.innerHeight;
     }, undefined, { timeout: 10000 });
-    assert.equal(await panel.locator('[role="status"]').count(), 1,
+    const validationStatus = panel.locator('.att-validation-status[role="status"]');
+    assert.equal(await validationStatus.count(), 1,
       'the newly opened contextual validation status must be visible and announced');
+    assert.ok(await validationStatus.isVisible(), 'the contextual validation lifecycle status must remain visible');
   };
 
   try {
