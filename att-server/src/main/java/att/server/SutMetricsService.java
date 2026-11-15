@@ -1146,6 +1146,8 @@ final class SutMetricsService implements AutoCloseable {
                 List<Map<String, Object>> series = listOfMaps(safeSeries.get("series"));
                 List<Map<String, Object>> preview = chartPreview(series, MAX_REPORT_PREVIEW_POINTS, String.valueOf(collection.get("step")));
                 boolean businessCall = "business-call".equals(query.get("observationType"));
+                int businessValueCount = safeSeries.get("value") instanceof Number value
+                        && Double.isFinite(value.doubleValue()) ? 1 : 0;
                 Map<String, Object> normalizedObservation = objectOrEmpty(safeSeries.get("observation"));
                 Map<String, Object> normalizedWindow = objectOrEmpty(normalizedObservation.get("window"));
                 Map<String, Object> normalizedAvailability = objectOrEmpty(normalizedObservation.get("availability"));
@@ -1173,7 +1175,7 @@ final class SutMetricsService implements AutoCloseable {
                         "target", fields("id", file.get("targetId"), "type", file.get("targetType")),
                         "window", reportWindow,
                         "sampleResolution", businessCall ? null : collection.get("step"),
-                        "coverage", businessCall ? fields("valueCount", 1) : file.get("coverage"),
+                        "coverage", businessCall ? fields("valueCount", businessValueCount) : file.get("coverage"),
                         "quality", quality,
                         "path", "report/v2/sut-metrics/observations/" + name,
                         "sourceSha256", file.get("sha256"), "sha256", sha256(reportBytes), "lengthBytes", reportBytes.length,
