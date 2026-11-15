@@ -2568,17 +2568,17 @@ final class ServerRuntime implements AutoCloseable {
             execution.startedNanos=started;
             String state="COMPLETED",errorCode=null,errorMessage=null;String reportJson=null;
             try {
-                String revisionBefore=captureValidationSourceRevision(execution.plan);
                 Map<String,Object> report=validateVNext(execution.plan.input,execution.actor);
-                String revisionAfter=captureValidationSourceRevision(execution.plan);
-                String revision=revisionBefore!=null&&revisionBefore.equals(revisionAfter)?revisionBefore:null;
-                String environment=execution.plan.environment;Object rawContext=report.get("context");
+                String revision=null;Object rawContext=report.get("context");
                 if(rawContext instanceof Map<?,?> context) {
-                    Object env=context.get("environment");if(env instanceof String value&&value.matches("[A-Za-z][A-Za-z0-9_-]{0,31}"))environment=value;
-                    if(revision!=null) {
-                        @SuppressWarnings("unchecked") Map<String,Object> mutableContext=(Map<String,Object>)context;
-                        mutableContext.put("sourceRevision",revision);
-                    }
+                    Object rawRevision=context.get("sourceRevision");
+                    if(rawRevision instanceof String value&&value.matches("[a-f0-9]{64}"))revision=value;
+                }
+                boolean sharedConfig="config".equals(execution.plan.scope)&&execution.plan.packageId==null;
+                String environment=sharedConfig?null:execution.plan.environment;
+                if(!sharedConfig&&rawContext instanceof Map<?,?> context) {
+                    Object env=context.get("environment");
+                    if(env instanceof String value&&value.matches("[A-Za-z][A-Za-z0-9_-]{0,31}"))environment=value;
                 }
                 store.validationSourceContext(execution.id,environment,revision);
                 reportJson=JSON.writeValueAsString(report);
@@ -2612,56 +2612,15 @@ final class ServerRuntime implements AutoCloseable {
     String captureValidationSourceRevision(ValidationPlan plan) {
         if(plan==null||plan.all)return null;
         try {
-            java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
-            long[] totalBytes={0};int[] entries={0};
-            Path runtimeRoot=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath);
-            updateValidationTree(digest,"runtime-config",runtimeRoot.resolve("config"),totalBytes,entries);
-            if(plan.packageId!=null) {
-                Path root=packageRoot(plan.packageId);
-                if(root==null)return null;
-                validatePackageRoot(root);
-                updateValidationTree(digest,"package",root,totalBytes,entries);
-            }
-            StringBuilder result=new StringBuilder(64);for(byte value:digest.digest())result.append(String.format("%02x",value&255));
-            return result.toString();
+            Path root=plan.packageId==null?ServerConfig.runtimeConfigRoot(config.runtimeConfigPath):packageRoot(plan.packageId);
+            if(root==null)return null;
+            if(plan.packageId!=null)validatePackageRoot(root);
+            WorkerRequest request=inspectionRequest(plan.packageId,root,plan.environment);
+            request.inspectionAction="validation-revision";
+            request.inspectionSharedConfiguration=Boolean.valueOf(plan.packageId==null);
+            Object revision=executeInspection(root,request).get("sourceRevision");
+            return revision instanceof String&&((String)revision).matches("[a-f0-9]{64}")?(String)revision:null;
         } catch(Exception unavailable) { return null; }
-    }
-
-    private static void updateValidationTree(java.security.MessageDigest digest,String label,Path root,long[] totalBytes,int[] entries) throws Exception {
-        Path canonical=root.toAbsolutePath().normalize();
-        updateValidationDigest(digest,"root",label);
-        if(Files.isSymbolicLink(canonical))throw new IllegalArgumentException("Validation source root is a symbolic link");
-        if(!Files.exists(canonical,java.nio.file.LinkOption.NOFOLLOW_LINKS)) {updateValidationDigest(digest,"missing","");return;}
-        if(!Files.isDirectory(canonical,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Validation source root is not a directory");
-        List<Path> paths;
-        try(java.util.stream.Stream<Path> walk=Files.walk(canonical)) {
-            paths=walk.limit(20001).collect(java.util.stream.Collectors.toList());
-        }
-        if(paths.size()>20000)throw new IllegalArgumentException("Validation source entry limit exceeded");
-        paths.sort(java.util.Comparator.comparing(path->canonical.relativize(path).toString().replace('\\','/')));
-        for(Path path:paths) {
-            if(++entries[0]>20000)throw new IllegalArgumentException("Validation source entry limit exceeded");
-            if(Files.isSymbolicLink(path))throw new IllegalArgumentException("Validation source contains a symbolic link");
-            String relative=canonical.relativize(path).toString().replace('\\','/');
-            updateValidationDigest(digest,"path",relative);
-            if(Files.isDirectory(path,java.nio.file.LinkOption.NOFOLLOW_LINKS)) {updateValidationDigest(digest,"directory","");continue;}
-            if(!Files.isRegularFile(path,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Validation source contains an unsupported file");
-            updateValidationDigest(digest,"file","");
-            try(java.io.InputStream input=Files.newInputStream(path)) {
-                byte[] buffer=new byte[8192];int read;
-                while((read=input.read(buffer))!=-1) {
-                    totalBytes[0]+=read;if(totalBytes[0]>268435456L)throw new IllegalArgumentException("Validation source byte limit exceeded");
-                    digest.update(buffer,0,read);
-                }
-            }
-        }
-    }
-
-    private static void updateValidationDigest(java.security.MessageDigest digest,String kind,String value) {
-        byte[] kindBytes=kind.getBytes(StandardCharsets.UTF_8),valueBytes=value.getBytes(StandardCharsets.UTF_8);
-        digest.update((byte)(kindBytes.length>>>8));digest.update((byte)kindBytes.length);digest.update(kindBytes);
-        digest.update((byte)(valueBytes.length>>>24));digest.update((byte)(valueBytes.length>>>16));
-        digest.update((byte)(valueBytes.length>>>8));digest.update((byte)valueBytes.length);digest.update(valueBytes);
     }
 
     private void endValidationExecution(ValidationExecution execution) {
@@ -2696,7 +2655,7 @@ final class ServerRuntime implements AutoCloseable {
             if(scope==null)throw new IllegalArgumentException("A scope is required for an exact validation context lookup");
             if(target!=null)target=List.of("suite","load").contains(scope)?safeRelative(target,scope):safeText(target,512,"target");
             if(environment!=null)environment=safeText(environment,32,"environment");
-            else environment=resolveValidationEnvironment(packageId,null);
+            else if(packageId!=null)environment=resolveValidationEnvironment(packageId,null);
             if(packageId!=null&&environment!=null)config.packageConfiguration.authorizeEnvironment(environment,true);
         }
         if(limit<1||limit>100)throw new IllegalArgumentException("limit must be from 1 to 100");
@@ -2781,8 +2740,8 @@ final class ServerRuntime implements AutoCloseable {
             Object value=record.get(key);if(value!=null)out.put(key,value);
         }
         if(Boolean.TRUE.equals(record.get("all")))out.put("all",true);
-        out.put("applicability",includeReport?validationApplicability(record):"UNVERIFIED");
         String state=String.valueOf(record.get("status"));ValidationExecution execution=validationExecutions.get(String.valueOf(record.get("validationId")));
+        out.put("applicability",includeReport&&"COMPLETED".equals(state)?validationApplicability(record):"UNVERIFIED");
         if(execution!=null&&("QUEUED".equals(state)||"RUNNING".equals(state))) {
             long now=System.nanoTime();long queue=execution.startedNanos>0?elapsedMillis(execution.submittedNanos,execution.startedNanos):elapsedMillis(execution.submittedNanos,now);
             long active=execution.startedNanos>0?elapsedMillis(execution.startedNanos,now):0L;

@@ -94,6 +94,38 @@ class PackageResourceInspectorTest {
         }
     }
 
+    @Test void validationSourceRevisionReusesItsWatchedIndexAndTracksOnlyRelevantInputs() throws Exception {
+        Path root=packageWithTemplate("validation-revision-cache","REVISION","description: validation cache");
+        Path descriptor=Files.createDirectories(root.resolve("testdata")).resolve("base.yaml");
+        writeUtf8(descriptor,"schemaVersion: att-testdata/v1\nid: base\nrecords: []\n");
+        writeUtf8(root.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata:\n  descriptors: [testdata/base.yaml]\n");
+        Path unrelated=Files.createDirectories(root.resolve("target/classes")).resolve("generated.txt");
+        writeUtf8(unrelated,"generated artifact one\n");
+        try(PackageResourceInspector inspector=new PackageResourceInspector(root,root.resolve("config/config.yaml"),"SIT",
+                Collections.<String>emptyList(),65536,262144,true)) {
+            String first=inspector.validationSourceRevisionDigest(true);
+            assertTrue(first.matches("[a-f0-9]{64}"));
+            long builds=inspector.indexBuildCount();
+            assertEquals(first,inspector.validationSourceRevisionDigest(true));
+            assertEquals(builds,inspector.indexBuildCount(),"Repeated validation detail reads reuse the unchanged watched index");
+
+            writeUtf8(unrelated,"generated artifact two\n");
+            assertEquals(first,inspector.validationSourceRevisionDigest(true),"Unrelated build output does not make a validation stale");
+            assertEquals(builds,inspector.indexBuildCount(),"Unrelated build output does not rebuild the validation source index");
+
+            writeUtf8(descriptor,"schemaVersion: att-testdata/v1\nid: base\nrecords: [{id: changed}]\n");
+            String changed=first;long changeDeadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+            while(first.equals(changed)&&System.nanoTime()<changeDeadline) {
+                Thread.sleep(10);changed=inspector.validationSourceRevisionDigest(true);
+            }
+            assertNotEquals(first,changed,"Declared testdata changes invalidate validation applicability");
+            assertTrue(inspector.indexBuildCount()>builds);
+
+            writeUtf8(root.resolve("package.yaml"),"schemaVersion: att-package/v1\nmetadata: {description: updated}\ntestdata:\n  descriptors: [testdata/base.yaml]\n");
+            assertNull(inspector.validationSourceRevisionDigest(true),"A changed Package manifest is unverified until the watched index is rebuilt");
+        }
+    }
+
     @Test void listsConfiguredPackageResourcesWithLogicalIdsAndReferences() throws Exception {
         Map<String,Object> page=inspector().inspect("list",null,null,null,0,100);
         @SuppressWarnings("unchecked") List<Map<String,Object>> items=(List<Map<String,Object>>)page.get("items");

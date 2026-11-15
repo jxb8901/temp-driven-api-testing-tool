@@ -81,7 +81,7 @@ class ApiServletIntegratedLimitsTest {
         createPackage(packages.resolve("payments"));
         Path runtimeConfig=sharedRuntimeConfig();
         Path libs=workerLibraries("validation-record-libs");
-        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"validation-record-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true)) {
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"validation-record-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true,1)) {
             ApiServlet servlet=servlet(runtime);
             byte[] body="{\"command\":\"validate\",\"targetKind\":\"config\"}".getBytes(StandardCharsets.UTF_8);
             Captured accepted=invokeAs(servlet,"POST","/validations",Map.of(),body,"alice");
@@ -90,6 +90,7 @@ class ApiServletIntegratedLimitsTest {
             assertTrue(queued.path("validationId").asText().matches("V[0-9A-F]{32}"));
             String id=queued.path("validationId").asText();
             assertEquals("QUEUED",queued.path("status").asText());
+            assertFalse(queued.has("environment"),"Shared Config context is canonical with a null Environment");
             assertTrue(accepted.headers.get("Location").endsWith("/api/v1/validations/"+id));
 
             Captured otherOwner=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"bob");
@@ -112,6 +113,8 @@ class ApiServletIntegratedLimitsTest {
             assertEquals(200,result.status,new String(result.body(),StandardCharsets.UTF_8));
             assertEquals("COMPLETED",completed.path("status").asText());
             assertEquals("att-validation/v1",completed.path("report").path("schemaVersion").asText());
+            assertFalse(completed.has("environment"),"The report may describe Runtime default SIT without changing the Shared Config context key");
+            assertEquals("SIT",completed.path("report").path("context").path("environment").asText());
             assertTrue(completed.path("sourceRevision").asText().matches("[a-f0-9]{64}"));
             assertEquals("CURRENT",completed.path("applicability").asText());
             assertEquals(0,runtime.jobsFor("alice",null).size(),"Read-only validation must not create a Job");
@@ -123,15 +126,33 @@ class ApiServletIntegratedLimitsTest {
             assertEquals(id,summaryRecord.path("validationId").asText());
             assertFalse(summaryRecord.has("report"));
 
+            Semaphore validationAdmission=semaphore(runtime,"validationAdmissionSlots");
+            long admissionDeadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while(validationAdmission.availablePermits()==0&&System.nanoTime()<admissionDeadline)Thread.sleep(5);
+            assertTrue(validationAdmission.availablePermits()>0,"The next submission must have a free validation admission slot");
+
             Files.writeString(runtimeConfig,Files.readString(runtimeConfig)+"\n# changed after validation\n");
             Captured stale=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
             assertEquals("STALE",ServerRuntime.JSON.readTree(stale.body()).path("applicability").asText());
 
             ReentrantLock workerLock=inspectionWorkerLock(runtime);workerLock.lock();
+            java.util.concurrent.CountDownLatch blockerStarted=new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.CountDownLatch releaseBlocker=new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.ThreadPoolExecutor executor=validationExecutor(runtime);
+            executor.execute(()->{blockerStarted.countDown();try{releaseBlocker.await();}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}});
+            assertTrue(blockerStarted.await(5,java.util.concurrent.TimeUnit.SECONDS));
+            String secondId;
             try {
                 Captured secondAccepted=invokeAs(servlet,"POST","/validations",Map.of(),body,"alice");
-                String secondId=ServerRuntime.JSON.readTree(secondAccepted.body()).path("validationId").asText();
+                secondId=ServerRuntime.JSON.readTree(secondAccepted.body()).path("validationId").asText();
                 assertEquals(202,secondAccepted.status);
+                JsonNode queuedAgain=ServerRuntime.JSON.readTree(secondAccepted.body());
+                assertEquals("QUEUED",queuedAgain.path("status").asText());
+                assertFalse(queuedAgain.has("environment"));
+                Captured queuedLookup=invokeAs(servlet,"GET","/validations",Map.of("scope","config","matchContext","true","limit","1"),new byte[0],"alice");
+                assertEquals(secondId,ServerRuntime.JSON.readTree(queuedLookup.body()).path("items").path(0).path("validationId").asText(),
+                        "A Shared Config lookup recovers the queued record without another submission");
+                releaseBlocker.countDown();
                 boolean sawRunning=false;long runningDeadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
                 while(System.nanoTime()<runningDeadline) {
                     JsonNode current=ServerRuntime.JSON.readTree(invokeAs(servlet,"GET","/validations/"+secondId,Map.of(),new byte[0],"alice").body());
@@ -139,16 +160,21 @@ class ApiServletIntegratedLimitsTest {
                     Thread.sleep(10);
                 }
                 assertTrue(sawRunning,"Validation should enter RUNNING while waiting for the held inspection Worker");
-                Captured duplicate=invokeAs(servlet,"POST","/validations",Map.of(),body,"alice");
-                JsonNode duplicateRecord=ServerRuntime.JSON.readTree(duplicate.body());
-                assertEquals(202,duplicate.status);
-                assertEquals(secondId,duplicateRecord.path("validationId").asText(),
-                        "Submitting the same active owner/context should return the existing durable record");
-                Captured cancelled=invokeAs(servlet,"POST","/validations/"+secondId+"/cancel",Map.of(),new byte[0],"alice");
-                JsonNode cancelledRecord=ServerRuntime.JSON.readTree(cancelled.body());
-                assertEquals(200,cancelled.status,new String(cancelled.body(),StandardCharsets.UTF_8));
-                assertEquals("CANCELLED",cancelledRecord.path("status").asText());
-            } finally {workerLock.unlock();}
+                Captured runningLookup=invokeAs(servlet,"GET","/validations",Map.of("scope","config","matchContext","true","limit","1"),new byte[0],"alice");
+                assertEquals(secondId,ServerRuntime.JSON.readTree(runningLookup.body()).path("items").path(0).path("validationId").asText(),
+                        "A Shared Config lookup recovers the running record without another submission");
+            } finally {releaseBlocker.countDown();workerLock.unlock();}
+            Captured secondResult=null;long secondDeadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+            while(System.nanoTime()<secondDeadline) {
+                secondResult=invokeAs(servlet,"GET","/validations/"+secondId,Map.of(),new byte[0],"alice");
+                if(!List.of("QUEUED","RUNNING").contains(ServerRuntime.JSON.readTree(secondResult.body()).path("status").asText()))break;
+                Thread.sleep(25);
+            }
+            assertNotNull(secondResult);
+            assertEquals("COMPLETED",ServerRuntime.JSON.readTree(secondResult.body()).path("status").asText());
+            Captured completedLookup=invokeAs(servlet,"GET","/validations",Map.of("scope","config","matchContext","true","limit","1"),new byte[0],"alice");
+            assertEquals(secondId,ServerRuntime.JSON.readTree(completedLookup.body()).path("items").path(0).path("validationId").asText(),
+                    "The Shared Config lookup also recovers the completed record");
             stopInspectionProcesses(runtime);
         }
     }

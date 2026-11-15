@@ -10,6 +10,8 @@ import type { JobSummary } from './types';
 import type { ValidationRecord } from './features/validation/types';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const VALIDATION_CONTEXTS_PREFIX = 'att.validation.contexts.v1';
+const validationContextsKey = (identity: string) => `${VALIDATION_CONTEXTS_PREFIX}.${encodeURIComponent(identity)}`;
 if (!HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
   HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
@@ -21,7 +23,8 @@ describe('App Dashboard job refresh', () => {
 
   beforeEach(() => {
     sessionStorage.clear();
-    localStorage.removeItem('att.validation.contexts.v1');
+    for (const key of Object.keys(localStorage)) if (key.startsWith(VALIDATION_CONTEXTS_PREFIX)) localStorage.removeItem(key);
+    localStorage.removeItem(VALIDATION_CONTEXTS_PREFIX);
     localStorage.setItem('att-ui-language', 'en');
     localStorage.setItem('att-ui-theme', 'light');
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -30,7 +33,7 @@ describe('App Dashboard job refresh', () => {
     root = createRoot(host);
     vi.spyOn(api, 'getVersion').mockResolvedValue({ apiVersion: '1', inlineLoadEnabled: false });
     vi.spyOn(api, 'getPackages').mockResolvedValue({ items: [] });
-    vi.spyOn(api, 'getAuthCapabilities').mockResolvedValue({ configurationAdmin: false, capabilities: { operate: true, accountManage: true } });
+    vi.spyOn(api, 'getAuthCapabilities').mockResolvedValue({ configurationAdmin: false, capabilities: { operate: true, accountManage: true }, inspectionCacheContext: 'test-auth-context' });
     vi.spyOn(api, 'listJobs').mockResolvedValue([]);
   });
 
@@ -172,7 +175,7 @@ describe('App Dashboard job refresh', () => {
     await vi.waitFor(() => expect(host.textContent).toContain('V22222222222222222222222222222222'));
     expect(host.textContent).toContain('V22222222222222222222222222222222');
     expect(submitted).toHaveLength(2);
-    expect(JSON.parse(localStorage.getItem('att.validation.contexts.v1') || '[]')).toHaveLength(2);
+    expect(JSON.parse(localStorage.getItem(validationContextsKey('test-auth-context')) || '[]')).toHaveLength(2);
     expect(cancel).not.toHaveBeenCalled();
 
     await navigate('#/');
@@ -187,6 +190,37 @@ describe('App Dashboard job refresh', () => {
     expect(host.textContent).toContain('V11111111111111111111111111111111');
     expect(submitted).toHaveLength(2);
     expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it('keeps remembered validation context separate when another user logs in on the same browser', async () => {
+    vi.mocked(api.getVersion).mockResolvedValue({ apiVersion: '1', inlineLoadEnabled: false, validationRecordsApiVersion: 'att-validation-records/v1' });
+    vi.spyOn(api, 'getDeclaredConfiguration').mockResolvedValue({ environments: [{ name: 'SIT', state: 'active' }] });
+    const userARecord: ValidationRecord = {
+      validationId: 'VAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', scope: 'config', status: 'QUEUED',
+      requestId: 'user-a-request', submittedAt: '2026-11-15T00:00:00Z',
+    };
+    vi.spyOn(api, 'submitValidation').mockResolvedValue(userARecord);
+    vi.spyOn(api, 'listValidationRecords').mockResolvedValue({ items: [userARecord] });
+    vi.spyOn(api, 'getValidationRecord').mockResolvedValue(userARecord);
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/configuration');
+
+    await act(async () => root.render(<App />)); await settle();
+    const validate = [...host.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Read-only validate Shared Config');
+    expect(validate).toBeTruthy();
+    await act(async () => { validate!.click(); await Promise.resolve(); }); await settle();
+    await vi.waitFor(() => expect(host.textContent).toContain(userARecord.validationId));
+    expect(JSON.parse(localStorage.getItem(validationContextsKey('test-auth-context')) || '[]')).toHaveLength(1);
+
+    act(() => root.unmount()); root = createRoot(host);
+    vi.mocked(api.getAuthCapabilities).mockResolvedValue({ configurationAdmin: false,
+      capabilities: { operate: true, accountManage: true }, inspectionCacheContext: 'test-auth-context-user-b' });
+    vi.mocked(api.listValidationRecords).mockResolvedValue({ items: [] });
+    vi.mocked(api.getValidationRecord).mockRejectedValue(new Error('No record for this identity'));
+    await act(async () => root.render(<App />)); await settle();
+
+    expect(host.textContent).not.toContain(userARecord.validationId);
+    expect(JSON.parse(localStorage.getItem(validationContextsKey('test-auth-context-user-b')) || '[]')).toEqual([]);
+    expect(JSON.parse(localStorage.getItem(validationContextsKey('test-auth-context')) || '[]')).toHaveLength(1);
   });
 
   it('redirects a legacy Testdata link into the Package route without changing Workspace context', async () => {

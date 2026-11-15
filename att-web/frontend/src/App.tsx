@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { AppShell, useAppShellContext } from './AppShell';
 import { DashboardPage } from './DashboardPage';
@@ -63,9 +63,13 @@ function isContextValidation(value: unknown): value is ContextValidation {
   return true;
 }
 
-function readRememberedValidationContexts(): ContextValidation[] {
+function contextValidationStorageKey(authContextKey: string): string {
+  return `${CONTEXT_VALIDATIONS_STORAGE_KEY}.${encodeURIComponent(authContextKey)}`;
+}
+
+function readRememberedValidationContexts(storageKey: string): ContextValidation[] {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(CONTEXT_VALIDATIONS_STORAGE_KEY) || '[]');
+    const parsed: unknown = JSON.parse(localStorage.getItem(storageKey) || '[]');
     if (!Array.isArray(parsed)) return [];
     return uniqueContextValidations(parsed.filter(isContextValidation).map(item => ({ ...item, submitOnOpen: false })));
   } catch { return []; }
@@ -82,6 +86,90 @@ function uniqueContextValidations(values: ContextValidation[]): ContextValidatio
     if (seen.has(key)) return false;
     seen.add(key);return true;
   }).reverse().slice(-MAX_REMEMBERED_VALIDATION_CONTEXTS);
+}
+
+type ValidationContextState = {
+  contextValidation?: ContextValidation;
+  onValidateContext(request: ValidationRequest, title: string): void;
+  rememberContextValidation(record: ValidationRecord): void;
+  closeContextValidation(): void;
+};
+
+function ValidationContextCache({ routeKey, supportsValidationRecords, navigate, children }: {
+  routeKey: string;
+  supportsValidationRecords: boolean;
+  navigate(route: AppRoute): void;
+  children(state: ValidationContextState): ReactNode;
+}) {
+  const shell = useAppShellContext();
+  const authContextKey = shell.authContextKey || '';
+  const identityReady = Boolean(authContextKey && !authContextKey.startsWith('auth:') && shell.accessCapabilities.operate);
+  const storageKey = identityReady ? contextValidationStorageKey(authContextKey) : '';
+  const [saved, setSaved] = useState<{ owner: string | null; values: ContextValidation[] }>(() => identityReady
+    ? { owner: authContextKey, values: readRememberedValidationContexts(storageKey) }
+    : { owner: null, values: [] });
+  const cacheReady = identityReady && saved.owner === authContextKey;
+  const contextValidations = cacheReady ? saved.values : [];
+  const contextValidation = [...contextValidations].reverse().find(value => value.routeKey === routeKey);
+  const previousRouteKey = useRef(routeKey);
+
+  useEffect(() => {
+    try { localStorage.removeItem(CONTEXT_VALIDATIONS_STORAGE_KEY); } catch { /* Legacy unscoped records are never restored. */ }
+  }, []);
+  useEffect(() => {
+    if (!identityReady) { setSaved({ owner: null, values: [] }); return; }
+    setSaved({ owner: authContextKey, values: readRememberedValidationContexts(storageKey) });
+  }, [authContextKey, identityReady, storageKey]);
+  useEffect(() => {
+    if (!cacheReady) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(saved.values.map(value => ({ ...value, submitOnOpen: false }))));
+    } catch { /* Server-owned validation records remain recoverable from their contextual action. */ }
+  }, [cacheReady, saved.owner, saved.values, storageKey]);
+  useEffect(() => {
+    if (previousRouteKey.current !== routeKey) {
+      previousRouteKey.current = routeKey;
+      setSaved(current => current.owner === authContextKey
+        ? { ...current, values: current.values.map(value => value.submitOnOpen ? { ...value, submitOnOpen: false } : value) }
+        : current);
+    }
+  }, [authContextKey, routeKey]);
+
+  const onValidateContext = useCallback((request: ValidationRequest, title: string) => {
+    if (supportsValidationRecords) {
+      if (!cacheReady) return;
+      const value: ContextValidation = { routeKey, request, title, submitOnOpen: true };
+      const key = contextValidationKey(value);
+      setSaved(current => current.owner === authContextKey
+        ? { ...current, values: uniqueContextValidations([...current.values.filter(item => contextValidationKey(item) !== key), value]) }
+        : current);
+      return;
+    }
+    if ('all' in request) return;
+    navigate({ kind: 'validation', scope: request.targetKind,
+      ...(request.packageId ? { packageId: request.packageId } : {}),
+      ...(request.environment ? { environment: request.environment } : {}),
+      ...('target' in request ? { target: request.target } : {}) });
+  }, [authContextKey, cacheReady, navigate, routeKey, supportsValidationRecords]);
+  const rememberContextValidation = useCallback((record: ValidationRecord) => {
+    if (!cacheReady || !record.environment) return;
+    setSaved(current => current.owner === authContextKey ? { ...current, values: uniqueContextValidations(current.values.map(value => {
+      const request = value.request;
+      if ('all' in request || request.environment || request.targetKind !== record.scope
+          || (request.packageId || undefined) !== record.packageId
+          || (('target' in request ? request.target : undefined) || undefined) !== record.target) return value;
+      return { ...value, request: { ...request, environment: record.environment }, submitOnOpen: false };
+    })) } : current);
+  }, [authContextKey, cacheReady]);
+  const closeContextValidation = useCallback(() => {
+    if (!cacheReady || !contextValidation) return;
+    const key = contextValidationKey(contextValidation);
+    setSaved(current => current.owner === authContextKey
+      ? { ...current, values: current.values.filter(value => contextValidationKey(value) !== key) }
+      : current);
+  }, [authContextKey, cacheReady, contextValidation]);
+
+  return <>{children({ contextValidation, onValidateContext, rememberContextValidation, closeContextValidation })}</>;
 }
 
 function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSchedule, packageRegistrationState, registered, packageLabel,
@@ -431,46 +519,8 @@ export default function App() {
   const workspaceResolutionError = Boolean(selectedPackage && workspaceResolution.key === `${selectedPackage}\n${selectedEnvironment}` && workspaceResolution.error);
   const [catalogEnvironment, setCatalogEnvironment] = useState('');
   const currentRouteKey = formatRoute(navigation.route);
-  const [contextValidations, setContextValidations] = useState<ContextValidation[]>(readRememberedValidationContexts);
-  const contextValidation = [...contextValidations].reverse().find(value => value.routeKey === currentRouteKey);
   const supportsValidationRecords = state.serverVersion.status === 'ready'
     && state.serverVersion.data.validationRecordsApiVersion === 'att-validation-records/v1';
-  const previousRouteKey = useRef(currentRouteKey);
-  useEffect(() => {
-    if (previousRouteKey.current !== currentRouteKey) {
-      previousRouteKey.current = currentRouteKey;
-      setContextValidations(values => values.map(value => value.submitOnOpen ? { ...value, submitOnOpen: false } : value));
-    }
-  }, [currentRouteKey]);
-  useEffect(() => {
-    try {
-      localStorage.setItem(CONTEXT_VALIDATIONS_STORAGE_KEY,
-        JSON.stringify(contextValidations.map(value => ({ ...value, submitOnOpen: false }))));
-    } catch { /* Server-owned validation records remain recoverable from their contextual action. */ }
-  }, [contextValidations]);
-  const onValidateContext = useCallback((request: ValidationRequest, title: string) => {
-    if (supportsValidationRecords) {
-      const value: ContextValidation = { routeKey: currentRouteKey, request, title, submitOnOpen: true };
-      const key = contextValidationKey(value);
-      setContextValidations(current => uniqueContextValidations([...current.filter(item => contextValidationKey(item) !== key), value]));
-      return;
-    }
-    if ('all' in request) return;
-    navigation.navigate({ kind: 'validation', scope: request.targetKind,
-      ...(request.packageId ? { packageId: request.packageId } : {}),
-      ...(request.environment ? { environment: request.environment } : {}),
-      ...('target' in request ? { target: request.target } : {}) });
-  }, [currentRouteKey, navigation.navigate, supportsValidationRecords]);
-  const rememberContextValidation = useCallback((record: ValidationRecord) => {
-    if (!record.environment) return;
-    setContextValidations(values => uniqueContextValidations(values.map(value => {
-      const request = value.request;
-      if ('all' in request || request.environment || request.targetKind !== record.scope
-          || (request.packageId || undefined) !== record.packageId
-          || (('target' in request ? request.target : undefined) || undefined) !== record.target) return value;
-      return { ...value, request: { ...request, environment: record.environment }, submitOnOpen: false };
-    })));
-  }, []);
   useEffect(() => { try { sessionStorage.setItem('att.workspace.context', JSON.stringify(workspaceContext)); } catch { /* In-memory context remains usable. */ } }, [workspaceContext]);
   useEffect(() => {
     const controller = new AbortController();
@@ -601,7 +651,8 @@ export default function App() {
       ? selectedEnvironment : ''
   );
 
-  let content;
+  const renderContent = (onValidateContext: (request: ValidationRequest, title: string) => void): ReactNode => {
+  let content: ReactNode;
   if (navigation.route.kind === 'dashboard') {
     content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'monitoring') {
@@ -709,6 +760,8 @@ export default function App() {
             `LOAD Scenario · ${item.path}`)} />
       </LoadTestingPage></Suspense>;
   }
+  return content;
+  };
 
   return (
     <AppShell
@@ -727,15 +780,19 @@ export default function App() {
       workspaceNotice={selectedPackage && state.packages.status === 'ready' && !state.packages.data.some(item => item.packageId === selectedPackage) ? 'The selected Workspace Package is no longer available. Choose another Package.' : workspaceProfilesStatus === 'error' ? 'Workspace profiles could not be loaded. Check the selected Package.' : workspaceProfilesStatus === 'ready' && selectedEnvironment && !workspaceEnvironments.includes(selectedEnvironment) ? 'The selected Workspace Environment is no longer active for this Package. Choose another environment.' : workspaceResolutionError ? 'Workspace Environment could not be resolved. Validate the execution configuration before use.' : ''}
       onJobAccepted={onJobAccepted}
     >
-      {content}
-      {supportsValidationRecords && contextValidation && <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation…</div>}>
-        <ValidationPanel key={`${contextValidation.routeKey}:${contextValidation.title}:${JSON.stringify(contextValidation.request)}`}
-          request={contextValidation.request} title={contextValidation.title}
-          onClose={() => setContextValidations(values => values.filter(value => contextValidationKey(value) !== contextValidationKey(contextValidation)))}
-          submitOnOpen={contextValidation.submitOnOpen} onRecordLoaded={rememberContextValidation}
-          onOpenRecord={validationId => navigation.navigate({ kind: 'validation', validationId })}
-          onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
-      </Suspense>}
+      <ValidationContextCache routeKey={currentRouteKey} supportsValidationRecords={supportsValidationRecords} navigate={navigation.navigate}>
+        {({ contextValidation, onValidateContext, rememberContextValidation, closeContextValidation }) => <>
+          {renderContent(onValidateContext)}
+          {supportsValidationRecords && contextValidation && <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation…</div>}>
+            <ValidationPanel key={`${contextValidation.routeKey}:${contextValidation.title}:${JSON.stringify(contextValidation.request)}`}
+              request={contextValidation.request} title={contextValidation.title}
+              onClose={closeContextValidation}
+              submitOnOpen={contextValidation.submitOnOpen} onRecordLoaded={rememberContextValidation}
+              onOpenRecord={validationId => navigation.navigate({ kind: 'validation', validationId })}
+              onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
+          </Suspense>}
+        </>}
+      </ValidationContextCache>
     </AppShell>
   );
 }
