@@ -136,13 +136,12 @@ function activeNavigation(route: AppRoute): string {
   return 'dashboard';
 }
 
-function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, accessCapabilities, uiLocale, onClose, onNavigate }: {
+function KeyboardDialog({ open, mode, showScheduledLoad, selectedPackage, accessCapabilities, onClose, onNavigate }: {
   open: boolean;
   mode: 'palette' | 'shortcuts';
   showScheduledLoad: boolean;
   selectedPackage: string;
   accessCapabilities: AccessCapabilities;
-  uiLocale: UiLocale;
   onClose(): void;
   onNavigate(route: AppRoute): void;
 }) {
@@ -725,7 +724,7 @@ export function AppShell({
         </div>
         <DiscardChangesDialog navigation={navigation} />
         <ChangePasswordDialog open={changePasswordOpen} locale={uiLocale} onClose={()=>setChangePasswordOpen(false)} />
-        <KeyboardDialog open={keyboardMode !== null} mode={keyboardMode || 'palette'} showScheduledLoad={showScheduledLoad&&accessCapabilities.operate} selectedPackage={selectedPackage} accessCapabilities={accessCapabilities} uiLocale={uiLocale}
+        <KeyboardDialog open={keyboardMode !== null} mode={keyboardMode || 'palette'} showScheduledLoad={showScheduledLoad&&accessCapabilities.operate} selectedPackage={selectedPackage} accessCapabilities={accessCapabilities}
           onClose={() => setKeyboardMode(null)} onNavigate={target => { navigate(target); setKeyboardMode(null); setMobileNavigationOpen(false); }} />
       </div>
       </JobConsoleProvider>}

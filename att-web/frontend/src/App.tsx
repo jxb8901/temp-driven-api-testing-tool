@@ -88,7 +88,7 @@ function uniqueContextValidations(values: ContextValidation[]): ContextValidatio
   }).reverse().slice(-MAX_REMEMBERED_VALIDATION_CONTEXTS);
 }
 
-function validationOriginRoute(record: ValidationRecord, contexts: ContextValidation[] = []): AppRoute | undefined {
+export function validationOriginRoute(record: ValidationRecord, contexts: ContextValidation[] = []): AppRoute | undefined {
   const savedContext = [...contexts].reverse().find(({ request }) => {
     if ('all' in request) return Boolean(record.all);
     return !record.all && request.targetKind === record.scope
@@ -706,7 +706,7 @@ export default function App() {
   } else if (navigation.route.kind === 'packages') {
     content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'job-console' || (navigation.route.kind === 'jobs' && navigation.route.standalone && navigation.route.jobId)) {
-    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Job console…</div>}><StandaloneJobConsolePage jobId={navigation.route.jobId!} view={navigation.route.kind === 'job-console' ? navigation.route.view : navigation.route.tab} /></Suspense>;
+    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Job console…</div>}><StandaloneJobConsolePage jobId={navigation.route.jobId!} view={navigation.route.kind === 'job-console' ? navigation.route.view : navigation.route.tab === 'validations' ? undefined : navigation.route.tab} /></Suspense>;
   } else if (navigation.route.kind === 'job-artifact') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading artifact…</div>}><StandaloneJobArtifactPage api={loadJobsApi} jobId={navigation.route.jobId} path={navigation.route.path} /></Suspense>;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {

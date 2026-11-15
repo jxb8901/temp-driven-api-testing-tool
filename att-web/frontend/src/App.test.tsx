@@ -2,10 +2,10 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import App from './App';
+import App, { validationOriginRoute } from './App';
 import { api } from './api';
 import { artifactApi } from './features/load/artifactApi';
-import { parseRoute } from './router';
+import { formatRoute, parseRoute } from './router';
 import type { JobSummary } from './types';
 import type { ValidationRecord } from './features/validation/types';
 
@@ -56,6 +56,19 @@ describe('App Dashboard job refresh', () => {
     if (!link) throw new Error(`Missing ${name} navigation link`);
     act(() => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
   }
+
+  it('opens a historical Package validation in its recorded Environment', () => {
+    const historicalRecord: ValidationRecord = {
+      validationId: 'V0123456789ABCDEF0123456789ABCDEF', scope: 'package', packageId: 'payments',
+      environment: 'SIT', status: 'COMPLETED', requestId: 'request-sit', submittedAt: '2026-11-15T10:00:00Z',
+    };
+    const currentWorkspaceEnvironment = 'UAT';
+    const origin = validationOriginRoute(historicalRecord);
+    expect(origin).toEqual({ kind: 'package', packageId: 'payments', environment: 'SIT' });
+    expect(origin?.kind === 'package' ? origin.environment : undefined).not.toBe(currentWorkspaceEnvironment);
+    expect(formatRoute(origin!)).toBe('#/packages/payments?environment=SIT');
+    expect(parseRoute(formatRoute(origin!))).toEqual(origin);
+  });
 
   it('preserves Workspace while a different historical Job is opened and reloaded', async () => {
     sessionStorage.setItem('att.workspace.context', JSON.stringify({packageId:'payments', environment:'UAT'}));
@@ -375,6 +388,7 @@ describe('App Dashboard job refresh', () => {
     }));
     vi.spyOn(api, 'getJobs').mockResolvedValue({ items: [] });
 
+    await import('./features/load/QuickLoadPage');
     await act(async () => root.render(<App />));
     await settle();
     const durationInput = () => host.querySelector<HTMLInputElement>('input[placeholder="e.g. 30s or 5m"]');

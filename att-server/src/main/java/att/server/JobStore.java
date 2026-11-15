@@ -20,6 +20,7 @@ import java.util.Set;
 final class JobStore implements AutoCloseable {
     static final Duration REPLAY_INTENT_RETENTION=Duration.ofDays(30);
     private static final Object DRIVER_LIFECYCLE=new Object();
+    private static final Set<String> VALIDATION_OUTCOMES=Set.of("PASS","INVALID","PARTIAL");
     private static int openStores;
     private volatile boolean closed;
     /** Keeps the embedded database open until the owning runtime closes. Query connections remain short-lived. */
@@ -114,7 +115,7 @@ final class JobStore implements AutoCloseable {
             s.execute("CREATE INDEX IF NOT EXISTS job_replay_intents_expiry_idx ON job_replay_intents(expires_at)");
             s.execute("CREATE TABLE IF NOT EXISTS validation_records (validation_id VARCHAR(40) PRIMARY KEY, actor VARCHAR(256) NOT NULL, all_scope BOOLEAN DEFAULT FALSE NOT NULL, scope VARCHAR(16) NOT NULL, package_id VARCHAR(64), target VARCHAR(1024), environment VARCHAR(128), state VARCHAR(16) NOT NULL, phase VARCHAR(64), request_id VARCHAR(128) NOT NULL, submitted_at VARCHAR(40) NOT NULL, started_at VARCHAR(40), finished_at VARCHAR(40), queue_elapsed_ms BIGINT, execution_elapsed_ms BIGINT, total_elapsed_ms BIGINT, source_revision VARCHAR(128), plan_json CLOB NOT NULL, report_json CLOB, error_code VARCHAR(80), error_message VARCHAR(512), record_bytes BIGINT NOT NULL)");
             s.execute("ALTER TABLE validation_records ADD COLUMN IF NOT EXISTS overall_status VARCHAR(16)");
-            s.execute("UPDATE validation_records SET overall_status=JSON_VALUE(report_json, '$.overallStatus') WHERE overall_status IS NULL AND report_json IS NOT NULL");
+            backfillValidationOutcomeSummaries(c);
             s.execute("CREATE INDEX IF NOT EXISTS validation_records_owner_page_idx ON validation_records(actor,submitted_at,validation_id)");
             s.execute("CREATE INDEX IF NOT EXISTS validation_records_retention_idx ON validation_records(state,submitted_at)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS replay_unavailable VARCHAR(240)");
@@ -181,6 +182,33 @@ final class JobStore implements AutoCloseable {
                 }
                 c.commit();return batch.size();
             } catch(Exception failure){c.rollback();throw failure;}
+        }
+    }
+
+    /** Backfills the metadata-only outcome column without relying on database-specific JSON functions. */
+    private static void backfillValidationOutcomeSummaries(Connection connection) throws Exception {
+        try(PreparedStatement rows=connection.prepareStatement(
+                    "SELECT validation_id,report_json FROM validation_records WHERE overall_status IS NULL AND report_json IS NOT NULL");
+                ResultSet result=rows.executeQuery();
+                PreparedStatement update=connection.prepareStatement(
+                    "UPDATE validation_records SET overall_status=? WHERE validation_id=? AND overall_status IS NULL")) {
+            while(result.next()) {
+                String validationId=result.getString(1);
+                String outcome=null;
+                try(java.io.Reader reportReader=result.getCharacterStream(2)) {
+                    if(reportReader==null)continue;
+                    JsonNode report=ServerRuntime.JSON.readTree(reportReader);
+                    JsonNode value=report==null?null:report.get("overallStatus");
+                    if(value!=null&&value.isTextual()&&VALIDATION_OUTCOMES.contains(value.textValue()))
+                        outcome=value.textValue();
+                } catch(java.io.IOException malformedLegacyReport) {
+                    // A legacy report should not prevent Server startup; it remains available from its stored record.
+                    continue;
+                }
+                if(outcome!=null) {
+                    update.setString(1,outcome);update.setString(2,validationId);update.executeUpdate();
+                }
+            }
         }
     }
     static final class TargetSearchPendingException extends Exception { }

@@ -156,7 +156,8 @@ export function parseRoute(hash: string): AppRoute {
           ? { actionId: safeRouteValue(query.get('action'), 512)! } : {}),
       } };
     }
-    return { kind: 'package', packageId: parts[1] };
+    return { kind: 'package', packageId: parts[1],
+      ...(query.has('environment') ? { environment: query.get('environment') || '' } : {}) };
   }
   if (parts[0] === 'configuration') {
     const rawTab = query.get('tab');
@@ -310,7 +311,11 @@ export function formatRoute(route: AppRoute): string {
         if (route.returnTo) query.set('returnTo', route.returnTo);
         return root + '/source-file' + (query.size ? '?' + query.toString() : '');
       }
-      if (!route.resource) return root;
+      if (!route.resource) {
+        const query = new URLSearchParams();
+        if (route.environment !== undefined) query.set('environment', route.environment);
+        return root + (query.size ? '?' + query.toString() : '');
+      }
       const resource = root + '/resources/' + encodeURIComponent(route.resource.type) + '/' + encodeURIComponent(route.resource.resourceId);
       if ((!route.resource.tab || route.resource.tab === 'definition') && !route.resource.logicalId && !route.resource.actionId && route.environment === undefined) return resource;
       const query = new URLSearchParams();

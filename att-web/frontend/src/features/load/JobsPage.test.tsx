@@ -2,7 +2,8 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ArtifactsPanel, BucketTable, JobOverview, JobsPage, MetricsPanel, TimeSeriesChart, downsampleMetricPoints, CHART_DISPLAY_POINT_THRESHOLD, type MetricBucket, type MetricSeries } from './JobsPage';
+import { AppShellContext, type AppShellContextValue } from '../../AppShell';
+import { ArtifactsPanel, BucketTable, JobOverview, JobsPage as JobsPageWithoutShell, MetricsPanel, TimeSeriesChart, downsampleMetricPoints, CHART_DISPLAY_POINT_THRESHOLD, type MetricBucket, type MetricSeries } from './JobsPage';
 import { JobArtifacts } from './JobArtifacts';
 import type { JobEventHandlers, JobResultResponse, JobStatus, JobView, LoadJobsApi } from './types';
 
@@ -43,6 +44,11 @@ function makeApi(overrides: Partial<LoadJobsApi> = {}): LoadJobsApi {
 
 let host: HTMLDivElement;
 let root: Root;
+const jobsPageContext = { uiLocale: 'en', authContextKey: 'test-account', inspectionSessionEpoch: 1 } as unknown as AppShellContextValue;
+
+function JobsPage(props: Parameters<typeof JobsPageWithoutShell>[0]) {
+  return <AppShellContext.Provider value={jobsPageContext}><JobsPageWithoutShell {...props} /></AppShellContext.Provider>;
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
