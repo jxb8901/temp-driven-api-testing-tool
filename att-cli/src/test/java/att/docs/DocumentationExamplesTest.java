@@ -115,6 +115,7 @@ class DocumentationExamplesTest {
         Map<String, Integer> actual = new TreeMap<String, Integer>();
         try (java.util.stream.Stream<Path> files = Files.walk(packageRoot)) {
             for (Path file : (Iterable<Path>) files.filter(Files::isRegularFile)
+                    .filter(path -> !path.startsWith(packageRoot.resolve("target")))
                     .filter(path -> path.toString().endsWith(".yaml") || path.toString().endsWith(".yml"))::iterator) {
                 Object value = YamlSupport.parser().load(read(file));
                 assertTrue(value instanceof Map, "Package YAML must be a mapping: " + packageRoot.relativize(file));
