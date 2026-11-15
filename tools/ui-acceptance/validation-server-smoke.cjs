@@ -90,10 +90,11 @@ async function main() {
     const packageConfigResponse = await packageConfigResponsePromise;
     assert.equal(packageConfigResponse.status(), 202);
     assert.deepEqual(await packageConfigResponse.request().postDataJSON(), {
-      command: 'validate', targetKind: 'config', packageId: 'payments', environment: 'SIT',
-    }, 'Package-effective Config validation must use the explicitly selected Package and Server default Environment');
+      command: 'validate', targetKind: 'config', packageId: 'payments',
+    }, 'Package-effective Config validation must keep the selected Package in its submission context');
     const packageConfigInitial = await packageConfigResponse.json();
     const packageConfigRecord = await waitForRecordReport(packageConfigInitial.validationId);
+    assert.equal(packageConfigRecord.environment, 'SIT', 'the Server must capture the Package default Environment into the durable record');
     assert.equal(packageConfigRecord.report.schemaVersion, 'att-validation/v1');
     assert.equal(packageConfigRecord.report.scope, 'CONFIG_PACKAGE');
     assert.equal(packageConfigRecord.report.context.environment, 'SIT');
