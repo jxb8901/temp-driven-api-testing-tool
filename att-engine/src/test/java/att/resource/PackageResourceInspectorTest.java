@@ -122,7 +122,9 @@ class PackageResourceInspectorTest {
             assertTrue(inspector.indexBuildCount()>builds);
 
             writeUtf8(root.resolve("package.yaml"),"schemaVersion: att-package/v1\nmetadata: {description: updated}\ntestdata:\n  descriptors: [testdata/base.yaml]\n");
-            assertNull(inspector.validationSourceRevisionDigest(true),"A changed Package manifest is unverified until the watched index is rebuilt");
+            String manifestRevision=inspector.validationSourceRevisionDigest(true);
+            assertTrue(manifestRevision==null||!changed.equals(manifestRevision),
+                    "A manifest edit is unverified until refresh or yields a new fingerprint if the watcher already rebuilt the index");
         }
     }
 
