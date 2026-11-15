@@ -87,6 +87,26 @@ class ServerRuntimeJobReplayTest {
         }
         fail("Job did not finish: "+id);
     }
+    private static void awaitRunning(ServerRuntime runtime,String id) throws Exception {
+        Instant deadline=Instant.now().plusSeconds(15);
+        while(Instant.now().isBefore(deadline)) {
+            String status=String.valueOf(runtime.jobRecord(id).get("status"));
+            if("RUNNING".equals(status))return;
+            if(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(status))fail("Job finished before the source edit: "+status);
+            Thread.sleep(25);
+        }
+        fail("Job did not start before the source edit: "+id);
+    }
+    private static Map<String,Object> awaitSutMetrics(ServerRuntime runtime,String id) throws Exception {
+        Instant deadline=Instant.now().plusSeconds(30);
+        while(Instant.now().isBefore(deadline)) {
+            Map<String,Object> manifest=runtime.sutMetrics.collectionStatus(id);
+            if(List.of("READY","PARTIAL","UNAVAILABLE","FAILED","DISABLED").contains(manifest.get("state")))return manifest;
+            Thread.sleep(25);
+        }
+        fail("SUT Metrics collection did not finish: "+id);
+        return Map.of();
+    }
     @Test void schedulePoliciesPreserveSourceAndAllowStaleMetadataEditsAcrossRestart() throws Exception {
         Fixture fixture=fixture();String strictId,pauseId,ignoreId,stored;
         ServerRuntimeTestSupport.MutableClock clock=new ServerRuntimeTestSupport.MutableClock(Instant.parse("2026-10-22T00:00:00Z"));
@@ -739,6 +759,44 @@ class ServerRuntimeJobReplayTest {
             Map<String,Object> rerun=runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("intentId",review.get("intentId"),"confirm",true)),"alice");
             String rerunId=String.valueOf(rerun.get("jobId"));
             assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForJob(rerunId)).path("queries").get(0).path("query").asText());
+        }
+    }
+    @Test void businessMetricCallsFailClosedWhenPinnedPackageOrRuntimeConfigChangesAfterAdmission() throws Exception {
+        Fixture fixture=fixture();
+        String scenario="schemaVersion: att-load/v1.9\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 5s}\n"
+                +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: business-tool\n      scope: job\n  collection: {mode: post-run, before: 1m, after: 1s, step: 15s}\n  livePreview: {enabled: false}\n";
+        Files.writeString(fixture.root.resolve("load/smoke.yaml"),scenario);
+        Path changedPackageFile=fixture.root.resolve("templates/BAD/template.yaml");
+        String originalTemplate=Files.readString(changedPackageFile);
+        String originalConfig=Files.readString(temp.resolve("unified-runtime/config/config.yaml"));
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            runtime.saveSutMetricProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","business-tool","name","Business Tool",
+                    "kind","base","category","db","metrics",List.of(Map.of("id","tool-version","title","Tool version",
+                            "unit","count","kind","gauge","sampling","afterDrain","call","#{version()}","sideEffectsAcknowledged",true))));
+            for(String revisionChange:List.of("runtime-config","package")) {
+                Files.writeString(temp.resolve("unified-runtime/config/config.yaml"),originalConfig);
+                Files.writeString(changedPackageFile,originalTemplate);
+                String id=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of(
+                        "packageId","p","scenario","load/smoke.yaml")),"alice").get("jobId"));
+                awaitRunning(runtime,id);
+                if("runtime-config".equals(revisionChange))
+                    Files.writeString(temp.resolve("unified-runtime/config/config.yaml"),originalConfig+"# changed after LOAD admission\n");
+                else Files.writeString(changedPackageFile,originalTemplate+"# changed after LOAD admission\n");
+                await(runtime,id);
+                Map<String,Object> manifest=awaitSutMetrics(runtime,id);
+                String expectedCode="runtime-config".equals(revisionChange)?"BUSINESS_CALL_CONFIG_CHANGED":"BUSINESS_CALL_PACKAGE_CHANGED";
+                assertTrue(((List<?>)manifest.get("diagnostics")).stream().anyMatch(item->expectedCode.equals(((Map<?,?>)item).get("code"))),
+                        revisionChange+": "+manifest.toString());
+                Map<?,?> file=(Map<?,?>)((List<?>)manifest.get("files")).get(0);
+                Map<?,?> sidecar=ServerRuntime.JSON.readValue(Files.readAllBytes(runtime.config.dataDir.resolve("jobs").resolve(id)
+                        .resolve("sut-metrics").resolve(String.valueOf(file.get("path")))),Map.class);
+                assertEquals("NOT_EVALUATED",sidecar.get("queryStatus"),"Changed admitted revisions must not substitute current source silently.");
+                assertEquals(0,sidecar.get("callCount"));
+            }
+        } finally {
+            Files.writeString(temp.resolve("unified-runtime/config/config.yaml"),originalConfig);
+            Files.writeString(changedPackageFile,originalTemplate);
         }
     }
     @Test void newScheduleOccurrencesResolveCurrentProfilesWhileRerunsKeepTheDispatchedSnapshot() throws Exception {

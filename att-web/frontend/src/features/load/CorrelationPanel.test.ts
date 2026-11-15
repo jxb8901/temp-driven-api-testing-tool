@@ -34,6 +34,19 @@ describe('LOAD and SUT correlation series', () => {
     expect(points.map(point => [point.y, point.durationMs])).toEqual([[2, 60_000], [3, 60_000]]);
   });
 
+  it('labels the arithmetic mean of unequal-duration rates as unweighted and retains clipped bin rates', () => {
+    const points = selectLoadPoints([
+      { windowStartEpochMs: 0, durationMs: 1000, completedRate: 0 },
+      { windowStartEpochMs: 1000, durationMs: 9000, completedRate: 100 },
+    ], { id: 'completedRate', field: 'completedRate', label: 'Completed TPS', unit: 'requests/s', rate: true },
+    'all', [], 500, 10_000);
+
+    expect(points.map(point => [point.y, point.durationMs, point.partialRange])).toEqual([
+      [0, 1000, true], [100, 9000, false],
+    ]);
+    expect(meanForLoadMetric(points, false)).toBe(50);
+  });
+
   it('keeps the latest SUT sample inside a preset window with an exclusive end', () => {
     const samples = [
       { timestamp: '1970-01-01T00:00:30.000Z', timestampEpochMs: 30_000, value: 10 },

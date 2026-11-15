@@ -16,6 +16,8 @@
 - Align #348 with the simplified two-form profile model: base profiles own only metric definitions and typed parameters; source/tenant/target bindings belong to direct Scenario bindings or one-level composite presets. Reject `extends`, derived profiles, nested composites, and incomplete preset bindings.
 - Publish the #348 provider-neutral `att-sut-metrics-observation/v1` contract with pinned source/profile/target revisions, UTC execution/phase/query windows, coverage, gaps, availability, and safe provenance.
 - Keep post-run metrics PENDING through the configured after-buffer and one query-step ingestion grace; mark missing or stale-tail coverage PARTIAL using a two-step/30-second tolerance, and atomically publish each snapshot-anchored manifest integrity transition with its manifest.
+- Collect after-drain business metrics promptly while mixed Jobs remain PENDING for buffered Prometheus collection; fail closed with NOT_EVALUATED diagnostics when pinned Package or Runtime Config revisions change.
+- Draft mapped business calls in a separate business-only Settings Profile, and label LOAD correlation means as unweighted arithmetic means of observed bins.
 - Serialize manifest writes per Job while keeping reads independent across Jobs.
 - Add a read-only Correlation view to LOAD Job details for comparing selected native LOAD metrics with a post-run SUT query over UTC time, with workload, phase, time-range, and SUT-series filters (#349).
 - Preserve native-bin and source-gap semantics in Correlation charts, including partial-range bins, extrema-aware downsampling, a 1,200-point cap, selected-versus-displayed counts, and no value extension across bins omitted by downsampling (#349).

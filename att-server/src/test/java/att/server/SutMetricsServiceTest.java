@@ -1260,11 +1260,11 @@ class SutMetricsServiceTest {
             service.upsertProfile(baseProfile("base", 1, false));
             service.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='select count(*)')}"));
             Map<String, Object> configured = scenario(List.of(binding("prom", null), map("profile", "business")),
-                    "1m", "2m", "30s");
+                    "1m", "1s", "15s");
             configured.put("thresholds", List.of(map("id", "count-max", "profile", "business", "metric", "count", "max", 10.0)));
             Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
-            assertEquals("120s", object(snapshot.get("collection")).get("after"));
-            assertEquals("30s", object(snapshot.get("collection")).get("step"));
+            assertEquals("1s", object(snapshot.get("collection")).get("after"));
+            assertEquals("15s", object(snapshot.get("collection")).get("step"));
             service.writeSnapshot(JOB_ID, snapshot);
             service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
                 @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
@@ -1273,7 +1273,7 @@ class SutMetricsServiceTest {
                 @Override public void close() { }
             });
 
-            Instant finishedAt = Instant.now().minusSeconds(160);
+            Instant finishedAt = Instant.now().minusSeconds(2);
             service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
             Map<String, Object> manifest = awaitManifest(service, JOB_ID);
             assertEquals("READY", manifest.get("state"));
@@ -1291,7 +1291,7 @@ class SutMetricsServiceTest {
         }
     }
 
-    @Test void hourLongPrometheusBufferCannotMakeLateBusinessSnapshotFresh() throws Exception {
+    @Test void hourLongPrometheusBufferDoesNotDelayAfterDrainBusinessSnapshot() throws Exception {
         try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::atWindowEndResponse);
              SutMetricsService service = new SutMetricsService(temp.resolve("mixed-hour-business-buffer"))) {
             service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
@@ -1309,9 +1309,19 @@ class SutMetricsServiceTest {
                 @Override public void close() { }
             });
 
-            Instant finishedAt = Instant.now().minusSeconds(70 * 60L);
+            Instant finishedAt = Instant.now().minusSeconds(2);
             service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
-            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            Map<String, Object> manifest;
+            do {
+                manifest = service.collectionStatus(JOB_ID);
+                if ("COMPLETE".equals(object(manifest.get("collectionProgress")).get("business"))) break;
+                Thread.sleep(25);
+            } while (System.nanoTime() < deadline);
+            assertEquals("PENDING", manifest.get("state"), "The combined manifest must stay pending for the Prometheus buffer.");
+            assertEquals("COMPLETE", object(manifest.get("collectionProgress")).get("business"));
+            assertEquals("PENDING", object(manifest.get("collectionProgress")).get("prometheus"));
+            assertEquals(0, fixture.requests.get(), "Prometheus collection must wait for after=1h plus one step.");
             Map<String, Object> businessFile = maps(manifest.get("files")).stream()
                     .filter(file -> "count".equals(file.get("metricId"))).findFirst().orElseThrow();
             Map<String, Object> sidecar = ServerRuntime.JSON.readValue(Files.readAllBytes(temp.resolve("mixed-hour-business-buffer")
@@ -1320,11 +1330,10 @@ class SutMetricsServiceTest {
             Map<String, Object> window = object(observation.get("window"));
             Map<String, Object> availability = object(observation.get("availability"));
             assertTrue(((Number) window.get("delayFromExecutionEndMs")).longValue()
-                    > SutMetricsService.MAX_MIXED_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS);
-            assertEquals("STALE", availability.get("freshness"));
-            Map<String, Object> evaluation = awaitThresholdEvaluation(service, JOB_ID);
-            assertEquals("NOT_EVALUATED", evaluation.get("state"));
-            assertEquals("NOT_EVALUATED", maps(object(evaluation.get("sutThresholds")).get("items")).get(0).get("status"));
+                    <= SutMetricsService.MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS);
+            assertEquals("FRESH", availability.get("freshness"));
+            assertEquals("PENDING", service.thresholdEvaluationStatus(JOB_ID).get("state"),
+                    "Threshold evaluation must wait until the combined collection reaches a terminal state.");
         }
     }
 

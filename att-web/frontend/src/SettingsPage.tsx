@@ -17,6 +17,9 @@ const EMPTY_SUT_PROFILE = {
   params: { instance: { type: 'promLabelValue', required: true } }, overridableParams: ['instance'],
   metrics: [{ id: 'cpu', title: 'CPU usage', unit: 'percent', kind: 'gauge', query: '100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle",instance="{{instance}}"}[5m])))' }],
 };
+const EMPTY_BUSINESS_PROFILE = {
+  schemaVersion: 'att-sut-metrics-profile/v1', id: 'business-metrics', name: 'Business Metrics', kind: 'base', category: 'db', metrics: [],
+};
 const EMPTY_SUT_BINDING = {
   schemaVersion: 'att-load-observability/v1', collections: [{ profile: 'profile-os', source: 'prom-main',
     targets: [{ id: 'sut-1', type: 'application', parameters: { instance: 'app-1:8080' } }] }],
@@ -140,6 +143,7 @@ function SutMetricsAdminPanel() {
   const [profiles, setProfiles] = useState<Array<Record<string, unknown>>>([]);
   const [sourceJson, setSourceJson] = useState(JSON.stringify(EMPTY_SUT_SOURCE, null, 2));
   const [profileJson, setProfileJson] = useState(JSON.stringify(EMPTY_SUT_PROFILE, null, 2));
+  const [businessProfileJson, setBusinessProfileJson] = useState(JSON.stringify(EMPTY_BUSINESS_PROFILE, null, 2));
   const [mappedGroupId, setMappedGroupId] = useState('transaction-query');
   const [mappedCall, setMappedCall] = useState("#{db.orders.query(sql='select workload_id, mix_id, success, failure from transaction_summary')}");
   const [mappedRowsPath, setMappedRowsPath] = useState('rows');
@@ -183,7 +187,7 @@ function SutMetricsAdminPanel() {
   }
   function addMappedBusinessCall() {
     try {
-      const profile = parseEditor(profileJson, 'Metrics Profile');
+      const profile = parseEditor(businessProfileJson, 'Business Metrics Profile');
       const metrics = Array.isArray(profile.metrics) ? profile.metrics : [];
       const mapping: Record<string, string> = { rows: mappedRowsPath.trim() || 'rows' };
       if (mappedWorkloadColumn.trim()) mapping.workloadColumn = mappedWorkloadColumn.trim();
@@ -195,8 +199,8 @@ function SutMetricsAdminPanel() {
         mapping,
         outputs: mappedOutputs.map(output => ({ ...output })),
       };
-      setProfileJson(JSON.stringify({ ...profile, metrics: [...metrics, group] }, null, 2));
-      setMessage(zh ? '多指標 business call 已加入 JSON 草稿；請檢視並儲存 Metrics Profile。' : 'Multi-output business call added to the JSON draft. Review and save the Metrics Profile.');
+      setBusinessProfileJson(JSON.stringify({ ...profile, kind: 'base', metrics: [...metrics, group] }, null, 2));
+      setMessage(zh ? '多指標 business call 已加入獨立的 Business Metrics Profile 草稿。' : 'Multi-output business call added to the separate Business Metrics Profile draft.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : (zh ? '無法建立 business call JSON。' : 'Could not build the business call JSON.'));
     }
@@ -221,14 +225,19 @@ function SutMetricsAdminPanel() {
     </section>
     <section aria-labelledby="sut-profiles-title"><h3 id="sut-profiles-title">Metrics Profiles</h3>
       <ul className="att-sut-catalog-list">{profiles.map(profile => <li key={String(profile.id)}><strong>{String(profile.name || profile.id)}</strong> <code>{String(profile.id)}</code> · {String(profile.kind)} / {String(profile.category)}
-        <button type="button" disabled={busy} onClick={() => setProfileJson(JSON.stringify(profile, null, 2))}>Edit JSON</button>
+        <button type="button" disabled={busy} onClick={() => {
+          const metrics = Array.isArray(profile.metrics) ? profile.metrics as Array<Record<string, unknown>> : [];
+          const businessOnly = metrics.length > 0 && metrics.every(metric => typeof metric.call === 'string' && typeof metric.query !== 'string');
+          if (businessOnly) setBusinessProfileJson(JSON.stringify(profile, null, 2));
+          else setProfileJson(JSON.stringify(profile, null, 2));
+        }}>Edit JSON</button>
         <button type="button" disabled={busy} onClick={() => void run(() => api.deleteSutMetricProfile(String(profile.id)), `Metrics Profile ${String(profile.id)} deleted.`)}>Delete</button>
       </li>)}</ul>
       <fieldset className="att-sut-mapped-call-editor">
         <legend>{zh ? '多指標 business call 對照' : 'Multi-output business call mapping'}</legend>
         <p className="att-settings-help">{zh
           ? '一次執行 DBHelper query 或 Package Tool，將明確資料欄位對應至多個數值 metric。Workload 和 Mix 欄位必須使用 LOAD 中不可變的 workloadId／mixId；未知或重複的列會保留為診斷資料。'
-          : 'Run one DBHelper query or Package Tool and map explicit result columns to numeric metrics. Workload and Mix columns must use immutable LOAD workloadId and mixId values; unknown or duplicate rows remain diagnostic.'}</p>
+          : 'Run one DBHelper query or Package Tool and map explicit result columns to numeric metrics. Workload and Mix columns must use immutable LOAD workloadId and mixId values; unknown or duplicate rows remain diagnostic. These mappings are drafted in a separate Business Metrics Profile so PromQL profiles stay query-only.'}</p>
         <label>{zh ? 'Call group ID' : 'Call group ID'}<input value={mappedGroupId} onChange={event => setMappedGroupId(event.target.value)} /></label>
         <label>{zh ? 'DBHelper／Package Tool call' : 'DBHelper / Package Tool call'}<textarea value={mappedCall} onChange={event => setMappedCall(event.target.value)} rows={3} spellCheck={false} /></label>
         <label>{zh ? '結果列路徑' : 'Result rows path'}<input value={mappedRowsPath} onChange={event => setMappedRowsPath(event.target.value)} /></label>
@@ -253,10 +262,12 @@ function SutMetricsAdminPanel() {
           </fieldset>)}
           <button type="button" disabled={busy || mappedOutputs.length >= 64} onClick={() => setMappedOutputs(current => [...current, { id: '', title: '', column: '', unit: 'count', kind: 'gauge' }])}>{zh ? '新增輸出' : 'Add output'}</button>
         </div>
-        <button type="button" disabled={busy} onClick={addMappedBusinessCall}>{zh ? '加入 JSON 草稿' : 'Add mapping to JSON draft'}</button>
+        <button type="button" disabled={busy} onClick={addMappedBusinessCall}>{zh ? '加入 Business Profile 草稿' : 'Add mapping to Business Profile draft'}</button>
       </fieldset>
-      <label>Metrics Profile JSON<textarea value={profileJson} onChange={event => setProfileJson(event.target.value)} rows={16} spellCheck={false} /></label>
+      <label>Prometheus Metrics Profile JSON<textarea value={profileJson} onChange={event => setProfileJson(event.target.value)} rows={16} spellCheck={false} /></label>
       <button type="button" disabled={busy} onClick={() => void run(() => api.saveSutMetricProfile(parseEditor(profileJson, 'Metrics Profile')), 'Metrics Profile saved and dependency graph validated.')}>Save Metrics Profile</button>
+      <label>Business Metrics Profile JSON<textarea value={businessProfileJson} onChange={event => setBusinessProfileJson(event.target.value)} rows={16} spellCheck={false} /></label>
+      <button type="button" disabled={busy} onClick={() => void run(() => api.saveSutMetricProfile(parseEditor(businessProfileJson, 'Business Metrics Profile')), 'Business Metrics Profile saved and dependency graph validated.')}>Save Business Metrics Profile</button>
     </section>
     <section aria-labelledby="sut-binding-title"><h3 id="sut-binding-title">Validate a LOAD observability binding</h3>
       <p>Validation resolves registered profiles, checks permissions and budgets, and returns a redacted query preview.</p>

@@ -2729,9 +2729,9 @@ final class ServerRuntime implements AutoCloseable {
             throw new IllegalStateException("The immutable business-metric execution snapshot is incomplete.");
         Path root=packageRoot(packageId);if(root==null)throw new IllegalStateException("The pinned Package is unavailable for business metrics.");
         validatePackageRoot(root);
-        verifyPackageRevision(packageId,environment,packageRevision);
         if(!runtimeRevision.equals(runtimeConfigRevision()))
             throw new IllegalStateException("The shared Runtime Config changed after LOAD admission; business metrics were not executed.");
+        verifyPackageRevision(packageId,environment,packageRevision);
         att.config.FrameworkConfig frameworkConfig=new att.config.FrameworkConfigLoader().load(config.runtimeConfigPath,
                 ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),root,environment);
         frameworkConfig.requireExecutionConfig();

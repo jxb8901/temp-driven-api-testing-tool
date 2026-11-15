@@ -65,6 +65,7 @@ import java.util.regex.Pattern;
 
 /** Server-owned Prometheus catalog, immutable LOAD snapshots and companion evidence. */
 final class SutMetricsService implements AutoCloseable {
+    private enum PostRunPhase { ALL, BUSINESS, PROMETHEUS }
     record WorkloadSubject(String workloadId, String mixId, String targetType, String targetId,
                            boolean mixedWorkload) {
         String scope() { return mixId == null ? "workload" : "mix"; }
@@ -128,8 +129,6 @@ final class SutMetricsService implements AutoCloseable {
     static final int MAX_BUSINESS_CALLS_PER_JOB = 16;
     static final long MAX_BUSINESS_CALL_TOTAL_MILLIS = 120_000L;
     static final long MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS = 120_000L;
-    // A larger Prometheus buffer cannot extend mixed-profile business freshness beyond five minutes.
-    static final long MAX_MIXED_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS = 300_000L;
     private static final String BUSINESS_CALL_PAYLOAD_SCHEMA = "att-sut-business-call-payload/v1";
     private static final int BUSINESS_CALL_PENDING = 0, BUSINESS_CALL_EXECUTING = 1, BUSINESS_CALL_CANCELLED = 2;
     private static final long MAX_BUSINESS_CALL_PAYLOAD_BYTES = 2L * 1024 * 1024;
@@ -1408,8 +1407,11 @@ final class SutMetricsService implements AutoCloseable {
                 return;
             }
             List<Map<String, Object>> snapshotQueries = listOfMaps(snapshot.get("queries"));
+            boolean hasBusinessQueries = snapshotQueries.stream()
+                    .anyMatch(query -> "business-call".equals(query.get("observationType")));
             boolean hasPrometheusQueries = snapshotQueries.stream()
                     .anyMatch(query -> !"business-call".equals(query.get("observationType")));
+            boolean mixedQueries = hasBusinessQueries && hasPrometheusQueries;
             Instant start = hasPrometheusQueries
                     ? startedAt.minusSeconds(durationSeconds(String.valueOf(objectOrEmpty(snapshot.get("collection")).get("before")), "before"))
                     : startedAt;
@@ -1434,26 +1436,72 @@ final class SutMetricsService implements AutoCloseable {
                     && finishedAt.toString().equals(prior.get("finishedAt"))
                     && end.toString().equals(prior.get("windowEnd"))
                     && eligibleAt.toString().equals(prior.get("eligibleAt"));
-            if (!alreadyScheduled) {
+            if (!alreadyScheduled || !prior.containsKey("collectionProgress")) {
                 Map<String, Object> pending = new LinkedHashMap<>(prior);
                 pending.putAll(fields("state", "PENDING", "complete", Boolean.FALSE, "startedAt", startedAt.toString(),
                         "finishedAt", finishedAt.toString(), "windowStart", start.toString(), "windowEnd", end.toString(),
                         "eligibleAt", eligibleAt.toString(), "step", objectOrEmpty(snapshot.get("collection")).get("step"),
-                        "phaseWindows", safePhases, "updatedAt", Instant.now().toString()));
+                        "phaseWindows", safePhases,
+                        "collectionProgress", fields(
+                                "business", hasBusinessQueries && !"COMPLETE".equals(objectOrEmpty(prior.get("collectionProgress")).get("business")) ? "PENDING" : "COMPLETE",
+                                "prometheus", hasPrometheusQueries && !"COMPLETE".equals(objectOrEmpty(prior.get("collectionProgress")).get("prometheus")) ? "PENDING" : "COMPLETE"),
+                        "updatedAt", Instant.now().toString()));
                 writeManifest(jobMetricsDirectory(jobId), pending);
             }
-            long delayMillis = Math.max(0L, Duration.between(Instant.now(), eligibleAt).toMillis());
+            Map<String, Object> progress = objectOrEmpty(collectionStatus(jobId).get("collectionProgress"));
+            PostRunPhase phase = mixedQueries
+                    ? ("COMPLETE".equals(progress.get("business")) ? PostRunPhase.PROMETHEUS : PostRunPhase.BUSINESS)
+                    : PostRunPhase.ALL;
+            Instant phaseEligibleAt = mixedQueries && phase == PostRunPhase.BUSINESS ? finishedAt : eligibleAt;
+            long delayMillis = Math.max(0L, Duration.between(Instant.now(), phaseEligibleAt).toMillis());
+            schedulePostRunPhase(jobId, snapshot, startedAt, finishedAt, start, end, eligibleAt,
+                    safePhases, phase, mixedQueries, delayMillis);
+        } catch (java.util.concurrent.RejectedExecutionException full) {
+            scheduledCollections.remove(jobId);
+            try { updateState(jobId, "FAILED", "Post-run collection scheduling capacity is full.", List.of()); }
+            catch (Exception ignored) { }
+        } catch (Exception failure) {
+            scheduledCollections.remove(jobId);
+            try { updateState(jobId, "FAILED", "Post-run SUT Metrics could not be scheduled.", List.of()); }
+            catch (Exception ignored) { }
+        }
+    }
+
+    private void schedulePostRunPhase(String jobId, Map<String, Object> snapshot, Instant startedAt,
+                                     Instant finishedAt, Instant start, Instant end, Instant eligibleAt,
+                                     List<Map<String, Object>> phaseWindows, PostRunPhase phase,
+                                     boolean mixedQueries, long delayMillis) {
+        try {
             collectionScheduler.schedule(() -> {
                 try {
                     Map<String, Object> current = collectionStatus(jobId);
-                    if (!"PENDING".equals(current.get("state"))) return;
+                    if (!"PENDING".equals(current.get("state"))) {
+                        scheduledCollections.remove(jobId);
+                        return;
+                    }
                     current.put("state", "COLLECTING");
                     current.put("complete", Boolean.FALSE);
                     current.put("updatedAt", Instant.now().toString());
                     writeManifest(jobMetricsDirectory(jobId), current);
                     collectors.execute(() -> {
-                        try { collectPostRun(jobId, snapshot, startedAt, finishedAt, start, end, eligibleAt, safePhases); }
-                        finally { scheduledCollections.remove(jobId); }
+                        try {
+                            collectPostRun(jobId, snapshot, startedAt, finishedAt, start, end,
+                                    eligibleAt, phaseWindows, phase);
+                            Map<String, Object> completed = collectionStatus(jobId);
+                            if (mixedQueries && phase == PostRunPhase.BUSINESS
+                                    && "PENDING".equals(completed.get("state"))
+                                    && "COMPLETE".equals(objectOrEmpty(completed.get("collectionProgress")).get("business"))) {
+                                long remainingDelay = Math.max(0L, Duration.between(Instant.now(), eligibleAt).toMillis());
+                                schedulePostRunPhase(jobId, snapshot, startedAt, finishedAt, start, end,
+                                        eligibleAt, phaseWindows, PostRunPhase.PROMETHEUS, true, remainingDelay);
+                            } else {
+                                scheduledCollections.remove(jobId);
+                            }
+                        } catch (Exception failure) {
+                            try { updateState(jobId, "FAILED", "Post-run SUT Metrics collection could not be completed.", List.of()); }
+                            catch (Exception ignored) { }
+                            scheduledCollections.remove(jobId);
+                        }
                     });
                 } catch (java.util.concurrent.RejectedExecutionException full) {
                     try { updateState(jobId, "FAILED", "Post-run collection capacity is full; no collection worker was available.", List.of()); }
@@ -1466,13 +1514,9 @@ final class SutMetricsService implements AutoCloseable {
                 }
             }, delayMillis, TimeUnit.MILLISECONDS);
         } catch (java.util.concurrent.RejectedExecutionException full) {
-            scheduledCollections.remove(jobId);
             try { updateState(jobId, "FAILED", "Post-run collection scheduling capacity is full.", List.of()); }
             catch (Exception ignored) { }
-        } catch (Exception failure) {
             scheduledCollections.remove(jobId);
-            try { updateState(jobId, "FAILED", "Post-run SUT Metrics could not be scheduled.", List.of()); }
-            catch (Exception ignored) { }
         }
     }
 
@@ -1527,7 +1571,7 @@ final class SutMetricsService implements AutoCloseable {
 
     private void collectPostRun(String jobId, Map<String, Object> snapshot, Instant executionStartedAt,
                                 Instant executionFinishedAt, Instant start, Instant end, Instant eligibleAt,
-                                List<Map<String, Object>> phaseWindows) {
+                                List<Map<String, Object>> phaseWindows, PostRunPhase phase) {
         List<Map<String, Object>> fileEntries = new ArrayList<>();
         List<Map<String, Object>> diagnostics = new ArrayList<>();
         long totalBytes = 0, totalSamples = 0, queriesSucceeded = 0, queriesFailed = 0, queriesEmpty = 0, queriesPartial = 0;
@@ -1543,10 +1587,30 @@ final class SutMetricsService implements AutoCloseable {
             directory = jobMetricsDirectory(jobId); Files.createDirectories(directory);
             List<Map<String, Object>> queries = listOfMaps(snapshot.get("queries"));
             queryRequestBudgets(snapshot, queries, Duration.between(start, end).getSeconds());
+            Map<String, Object> previousManifest = collectionStatus(jobId);
+            Map<String, Object> previousCoverage = objectOrEmpty(previousManifest.get("coverage"));
+            fileEntries.addAll(listOfMaps(previousManifest.get("files")));
+            diagnostics.addAll(listOfMaps(previousManifest.get("diagnostics")));
+            totalBytes = previousCoverage.get("artifactBytes") instanceof Number value ? value.longValue() : 0L;
+            totalSamples = previousCoverage.get("sampleCount") instanceof Number value ? value.longValue() : 0L;
+            queriesSucceeded = previousCoverage.get("successfulQueries") instanceof Number value ? value.longValue() : 0L;
+            queriesFailed = previousCoverage.get("failedQueries") instanceof Number value ? value.longValue() : 0L;
+            queriesEmpty = previousCoverage.get("emptyQueries") instanceof Number value ? value.longValue() : 0L;
+            queriesPartial = previousCoverage.get("partialQueries") instanceof Number value ? value.longValue() : 0L;
+            businessCallSubmitted = previousCoverage.get("businessCallSubmitted") instanceof Number value ? value.longValue() : 0L;
+            businessCallStarted = previousCoverage.get("businessCallStarted") instanceof Number value ? value.longValue() : 0L;
+            businessCallSucceeded = previousCoverage.get("businessCallSucceeded") instanceof Number value ? value.longValue() : 0L;
+            businessCallFailed = previousCoverage.get("businessCallFailed") instanceof Number value ? value.longValue() : 0L;
+            businessCallTimedOut = previousCoverage.get("businessCallTimedOut") instanceof Number value ? value.longValue() : 0L;
+            businessCallNativeTimedOut = previousCoverage.get("businessCallNativeTimedOut") instanceof Number value ? value.longValue() : 0L;
+            businessCallBudgetTimedOut = previousCoverage.get("businessCallBudgetTimedOut") instanceof Number value ? value.longValue() : 0L;
+            businessCallSkipped = previousCoverage.get("businessCallSkipped") instanceof Number value ? value.longValue() : 0L;
+            businessCallDurationMs = previousCoverage.get("businessCallDurationMs") instanceof Number value ? value.longValue() : 0L;
             boolean hasPrometheusQueries = queries.stream()
                     .anyMatch(query -> !"business-call".equals(query.get("observationType")));
-            long businessAfterDrainFreshnessLimitMillis = businessAfterDrainFreshnessLimitMillis(
-                    hasPrometheusQueries, afterSeconds, stepSeconds);
+            boolean hasBusinessQueries = queries.stream()
+                    .anyMatch(query -> "business-call".equals(query.get("observationType")));
+            long businessAfterDrainFreshnessLimitMillis = MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS;
             boolean businessCallStopped = false;
             long firstBusinessCallNanos = 0L;
             Map<String, BusinessCallResult> businessCallResults = new LinkedHashMap<>();
@@ -1555,6 +1619,8 @@ final class SutMetricsService implements AutoCloseable {
             for (int index = 0; index < queries.size(); index++) {
                 Map<String, Object> query = queries.get(index);
                 boolean businessCall = "business-call".equals(query.get("observationType"));
+                if (phase == PostRunPhase.BUSINESS && !businessCall
+                        || phase == PostRunPhase.PROMETHEUS && businessCall) continue;
                 boolean businessCallSubmittedThisQuery = false;
                 boolean businessCallSucceededThisQuery = false;
                 boolean businessCallInvocationThisQuery = false;
@@ -1595,7 +1661,7 @@ final class SutMetricsService implements AutoCloseable {
                             businessCallInvocationThisQuery = true;
                             if (executor == null) throw new IllegalStateException("Server-owned business-call execution is unavailable.");
                             Map<String, Object> steady = phaseWindows.stream()
-                                    .filter(phase -> "STEADY".equals(phase.get("phase"))).findFirst().orElse(null);
+                                    .filter(window -> "STEADY".equals(window.get("phase"))).findFirst().orElse(null);
                             Instant steadyStart = steady == null ? null : parseInstant(nullableText(steady.get("startAt")));
                             Instant steadyEnd = steady == null ? null : parseInstant(nullableText(steady.get("endAt")));
                             callAttemptNanos = System.nanoTime();
@@ -1793,13 +1859,21 @@ final class SutMetricsService implements AutoCloseable {
                     }
                 }
             }
-            String state = queriesFailed > 0 ? (queriesSucceeded == 0 ? "FAILED" : "PARTIAL")
+            Map<String, Object> progress = new LinkedHashMap<>(objectOrEmpty(previousManifest.get("collectionProgress")));
+            if (phase == PostRunPhase.ALL) {
+                progress.put("business", "COMPLETE");
+                progress.put("prometheus", "COMPLETE");
+            } else if (phase == PostRunPhase.BUSINESS) progress.put("business", "COMPLETE");
+            else progress.put("prometheus", "COMPLETE");
+            boolean waitingForPrometheusBuffer = phase == PostRunPhase.BUSINESS && hasBusinessQueries && hasPrometheusQueries;
+            String state = waitingForPrometheusBuffer ? "PENDING"
+                    : queriesFailed > 0 ? (queriesSucceeded == 0 ? "FAILED" : "PARTIAL")
                     : queriesSucceeded == 0 ? "UNAVAILABLE" : queriesEmpty > 0 || queriesPartial > 0 ? "PARTIAL" : "READY";
             Map<String, Object> manifest = fields("schemaVersion", COLLECTION_SCHEMA, "state", state,
                     "complete", "READY".equals(state), "jobId", jobId, "snapshotId", snapshot.get("snapshotId"),
                     "startedAt", executionStartedAt.toString(), "finishedAt", executionFinishedAt.toString(), "windowStart", start.toString(),
                     "windowEnd", end.toString(), "eligibleAt", eligibleAt.toString(), "step", objectOrEmpty(snapshot.get("collection")).get("step"),
-                    "phaseWindows", phaseWindows,
+                    "phaseWindows", phaseWindows, "collectionProgress", progress,
                     "coverage", fields("queryCount", queries.size(), "successfulQueries", queriesSucceeded,
                             "emptyQueries", queriesEmpty, "partialQueries", queriesPartial, "failedQueries", queriesFailed, "sampleCount", totalSamples,
                             "businessCallCount", businessCallStarted, "businessCallSubmitted", businessCallSubmitted,
@@ -2069,7 +2143,10 @@ final class SutMetricsService implements AutoCloseable {
         String code = failure instanceof BusinessMetricOutputException output
                 ? output.code() : safeBusinessCallFailureCode(failure);
         String mappingStatus = failure instanceof BusinessMetricOutputException output
-                ? output.mappingStatus() : "UNAVAILABLE";
+                ? output.mappingStatus() : Set.of("BUSINESS_CALL_CONFIG_CHANGED", "BUSINESS_CALL_PACKAGE_CHANGED").contains(code)
+                        ? "NOT_EVALUATED" : "UNAVAILABLE";
+        boolean notEvaluated = failure instanceof BusinessMetricOutputException
+                || Set.of("BUSINESS_CALL_CONFIG_CHANGED", "BUSINESS_CALL_PACKAGE_CHANGED").contains(code);
         int unmatchedRows = failure instanceof BusinessMetricOutputException output ? output.unmatchedRows() : 0;
         long durationMs = callResult == null ? 0L : callResult.durationMs();
         Instant observedAt = callResult == null || callResult.observedAt() == null ? Instant.now() : callResult.observedAt();
@@ -2100,7 +2177,7 @@ final class SutMetricsService implements AutoCloseable {
                 "metric", fields("id", query.get("metricId"), "name", query.get("title"), "category", query.get("category"),
                         "unit", query.get("unit"), "kind", query.get("kind")),
                 "window", window,
-                "availability", fields("state", failure instanceof BusinessMetricOutputException ? "NOT_EVALUATED" : "UNAVAILABLE",
+                "availability", fields("state", notEvaluated ? "NOT_EVALUATED" : "UNAVAILABLE",
                         "freshness", "UNKNOWN", "quality", mappingStatus, "mappingStatus", mappingStatus,
                         "unmatchedRowCount", unmatchedRows, "callCount", callCount, "callSubmitted", callSubmitted,
                         "collectionDurationMs", durationMs, "diagnostics", List.of(diagnostic)),
@@ -2112,7 +2189,7 @@ final class SutMetricsService implements AutoCloseable {
                         "runtimeConfigRevision", objectOrEmpty(snapshot.get("execution")).get("runtimeConfigRevision")));
         byte[] bytes = json.writeValueAsBytes(fields("schemaVersion", OBSERVATION_SCHEMA,
                 "queryId", query.get("id"), "callGroupId", callGroupId,
-                "queryStatus", failure instanceof BusinessMetricOutputException ? "NOT_EVALUATED" : "UNAVAILABLE",
+                "queryStatus", notEvaluated ? "NOT_EVALUATED" : "UNAVAILABLE",
                 "profile", query.get("profile"),
                 "profilePath", query.get("profilePath"), "sourceId", query.get("sourceId"), "sourceName", query.get("sourceName"),
                 "metricId", query.get("metricId"), "title", query.get("title"), "category", query.get("category"),
@@ -3641,15 +3718,6 @@ final class SutMetricsService implements AutoCloseable {
         return number * multiplier;
     }
 
-    private static long businessAfterDrainFreshnessLimitMillis(boolean hasPrometheusQueries,
-                                                                long afterSeconds, long stepSeconds) {
-        if (!hasPrometheusQueries) return MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS;
-        long expectedPrometheusDelaySeconds = Math.addExact(afterSeconds, stepSeconds);
-        long expectedPrometheusDelayMillis = Math.multiplyExact(expectedPrometheusDelaySeconds, 1000L);
-        return Math.min(MAX_MIXED_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS,
-                Math.addExact(MAX_BUSINESS_AFTER_DRAIN_FRESHNESS_DELAY_MILLIS, expectedPrometheusDelayMillis));
-    }
-
     private static void validateCollectionOptions(Map<String, Object> options) {
         rejectUnknown(options, Set.of("mode", "step", "before", "after"), "observability.collection");
         if (options.containsKey("mode") && !"post-run".equals(options.get("mode"))) throw new IllegalArgumentException("Only post-run collection is supported in Phase 1.");
@@ -3776,6 +3844,7 @@ final class SutMetricsService implements AutoCloseable {
         if (failure instanceof BusinessCallBudgetTimeoutException) return "BUSINESS_CALL_BUDGET_TIMEOUT";
         if (failure instanceof BusinessCallNativeTimeoutException) return "BUSINESS_CALL_TIMEOUT";
         if (failure instanceof TimeoutException) return "BUSINESS_CALL_TIMEOUT";
+        if (failure instanceof ServerRuntime.StaleCursorException) return "BUSINESS_CALL_PACKAGE_CHANGED";
         String message = failure.getMessage() == null ? "" : failure.getMessage().toLowerCase(Locale.ROOT);
         if (message.contains("runtime config changed")) return "BUSINESS_CALL_CONFIG_CHANGED";
         if (message.contains("package revision") || message.contains("pinned package")) return "BUSINESS_CALL_PACKAGE_CHANGED";
