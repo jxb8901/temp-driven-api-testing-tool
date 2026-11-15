@@ -334,6 +334,68 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void sutMetricsRouteExposesCompletedBusinessPhaseAsProvisionalDuringPrometheusBuffer() throws Exception {
+        Path packages = Files.createDirectories(temp.resolve("sut-metrics-provisional-packages"));
+        createPackage(packages.resolve("p"));
+        String jobId = "J0000000000000811";
+        try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0);
+             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-metrics-provisional-data",
+                     DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-metrics-provisional-libs"), true)) {
+            runtime.sutMetrics.upsertSource(Map.of("schemaVersion", "att-sut-metrics-source/v1", "id", "prom",
+                    "name", "Prometheus", "url", fixture.url(), "readers", List.of("alice"), "readRoles", List.of()));
+            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion", "att-sut-metrics-profile/v1", "id", "base",
+                    "name", "Base", "kind", "base", "category", "app", "metrics", List.of(Map.of(
+                            "id", "requests", "title", "Requests", "unit", "count", "kind", "gauge", "query", "up"))));
+            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion", "att-sut-metrics-profile/v1", "id", "business",
+                    "name", "Business", "kind", "base", "category", "db", "metrics", List.of(Map.of(
+                            "id", "count", "title", "Count", "unit", "count", "kind", "gauge",
+                            "call", "#{db.orders.scalar(sql='select count(*)')}"))));
+            Map<String, Object> scenario = new java.util.LinkedHashMap<>();
+            scenario.put("schemaVersion", "att-load-observability/v1");
+            scenario.put("collections", List.of(
+                    Map.of("id", "prom-binding", "profile", "base", "source", "prom",
+                            "targets", List.of(Map.of("id", "sut-1", "type", "app"))),
+                    Map.of("id", "business-binding", "profile", "business")));
+            scenario.put("collection", Map.of("mode", "post-run", "before", "1m", "after", "1h", "step", "5m"));
+            scenario.put("livePreview", Map.of("enabled", false));
+            scenario.put("thresholds", List.of(Map.of("id", "count-max", "profile", "business", "metric", "count", "max", 10.0)));
+            Map<String, Object> snapshot = runtime.sutMetrics.resolveScenario(scenario, "alice", false);
+            runtime.sutMetrics.setBusinessCallExecutor((ignoredJob, ignoredSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) { return 12; }
+                @Override public void close() { }
+            });
+            seedLoadJob(runtime, jobId, "alice", snapshot, "{}");
+            Instant finishedAt = Instant.now().minusSeconds(2), startedAt = finishedAt.minusSeconds(30);
+            runtime.sutMetrics.jobFinished(jobId, startedAt, finishedAt);
+
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            Map<String, Object> manifest;
+            do {
+                manifest = runtime.sutMetrics.collectionStatus(jobId);
+                if (manifest.get("collectionProgress") instanceof Map<?, ?> progress
+                        && "COMPLETE".equals(progress.get("business"))) break;
+                Thread.sleep(25);
+            } while (System.nanoTime() < deadline);
+            assertEquals("PENDING", manifest.get("state"));
+            assertEquals(0, fixture.requests.get(), "Prometheus must remain in its configured after-buffer.");
+
+            Captured response = invokeAs(servlet(runtime), "GET", "/jobs/" + jobId + "/sut-metrics",
+                    Collections.emptyMap(), new byte[0], "alice", Set.of(runtime.config.authorization.userRole));
+            JsonNode body = ServerRuntime.JSON.readTree(response.body());
+            assertEquals(200, response.status, response.bodyText());
+            assertTrue(body.path("provisional").asBoolean(), body.toString());
+            assertEquals("PENDING", body.path("state").asText());
+            assertEquals("COMPLETE", body.path("collection").path("collectionProgress").path("business").asText());
+            assertEquals("PENDING", body.path("collection").path("collectionProgress").path("prometheus").asText());
+            assertTrue(body.path("collection").path("eligibleAt").isTextual(), body.toString());
+            assertEquals(1, body.path("items").size(), "The API exposes the completed business value before Prometheus is eligible.");
+            assertEquals("count", body.path("items").get(0).path("metricId").asText());
+            assertEquals("PENDING", body.path("thresholdEvaluation").path("state").asText());
+        }
+    }
+
     @Test void loadResultRouteReturnsNativeAndSutCombinedPerformanceVerdict() throws Exception {
         Path packages = Files.createDirectories(temp.resolve("sut-threshold-result-packages"));
         createPackage(packages.resolve("p"));

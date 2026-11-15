@@ -1104,16 +1104,28 @@ final class SutMetricsService implements AutoCloseable {
                                           String targetId, String profilePath) throws Exception {
         Map<String, Object> manifest = collectionStatus(jobId);
         String state = String.valueOf(manifest.get("state"));
-        if (!Set.of("READY", "PARTIAL", "UNAVAILABLE", "FAILED").contains(state))
-            return fields("manifest", manifest, "items", List.of(), "nextOffset", null);
+        Map<String, Object> progress = objectOrEmpty(manifest.get("collectionProgress"));
+        boolean provisional = Set.of("PENDING", "COLLECTING").contains(state)
+                && "COMPLETE".equals(progress.get("business"))
+                && "PENDING".equals(progress.get("prometheus"));
+        if (!Set.of("READY", "PARTIAL", "UNAVAILABLE", "FAILED").contains(state) && !provisional)
+            return fields("manifest", manifest, "items", List.of(), "nextOffset", null, "provisional", false);
         List<Map<String, Object>> all = listOfMaps(manifest.get("files"));
+        if (provisional) {
+            Set<String> completedBusinessQueries = new HashSet<>();
+            for (Map<String, Object> query : listOfMaps(manifest.get("queries")))
+                if ("business-call".equals(query.get("observationType")) && query.get("id") instanceof String id)
+                    completedBusinessQueries.add(id);
+            all.removeIf(item -> !completedBusinessQueries.contains(item.get("queryId")));
+        }
         if (queryId != null && !queryId.isBlank()) all.removeIf(item -> !queryId.equals(item.get("queryId")));
         if (targetId != null && !targetId.isBlank()) all.removeIf(item -> !targetId.equals(item.get("targetId")));
         if (profilePath != null && !profilePath.isBlank()) all.removeIf(item -> !profilePath.equals(item.get("profilePath")));
         int from = Math.max(0, Math.min(offset, all.size())), to = Math.min(all.size(), from + Math.max(1, Math.min(limit, 16)));
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> fileEntry : all.subList(from, to)) rows.add(readSeriesFile(jobId, fileEntry));
-        return fields("manifest", manifest, "items", rows, "nextOffset", to < all.size() ? to : null);
+        return fields("manifest", manifest, "items", rows, "nextOffset", to < all.size() ? to : null,
+                "provisional", provisional);
     }
 
     Map<String, Object> writeOfflineReportEvidence(String jobId, Path reportRoot) throws Exception {

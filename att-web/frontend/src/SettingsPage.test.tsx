@@ -54,9 +54,14 @@ describe('SettingsPage SUT Metrics profiles', () => {
     expect(prometheusProfile.metrics).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'cpu', query: expect.any(String) })]));
     expect(businessProfile).toMatchObject({ id: 'business-metrics', kind: 'base' });
     expect(businessProfile.metrics).toEqual(expect.arrayContaining([expect.objectContaining({
-      id: 'transaction-query', call: expect.stringContaining('db.orders.query'),
+      id: 'transaction-query', call: expect.stringContaining('select workload_id, mix_id, success, failure'),
     })]));
-    expect((businessProfile.metrics as Array<Record<string, unknown>>)[0]?.outputs).toHaveLength(2);
+    const businessMetric = (businessProfile.metrics as Array<Record<string, unknown>>)[0]!;
+    expect(businessMetric.mapping).toMatchObject({ workloadColumn: 'workload_id', mixColumn: 'mix_id' });
+    expect(businessMetric.outputs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ column: 'success' }), expect.objectContaining({ column: 'failure' }),
+    ]));
+    expect(host.textContent).toContain('Column names are matched exactly and are case-sensitive');
 
     const saveBusiness = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Save Business Metrics Profile');
     await act(async () => { saveBusiness!.click(); await Promise.resolve(); });

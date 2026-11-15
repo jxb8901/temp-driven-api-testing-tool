@@ -1587,22 +1587,22 @@ Base profile 可使用已配置的 `call` 定義業務指標，代替 PromQL。L
     "sampling": "afterDrain",
     "mapping": {
       "rows": "rows",
-      "workloadColumn": "WORKLOAD_ID",
-      "mixColumn": "MIX_ID"
+      "workloadColumn": "workload_id",
+      "mixColumn": "mix_id"
     },
     "outputs": [
-      {"id": "successful_transactions", "title": "Successful transactions", "column": "SUCCESS", "unit": "transactions", "kind": "counter"},
-      {"id": "failed_transactions", "title": "Failed transactions", "column": "FAILURE", "unit": "transactions", "kind": "counter"}
+      {"id": "successful_transactions", "title": "Successful transactions", "column": "success", "unit": "transactions", "kind": "counter"},
+      {"id": "failed_transactions", "title": "Failed transactions", "column": "failure", "unit": "transactions", "kind": "counter"}
     ]
   }]
 }
 ~~~
 
-Result path 預設為 `rows`，也可指定 `payload.rows` 等有界 object/list path。若沒有 `workloadColumn`，Job-wide binding 必須恰好回傳一列。設定 `workloadColumn` 但不設定 `mixColumn` 時，每列都會對應至 Workload scope，mixed Workload 亦然。若 query 回傳跨 mix slot 的 aggregate，必須由 query 或 Tool 明確計算；ATT 會保留 Workload scope，不會將數值複製或歸屬至個別 slot。每個 Workload 最多只能有一列。設定 `mixColumn` 可用 `workloadId` 和 `mixId` 配對 mix slot，並且必須同時設定 `workloadColumn`。缺少或未知 mix ID 的 row 會保持未歸屬並記錄於 mapping diagnostics；其他已明確對應的 slot 仍可用。ATT 不會以 target ID、動態 pivot、模糊 join 或隱式 aggregation 對照資料列。欄位名稱和 ID 值必須完全相符。
+Result path 預設為 `rows`，也可指定 `payload.rows` 等有界 object/list path。若沒有 `workloadColumn`，Job-wide binding 必須恰好回傳一列。設定 `workloadColumn` 但不設定 `mixColumn` 時，每列都會對應至 Workload scope，mixed Workload 亦然。若 query 回傳跨 mix slot 的 aggregate，必須由 query 或 Tool 明確計算；ATT 會保留 Workload scope，不會將數值複製或歸屬至個別 slot。每個 Workload 最多只能有一列。設定 `mixColumn` 可用 `workloadId` 和 `mixId` 配對 mix slot，並且必須同時設定 `workloadColumn`。缺少或未知 mix ID 的 row 會保持未歸屬並記錄於 mapping diagnostics；其他已明確對應的 slot 仍可用。ATT 不會以 target ID、動態 pivot、模糊 join 或隱式 aggregation 對照資料列。欄位名稱會區分大小寫，mapping 必須與 query 或 Tool 回傳的欄名完全一致。
 
 每個 call group 最多可有 64 個 output 及 4,096 列 result。每個 Job 最多執行 16 次實際呼叫，每次最多 60 秒，所有呼叫合計最多 120 秒。回傳列只保存在記憶體；sidecar 和報告會保存各個數值 output 及 mapping diagnostics，不保存 raw rows。無效欄位只影響該 metric 和 subject。Call 失敗或 timeout 會令同一 group 的所有 outputs unavailable。重複、未知、缺少或有歧義的 rows 會保留為 diagnostics；每個預期的 Workload/mix output 仍會出現在結果中。Partial 或 unavailable value 不會替換為零。
 
-設定 `sampling: windowQuery` 和 `window: steady`，即可在 drain 後執行一次 call，並透過 `EXEC.OBSERVATION.WINDOW_START` 和 `EXEC.OBSERVATION.WINDOW_END` 讀取實際 STEADY bounds。Aggregation 由 query author 定義；成功回傳數值不代表已完整覆蓋該 interval。單一輸出的 map 或 list result 必須使用明確 `valuePath`，例如 `rows[0].active`；解析後必須是單一有限數字。Server 會在 Job admission 時固定 Package 和 Runtime Config revision，但不會保留 executable source 供延遲執行；若任一 revision 在 collection 前改變，sidecar 會記為 `NOT_EVALUATED`，Job diagnostics 會回報 `BUSINESS_CALL_PACKAGE_CHANGED` 或 `BUSINESS_CALL_CONFIG_CHANGED`。ATT 不會靜默使用已改動的檔案執行 call。Calls 在有界的 Server worker pool 中執行，不會佔用 LOAD worker。After-drain value 只有在 LOAD 完成後兩分鐘內收集才會視為 fresh；此上限不受 Prometheus after buffer 影響，較遲的 value 會標示 stale。Mixed Job 的 after-drain call 會在 LOAD 完成後儘快執行；combined manifest 會維持 `PENDING` 等待 buffered Prometheus collection，threshold evaluation 則等待 collection 終結。Call 失敗、timeout、過期或結果非數字會評估為 `NOT_EVALUATED`；不會代入零值，也不會改變 Worker result。Binding validation 和 live preview 都不會執行 business call。
+設定 `sampling: windowQuery` 和 `window: steady`，即可在 drain 後執行一次 call，並透過 `EXEC.OBSERVATION.WINDOW_START` 和 `EXEC.OBSERVATION.WINDOW_END` 讀取實際 STEADY bounds。Aggregation 由 query author 定義；成功回傳數值不代表已完整覆蓋該 interval。單一輸出的 map 或 list result 必須使用明確 `valuePath`，例如 `rows[0].active`；解析後必須是單一有限數字。Server 會在 Job admission 時固定 Package 和 Runtime Config revision，但不會保留 executable source 供延遲執行；若任一 revision 在 collection 前改變，sidecar 會記為 `NOT_EVALUATED`，Job diagnostics 會回報 `BUSINESS_CALL_PACKAGE_CHANGED` 或 `BUSINESS_CALL_CONFIG_CHANGED`。ATT 不會靜默使用已改動的檔案執行 call。Calls 在有界的 Server worker pool 中執行，不會佔用 LOAD worker。After-drain value 只有在 LOAD 完成後兩分鐘內收集才會視為 fresh；此上限不受 Prometheus after buffer 影響，較遲的 value 會標示 stale。Mixed Job 的 after-drain call 會在 LOAD 完成後儘快執行。已驗證的 business sidecar 會在 combined manifest 仍為 `PENDING` 時，以 provisional 唯讀證據提供，並標示 `business: COMPLETE`、`prometheus: PENDING` 及 Prometheus `eligibleAt`。Threshold 和 combined performance verdict 會等到完整 collection 終結；buffer 期間的 polling 會依 deadline 逐步退避。Server 重啟後，會恢復尚未完成的 Prometheus phase，不會重複執行已完成的 Business phase。若重啟時 Business call 尚未完成，系統會以 `SERVER_RESTART_INTERRUPTED` fail closed，不會重試可能有 side effect 的 call。Call 失敗、timeout、過期或結果非數字會評估為 `NOT_EVALUATED`；不會代入零值，也不會改變 Worker result。Binding validation 和 live preview 都不會執行 business call。
 
 Business metric（包括 numeric counter）支援 `max <= value` threshold。`afterDrain` metric 使用 `window: afterDrain`；`windowQuery` metric 使用 `window: steady`。這些單值規則不使用 `minimumCoverage`。省略 `subjects` 或設定 `all` 會評估所有預期 subject。若要指定 Workload 或 mix，請將 `subjects` 設為明確清單；mix selector 必須同時包含不可變 ID：
 

@@ -1114,11 +1114,13 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
   const [queryDefinitions, setQueryDefinitions] = useState<SutMetricQueryMetadata[]>([]);
   const [liveEndedJobId, setLiveEndedJobId] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
+  const mixedWaitPollAttempt = useRef(0);
 
   useEffect(() => {
     if (hidden) return;
     let disposed = false;
     let timer: number | undefined;
+    mixedWaitPollAttempt.current = 0;
     const schedule = (delay: number) => {
       if (timer !== undefined) window.clearTimeout(timer);
       if (!disposed && !document.hidden) timer = window.setTimeout(() => void poll(), delay);
@@ -1143,8 +1145,23 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
           if (disposed || controller.signal.aborted) return;
           setResponse(value); setQueryDefinitions(value.collection?.queries || []); setNextOffset(typeof value.nextOffset === 'number' ? value.nextOffset : null);
           const evaluationState = String(value.thresholdEvaluation?.state || 'DISABLED');
-          if (['PENDING', 'COLLECTING'].includes(String(value.state || value.collection?.state))) schedule(5_000);
-          else if (shouldPollEvaluation(evaluationState, value.thresholdEvaluation?.attempt)) schedule(2_000);
+          const collectionState = String(value.state || value.collection?.state);
+          const phaseProgress = value.collection?.collectionProgress;
+          const mixedPrometheusWait = value.provisional === true
+            && phaseProgress?.business === 'COMPLETE' && phaseProgress.prometheus === 'PENDING';
+          const eligibleAt = value.collection?.eligibleAt ? Date.parse(value.collection.eligibleAt) : Number.NaN;
+          const remainingUntilPrometheus = eligibleAt - Date.now();
+          if (mixedPrometheusWait && Number.isFinite(remainingUntilPrometheus) && remainingUntilPrometheus > 0) {
+            const backoff = Math.min(120_000, 15_000 * (2 ** Math.min(mixedWaitPollAttempt.current, 3)));
+            mixedWaitPollAttempt.current += 1;
+            schedule(Math.max(1_000, Math.min(backoff, remainingUntilPrometheus)));
+          } else if (['PENDING', 'COLLECTING'].includes(collectionState)) {
+            mixedWaitPollAttempt.current = 0;
+            schedule(5_000);
+          } else {
+            mixedWaitPollAttempt.current = 0;
+            if (shouldPollEvaluation(evaluationState, value.thresholdEvaluation?.attempt)) schedule(2_000);
+          }
         }
       } catch (failure) {
         if (disposed || controller.signal.aborted) return;
@@ -1195,6 +1212,9 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
   const freshness = (response as SutMetricsLiveResponse | null)?.sourceQueryTime || collection?.updatedAt || collection?.createdAt;
   const sampleCount = (response as SutMetricsLiveResponse | null)?.sampleCount;
   const diagnostics = collection?.diagnostics || [];
+  const provisional = (response as SutMetricsJobResponse | null)?.provisional === true
+    && collection?.collectionProgress?.business === 'COMPLETE'
+    && collection.collectionProgress.prometheus === 'PENDING';
   const showLive = activeLoad && liveEndedJobId !== jobId;
   const queries = queryDefinitions.length ? queryDefinitions : showLive
     ? ((response as SutMetricsLiveResponse | null)?.queries || [])
@@ -1219,13 +1239,20 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
       <div><dt>Collection state</dt><dd>{state}</dd></div>
       {windowStart && <div><dt>Coverage start</dt><dd>{dateTime(windowStart)}</dd></div>}
       {windowEnd && <div><dt>Coverage end</dt><dd>{dateTime(windowEnd)}</dd></div>}
+      {provisional && <><div><dt>Business phase</dt><dd>COMPLETE</dd></div><div><dt>Prometheus phase</dt><dd>PENDING</dd></div>
+        {collection?.eligibleAt && <div><dt>Prometheus eligible at</dt><dd>{dateTime(collection.eligibleAt)}</dd></div>}</>}
       {freshness && <div><dt>Last source query</dt><dd>{dateTime(freshness)}</dd></div>}
       {sampleCount !== undefined && <div><dt>Samples in preview</dt><dd>{METRIC_NUMBER_FORMATTER.format(sampleCount)}</dd></div>}
     </dl>
     <SutAcceptanceSummary acceptance={(response as SutMetricsJobResponse | null)?.performanceAcceptance} />
+    {provisional && <p className="att-sut-provisional-evidence" role="status">
+      Provisional business evidence is available read-only. Business phase is COMPLETE; Prometheus phase is PENDING.
+      Threshold and combined performance verdicts stay PENDING until the full collection is terminal.
+      {collection?.eligibleAt && <> Prometheus collection is eligible at {dateTime(collection.eligibleAt)}.</>}
+    </p>}
     {state === 'DISABLED' && <p role="status">SUT Metrics are not configured for this LOAD Job.</p>}
-    {state === 'PENDING' && <p role="status" aria-busy={loading}>SUT Metrics are waiting for LOAD execution or the post-run collection worker.</p>}
-    {state === 'COLLECTING' && <p role="status" aria-busy="true">Post-run SUT Metrics collection is in progress. The LOAD execution result is independent of this status.</p>}
+    {state === 'PENDING' && !provisional && <p role="status" aria-busy={loading}>SUT Metrics are waiting for LOAD execution or the post-run collection worker.</p>}
+    {state === 'COLLECTING' && !provisional && <p role="status" aria-busy="true">Post-run SUT Metrics collection is in progress. The LOAD execution result is independent of this status.</p>}
     {state === 'UNAVAILABLE' && <p role="status">No SUT metric observations were collected for this Job.</p>}
     {state === 'FAILED' && <p role="alert">SUT Metrics collection failed. The LOAD execution verdict is unchanged.</p>}
     {state === 'PARTIAL' && <p role="status">Some metrics are available; other queries returned no data or could not be collected.</p>}

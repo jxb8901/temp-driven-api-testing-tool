@@ -147,13 +147,13 @@ function SutMetricsAdminPanel() {
   const [mappedGroupId, setMappedGroupId] = useState('transaction-query');
   const [mappedCall, setMappedCall] = useState("#{db.orders.query(sql='select workload_id, mix_id, success, failure from transaction_summary')}");
   const [mappedRowsPath, setMappedRowsPath] = useState('rows');
-  const [mappedWorkloadColumn, setMappedWorkloadColumn] = useState('WORKLOAD_ID');
-  const [mappedMixColumn, setMappedMixColumn] = useState('MIX_ID');
+  const [mappedWorkloadColumn, setMappedWorkloadColumn] = useState('workload_id');
+  const [mappedMixColumn, setMappedMixColumn] = useState('mix_id');
   const [mappedSampling, setMappedSampling] = useState<'afterDrain' | 'windowQuery'>('afterDrain');
   const [mappedToolAcknowledged, setMappedToolAcknowledged] = useState(false);
   const [mappedOutputs, setMappedOutputs] = useState([
-    { id: 'success_transactions', title: 'Successful transactions', column: 'SUCCESS', unit: 'transactions', kind: 'counter' },
-    { id: 'failed_transactions', title: 'Failed transactions', column: 'FAILURE', unit: 'transactions', kind: 'counter' },
+    { id: 'success_transactions', title: 'Successful transactions', column: 'success', unit: 'transactions', kind: 'counter' },
+    { id: 'failed_transactions', title: 'Failed transactions', column: 'failure', unit: 'transactions', kind: 'counter' },
   ]);
   const [bindingJson, setBindingJson] = useState(JSON.stringify(EMPTY_SUT_BINDING, null, 2));
   const [preview, setPreview] = useState<unknown>(null);
@@ -236,8 +236,8 @@ function SutMetricsAdminPanel() {
       <fieldset className="att-sut-mapped-call-editor">
         <legend>{zh ? '多指標 business call 對照' : 'Multi-output business call mapping'}</legend>
         <p className="att-settings-help">{zh
-          ? '一次執行 DBHelper query 或 Package Tool，將明確資料欄位對應至多個數值 metric。Workload 和 Mix 欄位必須使用 LOAD 中不可變的 workloadId／mixId；未知或重複的列會保留為診斷資料。'
-          : 'Run one DBHelper query or Package Tool and map explicit result columns to numeric metrics. Workload and Mix columns must use immutable LOAD workloadId and mixId values; unknown or duplicate rows remain diagnostic. These mappings are drafted in a separate Business Metrics Profile so PromQL profiles stay query-only.'}</p>
+          ? '一次執行 DBHelper query 或 Package Tool，將明確資料欄位對應至多個數值 metric。欄位名稱會區分大小寫，必須與查詢結果的欄名完全一致。Workload 和 Mix 欄位必須使用 LOAD 中不可變的 workloadId／mixId；未知或重複的列會保留為診斷資料。'
+          : 'Run one DBHelper query or Package Tool and map explicit result columns to numeric metrics. Column names are matched exactly and are case-sensitive, so keep them aligned with the query result labels. Workload and Mix columns must use immutable LOAD workloadId and mixId values; unknown or duplicate rows remain diagnostic. These mappings are drafted in a separate Business Metrics Profile so PromQL profiles stay query-only.'}</p>
         <label>{zh ? 'Call group ID' : 'Call group ID'}<input value={mappedGroupId} onChange={event => setMappedGroupId(event.target.value)} /></label>
         <label>{zh ? 'DBHelper／Package Tool call' : 'DBHelper / Package Tool call'}<textarea value={mappedCall} onChange={event => setMappedCall(event.target.value)} rows={3} spellCheck={false} /></label>
         <label>{zh ? '結果列路徑' : 'Result rows path'}<input value={mappedRowsPath} onChange={event => setMappedRowsPath(event.target.value)} /></label>

@@ -842,6 +842,43 @@ describe('JobsPage React feature', () => {
     expect(getMetrics).toHaveBeenCalledTimes(1);
   });
 
+  it('shows provisional business evidence during the Prometheus buffer and backs off toward its deadline', async () => {
+    const eligibleAt = new Date(Date.now() + 60 * 60_000).toISOString();
+    const getMetrics = vi.fn(async (): Promise<SutMetricsJobResponse> => ({
+      state: 'PENDING', provisional: true,
+      collection: { state: 'PENDING', eligibleAt, collectionProgress: { business: 'COMPLETE', prometheus: 'PENDING' }, queries: [
+        { id: 'business-count', observationType: 'business-call', profile: 'business', profilePath: 'business',
+          targetId: 'checkout', metricId: 'successful_transactions', title: 'Successful transactions', unit: 'transactions' },
+        { id: 'prom-cpu', profile: 'system', profilePath: 'system', targetId: 'sut-1', metricId: 'cpu', title: 'CPU', unit: '%' },
+      ] },
+      thresholdEvaluation: { state: 'PENDING' },
+      performanceAcceptance: { nativePerformanceVerdict: 'MET', externalEvaluationStatus: 'PENDING', performanceVerdict: 'PENDING' },
+      items: [{ queryId: 'business-count', metricId: 'successful_transactions', title: 'Successful transactions',
+        category: 'db', targetId: 'checkout', targetType: 'workload', unit: 'transactions', value: 12, queryStatus: 'READY' }],
+    }));
+    const api = makeApi({ getJobSutMetrics: getMetrics });
+    await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={false} hidden={false} />));
+    await advance();
+
+    const panel = host.querySelector('#job-panel-sutMetrics')!;
+    expect(panel.textContent).toContain('Provisional business evidence is available read-only');
+    expect(panel.textContent).toContain('Business phaseCOMPLETE');
+    expect(panel.textContent).toContain('Prometheus phasePENDING');
+    expect(panel.textContent).toContain('Prometheus eligible at');
+    expect(panel.textContent).toContain('Successful transactions');
+    expect(panel.textContent).toContain('12');
+    expect(panel.textContent).toContain('Combined performance verdictPENDING');
+
+    await advance(14_799);
+    expect(getMetrics).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(getMetrics).toHaveBeenCalledTimes(2);
+    await advance(29_999);
+    expect(getMetrics).toHaveBeenCalledTimes(2);
+    await advance(1);
+    expect(getMetrics).toHaveBeenCalledTimes(3);
+  });
+
   it('renders each post-run collection lifecycle state independently from the LOAD outcome', async () => {
     const cases: Array<[string, string]> = [
       ['DISABLED', 'SUT Metrics are not configured for this LOAD Job.'],

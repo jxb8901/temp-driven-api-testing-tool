@@ -1322,6 +1322,12 @@ class SutMetricsServiceTest {
             assertEquals("COMPLETE", object(manifest.get("collectionProgress")).get("business"));
             assertEquals("PENDING", object(manifest.get("collectionProgress")).get("prometheus"));
             assertEquals(0, fixture.requests.get(), "Prometheus collection must wait for after=1h plus one step.");
+            Map<String, Object> provisionalPage = service.readCollectionPage(JOB_ID, 0, 16, null, null, null);
+            assertEquals(Boolean.TRUE, provisionalPage.get("provisional"));
+            assertEquals("COMPLETE", object(object(provisionalPage.get("manifest")).get("collectionProgress")).get("business"));
+            assertEquals("PENDING", object(object(provisionalPage.get("manifest")).get("collectionProgress")).get("prometheus"));
+            assertEquals(1, maps(provisionalPage.get("items")).size(), "Only completed Business evidence is published provisionally.");
+            assertEquals("count", maps(provisionalPage.get("items")).get(0).get("metricId"));
             Map<String, Object> businessFile = maps(manifest.get("files")).stream()
                     .filter(file -> "count".equals(file.get("metricId"))).findFirst().orElseThrow();
             Map<String, Object> sidecar = ServerRuntime.JSON.readValue(Files.readAllBytes(temp.resolve("mixed-hour-business-buffer")
@@ -1334,6 +1340,132 @@ class SutMetricsServiceTest {
             assertEquals("FRESH", availability.get("freshness"));
             assertEquals("PENDING", service.thresholdEvaluationStatus(JOB_ID).get("state"),
                     "Threshold evaluation must wait until the combined collection reaches a terminal state.");
+        }
+    }
+
+    @Test void restartAfterCompletedBusinessPhaseResumesPrometheusWithoutRepeatingCalls() throws Exception {
+        Path data = temp.resolve("mixed-restart-after-business");
+        AtomicInteger businessInvocations = new AtomicInteger();
+        try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::atWindowEndResponse)) {
+            Instant finishedAt = Instant.now().minusSeconds(5), startedAt = finishedAt.minusSeconds(30);
+            Map<String, Object> businessFileBeforeRestart;
+            SutMetricsService first = new SutMetricsService(data);
+            first.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            first.upsertProfile(baseProfile("base", 1, false));
+            first.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='select count(*)')}"));
+            Map<String, Object> configured = scenario(List.of(binding("prom", null), map("profile", "business")),
+                    "1m", "1s", "15s");
+            configured.put("thresholds", List.of(map("id", "count-max", "profile", "business", "metric", "count", "max", 10.0)));
+            first.writeSnapshot(JOB_ID, first.resolveScenario(configured, "alice"));
+            first.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    businessInvocations.incrementAndGet();
+                    return 12;
+                }
+                @Override public void close() { }
+            });
+            first.jobFinished(JOB_ID, startedAt, finishedAt);
+
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            Map<String, Object> manifest;
+            do {
+                manifest = first.collectionStatus(JOB_ID);
+                if ("COMPLETE".equals(object(manifest.get("collectionProgress")).get("business"))) break;
+                Thread.sleep(25);
+            } while (System.nanoTime() < deadline);
+            assertEquals("PENDING", manifest.get("state"));
+            assertEquals("PENDING", object(manifest.get("collectionProgress")).get("prometheus"));
+            assertEquals(1, businessInvocations.get());
+            assertEquals(0, fixture.requests.get());
+            businessFileBeforeRestart = maps(manifest.get("files")).stream()
+                    .filter(file -> "count".equals(file.get("metricId"))).findFirst().orElseThrow();
+            String businessDigest = String.valueOf(businessFileBeforeRestart.get("sha256"));
+            assertEquals(1, maps(first.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items")).size());
+            first.close();
+
+            try (SutMetricsService restarted = new SutMetricsService(data)) {
+                restarted.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                    @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                    Instant executionFinishedAt, Instant steadyStart,
+                                                    Instant steadyEnd, Instant observedAt) {
+                        businessInvocations.incrementAndGet();
+                        return 99;
+                    }
+                    @Override public void close() { }
+                });
+                assertEquals(List.of(JOB_ID), restarted.pendingCollectionJobIds());
+                restarted.jobFinished(JOB_ID, startedAt, finishedAt);
+                Map<String, Object> completed = awaitManifest(restarted, JOB_ID);
+                assertEquals("READY", completed.get("state"));
+                assertEquals("COMPLETE", object(completed.get("collectionProgress")).get("business"));
+                assertEquals("COMPLETE", object(completed.get("collectionProgress")).get("prometheus"));
+                assertEquals(1, businessInvocations.get(), "Recovery must not repeat a completed side-effecting call.");
+                assertTrue(fixture.requests.get() > 0, "Recovery must resume the unfinished Prometheus phase.");
+                assertEquals(2, maps(completed.get("files")).size());
+                Map<String, Object> businessFileAfterRestart = maps(completed.get("files")).stream()
+                        .filter(file -> "count".equals(file.get("metricId"))).findFirst().orElseThrow();
+                assertEquals(businessDigest, businessFileAfterRestart.get("sha256"), "The completed business sidecar must remain unchanged.");
+                assertEquals(2, ((Number) object(completed.get("coverage")).get("successfulQueries")).intValue());
+
+                Map<String, Object> evaluation = awaitThresholdEvaluation(restarted, JOB_ID);
+                assertEquals("NOT_MET", evaluation.get("state"));
+                Map<String, Object> offline = restarted.writeOfflineReportEvidence(JOB_ID, temp.resolve("mixed-restart-report"));
+                assertEquals("READY", offline.get("state"));
+                assertEquals(2, maps(offline.get("observations")).size(), "The terminal combined report must include both phases.");
+            }
+        }
+    }
+
+    @Test void restartDuringBusinessCallFailsClosedWithoutRetryingUncertainSideEffects() throws Exception {
+        Path data = temp.resolve("mixed-restart-during-business");
+        CountDownLatch callStarted = new CountDownLatch(1);
+        CountDownLatch callExited = new CountDownLatch(1);
+        AtomicInteger businessInvocations = new AtomicInteger();
+        SutMetricsService original = new SutMetricsService(data);
+        try {
+            original.upsertProfile(businessProfile("business", "#{db.orders.scalar(sql='update account set seen = 1')}"));
+            original.writeSnapshot(JOB_ID, original.resolveScenario(scenario(List.of(map("profile", "business")),
+                    "1m", "1m", "15s"), "alice"));
+            original.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) throws Exception {
+                    businessInvocations.incrementAndGet();
+                    callStarted.countDown();
+                    try { new CountDownLatch(1).await(); return 1; }
+                    finally { callExited.countDown(); }
+                }
+                @Override public void close() { }
+            });
+            Instant finishedAt = Instant.now().minusSeconds(2), startedAt = finishedAt.minusSeconds(30);
+            original.jobFinished(JOB_ID, startedAt, finishedAt);
+            assertTrue(callStarted.await(10, TimeUnit.SECONDS), "The test side-effecting call should enter before restart.");
+            assertEquals("COLLECTING", original.collectionStatus(JOB_ID).get("state"));
+
+            try (SutMetricsService restarted = new SutMetricsService(data)) {
+                Map<String, Object> failed = restarted.collectionStatus(JOB_ID);
+                assertEquals("FAILED", failed.get("state"));
+                assertEquals("SERVER_RESTART_INTERRUPTED", maps(failed.get("diagnostics")).get(0).get("code"));
+                AtomicInteger retryInvocations = new AtomicInteger();
+                restarted.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                    @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                    Instant executionFinishedAt, Instant steadyStart,
+                                                    Instant steadyEnd, Instant observedAt) {
+                        retryInvocations.incrementAndGet();
+                        return 2;
+                    }
+                    @Override public void close() { }
+                });
+                restarted.jobFinished(JOB_ID, startedAt, finishedAt);
+                assertEquals(0, retryInvocations.get(), "Recovery must not retry a call whose side effects are uncertain.");
+                assertTrue(restarted.pendingCollectionJobIds().isEmpty());
+                assertEquals(1, businessInvocations.get());
+            }
+        } finally {
+            original.close();
+            assertTrue(callExited.await(5, TimeUnit.SECONDS), "The simulated in-flight call should stop when the original service closes.");
         }
     }
 
@@ -1366,6 +1498,52 @@ class SutMetricsServiceTest {
                 Map<String, Object> rule = maps(object(evaluation.get("sutThresholds")).get("items")).get(0);
                 assertEquals(expectedStates.get(index), rule.get("status"));
             }
+        }
+    }
+
+    @Test void multiOutputMappingReadsRealLowercaseDatabaseColumnLabelsExactly() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-multi-output-lowercase-columns"))) {
+            Map<String, Object> profile = map("schemaVersion", "att-sut-metrics-profile/v1", "id", "lowercase-columns",
+                    "name", "Lowercase columns", "kind", "base", "category", "db", "metrics", List.of(map(
+                            "id", "transaction-query",
+                            "call", "#{db.orders.query(sql='select workload_id, mix_id, success, failure from transaction_summary')}",
+                            "sampling", "afterDrain",
+                            "mapping", map("rows", "rows", "workloadColumn", "workload_id", "mixColumn", "mix_id"),
+                            "outputs", List.of(
+                                    map("id", "success", "title", "Success", "column", "success", "unit", "transactions", "kind", "counter"),
+                                    map("id", "failure", "title", "Failure", "column", "failure", "unit", "transactions", "kind", "counter")))));
+            service.upsertProfile(profile);
+            Map<String, Object> snapshot = service.resolveScenario(scenario(List.of(map("profile", "lowercase-columns")),
+                    "1m", "1s", "15s"), "alice", false,
+                    multiOutputBusinessContext(multiMixSubjects("checkout")));
+            AtomicInteger invocations = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    invocations.incrementAndGet();
+                    return map("rowCount", 2, "rows", List.of(
+                            map("workload_id", "checkout", "mix_id", "web", "success", 20, "failure", 2),
+                            map("workload_id", "checkout", "mix_id", "mobile", "success", 8, "failure", 0)));
+                }
+                @Override public void close() { }
+            });
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(30);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(30), finishedAt);
+
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("READY", manifest.get("state"));
+            assertEquals(1, invocations.get());
+            List<Map<String, Object>> items = maps(service.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items"));
+            assertEquals(4, items.size());
+            Map<String, Object> web = items.stream().filter(item -> "success".equals(item.get("metricId"))
+                    && "web".equals(item.get("mixId"))).findFirst().orElseThrow();
+            assertEquals(20.0, web.get("value"));
+            assertEquals("MAPPED", web.get("mappingStatus"));
+            Map<String, Object> mobileFailure = items.stream().filter(item -> "failure".equals(item.get("metricId"))
+                    && "mobile".equals(item.get("mixId"))).findFirst().orElseThrow();
+            assertEquals(0.0, mobileFailure.get("value"));
         }
     }
 

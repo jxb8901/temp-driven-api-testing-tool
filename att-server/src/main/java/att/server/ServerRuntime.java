@@ -1396,6 +1396,7 @@ final class ServerRuntime implements AutoCloseable {
         response.put("jobId",id);response.put("snapshotId",snapshot.get("snapshotId"));
         response.put("livePreview",snapshot.get("livePreview"));response.put("collection",page.get("manifest"));
         response.put("items",page.get("items"));response.put("nextOffset",page.get("nextOffset"));
+        response.put("provisional",page.get("provisional"));
         response.put("thresholdEvaluation",thresholdEvaluationOrUnavailable(id,snapshot));
         Map<String,Object> result=resultRecord(id);
         Map<String,Object> acceptance=sutPerformanceAcceptance(id,principal,admin,(JsonNode)result.get("result"));

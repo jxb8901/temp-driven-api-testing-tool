@@ -261,12 +261,14 @@ export interface SutMetricItem {
 }
 export interface SutMetricsManifest {
   schemaVersion?: string; state?: string; complete?: boolean; createdAt?: string; updatedAt?: string;
-  windowStart?: string; windowEnd?: string; step?: string; coverage?: Record<string, unknown>;
+  windowStart?: string; windowEnd?: string; eligibleAt?: string; step?: string; coverage?: Record<string, unknown>;
+  collectionProgress?: { business?: string; prometheus?: string };
   queries?: SutMetricQueryMetadata[];
   diagnostics?: Array<{ code?: string; message?: string }>; files?: Array<Record<string, unknown>>;
 }
 export interface SutMetricsJobResponse {
   schemaVersion?: string; state?: string; jobId?: string; snapshotId?: string;
+  provisional?: boolean;
   collection?: SutMetricsManifest | null; livePreview?: Record<string, unknown>;
   thresholdEvaluation?: Record<string, unknown>; performanceAcceptance?: Record<string, unknown>;
   items?: SutMetricItem[]; nextOffset?: number | null;

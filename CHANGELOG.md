@@ -18,6 +18,7 @@
 - Keep post-run metrics PENDING through the configured after-buffer and one query-step ingestion grace; mark missing or stale-tail coverage PARTIAL using a two-step/30-second tolerance, and atomically publish each snapshot-anchored manifest integrity transition with its manifest.
 - Collect after-drain business metrics promptly while mixed Jobs remain PENDING for buffered Prometheus collection; fail closed with NOT_EVALUATED diagnostics when pinned Package or Runtime Config revisions change.
 - Draft mapped business calls in a separate business-only Settings Profile, and label LOAD correlation means as unweighted arithmetic means of observed bins.
+- Show verified mixed-Job Business Metrics as provisional read-only evidence during the Prometheus buffer, poll with deadline-aware backoff, and resume only the unfinished phase after restart; fail closed when a restart interrupts an uncertain business call. Keep the starter SQL's case-sensitive result mappings aligned with its lowercase columns.
 - Serialize manifest writes per Job while keeping reads independent across Jobs.
 - Add a read-only Correlation view to LOAD Job details for comparing selected native LOAD metrics with a post-run SUT query over UTC time, with workload, phase, time-range, and SUT-series filters (#349).
 - Preserve native-bin and source-gap semantics in Correlation charts, including partial-range bins, extrema-aware downsampling, a 1,200-point cap, selected-versus-displayed counts, and no value extension across bins omitted by downsampling (#349).
