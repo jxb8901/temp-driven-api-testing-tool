@@ -1854,7 +1854,15 @@ final class SutMetricsService implements AutoCloseable {
     private static BusinessMappedRows mapBusinessRows(Object raw, List<Map<String, Object>> groupQueries) {
         Map<String, Object> mapping = objectOrEmpty(groupQueries.isEmpty() ? null : groupQueries.get(0).get("mapping"));
         Object rawRows;
-        try { rawRows = pathValue(raw, String.valueOf(mapping.getOrDefault("rows", "rows")), false); }
+        String rowsPath = String.valueOf(mapping.getOrDefault("rows", "rows"));
+        String workloadColumn = nullableText(mapping.get("workloadColumn"));
+        String mixColumn = nullableText(mapping.get("mixColumn"));
+        try {
+            if (raw instanceof Map<?, ?> rawMap && !rawMap.containsKey("rows")
+                    && "rows".equals(rowsPath) && workloadColumn == null && mixColumn == null)
+                rawRows = Collections.singletonList(rawMap);
+            else rawRows = pathValue(raw, rowsPath, false);
+        }
         catch (RuntimeException invalid) {
             return new BusinessMappedRows(Map.of(), Set.of(), Set.of(), Set.of(), 0, "INVALID", "BUSINESS_MAPPING_INVALID");
         }
@@ -1871,8 +1879,6 @@ final class SutMetricsService implements AutoCloseable {
         Map<String, Map<String, Object>> mapped = new LinkedHashMap<>();
         Set<String> duplicates = new LinkedHashSet<>(), ambiguous = new LinkedHashSet<>(), invalid = new LinkedHashSet<>();
         int unmatched = 0;
-        String workloadColumn = nullableText(mapping.get("workloadColumn"));
-        String mixColumn = nullableText(mapping.get("mixColumn"));
         if (workloadColumn == null) {
             if (rows.size() != 1 || expected.size() != 1)
                 return new BusinessMappedRows(Map.of(), Set.of(), new LinkedHashSet<>(expected.keySet()), Set.of(), rows.size(),
@@ -1955,7 +1961,9 @@ final class SutMetricsService implements AutoCloseable {
         if (!(rawValue instanceof Number number) || !Double.isFinite(number.doubleValue()))
             throw new BusinessMetricOutputException("BUSINESS_METRIC_VALUE_INVALID", "INVALID_VALUE", unmatched,
                     "The mapped output column is null, nonnumeric, or nonfinite.");
-        return new BusinessMetricValue(number.doubleValue(), mappedRows.status(), unmatched);
+        String mappingStatus = nullableText(objectOrEmpty(query.get("mapping")).get("workloadColumn")) == null
+                ? mappedRows.status() : "MAPPED";
+        return new BusinessMetricValue(number.doubleValue(), mappingStatus, unmatched);
     }
 
     private Map<String, Object> writeBusinessMetricObservation(Path directory, int index,
@@ -1993,19 +2001,17 @@ final class SutMetricsService implements AutoCloseable {
         }
         String mappingStatus = metricValue.mappingStatus();
         String quality = "afterDrain".equals(sampling) ? "SINGLE_VALUE" : "AUTHOR_DEFINED_WINDOW_QUERY";
-        if (Boolean.TRUE.equals(query.get("multiOutput"))) quality = mappingStatus.equals("PARTIAL")
-                ? "PARTIAL_EXPLICIT_MAPPING" : mappingStatus.equals("JOB_SHARED") ? "JOB_SHARED_RESULT" : "EXPLICIT_WORKLOAD_MAPPING";
         List<Map<String, Object>> qualityDiagnostics = staleAfterDrain
                 ? List.of(fields("code", "BUSINESS_CALL_STALE_AFTER_DRAIN",
                         "message", "The afterDrain business snapshot exceeded the configured freshness limit of "
                                 + freshnessLimitMs + " ms and is marked stale."))
-                : mappingStatus.equals("PARTIAL")
+                : metricValue.unmatchedRowCount() > 0
                     ? List.of(fields("code", "BUSINESS_MAPPING_UNMATCHED_ROWS",
                             "message", "One or more returned rows could not be mapped to the immutable LOAD subjects."))
                     : List.of();
         String callGroupId = String.valueOf(query.getOrDefault("callGroupId", query.get("id")));
         int callCount = 1;
-        String queryStatus = staleAfterDrain ? "STALE" : "PARTIAL".equals(mappingStatus) ? "PARTIAL" : "READY";
+        String queryStatus = staleAfterDrain ? "STALE" : metricValue.unmatchedRowCount() > 0 ? "PARTIAL" : "READY";
         Map<String, Object> observation = fields("schemaVersion", OBSERVATION_SCHEMA,
                 "kind", query.get("observationKind"), "effectiveBindingId", query.get("id"),
                 "source", fields("id", query.get("sourceId"), "name", query.get("sourceName"), "revision", query.get("sourceRevision")),
@@ -2014,7 +2020,7 @@ final class SutMetricsService implements AutoCloseable {
                 "metric", fields("id", query.get("metricId"), "name", query.get("title"), "category", query.get("category"),
                         "unit", query.get("unit"), "kind", query.get("kind")),
                 "window", observationWindow,
-                "availability", fields("state", "PARTIAL".equals(mappingStatus) ? "PARTIAL" : "AVAILABLE",
+                "availability", fields("state", "AVAILABLE",
                         "freshness", staleAfterDrain ? "STALE" : "FRESH",
                         "quality", quality, "mappingStatus", mappingStatus,
                         "unmatchedRowCount", metricValue.unmatchedRowCount(), "callCount", callCount,
@@ -2867,14 +2873,20 @@ final class SutMetricsService implements AutoCloseable {
 
     private List<Map<String, Object>> validateMetrics(Object raw, String category) {
         if (!(raw instanceof List<?> list) || list.size() > 64) throw new IllegalArgumentException("Base profile metrics must be an array of at most 64 definitions.");
-        Set<String> ids = new HashSet<>(); List<Map<String, Object>> out = new ArrayList<>();
+        Set<String> ids = new HashSet<>(), groupedInputIds = new HashSet<>(), normalizedGroupIds = new HashSet<>();
+        Map<String, Map<String, Object>> multiOutputGroups = new LinkedHashMap<>();
+        List<Map<String, Object>> out = new ArrayList<>();
         for (Object value : list) {
+            if (out.size() >= MAX_EXPANDED_METRICS)
+                throw new IllegalArgumentException("Base profile exceeds the 64 declared metric limit.");
             Map<String, Object> metric = object(value, "metric definition");
             rejectUnknown(metric, Set.of("id", "title", "unit", "kind", "category", "query", "call",
-                    "sampling", "window", "valuePath", "sideEffectsAcknowledged", "outputs", "mapping"), "metric definition");
+                    "sampling", "window", "valuePath", "sideEffectsAcknowledged", "outputs", "mapping",
+                    "callGroupId", "column", "multiOutput"), "metric definition");
             if (metric.containsKey("outputs")) {
                 String groupId = requiredText(metric, "id");
-                if (!ID.matcher(groupId).matches() || !ids.add(groupId))
+                if (!ID.matcher(groupId).matches() || !groupedInputIds.add(groupId)
+                        || normalizedGroupIds.contains(groupId))
                     throw new IllegalArgumentException("Business call group id is invalid or duplicated.");
                 if (metric.containsKey("query") || metric.containsKey("title") || metric.containsKey("unit")
                         || metric.containsKey("kind") || metric.containsKey("category") || metric.containsKey("valuePath"))
@@ -2890,32 +2902,55 @@ final class SutMetricsService implements AutoCloseable {
                 if (metric.containsKey("sideEffectsAcknowledged") && !(metric.get("sideEffectsAcknowledged") instanceof Boolean))
                     throw new IllegalArgumentException("sideEffectsAcknowledged must be a boolean.");
                 Map<String, Object> mapping = validateBusinessMapping(metric.get("mapping"));
+                Map<String, Object> groupConfig = fields("call", call, "sampling", sampling, "window", window,
+                        "sideEffectsAcknowledged", Boolean.TRUE.equals(metric.get("sideEffectsAcknowledged")), "mapping", mapping);
+                registerMultiOutputGroup(multiOutputGroups, groupId, groupConfig);
                 Object rawOutputs = metric.get("outputs");
                 if (!(rawOutputs instanceof List<?> outputs) || outputs.isEmpty() || outputs.size() > 64)
                     throw new IllegalArgumentException("Business call outputs must contain 1 to 64 declared metrics.");
                 for (Object rawOutput : outputs) {
+                    if (out.size() >= MAX_EXPANDED_METRICS)
+                        throw new IllegalArgumentException("Base profile exceeds the 64 declared metric limit.");
                     Map<String, Object> output = object(rawOutput, "business metric output");
                     rejectUnknown(output, Set.of("id", "title", "column", "unit", "kind", "category"), "business metric output");
-                    String id = requiredText(output, "id"), title = requiredText(output, "title");
-                    String column = requiredText(output, "column");
-                    String unit = requiredText(output, "unit");
-                    String kind = String.valueOf(output.getOrDefault("kind", "gauge"));
-                    if (!ID.matcher(id).matches() || !ids.add(id) || title.length() > 120 || hasControl(title))
-                        throw new IllegalArgumentException("Business metric output id or title is invalid or duplicated.");
-                    if (!column.matches("[A-Za-z_][A-Za-z0-9_]{0,127}"))
-                        throw new IllegalArgumentException("Business metric output column must be an explicit bounded column name.");
-                    if (!Set.of("percent", "bytes", "bytes_per_second", "seconds", "milliseconds", "count", "transactions", "ratio", "cores", "custom").contains(unit))
-                        throw new IllegalArgumentException("Unsupported metric unit " + unit + ".");
-                    if (!Set.of("gauge", "rate", "counter", "histogram").contains(kind))
-                        throw new IllegalArgumentException("Unsupported metric kind " + kind + ".");
-                    String metricCategory = String.valueOf(output.getOrDefault("category", category)).toLowerCase(Locale.ROOT);
-                    if (!Set.of("os", "jvm", "app", "db", "mq", "custom").contains(metricCategory))
-                        throw new IllegalArgumentException("Metric category is invalid.");
-                    out.add(fields("id", id, "title", title, "unit", unit, "kind", kind, "category", metricCategory,
-                            "call", call, "sampling", sampling, "window", window,
+                    Map<String, Object> normalized = validateBusinessOutput(output, category, ids);
+                    normalized.putAll(fields("call", call, "sampling", sampling, "window", window,
                             "sideEffectsAcknowledged", Boolean.TRUE.equals(metric.get("sideEffectsAcknowledged")),
-                            "callGroupId", groupId, "column", column, "mapping", mapping, "multiOutput", Boolean.TRUE));
+                            "callGroupId", groupId, "mapping", mapping, "multiOutput", Boolean.TRUE));
+                    out.add(normalized);
                 }
+                continue;
+            }
+            boolean normalizedMultiOutput = metric.containsKey("multiOutput") || metric.containsKey("callGroupId")
+                    || metric.containsKey("column");
+            if (normalizedMultiOutput) {
+                if (!Boolean.TRUE.equals(metric.get("multiOutput")) || !metric.containsKey("callGroupId")
+                        || !metric.containsKey("column") || metric.containsKey("query")
+                        || metric.containsKey("outputs") || metric.containsKey("valuePath"))
+                    throw new IllegalArgumentException("Normalized multi-output metrics require callGroupId, column, and multiOutput: true.");
+                String groupId = requiredText(metric, "callGroupId");
+                if (!ID.matcher(groupId).matches() || groupedInputIds.contains(groupId))
+                    throw new IllegalArgumentException("Business call group id is invalid or mixed with grouped definitions.");
+                normalizedGroupIds.add(groupId);
+                String call = requiredText(metric, "call").trim();
+                validateBusinessCall(call);
+                att.template.ToolCallParser.ParsedCall parsed = new att.template.ToolCallParser().parse(call);
+                if (parsed.name().startsWith("db.") && !parsed.name().matches("db\\.[A-Za-z0-9._-]+\\.query"))
+                    throw new IllegalArgumentException("Multi-output DBHelper calls must use db.<id>.query.");
+                String sampling = String.valueOf(metric.getOrDefault("sampling", "afterDrain"));
+                String window = nullableText(metric.get("window"));
+                validateBusinessSampling(sampling, window);
+                if (metric.containsKey("sideEffectsAcknowledged") && !(metric.get("sideEffectsAcknowledged") instanceof Boolean))
+                    throw new IllegalArgumentException("sideEffectsAcknowledged must be a boolean.");
+                Map<String, Object> mapping = validateBusinessMapping(metric.get("mapping"));
+                Map<String, Object> groupConfig = fields("call", call, "sampling", sampling, "window", window,
+                        "sideEffectsAcknowledged", Boolean.TRUE.equals(metric.get("sideEffectsAcknowledged")), "mapping", mapping);
+                registerMultiOutputGroup(multiOutputGroups, groupId, groupConfig);
+                Map<String, Object> normalized = validateBusinessOutput(metric, category, ids);
+                normalized.putAll(fields("call", call, "sampling", sampling, "window", window,
+                        "sideEffectsAcknowledged", Boolean.TRUE.equals(metric.get("sideEffectsAcknowledged")),
+                        "callGroupId", groupId, "mapping", mapping, "multiOutput", Boolean.TRUE));
+                out.add(normalized);
                 continue;
             }
             if (metric.containsKey("mapping"))
@@ -2951,7 +2986,37 @@ final class SutMetricsService implements AutoCloseable {
                         "sideEffectsAcknowledged", Boolean.TRUE.equals(metric.get("sideEffectsAcknowledged"))));
             }
         }
+        Set<String> callGroupIds = new HashSet<>(groupedInputIds);
+        callGroupIds.addAll(normalizedGroupIds);
+        if (callGroupIds.stream().anyMatch(ids::contains))
+            throw new IllegalArgumentException("Business call group ids must be distinct from metric ids.");
         return out;
+    }
+
+    private static Map<String, Object> validateBusinessOutput(Map<String, Object> output, String defaultCategory,
+                                                               Set<String> ids) {
+        String id = requiredText(output, "id"), title = requiredText(output, "title");
+        String column = requiredText(output, "column"), unit = requiredText(output, "unit");
+        String kind = String.valueOf(output.getOrDefault("kind", "gauge"));
+        if (!ID.matcher(id).matches() || !ids.add(id) || title.length() > 120 || hasControl(title))
+            throw new IllegalArgumentException("Business metric output id or title is invalid or duplicated.");
+        if (!column.matches("[A-Za-z_][A-Za-z0-9_]{0,127}"))
+            throw new IllegalArgumentException("Business metric output column must be an explicit bounded column name.");
+        if (!Set.of("percent", "bytes", "bytes_per_second", "seconds", "milliseconds", "count", "transactions", "ratio", "cores", "custom").contains(unit))
+            throw new IllegalArgumentException("Unsupported metric unit " + unit + ".");
+        if (!Set.of("gauge", "rate", "counter", "histogram").contains(kind))
+            throw new IllegalArgumentException("Unsupported metric kind " + kind + ".");
+        String metricCategory = String.valueOf(output.getOrDefault("category", defaultCategory)).toLowerCase(Locale.ROOT);
+        if (!Set.of("os", "jvm", "app", "db", "mq", "custom").contains(metricCategory))
+            throw new IllegalArgumentException("Metric category is invalid.");
+        return fields("id", id, "title", title, "unit", unit, "kind", kind, "category", metricCategory, "column", column);
+    }
+
+    private static void registerMultiOutputGroup(Map<String, Map<String, Object>> groups, String groupId,
+                                                 Map<String, Object> configuration) {
+        Map<String, Object> prior = groups.putIfAbsent(groupId, configuration);
+        if (prior != null && !prior.equals(configuration))
+            throw new IllegalArgumentException("Metrics sharing a business call group must use the same call, sampling, and row mapping.");
     }
 
     private static void validateBusinessCall(String call) {

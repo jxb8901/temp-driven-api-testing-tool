@@ -174,7 +174,14 @@
             ]
           },
           "window": {
-            "const": "steady"
+            "anyOf": [
+              {
+                "const": "steady"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "valuePath": {
             "type": "string",
@@ -196,13 +203,19 @@
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[[0-9]{1,6}\\]){0,16}$"
               },
               "workloadColumn": {
-                "type": "string",
+                "type": [
+                  "string",
+                  "null"
+                ],
                 "minLength": 1,
                 "maxLength": 128,
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
               },
               "mixColumn": {
-                "type": "string",
+                "type": [
+                  "string",
+                  "null"
+                ],
                 "minLength": 1,
                 "maxLength": 128,
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
@@ -222,6 +235,19 @@
                 }
               }
             ]
+          },
+          "callGroupId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+          },
+          "column": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+          },
+          "multiOutput": {
+            "const": true
           },
           "outputs": {
             "type": "array",
@@ -447,6 +473,61 @@
                 "required": [
                   "window"
                 ]
+              }
+            }
+          },
+          {
+            "required": [
+              "id",
+              "title",
+              "unit",
+              "kind",
+              "category",
+              "call",
+              "sampling",
+              "window",
+              "sideEffectsAcknowledged",
+              "mapping",
+              "callGroupId",
+              "column",
+              "multiOutput"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "query"
+                  ]
+                },
+                {
+                  "required": [
+                    "outputs"
+                  ]
+                }
+              ]
+            },
+            "if": {
+              "properties": {
+                "sampling": {
+                  "const": "windowQuery"
+                }
+              },
+              "required": [
+                "sampling"
+              ]
+            },
+            "then": {
+              "properties": {
+                "window": {
+                  "const": "steady"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "window": {
+                  "type": "null"
+                }
               }
             }
           }
