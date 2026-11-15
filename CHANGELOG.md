@@ -5,6 +5,9 @@
 - Add Package Tool source inspection to Explorer; remove Tool and Tool Group catalogs from Shared Configuration; include Package Tool descriptors in revision fingerprints.
 - Convert bundled Package examples from global Tool declarations and document migration from older configurations.
 - Add the Studio Read-only Validate workspace for shared/effective Config, registered Packages, Explorer resources, and executable LOAD Scenarios; advertise the `att-validation/v1` Server capability and report contract (#355).
+- Add owner-scoped asynchronous validation records with bounded retention, status/list/cancel APIs, restart recovery, and contextual Studio validation that survives navigation and reload while preserving the synchronous validation contract (#364, #367).
+- Preserve authorized opaque source references for Tool Group manifests and improve Explorer source presentation with compact related-manifest links (#365, #366, #367).
+- Remove duplicate legacy global Tool Groups after auditing their Package-owned equivalents, verify the default Package schema inventory, and fix shared Flow identity across Run, Debug, Quick Load, and Advanced Load (#368, #367).
 
 # Changelog
 
