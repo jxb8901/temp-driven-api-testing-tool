@@ -269,7 +269,7 @@ Base profile 可使用已配置的 `call` 定義業務指標，代替 PromQL。L
 }
 ~~~
 
-Result path 預設為 `rows`，也可指定 `payload.rows` 等有界 object/list path。若沒有 `workloadColumn`，Job-wide binding 必須恰好回傳一列。設定 `workloadColumn` 後，每列必須指出一個不可變 `workloadId`。如需識別 mix slot，請再設定 `mixColumn`，以 `workloadId` 和 `mixId` 配對；設定 `mixColumn` 時必須同時設定 `workloadColumn`。同一 Workload 使用 target mix 時，只有 workload 的 row 會產生歧義。ATT 不會以 target ID、動態 pivot、模糊 join 或隱式 aggregation 對照資料列。欄位名稱和 ID 值必須完全相符。
+Result path 預設為 `rows`，也可指定 `payload.rows` 等有界 object/list path。若沒有 `workloadColumn`，Job-wide binding 必須恰好回傳一列。設定 `workloadColumn` 但不設定 `mixColumn` 時，每列都會對應至 Workload scope，mixed Workload 亦然。若 query 回傳跨 mix slot 的 aggregate，必須由 query 或 Tool 明確計算；ATT 會保留 Workload scope，不會將數值複製或歸屬至個別 slot。每個 Workload 最多只能有一列。設定 `mixColumn` 可用 `workloadId` 和 `mixId` 配對 mix slot，並且必須同時設定 `workloadColumn`。缺少或未知 mix ID 的 row 會保持未歸屬並記錄於 mapping diagnostics；其他已明確對應的 slot 仍可用。ATT 不會以 target ID、動態 pivot、模糊 join 或隱式 aggregation 對照資料列。欄位名稱和 ID 值必須完全相符。
 
 每個 call group 最多可有 64 個 output 及 4,096 列 result。每個 Job 最多執行 16 次實際呼叫，每次最多 60 秒，所有呼叫合計最多 120 秒。回傳列只保存在記憶體；sidecar 和報告會保存各個數值 output 及 mapping diagnostics，不保存 raw rows。無效欄位只影響該 metric 和 subject。Call 失敗或 timeout 會令同一 group 的所有 outputs unavailable。重複、未知、缺少或有歧義的 rows 會保留為 diagnostics；每個預期的 Workload/mix output 仍會出現在結果中。Partial 或 unavailable value 不會替換為零。
 

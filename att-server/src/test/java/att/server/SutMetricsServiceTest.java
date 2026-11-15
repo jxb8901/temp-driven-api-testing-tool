@@ -1556,6 +1556,99 @@ class SutMetricsServiceTest {
         }
     }
 
+    @Test void missingMixIdentityDoesNotInvalidateIndependentlyMappedSlots() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-multi-output-missing-mix-identity"))) {
+            service.upsertProfile(multiOutputBusinessProfile("missing-mix-identity"));
+            Map<String, Object> configured = scenario(List.of(map("profile", "missing-mix-identity")), "1m", "1s", "15s");
+            configured.put("thresholds", List.of(map("id", "web-success-max", "profile", "missing-mix-identity",
+                    "metric", "success", "max", 10.0, "subjects", List.of(map("scope", "mix",
+                            "workloadId", "checkout", "mixId", "web")))));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice", false,
+                    multiOutputBusinessContext(multiMixSubjects("checkout")));
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    return map("rowCount", 3, "rows", List.of(
+                            map("WORKLOAD_ID", "checkout", "MIX_ID", "web", "SUCCESS", 20, "FAILURE", 2),
+                            map("WORKLOAD_ID", "checkout", "MIX_ID", "mobile", "SUCCESS", 8, "FAILURE", 0),
+                            map("WORKLOAD_ID", "checkout", "MIX_ID", null, "SUCCESS", 99, "FAILURE", 1)));
+                }
+                @Override public void close() { }
+            });
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(60);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("PARTIAL", manifest.get("state"));
+            List<Map<String, Object>> items = maps(service.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items"));
+            Map<String, Object> web = items.stream().filter(item -> "success".equals(item.get("metricId"))
+                    && "web".equals(item.get("mixId"))).findFirst().orElseThrow();
+            assertEquals(20.0, web.get("value"));
+            assertEquals("MAPPED", web.get("mappingStatus"));
+            assertEquals(1, web.get("unmatchedRowCount"));
+            Map<String, Object> mobile = items.stream().filter(item -> "success".equals(item.get("metricId"))
+                    && "mobile".equals(item.get("mixId"))).findFirst().orElseThrow();
+            assertEquals(8.0, mobile.get("value"));
+            assertEquals("MAPPED", mobile.get("mappingStatus"));
+
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, JOB_ID);
+            assertEquals("NOT_MET", evaluation.get("state"));
+            Map<String, Object> rule = maps(object(evaluation.get("sutThresholds")).get("items")).get(0);
+            assertEquals("NOT_MET", rule.get("status"));
+        }
+    }
+
+    @Test void mixedWorkloadAggregateMapsAtWorkloadScopeWithoutMixAttribution() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("business-multi-output-workload-aggregate"))) {
+            service.upsertProfile(multiOutputBusinessProfile("workload-aggregate", false));
+            Map<String, Object> configured = scenario(List.of(map("profile", "workload-aggregate")), "1m", "1s", "15s");
+            configured.put("thresholds", List.of(map("id", "workload-success-max", "profile", "workload-aggregate",
+                    "metric", "success", "max", 10.0, "subjects", List.of(map("scope", "workload",
+                            "workloadId", "checkout")))));
+            Map<String, Object> snapshot = service.resolveScenario(configured, "alice", false,
+                    multiOutputBusinessContext(multiMixSubjects("checkout")));
+            List<Map<String, Object>> queries = maps(snapshot.get("queries"));
+            assertEquals(2, queries.size(), "Workload aggregation produces one subject per declared output.");
+            assertTrue(queries.stream().allMatch(query -> "workload".equals(query.get("scope"))
+                    && "checkout".equals(query.get("workloadId")) && query.get("mixId") == null));
+
+            AtomicInteger invocations = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    invocations.incrementAndGet();
+                    return map("rowCount", 1, "rows", List.of(
+                            map("WORKLOAD_ID", "checkout", "SUCCESS", 20, "FAILURE", 3)));
+                }
+                @Override public void close() { }
+            });
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(60);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(60), finishedAt);
+
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("READY", manifest.get("state"));
+            List<Map<String, Object>> items = maps(service.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items"));
+            assertEquals(2, items.size());
+            Map<String, Object> success = items.stream()
+                    .filter(item -> "success".equals(item.get("metricId"))).findFirst().orElseThrow();
+            assertEquals(20.0, success.get("value"));
+            assertEquals("workload", success.get("scope"));
+            assertEquals("checkout", success.get("workloadId"));
+            assertNull(success.get("mixId"), "An aggregate is not attributed to any mix slot.");
+            assertEquals("MAPPED", success.get("mappingStatus"));
+            assertEquals(1, invocations.get(), "The outputs share one query invocation.");
+
+            Map<String, Object> evaluation = awaitThresholdEvaluation(service, JOB_ID);
+            assertEquals("NOT_MET", evaluation.get("state"));
+            Map<String, Object> rule = maps(object(evaluation.get("sutThresholds")).get("items")).get(0);
+            assertEquals("NOT_MET", rule.get("status"));
+        }
+    }
+
     @Test void packageToolTypedMapCanSupplySeveralUnpartitionedMetrics() throws Exception {
         try (SutMetricsService service = new SutMetricsService(temp.resolve("business-tool-typed-map"))) {
             Map<String, Object> group = map("id", "report-query", "call", "#{reporter(summary='private')}",
@@ -1932,11 +2025,20 @@ class SutMetricsServiceTest {
     }
 
     private static Map<String, Object> multiOutputBusinessProfile(String id) {
+        return multiOutputBusinessProfile(id, true);
+    }
+
+    private static Map<String, Object> multiOutputBusinessProfile(String id, boolean mapMixSlots) {
+        Map<String, Object> mapping = map("rows", "rows", "workloadColumn", "WORKLOAD_ID");
+        if (mapMixSlots) mapping.put("mixColumn", "MIX_ID");
+        String call = mapMixSlots
+                ? "#{db.orders.query(sql='select workload_id, mix_id, success, failure from transaction_summary')}"
+                : "#{db.orders.query(sql='select workload_id, sum(success) as success, sum(failure) as failure from transaction_summary group by workload_id')}";
         return map("schemaVersion", "att-sut-metrics-profile/v1", "id", id, "name", id, "kind", "base", "category", "db",
                 "metrics", List.of(map("id", "transaction-query",
-                        "call", "#{db.orders.query(sql='select workload_id, mix_id, success, failure from transaction_summary')}",
+                        "call", call,
                         "sampling", "afterDrain",
-                        "mapping", map("rows", "rows", "workloadColumn", "WORKLOAD_ID", "mixColumn", "MIX_ID"),
+                        "mapping", mapping,
                         "outputs", List.of(
                                 map("id", "success", "title", "Successful transactions", "column", "SUCCESS", "unit", "transactions", "kind", "counter"),
                                 map("id", "failure", "title", "Failed transactions", "column", "FAILURE", "unit", "transactions", "kind", "counter")))));

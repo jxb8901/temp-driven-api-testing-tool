@@ -1908,23 +1908,20 @@ final class SutMetricsService implements AutoCloseable {
             if (workloadSubjects.isEmpty()) { unmatched++; continue; }
             List<Map<String, Object>> candidates;
             if (mixColumn == null) {
-                if (workloadSubjects.stream().anyMatch(query -> Boolean.TRUE.equals(query.get("mappingAmbiguous")))) {
-                    ambiguous.add(String.valueOf(workloadSubjects.get(0).get("subjectKey"))); unmatched++; continue;
-                }
                 candidates = workloadSubjects.stream().filter(query -> "workload".equals(query.get("scope"))).toList();
             } else {
                 Object rawMix = row.get(mixColumn);
                 String mix = rawMix instanceof String text && !text.isEmpty() ? text : null;
                 if (mix == null) {
                     candidates = workloadSubjects.stream().filter(query -> "workload".equals(query.get("scope"))).toList();
-                    if (candidates.isEmpty()) { ambiguous.add(String.valueOf(workloadSubjects.get(0).get("subjectKey"))); unmatched++; continue; }
+                    if (candidates.isEmpty()) { unmatched++; continue; }
                 } else candidates = workloadSubjects.stream().filter(query -> "mix".equals(query.get("scope"))
                         && mix.equals(query.get("mixId"))).toList();
             }
             if (candidates.size() != 1) {
                 unmatched++;
-                if (candidates.size() > 1 || workloadSubjects.stream().anyMatch(query -> Boolean.TRUE.equals(query.get("mappingAmbiguous"))))
-                    for (Map<String, Object> query : workloadSubjects) ambiguous.add(String.valueOf(query.get("subjectKey")));
+                if (candidates.size() > 1)
+                    for (Map<String, Object> query : candidates) ambiguous.add(String.valueOf(query.get("subjectKey")));
                 continue;
             }
             String key = String.valueOf(candidates.get(0).get("subjectKey"));
@@ -1949,7 +1946,7 @@ final class SutMetricsService implements AutoCloseable {
         if (mappedRows.duplicateSubjects().contains(subjectKey))
             throw new BusinessMetricOutputException("BUSINESS_MAPPING_DUPLICATE", "DUPLICATE", unmatched,
                     "More than one result row maps to this metric and Workload/mix subject.");
-        if (mappedRows.ambiguousSubjects().contains(subjectKey) || Boolean.TRUE.equals(query.get("mappingAmbiguous")))
+        if (mappedRows.ambiguousSubjects().contains(subjectKey))
             throw new BusinessMetricOutputException("BUSINESS_MAPPING_AMBIGUOUS", "AMBIGUOUS", unmatched,
                     "The result row does not identify one immutable Workload/mix subject.");
         Map<String, Object> row = mappedRows.rowsBySubject().get(subjectKey);
@@ -2673,8 +2670,6 @@ final class SutMetricsService implements AutoCloseable {
                             "workloadId", resolvedWorkloadId, "mixId", resolvedMixId,
                             "callWorkloadId", multiOutput && nullableText(mapping.get("workloadColumn")) != null
                                     ? null : resolvedWorkloadId,
-                            "mappingAmbiguous", subject != null && subject.mixedWorkload() && resolvedMixId == null
-                                    && nullableText(mapping.get("workloadColumn")) != null,
                             "profileRevision", sha256Json(profile), "sourceRevision", callContext == null ? null : callContext.runtimeConfigRevision(),
                             "targetRevision", callContext == null ? null : callContext.packageRevision());
                     queries.add(row);
@@ -3062,6 +3057,7 @@ final class SutMetricsService implements AutoCloseable {
             if (callContext == null || callContext.workloadSubjects().isEmpty())
                 throw new IllegalArgumentException("Row-mapped business metrics require the validated immutable LOAD Workload and mix identities.");
             if (mixColumn != null) return callContext.workloadSubjects();
+            // Without a mix column, each result row is explicitly Workload-scoped, including mixed Workloads.
             Map<String, WorkloadSubject> byWorkload = new LinkedHashMap<>();
             for (WorkloadSubject subject : callContext.workloadSubjects()) {
                 WorkloadSubject expected = subject.mixedWorkload()
