@@ -23,6 +23,6 @@ Business-call execution uses the Package and Runtime Config revisions pinned at 
 
 Each local result and hosted check must identify the exact source revision. A local test result is not hosted CI evidence, and neither substitutes for production deployment or scale validation.
 
-- Local verification for the review-fix changes: the affected Server reactor (`SutMetricsServiceTest` and `ServerRuntimeJobReplayTest`) passed 88 tests, and the Settings/Correlation frontend tests passed 13 tests. Maven also type-checked and built the frontend and passed the initial bundle budget.
+- Local verification for the review-fix changes: the affected Server reactor (`SutMetricsServiceTest` and `ServerRuntimeJobReplayTest`) passed 88 tests; the Engine LOAD normalization regression passed 1 test; and the Settings/Correlation frontend tests passed 13 tests. Maven also type-checked and built the frontend and passed the initial bundle budget.
 - Earlier hosted CI run `43669628531` passed 8/8 checks on PR head `b40b770dbeabc65109322d69d08c7a074e1c7795`; it predates these review fixes and does not validate them.
 - Production deployment, live Grafana, destination-IP egress enforcement, external verdict integration, and production-scale 25-hour collection remain outside the evidence above.
