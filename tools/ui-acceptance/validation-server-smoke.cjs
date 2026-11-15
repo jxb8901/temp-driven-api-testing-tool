@@ -29,13 +29,16 @@ async function main() {
     return (body.items || []).map(item => item.jobId).sort();
   });
   const waitForRecordReport = async validationId => {
-    const handle = await page.waitForFunction(async id => {
+    await page.waitForFunction(async id => {
       const response = await fetch(new URL(`../api/v1/validations/${encodeURIComponent(id)}`, document.baseURI), { cache: 'no-store' });
       if (!response.ok) return false;
       const record = await response.json();
-      return record.report ? record : false;
+      return Boolean(record.report) || ['COMPLETED', 'FAILED', 'TIMED_OUT', 'INTERRUPTED', 'CANCELLED'].includes(record.status);
     }, validationId, { timeout: 60000 });
-    const record = await handle.jsonValue();
+    const response = await page.request.get(`${origin}/tools/att/api/v1/validations/${encodeURIComponent(validationId)}`);
+    assert.equal(response.status(), 200, `Validation record ${validationId} should remain readable after completion`);
+    const record = await response.json();
+    assert.ok(record.report, `Validation record ${validationId} completed as ${record.status} without a report: ${JSON.stringify(record)}`);
     await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
     return record;
   };
