@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -57,6 +58,52 @@ class JobStoreValidationRecordTest {
             assertEquals("ATT-SERVER-VALIDATION-INTERRUPTED",recovered.get("errorCode"));
             assertNull(restarted.store.validationRecord(id,"bob"));
             assertTrue(restarted.store.validationRecords("bob",null,null,false,null,null,10).isEmpty());
+        }
+    }
+
+    @Test void validationListsAndShellSummariesExcludeLargePlanAndReportClobs() throws Exception {
+        ServerConfig config=config("large-validation-records","    maxTotalSizeMb: 4\n    maxRecordBytes: 3145728\n");
+        String id="VAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        Instant now=Instant.parse("2026-11-14T10:00:00Z");
+        String plan="{\"command\":\"validate\",\"padding\":\""+"p".repeat(300_000)+"\"}";
+        String report="{\"payload\":\""+"r".repeat(600_000)+"\"}";
+        try(JobStore store=new JobStore(config)) {
+            create(store,config,id,"alice",plan,now);
+            assertTrue(store.startValidationRecord(id,now.plusSeconds(1).toString(),10));
+            assertTrue(store.finishValidationRecord(id,"COMPLETED",now.plusSeconds(2).toString(),10,20,30,
+                    report,null,null,config.validationRecords));
+
+            Map<String,Object> listed=store.validationRecords("alice",null,null,false,null,null,10).get(0);
+            assertEquals(id,listed.get("validationId"));
+            assertFalse(listed.containsKey("report"));
+            assertFalse(listed.containsKey("planJson"));
+            assertFalse(listed.containsKey("recordBytes"));
+
+            Map<String,Object> summary=store.validationRecordSummaries("alice",1).get(0);
+            assertEquals(id,summary.get("validationId"));
+            assertFalse(summary.containsKey("report"));
+            assertFalse(summary.containsKey("planJson"));
+
+            Map<String,Object> detail=store.validationRecord(id,"alice");
+            assertEquals("r".repeat(600_000),((Map<?,?>)detail.get("report")).get("payload"));
+            assertEquals(plan.length(),((String)detail.get("planJson")).length());
+        }
+    }
+
+    @Test void exactContextListLookupSeparatesPackageEnvironmentAndTarget() throws Exception {
+        ServerConfig config=config("validation-context-list",null);
+        Instant now=Instant.parse("2026-11-14T10:00:00Z");
+        String sit="V0123456789ABCDEF0123456789ABCDEF",uat="VFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
+        try(JobStore store=new JobStore(config)) {
+            store.createValidationRecord(sit,"alice",false,"template","payments","tpl-a","SIT","request-364",now.toString(),
+                    "{\"command\":\"validate\"}",config.validationRecords,now);
+            store.createValidationRecord(uat,"alice",false,"template","payments","tpl-a","UAT","request-364",now.plusSeconds(1).toString(),
+                    "{\"command\":\"validate\"}",config.validationRecords,now.plusSeconds(1));
+            List<Map<String,Object>> exact=store.validationRecords("alice","payments","template","tpl-a","SIT",true,
+                    false,null,null,1);
+            assertEquals(1,exact.size());
+            assertEquals(sit,exact.get(0).get("validationId"));
+            assertEquals("SIT",exact.get(0).get("environment"));
         }
     }
 

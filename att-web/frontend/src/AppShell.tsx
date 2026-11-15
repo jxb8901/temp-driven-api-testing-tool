@@ -329,8 +329,8 @@ export function AppShell({
     const refresh = async () => {
       if (document.visibilityState !== 'visible') return;
       try {
-        const page = await api.listValidationRecords({ limit: 100 });
-        if (active) setActiveValidationRecord(page.items.find(item => item.status === 'QUEUED' || item.status === 'RUNNING') || page.items[0] || null);
+        const summary = await api.getValidationRecordSummary();
+        if (active) setActiveValidationRecord(summary.record);
       } catch { /* The shell keeps the last visible state while the API is temporarily unavailable. */ }
     };
     void refresh();

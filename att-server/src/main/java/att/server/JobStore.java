@@ -994,30 +994,55 @@ final class JobStore implements AutoCloseable {
 
     synchronized Map<String,Object> activeValidationRecord(String actor,boolean all,String scope,String packageId,String target,
             String environment) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,report_json,error_code,error_message,plan_json,record_bytes FROM validation_records WHERE actor=? AND all_scope=? AND scope=? AND ((package_id=?) OR (package_id IS NULL AND ? IS NULL)) AND ((target=?) OR (target IS NULL AND ? IS NULL)) AND ((environment=?) OR (environment IS NULL AND ? IS NULL)) AND state IN ('QUEUED','RUNNING') ORDER BY submitted_at DESC,validation_id DESC LIMIT 1")) {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,error_code,error_message FROM validation_records WHERE actor=? AND all_scope=? AND scope=? AND ((package_id=?) OR (package_id IS NULL AND ? IS NULL)) AND ((target=?) OR (target IS NULL AND ? IS NULL)) AND ((environment=?) OR (environment IS NULL AND ? IS NULL)) AND state IN ('QUEUED','RUNNING') ORDER BY submitted_at DESC,validation_id DESC LIMIT 1")) {
             p.setString(1,actor);p.setBoolean(2,all);p.setString(3,scope);p.setString(4,packageId);p.setString(5,packageId);
             p.setString(6,target);p.setString(7,target);p.setString(8,environment);p.setString(9,environment);
-            try(ResultSet row=p.executeQuery()){return row.next()?readValidationRecord(row,true):null;}
+            try(ResultSet row=p.executeQuery()){return row.next()?readValidationRecordSummary(row):null;}
         }
     }
 
     synchronized Map<String,Object> validationRecord(String id,String actor) throws Exception {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,report_json,error_code,error_message,plan_json,record_bytes FROM validation_records WHERE validation_id=? AND actor=?")) {
-            p.setString(1,id);p.setString(2,actor);try(ResultSet r=p.executeQuery()){return r.next()?readValidationRecord(r,true):null;}
+            p.setString(1,id);p.setString(2,actor);try(ResultSet r=p.executeQuery()){return r.next()?readValidationRecord(r):null;}
         }
     }
 
     synchronized List<Map<String,Object>> validationRecords(String actor,String packageId,String scope,boolean includeAll,
             String beforeAt,String beforeId,int limit) throws Exception {
-        StringBuilder sql=new StringBuilder("SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,report_json,error_code,error_message,plan_json,record_bytes FROM validation_records WHERE actor=?");
-        if(packageId!=null)sql.append(" AND package_id=?");if(scope!=null)sql.append(" AND scope=?");if(!includeAll)sql.append(" AND all_scope=FALSE");
+        return validationRecords(actor,packageId,scope,null,null,false,includeAll,beforeAt,beforeId,limit);
+    }
+
+    synchronized List<Map<String,Object>> validationRecords(String actor,String packageId,String scope,String target,
+            String environment,boolean matchContext,boolean includeAll,String beforeAt,String beforeId,int limit) throws Exception {
+        StringBuilder sql=new StringBuilder("SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,error_code,error_message FROM validation_records WHERE actor=?");
+        if(matchContext) {
+            sql.append(" AND ((package_id=?) OR (package_id IS NULL AND ? IS NULL)) AND scope=? AND ((target=?) OR (target IS NULL AND ? IS NULL)) AND ((environment=?) OR (environment IS NULL AND ? IS NULL))");
+        } else {
+            if(packageId!=null)sql.append(" AND package_id=?");if(scope!=null)sql.append(" AND scope=?");
+        }
+        if(!includeAll)sql.append(" AND all_scope=FALSE");
         if(beforeAt!=null)sql.append(" AND (submitted_at<? OR (submitted_at=? AND validation_id<?))");
         sql.append(" ORDER BY submitted_at DESC,validation_id DESC LIMIT ?");
         List<Map<String,Object>> out=new ArrayList<>();
         try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql.toString())) {
-            int n=1;p.setString(n++,actor);if(packageId!=null)p.setString(n++,packageId);if(scope!=null)p.setString(n++,scope);
+            int n=1;p.setString(n++,actor);
+            if(matchContext) {
+                p.setString(n++,packageId);p.setString(n++,packageId);p.setString(n++,scope);
+                p.setString(n++,target);p.setString(n++,target);p.setString(n++,environment);p.setString(n++,environment);
+            } else {
+                if(packageId!=null)p.setString(n++,packageId);if(scope!=null)p.setString(n++,scope);
+            }
             if(beforeAt!=null){p.setString(n++,beforeAt);p.setString(n++,beforeAt);p.setString(n++,beforeId);}p.setInt(n,limit);
-            try(ResultSet r=p.executeQuery()){while(r.next())out.add(readValidationRecord(r,false));}
+            try(ResultSet r=p.executeQuery()){while(r.next())out.add(readValidationRecordSummary(r));}
+        }
+        return out;
+    }
+
+    synchronized List<Map<String,Object>> validationRecordSummaries(String actor,int limit) throws Exception {
+        String sql="SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,error_code,error_message FROM validation_records WHERE actor=? ORDER BY CASE WHEN state IN ('QUEUED','RUNNING') THEN 0 ELSE 1 END,submitted_at DESC,validation_id DESC LIMIT ?";
+        List<Map<String,Object>> out=new ArrayList<>();
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)) {
+            p.setString(1,actor);p.setInt(2,limit);try(ResultSet r=p.executeQuery()){while(r.next())out.add(readValidationRecordSummary(r));}
         }
         return out;
     }
@@ -1136,15 +1161,24 @@ final class JobStore implements AutoCloseable {
                 +(reportJson==null?0:reportJson.getBytes(StandardCharsets.UTF_8).length);
     }
 
-    @SuppressWarnings("unchecked") private static Map<String,Object> readValidationRecord(ResultSet r,boolean includeReport) throws Exception {
+    @SuppressWarnings("unchecked") private static Map<String,Object> readValidationRecord(ResultSet r) throws Exception {
         Map<String,Object> m=new LinkedHashMap<>();m.put("validationId",r.getString(1));m.put("actor",r.getString(2));
         m.put("all",r.getBoolean(3));m.put("scope",r.getString(4));m.put("packageId",r.getString(5));m.put("target",r.getString(6));
         m.put("environment",r.getString(7));m.put("status",r.getString(8));m.put("phase",r.getString(9));m.put("requestId",r.getString(10));
         m.put("submittedAt",r.getString(11));m.put("startedAt",r.getString(12));m.put("finishedAt",r.getString(13));
         m.put("queueElapsedMs",r.getObject(14));m.put("executionElapsedMs",r.getObject(15));m.put("totalElapsedMs",r.getObject(16));
         m.put("sourceRevision",r.getString(17));String report=r.getString(18);m.put("errorCode",r.getString(19));m.put("error",r.getString(20));
-        if(includeReport&&report!=null)m.put("report",(Map<String,Object>)ServerRuntime.JSON.readValue(report,Map.class));
+        if(report!=null)m.put("report",(Map<String,Object>)ServerRuntime.JSON.readValue(report,Map.class));
         if(r.getString(21)!=null)m.put("planJson",r.getString(21));m.put("recordBytes",r.getLong(22));return m;
+    }
+
+    private static Map<String,Object> readValidationRecordSummary(ResultSet r) throws Exception {
+        Map<String,Object> m=new LinkedHashMap<>();m.put("validationId",r.getString(1));m.put("actor",r.getString(2));
+        m.put("all",r.getBoolean(3));m.put("scope",r.getString(4));m.put("packageId",r.getString(5));m.put("target",r.getString(6));
+        m.put("environment",r.getString(7));m.put("status",r.getString(8));m.put("phase",r.getString(9));m.put("requestId",r.getString(10));
+        m.put("submittedAt",r.getString(11));m.put("startedAt",r.getString(12));m.put("finishedAt",r.getString(13));
+        m.put("queueElapsedMs",r.getObject(14));m.put("executionElapsedMs",r.getObject(15));m.put("totalElapsedMs",r.getObject(16));
+        m.put("sourceRevision",r.getString(17));m.put("errorCode",r.getString(18));m.put("error",r.getString(19));return m;
     }
     synchronized void deleteAuthSession(String hash) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM auth_sessions WHERE token_hash=?")){p.setString(1,hash);p.executeUpdate();}}
     synchronized void revokeAuthSessions(String login) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM auth_sessions WHERE login_id=?")){p.setString(1,login);p.executeUpdate();}}

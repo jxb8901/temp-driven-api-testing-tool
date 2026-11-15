@@ -82,7 +82,7 @@ final class ServerRuntime implements AutoCloseable {
         final Map<String,Object> scenario;final String revisionDigest,model;final boolean containsSensitiveValues,containsSensitiveAuthoredValues;
         ValidatedScheduledScenario(Map<String,Object> scenario,String revisionDigest,String model,boolean containsSensitiveValues,boolean containsSensitiveAuthoredValues){this.scenario=scenario;this.revisionDigest=revisionDigest;this.model=model;this.containsSensitiveValues=containsSensitiveValues;this.containsSensitiveAuthoredValues=containsSensitiveAuthoredValues;}
     }
-    private static final class ValidationPlan {
+    static final class ValidationPlan {
         final JsonNode input;final boolean all;final String scope,target,packageId,environment;
         ValidationPlan(JsonNode input,boolean all,String scope,String target,String packageId,String environment) {
             this.input=input;this.all=all;this.scope=scope;this.target=target;this.packageId=packageId;this.environment=environment;
@@ -2447,7 +2447,7 @@ final class ServerRuntime implements AutoCloseable {
         return result;
     }
 
-    private ValidationPlan validationPlan(JsonNode input) {
+    ValidationPlan validationPlan(JsonNode input) {
         if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON validation plan is required");
         Set<String> allowedFields=Set.of("command","targetKind","target","packageId","environment","all");
         java.util.Iterator<String> fields=input.fieldNames();while(fields.hasNext())if(!allowedFields.contains(fields.next()))
@@ -2536,14 +2536,16 @@ final class ServerRuntime implements AutoCloseable {
         }
     }
 
-    private ValidationPlan captureDefaultValidationEnvironment(ValidationPlan plan) throws Exception {
+    ValidationPlan captureDefaultValidationEnvironment(ValidationPlan plan) throws Exception {
         if(plan.all||plan.packageId==null||plan.environment!=null)return plan;
         Path root=packageRoot(plan.packageId);
         if(root==null)return plan;
         try {
             Object value=resolveExecutionConfiguration(plan.packageId,root,null).get("environment");
-            if(value instanceof String environment&&environment.matches("[A-Za-z][A-Za-z0-9_-]{0,31}"))
-                return new ValidationPlan(plan.input,plan.all,plan.scope,plan.target,plan.packageId,environment);
+            if(value instanceof String environment&&environment.matches("[A-Za-z][A-Za-z0-9_-]{0,31}")) {
+                ObjectNode normalized=plan.input.deepCopy();normalized.put("environment",environment);
+                return new ValidationPlan(normalized,plan.all,plan.scope,plan.target,plan.packageId,environment);
+            }
         } catch(InspectionConfigurationException invalid) {
             // Preserve async validation's report path when configuration cannot supply an effective Environment.
         }
@@ -2566,12 +2568,16 @@ final class ServerRuntime implements AutoCloseable {
             execution.startedNanos=started;
             String state="COMPLETED",errorCode=null,errorMessage=null;String reportJson=null;
             try {
+                String revisionBefore=captureValidationSourceRevision(execution.plan);
                 Map<String,Object> report=validateVNext(execution.plan.input,execution.actor);
-                String environment=null,revision=null;Object rawContext=report.get("context");
+                String revisionAfter=captureValidationSourceRevision(execution.plan);
+                String revision=revisionBefore!=null&&revisionBefore.equals(revisionAfter)?revisionBefore:null;
+                String environment=execution.plan.environment;Object rawContext=report.get("context");
                 if(rawContext instanceof Map<?,?> context) {
                     Object env=context.get("environment");if(env instanceof String value&&value.matches("[A-Za-z][A-Za-z0-9_-]{0,31}"))environment=value;
-                    for(String key:List.of("sourceRevision","revisionDigest","packageRevision","runtimeConfigRevision","configurationRevision")) {
-                        Object value=context.get(key);if(value instanceof String digest&&digest.matches("[A-Fa-f0-9]{32,128}")){revision=digest;break;}
+                    if(revision!=null) {
+                        @SuppressWarnings("unchecked") Map<String,Object> mutableContext=(Map<String,Object>)context;
+                        mutableContext.put("sourceRevision",revision);
                     }
                 }
                 store.validationSourceContext(execution.id,environment,revision);
@@ -2603,6 +2609,61 @@ final class ServerRuntime implements AutoCloseable {
         if(startNanos<=0||endNanos<=startNanos)return 0L;return TimeUnit.NANOSECONDS.toMillis(endNanos-startNanos);
     }
 
+    String captureValidationSourceRevision(ValidationPlan plan) {
+        if(plan==null||plan.all)return null;
+        try {
+            java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
+            long[] totalBytes={0};int[] entries={0};
+            Path runtimeRoot=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath);
+            updateValidationTree(digest,"runtime-config",runtimeRoot.resolve("config"),totalBytes,entries);
+            if(plan.packageId!=null) {
+                Path root=packageRoot(plan.packageId);
+                if(root==null)return null;
+                validatePackageRoot(root);
+                updateValidationTree(digest,"package",root,totalBytes,entries);
+            }
+            StringBuilder result=new StringBuilder(64);for(byte value:digest.digest())result.append(String.format("%02x",value&255));
+            return result.toString();
+        } catch(Exception unavailable) { return null; }
+    }
+
+    private static void updateValidationTree(java.security.MessageDigest digest,String label,Path root,long[] totalBytes,int[] entries) throws Exception {
+        Path canonical=root.toAbsolutePath().normalize();
+        updateValidationDigest(digest,"root",label);
+        if(Files.isSymbolicLink(canonical))throw new IllegalArgumentException("Validation source root is a symbolic link");
+        if(!Files.exists(canonical,java.nio.file.LinkOption.NOFOLLOW_LINKS)) {updateValidationDigest(digest,"missing","");return;}
+        if(!Files.isDirectory(canonical,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Validation source root is not a directory");
+        List<Path> paths;
+        try(java.util.stream.Stream<Path> walk=Files.walk(canonical)) {
+            paths=walk.limit(20001).collect(java.util.stream.Collectors.toList());
+        }
+        if(paths.size()>20000)throw new IllegalArgumentException("Validation source entry limit exceeded");
+        paths.sort(java.util.Comparator.comparing(path->canonical.relativize(path).toString().replace('\\','/')));
+        for(Path path:paths) {
+            if(++entries[0]>20000)throw new IllegalArgumentException("Validation source entry limit exceeded");
+            if(Files.isSymbolicLink(path))throw new IllegalArgumentException("Validation source contains a symbolic link");
+            String relative=canonical.relativize(path).toString().replace('\\','/');
+            updateValidationDigest(digest,"path",relative);
+            if(Files.isDirectory(path,java.nio.file.LinkOption.NOFOLLOW_LINKS)) {updateValidationDigest(digest,"directory","");continue;}
+            if(!Files.isRegularFile(path,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Validation source contains an unsupported file");
+            updateValidationDigest(digest,"file","");
+            try(java.io.InputStream input=Files.newInputStream(path)) {
+                byte[] buffer=new byte[8192];int read;
+                while((read=input.read(buffer))!=-1) {
+                    totalBytes[0]+=read;if(totalBytes[0]>268435456L)throw new IllegalArgumentException("Validation source byte limit exceeded");
+                    digest.update(buffer,0,read);
+                }
+            }
+        }
+    }
+
+    private static void updateValidationDigest(java.security.MessageDigest digest,String kind,String value) {
+        byte[] kindBytes=kind.getBytes(StandardCharsets.UTF_8),valueBytes=value.getBytes(StandardCharsets.UTF_8);
+        digest.update((byte)(kindBytes.length>>>8));digest.update((byte)kindBytes.length);digest.update(kindBytes);
+        digest.update((byte)(valueBytes.length>>>24));digest.update((byte)(valueBytes.length>>>16));
+        digest.update((byte)(valueBytes.length>>>8));digest.update((byte)valueBytes.length);digest.update(valueBytes);
+    }
+
     private void endValidationExecution(ValidationExecution execution) {
         validationExecutions.remove(execution.id,execution);releaseValidationAdmission(execution);
     }
@@ -2625,11 +2686,19 @@ final class ServerRuntime implements AutoCloseable {
         verifyValidationRecordAccess(record);return Boolean.TRUE.equals(record.get("all"));
     }
 
-    Map<String,Object> listValidationRecords(String actor,String packageId,String scope,int limit,String cursor,boolean includeAll) throws Exception {
+    Map<String,Object> listValidationRecords(String actor,String packageId,String scope,String target,String environment,
+            boolean matchContext,int limit,String cursor,boolean includeAll) throws Exception {
         requireValidationRecords();
         if(packageId!=null)packageId=safeText(packageId,64,"packageId");
         if(scope!=null&&!List.of("config","package","case","suite","template","flow","tool","load").contains(scope))
             throw new IllegalArgumentException("Unsupported validation scope filter");
+        if(matchContext) {
+            if(scope==null)throw new IllegalArgumentException("A scope is required for an exact validation context lookup");
+            if(target!=null)target=List.of("suite","load").contains(scope)?safeRelative(target,scope):safeText(target,512,"target");
+            if(environment!=null)environment=safeText(environment,32,"environment");
+            else environment=resolveValidationEnvironment(packageId,null);
+            if(packageId!=null&&environment!=null)config.packageConfiguration.authorizeEnvironment(environment,true);
+        }
         if(limit<1||limit>100)throw new IllegalArgumentException("limit must be from 1 to 100");
         String beforeAt=null,beforeId=null;
         if(cursor!=null&&!cursor.isBlank()) {
@@ -2640,7 +2709,8 @@ final class ServerRuntime implements AutoCloseable {
                 beforeAt=Instant.parse(decoded.substring(0,split)).toString();beforeId=decoded.substring(split+1);validateValidationId(beforeId);
             } catch(Exception invalid){throw new IllegalArgumentException("Invalid validation cursor");}
         }
-        List<Map<String,Object>> rows=store.validationRecords(actor,packageId,scope,includeAll,beforeAt,beforeId,limit+1);
+        List<Map<String,Object>> rows=store.validationRecords(actor,packageId,scope,target,environment,matchContext,
+                includeAll,beforeAt,beforeId,limit+1);
         boolean hasMore=rows.size()>limit;if(hasMore)rows=rows.subList(0,limit);
         List<Map<String,Object>> items=new ArrayList<>();for(Map<String,Object> row:rows) {
             try {verifyValidationRecordAccess(row);items.add(publicValidationRecord(row,false));}
@@ -2649,6 +2719,32 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> response=new LinkedHashMap<>();response.put("items",items);
         response.put("nextCursor",hasMore&&!rows.isEmpty()?encodeValidationCursor(rows.get(rows.size()-1)):null);
         return response;
+    }
+
+    Map<String,Object> validationRecordSummary(String actor) throws Exception {
+        requireValidationRecords();
+        for(Map<String,Object> row:store.validationRecordSummaries(actor,16)) {
+            try {
+                verifyValidationRecordAccess(row);
+                Map<String,Object> response=new LinkedHashMap<>();response.put("record",publicValidationRecord(row,false));return response;
+            } catch(NotFoundException|PackageConfigurationPolicy.EnvironmentDeniedException inaccessible) {
+                // Skip records whose Package or Environment access has been revoked.
+            }
+        }
+        Map<String,Object> response=new LinkedHashMap<>();response.put("record",null);return response;
+    }
+
+    private String resolveValidationEnvironment(String packageId,String requestedEnvironment) throws Exception {
+        if(requestedEnvironment!=null)return requestedEnvironment;
+        Path root=packageId==null?ServerConfig.runtimeConfigRoot(config.runtimeConfigPath):packageRoot(packageId);
+        if(root==null)return null;
+        try {
+            Object value=resolveExecutionConfiguration(packageId,root,null).get("environment");
+            if(value instanceof String environment&&environment.matches("[A-Za-z][A-Za-z0-9_-]{0,31}"))return environment;
+        } catch(InspectionConfigurationException invalid) {
+            // An unavailable default Environment remains unmatched rather than guessing a different context.
+        }
+        return null;
     }
 
     Map<String,Object> cancelValidation(String id,String actor) throws Exception {
@@ -2685,7 +2781,7 @@ final class ServerRuntime implements AutoCloseable {
             Object value=record.get(key);if(value!=null)out.put(key,value);
         }
         if(Boolean.TRUE.equals(record.get("all")))out.put("all",true);
-        out.put("applicability","UNVERIFIED");
+        out.put("applicability",includeReport?validationApplicability(record):"UNVERIFIED");
         String state=String.valueOf(record.get("status"));ValidationExecution execution=validationExecutions.get(String.valueOf(record.get("validationId")));
         if(execution!=null&&("QUEUED".equals(state)||"RUNNING".equals(state))) {
             long now=System.nanoTime();long queue=execution.startedNanos>0?elapsedMillis(execution.submittedNanos,execution.startedNanos):elapsedMillis(execution.submittedNanos,now);
@@ -2695,6 +2791,22 @@ final class ServerRuntime implements AutoCloseable {
         if(includeReport&&record.get("report") instanceof Map<?,?>)out.put("report",record.get("report"));
         if(record.get("report") instanceof Map<?,?> report&&report.get("overallStatus")!=null)out.put("overallStatus",report.get("overallStatus"));
         return out;
+    }
+
+    private String validationApplicability(Map<String,Object> record) {
+        String captured=(String)record.get("sourceRevision");
+        if(captured==null||!captured.matches("[a-f0-9]{64}"))return "UNVERIFIED";
+        if(Boolean.TRUE.equals(record.get("all")))return "UNVERIFIED";
+        String packageId=(String)record.get("packageId"),environment=(String)record.get("environment");
+        ValidationPlan plan=new ValidationPlan(null,false,String.valueOf(record.get("scope")),
+                (String)record.get("target"),packageId,environment);
+        return validationApplicability(captured,captureValidationSourceRevision(plan));
+    }
+
+    static String validationApplicability(String captured,String current) {
+        if(captured==null||current==null||!captured.matches("[a-f0-9]{64}")||!current.matches("[a-f0-9]{64}"))
+            return "UNVERIFIED";
+        return captured.equals(current)?"CURRENT":"STALE";
     }
 
     private static String encodeValidationCursor(Map<String,Object> row) {

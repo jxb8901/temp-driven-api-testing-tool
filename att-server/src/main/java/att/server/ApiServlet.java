@@ -69,11 +69,19 @@ public final class ApiServlet extends HttpServlet {
             if(loadSchedulePath(path)){scheduleGet(req,res,path,requestId);return;}
             boolean draftRequest=path.matches("/drafts/[DLAR][0-9A-F]{32}");
             String principal=principal(req);if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+            if("/validations/summary".equals(path)) {
+                if(!requireValidationIdentity(principal,res,requestId))return;
+                if(!requireOperator(req,res,requestId))return;
+                Map<String,Object> response=runtime.validationRecordSummary(principal);
+                response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;
+            }
             if("/validations".equals(path)) {
                 if(!requireValidationIdentity(principal,res,requestId))return;
                 boolean admin=systemAdminCapability(req,principal);if(!admin&&!requireOperator(req,res,requestId))return;
                 Map<String,Object> response=runtime.listValidationRecords(principal,req.getParameter("packageId"),
-                        req.getParameter("scope"),parseValidationLimit(req.getParameter("limit")),req.getParameter("cursor"),admin);
+                        req.getParameter("scope"),req.getParameter("target"),req.getParameter("environment"),
+                        Boolean.parseBoolean(req.getParameter("matchContext")),parseValidationLimit(req.getParameter("limit")),
+                        req.getParameter("cursor"),admin);
                 response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;
             }
             if(path.matches("/validations/V[0-9A-F]{32}")) {

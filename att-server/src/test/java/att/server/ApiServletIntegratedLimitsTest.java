@@ -79,8 +79,9 @@ class ApiServletIntegratedLimitsTest {
     @Test void asynchronousValidationRecordIsDurableOwnerScopedAndCreatesNoJob() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("validation-record-packages"));
         createPackage(packages.resolve("payments"));
+        Path runtimeConfig=sharedRuntimeConfig();
         Path libs=workerLibraries("validation-record-libs");
-        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"validation-record-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true)) {
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"validation-record-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true)) {
             ApiServlet servlet=servlet(runtime);
             byte[] body="{\"command\":\"validate\",\"targetKind\":\"config\"}".getBytes(StandardCharsets.UTF_8);
             Captured accepted=invokeAs(servlet,"POST","/validations",Map.of(),body,"alice");
@@ -111,7 +112,20 @@ class ApiServletIntegratedLimitsTest {
             assertEquals(200,result.status,new String(result.body(),StandardCharsets.UTF_8));
             assertEquals("COMPLETED",completed.path("status").asText());
             assertEquals("att-validation/v1",completed.path("report").path("schemaVersion").asText());
+            assertTrue(completed.path("sourceRevision").asText().matches("[a-f0-9]{64}"));
+            assertEquals("CURRENT",completed.path("applicability").asText());
             assertEquals(0,runtime.jobsFor("alice",null).size(),"Read-only validation must not create a Job");
+
+            Captured matching=invokeAs(servlet,"GET","/validations",Map.of("scope","config","matchContext","true","limit","1"),new byte[0],"alice");
+            assertEquals(id,ServerRuntime.JSON.readTree(matching.body()).path("items").path(0).path("validationId").asText());
+            Captured summary=invokeAs(servlet,"GET","/validations/summary",Map.of(),new byte[0],"alice");
+            JsonNode summaryRecord=ServerRuntime.JSON.readTree(summary.body()).path("record");
+            assertEquals(id,summaryRecord.path("validationId").asText());
+            assertFalse(summaryRecord.has("report"));
+
+            Files.writeString(runtimeConfig,Files.readString(runtimeConfig)+"\n# changed after validation\n");
+            Captured stale=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
+            assertEquals("STALE",ServerRuntime.JSON.readTree(stale.body()).path("applicability").asText());
 
             ReentrantLock workerLock=inspectionWorkerLock(runtime);workerLock.lock();
             try {
@@ -135,6 +149,52 @@ class ApiServletIntegratedLimitsTest {
                 assertEquals(200,cancelled.status,new String(cancelled.body(),StandardCharsets.UTF_8));
                 assertEquals("CANCELLED",cancelledRecord.path("status").asText());
             } finally {workerLock.unlock();}
+            stopInspectionProcesses(runtime);
+        }
+    }
+
+    @Test void queuedPlanFreezesTheResolvedEnvironmentAcrossConfigurationChanges() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("validation-environment-packages"));
+        createPackage(packages.resolve("payments"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+                +"environments:\n  SIT: {}\n  UAT: {}\ntimeoutMs: 10000\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
+        Path libs=workerLibraries("validation-environment-libs");
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"validation-environment-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true,1)) {
+            ApiServlet servlet=servlet(runtime);
+            java.util.concurrent.CountDownLatch blockerStarted=new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.CountDownLatch releaseBlocker=new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.ThreadPoolExecutor executor=validationExecutor(runtime);
+            String validationId;
+            executor.execute(()->{blockerStarted.countDown();try{releaseBlocker.await();}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}});
+            assertTrue(blockerStarted.await(5,java.util.concurrent.TimeUnit.SECONDS));
+            try {
+                byte[] body="{\"command\":\"validate\",\"targetKind\":\"config\",\"packageId\":\"payments\"}"
+                        .getBytes(StandardCharsets.UTF_8);
+                Captured accepted=invokeAs(servlet,"POST","/validations",Map.of(),body,"alice");
+                JsonNode queued=ServerRuntime.JSON.readTree(accepted.body());validationId=queued.path("validationId").asText();
+                assertEquals(202,accepted.status,new String(accepted.body(),StandardCharsets.UTF_8));
+                assertEquals("QUEUED",queued.path("status").asText());
+                assertEquals("SIT",queued.path("environment").asText(),"The durable record must capture the submitted effective Environment");
+
+                Files.writeString(runtimeConfig,Files.readString(runtimeConfig).replace("environment: SIT","environment: UAT"));
+                JsonNode stillQueued=ServerRuntime.JSON.readTree(invokeAs(servlet,"GET","/validations/"+validationId,Map.of(),new byte[0],"alice").body());
+                assertEquals("QUEUED",stillQueued.path("status").asText());
+                assertEquals("SIT",stillQueued.path("environment").asText());
+            } finally {releaseBlocker.countDown();}
+
+            JsonNode completed=null;long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+            while(System.nanoTime()<deadline) {
+                Captured result=invokeAs(servlet,"GET","/validations/"+validationId,Map.of(),new byte[0],"alice");
+                completed=ServerRuntime.JSON.readTree(result.body());
+                if(!List.of("QUEUED","RUNNING").contains(completed.path("status").asText()))break;
+                Thread.sleep(25);
+            }
+            assertNotNull(completed);
+            assertEquals("COMPLETED",completed.path("status").asText());
+            assertEquals("SIT",completed.path("environment").asText());
+            assertEquals("SIT",completed.path("report").path("context").path("environment").asText());
             stopInspectionProcesses(runtime);
         }
     }
@@ -368,6 +428,12 @@ class ApiServletIntegratedLimitsTest {
 
     private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
                                   ServerRuntime.WorkerProcessLauncher launcher,Path libs,boolean authenticationRequired) throws Exception {
+        return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,authenticationRequired,0);
+    }
+
+    private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
+                                  ServerRuntime.WorkerProcessLauncher launcher,Path libs,boolean authenticationRequired,
+                                  int inspectionQueuedLimit) throws Exception {
         Path yaml=temp.resolve(dataName+".yaml");
         StringBuilder entries=new StringBuilder();
         try(java.util.stream.Stream<Path> children=Files.list(packages)) {
@@ -378,7 +444,7 @@ class ApiServletIntegratedLimitsTest {
                 +"\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
                 +"\n  maxRequestBytes: 1024\n  authenticationRequired: "+authenticationRequired+"\n"
                 +(authenticationRequired?"":"  authorization:\n    allowAnonymousOperations: true\n")
-                +"  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: 0\n    timeoutMs: "+timeout
+                +"  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: "+inspectionQueuedLimit+"\n    timeoutMs: "+timeout
                 +"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 0\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(packages)
                 +"\n  entries:\n"+entries;
         ServerConfig serverConfig=ServerConfig.load(Files.writeString(yaml,config));
@@ -480,6 +546,11 @@ class ApiServletIntegratedLimitsTest {
     private static ReentrantLock inspectionWorkerLock(ServerRuntime runtime) throws Exception {
         Object worker=inspectionWorkers(runtime).get(0);Field field=worker.getClass().getDeclaredField("lock");field.setAccessible(true);
         return (ReentrantLock)field.get(worker);
+    }
+
+    private static java.util.concurrent.ThreadPoolExecutor validationExecutor(ServerRuntime runtime) throws Exception {
+        Field field=ServerRuntime.class.getDeclaredField("validationExecutor");field.setAccessible(true);
+        return (java.util.concurrent.ThreadPoolExecutor)field.get(runtime);
     }
 
     private static void stopInspectionProcesses(ServerRuntime runtime) throws Exception {

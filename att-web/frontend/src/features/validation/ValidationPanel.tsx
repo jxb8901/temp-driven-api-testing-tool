@@ -6,8 +6,9 @@ import { diagnosticResourceKey, diagnosticResourceLookups, ValidationReport } fr
 import type { ValidationRecord, ValidationRequest, ValidationTransportState } from './types';
 import './validation.css';
 
-type ValidationPanelApi = Pick<typeof api, 'submitValidation' | 'getValidationRecord' | 'cancelValidation' | 'listResources'>;
+type ValidationPanelApi = Pick<typeof api, 'submitValidation' | 'getValidationRecord' | 'cancelValidation' | 'listResources' | 'listValidationRecords'>;
 const ACTIVE = new Set(['QUEUED', 'RUNNING']);
+type ValidationPanelError = 'lookup' | 'unavailable' | 'refresh' | 'cancel' | 'submit' | 'capacity';
 
 function label(en: string, zh: string, locale: 'en' | 'zh-Hant'): string {
   return locale === 'zh-Hant' ? zh : en;
@@ -31,10 +32,37 @@ function requestForRecord(record: ValidationRecord): ValidationRequest | undefin
   return undefined;
 }
 
-export function ValidationPanel({ request, validationId, title, onClose, onOpenResource, onOpenRecord, api: apiOverride = api }: {
+function lookupForRequest(request: ValidationRequest) {
+  if ('all' in request) return undefined;
+  return {
+    packageId: 'packageId' in request ? request.packageId : undefined,
+    scope: request.targetKind,
+    target: 'target' in request ? request.target : undefined,
+    environment: 'environment' in request ? request.environment : undefined,
+    matchContext: true,
+    limit: 1,
+  };
+}
+
+function errorMessage(error: ValidationPanelError, locale: 'en' | 'zh-Hant'): string {
+  const messages: Record<ValidationPanelError, [string, string]> = {
+    lookup: ['Could not look up a matching validation record.', '無法查詢相符的驗證記錄。'],
+    unavailable: ['This validation record is unavailable or has expired.', '此驗證記錄無法使用或已過期。'],
+    refresh: ['Could not refresh this validation record.', '無法重新整理此驗證記錄。'],
+    cancel: ['The Server could not cancel this validation.', 'Server 無法取消此驗證。'],
+    submit: ['The Server could not accept this validation request.', 'Server 無法接受此驗證請求。'],
+    capacity: ['Validation capacity is full. Wait briefly and retry.', '驗證容量已滿。請稍候再試。'],
+  };
+  return label(...messages[error], locale);
+}
+
+export function ValidationPanel({ request, validationId, title, submitOnOpen = true, onRecordLoaded,
+  onClose, onOpenResource, onOpenRecord, api: apiOverride = api }: {
   request?: ValidationRequest;
   validationId?: string;
   title?: string;
+  submitOnOpen?: boolean;
+  onRecordLoaded?(record: ValidationRecord): void;
   onClose?: () => void;
   onOpenResource?(packageId: string, resource: ResourceRoute, environment?: string): void;
   onOpenRecord?(validationId: string): void;
@@ -43,8 +71,9 @@ export function ValidationPanel({ request, validationId, title, onClose, onOpenR
   const workspace = useAppShellContext();
   const locale = workspace.uiLocale;
   const [record, setRecord] = useState<ValidationRecord | null>(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ValidationPanelError | null>(null);
   const [busy, setBusy] = useState(false);
+  const [initializing, setInitializing] = useState(false);
   const [diagnosticRoutes, setDiagnosticRoutes] = useState<Record<string, ResourceRoute>>({});
   const requestKey = JSON.stringify(request || null);
 
@@ -54,41 +83,55 @@ export function ValidationPanel({ request, validationId, title, onClose, onOpenR
       const updated = await apiOverride.getValidationRecord(record.validationId, signal);
       if (!signal?.aborted) {
         setRecord(updated);
-        setError('');
+        setError(null);
       }
     } catch {
-      if (!signal?.aborted) setError(label('Could not refresh this validation record.', '無法重新整理此驗證記錄。', locale));
+      if (!signal?.aborted) setError('refresh');
     }
-  }, [apiOverride, locale, record?.validationId]);
+  }, [apiOverride, record?.validationId]);
 
   useEffect(() => {
     let alive = true;
     const controller = new AbortController();
     setRecord(null);
-    setError('');
-    if (validationId) {
-      apiOverride.getValidationRecord(validationId, controller.signal).then(value => {
-        if (alive) setRecord(value);
-      }).catch(() => {
-        if (alive) setError(label('This validation record is unavailable or has expired.', '此驗證記錄無法使用或已過期。', locale));
-      });
-    } else if (requestKey !== 'null') {
-      // Admission is intentionally not tied to this component's AbortSignal:
-      // navigating away must not turn into a server-side cancellation.
-      apiOverride.submitValidation(JSON.parse(requestKey) as ValidationRequest).then(value => {
-        if (alive) setRecord(value);
-      }).catch((reason: unknown) => {
+    setError(null);
+    setInitializing(true);
+    const load = async () => {
+      try {
+        if (validationId) {
+          const value = await apiOverride.getValidationRecord(validationId, controller.signal);
+          if (alive) { setRecord(value); onRecordLoaded?.(value); }
+        } else if (requestKey !== 'null') {
+          const request = JSON.parse(requestKey) as ValidationRequest;
+          const lookup = lookupForRequest(request);
+          if (lookup) {
+            const page = await apiOverride.listValidationRecords(lookup, controller.signal);
+            const match = page.items[0];
+            if (match) {
+              const value = await apiOverride.getValidationRecord(match.validationId, controller.signal);
+              if (alive) { setRecord(value); onRecordLoaded?.(value); }
+              return;
+            }
+          }
+          if (!submitOnOpen) return;
+          // Admission is intentionally not tied to this AbortSignal:
+          // navigating away must not turn into a server-side cancellation.
+          const value = await apiOverride.submitValidation(request);
+          if (alive) { setRecord(value); onRecordLoaded?.(value); }
+        }
+      } catch (reason: unknown) {
         if (alive) {
           const status = typeof reason === 'object' && reason !== null && 'status' in reason
             ? Number((reason as { status?: unknown }).status) : 0;
-          setError(status === 503
-            ? label('Validation capacity is full. Wait briefly and retry.', '驗證容量已滿。請稍候再試。', locale)
-            : label('The Server could not accept this validation request.', 'Server 無法接受此驗證請求。', locale));
+          setError(validationId ? 'unavailable' : status === 503 ? 'capacity' : 'lookup');
         }
-      });
-    }
+      } finally {
+        if (alive) setInitializing(false);
+      }
+    };
+    void load();
     return () => { alive = false; controller.abort(); };
-  }, [apiOverride, locale, requestKey, validationId]);
+  }, [apiOverride, onRecordLoaded, requestKey, submitOnOpen, validationId]);
 
   useEffect(() => {
     if (!record?.validationId || !ACTIVE.has(record.status) || document.visibilityState !== 'visible') return;
@@ -133,11 +176,11 @@ export function ValidationPanel({ request, validationId, title, onClose, onOpenR
   const cancel = async () => {
     if (!record || !ACTIVE.has(record.status)) return;
     setBusy(true);
-    setError('');
+    setError(null);
     try {
       setRecord(await apiOverride.cancelValidation(record.validationId));
     } catch {
-      setError(label('The Server could not cancel this validation.', 'Server 無法取消此驗證。', locale));
+      setError('cancel');
       await refresh();
     } finally {
       setBusy(false);
@@ -145,16 +188,32 @@ export function ValidationPanel({ request, validationId, title, onClose, onOpenR
   };
 
   const revalidationRequest = request || (record ? requestForRecord(record) : undefined);
+  const submitNewValidation = async () => {
+    if (!request || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const submitted = await apiOverride.submitValidation(request);
+      setRecord(submitted);onRecordLoaded?.(submitted);
+    }
+    catch { setError('submit'); }
+    finally { setBusy(false); }
+  };
   const revalidate = async () => {
     if (!revalidationRequest || busy) return;
-    setBusy(true); setError('');
-    try { setRecord(await apiOverride.submitValidation(revalidationRequest)); }
-    catch { setError(label('The Server could not accept a new validation.', 'Server 無法接受新的驗證。', locale)); }
+    setBusy(true); setError(null);
+    try {
+      const submitted=await apiOverride.submitValidation(revalidationRequest);
+      setRecord(submitted);onRecordLoaded?.(submitted);
+    }
+    catch { setError('submit'); }
     finally { setBusy(false); }
   };
 
   const status = record?.status;
-  const transportState = status ? label(status.replace('_', ' ').toLowerCase(), ({
+  const transportState = initializing && !record ? label('Looking for a matching validation…', '正在尋找相符的驗證…', locale)
+    : busy && !record ? label('Submitting…', '正在提交…', locale)
+      : !record ? label('No matching validation record.', '沒有相符的驗證記錄。', locale)
+        : status ? label(status.replace('_', ' ').toLowerCase(), ({
     QUEUED: '排隊中', RUNNING: '執行中', COMPLETED: '已完成', FAILED: '失敗',
     TIMED_OUT: '逾時', CANCELLED: '已取消', INTERRUPTED: '已中斷',
   } as Record<ValidationTransportState, string>)[status], locale) : label('Submitting…', '正在提交…', locale);
@@ -186,11 +245,14 @@ export function ValidationPanel({ request, validationId, title, onClose, onOpenR
         <div><dt>{label('Execution time', '執行時間', locale)}</dt><dd>{record.executionElapsedMs == null ? '—' : `${record.executionElapsedMs} ms`}</dd></div>
       </dl>}
       {record?.error && <p className="att-validation-error" role="alert">{record.error}</p>}
-      {error && <p className="att-validation-error" role="alert">{error}</p>}
+      {error && <p className="att-validation-error" role="alert">{errorMessage(error, locale)}</p>}
       <div className="att-validation-submit-row">
         <button className="button button-quiet" type="button" disabled={!record || busy} onClick={() => void refresh()}>{label('Refresh', '重新整理', locale)}</button>
         {record && onOpenRecord && <button className="button button-quiet" type="button" onClick={() => onOpenRecord(record.validationId)}>{label('Open full record', '開啟完整記錄', locale)}</button>}
         {ACTIVE.has(status || '') && <button className="button button-quiet" type="button" disabled={busy} onClick={() => void cancel()}>{label('Cancel validation', '取消驗證', locale)}</button>}
+        {request && !record && <button className="button button-primary" type="button" disabled={busy || initializing} onClick={() => void submitNewValidation()}>{label('Validate', '驗證', locale)}</button>}
+        {record && !ACTIVE.has(status || '') && revalidationRequest
+          && <button className="button button-primary" type="button" disabled={busy} onClick={() => void revalidate()}>{label('Revalidate', '重新驗證', locale)}</button>}
       </div>
     </div>
     {record?.report && <ValidationReport report={record.report} scope={scope} packageId={record.packageId}

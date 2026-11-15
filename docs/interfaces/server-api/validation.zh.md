@@ -12,6 +12,7 @@
 | `POST` | `/api/v1/validations` | 接受持久非同步 validation record；回傳 `202`。 |
 | `GET` | `/api/v1/validations/{validationId}` | 讀取 owner 範圍內的 record 及 report。 |
 | `GET` | `/api/v1/validations` | 列出已驗證用戶近期的有限筆 record。 |
+| `GET` | `/api/v1/validations/summary` | 讀取 owner 最新的作用中 record；若沒有則讀取最新 record。 |
 | `POST` | `/api/v1/validations/{validationId}/cancel` | 取消 owner 的排隊中或執行中 record。 |
 
 支援此 route 及 report contract 的 Server 會在 `GET /api/v1/version` 宣告 `validationApiVersion: "att-validation/v1"`。Studio 會先檢查此 marker，再啟用 **Read-only validation**。若 marker 不存在或版本不同，代表 Server build 沒有宣告所需 capability。
@@ -87,9 +88,13 @@ Studio 範圍選擇、上下文入口、report 檢視及取消行為請參閱 [S
 
 Record 包含 typed plan identity、生命週期狀態、計時、選用的安全 source revision、安全錯誤資訊，以及完成後的 `att-validation/v1` report。它不會保存提交的 source text、任意 filesystem path 或 client 提供的 configuration。讀取或列出時，Server 會再次檢查已註冊 Package 及 Environment 權限。Record 只供 owner 存取；installation-wide record 另需 system-administrator 權限。List endpoint 不會列出其他 owner 的 record。
 
-`GET /api/v1/validations` 接受選用的 `packageId`、`scope`、`limit` 及不透明 `cursor` query parameter。`limit` 預設為 `20`，範圍為 `1` 至 `100`。Response 包含 `items` 及 `nextCursor`；list item 不含 report body。結果採用有限筆數，並依最新提交時間排序。已撤銷或不可用的 Package 或 Environment 不會出現在結果中。
+`GET /api/v1/validations` 接受選用的 `packageId`、`scope`、`target`、`environment`、`matchContext`、`limit` 及不透明 `cursor` query parameter。`matchContext=true` 會精確比對 scope、Package（包含沒有 Package）、target（包含沒有 target）及 Environment（省略時使用目前 effective default），供上下文記錄恢復使用；建議同時指定 `limit=1`。`limit` 預設為 `20`，範圍為 `1` 至 `100`。Response 包含 `items` 及 `nextCursor`；list item 不含 report 或 plan CLOB。結果採用有限筆數，並依最新提交時間排序。已撤銷或不可用的 Package 或 Environment 不會出現在結果中。
+
+`GET /api/v1/validations/summary` 回傳 owner 最新的作用中 validation；若沒有作用中記錄，則回傳最新 owner 記錄的 metadata-only `record`。Studio shell 使用此 route；response 不含 report 或 plan。
 
 `GET /api/v1/validations/{validationId}` 會在可用時回傳 record 及 report。`POST /api/v1/validations/{validationId}/cancel` 會在 Server 端取消排隊中或執行中的 record。若 record 已結束，request 會回傳目前狀態。關閉 browser view、切換 route 或停止 polling 不會取消 record；只有明確呼叫此 endpoint 才會要求取消。
+
+Terminal record 的 `applicability`：Server 能將穩定捕獲的 source revision 與目前授權可讀的 source 比對且相同時為 `CURRENT`；revision 不同時為 `STALE`；無法可靠比對時為 `UNVERIFIED`。Server 會在 validation 前後使用有界 source fingerprint；validation 期間來源若改變，就不會標示為 `CURRENT`。Installation-wide record 或未捕獲 revision 的 record 會保持 `UNVERIFIED`。
 
 Transport state 與 report outcome 分開表示：
 

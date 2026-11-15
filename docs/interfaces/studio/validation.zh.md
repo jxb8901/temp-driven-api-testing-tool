@@ -23,7 +23,7 @@ Package 範圍 validation 使用 active Environment Profile。可明確選取一
 
 ## 執行與檢視
 
-上下文 validation 會送出 `POST /api/v1/validations`。Server 接受工作並保存 record 後，會回傳 durable record ID。頁面可見時，Studio 每 2.5 秒讀取 `GET /api/v1/validations/{validationId}`，顯示 `QUEUED` 或 `RUNNING`、生命週期時間、排隊與執行時間，以及可取得的 phase。Studio 不會顯示虛構的百分比或預計完成時間。Shell 會連結至 owner 最新的作用中或近期 record。選擇 **Open full record** 會開啟可加入書籤的 `#/validate?record=V…` route，稍後可重新載入。
+上下文 validation 會開啟 inline record panel。Panel 會先依精確的 Package、Environment、scope 及 target 查詢並還原最新相符 record；需要新工作時才由明確的 **Validate** 或 **Revalidate** action 提交。頁面可見時，Studio 每 2.5 秒讀取 `GET /api/v1/validations/{validationId}`，顯示 `QUEUED` 或 `RUNNING`、生命週期時間、排隊與執行時間，以及可取得的 phase。Studio 不會顯示虛構的百分比或預計完成時間。Shell 每五秒讀取最新作用中或近期 record 的 metadata-only summary。選擇 **Open full record** 會開啟可加入書籤的 `#/validate?record=V…` route，稍後可重新載入。
 
 同步進階工作區則在選擇 **Run Validation** 後送出單一 `POST /api/v1/validation` request。載入頁面、變更範圍、選取 Package／Environment／target 或搜尋 catalog 都不會提交 validation。Studio 會檢查 `GET /api/v1/version.validationApiVersion`；Server 宣告 `att-validation/v1` 後才會啟用同步 action。上下文 action 另需 `validationRecordsApiVersion: "att-validation-records/v1"`。Server 會依目前 principal、Package／Environment policy 及 Origin/CSRF 控制授權每個 request。
 
@@ -31,7 +31,7 @@ Report 會顯示階層式檢查、完整性、數量、Server request ID 及安�
 
 只有 Server 回傳 `overallStatus: PASS`、`complete: true` 及 `exitCode: 0` 時，Studio 才會顯示 `PASS`。`INVALID` report 保持無效；不完整或其他非通過結果會顯示 `PARTIAL`。單有 HTTP `200` 並不代表通過。
 
-Report 會把 transport state 與 validation outcome 分開。`COMPLETED` 可以包含 `PASS`、`INVALID` 或 `PARTIAL`；只有 `overallStatus: PASS`、`complete: true` 及 `exitCode: 0` 才代表通過。歷史 record 會顯示來源適用性 `UNVERIFIED`，因此舊 PASS 不會被當成目前結果。**Cancel validation** 會呼叫 `POST /api/v1/validations/{validationId}/cancel`。關閉 panel、離開 route 或停止 polling 都不會取消 Server 工作。Record 及 report 會持續供 owner 存取，直到保留或儲存清理移除。Server restart 會把作用中的 record 標記為 `INTERRUPTED`。
+Report 會把 transport state 與 validation outcome 分開。`COMPLETED` 可以包含 `PASS`、`INVALID` 或 `PARTIAL`；只有 `overallStatus: PASS`、`complete: true` 及 `exitCode: 0` 才代表通過。Server 能確認捕獲 revision 未變時顯示 `CURRENT`，授權 source 已變更時顯示 `STALE`，無法穩定比對時顯示 `UNVERIFIED`。**Cancel validation** 會呼叫 `POST /api/v1/validations/{validationId}/cancel`。關閉 panel、離開 route 或停止 polling 都不會取消 Server 工作；返回上下文來源時會還原相符 record，切換 Studio 語言不會重新提交 validation。Record 及 report 會持續供 owner 存取，直到保留或儲存清理移除。Server restart 會把作用中的 record 標記為 `INTERRUPTED`。
 
 ## 權限與呈現
 

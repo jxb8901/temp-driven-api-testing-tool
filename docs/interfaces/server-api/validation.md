@@ -12,6 +12,7 @@
 | `POST` | `/api/v1/validations` | Admit a durable asynchronous validation record; returns `202`. |
 | `GET` | `/api/v1/validations/{validationId}` | Read one owner-scoped record and its report. |
 | `GET` | `/api/v1/validations` | List bounded recent records for the authenticated owner. |
+| `GET` | `/api/v1/validations/summary` | Read the owner's newest active record, or newest record when none are active. |
 | `POST` | `/api/v1/validations/{validationId}/cancel` | Cancel the owner's queued or running record. |
 
 `GET /api/v1/version` advertises `validationApiVersion: "att-validation/v1"` when the Server supports this route and report contract. Studio checks that marker before enabling **Read-only validation**. An absent or different marker means the Server build does not advertise the required capability.
@@ -87,9 +88,13 @@ See [Studio Read-only validation](../studio/validation.md) for scope selection, 
 
 The record contains the typed plan identity, lifecycle state, timing values, optional safe source revision, safe error information, and (when complete) the `att-validation/v1` report. It does not store submitted source text, arbitrary filesystem paths, or client-supplied configuration. The Server rechecks registered Package and Environment access when a record is read or listed. Records are visible only to their owner. Installation-wide records also require system-administrator access. The list endpoint does not enumerate another owner's records.
 
-`GET /api/v1/validations` accepts optional `packageId`, `scope`, `limit`, and opaque `cursor` query parameters. `limit` defaults to `20` and must be from `1` through `100`. The response contains `items` and `nextCursor`; list items omit the report body. Results use a bounded, newest-first page. A revoked or unavailable Package or Environment is omitted.
+`GET /api/v1/validations` accepts optional `packageId`, `scope`, `target`, `environment`, `matchContext`, `limit`, and opaque `cursor` query parameters. `matchContext=true` matches one exact scope, Package (including no Package), target (including no target), and Environment (including the current effective default when omitted). It is intended for restoring a contextual record; combine it with `limit=1`. `limit` defaults to `20` and must be from `1` through `100`. The response contains `items` and `nextCursor`; list items omit report and plan CLOBs. Results use a bounded, newest-first page. A revoked or unavailable Package or Environment is omitted.
+
+`GET /api/v1/validations/summary` returns a small metadata-only `record` for the newest active validation owned by the caller, or the newest owned record if none are active. It is used by the Studio shell and does not return report or plan content.
 
 `GET /api/v1/validations/{validationId}` returns the record and report when available. `POST /api/v1/validations/{validationId}/cancel` performs a Server-side cancellation for a queued or running record. It is idempotent for terminal records and returns their current state. Closing a browser view, changing routes, or stopping polling does not cancel a record. Only this explicit endpoint requests cancellation.
+
+For a terminal record, `applicability` is `CURRENT` when the Server can compare a stable captured source revision with the presently authorized source, `STALE` when those revisions differ, and `UNVERIFIED` when a stable comparison is unavailable. The Server brackets validation with a bounded source fingerprint; changes during validation prevent a `CURRENT` result. Installation-wide records and records without a captured revision remain `UNVERIFIED`.
 
 Transport state is separate from report outcome:
 

@@ -25,7 +25,7 @@ import { ConfigurationWorkspace } from './features/explorer/ConfigurationWorkspa
 import { PackageManifestWorkspace } from './features/explorer/PackageManifestWorkspace';
 import { PackageTestdataWorkspace } from './features/explorer/PackageTestdataCatalog';
 import { PackageSafeSourceFileViewer } from './features/explorer/PackageSafeSourceFileViewer';
-import type { ValidationRequest } from './features/validation/types';
+import type { ValidationRecord, ValidationRequest } from './features/validation/types';
 const LoadTestingPage = lazy(() => import('./features/load/LoadTestingPage').then(module => ({ default: module.LoadTestingPage })));
 const SavedLoadScenarios = lazy(() => import('./features/load/SavedLoadScenarios').then(module => ({ default: module.SavedLoadScenarios })));
 const LoadTemplateBuilder = lazy(() => import('./features/load/LoadTemplateBuilder').then(module => ({ default: module.LoadTemplateBuilder })));
@@ -39,6 +39,50 @@ function asError(value: unknown): Error {
 }
 
 const loadJobsApi: LoadJobsApi = api;
+const CONTEXT_VALIDATIONS_STORAGE_KEY = 'att.validation.contexts.v1';
+const MAX_REMEMBERED_VALIDATION_CONTEXTS = 32;
+type ContextValidation = { routeKey: string; request: ValidationRequest; title: string; submitOnOpen: boolean };
+
+function isContextValidation(value: unknown): value is ContextValidation {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<ContextValidation>;
+  if (typeof item.routeKey !== 'string' || !item.routeKey || item.routeKey.length > 4096
+      || /[\u0000-\u001f\u007f]/.test(item.routeKey)
+      || typeof item.title !== 'string' || !item.title || item.title.length > 1024
+      || !item.request || typeof item.request !== 'object') return false;
+  const request = item.request as { targetKind?: unknown; packageId?: unknown; environment?: unknown; target?: unknown };
+  const scope = String(request.targetKind);
+  if (!['config', 'package', 'case', 'suite', 'template', 'flow', 'tool', 'load'].includes(scope)) return false;
+  if (request.packageId !== undefined && (typeof request.packageId !== 'string' || request.packageId.length > 128)) return false;
+  if (request.environment !== undefined && (typeof request.environment !== 'string' || request.environment.length > 32)) return false;
+  if (request.target !== undefined && (typeof request.target !== 'string' || request.target.length > 512)) return false;
+  if (scope !== 'config' && (typeof request.packageId !== 'string' || !request.packageId)) return false;
+  if (['case', 'suite', 'template', 'flow', 'tool', 'load'].includes(scope)
+      && (typeof request.target !== 'string' || !request.target)) return false;
+  if (['config', 'package'].includes(scope) && request.target !== undefined) return false;
+  return true;
+}
+
+function readRememberedValidationContexts(): ContextValidation[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(CONTEXT_VALIDATIONS_STORAGE_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return uniqueContextValidations(parsed.filter(isContextValidation).map(item => ({ ...item, submitOnOpen: false })));
+  } catch { return []; }
+}
+
+function contextValidationKey(value: Pick<ContextValidation, 'routeKey' | 'request'>): string {
+  return `${value.routeKey}\n${JSON.stringify(value.request)}`;
+}
+
+function uniqueContextValidations(values: ContextValidation[]): ContextValidation[] {
+  const seen = new Set<string>();
+  return [...values].reverse().filter(value => {
+    const key = contextValidationKey(value);
+    if (seen.has(key)) return false;
+    seen.add(key);return true;
+  }).reverse().slice(-MAX_REMEMBERED_VALIDATION_CONTEXTS);
+}
 
 function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSchedule, packageRegistrationState, registered, packageLabel,
   onValidateContext }: {
@@ -387,19 +431,28 @@ export default function App() {
   const workspaceResolutionError = Boolean(selectedPackage && workspaceResolution.key === `${selectedPackage}\n${selectedEnvironment}` && workspaceResolution.error);
   const [catalogEnvironment, setCatalogEnvironment] = useState('');
   const currentRouteKey = formatRoute(navigation.route);
-  const [contextValidation, setContextValidation] = useState<{ routeKey: string; request: ValidationRequest; title: string } | null>(null);
+  const [contextValidations, setContextValidations] = useState<ContextValidation[]>(readRememberedValidationContexts);
+  const contextValidation = [...contextValidations].reverse().find(value => value.routeKey === currentRouteKey);
   const supportsValidationRecords = state.serverVersion.status === 'ready'
     && state.serverVersion.data.validationRecordsApiVersion === 'att-validation-records/v1';
   const previousRouteKey = useRef(currentRouteKey);
   useEffect(() => {
     if (previousRouteKey.current !== currentRouteKey) {
       previousRouteKey.current = currentRouteKey;
-      setContextValidation(null);
+      setContextValidations(values => values.map(value => value.submitOnOpen ? { ...value, submitOnOpen: false } : value));
     }
   }, [currentRouteKey]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(CONTEXT_VALIDATIONS_STORAGE_KEY,
+        JSON.stringify(contextValidations.map(value => ({ ...value, submitOnOpen: false }))));
+    } catch { /* Server-owned validation records remain recoverable from their contextual action. */ }
+  }, [contextValidations]);
   const onValidateContext = useCallback((request: ValidationRequest, title: string) => {
     if (supportsValidationRecords) {
-      setContextValidation({ routeKey: currentRouteKey, request, title });
+      const value: ContextValidation = { routeKey: currentRouteKey, request, title, submitOnOpen: true };
+      const key = contextValidationKey(value);
+      setContextValidations(current => uniqueContextValidations([...current.filter(item => contextValidationKey(item) !== key), value]));
       return;
     }
     if ('all' in request) return;
@@ -408,6 +461,16 @@ export default function App() {
       ...(request.environment ? { environment: request.environment } : {}),
       ...('target' in request ? { target: request.target } : {}) });
   }, [currentRouteKey, navigation.navigate, supportsValidationRecords]);
+  const rememberContextValidation = useCallback((record: ValidationRecord) => {
+    if (!record.environment) return;
+    setContextValidations(values => uniqueContextValidations(values.map(value => {
+      const request = value.request;
+      if ('all' in request || request.environment || request.targetKind !== record.scope
+          || (request.packageId || undefined) !== record.packageId
+          || (('target' in request ? request.target : undefined) || undefined) !== record.target) return value;
+      return { ...value, request: { ...request, environment: record.environment }, submitOnOpen: false };
+    })));
+  }, []);
   useEffect(() => { try { sessionStorage.setItem('att.workspace.context', JSON.stringify(workspaceContext)); } catch { /* In-memory context remains usable. */ } }, [workspaceContext]);
   useEffect(() => {
     const controller = new AbortController();
@@ -665,9 +728,11 @@ export default function App() {
       onJobAccepted={onJobAccepted}
     >
       {content}
-      {contextValidation?.routeKey === currentRouteKey && <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation…</div>}>
-        <ValidationPanel key={`${contextValidation.title}:${JSON.stringify(contextValidation.request)}`}
-          request={contextValidation.request} title={contextValidation.title} onClose={() => setContextValidation(null)}
+      {supportsValidationRecords && contextValidation && <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation…</div>}>
+        <ValidationPanel key={`${contextValidation.routeKey}:${contextValidation.title}:${JSON.stringify(contextValidation.request)}`}
+          request={contextValidation.request} title={contextValidation.title}
+          onClose={() => setContextValidations(values => values.filter(value => contextValidationKey(value) !== contextValidationKey(contextValidation)))}
+          submitOnOpen={contextValidation.submitOnOpen} onRecordLoaded={rememberContextValidation}
           onOpenRecord={validationId => navigation.navigate({ kind: 'validation', validationId })}
           onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
       </Suspense>}
