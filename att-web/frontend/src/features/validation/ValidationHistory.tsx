@@ -57,14 +57,16 @@ export function ValidationHistory({ active, supported, onOpenRecord }: {
   const [pagination, setPagination] = useState<{ identity: string; stack: Array<string | undefined> }>({ identity: identityKey, stack: [undefined] });
   const cursorStack = pagination.identity === identityKey ? pagination.stack : [undefined];
   const cursor = cursorStack[cursorStack.length - 1];
-  const [page, setPage] = useState<{ identity: string; records: ValidationRecord[]; nextCursor: string | null; loading: boolean; error: string }>(
-    { identity: identityKey, records: [], nextCursor: null, loading: true, error: '' },
+  const queryKey = JSON.stringify([identityKey, packageId, environment, scope, status, cursor]);
+  const [page, setPage] = useState<{ queryKey: string; records: ValidationRecord[]; nextCursor: string | null; loading: boolean; error: string }>(
+    { queryKey: '', records: [], nextCursor: null, loading: true, error: '' },
   );
-  const pageMatchesIdentity = page.identity === identityKey;
-  const records = pageMatchesIdentity ? page.records : [];
-  const nextCursor = pageMatchesIdentity ? page.nextCursor : null;
-  const loading = !pageMatchesIdentity || page.loading;
-  const error = pageMatchesIdentity ? page.error : '';
+  const pageMatchesQuery = page.queryKey === queryKey;
+  const records = pageMatchesQuery ? page.records : [];
+  const nextCursor = pageMatchesQuery ? page.nextCursor : null;
+  const loading = !pageMatchesQuery || page.loading;
+  const refreshing = loading && records.length > 0;
+  const error = pageMatchesQuery ? page.error : '';
   const [refreshSequence, setRefreshSequence] = useState(0);
   const [cancelling, setCancelling] = useState({ identity: identityKey, id: '' });
   const cancellingId = cancelling.identity === identityKey ? cancelling.id : '';
@@ -86,24 +88,27 @@ export function ValidationHistory({ active, supported, onOpenRecord }: {
 
   useEffect(() => {
     if (!supported) {
-      setPage({ identity: identityKey, records: [], nextCursor: null, loading: false, error: '' });
+      setPage({ queryKey, records: [], nextCursor: null, loading: false, error: '' });
       return;
     }
     const controller = new AbortController();
-    setPage({ identity: identityKey, records: [], nextCursor: null, loading: true, error: '' });
+    setPage(current => current.queryKey === queryKey
+      ? { ...current, loading: true, error: '' }
+      : { queryKey, records: [], nextCursor: null, loading: true, error: '' });
     api.listValidationRecords({ packageId: packageId.trim() || undefined, environment: environment.trim() || undefined,
       scope: scope || undefined, status: status || undefined, limit: PAGE_SIZE, cursor }, controller.signal)
       .then(page => {
         if (controller.signal.aborted) return;
-        setPage({ identity: identityKey, records: page.items, nextCursor: page.nextCursor || null, loading: false, error: '' });
+        setPage({ queryKey, records: page.items, nextCursor: page.nextCursor || null, loading: false, error: '' });
       })
       .catch(reason => {
         if (controller.signal.aborted) return;
-        setPage({ identity: identityKey, records: [], nextCursor: null, loading: false,
-          error: reason instanceof Error ? reason.message : label('Validation history could not be loaded.', '無法載入驗證記錄。', locale) });
+        setPage(current => ({ queryKey, records: current.queryKey === queryKey ? current.records : [],
+          nextCursor: current.queryKey === queryKey ? current.nextCursor : null, loading: false,
+          error: reason instanceof Error ? reason.message : label('Validation history could not be loaded.', '無法載入驗證記錄。', locale) }));
       });
     return () => controller.abort();
-  }, [identityKey, packageId, environment, scope, status, cursor, refreshSequence, supported, locale]);
+  }, [queryKey, identityKey, packageId, environment, scope, status, cursor, refreshSequence, supported, locale]);
 
   const hasActiveRecords = records.some(record => ACTIVE.has(record.status));
   const idleRefreshPaused = !hasActiveRecords && cursorStack.length === 1 && idleRefreshCount >= MAX_IDLE_REFRESHES;
@@ -127,13 +132,13 @@ export function ValidationHistory({ active, supported, onOpenRecord }: {
   const cancel = async (record: ValidationRecord) => {
     if (cancellingId || !ACTIVE.has(record.status)) return;
     setCancelling({ identity: identityKey, id: record.validationId });
-    setPage(current => current.identity === identityKey ? { ...current, error: '' } : current);
+    setPage(current => current.queryKey === queryKey ? { ...current, error: '' } : current);
     try {
       const updated = await api.cancelValidation(record.validationId);
-      setPage(current => current.identity === identityKey
+      setPage(current => current.queryKey === queryKey
         ? { ...current, records: current.records.map(item => item.validationId === updated.validationId ? updated : item) } : current);
     } catch (reason) {
-      setPage(current => current.identity === identityKey ? { ...current,
+      setPage(current => current.queryKey === queryKey ? { ...current,
         error: reason instanceof Error ? reason.message : label('The Server could not cancel this validation.', 'Server 無法取消此驗證。', locale) } : current);
     } finally { setCancelling(current => current.identity === identityKey ? { identity: identityKey, id: '' } : current); }
   };
@@ -155,7 +160,8 @@ export function ValidationHistory({ active, supported, onOpenRecord }: {
         <div className="att-query-filter-actions"><button type="button" disabled={loading} onClick={refresh}>{label('Refresh validations', '重新整理驗證', locale)}</button></div>
       </section>
       <section className="att-query-results-panel" aria-label={label('Validation records', '驗證記錄', locale)}>
-        <p role="status" aria-live="polite">{loading ? label('Loading validations…', '正在載入驗證記錄…', locale)
+        <p role="status" aria-live="polite">{refreshing ? label('Refreshing validations…', '正在重新整理驗證記錄…', locale)
+          : loading ? label('Loading validations…', '正在載入驗證記錄…', locale)
           : error ? label('Validation history unavailable.', '無法使用驗證記錄。', locale)
             : label(`${records.length} validation records on this page`, `此頁有 ${records.length} 筆驗證記錄`, locale)}</p>
         {idleRefreshPaused && <p role="note">{label('Automatic history refresh paused after 10 minutes. Refresh validations to check again.', '自動更新已暫停 10 分鐘。請手動重新整理驗證記錄。', locale)}</p>}

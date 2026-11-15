@@ -154,4 +154,26 @@ describe('ValidationHistory', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     expect(listRecords).toHaveBeenCalledTimes(21);
   });
+
+  it('keeps active rows visible while the five-second background refresh is pending', async () => {
+    vi.useFakeTimers();
+    const activeRecord = record('VAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', { status: 'RUNNING', overallStatus: undefined, phase: 'inspection' });
+    const completedRecord: ValidationRecord = { ...activeRecord, status: 'COMPLETED', overallStatus: 'PASS', phase: undefined };
+    let resolveRefresh: ((page: ValidationRecordPage) => void) | undefined;
+    listRecords.mockResolvedValueOnce({ items: [activeRecord], nextCursor: null })
+      .mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
+    await render();
+    expect(host.textContent).toContain(activeRecord.validationId);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(listRecords).toHaveBeenCalledTimes(2);
+    expect(host.textContent).toContain(activeRecord.validationId);
+    expect(host.textContent).toContain('Refreshing validations…');
+    expect(host.textContent).not.toContain('Loading validations…');
+
+    await act(async () => { resolveRefresh?.({ items: [completedRecord], nextCursor: null }); await Promise.resolve(); });
+    await settle();
+    expect(host.textContent).toContain(completedRecord.validationId);
+    expect(host.textContent).toContain('COMPLETED');
+  });
 });

@@ -74,6 +74,15 @@ async function click(element: Element) {
 }
 
 describe('JobsPage React feature', () => {
+  it('keeps the Jobs route inside the AppShell main landmark without nesting another main', async () => {
+    const api = makeApi({ listJobs: vi.fn(async () => []) });
+    await act(async () => root.render(<main id="main-content"><AppShellContext.Provider value={jobsPageContext}>
+      <JobsPageWithoutShell api={api} onOpenJob={vi.fn()} onShowList={vi.fn()} />
+    </AppShellContext.Provider></main>));
+    expect(host.querySelectorAll('main')).toHaveLength(1);
+    expect(host.querySelector('[role="tabpanel"]')?.getAttribute('aria-labelledby')).toBe('jobs-results-tab-jobs');
+  });
+
   it('downsamples only the chart display and preserves exact extrema and coordinates', () => {
     const points = Array.from({ length: CHART_DISPLAY_POINT_THRESHOLD + 240 }, (_, index) => ({
       epochMs: 1_800_000_000_000 + index * 1000,

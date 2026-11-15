@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../api';
 import type { ResourceRoute, ValidationScope } from '../../router';
 import { useAppShellContext } from '../../AppShell';
@@ -77,6 +77,15 @@ export function ValidationPanel({ request, validationId, title, submitOnOpen = t
   const [initializing, setInitializing] = useState(false);
   const [diagnosticRoutes, setDiagnosticRoutes] = useState<Record<string, ResourceRoute>>({});
   const requestKey = JSON.stringify(request || null);
+  const contextualPanel = Boolean(onClose);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+
+  useEffect(() => {
+    if (!contextualPanel) return;
+    headingRef.current?.focus({ preventScroll: true });
+    panelRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }, [contextualPanel]);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (!record?.validationId) return;
@@ -232,10 +241,10 @@ export function ValidationPanel({ request, validationId, title, submitOnOpen = t
   } as Record<ValidationTransportState, string>)[status], locale) : label('Submitting…', '正在提交…', locale);
   const scope = (record?.scope || (request && 'targetKind' in request ? request.targetKind : 'config')) as ValidationScope;
 
-  return <section className={`att-validation-panel att-validation-page${onClose ? ' att-validation-context-panel' : ''}`} aria-labelledby="att-validation-panel-title">
+  return <section ref={panelRef} className={`att-validation-panel att-validation-page${onClose ? ' att-validation-context-panel' : ''}`} aria-labelledby="att-validation-panel-title">
     <header className="att-feature-header">
       <div><p className="att-eyebrow">{label('Read-only validation', '唯讀驗證', locale)}</p>
-        <h2 id="att-validation-panel-title">{title || label('Validation record', '驗證記錄', locale)}</h2>
+        <h2 ref={headingRef} id="att-validation-panel-title" tabIndex={contextualPanel ? -1 : undefined}>{title || label('Validation record', '驗證記錄', locale)}</h2>
         <p>{label('This read-only Server check does not run tests or create a Job. Closing or hiding this panel does not cancel it.', '此 Server 唯讀檢查不會執行測試或建立 Job。關閉或隱藏此面板不會取消驗證。', locale)}</p></div>
       {onClose && <button className="button button-quiet" type="button" onClick={onClose}>{label('Close', '關閉', locale)}</button>}
     </header>

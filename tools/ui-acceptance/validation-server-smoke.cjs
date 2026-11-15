@@ -47,6 +47,19 @@ async function main() {
   };
   const nextRecordSubmission = () => page.waitForResponse(response => response.request().method() === 'POST'
     && new URL(response.url()).pathname.endsWith('/api/v1/validations'));
+  const assertContextValidationVisible = async () => {
+    const panel = page.locator('.att-validation-context-panel');
+    await page.waitForFunction(() => {
+      const panelElement = document.querySelector('.att-validation-context-panel');
+      const status = panelElement?.querySelector('.att-validation-status');
+      const heading = panelElement?.querySelector('h2');
+      if (!status || !heading) return false;
+      const rect = status.getBoundingClientRect();
+      return document.activeElement === heading && rect.top >= 0 && rect.bottom <= window.innerHeight;
+    }, undefined, { timeout: 10000 });
+    assert.equal(await panel.locator('[role="status"]').count(), 1,
+      'the newly opened contextual validation status must be visible and announced');
+  };
 
   try {
     const versionResponse = await page.request.get(`${origin}/tools/att/api/v1/version`);
@@ -80,6 +93,7 @@ async function main() {
     await page.getByRole('button', { name: 'Validate Shared Config', exact: true }).click();
     const sharedConfigResponse = await sharedConfigResponsePromise;
     assert.equal(sharedConfigResponse.status(), 202);
+    await assertContextValidationVisible();
     assert.deepEqual(await sharedConfigResponse.request().postDataJSON(), { command: 'validate', targetKind: 'config' },
       'the Shared Configuration shortcut must validate global Config without inheriting a selected Package');
     const sharedConfigInitial = await sharedConfigResponse.json();
@@ -120,6 +134,7 @@ async function main() {
     await detailActions.getByRole('button', { name: 'Validate', exact: true }).click();
     const flowResponse = await flowResponsePromise;
     assert.equal(flowResponse.status(), 202);
+    await assertContextValidationVisible();
     assert.deepEqual(await flowResponse.request().postDataJSON(), {
       command: 'validate', targetKind: 'flow', packageId: 'payments', target,
     });

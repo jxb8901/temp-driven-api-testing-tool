@@ -1016,7 +1016,7 @@ export function JobsPage(props: JobsFeatureProps) {
   const locale = useAppShellContext().uiLocale;
   if (props.jobId) return <JobDetail key={props.jobId} {...props} jobId={props.jobId} />;
   const selectedTab = props.jobsTab === 'validations' ? 'validations' : 'jobs';
-  return <main className="page-content att-jobs-page att-query-workspace">
+  return <div className="page-content att-jobs-page att-query-workspace">
     <header className="att-feature-header"><div><p className="att-eyebrow">{locale === 'zh-Hant' ? '工作與結果' : 'Jobs and results'}</p>
       <h1>{selectedTab === 'validations' ? (locale === 'zh-Hant' ? '驗證' : 'Validations') : (locale === 'zh-Hant' ? '工作' : 'Jobs')}</h1></div>
       <JobsResultsTabs selected={selectedTab} onSelect={tab => props.onJobsTabChange?.(tab)} />
@@ -1028,7 +1028,7 @@ export function JobsPage(props: JobsFeatureProps) {
             onOpenRecord={validationId => props.onOpenValidationRecord?.(validationId)} />
         : <JobsList {...props} />}
     </div>
-  </main>;
+  </div>;
 }
 
 function JobDetail({ api, jobId, onShowList, confirmCancel, onOpenJob, onSchedule, onEditSchedule, initialTab, onTabChange, standalone }: JobsFeatureProps & { jobId: string }) {
