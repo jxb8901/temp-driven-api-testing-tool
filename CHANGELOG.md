@@ -1,3 +1,9 @@
+# ATT 4.3.0 - release preparation (2026-11-16)
+
+- Establish the 4.3.0 baseline from the Issue #348 SUT Observability implementation (`612e277a53b7a21a03261834e5ff56a58b0cb64b`, PR #357).
+- Include the Prometheus/Grafana SUT metrics collection, immutable snapshots, correlation, threshold evidence, DBHelper/Package Tool metrics, multi-column/row mappings and versioned offline report from #348/#349/#350/#351/#358/#359.
+- Release preparation only: full packaging, integration smoke, supported deployment security/egress and production-scale operational readiness still require release-gate verification before publishing or tagging.
+
 # ATT 4.2.10 - 2026-11-11
 
 - Introduce `att-tool/v1` as a versioned, JAR-embedded schema for Package-owned Tools, with deterministic `tools/*.yaml` discovery and Package-scoped Tool resolution (#352).
