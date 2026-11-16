@@ -29,6 +29,9 @@ export interface ValidationRouteState {
   resource?: ResourceRoute;
 }
 
+export type JobDetailTab = 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics';
+export type JobsRouteTab = JobDetailTab | 'validations';
+
 export type ConfigurationTab = 'source' | 'declared' | 'effective' | 'compare';
 export interface ResourceSourceReferenceRoute {
   type: 'case' | 'template' | 'flow' | 'tool'; resourceId: string; referenceId: string;
@@ -45,7 +48,7 @@ export type AppRoute =
   | { kind: 'configuration'; packageId?: string; environment?: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReferenceRoute; configurationReferenceId?: string; tab?: ConfigurationTab; view?: 'package-manifest' }
   | { kind: 'quick-load'; packageId: string; target?: ResourceRoute; environment?: string; templateId?: string; model?: 'virtualUsers' | 'arrivalRate' }
   | { kind: 'run'; packageId?: string; target?: ResourceRoute; environment?: string; batch?: boolean; replayDraftId?: string; replaySourceJobId?: string }
-  | { kind: 'jobs'; jobId?: string; executionType?: 'load'; standalone?: boolean; tab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' }
+  | { kind: 'jobs'; jobId?: string; executionType?: 'load'; standalone?: boolean; tab?: JobsRouteTab }
   | { kind: 'job-console'; jobId: string; view?: 'live' | 'events' }
   | { kind: 'job-artifact'; jobId: string; path: string }
   | { kind: 'load'; packageId?: string; catalog?: LoadCatalogRouteState; tab?: 'templates' | 'scenarios'; templateId?: string; environment?: string; replayDraftId?: string; replaySourceJobId?: string }
@@ -153,7 +156,8 @@ export function parseRoute(hash: string): AppRoute {
           ? { actionId: safeRouteValue(query.get('action'), 512)! } : {}),
       } };
     }
-    return { kind: 'package', packageId: parts[1] };
+    return { kind: 'package', packageId: parts[1],
+      ...(query.has('environment') ? { environment: query.get('environment') || '' } : {}) };
   }
   if (parts[0] === 'configuration') {
     const rawTab = query.get('tab');
@@ -212,7 +216,13 @@ export function parseRoute(hash: string): AppRoute {
     if (parts[1] && parts[2] === 'artifact' && parts.length === 3) {
       return { kind: 'job-artifact', jobId: parts[1], path: query.get('path') || '' };
     }
-    return { kind: 'jobs', ...(parts[1] ? { jobId: parts[1] } : {}), ...(query.get('standalone') === '1' ? { standalone: true } : {}), ...(['overview','live','events','results','artifacts','metrics'].includes(query.get('tab') || '') ? {tab: query.get('tab') as 'live'} : {}), ...(query.get('type') === 'load' ? { executionType: 'load' } : {}) };
+    const rawTab = query.get('tab') || '';
+    const jobTabs = ['overview', 'live', 'events', 'results', 'artifacts', 'metrics'];
+    const validTab = parts[1]
+      ? jobTabs.includes(rawTab) ? rawTab as JobDetailTab : undefined
+      : rawTab === 'validations' ? 'validations' : undefined;
+    return { kind: 'jobs', ...(parts[1] ? { jobId: parts[1] } : {}), ...(query.get('standalone') === '1' ? { standalone: true } : {}),
+      ...(validTab ? { tab: validTab } : {}), ...(query.get('type') === 'load' ? { executionType: 'load' } : {}) };
   }
   if (parts[0] === 'load' && parts[1] === 'resources' && parts[2] && parts[3]) return {
     kind: 'load-resource', packageId: parts[2], resourceId: parts[3],
@@ -301,7 +311,11 @@ export function formatRoute(route: AppRoute): string {
         if (route.returnTo) query.set('returnTo', route.returnTo);
         return root + '/source-file' + (query.size ? '?' + query.toString() : '');
       }
-      if (!route.resource) return root;
+      if (!route.resource) {
+        const query = new URLSearchParams();
+        if (route.environment !== undefined) query.set('environment', route.environment);
+        return root + (query.size ? '?' + query.toString() : '');
+      }
       const resource = root + '/resources/' + encodeURIComponent(route.resource.type) + '/' + encodeURIComponent(route.resource.resourceId);
       if ((!route.resource.tab || route.resource.tab === 'definition') && !route.resource.logicalId && !route.resource.actionId && route.environment === undefined) return resource;
       const query = new URLSearchParams();

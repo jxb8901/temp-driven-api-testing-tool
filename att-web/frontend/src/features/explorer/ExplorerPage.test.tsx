@@ -185,7 +185,7 @@ describe('Explorer source viewer', () => {
     click(button('Clear filters'));
     await new Promise(resolve => window.setTimeout(resolve, 10));
     await settle();
-    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('All');
+    expect(container.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('All');
     click(button('Refresh resources'));
     await settle();
     expect(api.listResources).toHaveBeenCalledTimes(4);
@@ -197,7 +197,7 @@ describe('Explorer source viewer', () => {
     await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="SIT"
       registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} onRunBatch={onRunBatch} />);
 
-    click(button('Batch RUN'));
+    click(button('Run Test Cases…'));
     expect(onRunBatch).toHaveBeenCalledTimes(1);
   });
 
@@ -520,7 +520,7 @@ describe('Explorer page integration', () => {
     const search = container.querySelector<HTMLInputElement>('input[type="search"]')!;
     setValue(search, 'payment flow');
     await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
-    click([...container.querySelectorAll<HTMLElement>('[role="tab"]')].find(item => item.textContent === 'Flows')!);
+    click([...container.querySelectorAll<HTMLElement>('[role="radio"]')].find(item => item.textContent === 'Flows')!);
     await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
     click(container.querySelector('.att-explorer-sort')!);
     await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
@@ -537,7 +537,7 @@ describe('Explorer page integration', () => {
     await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
 
     expect(container.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('payment flow');
-    expect([...container.querySelectorAll<HTMLElement>('[role="tab"]')].find(item => item.textContent === 'Flows')?.getAttribute('aria-selected')).toBe('true');
+    expect([...container.querySelectorAll<HTMLElement>('[role="radio"]')].find(item => item.textContent === 'Flows')?.getAttribute('aria-checked')).toBe('true');
     expect(container.querySelector('.att-explorer-sort')?.textContent).toContain('↓');
     expect(listResources.mock.calls.slice(callsBeforeReturn).map(call => call[1])).toEqual([
       expect.objectContaining({ query: 'payment flow', type: 'flow', sort: 'name', direction: 'desc', limit: 50 }),

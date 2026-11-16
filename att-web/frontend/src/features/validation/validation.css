@@ -1,4 +1,46 @@
 .att-validation-page { max-width: 76rem; }
+.att-validation-context-panel { margin-block-start: .75rem; }
+.att-validation-context-panel .att-feature-header { margin-block-end: .45rem; gap: .75rem; }
+.att-validation-context-panel .att-feature-header h2 { margin: 0; font-size: 1.15rem; }
+.att-validation-context-panel .att-feature-header p:last-child { margin: .25rem 0 0; font-size: .84rem; }
+.att-validation-context-panel .att-validation-form { padding: .75rem; }
+.att-validation-context-panel .att-validation-status { margin-block: 0 .6rem; padding: .55rem .7rem; }
+.att-validation-context-panel .att-validation-status strong { font-size: .95rem; }
+.att-validation-context-panel .att-validation-summary { margin-block: .55rem; gap: .35rem; }
+.att-validation-context-summary { display: flex; flex-wrap: wrap; gap: .3rem; margin: 0 0 .55rem; }
+.att-validation-context-summary > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem; min-width: 0; padding: .22rem .42rem; border: 1px solid var(--att-color-border); border-radius: .4rem; background: var(--att-color-canvas); }
+.att-validation-context-summary dt { color: var(--att-color-muted); font-size: .72rem; }
+.att-validation-context-summary dd { margin: 0; overflow-wrap: anywhere; font-size: .82rem; font-weight: 600; }
+.att-validation-record-details { margin-block: .4rem; }
+.att-validation-record-details > summary { cursor: pointer; color: var(--att-color-muted); font-size: .82rem; }
+.att-validation-context-panel .att-validation-submit-row { margin-block-start: .6rem; }
+.att-validation-report-details { margin-block-start: .65rem; }
+.att-validation-report-details > summary { cursor: pointer; color: var(--att-color-primary); font-weight: 650; }
+.att-jobs-view-tabs { display: inline-flex; flex: 0 0 auto; gap: .15rem; align-self: flex-start; padding: .2rem; border: 1px solid var(--att-color-border); border-radius: .55rem; background: var(--att-color-canvas); }
+.att-jobs-view-tabs button { min-height: 2.4rem; padding: .4rem .8rem; border: 0; border-radius: .4rem; background: transparent; color: var(--att-color-text); font: inherit; cursor: pointer; }
+.att-jobs-view-tabs button[aria-selected="true"] { color: var(--att-color-primary); background: var(--att-color-surface); box-shadow: 0 1px 2px rgb(15 23 42 / .12); font-weight: 700; }
+.att-jobs-view-tabs button:focus-visible { outline: 3px solid color-mix(in srgb, var(--att-color-primary) 55%, transparent); outline-offset: 2px; }
+.att-jobs-workspace-panel, .att-jobs-list-content, .att-validation-history-content { display: grid; min-width: 0; gap: .6rem; }
+.att-validation-history-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); align-items: end; gap: .65rem; }
+.att-validation-history-description { margin: 0; color: var(--att-color-muted); }
+.att-validation-history-filters > label { display: grid; gap: .3rem; min-width: 0; color: var(--att-color-muted); font-size: .84rem; font-weight: 650; }
+.att-validation-history-filters input, .att-validation-history-filters select { width: 100%; min-height: 2.4rem; padding: .4rem .6rem; border: 1px solid var(--att-color-border); border-radius: .4rem; background: var(--att-color-surface); color: var(--att-color-text); font: inherit; }
+.att-validation-history-filters :focus-visible { outline: 3px solid color-mix(in srgb, var(--att-color-primary) 55%, transparent); outline-offset: 2px; }
+.att-validation-history-content .att-query-results-panel > p:first-child { margin-block: 0 .4rem; color: var(--att-color-muted); }
+.att-validation-history-table td { min-width: 8rem; vertical-align: top; }
+.att-validation-history-table td:nth-child(2) { min-width: 14rem; }
+.att-validation-history-table td:nth-child(4) { min-width: 10rem; }
+.att-validation-history-secondary { display: block; margin-block-start: .2rem; color: var(--att-color-muted); font-size: .8rem; overflow-wrap: anywhere; }
+.att-validation-history-status { display: inline-block; padding: .15rem .45rem; border: 1px solid var(--att-color-border); border-radius: 99px; font-size: .78rem; font-weight: 700; }
+.att-validation-history-status.is-completed { color: var(--att-color-success); }
+.att-validation-history-status.is-failed, .att-validation-history-status.is-timed_out, .att-validation-history-status.is-interrupted { color: var(--att-color-danger); }
+.att-validation-history-status.is-queued, .att-validation-history-status.is-running { color: var(--att-color-primary); }
+.att-validation-history-status.is-cancelled { color: var(--att-color-muted); }
+.att-validation-history-error { color: var(--att-color-danger); }
+.att-validation-history-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.att-validation-history-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem; margin-block-start: .75rem; }
+.att-validation-history-footer > div { display: flex; gap: .4rem; }
+.att-validation-history-footer button { min-height: 2.3rem; }
 .att-validation-page .att-feature-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.5rem; margin-block-end: var(--att-space-4, 1rem); }
 .att-validation-page .att-feature-header h1 { margin: 0; }
 .att-validation-page .att-feature-header p:last-child { max-width: 58rem; color: var(--att-color-muted); line-height: 1.55; }
