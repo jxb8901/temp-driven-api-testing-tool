@@ -1,3 +1,9 @@
+# ATT 4.3.1 - planned (not released)
+
+- Planned: fetch-centric Metric Sources with one acquisition mapped to multiple explicitly defined metric outputs (SQL wide rows and Prometheus labelled series), independent Logical Metric Groups and presentation-focused Profiles.
+- Planned: backward-compatible versioned observation/snapshot contracts, group-aware Studio/Reports and release validation; no dynamic Long Rows / Metric Name-value pivot in 4.3.1.
+- Do not tag or publish 4.3.1 until all linked issues and the full release gate are complete.
+
 # ATT 4.3.0 - release preparation (2026-11-16)
 
 - Establish the 4.3.0 baseline from the Issue #348 SUT Observability implementation (`612e277a53b7a21a03261834e5ff56a58b0cb64b`, PR #357).
