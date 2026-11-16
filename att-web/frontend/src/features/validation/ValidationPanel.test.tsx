@@ -38,6 +38,7 @@ afterEach(async () => {
   await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks();
   if (scrollIntoViewDescriptor) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', scrollIntoViewDescriptor);
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+  document.getElementById('validation-restore-previous-focus')?.remove();
 });
 async function settle() { await act(async () => { for (let index = 0; index < 5; index++) await Promise.resolve(); }); }
 
@@ -60,6 +61,32 @@ describe('ValidationPanel', () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
     expect(document.activeElement).toBe(panel.querySelector('h2'));
     expect(panel.querySelector('[role="status"]')?.textContent).toContain('queued');
+  });
+
+  it('keeps focus in place when restoring a remembered contextual record', async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    const previousFocus = document.createElement('button');
+    previousFocus.id = 'validation-restore-previous-focus';
+    document.body.append(previousFocus);
+    previousFocus.focus();
+    const api = {
+      submitValidation: vi.fn(async (_request: ValidationRequest) => queued),
+      getValidationRecord: vi.fn(async () => completed),
+      listValidationRecords: vi.fn(async () => ({ items: [{ ...completed, report: undefined }] })),
+      cancelValidation: vi.fn(async () => ({ ...queued, status: 'CANCELLED' as const })),
+      listResources: vi.fn(async () => ({ items: [], total: 0 })),
+    };
+    await act(async () => root.render(<AppShellContext.Provider value={context}>
+      <ValidationPanel request={{ targetKind: 'config' }} api={api as never} submitOnOpen={false} onClose={vi.fn()} />
+    </AppShellContext.Provider>));
+    await settle();
+
+    expect(host.textContent).toContain(completed.validationId);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(previousFocus);
+    expect(api.submitValidation).not.toHaveBeenCalled();
+    previousFocus.remove();
   });
 
   it('refreshes a durable record and does not cancel it when the view unmounts', async () => {

@@ -57,12 +57,13 @@ function errorMessage(error: ValidationPanelError, locale: 'en' | 'zh-Hant'): st
 }
 
 export function ValidationPanel({ request, validationId, title, submitOnOpen = true, onRecordLoaded,
-  onClose, onOpenResource, onOpenRecord, onOpenOrigin, api: apiOverride = api }: {
+  onRecordSubmitted, onClose, onOpenResource, onOpenRecord, onOpenOrigin, api: apiOverride = api }: {
   request?: ValidationRequest;
   validationId?: string;
   title?: string;
   submitOnOpen?: boolean;
   onRecordLoaded?(record: ValidationRecord): void;
+  onRecordSubmitted?(record: ValidationRecord): void;
   onClose?: () => void;
   onOpenResource?(packageId: string, resource: ResourceRoute, environment?: string): void;
   onOpenRecord?(validationId: string): void;
@@ -82,10 +83,10 @@ export function ValidationPanel({ request, validationId, title, submitOnOpen = t
   const headingRef = useRef<HTMLHeadingElement | null>(null);
 
   useEffect(() => {
-    if (!contextualPanel) return;
+    if (!contextualPanel || !submitOnOpen) return;
     headingRef.current?.focus({ preventScroll: true });
     panelRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-  }, [contextualPanel]);
+  }, [contextualPanel, submitOnOpen]);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (!record?.validationId) return;
@@ -213,7 +214,7 @@ export function ValidationPanel({ request, validationId, title, submitOnOpen = t
     setBusy(true); setError(null);
     try {
       const submitted=await apiOverride.submitValidation(revalidationRequest);
-      setRecord(submitted);onRecordLoaded?.(submitted);
+      setRecord(submitted);onRecordLoaded?.(submitted);onRecordSubmitted?.(submitted);
     }
     catch { setError('submit'); }
     finally { setBusy(false); }

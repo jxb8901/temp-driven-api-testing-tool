@@ -96,7 +96,26 @@ export function validationOriginRoute(record: ValidationRecord, contexts: Contex
       && (('target' in request ? request.target : undefined) || undefined) === (record.target || undefined)
       && (!('environment' in request) || !request.environment || request.environment === record.environment);
   });
-  if (savedContext) return parseRoute(savedContext.routeKey);
+  if (savedContext) {
+    const savedRoute = parseRoute(savedContext.routeKey);
+    const environment = record.environment;
+    if (!environment) return savedRoute;
+    switch (savedRoute.kind) {
+      case 'package':
+      case 'configuration':
+      case 'quick-load':
+      case 'run':
+      case 'load-resource':
+      case 'validation':
+        return { ...savedRoute, environment };
+      case 'load':
+        return savedRoute.packageId
+          ? { ...savedRoute, environment }
+          : { ...savedRoute, catalog: { ...savedRoute.catalog, environment } };
+      default:
+        return savedRoute;
+    }
+  }
   const environment = record.environment || '';
   if (record.scope === 'config') return { kind: 'configuration', ...(record.packageId ? { packageId: record.packageId } : {}), environment, tab: 'effective' };
   if (!record.packageId) return undefined;
@@ -689,6 +708,7 @@ export default function App() {
     content = navigation.route.validationId
       ? <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation record…</div>}>
           <ValidationPanel key={navigation.route.validationId} validationId={navigation.route.validationId}
+            onRecordSubmitted={record => navigation.navigate({ kind: 'validation', validationId: record.validationId })}
             onOpenOrigin={record => { const origin = validationOriginRoute(record, contextValidations); if (origin) navigation.navigate(origin); }}
             onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
         </Suspense>

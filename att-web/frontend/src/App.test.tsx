@@ -68,6 +68,44 @@ describe('App Dashboard job refresh', () => {
     expect(origin?.kind === 'package' ? origin.environment : undefined).not.toBe(currentWorkspaceEnvironment);
     expect(formatRoute(origin!)).toBe('#/packages/payments?environment=SIT');
     expect(parseRoute(formatRoute(origin!))).toEqual(origin);
+
+    const savedOrigin = validationOriginRoute(historicalRecord, [{
+      routeKey: '#/packages/payments', request: { targetKind: 'package', packageId: 'payments', environment: 'SIT' },
+      title: 'Package validation', submitOnOpen: false,
+    }]);
+    expect(savedOrigin).toEqual({ kind: 'package', packageId: 'payments', environment: 'SIT' });
+    expect(formatRoute(savedOrigin!)).toBe('#/packages/payments?environment=SIT');
+  });
+
+  it('updates a deep-linked validation bookmark after revalidation', async () => {
+    await import('./features/validation/ValidationPanel');
+    const oldId = 'V11111111111111111111111111111111';
+    const newId = 'V22222222222222222222222222222222';
+    const historical: ValidationRecord = {
+      validationId: oldId, scope: 'package', packageId: 'payments', environment: 'SIT', status: 'COMPLETED',
+      requestId: 'old-request', submittedAt: '2026-11-15T10:00:00Z', overallStatus: 'PASS',
+    };
+    const submitted: ValidationRecord = {
+      ...historical, validationId: newId, status: 'QUEUED', requestId: 'new-request',
+      submittedAt: '2026-11-16T10:00:00Z', overallStatus: undefined,
+    };
+    vi.mocked(api.getVersion).mockResolvedValue({ apiVersion: '1', inlineLoadEnabled: false,
+      validationRecordsApiVersion: 'att-validation-records/v1' });
+    vi.spyOn(api, 'getValidationRecord').mockResolvedValue(historical);
+    vi.spyOn(api, 'submitValidation').mockResolvedValue(submitted);
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + `#/validate?record=${oldId}`);
+
+    await act(async () => root.render(<App />));
+    await settle();
+    const revalidate = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Revalidate');
+    expect(revalidate).toBeTruthy();
+    await act(async () => { revalidate!.click(); await Promise.resolve(); });
+    await act(async () => { await vi.waitFor(() => expect(window.location.hash).toBe(`#/validate?record=${newId}`)); });
+    await settle();
+
+    expect(parseRoute(window.location.hash)).toEqual({ kind: 'validation', validationId: newId });
+    expect(api.submitValidation).toHaveBeenCalledWith({ targetKind: 'package', packageId: 'payments', environment: 'SIT' });
+    expect(api.getValidationRecord).toHaveBeenLastCalledWith(newId, expect.any(AbortSignal));
   });
 
   it('preserves Workspace while a different historical Job is opened and reloaded', async () => {
