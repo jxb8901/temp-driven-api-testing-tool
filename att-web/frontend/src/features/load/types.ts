@@ -459,6 +459,10 @@ export interface JobsFeatureProps {
   initialTab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics' | 'correlation';
   onTabChange?(tab: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics' | 'correlation'): void;
   standalone?: boolean;
+  jobsTab?: 'jobs' | 'validations';
+  onJobsTabChange?(tab: 'jobs' | 'validations'): void;
+  validationRecordsSupported?: boolean;
+  onOpenValidationRecord?(validationId: string): void;
   executionType?: 'load';
   schedulingEnabled?: boolean;
   onExecutionTypeChange?(value: 'load' | undefined): void;

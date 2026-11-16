@@ -2,7 +2,8 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ArtifactsPanel, BucketTable, JobOverview, JobsPage, MetricsPanel, SutMetricsPanel, TimeSeriesChart, downsampleMetricPoints, CHART_DISPLAY_POINT_THRESHOLD, type MetricBucket, type MetricSeries } from './JobsPage';
+import { AppShellContext, type AppShellContextValue } from '../../AppShell';
+import { ArtifactsPanel, BucketTable, JobOverview, JobsPage as JobsPageWithoutShell, MetricsPanel, SutMetricsPanel, TimeSeriesChart, downsampleMetricPoints, CHART_DISPLAY_POINT_THRESHOLD, type MetricBucket, type MetricSeries } from './JobsPage';
 import { JobArtifacts } from './JobArtifacts';
 import type { JobEventHandlers, JobResultResponse, JobStatus, JobView, LoadJobsApi, SutMetricsJobResponse, SutMetricsLiveResponse } from './types';
 
@@ -43,6 +44,11 @@ function makeApi(overrides: Partial<LoadJobsApi> = {}): LoadJobsApi {
 
 let host: HTMLDivElement;
 let root: Root;
+const jobsPageContext = { uiLocale: 'en', authContextKey: 'test-account', inspectionSessionEpoch: 1 } as unknown as AppShellContextValue;
+
+function JobsPage(props: Parameters<typeof JobsPageWithoutShell>[0]) {
+  return <AppShellContext.Provider value={jobsPageContext}><JobsPageWithoutShell {...props} /></AppShellContext.Provider>;
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -68,6 +74,15 @@ async function click(element: Element) {
 }
 
 describe('JobsPage React feature', () => {
+  it('keeps the Jobs route inside the AppShell main landmark without nesting another main', async () => {
+    const api = makeApi({ listJobs: vi.fn(async () => []) });
+    await act(async () => root.render(<main id="main-content"><AppShellContext.Provider value={jobsPageContext}>
+      <JobsPageWithoutShell api={api} onOpenJob={vi.fn()} onShowList={vi.fn()} />
+    </AppShellContext.Provider></main>));
+    expect(host.querySelectorAll('main')).toHaveLength(1);
+    expect(host.querySelector('[role="tabpanel"]')?.getAttribute('aria-labelledby')).toBe('jobs-results-tab-jobs');
+  });
+
   it('downsamples only the chart display and preserves exact extrema and coordinates', () => {
     const points = Array.from({ length: CHART_DISPLAY_POINT_THRESHOLD + 240 }, (_, index) => ({
       epochMs: 1_800_000_000_000 + index * 1000,

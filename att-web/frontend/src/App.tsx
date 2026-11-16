@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState, t
 import { api } from './api';
 import { AppShell, useAppShellContext } from './AppShell';
 import { DashboardPage } from './DashboardPage';
-import { formatRoute, useNavigationGuard, useRouteState, type AppRoute, type ValidationRouteState, type ValidationScope } from './router';
+import { formatRoute, parseRoute, useNavigationGuard, useRouteState, type AppRoute, type ValidationRouteState, type ValidationScope } from './router';
 import { appReducer, initialAppState, latestServerJobWindow, serverCapabilities } from './state';
 import { RunPage } from './features/run/RunPage';
 // explorer.css stays eager: TypedSidecarForm and ConfigurationExplorer use it
@@ -88,8 +88,52 @@ function uniqueContextValidations(values: ContextValidation[]): ContextValidatio
   }).reverse().slice(-MAX_REMEMBERED_VALIDATION_CONTEXTS);
 }
 
+export function validationOriginRoute(record: ValidationRecord, contexts: ContextValidation[] = []): AppRoute | undefined {
+  const savedContext = [...contexts].reverse().find(({ request }) => {
+    if ('all' in request) return Boolean(record.all);
+    return !record.all && request.targetKind === record.scope
+      && (request.packageId || undefined) === (record.packageId || undefined)
+      && (('target' in request ? request.target : undefined) || undefined) === (record.target || undefined)
+      && (!('environment' in request) || !request.environment || request.environment === record.environment);
+  });
+  if (savedContext) {
+    const savedRoute = parseRoute(savedContext.routeKey);
+    const environment = record.environment;
+    if (!environment) return savedRoute;
+    switch (savedRoute.kind) {
+      case 'package':
+      case 'configuration':
+      case 'quick-load':
+      case 'run':
+      case 'load-resource':
+      case 'validation':
+        return { ...savedRoute, environment };
+      case 'load':
+        return savedRoute.packageId
+          ? { ...savedRoute, environment }
+          : { ...savedRoute, catalog: { ...savedRoute.catalog, environment } };
+      default:
+        return savedRoute;
+    }
+  }
+  const environment = record.environment || '';
+  if (record.scope === 'config') return { kind: 'configuration', ...(record.packageId ? { packageId: record.packageId } : {}), environment, tab: 'effective' };
+  if (!record.packageId) return undefined;
+  if (record.scope === 'package') return { kind: 'package', packageId: record.packageId, environment };
+  if (['case', 'template', 'flow', 'tool'].includes(record.scope) && record.target) {
+    return { kind: 'package', packageId: record.packageId, environment,
+      resource: { type: record.scope, resourceId: record.target } };
+  }
+  if (record.scope === 'load') return { kind: 'load', tab: 'scenarios', catalog: {
+    query: record.target || '', packageFilter: record.packageId, environment,
+  } };
+  if (record.scope === 'suite' && record.target) return { kind: 'validation', scope: 'suite', packageId: record.packageId, target: record.target, environment };
+  return { kind: 'package', packageId: record.packageId, environment };
+}
+
 type ValidationContextState = {
   contextValidation?: ContextValidation;
+  contextValidations: ContextValidation[];
   onValidateContext(request: ValidationRequest, title: string): void;
   rememberContextValidation(record: ValidationRecord): void;
   closeContextValidation(): void;
@@ -169,7 +213,7 @@ function ValidationContextCache({ routeKey, supportsValidationRecords, navigate,
       : current);
   }, [authContextKey, cacheReady, contextValidation]);
 
-  return <>{children({ contextValidation, onValidateContext, rememberContextValidation, closeContextValidation })}</>;
+  return <>{children({ contextValidation, contextValidations, onValidateContext, rememberContextValidation, closeContextValidation })}</>;
 }
 
 function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSchedule, packageRegistrationState, registered, packageLabel,
@@ -394,10 +438,12 @@ function ConfigurationRouteView({ route, onValidateContext }: {
     onTabChange={onTabChange}
     onOpenResource={onOpenResource}
     onValidate={onValidateConfiguration}
-    validationLabel={workspace.uiLocale === 'zh-Hant' ? '唯讀驗證共用設定' : 'Read-only validate Shared Config'}
+    validationLabel={workspace.uiLocale === 'zh-Hant' ? '驗證共用設定' : 'Validate Shared Config'}
+    validationHelp={workspace.uiLocale === 'zh-Hant'
+      ? '唯讀檢查設定，不會執行測試或建立 Job。' : 'Read-only configuration inspection; it does not run tests or create a Job.'}
     onValidatePackage={route.packageId ? onValidatePackageConfiguration : undefined}
     packageValidationLabel={route.packageId ? (workspace.uiLocale === 'zh-Hant'
-      ? `唯讀驗證 ${route.packageId} 套件生效設定` : `Read-only validate ${route.packageId} effective Config`) : undefined}
+      ? '驗證生效設定' : 'Validate Effective Config') : undefined}
   />}</>;
 }
 
@@ -651,7 +697,8 @@ export default function App() {
       ? selectedEnvironment : ''
   );
 
-  const renderContent = (onValidateContext: (request: ValidationRequest, title: string) => void): ReactNode => {
+  const renderContent = (onValidateContext: (request: ValidationRequest, title: string) => void,
+    contextValidations: ContextValidation[]): ReactNode => {
   let content: ReactNode;
   if (navigation.route.kind === 'dashboard') {
     content = <DashboardPage view="dashboard" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
@@ -661,6 +708,8 @@ export default function App() {
     content = navigation.route.validationId
       ? <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation record…</div>}>
           <ValidationPanel key={navigation.route.validationId} validationId={navigation.route.validationId}
+            onRecordSubmitted={record => navigation.navigate({ kind: 'validation', validationId: record.validationId })}
+            onOpenOrigin={record => { const origin = validationOriginRoute(record, contextValidations); if (origin) navigation.navigate(origin); }}
             onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
         </Suspense>
       : <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation workspace…</div>}>
@@ -677,13 +726,23 @@ export default function App() {
   } else if (navigation.route.kind === 'packages') {
     content = <DashboardPage view="packages" state={state} onPackageChange={onPackageChange} onJobChange={onJobChange} onRetryPackages={() => void loadPackages()} onRetryJobs={() => void loadJobs()} jobsRefreshing={jobsRefreshing} jobsUpdatedAt={jobsUpdatedAt} />;
   } else if (navigation.route.kind === 'job-console' || (navigation.route.kind === 'jobs' && navigation.route.standalone && navigation.route.jobId)) {
-    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Job console…</div>}><StandaloneJobConsolePage jobId={navigation.route.jobId!} view={navigation.route.kind === 'job-console' ? navigation.route.view : navigation.route.tab} /></Suspense>;
+    content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Job console…</div>}><StandaloneJobConsolePage jobId={navigation.route.jobId!} view={navigation.route.kind === 'job-console' ? navigation.route.view : navigation.route.tab === 'validations' ? undefined : navigation.route.tab} /></Suspense>;
   } else if (navigation.route.kind === 'job-artifact') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading artifact…</div>}><StandaloneJobArtifactPage api={loadJobsApi} jobId={navigation.route.jobId} path={navigation.route.path} /></Suspense>;
   } else if (navigation.route.kind === 'jobs' && navigation.route.jobId) {
     content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage executionType={navigation.route.executionType} schedulingEnabled={capabilities.loadSchedulingEnabled} onExecutionTypeChange={executionType => navigation.navigate({ kind: 'jobs', executionType })} api={loadJobsApi} onSchedule={capabilities.loadSchedulingEnabled ? onSchedule : undefined} onEditSchedule={id => navigation.navigate({ kind: 'schedules', view: 'edit', scheduleId: id })} jobId={navigation.route.jobId} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs', ...(navigation.route.kind === 'jobs' && navigation.route.executionType ? { executionType: navigation.route.executionType } : {}) })} /></Suspense>;
   } else if (navigation.route.kind === 'jobs') {
-    content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage executionType={navigation.route.executionType} schedulingEnabled={capabilities.loadSchedulingEnabled} onExecutionTypeChange={executionType => navigation.navigate({ kind: 'jobs', executionType })} api={loadJobsApi} onSchedule={capabilities.loadSchedulingEnabled ? onSchedule : undefined} onEditSchedule={id => navigation.navigate({ kind: 'schedules', view: 'edit', scheduleId: id })} onOpenJob={onJobChange} onShowList={() => navigation.navigate({ kind: 'jobs', ...(navigation.route.kind === 'jobs' && navigation.route.executionType ? { executionType: navigation.route.executionType } : {}) })} /></Suspense>;
+    content = <Suspense fallback={<div role="status">Loading jobs…</div>}><JobsPage executionType={navigation.route.executionType}
+      jobsTab={navigation.route.tab === 'validations' ? 'validations' : 'jobs'}
+      onJobsTabChange={tab => navigation.navigate(tab === 'validations' ? { kind: 'jobs', tab: 'validations' } : { kind: 'jobs' })}
+      validationRecordsSupported={supportsValidationRecords}
+      onOpenValidationRecord={validationId => navigation.navigate({ kind: 'validation', validationId })}
+      schedulingEnabled={capabilities.loadSchedulingEnabled}
+      onExecutionTypeChange={executionType => navigation.navigate({ kind: 'jobs', executionType })} api={loadJobsApi}
+      onSchedule={capabilities.loadSchedulingEnabled ? onSchedule : undefined}
+      onEditSchedule={id => navigation.navigate({ kind: 'schedules', view: 'edit', scheduleId: id })}
+      onOpenJob={onJobChange}
+      onShowList={() => navigation.navigate({ kind: 'jobs', ...(navigation.route.kind === 'jobs' && navigation.route.executionType ? { executionType: navigation.route.executionType } : {}) })} /></Suspense>;
   } else if (navigation.route.kind === 'schedules') {
     content = <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading Schedules…</div>}>
       <ScheduledLoadPage
@@ -781,14 +840,15 @@ export default function App() {
       onJobAccepted={onJobAccepted}
     >
       <ValidationContextCache routeKey={currentRouteKey} supportsValidationRecords={supportsValidationRecords} navigate={navigation.navigate}>
-        {({ contextValidation, onValidateContext, rememberContextValidation, closeContextValidation }) => <>
-          {renderContent(onValidateContext)}
+        {({ contextValidation, contextValidations, onValidateContext, rememberContextValidation, closeContextValidation }) => <>
+          {renderContent(onValidateContext, contextValidations)}
           {supportsValidationRecords && contextValidation && <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation…</div>}>
-            <ValidationPanel key={`${contextValidation.routeKey}:${contextValidation.title}:${JSON.stringify(contextValidation.request)}`}
+            <ValidationPanel key={`${contextValidation.routeKey}:${contextValidation.title}`}
               request={contextValidation.request} title={contextValidation.title}
               onClose={closeContextValidation}
               submitOnOpen={contextValidation.submitOnOpen} onRecordLoaded={rememberContextValidation}
               onOpenRecord={validationId => navigation.navigate({ kind: 'validation', validationId })}
+              onOpenOrigin={record => { const origin = validationOriginRoute(record, contextValidations); if (origin) navigation.navigate(origin); }}
               onOpenResource={(packageId, resource, environment) => navigation.navigate({ kind: 'package', packageId, resource, environment })} />
           </Suspense>}
         </>}

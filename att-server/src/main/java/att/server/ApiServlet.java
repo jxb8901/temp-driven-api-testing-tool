@@ -83,7 +83,7 @@ public final class ApiServlet extends HttpServlet {
                 if(!requireValidationIdentity(principal,res,requestId))return;
                 boolean admin=systemAdminCapability(req,principal);if(!admin&&!requireOperator(req,res,requestId))return;
                 Map<String,Object> response=runtime.listValidationRecords(principal,req.getParameter("packageId"),
-                        req.getParameter("scope"),req.getParameter("target"),req.getParameter("environment"),
+                        req.getParameter("scope"),req.getParameter("target"),req.getParameter("environment"),req.getParameter("status"),
                         Boolean.parseBoolean(req.getParameter("matchContext")),parseValidationLimit(req.getParameter("limit")),
                         req.getParameter("cursor"),admin);
                 response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;

@@ -42,11 +42,26 @@ async function main() {
       await page.waitForTimeout(250);
     }
     assert.ok(record?.report, `Validation record ${validationId} did not produce a report within 60 seconds: ${JSON.stringify(record)}`);
-    await page.getByRole('heading', { name: 'Validation report', exact: true }).waitFor();
+    await page.getByText('View full report and diagnostics', { exact: true }).waitFor();
     return record;
   };
   const nextRecordSubmission = () => page.waitForResponse(response => response.request().method() === 'POST'
     && new URL(response.url()).pathname.endsWith('/api/v1/validations'));
+  const assertContextValidationVisible = async () => {
+    const panel = page.locator('.att-validation-context-panel');
+    await page.waitForFunction(() => {
+      const panelElement = document.querySelector('.att-validation-context-panel');
+      const status = panelElement?.querySelector('.att-validation-form > .att-validation-status');
+      const heading = panelElement?.querySelector('h2');
+      if (!status || !heading) return false;
+      const rect = status.getBoundingClientRect();
+      return document.activeElement === heading && rect.top >= 0 && rect.bottom <= window.innerHeight;
+    }, undefined, { timeout: 10000 });
+    const validationStatus = panel.locator('.att-validation-form > .att-validation-status[role="status"]');
+    assert.equal(await validationStatus.count(), 1,
+      'the newly opened contextual validation status must be visible and announced');
+    assert.ok(await validationStatus.isVisible(), 'the contextual validation lifecycle status must remain visible');
+  };
 
   try {
     const versionResponse = await page.request.get(`${origin}/tools/att/api/v1/version`);
@@ -77,9 +92,10 @@ async function main() {
     await page.getByRole('heading', { name: 'Configuration', level: 1, exact: true }).waitFor();
     const beforeSharedConfig = await getJobIds();
     const sharedConfigResponsePromise = nextRecordSubmission();
-    await page.getByRole('button', { name: 'Read-only validate Shared Config', exact: true }).click();
+    await page.getByRole('button', { name: 'Validate Shared Config', exact: true }).click();
     const sharedConfigResponse = await sharedConfigResponsePromise;
     assert.equal(sharedConfigResponse.status(), 202);
+    await assertContextValidationVisible();
     assert.deepEqual(await sharedConfigResponse.request().postDataJSON(), { command: 'validate', targetKind: 'config' },
       'the Shared Configuration shortcut must validate global Config without inheriting a selected Package');
     const sharedConfigInitial = await sharedConfigResponse.json();
@@ -89,10 +105,10 @@ async function main() {
     assert.deepEqual(await getJobIds(), beforeSharedConfig, 'Shared Config validation must not add a persisted Job');
 
     await page.goto(`${origin}/tools/att/ui/index.html#/configuration/payments`);
-    await page.getByRole('button', { name: 'Read-only validate payments effective Config', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Validate Effective Config', exact: true }).waitFor();
     const beforePackageConfig = await getJobIds();
     const packageConfigResponsePromise = nextRecordSubmission();
-    await page.getByRole('button', { name: 'Read-only validate payments effective Config', exact: true }).click();
+    await page.getByRole('button', { name: 'Validate Effective Config', exact: true }).click();
     const packageConfigResponse = await packageConfigResponsePromise;
     assert.equal(packageConfigResponse.status(), 202);
     assert.deepEqual(await packageConfigResponse.request().postDataJSON(), {
@@ -110,16 +126,17 @@ async function main() {
     await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
     await page.getByRole('button', { name: 'Reference Flow' }).click();
     const detailActions = page.locator('.att-explorer-detail-actions');
-    await detailActions.getByRole('button', { name: 'Read-only validate', exact: true }).waitFor();
+    await detailActions.getByRole('button', { name: 'Validate', exact: true }).waitFor();
     const resourceRoute = page.url().split('#')[1] || '';
     const routeMatch = resourceRoute.match(/\/resources\/[^/]+\/([^/?]+)/);
     const target = routeMatch ? decodeURIComponent(routeMatch[1]) : '';
     assert.ok(target, 'Explorer context should carry the selected canonical resource ID');
     const beforeFlow = await getJobIds();
     const flowResponsePromise = nextRecordSubmission();
-    await detailActions.getByRole('button', { name: 'Read-only validate', exact: true }).click();
+    await detailActions.getByRole('button', { name: 'Validate', exact: true }).click();
     const flowResponse = await flowResponsePromise;
     assert.equal(flowResponse.status(), 202);
+    await assertContextValidationVisible();
     assert.deepEqual(await flowResponse.request().postDataJSON(), {
       command: 'validate', targetKind: 'flow', packageId: 'payments', target,
     });

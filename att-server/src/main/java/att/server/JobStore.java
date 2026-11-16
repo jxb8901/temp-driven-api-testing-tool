@@ -20,6 +20,7 @@ import java.util.Set;
 final class JobStore implements AutoCloseable {
     static final Duration REPLAY_INTENT_RETENTION=Duration.ofDays(30);
     private static final Object DRIVER_LIFECYCLE=new Object();
+    private static final Set<String> VALIDATION_OUTCOMES=Set.of("PASS","INVALID","PARTIAL");
     private static int openStores;
     private volatile boolean closed;
     /** Keeps the embedded database open until the owning runtime closes. Query connections remain short-lived. */
@@ -117,6 +118,8 @@ final class JobStore implements AutoCloseable {
             s.execute("UPDATE job_replay_intents SET expires_at="+(System.currentTimeMillis()+REPLAY_INTENT_RETENTION.toMillis())+" WHERE expires_at IS NULL");
             s.execute("CREATE INDEX IF NOT EXISTS job_replay_intents_expiry_idx ON job_replay_intents(expires_at)");
             s.execute("CREATE TABLE IF NOT EXISTS validation_records (validation_id VARCHAR(40) PRIMARY KEY, actor VARCHAR(256) NOT NULL, all_scope BOOLEAN DEFAULT FALSE NOT NULL, scope VARCHAR(16) NOT NULL, package_id VARCHAR(64), target VARCHAR(1024), environment VARCHAR(128), state VARCHAR(16) NOT NULL, phase VARCHAR(64), request_id VARCHAR(128) NOT NULL, submitted_at VARCHAR(40) NOT NULL, started_at VARCHAR(40), finished_at VARCHAR(40), queue_elapsed_ms BIGINT, execution_elapsed_ms BIGINT, total_elapsed_ms BIGINT, source_revision VARCHAR(128), plan_json CLOB NOT NULL, report_json CLOB, error_code VARCHAR(80), error_message VARCHAR(512), record_bytes BIGINT NOT NULL)");
+            s.execute("ALTER TABLE validation_records ADD COLUMN IF NOT EXISTS overall_status VARCHAR(16)");
+            backfillValidationOutcomeSummaries(c);
             s.execute("CREATE INDEX IF NOT EXISTS validation_records_owner_page_idx ON validation_records(actor,submitted_at,validation_id)");
             s.execute("CREATE INDEX IF NOT EXISTS validation_records_retention_idx ON validation_records(state,submitted_at)");
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS replay_unavailable VARCHAR(240)");
@@ -183,6 +186,33 @@ final class JobStore implements AutoCloseable {
                 }
                 c.commit();return batch.size();
             } catch(Exception failure){c.rollback();throw failure;}
+        }
+    }
+
+    /** Backfills the metadata-only outcome column without relying on database-specific JSON functions. */
+    private static void backfillValidationOutcomeSummaries(Connection connection) throws Exception {
+        try(PreparedStatement rows=connection.prepareStatement(
+                    "SELECT validation_id,report_json FROM validation_records WHERE overall_status IS NULL AND report_json IS NOT NULL");
+                ResultSet result=rows.executeQuery();
+                PreparedStatement update=connection.prepareStatement(
+                    "UPDATE validation_records SET overall_status=? WHERE validation_id=? AND overall_status IS NULL")) {
+            while(result.next()) {
+                String validationId=result.getString(1);
+                String outcome=null;
+                try(java.io.Reader reportReader=result.getCharacterStream(2)) {
+                    if(reportReader==null)continue;
+                    JsonNode report=ServerRuntime.JSON.readTree(reportReader);
+                    JsonNode value=report==null?null:report.get("overallStatus");
+                    if(value!=null&&value.isTextual()&&VALIDATION_OUTCOMES.contains(value.textValue()))
+                        outcome=value.textValue();
+                } catch(java.io.IOException malformedLegacyReport) {
+                    // A legacy report should not prevent Server startup; it remains available from its stored record.
+                    continue;
+                }
+                if(outcome!=null) {
+                    update.setString(1,outcome);update.setString(2,validationId);update.executeUpdate();
+                }
+            }
         }
     }
     static final class TargetSearchPendingException extends Exception { }
@@ -998,7 +1028,7 @@ final class JobStore implements AutoCloseable {
 
     synchronized Map<String,Object> activeValidationRecord(String actor,boolean all,String scope,String packageId,String target,
             String environment) throws Exception {
-        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,error_code,error_message FROM validation_records WHERE actor=? AND all_scope=? AND scope=? AND ((package_id=?) OR (package_id IS NULL AND ? IS NULL)) AND ((target=?) OR (target IS NULL AND ? IS NULL)) AND ((environment=?) OR (environment IS NULL AND ? IS NULL)) AND state IN ('QUEUED','RUNNING') ORDER BY submitted_at DESC,validation_id DESC LIMIT 1")) {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement("SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,error_code,error_message,overall_status FROM validation_records WHERE actor=? AND all_scope=? AND scope=? AND ((package_id=?) OR (package_id IS NULL AND ? IS NULL)) AND ((target=?) OR (target IS NULL AND ? IS NULL)) AND ((environment=?) OR (environment IS NULL AND ? IS NULL)) AND state IN ('QUEUED','RUNNING') ORDER BY submitted_at DESC,validation_id DESC LIMIT 1")) {
             p.setString(1,actor);p.setBoolean(2,all);p.setString(3,scope);p.setString(4,packageId);p.setString(5,packageId);
             p.setString(6,target);p.setString(7,target);p.setString(8,environment);p.setString(9,environment);
             try(ResultSet row=p.executeQuery()){return row.next()?readValidationRecordSummary(row):null;}
@@ -1018,12 +1048,18 @@ final class JobStore implements AutoCloseable {
 
     synchronized List<Map<String,Object>> validationRecords(String actor,String packageId,String scope,String target,
             String environment,boolean matchContext,boolean includeAll,String beforeAt,String beforeId,int limit) throws Exception {
-        StringBuilder sql=new StringBuilder("SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,error_code,error_message FROM validation_records WHERE actor=?");
+        return validationRecords(actor,packageId,scope,target,environment,null,matchContext,includeAll,beforeAt,beforeId,limit);
+    }
+
+    synchronized List<Map<String,Object>> validationRecords(String actor,String packageId,String scope,String target,
+            String environment,String status,boolean matchContext,boolean includeAll,String beforeAt,String beforeId,int limit) throws Exception {
+        StringBuilder sql=new StringBuilder("SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,error_code,error_message,overall_status FROM validation_records WHERE actor=?");
         if(matchContext) {
             sql.append(" AND ((package_id=?) OR (package_id IS NULL AND ? IS NULL)) AND scope=? AND ((target=?) OR (target IS NULL AND ? IS NULL)) AND ((environment=?) OR (environment IS NULL AND ? IS NULL))");
         } else {
-            if(packageId!=null)sql.append(" AND package_id=?");if(scope!=null)sql.append(" AND scope=?");
+            if(packageId!=null)sql.append(" AND package_id=?");if(scope!=null)sql.append(" AND scope=?");if(environment!=null)sql.append(" AND environment=?");
         }
+        if(status!=null)sql.append(" AND state=?");
         if(!includeAll)sql.append(" AND all_scope=FALSE");
         if(beforeAt!=null)sql.append(" AND (submitted_at<? OR (submitted_at=? AND validation_id<?))");
         sql.append(" ORDER BY submitted_at DESC,validation_id DESC LIMIT ?");
@@ -1034,8 +1070,9 @@ final class JobStore implements AutoCloseable {
                 p.setString(n++,packageId);p.setString(n++,packageId);p.setString(n++,scope);
                 p.setString(n++,target);p.setString(n++,target);p.setString(n++,environment);p.setString(n++,environment);
             } else {
-                if(packageId!=null)p.setString(n++,packageId);if(scope!=null)p.setString(n++,scope);
+                if(packageId!=null)p.setString(n++,packageId);if(scope!=null)p.setString(n++,scope);if(environment!=null)p.setString(n++,environment);
             }
+            if(status!=null)p.setString(n++,status);
             if(beforeAt!=null){p.setString(n++,beforeAt);p.setString(n++,beforeAt);p.setString(n++,beforeId);}p.setInt(n,limit);
             try(ResultSet r=p.executeQuery()){while(r.next())out.add(readValidationRecordSummary(r));}
         }
@@ -1043,7 +1080,7 @@ final class JobStore implements AutoCloseable {
     }
 
     synchronized List<Map<String,Object>> validationRecordSummaries(String actor,int limit) throws Exception {
-        String sql="SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,error_code,error_message FROM validation_records WHERE actor=? ORDER BY CASE WHEN state IN ('QUEUED','RUNNING') THEN 0 ELSE 1 END,submitted_at DESC,validation_id DESC LIMIT ?";
+        String sql="SELECT validation_id,actor,all_scope,scope,package_id,target,environment,state,phase,request_id,submitted_at,started_at,finished_at,queue_elapsed_ms,execution_elapsed_ms,total_elapsed_ms,source_revision,error_code,error_message,overall_status FROM validation_records WHERE actor=? ORDER BY CASE WHEN state IN ('QUEUED','RUNNING') THEN 0 ELSE 1 END,submitted_at DESC,validation_id DESC LIMIT ?";
         List<Map<String,Object>> out=new ArrayList<>();
         try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)) {
             p.setString(1,actor);p.setInt(2,limit);try(ResultSet r=p.executeQuery()){while(r.next())out.add(readValidationRecordSummary(r));}
@@ -1066,11 +1103,21 @@ final class JobStore implements AutoCloseable {
     synchronized boolean finishValidationRecord(String id,String state,String finishedAt,long queueElapsedMs,
             long executionElapsedMs,long totalElapsedMs,String reportJson,String errorCode,String errorMessage,
             ServerConfig.ValidationRecords limits) throws Exception {
+        return finishValidationRecord(id,state,finishedAt,queueElapsedMs,executionElapsedMs,totalElapsedMs,
+                reportJson,null,errorCode,errorMessage,limits);
+    }
+
+    synchronized boolean finishValidationRecord(String id,String state,String finishedAt,long queueElapsedMs,
+            long executionElapsedMs,long totalElapsedMs,String reportJson,String overallStatus,String errorCode,String errorMessage,
+            ServerConfig.ValidationRecords limits) throws Exception {
         if(!Set.of("COMPLETED","FAILED","TIMED_OUT","INTERRUPTED").contains(state))
             throw new IllegalArgumentException("Invalid terminal validation state");
+        if(overallStatus!=null&&!Set.of("PASS","INVALID","PARTIAL").contains(overallStatus))
+            throw new IllegalArgumentException("Invalid validation outcome");
+        if(!"COMPLETED".equals(state)||reportJson==null)overallStatus=null;
         long bytes=validationRecordBytes(null,reportJson);
         if(bytes>limits.maxRecordBytes){
-            state="FAILED";reportJson=null;errorCode="ATT-SERVER-VALIDATION-RECORD-LIMIT";
+            state="FAILED";reportJson=null;overallStatus=null;errorCode="ATT-SERVER-VALIDATION-RECORD-LIMIT";
             errorMessage="The safe validation report exceeded the configured record size limit";
             bytes=validationRecordBytes(null,null);
         }
@@ -1085,14 +1132,14 @@ final class JobStore implements AutoCloseable {
                     }
                 }
                 if(currentBytes+additionalBytes>limits.maxRecordBytes) {
-                    state="FAILED";reportJson=null;errorCode="ATT-SERVER-VALIDATION-RECORD-LIMIT";
+                    state="FAILED";reportJson=null;overallStatus=null;errorCode="ATT-SERVER-VALIDATION-RECORD-LIMIT";
                     errorMessage="The safe validation report exceeded the configured record size limit";
                     additionalBytes=0;
                 }
                 while(additionalBytes>0&&validationRecordTotalOver(c,limits.maxTotalBytes,additionalBytes)) {
                     String oldest=oldestTerminalValidationId(c,id);
                     if(oldest==null) {
-                        state="FAILED";reportJson=null;errorCode="ATT-SERVER-VALIDATION-RECORD-CAPACITY";
+                        state="FAILED";reportJson=null;overallStatus=null;errorCode="ATT-SERVER-VALIDATION-RECORD-CAPACITY";
                         errorMessage="The safe validation report could not fit within the configured record storage limit";
                         additionalBytes=0;
                         break;
@@ -1101,10 +1148,10 @@ final class JobStore implements AutoCloseable {
                         delete.setString(1,oldest);if(delete.executeUpdate()==0)continue;
                     }
                 }
-                try(PreparedStatement p=c.prepareStatement("UPDATE validation_records SET state=?,phase=NULL,finished_at=?,queue_elapsed_ms=?,execution_elapsed_ms=?,total_elapsed_ms=?,report_json=?,error_code=?,error_message=?,record_bytes=record_bytes+? WHERE validation_id=? AND state IN ('QUEUED','RUNNING')")) {
+                try(PreparedStatement p=c.prepareStatement("UPDATE validation_records SET state=?,phase=NULL,finished_at=?,queue_elapsed_ms=?,execution_elapsed_ms=?,total_elapsed_ms=?,report_json=?,overall_status=?,error_code=?,error_message=?,record_bytes=record_bytes+? WHERE validation_id=? AND state IN ('QUEUED','RUNNING')")) {
             p.setString(1,state);p.setString(2,finishedAt);p.setLong(3,Math.max(0,queueElapsedMs));
             p.setLong(4,Math.max(0,executionElapsedMs));p.setLong(5,Math.max(0,totalElapsedMs));p.setString(6,reportJson);
-                    p.setString(7,errorCode);p.setString(8,bounded(errorMessage==null?"":errorMessage,512));p.setLong(9,additionalBytes);p.setString(10,id);
+                    p.setString(7,overallStatus);p.setString(8,errorCode);p.setString(9,bounded(errorMessage==null?"":errorMessage,512));p.setLong(10,additionalBytes);p.setString(11,id);
                     boolean updated=p.executeUpdate()==1;c.commit();return updated;
                 }
             } catch(Exception failure) {c.rollback();throw failure;}
@@ -1182,7 +1229,7 @@ final class JobStore implements AutoCloseable {
         m.put("environment",r.getString(7));m.put("status",r.getString(8));m.put("phase",r.getString(9));m.put("requestId",r.getString(10));
         m.put("submittedAt",r.getString(11));m.put("startedAt",r.getString(12));m.put("finishedAt",r.getString(13));
         m.put("queueElapsedMs",r.getObject(14));m.put("executionElapsedMs",r.getObject(15));m.put("totalElapsedMs",r.getObject(16));
-        m.put("sourceRevision",r.getString(17));m.put("errorCode",r.getString(18));m.put("error",r.getString(19));return m;
+        m.put("sourceRevision",r.getString(17));m.put("errorCode",r.getString(18));m.put("error",r.getString(19));m.put("overallStatus",r.getString(20));return m;
     }
     synchronized void deleteAuthSession(String hash) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM auth_sessions WHERE token_hash=?")){p.setString(1,hash);p.executeUpdate();}}
     synchronized void revokeAuthSessions(String login) throws Exception {try(Connection c=connect();PreparedStatement p=c.prepareStatement("DELETE FROM auth_sessions WHERE login_id=?")){p.setString(1,login);p.executeUpdate();}}

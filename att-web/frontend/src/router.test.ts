@@ -6,6 +6,8 @@ describe('ATT hash route contract', () => {
     expect(parseRoute('#/')).toEqual({ kind: 'dashboard' });
     expect(parseRoute('#/packages')).toEqual({ kind: 'packages' });
     expect(parseRoute('#/jobs')).toEqual({ kind: 'jobs' });
+    expect(parseRoute('#/jobs?tab=validations')).toEqual({ kind: 'jobs', tab: 'validations' });
+    expect(formatRoute({ kind: 'jobs', tab: 'validations' })).toBe('#/jobs?tab=validations');
     expect(parseRoute('#/advanced-load')).toEqual({ kind: 'load' });
     expect(parseRoute('#/load-schedules')).toEqual({ kind: 'schedules' });
     expect(parseRoute('#/scheduled-load')).toEqual({ kind: 'schedules' });
@@ -56,6 +58,13 @@ describe('ATT hash route contract', () => {
     expect(parseRoute(formatRoute({ kind: 'run', packageId: 'payments', environment: 'UAT', batch: true }))).toEqual({
       kind: 'run', packageId: 'payments', environment: 'UAT', batch: true,
     });
+  });
+
+  it('round-trips a Package Explorer list route with its frozen Environment', () => {
+    const route = { kind: 'package', packageId: 'payments', environment: 'SIT' } as const;
+    expect(formatRoute(route)).toBe('#/packages/payments?environment=SIT');
+    expect(parseRoute(formatRoute(route))).toEqual(route);
+    expect(parseRoute('#/packages/payments?environment=SIT')).toEqual(route);
   });
 
   it('owns Package Testdata routes and redirects legacy Configuration Testdata links', () => {

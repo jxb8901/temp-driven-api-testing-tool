@@ -3087,9 +3087,11 @@ final class ServerRuntime implements AutoCloseable {
         try {
             if(!store.startValidationRecord(execution.id,clock.instant().toString(),queueMs))return;
             execution.startedNanos=started;
-            String state="COMPLETED",errorCode=null,errorMessage=null;String reportJson=null;
+            String state="COMPLETED",errorCode=null,errorMessage=null,overallStatus=null;String reportJson=null;
             try {
                 Map<String,Object> report=validateVNext(execution.plan.input,execution.actor);
+                Object reportOutcome=report.get("overallStatus");
+                if(reportOutcome instanceof String outcome&&Set.of("PASS","INVALID","PARTIAL").contains(outcome))overallStatus=outcome;
                 String revision=null;Object rawContext=report.get("context");
                 if(rawContext instanceof Map<?,?> context) {
                     Object rawRevision=context.get("sourceRevision");
@@ -3115,7 +3117,7 @@ final class ServerRuntime implements AutoCloseable {
             }
             long finished=System.nanoTime();long executionMs=elapsedMillis(started,finished);
             store.finishValidationRecord(execution.id,state,clock.instant().toString(),queueMs,executionMs,
-                    elapsedMillis(execution.submittedNanos,finished),reportJson,errorCode,errorMessage,config.validationRecords);
+                    elapsedMillis(execution.submittedNanos,finished),reportJson,overallStatus,errorCode,errorMessage,config.validationRecords);
         } catch(Exception persistenceFailure) {
             java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).log(java.util.logging.Level.WARNING,
                     "Unable to persist validation record state id="+execution.id,persistenceFailure);
@@ -3166,17 +3168,19 @@ final class ServerRuntime implements AutoCloseable {
         verifyValidationRecordAccess(record);return Boolean.TRUE.equals(record.get("all"));
     }
 
-    Map<String,Object> listValidationRecords(String actor,String packageId,String scope,String target,String environment,
+    Map<String,Object> listValidationRecords(String actor,String packageId,String scope,String target,String environment,String status,
             boolean matchContext,int limit,String cursor,boolean includeAll) throws Exception {
         requireValidationRecords();
         if(packageId!=null)packageId=safeText(packageId,64,"packageId");
         if(scope!=null&&!List.of("config","package","case","suite","template","flow","tool","load").contains(scope))
             throw new IllegalArgumentException("Unsupported validation scope filter");
+        if(environment!=null)environment=safeText(environment,32,"environment");
+        if(status!=null&&!List.of("QUEUED","RUNNING","COMPLETED","FAILED","TIMED_OUT","CANCELLED","INTERRUPTED").contains(status))
+            throw new IllegalArgumentException("Unsupported validation status filter");
         if(matchContext) {
             if(scope==null)throw new IllegalArgumentException("A scope is required for an exact validation context lookup");
             if(target!=null)target=List.of("suite","load").contains(scope)?safeRelative(target,scope):safeText(target,512,"target");
-            if(environment!=null)environment=safeText(environment,32,"environment");
-            else if(packageId!=null)environment=resolveValidationEnvironment(packageId,null);
+            if(environment==null&&packageId!=null)environment=resolveValidationEnvironment(packageId,null);
             if(packageId!=null&&environment!=null)config.packageConfiguration.authorizeEnvironment(environment,true);
         }
         if(limit<1||limit>100)throw new IllegalArgumentException("limit must be from 1 to 100");
@@ -3189,7 +3193,7 @@ final class ServerRuntime implements AutoCloseable {
                 beforeAt=Instant.parse(decoded.substring(0,split)).toString();beforeId=decoded.substring(split+1);validateValidationId(beforeId);
             } catch(Exception invalid){throw new IllegalArgumentException("Invalid validation cursor");}
         }
-        List<Map<String,Object>> rows=store.validationRecords(actor,packageId,scope,target,environment,matchContext,
+        List<Map<String,Object>> rows=store.validationRecords(actor,packageId,scope,target,environment,status,matchContext,
                 includeAll,beforeAt,beforeId,limit+1);
         boolean hasMore=rows.size()>limit;if(hasMore)rows=rows.subList(0,limit);
         List<Map<String,Object>> items=new ArrayList<>();for(Map<String,Object> row:rows) {
@@ -3257,7 +3261,7 @@ final class ServerRuntime implements AutoCloseable {
     private Map<String,Object> publicValidationRecord(Map<String,Object> record,boolean includeReport) {
         if(record==null)throw new NotFoundException();Map<String,Object> out=new LinkedHashMap<>();
         for(String key:List.of("validationId","scope","packageId","target","environment","status","phase","requestId",
-                "submittedAt","startedAt","finishedAt","queueElapsedMs","executionElapsedMs","totalElapsedMs","sourceRevision","errorCode","error")) {
+                "submittedAt","startedAt","finishedAt","queueElapsedMs","executionElapsedMs","totalElapsedMs","sourceRevision","overallStatus","errorCode","error")) {
             Object value=record.get(key);if(value!=null)out.put(key,value);
         }
         if(Boolean.TRUE.equals(record.get("all")))out.put("all",true);

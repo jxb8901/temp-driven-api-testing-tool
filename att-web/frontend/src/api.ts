@@ -348,10 +348,10 @@ export const api = {
   getValidationRecordSummary(signal?: AbortSignal): Promise<{ record: ValidationRecord | null; requestId?: string }> {
     return request('validations/summary', { signal });
   },
-  listValidationRecords(input: { packageId?: string; scope?: string; target?: string; environment?: string;
+  listValidationRecords(input: { packageId?: string; scope?: string; target?: string; environment?: string; status?: string;
     matchContext?: boolean; limit?: number; cursor?: string } = {}, signal?: AbortSignal): Promise<ValidationRecordPage> {
     return request('validations' + queryString({ packageId: input.packageId, scope: input.scope, target: input.target,
-      environment: input.environment, matchContext: input.matchContext, limit: input.limit, cursor: input.cursor }), { signal });
+      environment: input.environment, status: input.status, matchContext: input.matchContext, limit: input.limit, cursor: input.cursor }), { signal });
   },
   cancelValidation(validationId: string): Promise<ValidationRecord> {
     return postJson<ValidationRecord>('validations/' + encodeURIComponent(validationId) + '/cancel', {});

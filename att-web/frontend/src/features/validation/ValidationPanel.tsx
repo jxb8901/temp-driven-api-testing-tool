@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../api';
 import type { ResourceRoute, ValidationScope } from '../../router';
 import { useAppShellContext } from '../../AppShell';
@@ -57,15 +57,17 @@ function errorMessage(error: ValidationPanelError, locale: 'en' | 'zh-Hant'): st
 }
 
 export function ValidationPanel({ request, validationId, title, submitOnOpen = true, onRecordLoaded,
-  onClose, onOpenResource, onOpenRecord, api: apiOverride = api }: {
+  onRecordSubmitted, onClose, onOpenResource, onOpenRecord, onOpenOrigin, api: apiOverride = api }: {
   request?: ValidationRequest;
   validationId?: string;
   title?: string;
   submitOnOpen?: boolean;
   onRecordLoaded?(record: ValidationRecord): void;
+  onRecordSubmitted?(record: ValidationRecord): void;
   onClose?: () => void;
   onOpenResource?(packageId: string, resource: ResourceRoute, environment?: string): void;
   onOpenRecord?(validationId: string): void;
+  onOpenOrigin?(record: ValidationRecord): void;
   api?: ValidationPanelApi;
 }) {
   const workspace = useAppShellContext();
@@ -76,6 +78,15 @@ export function ValidationPanel({ request, validationId, title, submitOnOpen = t
   const [initializing, setInitializing] = useState(false);
   const [diagnosticRoutes, setDiagnosticRoutes] = useState<Record<string, ResourceRoute>>({});
   const requestKey = JSON.stringify(request || null);
+  const contextualPanel = Boolean(onClose);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+
+  useEffect(() => {
+    if (!contextualPanel || !submitOnOpen) return;
+    headingRef.current?.focus({ preventScroll: true });
+    panelRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }, [contextualPanel, requestKey, submitOnOpen]);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (!record?.validationId) return;
@@ -203,12 +214,24 @@ export function ValidationPanel({ request, validationId, title, submitOnOpen = t
     setBusy(true); setError(null);
     try {
       const submitted=await apiOverride.submitValidation(revalidationRequest);
-      setRecord(submitted);onRecordLoaded?.(submitted);
+      setRecord(submitted);onRecordLoaded?.(submitted);onRecordSubmitted?.(submitted);
     }
     catch { setError('submit'); }
     finally { setBusy(false); }
   };
 
+  const scopeName = record?.all ? label('All packages', '所有套件', locale)
+    : record?.scope || (request && 'targetKind' in request ? request.targetKind : 'config');
+  const packageName = record?.packageId || (request && 'packageId' in request ? request.packageId : undefined)
+    || label('Runtime', 'Runtime', locale);
+  const environmentName = record?.environment || (request && 'environment' in request ? request.environment : undefined)
+    || label('Package default', '套件預設值', locale);
+  const targetName = record?.target || (request && 'target' in request ? request.target : undefined);
+  const resultLabel = record?.overallStatus;
+  const counts = record?.report?.counts;
+  const reportSummary = record?.error || (counts
+    ? `${resultLabel || label('Report available', '報告已提供', locale)} · ${counts.errors} ${label('errors', '個錯誤', locale)} · ${counts.warnings} ${label('warnings', '個警告', locale)}`
+    : resultLabel || '');
   const status = record?.status;
   const transportState = initializing && !record ? label('Looking for a matching validation…', '正在尋找相符的驗證…', locale)
     : busy && !record ? label('Submitting…', '正在提交…', locale)
@@ -219,49 +242,63 @@ export function ValidationPanel({ request, validationId, title, submitOnOpen = t
   } as Record<ValidationTransportState, string>)[status], locale) : label('Submitting…', '正在提交…', locale);
   const scope = (record?.scope || (request && 'targetKind' in request ? request.targetKind : 'config')) as ValidationScope;
 
-  return <section className="att-validation-panel att-validation-page" aria-labelledby="att-validation-panel-title">
+  return <section ref={panelRef} className={`att-validation-panel att-validation-page${onClose ? ' att-validation-context-panel' : ''}`} aria-labelledby="att-validation-panel-title">
     <header className="att-feature-header">
-      <div><p className="att-eyebrow">{label('Read-only contextual validation', '唯讀情境驗證', locale)}</p>
-        <h2 id="att-validation-panel-title">{title || label('Validation record', '驗證記錄', locale)}</h2>
-        <p>{label('This is a durable Server validation record. Closing this view does not cancel it.', '此為 Server 持久驗證記錄。關閉此檢視不會取消驗證。', locale)}</p></div>
+      <div><p className="att-eyebrow">{label('Read-only validation', '唯讀驗證', locale)}</p>
+        <h2 ref={headingRef} id="att-validation-panel-title" tabIndex={contextualPanel ? -1 : undefined}>{title || label('Validation record', '驗證記錄', locale)}</h2>
+        <p>{label('This read-only Server check does not run tests or create a Job. Closing or hiding this panel does not cancel it.', '此 Server 唯讀檢查不會執行測試或建立 Job。關閉或隱藏此面板不會取消驗證。', locale)}</p></div>
       {onClose && <button className="button button-quiet" type="button" onClick={onClose}>{label('Close', '關閉', locale)}</button>}
     </header>
     <div className="att-validation-form">
       <div className={`att-validation-status${record?.overallStatus ? ` is-${record.overallStatus.toLowerCase()}` : ''}`} role="status" aria-live="polite">
         <strong>{transportState}</strong>
         {record?.phase && status === 'RUNNING' && <span>{label('Phase', '階段', locale)}: {record.phase}</span>}
-        {record?.overallStatus && <span>{label('Report', '報告', locale)}: {record.overallStatus}</span>}
+        {resultLabel && <span>{label('Result', '結果', locale)}: {resultLabel}</span>}
         {record?.applicability && <span>{label('Source applicability', '來源適用性', locale)}: {record.applicability}</span>}
         {ACTIVE.has(status || '') && <span>{status === 'QUEUED'
           ? label('Waiting for an inspection slot.', '正在等候檢查時段。', locale)
           : label('Running; the current phase is not available.', '正在執行；目前階段無法取得。', locale)}</span>}
       </div>
-      {record && <dl className="att-validation-summary">
-        <div><dt>{label('Validation ID', '驗證 ID', locale)}</dt><dd>{record.validationId}</dd></div>
-        <div><dt>{label('Submitted', '提交時間', locale)}</dt><dd>{dateTime(record.submittedAt)}</dd></div>
-        <div><dt>{label('Started', '開始時間', locale)}</dt><dd>{dateTime(record.startedAt)}</dd></div>
-        <div><dt>{label('Finished', '完成時間', locale)}</dt><dd>{dateTime(record.finishedAt)}</dd></div>
-        <div><dt>{label('Queue time', '排隊時間', locale)}</dt><dd>{record.queueElapsedMs == null ? '—' : `${record.queueElapsedMs} ms`}</dd></div>
-        <div><dt>{label('Execution time', '執行時間', locale)}</dt><dd>{record.executionElapsedMs == null ? '—' : `${record.executionElapsedMs} ms`}</dd></div>
+      {(record || request) && <dl className="att-validation-context-summary">
+        <div><dt>{label('Scope', '範圍', locale)}</dt><dd>{scopeName}</dd></div>
+        <div><dt>{label('Package', '套件', locale)}</dt><dd>{packageName}</dd></div>
+        <div><dt>{label('Environment', '環境', locale)}</dt><dd>{environmentName}</dd></div>
+        {targetName && <div><dt>{label('Target', '目標', locale)}</dt><dd>{targetName}</dd></div>}
+        {record && <div><dt>{label('Validation ID', '驗證 ID', locale)}</dt><dd>{record.validationId}</dd></div>}
+        {reportSummary && <div><dt>{label('Summary', '摘要', locale)}</dt><dd>{reportSummary}</dd></div>}
       </dl>}
+      {record && <details className="att-validation-record-details">
+        <summary>{label('Record timings', '記錄時間', locale)}</summary>
+        <dl className="att-validation-summary">
+          <div><dt>{label('Submitted', '提交時間', locale)}</dt><dd>{dateTime(record.submittedAt)}</dd></div>
+          <div><dt>{label('Started', '開始時間', locale)}</dt><dd>{dateTime(record.startedAt)}</dd></div>
+          <div><dt>{label('Finished', '完成時間', locale)}</dt><dd>{dateTime(record.finishedAt)}</dd></div>
+          <div><dt>{label('Queue time', '排隊時間', locale)}</dt><dd>{record.queueElapsedMs == null ? '—' : `${record.queueElapsedMs} ms`}</dd></div>
+          <div><dt>{label('Execution time', '執行時間', locale)}</dt><dd>{record.executionElapsedMs == null ? '—' : `${record.executionElapsedMs} ms`}</dd></div>
+        </dl>
+      </details>}
       {record?.error && <p className="att-validation-error" role="alert">{record.error}</p>}
       {error && <p className="att-validation-error" role="alert">{errorMessage(error, locale)}</p>}
       <div className="att-validation-submit-row">
         <button className="button button-quiet" type="button" disabled={!record || busy} onClick={() => void refresh()}>{label('Refresh', '重新整理', locale)}</button>
         {record && onOpenRecord && <button className="button button-quiet" type="button" onClick={() => onOpenRecord(record.validationId)}>{label('Open full record', '開啟完整記錄', locale)}</button>}
+        {record && onOpenOrigin && <button className="button button-quiet" type="button" onClick={() => onOpenOrigin(record)}>{label('Open matching context', '開啟相符情境', locale)}</button>}
         {ACTIVE.has(status || '') && <button className="button button-quiet" type="button" disabled={busy} onClick={() => void cancel()}>{label('Cancel validation', '取消驗證', locale)}</button>}
         {request && !record && <button className="button button-primary" type="button" disabled={busy || initializing} onClick={() => void submitNewValidation()}>{label('Validate', '驗證', locale)}</button>}
         {record && !ACTIVE.has(status || '') && revalidationRequest
           && <button className="button button-primary" type="button" disabled={busy} onClick={() => void revalidate()}>{label('Revalidate', '重新驗證', locale)}</button>}
       </div>
     </div>
-    {record?.report && <ValidationReport report={record.report} scope={scope} packageId={record.packageId}
-      environment={record.environment} target={record.target}
-      diagnosticResourceRoutes={diagnosticRoutes}
-      resourceRoute={record.target && ['case', 'template', 'flow', 'tool'].includes(scope)
-        ? { type: scope, resourceId: record.target } : undefined}
-      onOpenResource={record.packageId && onOpenResource
-        ? resource => onOpenResource(record.packageId!, resource, record.environment) : undefined}
-      onRevalidate={() => void revalidate()} locale={locale} />}
+    {record?.report && <details className="att-validation-report-details">
+      <summary>{label('View full report and diagnostics', '檢視完整報告與診斷', locale)}</summary>
+      <ValidationReport report={record.report} scope={scope} packageId={record.packageId}
+        environment={record.environment} target={record.target}
+        diagnosticResourceRoutes={diagnosticRoutes}
+        resourceRoute={record.target && ['case', 'template', 'flow', 'tool'].includes(scope)
+          ? { type: scope, resourceId: record.target } : undefined}
+        onOpenResource={record.packageId && onOpenResource
+          ? resource => onOpenResource(record.packageId!, resource, record.environment) : undefined}
+        onRevalidate={() => void revalidate()} locale={locale} />
+    </details>}
   </section>;
 }
