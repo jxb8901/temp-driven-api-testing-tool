@@ -870,7 +870,9 @@ class SutMetricsServiceTest {
             Map<String,Object> manifest=awaitManifest(service,JOB_ID);
             assertEquals("FAILED",manifest.get("state"));
             assertEquals("PROMETHEUS_HTTP_ERROR",maps(manifest.get("diagnostics")).get(0).get("code"));
-            assertTrue(maps(manifest.get("files")).isEmpty());
+            assertEquals(1, maps(manifest.get("files")).size(),
+                    "The failed request keeps an explicit UNAVAILABLE observation sidecar.");
+            assertEquals("UNAVAILABLE", maps(manifest.get("files")).get(0).get("queryStatus"));
         }
 
         try(PrometheusFixture fixture=new PrometheusFixture(1,200,700,0,Map.of());
@@ -1551,6 +1553,156 @@ class SutMetricsServiceTest {
             Map<String, Object> mobileFailure = items.stream().filter(item -> "failure".equals(item.get("metricId"))
                     && "mobile".equals(item.get("mixId"))).findFirst().orElseThrow();
             assertEquals(0.0, mobileFailure.get("value"));
+        }
+    }
+
+    @Test void oneWideRowCallProducesThreeMetricsForFourDeclaredLabelSets() throws Exception {
+        try (SutMetricsService service = new SutMetricsService(temp)) {
+            Map<String, Object> profile = map("schemaVersion", "att-sut-metrics-profile/v1", "id", "wide-row",
+                    "name", "Wide row", "kind", "base", "category", "app", "metrics", List.of(map(
+                            "id", "instance-summary",
+                            "call", "#{db.orders.query(sql='select instance, role, cpu_pct, memory_mb, sessions from metric_summary')}",
+                            "sampling", "afterDrain",
+                            "mapping", map("rows", "rows", "allowedLabels", List.of("instance", "role"),
+                                    "labelColumns", map("instance", "INSTANCE", "role", "ROLE")),
+                            "outputs", List.of(
+                                    map("id", "cpu", "title", "CPU percent", "column", "CPU_PCT", "unit", "percent", "kind", "gauge"),
+                                    map("id", "memory", "title", "Memory MB", "column", "MEMORY_MB", "unit", "custom", "kind", "gauge"),
+                                    map("id", "sessions", "title", "Sessions", "column", "SESSIONS", "unit", "count", "kind", "gauge")))));
+            service.upsertProfile(profile);
+            AtomicInteger invocations = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    invocations.incrementAndGet();
+                    return map("rowCount", 4, "rows", List.of(
+                            map("INSTANCE", "app-1", "ROLE", "app", "CPU_PCT", 11, "MEMORY_MB", 128, "SESSIONS", 3),
+                            map("INSTANCE", "app-2", "ROLE", "app", "CPU_PCT", 12, "MEMORY_MB", 256, "SESSIONS", 4),
+                            map("INSTANCE", "db-1", "ROLE", "db", "CPU_PCT", 21, "MEMORY_MB", 512, "SESSIONS", 5),
+                            map("INSTANCE", "db-2", "ROLE", "db", "CPU_PCT", 22, "MEMORY_MB", 1024, "SESSIONS", 6)));
+                }
+                @Override public void close() { }
+            });
+            Map<String, Object> snapshot = service.resolveScenario(scenario(List.of(map("profile", "wide-row")),
+                    "1m", "1s", "15s"), "alice");
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(30);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(30), finishedAt);
+
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("READY", manifest.get("state"));
+            assertEquals(1, invocations.get(), "One shared wide-row call must serve all three output metrics.");
+            assertEquals(3, maps(manifest.get("files")).size());
+            Set<String> metricIds = new java.util.TreeSet<>();
+            Set<String> observationIds = new java.util.HashSet<>();
+            for (Map<String, Object> file : maps(manifest.get("files"))) {
+                metricIds.add(String.valueOf(file.get("metricId")));
+                Map<String, Object> sidecar = ServerRuntime.JSON.readValue(Files.readString(
+                        temp.resolve("jobs").resolve(JOB_ID).resolve("sut-metrics").resolve(String.valueOf(file.get("path")))), Map.class);
+                assertEquals(4, maps(sidecar.get("labeledValues")).size());
+                List<Map<String, Object>> observations = maps(sidecar.get("normalizedObservationsV2"));
+                assertEquals(4, observations.size());
+                for (Map<String, Object> observation : observations) {
+                    Map<String, Object> identity = object(observation.get("identity"));
+                    Map<String, Object> labels = object(identity.get("labels"));
+                    assertEquals(Set.of("instance", "role"), labels.keySet());
+                    assertTrue(observationIds.add(String.valueOf(observation.get("observationId"))),
+                            "Each labelled metric instance must have its own observation identity.");
+                }
+            }
+            assertEquals(Set.of("cpu", "memory", "sessions"), metricIds);
+            assertEquals(12, observationIds.size());
+        }
+    }
+
+    @Test void onePrometheusRangeFetchRoutesMultipleLabelledOutputsWithoutRelyingOnName() throws Exception {
+        try (PrometheusFixture fixture = new PrometheusFixture(SutMetricsServiceTest::multiMetricResponse);
+             SutMetricsService service = new SutMetricsService(temp.resolve("prometheus-multi-output"))) {
+            service.upsertSource(source("prom", fixture.url(), List.of("alice"), Map.of()));
+            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "multi-prom",
+                    "name", "Multi-series Prometheus", "kind", "base", "category", "app", "metrics", List.of(
+                            map("id", "cpu", "title", "CPU", "unit", "percent", "query", "sum by(instance) (up or process_cpu_seconds_total)",
+                                    "metricName", "host_cpu_seconds_total"),
+                            map("id", "memory", "title", "Memory", "unit", "bytes", "query", "sum by(instance) (up or process_cpu_seconds_total)",
+                                    "metricName", "host_memory_bytes"),
+                            map("id", "sessions", "title", "Sessions", "unit", "count", "query", "sum by(instance) (up or process_cpu_seconds_total)",
+                                    "discriminator", Map.of("family", "sessions")))));
+            Map<String, Object> snapshot = service.resolveScenario(scenario(List.of(map("profile", "multi-prom",
+                    "source", "prom", "targets", List.of(map("id", "sut-1", "type", "app")))),
+                    "1m", "1m", "15s"), "alice");
+            List<Map<String, Object>> queries = maps(snapshot.get("queries"));
+            assertEquals(3, queries.size());
+            assertEquals(1, queries.stream().map(query -> query.get("fetchId")).distinct().count(),
+                    "Outputs with the same source, target, tenant, PromQL and collection window share one immutable fetch.");
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(120);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(30), finishedAt);
+
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("READY", manifest.get("state"));
+            assertEquals(1, fixture.requests.get(), "A single query_range response must serve the three metric outputs.");
+            assertEquals(3, maps(manifest.get("files")).size());
+            Map<String, String> expectedLabels = Map.of("cpu", "host_cpu_seconds_total",
+                    "memory", "host_memory_bytes", "sessions", "sessions");
+            for (Map<String, Object> file : maps(manifest.get("files"))) {
+                String metricId = String.valueOf(file.get("metricId"));
+                Map<String, Object> sidecar = ServerRuntime.JSON.readValue(Files.readString(
+                        temp.resolve("prometheus-multi-output/jobs").resolve(JOB_ID).resolve("sut-metrics")
+                                .resolve(String.valueOf(file.get("path")))), Map.class);
+                List<Map<String, Object>> series = maps(sidecar.get("series"));
+                assertEquals(1, series.size(), "Each output receives only its matching provider series.");
+                Map<String, Object> labels = object(series.get(0).get("labels"));
+                if ("sessions".equals(metricId)) assertEquals("sessions", labels.get("family"));
+                else assertEquals(expectedLabels.get(metricId), labels.get("__name__"));
+                List<Map<String, Object>> normalized = maps(sidecar.get("normalizedObservationsV2"));
+                assertEquals(1, normalized.size());
+                assertEquals(metricId, object(normalized.get(0).get("identity")).get("metricId"));
+            }
+        }
+    }
+
+    @Test void failedWideRowCallIsSharedAndLeavesEveryOutputUnavailable() throws Exception {
+        Path data = temp.resolve("failed-wide-row");
+        try (SutMetricsService service = new SutMetricsService(data)) {
+            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v1", "id", "failed-wide",
+                    "name", "Failed wide row", "kind", "base", "category", "app", "metrics", List.of(map(
+                            "id", "instance-summary",
+                            "call", "#{db.orders.query(sql='select instance, role, cpu_pct from metric_summary')}",
+                            "sampling", "afterDrain",
+                            "mapping", map("rows", "rows", "allowedLabels", List.of("instance", "role"),
+                                    "labelColumns", map("instance", "INSTANCE", "role", "ROLE")),
+                            "outputs", List.of(
+                                    map("id", "cpu", "title", "CPU percent", "column", "CPU_PCT", "unit", "percent"),
+                                    map("id", "sessions", "title", "Sessions", "column", "SESSIONS", "unit", "count"))))));
+            AtomicInteger invocations = new AtomicInteger();
+            service.setBusinessCallExecutor((jobId, executionSnapshot) -> new SutMetricsService.BusinessCallSession() {
+                @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
+                                                Instant executionFinishedAt, Instant steadyStart,
+                                                Instant steadyEnd, Instant observedAt) {
+                    invocations.incrementAndGet();
+                    throw new IllegalStateException("database unavailable");
+                }
+                @Override public void close() { }
+            });
+            Map<String, Object> snapshot = service.resolveScenario(scenario(List.of(map("profile", "failed-wide")),
+                    "1m", "1s", "15s"), "alice");
+            service.writeSnapshot(JOB_ID, snapshot);
+            Instant finishedAt = Instant.now().minusSeconds(30);
+            service.jobFinished(JOB_ID, finishedAt.minusSeconds(30), finishedAt);
+
+            Map<String, Object> manifest = awaitManifest(service, JOB_ID);
+            assertEquals("FAILED", manifest.get("state"));
+            assertEquals(1, invocations.get(), "A failed fetch is shared across every output and is never repeated.");
+            List<Map<String, Object>> files = maps(manifest.get("files"));
+            assertEquals(2, files.size());
+            assertTrue(files.stream().allMatch(file -> "UNAVAILABLE".equals(file.get("queryStatus"))));
+            for (Map<String, Object> file : files) {
+                Map<String, Object> sidecar = ServerRuntime.JSON.readValue(Files.readString(
+                        data.resolve("jobs").resolve(JOB_ID).resolve("sut-metrics").resolve(String.valueOf(file.get("path")))), Map.class);
+                Map<String, Object> normalized = maps(sidecar.get("normalizedObservationsV2")).get(0);
+                assertEquals("UNAVAILABLE", object(normalized.get("data")).get("state"));
+            }
         }
     }
 
@@ -2354,6 +2506,15 @@ class SutMetricsServiceTest {
         return "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":["
                 + "{\"metric\":{\"instance\":\"sut-1\"},\"values\":[["
                 + String.format(Locale.ROOT, "%.3f", timestamp / 1000.0) + ",\"1.0\"]]}]}}";
+    }
+
+    private static String multiMetricResponse(String raw) {
+        long timestamp = Instant.parse(queryParameter(raw, "end")).toEpochMilli();
+        String atEnd = String.format(Locale.ROOT, "%.3f", timestamp / 1000.0);
+        return "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":["
+                + "{\"metric\":{\"__name__\":\"host_cpu_seconds_total\",\"instance\":\"sut-1\"},\"values\":[[" + atEnd + ",\"11.0\"]]},"
+                + "{\"metric\":{\"__name__\":\"host_memory_bytes\",\"instance\":\"sut-1\"},\"values\":[[" + atEnd + ",\"256.0\"]]},"
+                + "{\"metric\":{\"family\":\"sessions\",\"instance\":\"sut-1\"},\"values\":[[" + atEnd + ",\"3.0\"]]}]}}";
     }
 
     private static String thresholdResponse(String raw, double value) {

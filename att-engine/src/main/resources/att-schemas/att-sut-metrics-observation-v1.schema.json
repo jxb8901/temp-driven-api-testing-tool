@@ -492,6 +492,26 @@
         "null"
       ]
     },
+    "labeledValues": {
+      "description": "Bounded one-time values returned by one wide-row acquisition; each value keeps its explicit source labels.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "required": ["labels", "value"],
+        "additionalProperties": false,
+        "properties": {
+          "labels": {
+            "type": "object",
+            "minProperties": 1,
+            "maxProperties": 40,
+            "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 512 }
+          },
+          "value": { "type": "number" }
+        }
+      }
+    },
     "callGroupId": {
       "type": "string",
       "minLength": 1,
@@ -643,9 +663,7 @@
         "series"
       ],
       "not": {
-        "required": [
-          "value"
-        ]
+        "anyOf": [{ "required": ["value"] }, { "required": ["labeledValues"] }]
       },
       "properties": {
         "observation": {
@@ -662,9 +680,7 @@
         "value"
       ],
       "not": {
-        "required": [
-          "series"
-        ]
+        "anyOf": [{ "required": ["series"] }, { "required": ["labeledValues"] }]
       },
       "properties": {
         "observation": {
@@ -675,6 +691,17 @@
                 "window-aggregate"
               ]
             }
+          }
+        }
+      }
+    },
+    {
+      "required": ["labeledValues"],
+      "not": { "anyOf": [{ "required": ["value"] }, { "required": ["series"] }] },
+      "properties": {
+        "observation": {
+          "properties": {
+            "kind": { "enum": ["timed-snapshot", "window-aggregate"] }
           }
         }
       }

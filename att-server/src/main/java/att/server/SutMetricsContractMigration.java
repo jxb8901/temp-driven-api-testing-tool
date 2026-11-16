@@ -63,7 +63,14 @@ final class SutMetricsContractMigration {
             boolean business = "business-call".equals(query.get("observationType"));
             String oldFetchId = business
                     ? text(query.getOrDefault("callGroupId", query.get("id")), "callGroupId")
-                    : text(query.get("id"), "query id");
+                    : "prometheus:" + digest(fields("sourceId", sourceId,
+                            "sourceRevision", query.get("sourceRevision"),
+                            "targetRevision", query.get("targetRevision"),
+                            "targetId", query.get("targetId"), "targetType", query.get("targetType"),
+                            "tenant", query.get("tenant"), "query", query.get("query"),
+                            "parameters", query.get("parameters"), "sampling", query.getOrDefault("sampling", "range"),
+                            "window", query.get("window"), "collection", legacy.get("collection")))
+                    + (business || hasPrometheusOutputSelector(query) ? "" : "\u0000" + query.get("id"));
             String fetchKey = sourceId + "\u0000" + oldFetchId;
             String fetchId = "fetch-" + digest(fetchKey).substring(0, 40);
             String metricSourceId = metricSourceIds.computeIfAbsent(sourceId,
@@ -115,6 +122,8 @@ final class SutMetricsContractMigration {
                     Map<String, Object> output = fields("metricId", query.get("metricId"), "unit", query.get("unit"),
                             "kind", query.get("kind"), "mappingRevision", mappingRevision(query));
                     if (query.get("column") != null) output.put("column", query.get("column"));
+                    if (query.get("metricName") != null) output.put("metricName", query.get("metricName"));
+                    if (query.get("discriminator") != null) output.put("discriminator", query.get("discriminator"));
                     outputs.add(output);
                 }
                 Map<String, Object> subject = legacySubject(query);
@@ -268,6 +277,25 @@ final class SutMetricsContractMigration {
                                                              Long requestCountOverride) {
         if (!OBSERVATION_V1.equals(sidecar.get("schemaVersion")))
             throw new IllegalArgumentException("Only att-sut-metrics-observation/v1 sidecars can be migrated.");
+        if (sidecar.get("labeledValues") instanceof List<?> labeledValues) {
+            if (labeledValues.isEmpty() || labeledValues.size() > SutMetricsService.MAX_LABELLED_VALUES)
+                throw new IllegalArgumentException("The wide-row observation exceeds the normalized observation limit.");
+            List<Map<String, Object>> normalized = new ArrayList<>();
+            for (Object rawValue : labeledValues) {
+                Map<String, Object> labeled = asMap(rawValue);
+                Map<String, Object> oneValue = new LinkedHashMap<>(sidecar);
+                oneValue.remove("labeledValues");
+                oneValue.remove("series");
+                oneValue.put("value", labeled.get("value"));
+                Map<String, Object> observation = normalizeObservationV1(oneValue, snapshot, jobId, requestCountOverride).get(0);
+                Map<String, Object> identity = new LinkedHashMap<>(asMap(observation.get("identity")));
+                identity.put("labels", safeLabels(labeled.get("labels")));
+                observation.put("identity", identity);
+                observation.put("observationId", digest(identity));
+                normalized.add(observation);
+            }
+            return List.copyOf(normalized);
+        }
         List<Map<String, Object>> snapshotQueries = list(snapshot == null ? null : snapshot.get("queries"));
         String queryId = text(sidecar.get("queryId"), "queryId");
         Map<String, Object> query = snapshotQueries.stream()
@@ -372,7 +400,7 @@ final class SutMetricsContractMigration {
                 "profile", "profilePath", "profileRevision", "sourceId", "sourceName", "sourceType",
                 "sourceRevision", "targetId", "targetType", "targetRevision", "metricId", "title",
                 "category", "unit", "kind", "observationType", "observationKind", "sampling", "window",
-                "step", "scope", "workloadId", "mixId", "tenant", "subjectKey", "callGroupId", "callType", "callName",
+                "step", "scope", "workloadId", "mixId", "tenant", "metricName", "discriminator", "subjectKey", "callGroupId", "callType", "callName",
                 "callWorkloadId", "valuePath", "column", "multiOutput", "sideEffectsAcknowledged", "mapping");
         Map<String, Object> result = new LinkedHashMap<>();
         for (String key : allowed) if (query.containsKey(key)) result.put(key, query.get(key));
@@ -412,6 +440,10 @@ final class SutMetricsContractMigration {
         return safe;
     }
 
+    private static boolean hasPrometheusOutputSelector(Map<String, Object> query) {
+        return nullableText(query.get("metricName")) != null || !asMap(query.get("discriminator")).isEmpty();
+    }
+
     private static String fetchFingerprint(Map<String, Object> query, String sourceId, String oldFetchId) {
         Map<String, Object> key = fields("sourceId", sourceId, "binding", oldFetchId,
                 "sourceRevision", query.get("sourceRevision"), "targetRevision", query.get("targetRevision"),
@@ -427,7 +459,8 @@ final class SutMetricsContractMigration {
     private static String mappingRevision(Map<String, Object> query) {
         return digest(fields("metricId", query.get("metricId"), "unit", query.get("unit"), "kind", query.get("kind"),
                 "column", query.get("column"), "valuePath", query.get("valuePath"), "mapping", query.get("mapping"),
-                "profileRevision", query.get("profileRevision")));
+                "profileRevision", query.get("profileRevision"), "metricName", query.get("metricName"),
+                "discriminator", query.get("discriminator")));
     }
 
     private static Map<String, Object> legacySubject(Map<String, Object> query) {

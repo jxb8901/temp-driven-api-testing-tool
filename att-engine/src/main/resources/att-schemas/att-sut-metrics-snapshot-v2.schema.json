@@ -83,7 +83,13 @@
                 "kind": { "type": "string", "maxLength": 32 },
                 "mappingRevision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
                 "column": { "type": ["string", "null"], "maxLength": 128 },
-                "metricName": { "type": ["string", "null"], "maxLength": 128 }
+                "metricName": { "type": ["string", "null"], "maxLength": 128 },
+                "discriminator": {
+                  "type": ["object", "null"],
+                  "maxProperties": 40,
+                  "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                  "additionalProperties": { "type": "string", "maxLength": 512 }
+                }
               }
             }
           },
@@ -128,6 +134,13 @@
           "observationKind": { "type": ["string", "null"], "maxLength": 32 },
           "sampling": { "type": ["string", "null"], "maxLength": 32 },
           "window": { "type": ["string", "null"], "maxLength": 32 },
+          "metricName": { "type": ["string", "null"], "maxLength": 128 },
+          "discriminator": {
+            "type": ["object", "null"],
+            "maxProperties": 40,
+            "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+            "additionalProperties": { "type": "string", "maxLength": 512 }
+          },
           "tenant": { "type": ["string", "null"], "maxLength": 120 },
           "step": { "type": ["string", "null"], "maxLength": 16 },
           "scope": { "enum": ["job", "workload", "mix", null] },
@@ -148,7 +161,19 @@
             "properties": {
               "rows": { "type": "string", "maxLength": 256 },
               "workloadColumn": { "type": ["string", "null"], "maxLength": 128 },
-              "mixColumn": { "type": ["string", "null"], "maxLength": 128 }
+              "mixColumn": { "type": ["string", "null"], "maxLength": 128 },
+              "allowedLabels": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 40,
+                "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+              },
+              "labelColumns": {
+                "type": "object",
+                "maxProperties": 40,
+                "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                "additionalProperties": { "type": "string", "maxLength": 128, "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
+              }
             }
           }
         }
