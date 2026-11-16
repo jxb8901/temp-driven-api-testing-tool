@@ -51,13 +51,13 @@ async function main() {
     const panel = page.locator('.att-validation-context-panel');
     await page.waitForFunction(() => {
       const panelElement = document.querySelector('.att-validation-context-panel');
-      const status = panelElement?.querySelector('.att-validation-status');
+      const status = panelElement?.querySelector('.att-validation-form > .att-validation-status');
       const heading = panelElement?.querySelector('h2');
       if (!status || !heading) return false;
       const rect = status.getBoundingClientRect();
       return document.activeElement === heading && rect.top >= 0 && rect.bottom <= window.innerHeight;
     }, undefined, { timeout: 10000 });
-    const validationStatus = panel.locator('.att-validation-status[role="status"]');
+    const validationStatus = panel.locator('.att-validation-form > .att-validation-status[role="status"]');
     assert.equal(await validationStatus.count(), 1,
       'the newly opened contextual validation status must be visible and announced');
     assert.ok(await validationStatus.isVisible(), 'the contextual validation lifecycle status must remain visible');
