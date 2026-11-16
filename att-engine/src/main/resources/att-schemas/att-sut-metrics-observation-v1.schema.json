@@ -540,9 +540,41 @@
         "UNAVAILABLE",
         "NOT_EVALUATED"
       ]
+    },
+    "normalizedObservationsV2": {
+      "description": "Optional canonical v2 observations emitted alongside the unchanged v1 sidecar envelope during the compatibility period.",
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "$ref": "#/$defs/normalizedObservationV2"
+      }
+    },
+    "normalizationStatus": {
+      "enum": ["MIGRATED", "UNSUPPORTED"]
+    },
+    "normalizationDiagnostic": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "const": "V1_OBSERVATION_MIGRATION_UNSUPPORTED" },
+        "message": { "type": "string", "maxLength": 240 }
+      }
     }
   },
   "$defs": {
+    "normalizedObservationV2": {
+      "type": "object",
+      "required": ["schemaVersion", "observationId", "identity", "metric", "data", "acquisition"],
+      "properties": {
+        "schemaVersion": { "const": "att-sut-metrics-observation/v2" },
+        "observationId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "identity": { "type": "object" },
+        "metric": { "type": "object" },
+        "data": { "type": "object" },
+        "acquisition": { "type": "object" }
+      }
+    },
     "revision": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"

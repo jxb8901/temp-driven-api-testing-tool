@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "att-sut-metrics-group/v1",
+  "id": "runtime",
+  "title": "Runtime",
+  "order": 10,
+  "match": {"metricIds": ["cpu-idle-seconds", "http-requests"]},
+  "groupBy": ["instance"],
+  "display": "chart"
+}

@@ -1,6 +1,7 @@
 package att.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
@@ -448,7 +449,12 @@ class SutMetricsServiceTest {
                 golden = ServerRuntime.JSON.readTree(input);
             }
             JsonNode actual = ServerRuntime.JSON.readTree(sidecar);
-            assertGoldenShape(golden, actual, "$");
+            JsonNode v1Envelope = actual.deepCopy();
+            ((ObjectNode) v1Envelope).remove("normalizedObservationsV2");
+            assertGoldenShape(golden, v1Envelope, "$");
+            assertTrue(actual.path("normalizedObservationsV2").isArray());
+            assertEquals(SutMetricsContractMigration.OBSERVATION_V2,
+                    actual.path("normalizedObservationsV2").path(0).path("schemaVersion").asText());
             JsonNode observation = actual.path("observation");
             assertEquals(SutMetricsService.OBSERVATION_SCHEMA, observation.path("schemaVersion").asText());
             assertEquals(4, observation.path("window").path("phaseWindows").size());
@@ -612,13 +618,14 @@ class SutMetricsServiceTest {
             configured.put("thresholds", List.of(map("id", "cpu-max", "profile", "platform", "metric", "metric-1", "max", 90.0)));
             Map<String, Object> snapshot = service.resolveScenario(configured, "alice");
             service.writeSnapshot(jobId, snapshot);
+            Map<String, Object> pinnedSnapshot = service.snapshotForJob(jobId);
             Path recordPath = data.resolve("jobs").resolve(jobId).resolve("sut-metrics/threshold-evaluation.json");
             String pending = Files.readString(recordPath);
             assertFalse(ServerRuntime.JSON.readTree(pending).has("sutThresholds"));
             att.validation.JsonSchemaVerifier.verifyJson(schema, pending);
 
-            Map<String, Object> error = service.evaluationError(snapshot, "FAILED", "EVALUATION_FAILED", "bounded test error", 2);
-            service.writeThresholdEvaluation(jobId, snapshot, error);
+            Map<String, Object> error = service.evaluationError(pinnedSnapshot, "FAILED", "EVALUATION_FAILED", "bounded test error", 2);
+            service.writeThresholdEvaluation(jobId, pinnedSnapshot, error);
             String failed = Files.readString(recordPath);
             assertEquals("ERROR", ServerRuntime.JSON.readTree(failed).path("state").asText());
             assertFalse(ServerRuntime.JSON.readTree(failed).has("sutThresholds"));
@@ -920,10 +927,10 @@ class SutMetricsServiceTest {
             assertFalse(publicSnapshot.contains("sensitive-tool-argument"));
             assertFalse(publicSnapshot.contains("select count(*)"));
             assertFalse(service.snapshotForJob(JOB_ID).toString().contains("sensitive-tool-argument"));
-            assertTrue(Files.readString(metrics.resolve("business-calls.json")).contains("sensitive-tool-argument"));
+            assertTrue(Files.readString(metrics.resolve("execution-payload.json")).contains("sensitive-tool-argument"));
             try {
                 assertEquals("rw-------", java.nio.file.attribute.PosixFilePermissions.toString(
-                        Files.getPosixFilePermissions(metrics.resolve("business-calls.json"))));
+                        Files.getPosixFilePermissions(metrics.resolve("execution-payload.json"))));
             } catch (UnsupportedOperationException ignored) { }
 
             AtomicInteger opened = new AtomicInteger(), closed = new AtomicInteger();
@@ -2184,11 +2191,12 @@ class SutMetricsServiceTest {
     }
 
     private static Map<String, Object> businessSnapshot(List<Map<String, Object>> queries) {
-        return map("schemaVersion", SutMetricsService.SNAPSHOT_SCHEMA, "snapshotId", "business-snapshot",
+        Map<String, Object> legacy = map("schemaVersion", "att-sut-metrics-snapshot/v1", "snapshotId", "business-snapshot",
                 "createdAt", Instant.now().toString(), "collection", map("mode", "post-run", "before", "1s", "after", "1s", "step", "15s"),
                 "livePreview", map("enabled", false), "provenance", List.of(), "queries", queries, "sources", Map.of(),
                 "execution", map("packageId", "pkg", "environment", "test", "packageRevision", "a".repeat(64),
                         "runtimeConfigRevision", "b".repeat(64)), "thresholds", List.of());
+        return SutMetricsContractMigration.upgradeSnapshot(legacy);
     }
 
     private static Map<String, Object> businessQuery(String id, String call, String sourceType, String valuePath,

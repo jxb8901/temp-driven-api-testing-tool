@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "att-sut-metrics-profile/v2",
+  "id": "host-observability",
+  "name": "Host observability",
+  "metricSourceIds": ["db-wide-row", "prom-host-metrics"],
+  "groupIds": ["runtime"],
+  "allowedBindings": {
+    "environments": ["prod"],
+    "targets": [
+      {"type": "target", "id": "payments-api-01"},
+      {"type": "target", "id": "payments-api-02"}
+    ],
+    "tenants": ["payments"],
+    "parameters": {"service": {"type": "promLabelValue", "required": true}}
+  },
+  "budgets": {"maxFetches": 4, "maxObservations": 512, "maxArtifactBytes": 8388608}
+}

@@ -13,12 +13,18 @@ schemas:
   att-load/v1.9: att-load-v1.9.schema.json
   att-load-observability/v1: att-load-observability-v1.schema.json
   att-sut-metrics-source/v1: att-sut-metrics-source-v1.schema.json
+  att-sut-metrics-metric-source/v1: att-sut-metrics-metric-source-v1.schema.json
+  att-sut-metrics-group/v1: att-sut-metrics-group-v1.schema.json
   att-sut-metrics-profile/v1: att-sut-metrics-profile-v1.schema.json
+  att-sut-metrics-profile/v2: att-sut-metrics-profile-v2.schema.json
   att-sut-metrics-snapshot/v1: att-sut-metrics-snapshot-v1.schema.json
+  att-sut-metrics-snapshot/v2: att-sut-metrics-snapshot-v2.schema.json
+  att-sut-metrics-execution-payload/v2: att-sut-metrics-execution-payload-v2.schema.json
   att-sut-metrics-manifest/v1: att-sut-metrics-manifest-v1.schema.json
   att-sut-metrics-manifest-integrity/v1: att-sut-metrics-manifest-integrity-v1.schema.json
   att-sut-metrics-series/v1: att-sut-metrics-series-v1.schema.json
   att-sut-metrics-observation/v1: att-sut-metrics-observation-v1.schema.json
+  att-sut-metrics-observation/v2: att-sut-metrics-observation-v2.schema.json
   att-sut-threshold-evaluation/v1: att-sut-threshold-evaluation-v1.schema.json
   att-load/v1.8: history/att-load-v1.8.schema.json
   att-load/v1.7: history/att-load-v1.7.schema.json

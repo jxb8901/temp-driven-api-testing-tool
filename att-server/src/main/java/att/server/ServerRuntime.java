@@ -671,7 +671,7 @@ final class ServerRuntime implements AutoCloseable {
                 input.set("inlineLoadScenario",JSON.valueToTree(draft==null?catalog.scenario:draft.scenario));input.put("expectedRevisionDigest",review.selectedRevision);
                 if(draft==null&&catalog.resourceId!=null)input.put("scenario",catalog.resourceId);
                 input.set("configurationProvenance",JSON.valueToTree(review.configuration));
-                Map<String,Object> sutSnapshot=draft==null?sutMetrics.snapshotForJob(id):draft.sutMetricsSnapshot;
+                Map<String,Object> sutSnapshot=draft==null?sutMetrics.snapshotForExecution(id):draft.sutMetricsSnapshot;
                 if(sutSnapshot!=null) {
                     sutMetrics.authorizeSnapshot(sutSnapshot,principal,sutAdminPrincipal(principal));
                     input.set("sutMetricsSnapshot",JSON.valueToTree(sutSnapshot));
@@ -748,7 +748,8 @@ final class ServerRuntime implements AutoCloseable {
             if(!serverIssuedDraft||!"load".equals(command)||!input.path("sutMetricsSnapshot").isObject())
                 throw new IllegalArgumentException("SUT Metrics snapshots are server-issued Job metadata.");
             submittedSutSnapshot=JSON.convertValue(input.path("sutMetricsSnapshot"),Map.class);
-            if(!SutMetricsService.SNAPSHOT_SCHEMA.equals(submittedSutSnapshot.get("schemaVersion")))
+            if(!SutMetricsService.SNAPSHOT_SCHEMA.equals(submittedSutSnapshot.get("schemaVersion"))
+                    &&!SutMetricsService.LEGACY_SNAPSHOT_SCHEMA.equals(submittedSutSnapshot.get("schemaVersion")))
                 throw new IllegalArgumentException("Unsupported SUT Metrics snapshot schema.");
         }
         if(serverIssuedDraft&&"load".equals(command)) {

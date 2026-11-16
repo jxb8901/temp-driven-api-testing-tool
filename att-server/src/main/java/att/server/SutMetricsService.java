@@ -109,10 +109,12 @@ final class SutMetricsService implements AutoCloseable {
         BusinessCallBudgetTimeoutException() { super("The business metric collector budget expired."); }
     }
     static final String OBSERVABILITY_SCHEMA = "att-load-observability/v1";
-    static final String SNAPSHOT_SCHEMA = "att-sut-metrics-snapshot/v1";
+    static final String SNAPSHOT_SCHEMA = "att-sut-metrics-snapshot/v2";
+    static final String LEGACY_SNAPSHOT_SCHEMA = "att-sut-metrics-snapshot/v1";
     static final String COLLECTION_SCHEMA = "att-sut-metrics-manifest/v1";
     static final String SERIES_SCHEMA = "att-sut-metrics-series/v1";
     static final String OBSERVATION_SCHEMA = "att-sut-metrics-observation/v1";
+    static final String OBSERVATION_V2_SCHEMA = "att-sut-metrics-observation/v2";
     static final String OFFLINE_OBSERVATION_SCHEMA = "att-load-offline-observation/v1";
     static final String MANIFEST_INTEGRITY_SCHEMA = "att-sut-metrics-manifest-integrity/v1";
     static final String THRESHOLD_EVALUATION_SCHEMA = "att-sut-threshold-evaluation/v1";
@@ -132,6 +134,7 @@ final class SutMetricsService implements AutoCloseable {
     private static final String BUSINESS_CALL_PAYLOAD_SCHEMA = "att-sut-business-call-payload/v1";
     private static final int BUSINESS_CALL_PENDING = 0, BUSINESS_CALL_EXECUTING = 1, BUSINESS_CALL_CANCELLED = 2;
     private static final long MAX_BUSINESS_CALL_PAYLOAD_BYTES = 2L * 1024 * 1024;
+    private static final long MAX_EXECUTION_PAYLOAD_BYTES = 4L * 1024 * 1024;
     static final long MAX_SEGMENT_SECONDS = 6L * 60 * 60;
     static final long MAX_JOB_COLLECTION_BYTES = 64L * 1024 * 1024;
     static final long MAX_JOB_SAMPLES = 1_500_000L;
@@ -431,7 +434,7 @@ final class SutMetricsService implements AutoCloseable {
         try { snapshotDigest = sha256(json.writeValueAsBytes(fields("queries", expanded, "sources", pinnedSources,
                 "execution", execution, "collection", safeCollection, "livePreview", safeLive, "thresholds", thresholdRules))); }
         catch (Exception impossible) { throw new IllegalStateException("Could not canonicalize SUT Metrics snapshot.", impossible); }
-        return fields("schemaVersion", SNAPSHOT_SCHEMA, "snapshotId", snapshotDigest,
+        Map<String, Object> legacySnapshot = fields("schemaVersion", LEGACY_SNAPSHOT_SCHEMA, "snapshotId", snapshotDigest,
                 "createdAt", Instant.now().toString(), "collection", safeCollection, "livePreview", safeLive,
                 "provenance", provenance, "queries", expanded, "sources", pinnedSources, "execution", execution, "thresholds", thresholdRules,
                 "budgets", fields("metrics", expanded.size(),
@@ -439,6 +442,7 @@ final class SutMetricsService implements AutoCloseable {
                         "maxBusinessCalls", MAX_BUSINESS_CALLS_PER_JOB,
                         "maxBusinessCallTotalMillis", MAX_BUSINESS_CALL_TOTAL_MILLIS,
                         "maxBusinessCallMillis", MAX_BUSINESS_CALL_MILLIS));
+        return SutMetricsContractMigration.upgradeSnapshot(legacySnapshot);
     }
 
     private List<Map<String, Object>> normalizeThresholdRules(Object raw, List<Map<String, Object>> queries) {
@@ -620,7 +624,7 @@ final class SutMetricsService implements AutoCloseable {
             if (query.get("bindingId") != null) row.put("bindingId", query.get("bindingId"));
             rows.add(row);
         }
-        return fields("configured", Boolean.TRUE, "schemaVersion", SNAPSHOT_SCHEMA,
+        return fields("configured", Boolean.TRUE, "schemaVersion", snapshot.getOrDefault("schemaVersion", SNAPSHOT_SCHEMA),
                 "snapshotId", snapshot.get("snapshotId"), "collection", snapshot.get("collection"),
                 "thresholds", snapshot.get("thresholds"), "items", rows);
     }
@@ -635,28 +639,48 @@ final class SutMetricsService implements AutoCloseable {
     private void writeSnapshotLocked(String jobId, Map<String, Object> snapshot) throws Exception {
         Path directory = jobMetricsDirectory(jobId);
         Files.createDirectories(directory);
-        Map<String, String> businessCalls = businessCallsByQueryId(snapshot);
-        Map<String, Object> safeSnapshot = redactBusinessCalls(snapshot);
+        boolean version2 = SNAPSHOT_SCHEMA.equals(snapshot.get("schemaVersion"));
+        Map<String, Object> safeSnapshot;
         String executionPayloadSha256 = null;
-        Path executionPayload = directory.resolve("business-calls.json");
-        if (!businessCalls.isEmpty()) {
-            List<Map<String, Object>> calls = new ArrayList<>();
-            businessCalls.forEach((callGroupId, call) -> calls.add(fields("callGroupId", callGroupId, "call", call)));
-            byte[] payloadBytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(fields(
-                    "schemaVersion", BUSINESS_CALL_PAYLOAD_SCHEMA, "jobId", jobId,
-                    "snapshotId", snapshot.get("snapshotId"), "calls", calls));
-            if (payloadBytes.length > MAX_BUSINESS_CALL_PAYLOAD_BYTES)
-                throw new IllegalArgumentException("The private business-call execution payload exceeds its storage limit.");
-            atomicBytes(executionPayload, payloadBytes);
+        if (version2) {
+            Map<String, Object> payload = SutMetricsContractMigration.privateExecutionPayload(snapshot, jobId);
+            att.validation.JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolveVersion(dataDir,
+                    "att-sut-metrics-execution-payload/v2"), payload);
+            byte[] payloadBytes = json.writeValueAsBytes(payload);
+            if (payloadBytes.length > MAX_EXECUTION_PAYLOAD_BYTES)
+                throw new IllegalArgumentException("The private SUT Metrics execution payload exceeds its storage limit.");
             executionPayloadSha256 = sha256(payloadBytes);
+            atomicBytes(directory.resolve("execution-payload.json"), json.writerWithDefaultPrettyPrinter().writeValueAsBytes(payload));
+            Files.deleteIfExists(directory.resolve("business-calls.json"));
+            safeSnapshot = SutMetricsContractMigration.redactSnapshotForStorage(snapshot);
+            safeSnapshot.put("executionPayloadSha256", executionPayloadSha256);
+            safeSnapshot.remove("snapshotId");
+            safeSnapshot.put("snapshotId", sha256(json.writeValueAsBytes(safeSnapshot)));
+            att.validation.JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolveVersion(dataDir, SNAPSHOT_SCHEMA), safeSnapshot);
         } else {
-            Files.deleteIfExists(executionPayload);
+            Map<String, String> businessCalls = businessCallsByQueryId(snapshot);
+            safeSnapshot = redactBusinessCalls(snapshot);
+            Path executionPayload = directory.resolve("business-calls.json");
+            if (!businessCalls.isEmpty()) {
+                List<Map<String, Object>> calls = new ArrayList<>();
+                businessCalls.forEach((callGroupId, call) -> calls.add(fields("callGroupId", callGroupId, "call", call)));
+                byte[] payloadBytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(fields(
+                        "schemaVersion", BUSINESS_CALL_PAYLOAD_SCHEMA, "jobId", jobId,
+                        "snapshotId", snapshot.get("snapshotId"), "calls", calls));
+                if (payloadBytes.length > MAX_BUSINESS_CALL_PAYLOAD_BYTES)
+                    throw new IllegalArgumentException("The private business-call execution payload exceeds its storage limit.");
+                atomicBytes(executionPayload, payloadBytes);
+                executionPayloadSha256 = sha256(payloadBytes);
+            } else {
+                Files.deleteIfExists(executionPayload);
+            }
+            Files.deleteIfExists(directory.resolve("execution-payload.json"));
         }
         Map<String, Object> initialManifest = fields("schemaVersion", COLLECTION_SCHEMA, "state", "PENDING", "complete", Boolean.FALSE,
                 "jobId", jobId, "snapshotId", safeSnapshot.get("snapshotId"), "createdAt", Instant.now().toString(), "updatedAt", Instant.now().toString(),
                 "queries", queryMetadata(safeSnapshot), "files", List.of(), "diagnostics", List.of());
         byte[] initialManifestBytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(initialManifest);
-        Map<String, Object> content = fields("schemaVersion", SNAPSHOT_SCHEMA, "snapshot", safeSnapshot,
+        Map<String, Object> content = fields("schemaVersion", String.valueOf(safeSnapshot.get("schemaVersion")), "snapshot", safeSnapshot,
                 "snapshotSha256", sha256(json.writeValueAsBytes(safeSnapshot)), "executionPayloadSha256", executionPayloadSha256,
                 "jobId", jobId, "initialManifestSha256", sha256(initialManifestBytes));
         atomicJson(directory.resolve("snapshot.json"), content);
@@ -684,17 +708,33 @@ final class SutMetricsService implements AutoCloseable {
         return envelope == null ? null : envelope.snapshot();
     }
 
-    private Map<String, Object> snapshotForExecution(String jobId) throws Exception {
+    Map<String, Object> snapshotForExecution(String jobId) throws Exception {
         SnapshotEnvelope envelope = snapshotEnvelope(jobId);
         if (envelope == null) return null;
         Map<String, Object> snapshot = json.convertValue(envelope.snapshot(), Map.class);
         List<Map<String, Object>> queries = mutableQueryMaps(snapshot.get("queries"));
-        for (Map<String, Object> query : queries) {
-            if (!"business-call".equals(query.get("observationType"))) continue;
-            String callGroupId = String.valueOf(query.getOrDefault("callGroupId", query.get("id")));
-            String call = envelope.businessCalls().get(callGroupId);
-            if (call == null) throw new IllegalStateException("The private business-metric execution payload is incomplete.");
-            query.put("call", call);
+        if (SNAPSHOT_SCHEMA.equals(snapshot.get("schemaVersion"))) {
+            for (Map<String, Object> query : queries) {
+                String fetchId = nullableText(query.get("fetchId"));
+                Map<String, Object> payload = envelope.executionFetches().get(fetchId);
+                if (payload == null) {
+                    if (query.containsKey("observationType") || query.containsKey("fetchFingerprint"))
+                        throw new IllegalStateException("The private SUT Metrics execution payload is incomplete.");
+                    continue;
+                }
+                if (payload.get("query") instanceof String text) query.put("query", text);
+                if (payload.get("call") instanceof String text) query.put("call", text);
+                if (payload.get("parameters") instanceof Map<?, ?> parameters) query.put("parameters", parameters);
+            }
+            snapshot.put("sources", envelope.executionSources());
+        } else {
+            for (Map<String, Object> query : queries) {
+                if (!"business-call".equals(query.get("observationType"))) continue;
+                String callGroupId = String.valueOf(query.getOrDefault("callGroupId", query.get("id")));
+                String call = envelope.businessCalls().get(callGroupId);
+                if (call == null) throw new IllegalStateException("The private business-metric execution payload is incomplete.");
+                query.put("call", call);
+            }
         }
         return snapshot;
     }
@@ -710,16 +750,29 @@ final class SutMetricsService implements AutoCloseable {
         JsonNode wrapper = json.readTree(file.toFile());
         JsonNode snapshot = wrapper.path("snapshot");
         String digest = wrapper.path("snapshotSha256").asText();
-        if (!SNAPSHOT_SCHEMA.equals(snapshot.path("schemaVersion").asText())
+        String snapshotVersion = snapshot.path("schemaVersion").asText();
+        if (!(SNAPSHOT_SCHEMA.equals(snapshotVersion) || LEGACY_SNAPSHOT_SCHEMA.equals(snapshotVersion))
+                || !snapshotVersion.equals(wrapper.path("schemaVersion").asText())
                 || !digest.equals(sha256(json.writeValueAsBytes(snapshot)))
                 || wrapper.hasNonNull("jobId") && !jobId.equals(wrapper.path("jobId").asText()))
             throw new IllegalStateException("The immutable SUT Metrics Job snapshot failed integrity verification.");
+        if (SNAPSHOT_SCHEMA.equals(snapshotVersion))
+            att.validation.JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolveVersion(dataDir, SNAPSHOT_SCHEMA), snapshot);
         Map<String, Object> persistedSnapshot = json.convertValue(snapshot, Map.class);
         String payloadDigest = wrapper.path("executionPayloadSha256").asText(null);
+        Map<String, Object> safeSnapshot = redactBusinessCalls(persistedSnapshot);
+        if (SNAPSHOT_SCHEMA.equals(snapshotVersion)) {
+            String expectedPayloadDigest = nullableText(persistedSnapshot.get("executionPayloadSha256"));
+            if (expectedPayloadDigest == null || !expectedPayloadDigest.equals(payloadDigest))
+                throw new IllegalStateException("The private SUT Metrics execution payload reference does not match its immutable snapshot.");
+            ExecutionPayload execution = readExecutionPayload(jobId, expectedPayloadDigest);
+            return new SnapshotEnvelope(safeSnapshot, digest, wrapper.path("initialManifestSha256").asText(null),
+                    Map.of(), execution.fetches(), execution.sources());
+        }
         Map<String, String> businessCalls = payloadDigest == null
                 ? businessCallsByQueryId(persistedSnapshot) : readBusinessCallPayload(jobId, persistedSnapshot, payloadDigest);
-        Map<String, Object> safeSnapshot = redactBusinessCalls(persistedSnapshot);
-        return new SnapshotEnvelope(safeSnapshot, digest, wrapper.path("initialManifestSha256").asText(null), businessCalls);
+        return new SnapshotEnvelope(safeSnapshot, digest, wrapper.path("initialManifestSha256").asText(null),
+                businessCalls, Map.of(), Map.of());
     }
 
     private Map<String, String> readBusinessCallPayload(String jobId, Map<String, Object> snapshot, String expectedDigest) throws Exception {
@@ -751,6 +804,42 @@ final class SutMetricsService implements AutoCloseable {
         if (!expectedIds.equals(calls.keySet()))
             throw new IllegalStateException("The private business-metric execution payload does not match its Job queries.");
         return calls;
+    }
+
+    private ExecutionPayload readExecutionPayload(String jobId, String expectedDigest) throws Exception {
+        Path file = jobMetricsDirectory(jobId).resolve("execution-payload.json");
+        if (expectedDigest == null || !expectedDigest.matches("[a-f0-9]{64}")
+                || Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                || Files.size(file) > MAX_EXECUTION_PAYLOAD_BYTES)
+            throw new IllegalStateException("The private SUT Metrics execution payload is missing or exceeds its read limit.");
+        Map<String, Object> payload;
+        try (InputStream input = Files.newInputStream(file)) { payload = json.readValue(input, Map.class); }
+        att.validation.JsonSchemaVerifier.verify(att.validation.SchemaFiles.resolveVersion(dataDir,
+                "att-sut-metrics-execution-payload/v2"), payload);
+        if (!"att-sut-metrics-execution-payload/v2".equals(payload.get("schemaVersion"))
+                || !jobId.equals(payload.get("jobId"))
+                || !expectedDigest.equals(sha256(json.writeValueAsBytes(payload))))
+            throw new IllegalStateException("The private SUT Metrics execution payload failed integrity verification.");
+        List<Map<String, Object>> rows = listOfMaps(payload.get("fetches"));
+        if (rows.size() > MAX_EXPANDED_QUERIES)
+            throw new IllegalStateException("The private SUT Metrics execution payload exceeds its fetch limit.");
+        Map<String, Map<String, Object>> fetches = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            String id = nullableText(row.get("id"));
+            String query = nullableText(row.get("query"));
+            String call = nullableText(row.get("call"));
+            if (id == null || id.length() > 120 || (query == null) == (call == null)
+                    || query != null && (query.length() > 4096 || query.isBlank())
+                    || call != null && (call.length() > 4096 || call.isBlank())
+                    || fetches.putIfAbsent(id, row) != null)
+                throw new IllegalStateException("The private SUT Metrics execution payload contains an invalid fetch.");
+            if (row.get("parameters") instanceof Map<?, ?> parameters && parameters.size() > 32)
+                throw new IllegalStateException("The private SUT Metrics execution payload exceeds its parameter limit.");
+        }
+        Map<String, Object> sources = objectOrEmpty(payload.get("sources"));
+        if (sources.size() > MAX_SOURCES)
+            throw new IllegalStateException("The private SUT Metrics execution payload exceeds its source limit.");
+        return new ExecutionPayload(fetches, sources);
     }
 
     private Map<String, Object> redactBusinessCalls(Map<String, Object> snapshot) {
@@ -1258,18 +1347,20 @@ final class SutMetricsService implements AutoCloseable {
 
     private static Map<String, Object> redactSeriesLabels(Map<String, Object> original) {
         Map<String, Object> safe = new LinkedHashMap<>(original);
-        List<Map<String, Object>> series = new ArrayList<>();
-        for (Map<String, Object> row : listOfMaps(original.get("series"))) {
-            Map<String, Object> copy = new LinkedHashMap<>(row), labels = new LinkedHashMap<>();
-            objectOrEmpty(row.get("labels")).forEach((key, value) -> {
-                String label = String.valueOf(key);
-                if (label.matches("(?i).*(token|secret|password|credential|authorization|api[_-]?key).*")) labels.put(label, "[REDACTED]");
-                else if (value instanceof String text && text.length() <= 256 && !hasControl(text)) labels.put(label, text);
-            });
-            copy.put("labels", labels);
-            series.add(copy);
+        if (original.containsKey("series")) {
+            List<Map<String, Object>> series = new ArrayList<>();
+            for (Map<String, Object> row : listOfMaps(original.get("series"))) {
+                Map<String, Object> copy = new LinkedHashMap<>(row), labels = new LinkedHashMap<>();
+                objectOrEmpty(row.get("labels")).forEach((key, value) -> {
+                    String label = String.valueOf(key);
+                    if (label.matches("(?i).*(token|secret|password|credential|authorization|api[_-]?key).*")) labels.put(label, "[REDACTED]");
+                    else if (value instanceof String text && text.length() <= 256 && !hasControl(text)) labels.put(label, text);
+                });
+                copy.put("labels", labels);
+                series.add(copy);
+            }
+            safe.put("series", series);
         }
-        safe.put("series", series);
         return safe;
     }
 
@@ -1339,7 +1430,7 @@ final class SutMetricsService implements AutoCloseable {
 
     Map<String, Object> livePreview(String jobId, String principal, boolean admin, Instant startedAt,
                                     String range, String step, String targetId, String profilePath) throws Exception {
-        Map<String, Object> snapshot = snapshotForJob(jobId);
+        Map<String, Object> snapshot = snapshotForExecution(jobId);
         if (snapshot == null) return fields("schemaVersion", "att-sut-metrics-live/v1", "state", "DISABLED", "items", List.of());
         authorizeSnapshot(snapshot, principal, admin);
         List<Map<String, Object>> all = listOfMaps(snapshot.get("queries"));
@@ -1797,12 +1888,15 @@ final class SutMetricsService implements AutoCloseable {
                                     "diagnostics", queryDiagnostics),
                             "provenance", fields("provider", "prometheus", "jobId", jobId,
                                     "snapshotId", snapshot.get("snapshotId"), "queryId", query.get("id")));
-                    byte[] bytes = json.writeValueAsBytes(fields("schemaVersion", OBSERVATION_SCHEMA, "queryId", query.get("id"),
+                    Map<String, Object> sidecar = fields("schemaVersion", OBSERVATION_SCHEMA, "queryId", query.get("id"),
                             "profile", query.get("profile"), "profilePath", query.get("profilePath"),
                             "sourceId", query.get("sourceId"), "sourceName", query.get("sourceName"),
                             "metricId", query.get("metricId"), "title", query.get("title"),
                             "category", query.get("category"), "kind", query.get("kind"), "targetId", query.get("targetId"),
-                            "targetType", query.get("targetType"), "unit", query.get("unit"), "observation", observation, "series", series));
+                            "targetType", query.get("targetType"), "unit", query.get("unit"), "observation", observation,
+                            "series", series);
+                    Long requestCount = value.get("requestCount") instanceof Number count ? count.longValue() : null;
+                    byte[] bytes = json.writeValueAsBytes(withNormalizedObservationsV2(sidecar, snapshot, jobId, requestCount));
                     if (bytes.length > MAX_SERIES_FILE_BYTES || totalBytes > MAX_JOB_COLLECTION_BYTES - bytes.length)
                         throw new CollectionBudgetExceededException("The per-Job SUT Metrics artifact budget was exceeded.");
                     String name = String.format(Locale.ROOT, "series-%04d.json", index);
@@ -2119,7 +2213,7 @@ final class SutMetricsService implements AutoCloseable {
                                 && query.get("workloadId") != null ? "user-authored-mapping" : "explicit-binding",
                         "packageRevision", objectOrEmpty(snapshot.get("execution")).get("packageRevision"),
                         "runtimeConfigRevision", objectOrEmpty(snapshot.get("execution")).get("runtimeConfigRevision")));
-        byte[] bytes = json.writeValueAsBytes(fields("schemaVersion", OBSERVATION_SCHEMA,
+        Map<String, Object> sidecar = fields("schemaVersion", OBSERVATION_SCHEMA,
                 "queryId", query.get("id"), "callGroupId", callGroupId,
                 "queryStatus", queryStatus,
                 "profile", query.get("profile"), "profilePath", query.get("profilePath"),
@@ -2128,7 +2222,8 @@ final class SutMetricsService implements AutoCloseable {
                 "kind", query.get("kind"), "targetId", query.get("targetId"), "targetType", query.get("targetType"),
                 "scope", query.get("scope"), "workloadId", query.get("workloadId"), "mixId", query.get("mixId"),
                 "unit", query.get("unit"), "callCount", callCount, "mappingStatus", mappingStatus,
-                "unmatchedRowCount", metricValue.unmatchedRowCount(), "observation", observation, "value", metricValue.value()));
+                "unmatchedRowCount", metricValue.unmatchedRowCount(), "observation", observation, "value", metricValue.value());
+        byte[] bytes = json.writeValueAsBytes(withNormalizedObservationsV2(sidecar, snapshot, jobId, (long) callCount));
         if (bytes.length > MAX_SERIES_FILE_BYTES || totalBytes > MAX_JOB_COLLECTION_BYTES - bytes.length)
             throw new CollectionBudgetExceededException("The per-Job SUT Metrics artifact budget was exceeded.");
         String name = String.format(Locale.ROOT, "series-%04d.json", index);
@@ -2143,6 +2238,22 @@ final class SutMetricsService implements AutoCloseable {
                 "lengthBytes", bytes.length, "sha256", sha256(bytes), "sampleCount", 0, "seriesCount", 0,
                 "valueCount", 1, "observationKind", query.get("observationKind"),
                 "collectionDurationMs", callDurationMs, "queryStatus", queryStatus);
+    }
+
+    private Map<String, Object> withNormalizedObservationsV2(Map<String, Object> sidecar,
+                                                              Map<String, Object> snapshot,
+                                                              String jobId) {
+        return withNormalizedObservationsV2(sidecar, snapshot, jobId, null);
+    }
+
+    private Map<String, Object> withNormalizedObservationsV2(Map<String, Object> sidecar,
+                                                              Map<String, Object> snapshot,
+                                                              String jobId,
+                                                              Long requestCountOverride) {
+        Map<String, Object> safe = redactSeriesLabels(sidecar);
+        safe.put("normalizedObservationsV2",
+                SutMetricsContractMigration.normalizeObservationV1(safe, snapshot, jobId, requestCountOverride));
+        return safe;
     }
 
     private Map<String, Object> writeUnavailableBusinessMetric(Path directory, int index,
@@ -2199,7 +2310,7 @@ final class SutMetricsService implements AutoCloseable {
                         "scope", query.get("scope"), "workloadId", query.get("workloadId"), "mixId", query.get("mixId"),
                         "packageRevision", objectOrEmpty(snapshot.get("execution")).get("packageRevision"),
                         "runtimeConfigRevision", objectOrEmpty(snapshot.get("execution")).get("runtimeConfigRevision")));
-        byte[] bytes = json.writeValueAsBytes(fields("schemaVersion", OBSERVATION_SCHEMA,
+        Map<String, Object> sidecar = fields("schemaVersion", OBSERVATION_SCHEMA,
                 "queryId", query.get("id"), "callGroupId", callGroupId,
                 "queryStatus", notEvaluated ? "NOT_EVALUATED" : "UNAVAILABLE",
                 "profile", query.get("profile"),
@@ -2208,7 +2319,8 @@ final class SutMetricsService implements AutoCloseable {
                 "kind", query.get("kind"), "targetId", query.get("targetId"), "targetType", query.get("targetType"),
                 "scope", query.get("scope"), "workloadId", query.get("workloadId"), "mixId", query.get("mixId"),
                 "unit", query.get("unit"), "callCount", callCount, "mappingStatus", mappingStatus,
-                "unmatchedRowCount", unmatchedRows, "observation", observation, "value", null));
+                "unmatchedRowCount", unmatchedRows, "observation", observation, "value", null);
+        byte[] bytes = json.writeValueAsBytes(withNormalizedObservationsV2(sidecar, snapshot, jobId, (long) callCount));
         if (bytes.length > MAX_SERIES_FILE_BYTES || totalBytes > MAX_JOB_COLLECTION_BYTES - bytes.length)
             throw new CollectionBudgetExceededException("The per-Job SUT Metrics artifact budget was exceeded.");
         String name = String.format(Locale.ROOT, "series-%04d.json", index);
@@ -2302,10 +2414,19 @@ final class SutMetricsService implements AutoCloseable {
             long segmentEnd = Math.min(end.getEpochSecond(), segmentStart + MAX_SEGMENT_SECONDS);
             List<Map<String, Object>> rows = queryRange(source, String.valueOf(query.get("query")), Instant.ofEpochSecond(segmentStart),
                     Instant.ofEpochSecond(segmentEnd), Duration.ofSeconds(stepSeconds), nullableText(query.get("tenant")));
+            Set<String> segmentSeries = new HashSet<>();
             for (Map<String, Object> row : rows) {
                 String key = json.writeValueAsString(row.get("labels"));
+                if (!segmentSeries.add(key))
+                    throw new IllegalArgumentException("Prometheus returned duplicate metric identity labels in one segment.");
                 TreeMap<Long, Double> values = byLabels.computeIfAbsent(key, ignored -> new TreeMap<>());
-                for (Map<String, Object> point : listOfMaps(row.get("samples"))) values.put(((Number) point.get("timestampEpochMs")).longValue(), ((Number) point.get("value")).doubleValue());
+                for (Map<String, Object> point : listOfMaps(row.get("samples"))) {
+                    long timestamp = ((Number) point.get("timestampEpochMs")).longValue();
+                    double value = ((Number) point.get("value")).doubleValue();
+                    Double prior = values.putIfAbsent(timestamp, value);
+                    if (prior != null && Double.compare(prior.doubleValue(), value) != 0)
+                        throw new IllegalArgumentException("Prometheus returned conflicting values for one metric identity and timestamp.");
+                }
                 if (byLabels.size() > sourceInt(source, "maxSeriesPerJob")) throw new IllegalArgumentException("Prometheus returned too many series.");
             }
             segmentStart = segmentEnd; segmentCount++;
@@ -2335,7 +2456,7 @@ final class SutMetricsService implements AutoCloseable {
             totalGapCount += seriesGapCount;
         }
         if (samples > sourceInt(source, "maxSamplesPerQuery")) throw new IllegalArgumentException("The Data Source per-query sample budget was exceeded.");
-        return fields("series", series, "sampleCount", samples,
+        return fields("series", series, "sampleCount", samples, "requestCount", segmentCount,
                 "coverage", fields("sampleCount", samples, "seriesCount", series.size(), "gapCount", totalGapCount,
                         "firstSampleAt", firstSampleEpochMs == null ? null : Instant.ofEpochMilli(firstSampleEpochMs).toString(),
                         "lastSampleAt", lastSampleEpochMs == null ? null : Instant.ofEpochMilli(lastSampleEpochMs).toString(),
@@ -3603,9 +3724,22 @@ final class SutMetricsService implements AutoCloseable {
         if (Files.size(file) > MAX_SERIES_FILE_BYTES) throw new IllegalStateException("SUT Metrics companion sidecar exceeds its read limit.");
         if (!sha256(file, deadline).equals(entry.get("sha256")))
             throw new IllegalStateException("SUT Metrics companion sidecar failed integrity verification.");
+        Map<String, Object> sidecar;
         try (InputStream input = new DeadlineInputStream(Files.newInputStream(file), deadline)) {
-            return json.readValue(input, Map.class);
+            sidecar = json.readValue(input, Map.class);
         }
+        if (OBSERVATION_SCHEMA.equals(sidecar.get("schemaVersion"))
+                && !sidecar.containsKey("normalizedObservationsV2")) {
+            try {
+                sidecar = withNormalizedObservationsV2(sidecar, snapshotForJob(jobId), jobId);
+                sidecar.put("normalizationStatus", "MIGRATED");
+            } catch (RuntimeException unsupported) {
+                sidecar.put("normalizationStatus", "UNSUPPORTED");
+                sidecar.put("normalizationDiagnostic", fields("code", "V1_OBSERVATION_MIGRATION_UNSUPPORTED",
+                        "message", "This historical v1 observation remains readable but cannot be normalized to v2."));
+            }
+        }
+        return sidecar;
     }
 
     private Path jobMetricsDirectory(String jobId) {
@@ -3924,7 +4058,28 @@ final class SutMetricsService implements AutoCloseable {
     private Map<String, Object> cachedPreview(String key) { CacheEntry entry = previewCache.get(key); if (entry == null) return null; if (System.nanoTime() >= entry.expiresAtNanos) { previewCache.remove(key, entry); return null; } return entry.value; }
     private void trimPreviewCache() { if (previewCache.size() > 128) previewCache.entrySet().removeIf(entry -> System.nanoTime() >= entry.getValue().expiresAtNanos); if (previewCache.size() > 128) previewCache.clear(); }
 
-    @Override public void close() { collectionScheduler.shutdownNow(); collectors.shutdownNow(); evaluators.shutdownNow(); previews.shutdownNow(); bodyReaders.shutdownNow(); businessCallWorkers.shutdownNow(); scheduledCollections.clear(); evaluatingJobs.clear(); previewFlights.clear(); previewCache.clear(); clients.clear(); }
+    @Override public void close() {
+        List<ExecutorService> workers = List.of(collectionScheduler, collectors, evaluators, previews, bodyReaders, businessCallWorkers);
+        workers.forEach(ExecutorService::shutdownNow);
+        boolean interrupted = false;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        for (ExecutorService worker : workers) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0L) break;
+            try {
+                worker.awaitTermination(remaining, TimeUnit.NANOSECONDS);
+            } catch (InterruptedException shutdownInterrupted) {
+                interrupted = true;
+                break;
+            }
+        }
+        scheduledCollections.clear();
+        evaluatingJobs.clear();
+        previewFlights.clear();
+        previewCache.clear();
+        clients.clear();
+        if (interrupted) Thread.currentThread().interrupt();
+    }
     static final class CapacityException extends RuntimeException { CapacityException(String message) { super(message); } }
     static final class SutMetricsTimeoutException extends RuntimeException { SutMetricsTimeoutException(String message) { super(message); } }
     private static final class BusinessCallNotExecutedException extends Exception { }
@@ -3950,6 +4105,9 @@ final class SutMetricsService implements AutoCloseable {
     }
     private record CacheEntry(long expiresAtNanos, Map<String, Object> value) { }
     private record BusinessCallLimits(int maxCalls, long totalMillis, long callMillis) { }
+    private record ExecutionPayload(Map<String, Map<String, Object>> fetches, Map<String, Object> sources) { }
     private record SnapshotEnvelope(Map<String, Object> snapshot, String snapshotSha256, String initialManifestSha256,
-                                   Map<String, String> businessCalls) { }
+                                   Map<String, String> businessCalls,
+                                   Map<String, Map<String, Object>> executionFetches,
+                                   Map<String, Object> executionSources) { }
 }
