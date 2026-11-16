@@ -1,6 +1,6 @@
 # PR #357 cross-issue implementation checkpoint
 
-This checkpoint summarizes the SUT Metrics work present in PR #357 across issues #348, #349, #350, #351, #358, and #359. The PR originally branched from `master` at `ccecc3d23d3d79a2c572f08464ae3d613c1283ba`; it now includes `master` at `fd52cf475546e87a9013643ed5ace0cc818e9cdd`, merged by `dd0a400d314a6a7336c2cec56e4a648462eefb31`. Issue status and acceptance remain tracked on their respective issues; PR coverage and passing tests do not close those issues or establish production-scale behavior.
+This checkpoint summarizes the SUT Metrics work present in PR #357 across issues #348, #349, #350, #351, #358, and #359. The PR originally branched from `master` at `ccecc3d23d3d79a2c572f08464ae3d613c1283ba`; it now includes `master` at `d2cbe7f8176808b949936a46e5c1e4d78477293b`, merged by `56c1b8cde2a1b4b74447d8e9c362675e9aec5e8e`. Issue status and acceptance remain tracked on their respective issues; PR coverage and passing tests do not close those issues or establish production-scale behavior.
 
 ## Implementation and evidence matrix
 
@@ -26,6 +26,8 @@ Business-call execution uses the Package and Runtime Config revisions pinned at 
 Each local result and hosted check must identify the exact source revision. A local test result is not hosted CI evidence, and neither substitutes for production deployment or scale validation.
 
 - Local verification for the review-fix changes: the affected Server reactor (`SutMetricsServiceTest` and `ServerRuntimeJobReplayTest`) passed 88 tests; the Engine LOAD normalization regression passed 1 test; and the Settings/Correlation frontend tests passed 13 tests. Maven also type-checked and built the frontend and passed the initial bundle budget.
+- Current post-merge hosted CI run `43782546203` passed all 8 jobs on merge commit `56c1b8cde2a1b4b74447d8e9c362675e9aec5e8e`, which includes `master` at `d2cbe7f8176808b949936a46e5c1e4d78477293b`.
+- Previous checkpoint CI run `43715968020` passed all 8 jobs on head `311344b953f9e994252846e557fd2da93c3501a5`; it includes the prior `master` merge at `fd52cf475546e87a9013643ed5ace0cc818e9cdd`.
 - Post-merge hosted CI run `43708516185` passed all 8 jobs on merge commit `dd0a400d314a6a7336c2cec56e4a648462eefb31`, which includes `master` at `fd52cf475546e87a9013643ed5ace0cc818e9cdd`.
 - Earlier hosted CI run `43669628531` passed 8/8 checks on PR head `b40b770dbeabc65109322d69d08c7a074e1c7795`; it predates these review fixes and does not validate them.
 - Production deployment, live Grafana, destination-IP egress enforcement, external verdict integration, and production-scale 25-hour collection remain outside the evidence above.
