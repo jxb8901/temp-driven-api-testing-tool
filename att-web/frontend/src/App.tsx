@@ -843,7 +843,7 @@ export default function App() {
         {({ contextValidation, contextValidations, onValidateContext, rememberContextValidation, closeContextValidation }) => <>
           {renderContent(onValidateContext, contextValidations)}
           {supportsValidationRecords && contextValidation && <Suspense fallback={<div className="page-content" role="status" aria-busy="true">Loading validation…</div>}>
-            <ValidationPanel key={`${contextValidation.routeKey}:${contextValidation.title}:${JSON.stringify(contextValidation.request)}`}
+            <ValidationPanel key={`${contextValidation.routeKey}:${contextValidation.title}`}
               request={contextValidation.request} title={contextValidation.title}
               onClose={closeContextValidation}
               submitOnOpen={contextValidation.submitOnOpen} onRecordLoaded={rememberContextValidation}

@@ -86,7 +86,7 @@ export function ValidationPanel({ request, validationId, title, submitOnOpen = t
     if (!contextualPanel || !submitOnOpen) return;
     headingRef.current?.focus({ preventScroll: true });
     panelRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-  }, [contextualPanel, submitOnOpen]);
+  }, [contextualPanel, requestKey, submitOnOpen]);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (!record?.validationId) return;
