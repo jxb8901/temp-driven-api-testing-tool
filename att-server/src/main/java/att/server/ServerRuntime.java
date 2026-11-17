@@ -1432,7 +1432,7 @@ final class ServerRuntime implements AutoCloseable {
         response.put("state",page.get("manifest") instanceof Map<?,?> manifest?manifest.get("state"):"PENDING");
         response.put("jobId",id);response.put("snapshotId",snapshot.get("snapshotId"));
         response.put("livePreview",snapshot.get("livePreview"));response.put("collection",page.get("manifest"));
-        response.put("items",page.get("items"));response.put("nextOffset",page.get("nextOffset"));
+        response.put("groups",page.get("groups"));response.put("items",page.get("items"));response.put("nextOffset",page.get("nextOffset"));
         response.put("provisional",page.get("provisional"));
         response.put("thresholdEvaluation",thresholdEvaluationOrUnavailable(id,snapshot));
         Map<String,Object> result=resultRecord(id);

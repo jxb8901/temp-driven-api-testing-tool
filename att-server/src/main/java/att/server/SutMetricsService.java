@@ -613,6 +613,14 @@ final class SutMetricsService implements AutoCloseable {
         }
     }
 
+    static List<Map<String, Object>> safeGroupMetadata(List<Map<String, Object>> groups) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> group : groups) result.add(groupView(group, false));
+        result.sort(Comparator.comparingInt((Map<String, Object> value) -> ((Number) value.get("order")).intValue())
+                .thenComparing(value -> String.valueOf(value.get("id"))));
+        return result;
+    }
+
     private static Map<String, Object> groupView(Map<String, Object> group, boolean admin) {
         if (admin) return new LinkedHashMap<>(group);
         return fields("schemaVersion", group.get("schemaVersion"), "id", group.get("id"),
@@ -1841,13 +1849,17 @@ final class SutMetricsService implements AutoCloseable {
             queryMetadata.add(enriched);
         }
         manifest.put("queries", queryMetadata);
+        Map<String, Object> snapshot = snapshotForJob(jobId);
+        List<Map<String, Object>> pinnedGroups = listOfMaps(snapshot == null ? null : snapshot.get("groups"));
+        List<Map<String, Object>> safeGroups = safeGroupMetadata(pinnedGroups);
         String state = String.valueOf(manifest.get("state"));
         Map<String, Object> progress = objectOrEmpty(manifest.get("collectionProgress"));
         boolean provisional = Set.of("PENDING", "COLLECTING").contains(state)
                 && "COMPLETE".equals(progress.get("business"))
                 && "PENDING".equals(progress.get("prometheus"));
         if (!Set.of("READY", "PARTIAL", "UNAVAILABLE", "FAILED").contains(state) && !provisional)
-            return fields("manifest", manifest, "items", List.of(), "nextOffset", null, "provisional", false);
+            return fields("manifest", manifest, "groups", safeGroups, "items", List.of(),
+                    "nextOffset", null, "provisional", false);
         List<Map<String, Object>> all = listOfMaps(manifest.get("files"));
         if (provisional) {
             Set<String> completedBusinessQueries = new HashSet<>();
@@ -1861,14 +1873,13 @@ final class SutMetricsService implements AutoCloseable {
         if (profilePath != null && !profilePath.isBlank()) all.removeIf(item -> !profilePath.equals(item.get("profilePath")));
         int from = Math.max(0, Math.min(offset, all.size())), to = Math.min(all.size(), from + Math.max(1, Math.min(limit, 16)));
         List<Map<String, Object>> rows = new ArrayList<>();
-        Map<String, Object> snapshot = snapshotForJob(jobId);
         for (Map<String, Object> fileEntry : all.subList(from, to)) {
             Map<String, Object> item = readSeriesFile(jobId, fileEntry);
             if (!listOfMaps(snapshot == null ? null : snapshot.get("groups")).isEmpty())
                 item.put("groupView", groupView(item, listOfMaps(snapshot.get("groups"))));
             rows.add(item);
         }
-        return fields("manifest", manifest, "groups", listOfMaps(snapshot == null ? null : snapshot.get("groups")),
+        return fields("manifest", manifest, "groups", safeGroups,
                 "items", rows, "nextOffset", to < all.size() ? to : null,
                 "provisional", provisional);
     }
@@ -2074,7 +2085,7 @@ final class SutMetricsService implements AutoCloseable {
                         "phaseWindows", listOfMaps(collection.get("phaseWindows"))),
                 "sampleResolution", collection.get("step"), "coverage", collection.get("coverage"),
                 "queries", snapshot == null ? List.of() : queryMetadata(snapshot),
-                "groups", snapshot == null ? List.of() : listOfMaps(snapshot.get("groups")), "observations", observations,
+                "groups", snapshot == null ? List.of() : safeGroupMetadata(listOfMaps(snapshot.get("groups"))), "observations", observations,
                 "diagnostics", safeReportDiagnostics(collection.get("diagnostics")),
                 "sourceManifestSha256", sourceManifestSha256,
                 "extensions", fields("thresholdVerdict", fields("schemaVersion", "att-load-verdict/v1",

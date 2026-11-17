@@ -216,6 +216,86 @@ class SutMetricsGrafanaOfflineReportIntegrationTest {
         }
     }
 
+    @Test void publishedOfflineReportRedactsGroupSelectorsForAnAuthorizedNonAdminReader() throws Exception {
+        try (GrafanaFixture fixture = new GrafanaFixture("11.2.0");
+             SutMetricsService service = new SutMetricsService(temp.resolve("group-redaction-metrics"), Set.of(), reference -> TOKEN)) {
+            Map<String, Object> registeredSource = service.upsertSource(source(fixture.url()));
+            service.upsertMetricSource(map("schemaVersion", "att-sut-metrics-metric-source/v1", "id", "prom-metrics",
+                    "name", "Prometheus metrics", "connection", map("kind", "DATA_SOURCE", "id", "grafana",
+                            "revision", registeredSource.get("revision")),
+                    "fetch", map("id", "prom-fetch", "mode", "prometheus-range", "query", "up",
+                            "parameters", Map.of(), "sampling", "range", "step", "15s"),
+                    "mapping", map("labels", map("retain", List.of("instance")), "outputs", List.of(
+                            map("id", "requests", "title", "Requests", "unit", "count", "kind", "gauge", "metricName", "up"))),
+                    "limits", map("maxRows", 64, "maxSeries", 16, "maxSamples", 1000, "maxArtifactBytes", 1048576)));
+            service.upsertGroup(map("schemaVersion", "att-sut-metrics-group/v1", "id", "private-group",
+                    "title", "Private Group", "order", 10,
+                    "match", map("metricIds", List.of("sentinel_private_metric"),
+                            "sourceIds", List.of("sentinel_private_source"),
+                            "labels", map("tenant", "sentinel_private_group_label")),
+                    "groupBy", List.of("instance"), "display", "table"));
+            service.upsertProfile(map("schemaVersion", "att-sut-metrics-profile/v2", "id", "flat-profile",
+                    "name", "Flat profile", "metricSourceIds", List.of("prom-metrics"),
+                    "groupIds", List.of("private-group"),
+                    "allowedBindings", map("environments", List.of(),
+                            "targets", List.of(map("type", "target", "id", "sut-1")),
+                            "tenants", List.of(), "parameters", Map.of()),
+                    "budgets", map("maxFetches", 1, "maxObservations", 64, "maxArtifactBytes", 1048576)));
+
+            Map<String, Object> scenario = map("schemaVersion", "att-load-observability/v1",
+                    "collections", List.of(map("id", "grouped-binding", "profile", "flat-profile", "targetIds", List.of("sut-1"))),
+                    "collection", map("mode", "post-run", "before", "1m", "after", "1m", "step", "15s"),
+                    "livePreview", map("enabled", false));
+            Map<String, Object> snapshot = service.resolveScenario(scenario, "alice", false);
+            service.authorizeSnapshot(snapshot, "alice", false);
+            service.writeSnapshot(JOB_ID, snapshot);
+            Map<String, Object> terminalManifest = service.collectionStatus(JOB_ID);
+            Instant windowEnd = Instant.now(), windowStart = windowEnd.minusSeconds(60);
+            terminalManifest.put("state", "UNAVAILABLE");
+            terminalManifest.put("complete", false);
+            terminalManifest.put("windowStart", windowStart.toString());
+            terminalManifest.put("windowEnd", windowEnd.toString());
+            terminalManifest.put("step", "15s");
+            terminalManifest.put("phaseWindows", List.of());
+            terminalManifest.put("coverage", map("queryCount", 0));
+            service.writeManifest(temp.resolve("group-redaction-metrics").resolve("jobs").resolve(JOB_ID).resolve("sut-metrics"),
+                    terminalManifest);
+            assertEquals("UNAVAILABLE", service.collectionStatus(JOB_ID).get("state"));
+
+            Path nativeOutput = temp.resolve("group-redaction-native-output");
+            Files.createDirectories(nativeOutput);
+            Files.writeString(nativeOutput.resolve("evidence.txt"), "native evidence", StandardCharsets.UTF_8);
+            Path nativeArchive = temp.resolve("group-redaction-artifacts.zip");
+            ArtifactArchive.build(nativeOutput, nativeArchive, (path, bytes) -> { });
+            Path publicationRoot = temp.resolve("group-redaction-report-v2");
+            ServerRuntime.ArtifactPublisher publisher = (output, archive, validator) -> ArtifactArchive.build(output, archive, validator);
+            SutMetricsOfflineReportPublisher.Publication publication = SutMetricsOfflineReportPublisher.publish(
+                    JOB_ID, map("status", "SUCCEEDED"), temp.resolve("jobs").resolve(JOB_ID), nativeArchive,
+                    publicationRoot, service, publisher, (path, bytes) -> { });
+
+            Path archive = publicationRoot.resolve("snapshots").resolve(publication.publicationId() + ".zip");
+            JsonNode report = ServerRuntime.JSON.readTree(ArtifactArchive.read(archive, "report/v2/manifest.json"));
+            att.validation.JsonSchemaVerifier.verifyJson(Path.of("schemas/api/att-load-report-extension-v2.schema.json"),
+                    report.toString());
+            JsonNode reportGroup = report.path("groups").path(0);
+            assertEquals("private-group", reportGroup.path("id").asText());
+            assertEquals("Private Group", reportGroup.path("title").asText());
+            assertFalse(reportGroup.has("match"), reportGroup.toString());
+            assertFalse(report.toString().contains("sentinel_private"), report.toString());
+
+            byte[] offlineBytes = ArtifactArchive.read(archive, "report/v2/sut-metrics/manifest.json");
+            JsonNode offline = ServerRuntime.JSON.readTree(offlineBytes);
+            JsonNode offlineGroup = offline.path("groups").path(0);
+            assertEquals("private-group", offlineGroup.path("id").asText());
+            assertFalse(offlineGroup.has("match"), offlineGroup.toString());
+            assertFalse(offline.toString().contains("sentinel_private"), offline.toString());
+            att.validation.JsonSchemaVerifier.verifyJson(Path.of("schemas/api/att-load-offline-observations-v1.schema.json"),
+                    new String(offlineBytes, StandardCharsets.UTF_8));
+            String html = new String(ArtifactArchive.read(archive, "report/v2/index.html"), StandardCharsets.UTF_8);
+            assertTrue(html.contains("Private Group"), "Safe Group metadata still renders the report Group index.");
+        }
+    }
+
     @Test void offlineBusinessCoverageCountsOnlyValidMultiOutputValues() throws Exception {
         try (SutMetricsService service = new SutMetricsService(temp, Set.of(), reference -> null)) {
             Map<String, Object> group = map("id", "report-query", "call", "#{reporter(summary='private')}",

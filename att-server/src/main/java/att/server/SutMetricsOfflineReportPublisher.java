@@ -20,6 +20,7 @@ import java.util.Set;
 /** Builds an immutable, versioned offline report alongside the sealed native LOAD archive. */
 final class SutMetricsOfflineReportPublisher {
     static final String SCHEMA = "att-load-report-extension/v2";
+    private static final String GROUP_METADATA_POLICY = "safe-group-metadata/v1";
     private static final long MAX_VERDICT_RECORD_BYTES = 1024L * 1024L;
     private static final long MAX_VERDICT_EVIDENCE_BYTES = 8L * 1024L * 1024L;
 
@@ -45,7 +46,8 @@ final class SutMetricsOfflineReportPublisher {
             Object rawCollectionDigest = sut.get("sourceManifestSha256");
             String collectionDigest = rawCollectionDigest instanceof String digest ? digest : "";
             String publicationId = sha256((SCHEMA + "\u0000" + jobId + "\u0000" + nativeSha256 + "\u0000"
-                    + collectionDigest + "\u0000" + verdict.recordSha256()).getBytes(StandardCharsets.UTF_8));
+                    + collectionDigest + "\u0000" + verdict.recordSha256() + "\u0000" + GROUP_METADATA_POLICY)
+                    .getBytes(StandardCharsets.UTF_8));
             Path normalizedDestination = normalizedRoot.resolve("snapshots").resolve(publicationId + ".zip").normalize();
             if (!normalizedDestination.startsWith(normalizedRoot.resolve("snapshots")))
                 throw new IOException("The report snapshot path is invalid.");

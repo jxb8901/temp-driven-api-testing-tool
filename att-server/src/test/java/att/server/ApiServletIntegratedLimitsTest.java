@@ -451,9 +451,15 @@ class ApiServletIntegratedLimitsTest {
                         "mapping",Map.of("labels",Map.of("instance","sentinel_package_tool_column"),
                                 "outputs",List.of(Map.of("id","tool-count","title","Tool count","unit","count","kind","gauge","column","COUNT_VALUE"))),
                         "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576)));
+        Map<String,Object> groupedProfile=Map.of("schemaVersion","att-sut-metrics-profile/v2","id","grouped",
+                "name","Grouped profile","metricSourceIds",List.of("private-prom-metrics"),
+                "groupIds",List.of("private-prom-group"),
+                "allowedBindings",Map.of("environments",List.of(),"targets",List.of(Map.of("type","target","id","sut-1")),
+                        "tenants",List.of(),"parameters",Map.of()),
+                "budgets",Map.of("maxFetches",4,"maxObservations",512,"maxArtifactBytes",1048576));
         List<Map<String,Object>> profiles=List.of(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
                 "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
-                        "kind","gauge","query","up"))));
+                        "kind","gauge","query","up"))),groupedProfile);
         List<Map<String,Object>> groups=List.of(Map.of("schemaVersion","att-sut-metrics-group/v1","id","private-prom-group",
                 "title","Private Prometheus group","order",1,"match",Map.of("metricIds",List.of("prom-up"),
                         "sourceIds",List.of("prom"),"labels",Map.of("tenant","sentinel_private_tenant")),
@@ -560,6 +566,22 @@ class ApiServletIntegratedLimitsTest {
             assertTrue(adminMetricSources.bodyText().contains("sentinel_prometheus_query"));
             assertTrue(adminMetricSources.bodyText().contains("sentinel_dbhelper_sql"));
             assertTrue(adminMetricSources.bodyText().contains("sentinel_package_tool_call"));
+
+            String groupedJobId="J0000000000000812";
+            Map<String,Object> groupedScenario=Map.of("schemaVersion","att-load-observability/v1",
+                    "collections",List.of(Map.of("id","grouped-binding","profile","grouped","targetIds",List.of("sut-1"))),
+                    "collection",Map.of("mode","post-run","before","1m","after","1m","step","15s"),
+                    "livePreview",Map.of("enabled",false));
+            Map<String,Object> groupedSnapshot=runtime.sutMetrics.resolveScenario(groupedScenario,"alice",false);
+            seedLoadJob(runtime,groupedJobId,"alice",groupedSnapshot);
+            Captured groupedJobResponse=invokeAs(servlet,"GET","/jobs/"+groupedJobId+"/sut-metrics",Collections.emptyMap(),
+                    new byte[0],"alice",Set.of(userRole));
+            assertEquals(200,groupedJobResponse.status,groupedJobResponse.bodyText());
+            JsonNode apiGroup=ServerRuntime.JSON.readTree(groupedJobResponse.body()).path("groups").path(0);
+            assertEquals("private-prom-group",apiGroup.path("id").asText(),groupedJobResponse.bodyText());
+            assertEquals("Private Prometheus group",apiGroup.path("title").asText());
+            assertFalse(apiGroup.has("match"),apiGroup.toString());
+            assertFalse(groupedJobResponse.bodyText().contains("sentinel_private_tenant"),groupedJobResponse.bodyText());
 
             Map<String,Object> wrongTenant=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
                     "source","prom","tenant","tenant-b","targets",List.of(Map.of("id","sut-1","type","app")))),

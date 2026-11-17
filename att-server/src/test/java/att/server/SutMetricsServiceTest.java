@@ -1898,7 +1898,10 @@ class SutMetricsServiceTest {
             assertEquals("READY", manifest.get("state"));
             assertEquals(1, fixture.requests.get(), "The two labelled Prometheus outputs share one query_range fetch.");
             assertEquals(1, invocations.get(), "The DBHelper wide-row outputs share one call.");
-            List<Map<String, Object>> items = maps(service.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items"));
+            Map<String, Object> page = service.readCollectionPage(JOB_ID, 0, 16, null, null, null);
+            assertFalse(ServerRuntime.JSON.writeValueAsString(page.get("groups")).contains("match"),
+                    "Collection metadata exposes only the safe Group presentation fields.");
+            List<Map<String, Object>> items = maps(page.get("items"));
             Map<String, Object> cpu = items.stream().filter(item -> "cpu".equals(item.get("metricId"))).findFirst().orElseThrow();
             List<Map<String, Object>> assignments = maps(object(cpu.get("groupView")).get("assignments"));
             assertEquals(1, assignments.size());
@@ -1912,6 +1915,8 @@ class SutMetricsServiceTest {
             assertEquals("METRIC_GROUP_UNASSIGNED", maps(object(sessions.get("groupView")).get("diagnostics")).get(0).get("code"));
             Map<String, Object> offline = service.writeOfflineReportEvidence(JOB_ID, temp.resolve("flat-profile-offline-report"));
             assertEquals(1, maps(offline.get("groups")).size());
+            assertFalse(ServerRuntime.JSON.writeValueAsString(offline.get("groups")).contains("match"),
+                    "Offline observations must not publish Group match selectors.");
             Map<String, Object> offlineCpu = maps(offline.get("observations")).stream()
                     .filter(item -> "cpu".equals(object(item.get("metric")).get("id"))).findFirst().orElseThrow();
             assertEquals("runtime", maps(object(offlineCpu.get("groupView")).get("assignments")).get(0).get("groupId"));

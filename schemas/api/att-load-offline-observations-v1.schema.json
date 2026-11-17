@@ -159,22 +159,13 @@
     },
     "group": {
       "type": "object",
-      "required": ["schemaVersion", "id", "title", "order", "match", "groupBy", "display"],
+      "required": ["schemaVersion", "id", "title", "order", "groupBy", "display"],
       "additionalProperties": false,
       "properties": {
         "schemaVersion": { "const": "att-sut-metrics-group/v1" },
         "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
         "title": { "type": "string", "minLength": 1, "maxLength": 120 },
         "order": { "type": "integer", "minimum": 0, "maximum": 10000 },
-        "match": {
-          "type": "object", "maxProperties": 3, "additionalProperties": false,
-          "properties": {
-            "metricIds": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "maxLength": 80 } },
-            "sourceIds": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "maxLength": 80 } },
-            "labels": { "$ref": "#/$defs/labels" }
-          },
-          "anyOf": [{ "required": ["metricIds"] }, { "required": ["sourceIds"] }, { "required": ["labels"] }]
-        },
         "groupBy": { "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "type": "string", "maxLength": 64 } },
         "display": { "enum": ["auto", "summary", "table", "chart"] }
       }
