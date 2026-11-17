@@ -65,6 +65,7 @@ final class SutMetricsOfflineReportPublisher {
                     "observationsSchema", "att-load-offline-observations/v1",
                     "collectionState", sut.get("state"), "collectionManifestSha256", collectionDigest,
                     "observations", sut.get("observations"), "window", sut.get("window"),
+                    "groups", sut.get("groups"),
                     "sampleResolution", sut.get("sampleResolution"), "coverage", sut.get("coverage"),
                     "diagnostics", sut.get("diagnostics"),
                     "extensions", fields("thresholdVerdict", verdict.summary(),
@@ -205,15 +206,20 @@ final class SutMetricsOfflineReportPublisher {
         html.append("This report displays a separately versioned record when present; it does not calculate a verdict.</p>")
                 .append("</section><section><h2>Observed SUT metrics</h2>");
         List<Map<String, Object>> observations = maps(sut.get("observations"));
+        List<Map<String, Object>> groups = maps(sut.get("groups"));
+        if (!groups.isEmpty()) renderGroupIndex(html, groups, observations);
+        html.append("<h3 id=\"sut-observation-details\">Observation details</h3>");
         if (observations.isEmpty()) {
             html.append("<p role=\"status\">No SUT observations were available for this report. Collection state: <strong>")
                     .append(escape(String.valueOf(sut.get("state")))).append("</strong>.</p>");
         } else {
-            for (Map<String, Object> observation : observations) {
+            for (int observationIndex = 0; observationIndex < observations.size(); observationIndex++) {
+                Map<String, Object> observation = observations.get(observationIndex);
                 Map<String, Object> metric = map(observation.get("metric")), source = map(observation.get("source"));
                 Map<String, Object> profile = map(observation.get("profile")), target = map(observation.get("target"));
                 Map<String, Object> quality = map(observation.get("quality"));
-                html.append("<article><h3>").append(escape(String.valueOf(metric.getOrDefault("name", metric.get("id"))))).append("</h3><dl>")
+                html.append("<article id=\"sut-observation-").append(observationIndex).append("\"><h3>")
+                        .append(escape(String.valueOf(metric.getOrDefault("name", metric.get("id"))))).append("</h3><dl>")
                         .append(row("Source", source.getOrDefault("name", source.get("id"))))
                         .append(row("Metric / unit", String.valueOf(metric.getOrDefault("id", "")) + " · " + String.valueOf(metric.getOrDefault("unit", "unspecified"))))
                         .append(row("Profile", profile.getOrDefault("path", profile.get("id"))))
@@ -252,6 +258,60 @@ final class SutMetricsOfflineReportPublisher {
         }
         html.append("</section></main></body></html>");
         return html.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static void renderGroupIndex(StringBuilder html, List<Map<String, Object>> groups,
+                                         List<Map<String, Object>> observations) {
+        List<Map<String, Object>> ordered = new java.util.ArrayList<>(groups);
+        ordered.sort(java.util.Comparator
+                .comparingInt((Map<String, Object> group) -> group.get("order") instanceof Number number ? number.intValue() : 0)
+                .thenComparing(group -> String.valueOf(group.get("id"))));
+        html.append("<h3>Metric Groups</h3><p class=\"muted\">Groups organize the pinned observations. They do not change identities, collection, or threshold results.</p>");
+        for (Map<String, Object> group : ordered) {
+            String groupId = String.valueOf(group.get("id"));
+            html.append("<h4>").append(escape(String.valueOf(group.getOrDefault("title", groupId))))
+                    .append("</h4><table><thead><tr><th>Instance</th><th>Metric</th><th>Unit / value</th><th>Status</th><th>Evidence</th></tr></thead><tbody>");
+            int rows = 0;
+            for (int observationIndex = 0; observationIndex < observations.size(); observationIndex++) {
+                Map<String, Object> observation = observations.get(observationIndex);
+                Map<String, Object> groupView = map(observation.get("groupView"));
+                for (Map<String, Object> assignment : maps(groupView.get("assignments"))) {
+                    if (!groupId.equals(assignment.get("groupId"))) continue;
+                    rows++;
+                    Map<String, Object> groupBy = map(assignment.get("groupBy"));
+                    String instance = groupBy.isEmpty() ? "All instances" : groupBy.entrySet().stream()
+                            .map(entry -> entry.getKey() + "=" + entry.getValue()).collect(java.util.stream.Collectors.joining(", "));
+                    Map<String, Object> metric = map(observation.get("metric"));
+                    Map<String, Object> quality = map(observation.get("quality"));
+                    Object value = observation.get("value");
+                    String unitValue = value instanceof Number
+                            ? String.valueOf(value) + " " + String.valueOf(metric.getOrDefault("unit", ""))
+                            : String.valueOf(metric.getOrDefault("unit", "unspecified")) + " · "
+                                + String.valueOf(observation.getOrDefault("sampleCount", 0)) + " samples";
+                    html.append("<tr><td>").append(escape(instance)).append("</td><td>")
+                            .append(escape(String.valueOf(metric.getOrDefault("name", metric.get("id")))))
+                            .append("</td><td>").append(escape(unitValue)).append("</td><td>")
+                            .append(escape(String.valueOf(quality.getOrDefault("status", "UNKNOWN"))))
+                            .append("</td><td><a href=\"#sut-observation-").append(observationIndex)
+                            .append("\">Open verified detail</a></td></tr>");
+                }
+            }
+            if (rows == 0) html.append("<tr><td colspan=\"5\">No observations matched this pinned Metric Group.</td></tr>");
+            html.append("</tbody></table>");
+        }
+        html.append("<details><summary>Unassigned or ambiguous observations</summary>");
+        int unassigned = 0;
+        for (Map<String, Object> observation : observations) {
+            Map<String, Object> groupView = map(observation.get("groupView"));
+            for (Map<String, Object> item : maps(groupView.get("unassigned"))) {
+                unassigned++;
+                html.append("<p><code>").append(escape(String.valueOf(item.getOrDefault("metricId", "unknown metric"))))
+                        .append("</code> · ").append(escape(String.valueOf(item.getOrDefault("reason", "UNASSIGNED"))))
+                        .append(" · labels ").append(escape(jsonText(item.get("labels")))).append("</p>");
+            }
+        }
+        if (unassigned == 0) html.append("<p>No unassigned observations.</p>");
+        html.append("</details><p class=\"muted\"><a href=\"#sut-observation-details\">Open all observation details</a></p>");
     }
 
     private static String renderChart(List<Map<String, Object>> series, String unit, String sampleResolution,

@@ -117,7 +117,7 @@ environments:
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-The executable SIT and UAT configs retain common Helper and Environment bindings. `invokePaymentApi` and `sample.getAcDate` now live in the selected Package; legacy global Tools require explicit migration before running ATT 4.2.10.
+The executable SIT and UAT configs retain common Helper and Environment bindings. `invokePaymentApi` and `sample.getAcDate` now live in the selected Package; legacy global Tools require explicit migration before running the current ATT runtime.
 
 The SIT and UAT DBHelper descriptors both use `id: orders`, while their JDBC URL and other physical connection details differ. The MQHelper descriptors both use `id: payment`, while host, queue manager, port, and channel differ. A complete descriptor pair, including pool settings and safe evidence policy, is in [`examples/environments/README.md`](../../examples/environments/README.md).
 

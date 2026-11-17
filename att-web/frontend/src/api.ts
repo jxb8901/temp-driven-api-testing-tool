@@ -290,6 +290,12 @@ export const api = {
   listSutMetricSources(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> }> {
     return request('sut-metrics/sources', { signal });
   },
+  listSutMetricAcquisitions(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> }> {
+    return request('sut-metrics/metric-sources', { signal });
+  },
+  listSutMetricGroups(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> }> {
+    return request('sut-metrics/groups', { signal });
+  },
   listSutMetricProfiles(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> }> {
     return request('sut-metrics/profiles', { signal });
   },
@@ -298,6 +304,18 @@ export const api = {
   },
   deleteSutMetricSource(id: string): Promise<Record<string, unknown>> {
     return request('admin/sut-metrics/sources/' + encodeURIComponent(id), { method: 'DELETE' });
+  },
+  saveSutMetricAcquisition(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/metric-sources', input);
+  },
+  deleteSutMetricAcquisition(id: string): Promise<Record<string, unknown>> {
+    return request('admin/sut-metrics/metric-sources/' + encodeURIComponent(id), { method: 'DELETE' });
+  },
+  saveSutMetricGroup(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/groups', input);
+  },
+  deleteSutMetricGroup(id: string): Promise<Record<string, unknown>> {
+    return request('admin/sut-metrics/groups/' + encodeURIComponent(id), { method: 'DELETE' });
   },
   testSutMetricSource(id: string): Promise<Record<string, unknown>> {
     return postJson('admin/sut-metrics/sources/' + encodeURIComponent(id) + '/test', {});

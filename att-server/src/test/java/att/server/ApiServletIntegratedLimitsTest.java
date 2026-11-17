@@ -444,6 +444,18 @@ class ApiServletIntegratedLimitsTest {
 
             Captured adminWrite=invokeAs(servlet,"POST","/admin/sut-metrics/sources",Collections.emptyMap(),source,"admin",Set.of(adminRole));
             assertEquals(201,adminWrite.status,new String(adminWrite.body(),StandardCharsets.UTF_8));
+            byte[] invalidGroup=ServerRuntime.JSON.writeValueAsBytes(Map.of("schemaVersion","att-sut-metrics-group/v1",
+                    "id","invalid-group","title","Invalid group","order",10,
+                    "match",Map.of("metricIds",List.of("cpu")),"groupBy",List.of(17),"display","table"));
+            Captured invalidGroupWrite=invokeAs(servlet,"POST","/admin/sut-metrics/groups",Collections.emptyMap(),
+                    invalidGroup,"admin",Set.of(adminRole));
+            JsonNode fieldDiagnostic=ServerRuntime.JSON.readTree(invalidGroupWrite.body()).path("diagnostics").path(0);
+            assertEquals(400,invalidGroupWrite.status,new String(invalidGroupWrite.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-SUT-METRICS-INVALID-DEFINITION",ServerRuntime.JSON.readTree(invalidGroupWrite.body())
+                    .path("error").path("code").asText());
+            assertEquals("$.groupBy[0]",fieldDiagnostic.path("path").asText());
+            assertEquals("ATT-SUT-METRICS-FIELD-INVALID",fieldDiagnostic.path("code").asText());
+            assertFalse(fieldDiagnostic.path("keyword").asText().isBlank());
             Captured readerList=invokeAs(servlet,"GET","/sut-metrics/sources",Collections.emptyMap(),new byte[0],"alice",Set.of(userRole));
             JsonNode readerItem=ServerRuntime.JSON.readTree(readerList.body()).path("items").path(0);
             assertEquals(200,readerList.status);
@@ -468,6 +480,63 @@ class ApiServletIntegratedLimitsTest {
             JsonNode adminItem=ServerRuntime.JSON.readTree(adminList.body()).path("items").path(0);
             assertEquals("http://127.0.0.1:9090",adminItem.path("url").asText());
             assertEquals("PROM_TOKEN",adminItem.path("auth").path("secretRef").asText());
+
+            runtime.sutMetrics.upsertMetricSource(Map.of("schemaVersion","att-sut-metrics-metric-source/v1",
+                    "id","private-prom-metrics","name","Private Prometheus metrics",
+                    "connection",Map.of("kind","DATA_SOURCE","id","prom","revision",readerItem.path("revision").asText()),
+                    "fetch",Map.of("id","prom-fetch","mode","prometheus-range",
+                            "query","up{instance=\"sentinel_prometheus_query\"}",
+                            "parameters",Map.of("region","sentinel_prometheus_parameter"),"sampling","range","step","15s"),
+                    "mapping",Map.of("allowedLabels",List.of("instance"),
+                            "outputs",List.of(Map.of("id","prom-up","title","Prometheus up","unit","count",
+                                    "kind","gauge","metricName","up"))),
+                    "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576)));
+            runtime.sutMetrics.upsertMetricSource(Map.of("schemaVersion","att-sut-metrics-metric-source/v1",
+                    "id","private-db-metrics","name","Private DB metrics",
+                    "connection",Map.of("kind","DBHELPER","id","orders","revision","a".repeat(64)),
+                    "fetch",Map.of("id","db-fetch","mode","dbhelper-query",
+                            "call","#{db.orders.query(sql='select sentinel_dbhelper_sql from private_table')}",
+                            "parameters",Map.of("tenant","sentinel_dbhelper_parameter"),"sampling","afterDrain"),
+                    "mapping",Map.of("allowedLabels",List.of("instance"),
+                            "labelColumns",Map.of("instance","sentinel_dbhelper_column"),
+                            "outputs",List.of(Map.of("id","db-count","title","DB count","unit","count",
+                                    "kind","gauge","column","COUNT_VALUE"))),
+                    "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576)));
+            runtime.sutMetrics.upsertMetricSource(Map.of("schemaVersion","att-sut-metrics-metric-source/v1",
+                    "id","private-tool-metrics","name","Private tool metrics",
+                    "connection",Map.of("kind","PACKAGE_TOOL","id","private-tool","revision","b".repeat(64)),
+                    "fetch",Map.of("id","tool-fetch","mode","package-tool",
+                            "call","#{tools.private.read(path='sentinel_package_tool_call')}",
+                            "parameters",Map.of("scope","sentinel_package_tool_parameter"),"sampling","afterDrain"),
+                    "mapping",Map.of("allowedLabels",List.of("instance"),
+                            "labelColumns",Map.of("instance","sentinel_package_tool_column"),
+                            "outputs",List.of(Map.of("id","tool-count","title","Tool count","unit","count",
+                                    "kind","gauge","column","COUNT_VALUE"))),
+                    "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576)));
+            Captured readerMetricSources=invokeAs(servlet,"GET","/sut-metrics/metric-sources",Collections.emptyMap(),
+                    new byte[0],"alice",Set.of(userRole));
+            assertEquals(200,readerMetricSources.status,readerMetricSources.bodyText());
+            assertEquals("private, no-store",readerMetricSources.headers.get("Cache-Control"));
+            assertFalse(readerMetricSources.bodyText().contains("sentinel_prometheus_query"));
+            assertFalse(readerMetricSources.bodyText().contains("sentinel_prometheus_parameter"));
+            assertFalse(readerMetricSources.bodyText().contains("sentinel_dbhelper_sql"));
+            assertFalse(readerMetricSources.bodyText().contains("sentinel_dbhelper_parameter"));
+            assertFalse(readerMetricSources.bodyText().contains("sentinel_dbhelper_column"));
+            assertFalse(readerMetricSources.bodyText().contains("sentinel_package_tool_call"));
+            assertFalse(readerMetricSources.bodyText().contains("sentinel_package_tool_parameter"));
+            assertFalse(readerMetricSources.bodyText().contains("sentinel_package_tool_column"));
+            assertFalse(readerMetricSources.bodyText().contains("a".repeat(64)));
+            JsonNode safeMetricSource=ServerRuntime.JSON.readTree(readerMetricSources.body()).path("items").path(0);
+            assertFalse(safeMetricSource.has("fetch"),safeMetricSource.toString());
+            assertEquals("DBHELPER",safeMetricSource.path("connection").path("kind").asText());
+            assertEquals("db-count",safeMetricSource.path("mapping").path("outputs").path(0).path("id").asText());
+
+            Captured adminMetricSources=invokeAs(servlet,"GET","/sut-metrics/metric-sources",Collections.emptyMap(),
+                    new byte[0],"admin",Set.of(adminRole));
+            assertEquals(200,adminMetricSources.status,adminMetricSources.bodyText());
+            assertTrue(adminMetricSources.bodyText().contains("sentinel_prometheus_query"));
+            assertTrue(adminMetricSources.bodyText().contains("sentinel_dbhelper_sql"));
+            assertTrue(adminMetricSources.bodyText().contains("sentinel_package_tool_call"));
 
             runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
                     "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",

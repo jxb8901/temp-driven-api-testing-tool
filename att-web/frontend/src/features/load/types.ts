@@ -247,8 +247,22 @@ export interface JobResultResponse {
 
 export interface SutMetricPoint { timestamp: string; timestampEpochMs: number; value: number }
 export interface SutMetricSeries { labels: Record<string, string>; samples: SutMetricPoint[]; coverage?: Record<string, unknown> }
+export interface SutMetricGroupAssignment {
+  observationId: string; groupId: string; title?: string; order?: number; display?: string;
+  groupBy?: Record<string, string>;
+}
+export interface SutMetricGroupView {
+  assignments?: SutMetricGroupAssignment[];
+  unassigned?: Array<{ observationId?: string; metricId?: string; sourceId?: string; reason?: string }>;
+  diagnostics?: Array<{ code?: string; message?: string; observationId?: string; groupId?: string }>;
+}
+export interface SutMetricGroupDefinition {
+  schemaVersion?: string; id: string; title: string; order?: number; display?: string;
+  match?: { metricIds?: string[]; sourceIds?: string[]; labels?: Record<string, string> };
+  groupBy?: string[];
+}
 export interface SutMetricQueryMetadata {
-  id: string; profile?: string; profilePath?: string; sourceId?: string; sourceName?: string; kind?: string;
+  id: string; profile?: string; profilePath?: string; sourceId?: string; metricSourceId?: string; sourceName?: string; kind?: string;
   targetId: string; targetType?: string; metricId: string; title?: string; category?: string; unit?: string;
   observationType?: string; observationKind?: string; sampling?: string; scope?: string; workloadId?: string; sourceType?: string;
 }
@@ -258,6 +272,8 @@ export interface SutMetricItem {
   value?: number | null; coverage?: Record<string, unknown>; error?: string;
   scope?: 'job' | 'workload' | 'mix'; workloadId?: string | null; mixId?: string | null;
   callGroupId?: string; callCount?: number; mappingStatus?: string; unmatchedRowCount?: number;
+  groupView?: SutMetricGroupView;
+  normalizedObservationsV2?: Array<{ observationId?: string; identity?: { metricId?: string; binding?: { sourceId?: string }; labels?: Record<string, string> } }>;
 }
 export interface SutMetricsManifest {
   schemaVersion?: string; state?: string; complete?: boolean; createdAt?: string; updatedAt?: string;
@@ -271,7 +287,7 @@ export interface SutMetricsJobResponse {
   provisional?: boolean;
   collection?: SutMetricsManifest | null; livePreview?: Record<string, unknown>;
   thresholdEvaluation?: Record<string, unknown>; performanceAcceptance?: Record<string, unknown>;
-  items?: SutMetricItem[]; nextOffset?: number | null;
+  groups?: SutMetricGroupDefinition[]; items?: SutMetricItem[]; nextOffset?: number | null;
 }
 export interface SutMetricsLiveResponse {
   schemaVersion?: string; state?: string; snapshotId?: string; windowStart?: string; windowEnd?: string;

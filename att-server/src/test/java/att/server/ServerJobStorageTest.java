@@ -10,6 +10,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -706,8 +707,17 @@ class ServerJobStorageTest {
         job.status="PASS";job.finishedAt=Instant.now();runtime.store.insert(job,"{}");runtime.store.update(job);
         runtime.scheduleArtifactArchive(id);
         awaitNativeArchive(runtime,id);
-        runtime.sutMetrics.writeSnapshot(id,Map.of("schemaVersion",SutMetricsService.SNAPSHOT_SCHEMA,
-                "snapshotId","snapshot-"+id,"queries",List.of()));
+        Map<String, Object> profile = Map.of("schemaVersion", "att-sut-metrics-profile/v2", "id", "empty-test-profile",
+                "revision", "a".repeat(64), "migration", "native-v2");
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("schemaVersion", SutMetricsService.SNAPSHOT_SCHEMA);
+        snapshot.put("snapshotId", "b".repeat(64)); snapshot.put("createdAt", Instant.now().toString());
+        snapshot.put("profile", profile); snapshot.put("metricSources", List.of()); snapshot.put("groups", List.of());
+        snapshot.put("bindings", List.of()); snapshot.put("fetchPlan", List.of()); snapshot.put("expectedSubjects", List.of());
+        snapshot.put("collection", Map.of()); snapshot.put("livePreview", Map.of()); snapshot.put("provenance", List.of());
+        snapshot.put("queries", List.of()); snapshot.put("sources", Map.of()); snapshot.put("budgets", Map.of());
+        snapshot.put("executionPayloadSha256", "c".repeat(64));
+        runtime.sutMetrics.writeSnapshot(id, snapshot);
         runtime.sutMetrics.jobFinished(id,null,null);
         awaitFailedLoadReport(runtime,id,1);
         runtime.refreshLoadReportV2(id);

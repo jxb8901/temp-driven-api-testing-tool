@@ -748,17 +748,20 @@ class ServerRuntimeJobReplayTest {
             await(runtime,original);
             JsonNode retainedScenario=ServerRuntime.JSON.readTree(runtime.store.executionSpec(original).get("spec")).path("definition").path("scenario");
             assertTrue(retainedScenario.path("observability").isObject(),retainedScenario.toString());
-            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForJob(original)).path("queries").get(0).path("query").asText());
+            assertTrue(ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForJob(original)).path("queries").get(0).path("query").isMissingNode(),
+                    "The public Job snapshot must not expose the private executable query.");
+            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(original)).path("queries").get(0).path("query").asText());
 
             Map<String,Object> changed=ServerRuntime.JSON.convertValue(profile,Map.class);
             Map<String,Object> changedMetric=ServerRuntime.JSON.convertValue(((List<?>)changed.get("metrics")).get(0),Map.class);
             changedMetric.put("query","down");changed.put("metrics",List.of(changedMetric));runtime.saveSutMetricProfile(changed);
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
-            assertEquals("up",ServerRuntime.JSON.valueToTree(review.get("preview")).path("sutMetrics").path("items").get(0).path("queryPreview").asText());
+            assertTrue(ServerRuntime.JSON.valueToTree(review.get("preview")).path("sutMetrics").path("items").get(0)
+                    .path("queryPreview").isNull(),"A replay preview must not expose its private executable query.");
 
             Map<String,Object> rerun=runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("intentId",review.get("intentId"),"confirm",true)),"alice");
             String rerunId=String.valueOf(rerun.get("jobId"));
-            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForJob(rerunId)).path("queries").get(0).path("query").asText());
+            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(rerunId)).path("queries").get(0).path("query").asText());
         }
     }
     @Test void businessMetricCallsFailClosedWhenPinnedPackageOrRuntimeConfigChangesAfterAdmission() throws Exception {
@@ -821,7 +824,7 @@ class ServerRuntimeJobReplayTest {
             assertEquals("submitted",firstOccurrence.get("status"),firstOccurrence.toString());
             String firstJob=String.valueOf(firstOccurrence.get("jobId"));
             await(runtime,firstJob);
-            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForJob(firstJob)).path("queries").get(0).path("query").asText());
+            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(firstJob)).path("queries").get(0).path("query").asText());
 
             Map<String,Object> updatedProfile=ServerRuntime.JSON.convertValue(profile,Map.class);
             Map<String,Object> updatedMetric=ServerRuntime.JSON.convertValue(((List<?>)updatedProfile.get("metrics")).get(0),Map.class);
@@ -831,15 +834,16 @@ class ServerRuntimeJobReplayTest {
             assertEquals("submitted",secondOccurrence.get("status"),secondOccurrence.toString());
             String secondJob=String.valueOf(secondOccurrence.get("jobId"));
             await(runtime,secondJob);
-            assertEquals("down",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForJob(secondJob)).path("queries").get(0).path("query").asText(),
+            assertEquals("down",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(secondJob)).path("queries").get(0).path("query").asText(),
                     "Each newly dispatched Schedule occurrence resolves the current Admin profile.");
 
             Map<String,Object> replayReview=runtime.createJobReplayDraft(firstJob,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
-            assertEquals("up",ServerRuntime.JSON.valueToTree(replayReview.get("preview")).path("sutMetrics").path("items").get(0).path("queryPreview").asText());
+            assertTrue(ServerRuntime.JSON.valueToTree(replayReview.get("preview")).path("sutMetrics").path("items").get(0)
+                    .path("queryPreview").isNull(),"A replay preview must not expose its private executable query.");
             Map<String,Object> replay=runtime.rerunJob(firstJob,ServerRuntime.JSON.valueToTree(Map.of(
                     "intentId",replayReview.get("intentId"),"confirm",true)),"alice");
             String replayJob=String.valueOf(replay.get("jobId"));
-            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForJob(replayJob)).path("queries").get(0).path("query").asText(),
+            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(replayJob)).path("queries").get(0).path("query").asText(),
                     "A rerun of a dispatched occurrence keeps that Job's pinned SUT Metrics snapshot.");
             await(runtime,replayJob);
         }

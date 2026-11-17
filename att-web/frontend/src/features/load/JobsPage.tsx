@@ -1111,6 +1111,9 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
   const [moreLoading, setMoreLoading] = useState(false);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [targetFilter, setTargetFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [metricFilter, setMetricFilter] = useState('');
+  const [groupFilter, setGroupFilter] = useState('');
   const [profileFilter, setProfileFilter] = useState('');
   const [liveRange, setLiveRange] = useState('15m');
   const [collectionRange, setCollectionRange] = useState('all');
@@ -1223,7 +1226,25 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
     ? ((response as SutMetricsLiveResponse | null)?.queries || [])
     : (collection?.queries || []);
   const targets = [...new Set(queries.map(query => query.targetId).filter(Boolean))].sort();
+  const sources = [...new Set(queries.map(query => query.sourceName || query.sourceId || '').filter(Boolean))].sort();
   const profiles = [...new Set(queries.map(query => query.profilePath || query.profile || '').filter(Boolean))].sort();
+  const groupDefinitions = (response as SutMetricsJobResponse | null)?.groups || [];
+  const groupOptions = groupDefinitions.length
+    ? groupDefinitions.map(group => ({ id: group.id, title: group.title }))
+    : [...new Map(items.flatMap(item => item.groupView?.assignments || [])
+      .map(group => [group.groupId, group.title || group.groupId] as const)).entries()]
+      .map(([id, title]) => ({ id, title }));
+  const groupMetricIds = groupFilter ? new Set(items.filter(item => groupFilter === '__unassigned'
+    ? !(item.groupView?.assignments || []).length
+    : (item.groupView?.assignments || []).some(assignment => assignment.groupId === groupFilter))
+    .map(item => item.metricId)) : null;
+  const metricOptions = [...new Map(queries.filter(query => !groupFilter || !items.length || groupMetricIds?.has(query.metricId))
+    .map(query => [query.metricId, query.title || query.metricId] as const)).entries()];
+  const visibleItems = items.filter(item => (!sourceFilter || (item.sourceName || item.sourceId || '') === sourceFilter)
+    && (!metricFilter || item.metricId === metricFilter)
+    && (!groupFilter || (groupFilter === '__unassigned'
+      ? !(item.groupView?.assignments || []).length
+      : (item.groupView?.assignments || []).some(assignment => assignment.groupId === groupFilter))));
   const selectedRange = showLive ? liveRange : collectionRange;
   const rangeOptions = showLive
     ? [['5m', 'Last 5 minutes'], ['15m', 'Last 15 minutes'], ['30m', 'Last 30 minutes'], ['1h', 'Last hour'], ['4h', 'Last 4 hours']]
@@ -1234,6 +1255,12 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
     <p className="att-help">SUT observations include read-only live Prometheus previews and configured post-run metrics. Business calls run once after LOAD drain. Configured rules produce a separate persisted performance verdict.</p>
     {queries.length > 0 && <div className="att-sut-metrics-filters" aria-label="SUT Metrics filters">
       <label>Target<select value={targetFilter} onChange={event => setTargetFilter(event.target.value)}><option value="">All targets</option>{targets.map(target => <option key={target} value={target}>{target}</option>)}</select></label>
+      <label>Source<select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}><option value="">All sources</option>{sources.map(source => <option key={source} value={source}>{source}</option>)}</select></label>
+      <label>Metric<select value={metricFilter} onChange={event => setMetricFilter(event.target.value)}><option value="">All metrics</option>{metricOptions.map(([id, title]) => <option key={id} value={id}>{title} ({id})</option>)}</select></label>
+      {!showLive && groupOptions.length > 0 && <label>Metric Group<select value={groupFilter} onChange={event => setGroupFilter(event.target.value)}>
+        <option value="">All groups</option>{groupOptions.map(group => <option key={group.id} value={group.id}>{group.title}</option>)}
+        <option value="__unassigned">Unassigned / ambiguous</option>
+      </select></label>}
       <label>Profile<select value={profileFilter} onChange={event => setProfileFilter(event.target.value)}><option value="">All profiles</option>{profiles.map(profile => <option key={profile} value={profile}>{profile}</option>)}</select></label>
       <label>Range<select value={selectedRange} onChange={event => showLive ? setLiveRange(event.target.value) : setCollectionRange(event.target.value)}>{rangeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
     </div>}
@@ -1261,12 +1288,13 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
     {state === 'PARTIAL' && <p role="status">Some metrics are available; other queries returned no data or could not be collected.</p>}
     {state === 'NO_DATA' && <p role="status">No SUT samples are available yet for this time window.</p>}
     {state === 'READY' && !items.length && <p role="status">Collection is ready, but no metric series are present in this page.</p>}
-    {items.map((item, index) => <SutMetricCard item={item} range={showLive ? liveRange : collectionRange}
+    {visibleItems.map((item, index) => <SutMetricCard item={item} range={showLive ? liveRange : collectionRange}
       rangeStart={windowStart} rangeEnd={windowEnd}
       stepMilliseconds={showLive
         ? Math.max(1, Number((response as SutMetricsLiveResponse | null)?.stepSeconds || 30)) * 1000
         : metricStepMilliseconds(collection?.step)}
       key={`${item.id || item.queryId || item.metricId}-${item.targetId}-${index}`} />)}
+    {!showLive && groupFilter && !visibleItems.length && <p role="status">No observations in this loaded page match the selected Metric Group and filters.</p>}
     {diagnostics.length > 0 && <details><summary>Collection diagnostics ({diagnostics.length})</summary><ul>{diagnostics.slice(0, 20).map((item, index) => <li key={`${item.code}-${index}`}>{item.code || 'Collection issue'}: {item.message || 'No additional detail.'}</li>)}</ul></details>}
     {nextOffset !== null && <button type="button" onClick={() => void loadMore()} disabled={moreLoading}>{moreLoading ? 'Loading…' : 'Load more SUT metric series'}</button>}
     {loading && !response && <p role="status" aria-busy="true">Loading SUT Metrics…</p>}
@@ -1312,7 +1340,6 @@ const SutMetricCard = memo(function SutMetricCard({ item, range, rangeStart, ran
   const visiblePoints = visibleSeries.flatMap(series => series.samples);
   const values = visiblePoints.map(point => point.value);
   const minimum = values.length ? Math.min(...values) : 0, maximum = values.length ? Math.max(...values) : 1;
-  const average = values.length ? values.reduce((total, value) => total + value, 0) / values.length : null;
   const span = maximum - minimum || 1;
   const paths = visibleSeries.map((series, index) => {
     const points = series.samples;
@@ -1356,9 +1383,28 @@ const SutMetricCard = memo(function SutMetricCard({ item, range, rangeStart, ran
   const subjectLabel = item.scope === 'mix' ? `Mix ${item.mixId || 'unknown'} · Workload ${item.workloadId || 'unknown'}`
     : item.scope === 'workload' ? `Workload ${item.workloadId || item.targetId}`
       : item.scope === 'job' ? 'Job-wide' : undefined;
+  const groupAssignments = item.groupView?.assignments || [];
+  const groupDiagnostics = item.groupView?.diagnostics || [];
+  const seriesSummaries = visibleSeries.map((series, index) => {
+    const values = series.samples.map(point => point.value).filter(Number.isFinite);
+    const labels = Object.entries(series.labels || {}).filter(([key]) => key !== '__name__')
+      .map(([key, value]) => `${key}=${value}`).join(', ');
+    return { index, labels: labels || `Series ${index + 1}`, values,
+      minimum: values.length ? Math.min(...values) : null,
+      mean: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null,
+      maximum: values.length ? Math.max(...values) : null };
+  });
   return <article className="att-sut-metric-card">
     <header><div><h3>{item.title || item.metricId}</h3><p>{item.category || 'SUT'} · {item.targetType || 'target'} {item.targetId} · {item.unit}{item.profilePath ? ` · ${item.profilePath}` : ''}{subjectLabel ? ` · ${subjectLabel}` : ''}</p></div>
       <span className={`att-sut-metric-query-status att-sut-metric-query-status-${status.toLowerCase()}`}>{status}</span></header>
+    {item.groupView && <div className="att-sut-metric-groups" aria-label="Metric Group assignments">
+      {groupAssignments.length > 0 ? <ul>{groupAssignments.map(assignment => <li key={`${assignment.observationId}-${assignment.groupId}`}>
+        <strong>{assignment.title || assignment.groupId}</strong>{Object.keys(assignment.groupBy || {}).length > 0
+          ? ` · ${Object.entries(assignment.groupBy || {}).map(([key, value]) => `${key}=${value}`).join(', ')}` : ''}
+      </li>)}</ul> : <p>Unassigned / ambiguous observation.</p>}
+      {groupDiagnostics.length > 0 && <ul className="att-sut-metric-group-diagnostics">{groupDiagnostics.slice(0, 8).map((diagnostic, index) =>
+        <li key={`${diagnostic.code || 'group'}-${index}`}>{diagnostic.code || 'Group diagnostic'}: {diagnostic.message || 'The observation did not resolve to one display group.'}</li>)}</ul>}
+    </div>}
     {item.error && <p role="status">{item.error}</p>}
     {status === 'NOT_COLLECTED_LIVE' && <p role="status">Business calls run once after LOAD drain and are not executed by live preview.</p>}
     {(businessValue || callGroupId || item.scope) && <>
@@ -1387,11 +1433,18 @@ const SutMetricCard = memo(function SutMetricCard({ item, range, rangeStart, ran
       {paths.map(line => <path key={line.index} d={line.path} className={`att-sut-metric-line att-sut-metric-line-${line.index % 8}`} />)}
       <text x="4" y="214">{dateTime(String(firstVisible || ''))}</text><text x="800" y="214" textAnchor="end">{dateTime(String(latestVisible || ''))}</text>
     </svg>}
-    {count > 0 && <dl className="att-sut-metric-summary">
-      <div><dt>Min</dt><dd>{METRIC_NUMBER_FORMATTER.format(minimum)} {item.unit}</dd></div>
-      <div><dt>Avg</dt><dd>{METRIC_NUMBER_FORMATTER.format(average!)} {item.unit}</dd></div>
-      <div><dt>Max</dt><dd>{METRIC_NUMBER_FORMATTER.format(maximum)} {item.unit}</dd></div>
-    </dl>}
+    {count > 0 && <>
+      <ul className="att-sut-metric-series-legend" aria-label="Metric instances">{seriesSummaries.map(series => <li key={series.index}>
+        <span className={`att-sut-metric-line-key att-sut-metric-line-key-${series.index % 8}`} aria-hidden="true" />{series.labels}
+      </li>)}</ul>
+      <table className="att-sut-metric-series-summary"><thead><tr><th>Instance labels</th><th>Min</th><th>Mean</th><th>Max</th></tr></thead><tbody>
+        {seriesSummaries.map(series => <tr key={series.index}><th scope="row">{series.labels}</th>
+          <td aria-label={`Min ${series.minimum === null ? 'unavailable' : `${METRIC_NUMBER_FORMATTER.format(series.minimum)} ${item.unit}`}`}>{series.minimum === null ? '—' : `${METRIC_NUMBER_FORMATTER.format(series.minimum)} ${item.unit}`}</td>
+          <td aria-label={`Mean ${series.mean === null ? 'unavailable' : `${METRIC_NUMBER_FORMATTER.format(series.mean)} ${item.unit}`}`}>{series.mean === null ? '—' : `${METRIC_NUMBER_FORMATTER.format(series.mean)} ${item.unit}`}</td>
+          <td aria-label={`Max ${series.maximum === null ? 'unavailable' : `${METRIC_NUMBER_FORMATTER.format(series.maximum)} ${item.unit}`}`}>{series.maximum === null ? '—' : `${METRIC_NUMBER_FORMATTER.format(series.maximum)} ${item.unit}`}</td>
+        </tr>)}
+      </tbody></table>
+    </>}
     {!businessValue && status !== 'NOT_COLLECTED_LIVE' && <p className="att-sut-metric-coverage">{count} samples across {visibleSeries.filter(series => series.samples.length > 0).length} series · source {item.sourceName || item.sourceId || 'registered SUT Metrics source'}
       {firstVisible != null && <> · first {dateTime(String(firstVisible))}</>}{latestVisible != null && <> · latest {dateTime(String(latestVisible))}</>}</p>}
   </article>;

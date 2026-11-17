@@ -49,11 +49,15 @@ final class SutMetricsContractMigration {
             throw new IllegalArgumentException("Only an att-sut-metrics-snapshot/v1 snapshot can be migrated.");
         List<Map<String, Object>> queries = list(legacy.get("queries"));
         if (queries.size() > MAX_QUERIES) throw new IllegalArgumentException("The legacy SUT Metrics snapshot exceeds its query limit.");
-        Map<String, String> metricSourceIds = new LinkedHashMap<>();
+        Map<String, String> defaultMetricSourceByConnection = new LinkedHashMap<>();
+        Map<String, String> connectionByMetricSource = new LinkedHashMap<>();
+        Map<String, Set<String>> fetchesByMetricSource = new LinkedHashMap<>();
+        Map<String, Set<String>> metricRevisionsByMetricSource = new LinkedHashMap<>();
         Map<String, List<Map<String, Object>>> queriesByFetch = new LinkedHashMap<>();
-        Map<String, Set<String>> fetchesBySource = new LinkedHashMap<>();
-        Map<String, Set<String>> metricRevisionsBySource = new LinkedHashMap<>();
         Map<String, Map<String, Object>> fetchPlan = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> nativeMetricSources = new LinkedHashMap<>();
+        for (Map<String, Object> source : list(legacy.get("nativeMetricSources")))
+            nativeMetricSources.put(text(source.get("id"), "metric source id"), source);
         List<Map<String, Object>> bindings = new ArrayList<>();
         List<Map<String, Object>> expectedSubjects = new ArrayList<>();
         Set<String> seenBindings = new HashSet<>(), seenSubjects = new HashSet<>();
@@ -61,27 +65,25 @@ final class SutMetricsContractMigration {
         for (Map<String, Object> query : queries) {
             String sourceId = text(query.get("sourceId"), "sourceId");
             boolean business = "business-call".equals(query.get("observationType"));
-            String oldFetchId = business
-                    ? text(query.getOrDefault("callGroupId", query.get("id")), "callGroupId")
-                    : "prometheus:" + digest(fields("sourceId", sourceId,
-                            "sourceRevision", query.get("sourceRevision"),
-                            "targetRevision", query.get("targetRevision"),
-                            "targetId", query.get("targetId"), "targetType", query.get("targetType"),
-                            "tenant", query.get("tenant"), "query", query.get("query"),
-                            "parameters", query.get("parameters"), "sampling", query.getOrDefault("sampling", "range"),
-                            "window", query.get("window"), "collection", legacy.get("collection")))
-                    + (business || hasPrometheusOutputSelector(query) ? "" : "\u0000" + query.get("id"));
+            String oldFetchId = effectiveFetchBindingId(query, legacy.get("collection"));
             String fetchKey = sourceId + "\u0000" + oldFetchId;
-            String fetchId = "fetch-" + digest(fetchKey).substring(0, 40);
-            String metricSourceId = metricSourceIds.computeIfAbsent(sourceId,
+            String fetchId = canonicalFetchId(fetchKey);
+            String metricSourceId = nullableText(query.get("metricSourceId"));
+            if (metricSourceId == null) metricSourceId = defaultMetricSourceByConnection.computeIfAbsent(sourceId,
                     ignored -> "metric-source-" + digest(sourceId).substring(0, 32));
+            Map<String, Object> nativeMetricSource = nativeMetricSources.get(metricSourceId);
+            if (!nativeMetricSources.isEmpty() && nativeMetricSource == null)
+                throw new IllegalArgumentException("A resolved query references an undeclared Metric Source.");
+            String priorConnection = connectionByMetricSource.putIfAbsent(metricSourceId, sourceId);
+            if (priorConnection != null && !priorConnection.equals(sourceId))
+                throw new IllegalArgumentException("A Metric Source cannot resolve to multiple connection identities.");
             query.put("fetchId", fetchId);
             query.put("metricSourceId", metricSourceId);
             String fingerprint = fetchFingerprint(query, sourceId, oldFetchId);
             query.put("fetchFingerprint", fingerprint);
             queriesByFetch.computeIfAbsent(fetchId, ignored -> new ArrayList<>()).add(query);
-            fetchesBySource.computeIfAbsent(sourceId, ignored -> new LinkedHashSet<>()).add(fetchId);
-            metricRevisionsBySource.computeIfAbsent(sourceId, ignored -> new LinkedHashSet<>())
+            fetchesByMetricSource.computeIfAbsent(metricSourceId, ignored -> new LinkedHashSet<>()).add(fetchId);
+            metricRevisionsByMetricSource.computeIfAbsent(metricSourceId, ignored -> new LinkedHashSet<>())
                     .add(fingerprint);
 
             String targetId = text(query.getOrDefault("targetId", business ? query.getOrDefault("workloadId", "job") : "target"), "targetId");
@@ -106,7 +108,7 @@ final class SutMetricsContractMigration {
         }
         if (expectedSubjects.size() > MAX_OBSERVATIONS)
             throw new IllegalArgumentException("The legacy SUT Metrics snapshot exceeds its expected-subject limit.");
-        if (metricSourceIds.size() > MAX_SOURCES || bindings.size() > MAX_BINDINGS)
+        if (connectionByMetricSource.size() > MAX_SOURCES || bindings.size() > MAX_BINDINGS)
             throw new IllegalArgumentException("The legacy SUT Metrics snapshot exceeds its source or binding limit.");
 
         for (Map.Entry<String, List<Map<String, Object>>> entry : queriesByFetch.entrySet()) {
@@ -146,19 +148,32 @@ final class SutMetricsContractMigration {
         }
 
         List<Map<String, Object>> metricSources = new ArrayList<>();
-        for (Map.Entry<String, String> entry : metricSourceIds.entrySet()) {
-            String sourceId = entry.getKey();
-            Map<String, Object> members = firstForSource(queries, sourceId);
-            String sourceType = String.valueOf(members.getOrDefault("sourceType", "DATA_SOURCE"));
-            String connectionKind = "business-call".equals(members.get("observationType")) ? sourceType : "DATA_SOURCE";
-            String sourceRevision = nullableText(members.get("sourceRevision"));
-            metricSources.add(fields("id", entry.getValue(),
-                    "revision", digest(fields("connectionId", sourceId, "connectionRevision", sourceRevision,
-                            "fetches", sorted(fetchesBySource.getOrDefault(sourceId, Set.of())),
-                            "mappings", sorted(metricRevisionsBySource.getOrDefault(sourceId, Set.of())))),
-                    "connectionKind", normalizedConnectionKind(connectionKind),
-                    "connectionId", sourceId,
-                    "fetchIds", sorted(fetchesBySource.getOrDefault(sourceId, Set.of()))));
+        for (Map.Entry<String, String> entry : connectionByMetricSource.entrySet()) {
+            String metricSourceId = entry.getKey(), sourceId = entry.getValue();
+            Map<String, Object> nativeSource = nativeMetricSources.get(metricSourceId);
+            if (nativeSource != null) {
+                Map<String, Object> connection = asMap(nativeSource.get("connection"));
+                Map<String, Object> metricSourceSummary = fields("id", metricSourceId, "revision", nativeSource.get("revision"),
+                        "connectionKind", connection.get("kind"), "connectionId", connection.get("id"),
+                        "fetchIds", sorted(fetchesByMetricSource.getOrDefault(metricSourceId, Set.of())));
+                metricSourceSummary.put("mapping", fields("allowedLabels",
+                        asMap(nativeSource.get("mapping")).getOrDefault("allowedLabels", List.of())));
+                if (nativeSource.get("limits") instanceof Map<?, ?> limits)
+                    metricSourceSummary.put("limits", new LinkedHashMap<>(asMap(limits)));
+                metricSources.add(metricSourceSummary);
+            } else {
+                Map<String, Object> members = firstForSource(queries, sourceId);
+                String sourceType = String.valueOf(members.getOrDefault("sourceType", "DATA_SOURCE"));
+                String connectionKind = "business-call".equals(members.get("observationType")) ? sourceType : "DATA_SOURCE";
+                String sourceRevision = nullableText(members.get("sourceRevision"));
+                metricSources.add(fields("id", metricSourceId,
+                        "revision", digest(fields("connectionId", sourceId, "connectionRevision", sourceRevision,
+                                "fetches", sorted(fetchesByMetricSource.getOrDefault(metricSourceId, Set.of())),
+                                "mappings", sorted(metricRevisionsByMetricSource.getOrDefault(metricSourceId, Set.of())))),
+                        "connectionKind", normalizedConnectionKind(connectionKind),
+                        "connectionId", sourceId,
+                        "fetchIds", sorted(fetchesByMetricSource.getOrDefault(metricSourceId, Set.of()))));
+            }
         }
         metricSources.sort(Comparator.comparing(row -> String.valueOf(row.get("id"))));
 
@@ -172,18 +187,23 @@ final class SutMetricsContractMigration {
         List<String> profileRevisionValues = sorted(profileRevisions);
         String profileRevision = digest(fields("profileIds", sorted(profileIds), "revisions", profileRevisionValues));
         String profileId = profileIds.size() == 1 ? profileIds.iterator().next() : nullableText(firstQuery.get("bindingId"));
-        Map<String, Object> profile = fields("schemaVersion", PROFILE_V1, "id", profileId,
-                "revision", profileRevision, "migration", "legacy-v1-adapter");
+        Map<String, Object> nativeProfile = asMap(legacy.get("nativeProfile"));
+        Map<String, Object> profile = nativeProfile.isEmpty()
+                ? fields("schemaVersion", PROFILE_V1, "id", profileId, "revision", profileRevision, "migration", "legacy-v1-adapter")
+                : fields("schemaVersion", PROFILE_V2, "id", nativeProfile.get("id"),
+                        "revision", nativeProfile.get("revision"), "migration", "native-v2");
 
         Map<String, Object> sources = asMap(legacy.get("sources"));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("schemaVersion", SNAPSHOT_V2);
+        List<Map<String, Object>> groups = list(legacy.get("groups"));
         result.put("snapshotId", digest(fields("legacySnapshotId", legacy.get("snapshotId"),
-                "profile", profile, "fetchPlan", new ArrayList<>(fetchPlan.values()))));
+                "profile", profile, "metricSources", metricSources, "groups", groups,
+                "fetchPlan", new ArrayList<>(fetchPlan.values()))));
         result.put("createdAt", legacy.getOrDefault("createdAt", Instant.EPOCH.toString()));
         result.put("profile", profile);
         result.put("metricSources", metricSources);
-        result.put("groups", List.of());
+        result.put("groups", groups);
         result.put("bindings", bindings);
         result.put("fetchPlan", new ArrayList<>(fetchPlan.values()));
         result.put("expectedSubjects", expectedSubjects);
@@ -198,9 +218,33 @@ final class SutMetricsContractMigration {
             result.put("thresholds", thresholds);
         result.put("budgets", legacy.getOrDefault("budgets", Map.of()));
         result.put("executionPayloadSha256", digest(List.of()));
-        result.put("compatibility", fields("sourceSchema", PROFILE_V1, "adapterVersion", "v1-to-v2",
-                "unsupportedFeatures", List.of()));
+        if (nativeProfile.isEmpty()) result.put("compatibility", fields("sourceSchema", PROFILE_V1,
+                "adapterVersion", "v1-to-v2", "unsupportedFeatures", List.of()));
         return result;
+    }
+
+    /** Returns the same immutable fetch id used by {@link #upgradeSnapshot(Map)} before the
+     * v2 migration runs, so budget preflight and the persisted plan count identical work. */
+    static String effectiveFetchId(Map<String, Object> query, Map<String, Object> collection) {
+        String sourceId = text(query.get("sourceId"), "sourceId");
+        return canonicalFetchId(sourceId + "\u0000" + effectiveFetchBindingId(query, collection));
+    }
+
+    private static String effectiveFetchBindingId(Map<String, Object> query, Object collection) {
+        if ("business-call".equals(query.get("observationType")))
+            return text(query.getOrDefault("callGroupId", query.get("id")), "callGroupId");
+        return "prometheus:" + digest(fields("sourceId", query.get("sourceId"),
+                "sourceRevision", query.get("sourceRevision"),
+                "targetRevision", query.get("targetRevision"),
+                "targetId", query.get("targetId"), "targetType", query.get("targetType"),
+                "tenant", query.get("tenant"), "query", query.get("query"),
+                "parameters", query.get("parameters"), "sampling", query.getOrDefault("sampling", "range"),
+                "window", query.get("window"), "collection", collection))
+                + (hasPrometheusOutputSelector(query) ? "" : "\u0000" + query.get("id"));
+    }
+
+    private static String canonicalFetchId(String fetchKey) {
+        return "fetch-" + digest(fetchKey).substring(0, 40);
     }
 
     static Map<String, Object> privateExecutionPayload(Map<String, Object> snapshot, String jobId) {

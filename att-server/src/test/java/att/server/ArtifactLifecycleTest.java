@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -96,8 +97,7 @@ class ArtifactLifecycleTest {
             job(runtime,id,"PASS","load");
             Files.writeString(runtime.outputDirectoryForJob(id).resolve("native.txt"),"native evidence");
             runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
-            runtime.sutMetrics.writeSnapshot(id,Map.of("schemaVersion",SutMetricsService.SNAPSHOT_SCHEMA,
-                    "snapshotId","snapshot-1","queries",List.of()));
+            runtime.sutMetrics.writeSnapshot(id,emptySutMetricsSnapshot());
             runtime.sutMetrics.jobFinished(id,null,null);
             awaitLoadReport(runtime,id,"FAILED","user-a");
             assertFalse(runtime.store.loadReportPublicationPending(id),"A deferred retry keeps recovery scheduled without fencing retention during backoff.");
@@ -751,8 +751,7 @@ class ArtifactLifecycleTest {
         Job job=job(runtime,id,"PASS","load");
         Files.writeString(runtime.outputDirectoryForJob(id).resolve("native.txt"),"native evidence");
         runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
-        runtime.sutMetrics.writeSnapshot(id,Map.of("schemaVersion",SutMetricsService.SNAPSHOT_SCHEMA,
-                "snapshotId","snapshot-"+id,"queries",List.of()));
+        runtime.sutMetrics.writeSnapshot(id,emptySutMetricsSnapshot());
         if(externalEvaluationStatus!=null) {
             Path verdict=runtime.config.dataDir.resolve("jobs").resolve(id).resolve("load-verdict/v1/manifest.json");
             Files.createDirectories(verdict.getParent());
@@ -770,5 +769,21 @@ class ArtifactLifecycleTest {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);Map<String,Object> index;
         do {index=runtime.artifactIndex(id);if(expected.equals(index.get("archiveStatus")))return;Thread.sleep(10);}while(System.nanoTime()<deadline);
         fail("Expected "+expected+" but got "+index);
+    }
+
+    private static Map<String,Object> emptySutMetricsSnapshot() {
+        Map<String,Object> profile=Map.of("schemaVersion","att-sut-metrics-profile/v2","id","empty-test-profile",
+                "revision","a".repeat(64),"migration","native-v2");
+        Map<String,Object> snapshot=new LinkedHashMap<>();
+        snapshot.put("schemaVersion",SutMetricsService.SNAPSHOT_SCHEMA);
+        snapshot.put("snapshotId","b".repeat(64));
+        snapshot.put("createdAt",Instant.now().toString());
+        snapshot.put("profile",profile);
+        snapshot.put("metricSources",List.of());snapshot.put("groups",List.of());snapshot.put("bindings",List.of());
+        snapshot.put("fetchPlan",List.of());snapshot.put("expectedSubjects",List.of());
+        snapshot.put("collection",Map.of());snapshot.put("livePreview",Map.of());snapshot.put("provenance",List.of());
+        snapshot.put("queries",List.of());snapshot.put("sources",Map.of());snapshot.put("budgets",Map.of());
+        snapshot.put("executionPayloadSha256","c".repeat(64));
+        return snapshot;
     }
 }

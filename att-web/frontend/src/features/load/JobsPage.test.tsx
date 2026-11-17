@@ -574,26 +574,25 @@ describe('JobsPage React feature', () => {
     expect(getLive).toHaveBeenCalledWith('JOB-204', expect.objectContaining({ range: '15m', step: '30s' }));
     expect(panel.textContent).toContain('STALE');
     expect(panel.textContent).toContain('The latest sample is older than the live freshness window.');
-    expect(panel.textContent).toContain('Min1 bytes');
-    expect(panel.textContent).toContain('Avg3 bytes');
-    expect(panel.textContent).toContain('Max5 bytes');
+    const summaryCells = [...panel.querySelectorAll('.att-sut-metric-series-summary tbody td')].map(cell => cell.textContent);
+    expect(summaryCells).toEqual(['1 bytes', '3 bytes', '5 bytes']);
 
     const selects = [...panel.querySelectorAll('select')];
-    expect(selects).toHaveLength(3);
+    expect(selects).toHaveLength(5);
     expect([...selects[0]!.options].map(option => option.value)).toEqual(['', 'db-1', 'sut-1']);
-    expect([...selects[1]!.options].map(option => option.value)).toContain('profile-platform/jvm/profile-jvm');
+    expect([...selects[3]!.options].map(option => option.value)).toContain('profile-platform/jvm/profile-jvm');
     await act(async () => {
       selects[0]!.value = 'sut-1';
       selects[0]!.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await advance();
-    const profileSelect = host.querySelectorAll('#job-panel-sutMetrics select')[1] as HTMLSelectElement;
+    const profileSelect = host.querySelectorAll('#job-panel-sutMetrics select')[3] as HTMLSelectElement;
     await act(async () => {
       profileSelect.value = 'profile-platform/jvm/profile-jvm';
       profileSelect.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await advance();
-    const rangeSelect = host.querySelectorAll('#job-panel-sutMetrics select')[2] as HTMLSelectElement;
+    const rangeSelect = host.querySelectorAll('#job-panel-sutMetrics select')[4] as HTMLSelectElement;
     await act(async () => {
       rangeSelect.value = '1h';
       rangeSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -809,7 +808,7 @@ describe('JobsPage React feature', () => {
     await click(host.querySelector('#job-tab-correlation')!);
     await advance();
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(getSut).toHaveBeenCalledWith('JOB-204', expect.objectContaining({ offset: 0, limit: 1, signal: expect.any(AbortSignal) }));
+    expect(getSut).toHaveBeenCalledWith('JOB-204', expect.objectContaining({ offset: 0, limit: 16, signal: expect.any(AbortSignal) }));
     expect(host.querySelector('#job-panel-correlation [role="alert"]')?.textContent).toBe('403 forbidden');
     expect(host.querySelector('#job-panel-correlation svg')).toBeNull();
   });
@@ -851,7 +850,9 @@ describe('JobsPage React feature', () => {
     expect(getLive).toHaveBeenCalledTimes(1);
     expect(getMetrics).toHaveBeenCalledTimes(1);
     expect(host.querySelector('#job-panel-sutMetrics')?.textContent).toContain('READY');
-    expect([...host.querySelectorAll('#job-panel-sutMetrics select')[2]!.querySelectorAll('option')].map(option => (option as HTMLOptionElement).value)).toContain('all');
+    const rangeSelect = Array.from(host.querySelectorAll<HTMLSelectElement>('#job-panel-sutMetrics select'))
+      .find(select => select.parentElement?.textContent?.includes('Range'));
+    expect([...rangeSelect!.options].map(option => option.value)).toContain('all');
     await advance(60_000);
     expect(getLive).toHaveBeenCalledTimes(1);
     expect(getMetrics).toHaveBeenCalledTimes(1);
@@ -1053,15 +1054,49 @@ describe('JobsPage React feature', () => {
     await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={false} hidden={false} />));
     await advance();
     const panel = host.querySelector('#job-panel-sutMetrics')!;
-    const rangeSelect = panel.querySelectorAll('select')[2] as HTMLSelectElement;
+    const rangeSelect = Array.from(panel.querySelectorAll<HTMLSelectElement>('select'))
+      .find(select => select.parentElement?.textContent?.includes('Range'))!;
     await act(async () => {
       rangeSelect.value = '15m';
       rangeSelect.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
-    expect(panel.textContent).toContain('Min5 bytes');
+    expect([...panel.querySelectorAll('.att-sut-metric-series-summary tbody td')].map(cell => cell.textContent)).toContain('5 bytes');
     expect(panel.textContent).toContain('1 samples across 1 series');
     expect(getMetrics).toHaveBeenCalledTimes(1);
+  });
+
+  it('filters archived observations by pinned Metric Group and shows their instance labels', async () => {
+    const query = (id: string) => ({ id, profile: 'flat-host', profilePath: 'flat-host', sourceId: 'prom', metricSourceId: 'host-metrics',
+      targetId: 'sut-1', metricId: id, title: id.toUpperCase(), unit: 'count' });
+    const response: SutMetricsJobResponse = {
+      state: 'READY', collection: { state: 'READY', queries: [query('cpu'), query('sessions')] },
+      groups: [{ schemaVersion: 'att-sut-metrics-group/v1', id: 'app', title: 'App Servers', order: 1, display: 'table',
+        match: { labels: { role: 'app' } }, groupBy: ['instance'] }],
+      items: [
+        { ...query('cpu'), groupView: { assignments: [{ observationId: 'cpu-app-1', groupId: 'app', title: 'App Servers', groupBy: { instance: 'app-1' } }] },
+          normalizedObservationsV2: [{ observationId: 'cpu-app-1', identity: { metricId: 'cpu', labels: { instance: 'app-1', role: 'app' } } }],
+          series: [{ labels: { instance: 'app-1', role: 'app' }, samples: [{ timestamp: new Date().toISOString(), timestampEpochMs: Date.now(), value: 5 }] }] },
+        { ...query('sessions'), groupView: { assignments: [], unassigned: [{ metricId: 'sessions', reason: 'UNASSIGNED' }],
+          diagnostics: [{ code: 'METRIC_GROUP_UNASSIGNED', message: 'No group matched.' }] },
+          series: [{ labels: { instance: 'db-1', role: 'db' }, samples: [{ timestamp: new Date().toISOString(), timestampEpochMs: Date.now(), value: 2 }] }] },
+      ],
+    };
+    const api = makeApi({ getJobSutMetrics: vi.fn(async () => response) });
+    await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={false} hidden={false} />));
+    await advance();
+
+    const panel = host.querySelector('#job-panel-sutMetrics')!;
+    const groupSelect = Array.from(panel.querySelectorAll('label')).find(label => label.textContent?.includes('Metric Group'))?.querySelector('select')!;
+    await act(async () => {
+      groupSelect.value = 'app';
+      groupSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(panel.querySelectorAll('article.att-sut-metric-card')).toHaveLength(1);
+    expect(panel.textContent).toContain('App Servers');
+    expect(panel.textContent).toContain('instance=app-1');
+    expect(panel.textContent).not.toContain('sessions');
+    expect(panel.querySelector('.att-sut-metric-series-summary')?.textContent).toContain('5 count');
   });
 
   it('plots multiple SUT series on one timestamp scale and leaves scrape gaps visible', async () => {

@@ -33,7 +33,31 @@
           "revision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
           "connectionKind": { "enum": ["DATA_SOURCE", "DBHELPER", "PACKAGE_TOOL", "LEGACY"] },
           "connectionId": { "type": "string", "maxLength": 120 },
-          "fetchIds": { "type": "array", "uniqueItems": true, "maxItems": 256, "items": { "type": "string", "maxLength": 120 } }
+          "fetchIds": { "type": "array", "uniqueItems": true, "maxItems": 256, "items": { "type": "string", "maxLength": 120 } },
+          "mapping": {
+            "type": "object",
+            "required": ["allowedLabels"],
+            "additionalProperties": false,
+            "properties": {
+              "allowedLabels": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 40,
+                "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+              }
+            }
+          },
+          "limits": {
+            "type": "object",
+            "required": ["maxRows", "maxSeries", "maxSamples", "maxArtifactBytes"],
+            "additionalProperties": false,
+            "properties": {
+              "maxRows": { "type": "integer", "minimum": 1, "maximum": 4096 },
+              "maxSeries": { "type": "integer", "minimum": 1, "maximum": 512 },
+              "maxSamples": { "type": "integer", "minimum": 1, "maximum": 250000 },
+              "maxArtifactBytes": { "type": "integer", "minimum": 1024, "maximum": 67108864 }
+            }
+          }
         }
       }
     },
@@ -186,7 +210,14 @@
     },
     "execution": { "type": "object" },
     "thresholds": { "type": "array", "maxItems": 64, "items": { "type": "object" } },
-    "budgets": { "type": "object" },
+    "budgets": {
+      "type": "object",
+      "properties": {
+        "maxFetches": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "maxObservations": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "maxArtifactBytes": { "type": "integer", "minimum": 1024, "maximum": 67108864 }
+      }
+    },
     "executionPayloadSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "compatibility": {
       "type": "object",
@@ -200,6 +231,7 @@
     }
   },
   "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
     "group": {
       "type": "object",
       "required": ["schemaVersion", "id", "title", "order", "match", "groupBy", "display"],

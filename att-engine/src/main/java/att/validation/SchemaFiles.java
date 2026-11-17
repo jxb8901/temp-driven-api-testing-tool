@@ -142,6 +142,12 @@ public final class SchemaFiles {
         // Detail-series v1 and v2 can coexist in one LOAD report: v2 is the
         // shared-payload envelope while v1 remains valid for separately scoped files.
         if (version.startsWith("att-load-detail-series/v")) return version;
+        // SUT Metrics v1 sidecars and snapshots remain readable alongside the
+        // v2 Job contracts. Profiles v1 also remains the base/composite adapter
+        // while v2 is the new flat profile. These are intentionally concurrent
+        // wire contracts, not competing current versions of one descriptor.
+        if (version.matches("att-sut-metrics-(?:observation|profile|snapshot)/v[0-9]+(?:\\.[0-9]+)*"))
+            return version;
         int marker = version.lastIndexOf("/v");
         return marker < 0 ? version : version.substring(0, marker);
     }

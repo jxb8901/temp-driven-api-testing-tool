@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShellContext, type AppShellContextValue } from './AppShell';
 import { api } from './api';
 import { SettingsPage } from './SettingsPage';
+import { ApiError } from './types';
 
 let host: HTMLDivElement;
 let root: Root;
@@ -23,7 +24,10 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.spyOn(api, 'getServerMetrics').mockResolvedValue({ jobStorage: null } as never);
   vi.spyOn(api, 'listSutMetricSources').mockResolvedValue({ items: [] });
+  vi.spyOn(api, 'listSutMetricAcquisitions').mockResolvedValue({ items: [] });
+  vi.spyOn(api, 'listSutMetricGroups').mockResolvedValue({ items: [] });
   vi.spyOn(api, 'listSutMetricProfiles').mockResolvedValue({ items: [] });
+  vi.spyOn(api, 'testSutMetricSource').mockResolvedValue({});
   vi.spyOn(api, 'previewSutMetricBinding').mockResolvedValue({ valid: true, queries: [] });
 });
 
@@ -86,5 +90,133 @@ describe('SettingsPage SUT Metrics profiles', () => {
       collections: [expect.objectContaining({ profile: 'business-metrics', scope: 'job' })],
     }));
     expect(host.textContent).toContain('Observability binding is valid.');
+  });
+
+  it('previews and saves Metric Sources and Groups without running source calls', async () => {
+    const saveSource = vi.spyOn(api, 'saveSutMetricAcquisition').mockResolvedValue({});
+    const saveGroup = vi.spyOn(api, 'saveSutMetricGroup').mockResolvedValue({});
+    await act(async () => {
+      root.render(<AppShellContext.Provider value={context}><SettingsPage /></AppShellContext.Provider>);
+      await Promise.resolve();
+    });
+
+    const previewSource = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Preview fetch and outputs');
+    await act(async () => { previewSource!.click(); });
+    expect(host.textContent).toContain('no SQL, Tool, or Prometheus query ran');
+    expect(host.textContent).toContain('estimatedLogicalFetches');
+
+    const saveSourceButton = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Save Metric Source');
+    await act(async () => { saveSourceButton!.click(); await Promise.resolve(); });
+    expect(saveSource).toHaveBeenCalledWith(expect.objectContaining({
+      schemaVersion: 'att-sut-metrics-metric-source/v1', id: 'host-metrics',
+    }));
+
+    const previewGroup = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Preview group rules');
+    await act(async () => { previewGroup!.click(); });
+    expect(host.textContent).toContain('match');
+    expect(host.textContent).toContain('groupBy');
+    const saveGroupButton = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Save Metric Group');
+    await act(async () => { saveGroupButton!.click(); await Promise.resolve(); });
+    expect(saveGroup).toHaveBeenCalledWith(expect.objectContaining({
+      schemaVersion: 'att-sut-metrics-group/v1', id: 'host-servers',
+    }));
+    expect(api.testSutMetricSource).not.toHaveBeenCalled();
+  });
+
+  it('binds a Metric Source to a registered Data Source revision without inspecting it', async () => {
+    vi.spyOn(api, 'listSutMetricSources').mockResolvedValue({ items: [{ id: 'prom-main', name: 'Main Prometheus', revision: 'a'.repeat(64) }] });
+    await act(async () => {
+      root.render(<AppShellContext.Provider value={context}><SettingsPage /></AppShellContext.Provider>);
+      await Promise.resolve();
+    });
+    const selector = Array.from(host.querySelectorAll('select')).find(select => select.getAttribute('aria-label') === null
+      && select.parentElement?.textContent?.includes('Registered Prometheus Data Source'))!;
+    await act(async () => {
+      selector.value = 'prom-main'; selector.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const metricSourceEditor = Array.from(host.querySelectorAll('textarea')).find(editor => editor.value.includes('att-sut-metrics-metric-source/v1'))!;
+    expect(JSON.parse(metricSourceEditor.value)).toMatchObject({
+      connection: { kind: 'DATA_SOURCE', id: 'prom-main', revision: 'a'.repeat(64) },
+    });
+    expect(api.testSutMetricSource).not.toHaveBeenCalled();
+  });
+
+  it('shows server schema diagnostics beside the affected JSON editor', async () => {
+    vi.spyOn(api, 'listSutMetricGroups').mockResolvedValue({ items: [{ id: 'host-servers', title: 'Host servers' }] });
+    vi.spyOn(api, 'saveSutMetricGroup').mockRejectedValue(new ApiError('Metric Group definition has field validation errors', {
+      status: 400, code: 'ATT-SUT-METRICS-INVALID-DEFINITION', diagnostics: [
+        { code: 'ATT-SUT-METRICS-FIELD-INVALID', path: '/match/metricIds', message: 'must contain at least one item', keyword: 'minItems' },
+      ],
+    }));
+    await act(async () => {
+      root.render(<AppShellContext.Provider value={context}><SettingsPage /></AppShellContext.Provider>);
+      await Promise.resolve();
+    });
+
+    const save = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Save Metric Group');
+    await act(async () => { save!.click(); await Promise.resolve(); await Promise.resolve(); });
+
+    const groupEditor = Array.from(host.querySelectorAll('textarea')).find(editor => editor.value.includes('att-sut-metrics-group/v1'))!;
+    expect(groupEditor.getAttribute('aria-invalid')).toBe('true');
+    expect(groupEditor.getAttribute('aria-describedby')).toBe('sut-metric-group-errors');
+    expect(host.querySelector('#sut-metric-group-errors')?.textContent).toContain('/match/metricIds');
+    expect(host.querySelector('#sut-metric-group-errors')?.textContent).toContain('must contain at least one item');
+  });
+
+  it('selects only catalogued Metric Sources and Groups in a Flat Profile', async () => {
+    const saveProfile = vi.spyOn(api, 'saveSutMetricProfile').mockResolvedValue({});
+    vi.spyOn(api, 'listSutMetricAcquisitions').mockResolvedValue({ items: [{ id: 'host-metrics', name: 'Host metrics' }] });
+    vi.spyOn(api, 'listSutMetricGroups').mockResolvedValue({ items: [{ id: 'host-servers', title: 'Host servers' }, { id: 'db-servers', title: 'Database servers' }] });
+    vi.spyOn(api, 'listSutMetricProfiles').mockResolvedValue({ items: [{
+      schemaVersion: 'att-sut-metrics-profile/v2', id: 'flat-host', name: 'Flat host profile',
+      metricSourceIds: ['host-metrics'], groupIds: ['host-servers'],
+      allowedBindings: { environments: ['SIT'], targets: [{ type: 'target', id: 'sut-1' }], tenants: [], parameters: {} },
+      budgets: { maxFetches: 1, maxObservations: 64, maxArtifactBytes: 1048576 }, revision: 'c'.repeat(64),
+    }] });
+    await act(async () => {
+      root.render(<AppShellContext.Provider value={context}><SettingsPage /></AppShellContext.Provider>);
+      await Promise.resolve();
+    });
+    const profileRow = Array.from(host.querySelectorAll('li')).find(item => item.textContent?.includes('flat-host'))!;
+    const editProfile = Array.from(profileRow.querySelectorAll('button')).find(button => button.textContent === 'Edit JSON');
+    await act(async () => { editProfile!.click(); });
+    const groupCheckbox = Array.from(host.querySelectorAll<HTMLInputElement>('.att-sut-profile-selection input[type="checkbox"]'))
+      .find(input => input.parentElement?.textContent?.includes('db-servers'))!;
+    await act(async () => { groupCheckbox.click(); });
+    const profileEditor = Array.from(host.querySelectorAll('textarea')).find(editor => editor.value.includes('att-sut-metrics-profile/v2'))!;
+    const definition = JSON.parse(profileEditor.value) as { metricSourceIds: string[]; groupIds: string[] };
+    expect(definition.metricSourceIds).toEqual(['host-metrics']);
+    expect(definition.groupIds).toEqual(['host-servers', 'db-servers']);
+    expect(definition).not.toHaveProperty('revision');
+
+    const saveFlatProfile = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Save Flat Profile');
+    await act(async () => { saveFlatProfile!.click(); await Promise.resolve(); });
+    expect(saveProfile).toHaveBeenCalled();
+    expect(saveProfile.mock.calls[0]?.[0]).not.toHaveProperty('revision');
+  });
+
+  it('recomputes an existing Metric Source revision when saving edits', async () => {
+    const saveSource = vi.spyOn(api, 'saveSutMetricAcquisition').mockResolvedValue({});
+    vi.spyOn(api, 'listSutMetricAcquisitions').mockResolvedValue({ items: [{
+      schemaVersion: 'att-sut-metrics-metric-source/v1', id: 'host-metrics', name: 'Host metrics',
+      connection: { kind: 'DATA_SOURCE', id: 'prom-main', revision: 'b'.repeat(64) },
+      fetch: { id: 'host-series', mode: 'prometheus-range', query: 'up', parameters: {}, sampling: 'range', step: '15s' },
+      mapping: { allowedLabels: ['instance'], outputs: [{ id: 'cpu', title: 'CPU', unit: 'percent', kind: 'gauge', metricName: 'up' }] },
+      limits: { maxRows: 64, maxSeries: 16, maxSamples: 1000, maxArtifactBytes: 1048576 }, revision: 'a'.repeat(64),
+    }] });
+    await act(async () => {
+      root.render(<AppShellContext.Provider value={context}><SettingsPage /></AppShellContext.Provider>);
+      await Promise.resolve();
+    });
+
+    const sourceRow = Array.from(host.querySelectorAll('li')).find(item => item.textContent?.includes('host-metrics'))!;
+    const editSource = Array.from(sourceRow.querySelectorAll('button')).find(button => button.textContent === 'Edit JSON');
+    await act(async () => { editSource!.click(); });
+    const saveMetricSource = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Save Metric Source');
+    await act(async () => { saveMetricSource!.click(); await Promise.resolve(); });
+
+    expect(saveSource).toHaveBeenCalled();
+    expect(saveSource.mock.calls[0]?.[0]).not.toHaveProperty('revision');
+    expect(saveSource.mock.calls[0]?.[0].connection).toEqual({ kind: 'DATA_SOURCE', id: 'prom-main', revision: 'b'.repeat(64) });
   });
 });

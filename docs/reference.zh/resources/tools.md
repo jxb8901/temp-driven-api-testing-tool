@@ -161,7 +161,7 @@ Call-backed Tool 使用相同的聲明參數理念，但保留 typed value，並
 
 `type` 宣告 configured Tool 完整解析後的值 contract，可用 `any`、`string`、`integer`、`long`、`decimal`、`boolean`、`enum`、`bytes`、`map` 或 `list`。未填 `type` 時仍按 `any` 處理，維持舊 descriptor 行為。數值和 Boolean scalar 接受原生值或去除前後空白的數字／`true`／`false` 字串；enum 必須符合其中一個 `enumValues`；`bytes` 接受 byte array 或 UTF-8 String。`string`、`map` 和 `list` 要求原生值型別吻合。這些檢查在巢狀 expression 完整解析後執行；靜態安全可求值的內容會在 validation 檢查，其餘在 runtime 檢查。
 
-## Package-local Tool Group（ATT 4.2.10）
+## Package-local Tool Group
 
 Standalone Tool 使用 `tools/<id>.yaml` 與 `att-tool/v1`；Grouped Tools 則由固定名稱 `tools/<folder>/tool-group.yaml`（`att-tool-group/v3.0`）明確列出每個 `att-tool/v1` 成員，不遞迴掃描。
 

@@ -41,7 +41,8 @@
         },
         "sampling": { "enum": ["range", "afterDrain", "steadyWindow"] },
         "window": { "enum": ["steady", "afterDrain"] },
-        "step": { "type": "string", "maxLength": 16 }
+        "step": { "type": "string", "maxLength": 16 },
+        "sideEffectsAcknowledged": { "type": "boolean" }
       },
       "oneOf": [
         {
@@ -132,6 +133,14 @@
     {
       "if": { "properties": { "fetch": { "properties": { "mode": { "const": "package-tool" } } } } },
       "then": { "properties": { "connection": { "properties": { "kind": { "const": "PACKAGE_TOOL" } } } } }
+    },
+    {
+      "if": { "properties": { "fetch": { "properties": { "mode": { "enum": ["dbhelper-query", "package-tool"] } } } } },
+      "then": { "properties": { "mapping": { "properties": { "outputs": { "items": { "required": ["column"] } } } } } }
+    },
+    {
+      "if": { "properties": { "fetch": { "properties": { "mode": { "const": "prometheus-range" } } } } },
+      "then": { "properties": { "mapping": { "properties": { "outputs": { "items": { "not": { "required": ["column"] } } } } } } }
     }
   ]
 }

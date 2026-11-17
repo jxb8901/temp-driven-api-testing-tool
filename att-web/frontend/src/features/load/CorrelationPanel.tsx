@@ -352,6 +352,7 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   const [queryError, setQueryError] = useState('');
   const [queryLoading, setQueryLoading] = useState(false);
   const [profileFilter, setProfileFilter] = useState('');
+  const [groupFilter, setGroupFilter] = useState('');
   const [targetFilter, setTargetFilter] = useState('');
   const [metricFilter, setMetricFilter] = useState('');
   const [queryFilter, setQueryFilter] = useState('');
@@ -396,7 +397,7 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
       if (!api.getJobSutMetrics) { setCollectionError('This Server client does not support archived SUT Metrics.'); setCollectionLoading(false); return; }
       const controller = new AbortController(); request = controller; setCollectionLoading(true); setCollectionError('');
       try {
-        const value = await api.getJobSutMetrics(jobId, { offset: 0, limit: 1, signal: controller.signal });
+        const value = await api.getJobSutMetrics(jobId, { offset: 0, limit: 16, signal: controller.signal });
         if (disposed || controller.signal.aborted) return;
         setCollection(value);
         const state = String(value.collection?.state || value.state || 'UNKNOWN');
@@ -422,12 +423,21 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   const collectionState = String(collection?.collection?.state || collection?.state || (collectionLoading ? 'LOADING' : 'UNKNOWN'));
   const collectionRevision = collection?.collection?.updatedAt || collection?.collection?.createdAt || '';
   const queries = collection?.collection?.queries || [];
+  const groupOptions = collection?.groups || [];
+  const selectedGroup = groupOptions.find(group => group.id === groupFilter) || null;
   const profileOptions = [...new Set(queries.map(query => query.profilePath || query.profile || '').filter(Boolean))].sort();
   const targetOptions = [...new Set(queries.filter(query => !profileFilter || (query.profilePath || query.profile) === profileFilter).map(query => query.targetId).filter(Boolean))].sort();
   const metricOptions = [...new Map<string, string>(queries.filter(query => (!profileFilter || (query.profilePath || query.profile) === profileFilter)
     && (!targetFilter || query.targetId === targetFilter)).map(query => [query.metricId, query.title || query.metricId] as const)).entries()];
-  const filteredQueries = queries.filter(query => (!profileFilter || (query.profilePath || query.profile) === profileFilter)
-    && (!targetFilter || query.targetId === targetFilter) && (!metricFilter || query.metricId === metricFilter));
+  const filteredQueries = queries.filter(query => {
+    const matchesGroup = !selectedGroup
+      || (!selectedGroup.match?.metricIds?.length || selectedGroup.match.metricIds.includes(query.metricId))
+        && (!selectedGroup.match?.sourceIds?.length || selectedGroup.match.sourceIds.includes(query.metricSourceId || query.sourceId || ''));
+    return (!profileFilter || (query.profilePath || query.profile) === profileFilter)
+      && (!targetFilter || query.targetId === targetFilter)
+      && (!metricFilter || query.metricId === metricFilter)
+      && matchesGroup;
+  });
   const selectedQuery = filteredQueries.find(query => query.id === queryFilter) || filteredQueries[0] || null;
   useEffect(() => { if (selectedQuery?.id !== queryFilter) setQueryFilter(selectedQuery?.id || ''); }, [selectedQuery?.id, queryFilter]);
 
@@ -450,7 +460,19 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
     const items = queryResponse?.items || [];
     return items.find(item => item.queryId === selectedQuery?.id || item.id === selectedQuery?.id) || null;
   }, [queryResponse, queryResponseId, selectedQuery?.id]);
-  const instances = (selectedItem?.series || []).map((series, index) => ({ series, index, key: labelsKey(series, index), label: instanceLabel(series, index) }));
+  const assignedObservationIds = selectedGroup
+    ? new Set((selectedItem?.groupView?.assignments || []).filter(assignment => assignment.groupId === selectedGroup.id)
+      .map(assignment => assignment.observationId))
+    : null;
+  const observationLabels = new Map((selectedItem?.normalizedObservationsV2 || [])
+    .filter(observation => typeof observation.observationId === 'string')
+    .map(observation => [observation.observationId!, observation.identity?.labels || {}] as const));
+  const instances = (selectedItem?.series || []).map((series, index) => ({ series, index, key: labelsKey(series, index), label: instanceLabel(series, index) }))
+    .filter(instance => !assignedObservationIds || [...assignedObservationIds].some(id => {
+      const labels = observationLabels.get(id);
+      return labels && JSON.stringify(Object.entries(labels).sort(([left], [right]) => left.localeCompare(right)))
+        === JSON.stringify(Object.entries(instance.series.labels || {}).sort(([left], [right]) => left.localeCompare(right)));
+    }));
   useEffect(() => { if (!instances.some(instance => instance.key === instanceFilter)) setInstanceFilter(instances[0]?.key || ''); }, [selectedItem, instanceFilter]);
   const selectedInstance = instances.find(instance => instance.key === instanceFilter) || null;
   const selectedCoverage = record(selectedInstance?.series.coverage) || record(selectedItem?.coverage) || {};
@@ -516,7 +538,7 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
 
   return <section className="att-job-panel att-correlation-panel" role="tabpanel" id="job-panel-correlation" aria-labelledby="job-tab-correlation" hidden={hidden} tabIndex={0}>
     <h2>Correlation</h2>
-    <p className="att-help">Compare one native ATT LOAD series with one selected SUT metric series on the same UTC time axis. This read-only view does not change either Metrics tab or the LOAD result.</p>
+    <p className="att-help">Compare one native ATT LOAD series with one selected SUT metric series on the same UTC time axis. Metric Groups only navigate and filter existing observations; they do not make causal claims or change either Metrics tab or the LOAD result.</p>
     {activeLoad && <p role="status">Correlation is available after LOAD finishes and its authorized report archive is ready.</p>}
     {!activeLoad && availability === 'loading' && <p role="status" aria-busy="true">Loading authorized LOAD phase series…</p>}
     {!activeLoad && ['PENDING', 'ARCHIVING'].includes(availability) && <p role="status">The correlation series will be available when the LOAD report archive is ready.</p>}
@@ -544,6 +566,9 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
         <label>SUT profile<select value={profileFilter} onChange={event => { setProfileFilter(event.target.value); setTargetFilter(''); setMetricFilter(''); setQueryFilter(''); }}>
           <option value="">All profiles</option>{profileOptions.map(profile => <option key={profile} value={profile}>{profile}</option>)}
         </select></label>
+        {groupOptions.length > 0 && <label>SUT Metric Group<select value={groupFilter} onChange={event => { setGroupFilter(event.target.value); setMetricFilter(''); setQueryFilter(''); }}>
+          <option value="">All groups</option>{groupOptions.map(group => <option key={group.id} value={group.id}>{group.title}</option>)}
+        </select></label>}
         <label>SUT target<select value={targetFilter} onChange={event => { setTargetFilter(event.target.value); setMetricFilter(''); setQueryFilter(''); }}>
           <option value="">All SUT targets</option>{targetOptions.map(target => <option key={target} value={target}>{target}</option>)}
         </select></label>
@@ -587,6 +612,10 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
           <div><dt>Profile</dt><dd>{selectedItem?.profilePath || selectedItem?.profile || selectedQuery.profilePath || selectedQuery.profile || 'Not reported'}</dd></div>
           <div><dt>SUT metric and unit</dt><dd>{selectedItem?.title || selectedQuery.title || selectedQuery.metricId} · {selectedItem?.unit || selectedQuery.unit || 'unit not reported'}</dd></div>
           <div><dt>SUT metric kind</dt><dd>{sutMetricKind || 'Not reported'}</dd></div>
+          {selectedGroup && <div><dt>Metric Group</dt><dd>{(selectedItem?.groupView?.assignments || []).filter(assignment => assignment.groupId === selectedGroup.id)
+            .map(assignment => `${assignment.title || selectedGroup.title}${Object.keys(assignment.groupBy || {}).length
+              ? ` · ${Object.entries(assignment.groupBy || {}).map(([key, value]) => `${key}=${value}`).join(', ')}` : ''}`)
+            .join('; ') || `No observation in this query was assigned to ${selectedGroup.title}.`}</dd></div>}
           <div><dt>SUT query freshness (entire collected series)</dt><dd>{sutFreshness}</dd></div>
           <div><dt>Collection resolution</dt><dd>{collection?.collection?.step || 'Not reported'}</dd></div>
           <div><dt>Collection manifest updated</dt><dd>{utcDateTime(collection?.collection?.updatedAt || collection?.collection?.createdAt)}</dd></div>

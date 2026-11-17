@@ -1,7 +1,7 @@
-# ATT v4.2.10 使用手冊與參考
+# ATT v4.3.1 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.2.10
+Version: 4.3.1
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -101,7 +101,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [API paths](#api-paths)
 - [CLI 參考](#cli-參考)
   - [選擇命令](#選擇命令)
-  - [ATT 4.2.10 的可用性](#att-4210-的可用性)
+  - [ATT 4.3.1 的可用性](#att-431-的可用性)
   - [編譯 source checkout](#編譯-source-checkout)
   - [按任務查閱語法、option 和範例](#按任務查閱語法option-和範例)
   - [透過 CLI 使用 ATT Server](#透過-cli-使用-att-server)
@@ -959,9 +959,9 @@ RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型�
 
 ### 統一 RUN 與排程
 
-<!-- att-doc-status: current release=4.2.10 -->
+<!-- att-doc-status: current release=4.3.1 -->
 
-ATT 4.2.10 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+ATT 4.3.1 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
 
 已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](interfaces/cli/vnext-proposed.zh.md)。
 
@@ -1048,7 +1048,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 
 #### 遷移既有用戶端
 
-| 既有介面 | 4.2.10 對應 |
+| 既有介面 | 4.3.1 對應 |
 |---|---|
 | CLI `validate`、`run`、`report` | 保留驗證、Case RUN、報告命令 |
 | CLI `--suite`、`--suite-dir`、`--case`、`--tag`、`--rerun-failed` | 保留選取行為；Server 批次使用 `selection` |
@@ -1057,7 +1057,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 | `/load-schedules`、`jobType:load/debug` | 共用 scheduler 相容路徑，保留既有定義 |
 | `/jobs/...`、既有 Studio 工作/結果連結 | 保留共用 history、取消、事件與結果路徑 |
 
-4.2.10 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.6；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
+此 release 不會移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.6；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
 
 持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
 
@@ -1088,9 +1088,9 @@ Schedule 使用一般已驗證 draft 合約。RUN Debug 仍使用 `options.debug
 
 ### Run 模式
 
-<!-- att-doc-status: current release=4.2.10 -->
+<!-- att-doc-status: current release=4.3.1 -->
 
-ATT 4.2.10 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
+ATT 4.3.1 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
 
 ```sh
 ./att.sh run --all
@@ -1942,7 +1942,7 @@ Call-backed Tool 使用相同的聲明參數理念，但保留 typed value，並
 
 `type` 宣告 configured Tool 完整解析後的值 contract，可用 `any`、`string`、`integer`、`long`、`decimal`、`boolean`、`enum`、`bytes`、`map` 或 `list`。未填 `type` 時仍按 `any` 處理，維持舊 descriptor 行為。數值和 Boolean scalar 接受原生值或去除前後空白的數字／`true`／`false` 字串；enum 必須符合其中一個 `enumValues`；`bytes` 接受 byte array 或 UTF-8 String。`string`、`map` 和 `list` 要求原生值型別吻合。這些檢查在巢狀 expression 完整解析後執行；靜態安全可求值的內容會在 validation 檢查，其餘在 runtime 檢查。
 
-#### Package-local Tool Group（ATT 4.2.10）
+#### Package-local Tool Group
 
 Standalone Tool 使用 `tools/<id>.yaml` 與 `att-tool/v1`；Grouped Tools 則由固定名稱 `tools/<folder>/tool-group.yaml`（`att-tool-group/v3.0`）明確列出每個 `att-tool/v1` 成員，不遞迴掃描。
 
@@ -2601,7 +2601,7 @@ environments:
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-SIT 與 UAT Config 只保留共用 Helper/Environment 綁定；`invokePaymentApi` 與 `sample.getAcDate` 改由所選 Package 提供。升級至 4.2.10 時必須明確遷移舊式全局 Tools。
+SIT 與 UAT Config 只保留共用 Helper/Environment 綁定；`invokePaymentApi` 與 `sample.getAcDate` 改由所選 Package 提供。升級至目前的 ATT runtime 前，必須明確遷移舊式全局 Tools。
 
 SIT 與 UAT 的 DBHelper 都保持 `id: orders`，只改變 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改變 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可復制例子見 [`examples/environments/README.md`](../examples/environments/README.md)。
 
@@ -2993,7 +2993,7 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 
 ## CLI 參考
 
-<!-- att-doc-status: current release=4.2.10 -->
+<!-- att-doc-status: current release=4.3.1 -->
 
 
 ### 選擇命令
@@ -3013,11 +3013,11 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
-上表列出 ATT 4.2.10 CLI command。獨立的 vNext proposal 尚未包含在此 release。
+上表列出 ATT 4.3.1 CLI command。獨立的 vNext proposal 尚未包含在此 release。
 
-### ATT 4.2.10 的可用性
+### ATT 4.3.1 的可用性
 
-本 Reference 說明 ATT 4.2.10 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
+本 Reference 說明 ATT 4.3.1 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
 
 ### 編譯 source checkout
 
@@ -3436,7 +3436,7 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 
 ### 離線 SUT Metrics 報告
 
-完成的 LOAD 若有 SUT collection evidence，可另外發佈獨立版本化的離線報告 archive。Publisher 會驗證來源 manifest 及每個 observation sidecar，逐 byte 保留原本 sealed native archive，並以不可變 snapshot 發佈。`att-load-report-extension/v2` manifest 會引用 source-neutral 的 `att-load-offline-observations/v1` record。`att-load-offline-observation/v1` entries 記錄 source、metric、profile、target、UTC window、phase、單位、quality 和 checksum；time-series 會提供有界 chart preview，business metric 則提供單一數值、scope、不可變 Workload/mix identity、call-group metadata、mapping quality 及 unmatched-row count。Unavailable value 會保留為 null。完整 sidecar 仍使用 normalized `att-sut-metrics-observation/v1` contract。Partial 或 unavailable source data 會明確標示，不會改變 native Job result。
+完成的 LOAD 若有 SUT collection evidence，可另外發佈獨立版本化的離線報告 archive。Publisher 會驗證來源 manifest 及每個 observation sidecar，逐 byte 保留原本 sealed native archive，並以不可變 snapshot 發佈。`att-load-report-extension/v2` manifest 會引用 source-neutral 的 `att-load-offline-observations/v1` record。`att-load-offline-observation/v1` entries 記錄 source、metric、profile、target、UTC window、phase、單位、quality 和 checksum；time-series 會提供有界 chart preview，business metric 則提供單一數值、scope、不可變 Workload/mix identity、call-group metadata、mapping quality 及 unmatched-row count。若 Job snapshot 固定了 Metric Groups，報告亦會包括其定義，以及每個 observation 的 `groupView` assignment、labels 和 `groupBy` values。靜態 Group index 會連結每個已分組 instance 與其 metric observation；unassigned 和 ambiguous observations 仍會連同 diagnostics 列出。此 index 只提供導覽 metadata，不會重新查詢或改寫 source observations。Group 欄位為 optional，因此舊報告 archive 仍相容。Unavailable value 會保留為 null；完整 sidecar 使用 normalized `att-sut-metrics-observation/v1` 和 v2 forms。Partial 或 unavailable source data 會明確標示，不會改變 native Job result。
 
 報告可在沒有 network access 時使用，並採用 restrictive Content Security Policy。報告不會評估 performance threshold。如有獨立版本化的 `att-load-verdict/v1` record，報告只顯示其 evaluation state 與 evidence reference，不會重新計算 verdict。只有在驗證發佈成功後，才可透過 authenticated Job download route 取得 archive。
 
@@ -3528,7 +3528,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.2.10",
+  "attVersion": "4.3.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -3567,7 +3567,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.10-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.10-server.tar.gz`，以及 source archive `att-4.2.10-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
+`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.3.1-local.tar.gz`、包含 WAR 和部署指南的 `att-4.3.1-server.tar.gz`，以及 source archive `att-4.3.1-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
 
 ### Runtime dependencies
 
@@ -3630,9 +3630,15 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | SUT Metrics Data Source | att-sut-metrics-source/v1 |
 | SUT Metrics Profile | att-sut-metrics-profile/v1 |
 | SUT Metrics Job snapshot | att-sut-metrics-snapshot/v1 |
+| SUT Metric Source acquisition and output mapping | att-sut-metrics-metric-source/v1 |
+| SUT logical Metric Group | att-sut-metrics-group/v1 |
+| SUT flat Metrics Profile | att-sut-metrics-profile/v2 |
+| SUT Metrics Job snapshot | att-sut-metrics-snapshot/v2 |
+| Server-private SUT Metrics execution payload | att-sut-metrics-execution-payload/v2 |
 | SUT Metrics collection manifest | att-sut-metrics-manifest/v1 |
 | 同一檔案內的 SUT Metrics Manifest 完整性歷程 | att-sut-metrics-manifest-integrity/v1 |
 | SUT Metrics normalized observation | att-sut-metrics-observation/v1 |
+| SUT Metrics normalized observation | att-sut-metrics-observation/v2 |
 | SUT Metrics series sidecar | att-sut-metrics-series/v1 |
 | SUT Metrics threshold evaluation record | att-sut-threshold-evaluation/v1 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
@@ -3647,7 +3653,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 
 本次調整的 resource/config schema 舊版本位於 `schemas/history/`，除非嵌入的 Engine registry 登錄且支援，否則僅供歷史參考，不是 active execution contract。Unsupported version 會在 validation 失敗並提供 migration guidance。Repository `schemas/catalog.yaml` 僅為 build input；runtime 唯一權威來源是版本相符 ATT Engine JAR 內嵌 registry。Runtime 會從 classpath 讀取 schema files，並可在 private per-user temporary directory 建立經驗證、以內容 SHA-256 定位的相容快取。快取會保留目前及緊接上一版 registry 供 rollback；只有取得排他 OS lock 並確認沒有 Worker 使用後，才會刪除較舊版本。若清理中斷，下一次初始化會重試。不完整或遭竄改的快取只會在確認沒有程序持有 use lease 後重建；若仍有程序使用，validation 會 fail closed，並於 Worker 結束後重試。Validation revision 會綁定 Engine/registry identity、Package files、shared config files 及選定 Environment；Worker 處理請求前會驗證 Server 傳入的 registry identity。`ATT_HOME/schemas/` 及 package-local `schemas/` 不是 runtime 來源，也不能覆寫 registry。Package validation 會驗證 Engine 登錄的 schema resources；封存 schema 不會自動成為可用的 runtime contract。
 
-上表中的 SUT Metrics source schema 屬於 active Engine registry。離線報告 metadata 及外部提供的 verdict record 使用 `schemas/api/` 下的獨立 Server contracts，不屬於 Engine execution registry。詳見[離線 SUT Metrics 報告](reference.zh/results-reports-evidence.md)。
+上表中的 SUT Metrics Data Source schema 仍是 registered connection 定義。新的 [Metric Source schema](../schemas/att-sut-metrics-metric-source-v1.schema.json) (`att-sut-metrics-metric-source/v1`) 定義一次 acquisition 及其 declared output mapping，不會另外登錄 Data Source、DBHelper 或 Package Tool。Server 私有的 [SUT Metrics execution payload schema](../schemas/att-sut-metrics-execution-payload-v2.schema.json) (`att-sut-metrics-execution-payload/v2`) 將可執行 fetch/call data 綁定至不可變 Job snapshot，且不會透過 API 或 report 回傳。離線報告 metadata 及外部提供的 verdict record 使用 `schemas/api/` 下的獨立 Server contracts，不屬於 Engine execution registry。詳見[離線 SUT Metrics 報告](reference.zh/results-reports-evidence.md)。
 
 <!-- att-docs:historical -->
 Load v1.6 及 MQHelper v1.2 是 loader 支援的相容歷史 schema；既有 scalar routing 及 legacy evidence policy 維持。新路由／配額欄位須使用 active schema。
@@ -3810,7 +3816,7 @@ Timeout range、evidence sample bound、result limit、pool size 等 operational
 
 #### 為什麼 `Att.bat` 會要求 Maven，或者為什麼 `.sh` Tool 在 windows 上失敗？
 
-在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.10.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
+在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.3.1.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
 
 啟動器讓 ATT 自身跨平臺；它無法翻譯外部 Tool 可執行文件。請為 Windows 配置 `.bat`、`.cmd`、PowerShell 腳本（需要顯式 `powershell`/`pwsh` argv）或原生可執行文件，而不是 POSIX-only `.sh`。PATH 校驗遵循 Windows `PATHEXT`，因此如 `pwsh` 這類名稱可解析為 `pwsh.exe`。維護多平臺版本時，請保持參數契約和 stdout 輸出格式一致。
 

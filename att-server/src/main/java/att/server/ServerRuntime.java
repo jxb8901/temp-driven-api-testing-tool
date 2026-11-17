@@ -1393,10 +1393,16 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> sutMetricSources(String principal,boolean admin) { return sutMetrics.listSources(principal,admin); }
     Map<String,Object> sutMetricProfiles(String principal,boolean admin) { return sutMetrics.listProfiles(principal,admin); }
+    Map<String,Object> sutMetricSourcesV2(String principal,boolean admin) { return sutMetrics.listMetricSources(principal,admin); }
+    Map<String,Object> sutMetricGroups() { return sutMetrics.listGroups(); }
     Map<String,Object> saveSutMetricSource(Map<String,Object> value) throws Exception { return sutMetrics.upsertSource(value); }
     Map<String,Object> saveSutMetricProfile(Map<String,Object> value) throws Exception { return sutMetrics.upsertProfile(value); }
+    Map<String,Object> saveSutMetricSourceV2(Map<String,Object> value) throws Exception { return sutMetrics.upsertMetricSource(value); }
+    Map<String,Object> saveSutMetricGroup(Map<String,Object> value) throws Exception { return sutMetrics.upsertGroup(value); }
     Map<String,Object> deleteSutMetricSource(String id) throws Exception { return sutMetrics.deleteSource(id); }
     Map<String,Object> deleteSutMetricProfile(String id) throws Exception { return sutMetrics.deleteProfile(id); }
+    Map<String,Object> deleteSutMetricSourceV2(String id) throws Exception { return sutMetrics.deleteMetricSource(id); }
+    Map<String,Object> deleteSutMetricGroup(String id) throws Exception { return sutMetrics.deleteGroup(id); }
     Map<String,Object> testSutMetricSource(String id) throws Exception { return sutMetrics.testSource(id); }
     Map<String,Object> previewSutMetrics(Map<String,Object> observability,String principal,boolean admin) {
         return sutMetrics.previewResolution(observability,principal,admin);
