@@ -37,6 +37,91 @@ afterEach(async () => {
 });
 
 describe('SettingsPage SUT Metrics profiles', () => {
+  it('shows config-backed catalogs as read-only while keeping view, test, and safe previews available', async () => {
+    const configuration = { origin: 'server.runtimeConfigPath', state: 'LAST_KNOWN_GOOD', configured: true,
+      revision: 'a'.repeat(64), message: 'The latest Runtime Config revision was rejected at config.sutMetrics.' };
+    vi.spyOn(api, 'listSutMetricSources').mockResolvedValue({ configuration, items: [{
+      id: 'prom-main', name: 'Main Prometheus', revision: 'b'.repeat(64), provider: 'PROMETHEUS',
+      url: 'http://localhost:9090', apiPath: '/api/v1', readers: ['alice'], readRoles: [], limits: {},
+    }] });
+    vi.spyOn(api, 'listSutMetricAcquisitions').mockResolvedValue({ configuration, items: [{
+      schemaVersion: 'att-sut-metrics-metric-source/v1', id: 'host-metrics', name: 'Host metrics',
+      connection: { kind: 'DATA_SOURCE', id: 'prom-main', revision: 'b'.repeat(64) },
+      fetch: { mode: 'prometheus-range', query: 'up' },
+      mapping: { labels: { retain: ['instance'] }, outputs: [{ id: 'up', title: 'Up', unit: 'count', kind: 'gauge', metricName: 'up' }] },
+      limits: { maxRows: 10, maxSeries: 10, maxSamples: 100, maxArtifactBytes: 1024 },
+    }] });
+    vi.spyOn(api, 'listSutMetricGroups').mockResolvedValue({ configuration, items: [{
+      schemaVersion: 'att-sut-metrics-group/v1', id: 'runtime', title: 'Runtime', order: 1,
+      match: { metricIds: ['up'] }, groupBy: ['instance'], display: 'chart',
+    }] });
+    vi.spyOn(api, 'listSutMetricProfiles').mockResolvedValue({ configuration, items: [{
+      schemaVersion: 'att-sut-metrics-profile/v2', id: 'host-profile', name: 'Host profile',
+      metricSourceIds: ['host-metrics'], groupIds: ['runtime'], allowedBindings: { environments: [], targets: [], tenants: [], parameters: {} },
+      budgets: { maxFetches: 1, maxObservations: 10, maxArtifactBytes: 1024 },
+    }] });
+    const testSource = vi.spyOn(api, 'testSutMetricSource').mockResolvedValue({});
+
+    await act(async () => {
+      root.render(<AppShellContext.Provider value={context}><SettingsPage /></AppShellContext.Provider>);
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[aria-label="SUT Metrics configuration is read-only"]')).not.toBeNull();
+    expect(host.textContent).toContain('Update the Runtime Config (config.yaml) through the approved deployment process.');
+    expect(host.textContent).toContain('The active catalog is the last known good revision.');
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('The latest Runtime Config revision was rejected');
+    const buttonTexts = Array.from(host.querySelectorAll('button')).map(button => button.textContent?.trim());
+    for (const hiddenMutation of ['Save Data Source', 'Save Metric Source', 'Save Metric Group', 'Save Metrics Profile',
+      'Save Business Metrics Profile', 'Save Flat Profile', 'Delete', 'New Metric Group draft', 'New Flat Profile draft']) {
+      expect(buttonTexts).not.toContain(hiddenMutation);
+    }
+    expect(buttonTexts).not.toContain('Edit JSON');
+    expect(buttonTexts).toContain('View JSON');
+    expect(buttonTexts).toContain('Test');
+    expect(buttonTexts).toContain('Preview fetch and outputs');
+    expect(buttonTexts).toContain('Preview group rules');
+    expect(buttonTexts).toContain('Preview sources and fetch count');
+    expect(buttonTexts).toContain('Validate binding');
+    expect(Array.from(host.querySelectorAll<HTMLInputElement>('.att-sut-profile-selection input[type="checkbox"]'))
+      .every(input => input.disabled)).toBe(true);
+    expect(Array.from(host.querySelectorAll<HTMLTextAreaElement>('textarea')).filter(editor =>
+      editor.value.includes('att-sut-metrics-')).every(editor => editor.readOnly)).toBe(true);
+
+    const sourceRow = Array.from(host.querySelectorAll('li')).find(item => item.textContent?.includes('prom-main'))!;
+    const testButton = Array.from(sourceRow.querySelectorAll('button')).find(button => button.textContent === 'Test')!;
+    await act(async () => { testButton.click(); await Promise.resolve(); });
+    expect(testSource).toHaveBeenCalledWith('prom-main');
+    const metricSourceRow = Array.from(host.querySelectorAll('li')).find(item => item.textContent?.includes('host-metrics'))!;
+    const viewMetricSource = Array.from(metricSourceRow.querySelectorAll('button')).find(button => button.textContent === 'View JSON')!;
+    await act(async () => { viewMetricSource.click(); });
+    const dataSourceSelect = Array.from(host.querySelectorAll('select')).find(select =>
+      select.parentElement?.textContent?.includes('Registered Prometheus Data Source'));
+    expect(dataSourceSelect?.disabled).toBe(true);
+    const preview = Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Preview fetch and outputs')!;
+    await act(async () => { preview.click(); });
+    expect(host.textContent).toContain('Preview inspected the mapping only; no SQL, Tool, or Prometheus query ran.');
+    expect(testSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps legacy catalog editing available when responses omit configuration metadata', async () => {
+    vi.spyOn(api, 'listSutMetricSources').mockResolvedValue({ items: [{ id: 'legacy-source', name: 'Legacy source' }] });
+    await act(async () => {
+      root.render(<AppShellContext.Provider value={context}><SettingsPage /></AppShellContext.Provider>);
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[aria-label="SUT Metrics configuration is read-only"]')).toBeNull();
+    const buttonTexts = Array.from(host.querySelectorAll('button')).map(button => button.textContent?.trim());
+    expect(buttonTexts).toContain('Edit JSON');
+    expect(buttonTexts).toContain('Delete');
+    expect(buttonTexts).toContain('Save Data Source');
+    expect(buttonTexts).toContain('Save Metric Source');
+    expect(buttonTexts).toContain('Save Metric Group');
+    expect(Array.from(host.querySelectorAll<HTMLTextAreaElement>('textarea')).some(editor =>
+      editor.value.includes('att-sut-metrics-source/v1') && !editor.readOnly)).toBe(true);
+  });
+
   it('adds and saves a business mapping in its own profile while preserving the default PromQL profile', async () => {
     const save = vi.spyOn(api, 'saveSutMetricProfile').mockResolvedValue({});
     await act(async () => {

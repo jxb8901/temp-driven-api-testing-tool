@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -151,11 +152,69 @@ class SutMetricsConfigCatalogTest {
             Files.writeString(config, invalidCandidate);
             publishValidRevisionDuringSecretResolution.set(true);
 
-            assertEquals("Prometheus", source(service).get("name"),
-                    "The invalid revision must leave the last-known-good catalog active.");
+            assertEquals("Prometheus Newer", source(service).get("name"),
+                    "A valid revision published while the invalid candidate is being validated must be loaded immediately.");
             assertEquals("Prometheus Newer", source(service).get("name"),
                     "A newer valid revision written during validation must be reconsidered immediately.");
             assertEquals("ACTIVE", configuration(service).get("state"));
+        }
+    }
+
+    @Test void slowerValidRevisionCannotReplaceNewerRevisionOrRestoreRevokedReader() throws Exception {
+        Path config = configPath();
+        writeConfig(config, "Prometheus Base");
+        AtomicBoolean pauseNextActivation = new AtomicBoolean();
+        AtomicReference<String> pausedRevision = new AtomicReference<>();
+        java.util.concurrent.CountDownLatch candidateReady = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch releaseCandidate = new java.util.concurrent.CountDownLatch(1);
+        java.util.function.Consumer<String> activationBarrier = revision -> {
+            if (!pauseNextActivation.compareAndSet(true, false)) return;
+            pausedRevision.set(revision);
+            candidateReady.countDown();
+            try {
+                if (!releaseCandidate.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                    throw new IllegalStateException("Timed out waiting to release the stale Runtime Config candidate.");
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while pausing the Runtime Config candidate.", interrupted);
+            }
+        };
+
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("revision-fence-data"),
+                Set.of("prometheus.example.invalid"), ref -> "test-secret", ignored -> { }, ignored -> { },
+                config, temp, activationBarrier)) {
+            String candidateA = configText("Prometheus Candidate A")
+                    .replace("readers: ['*']", "readers: ['alice', 'bob']");
+            String candidateB = configText("Prometheus Candidate B")
+                    .replace("readers: ['*']", "readers: ['alice']");
+            Files.writeString(config, candidateA);
+            pauseNextActivation.set(true);
+
+            java.util.concurrent.ExecutorService callers = java.util.concurrent.Executors.newFixedThreadPool(2);
+            try {
+                java.util.concurrent.Future<Map<String, Object>> slowerRead = callers.submit(() -> service.listSources("admin", true));
+                assertTrue(candidateReady.await(5, java.util.concurrent.TimeUnit.SECONDS),
+                        "The first valid revision must pause after validation and before activation.");
+                assertEquals(sha256(candidateA.getBytes(StandardCharsets.UTF_8)), pausedRevision.get());
+
+                Files.writeString(config, candidateB);
+                java.util.concurrent.Future<Map<String, Object>> newerRead = callers.submit(() -> service.listSources("alice", false));
+                Map<String, Object> newerResponse = newerRead.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                assertEquals("Prometheus Candidate B", firstSourceName(newerResponse));
+
+                releaseCandidate.countDown();
+                Map<String, Object> slowerResponse = slowerRead.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                assertEquals("Prometheus Candidate B", firstSourceName(slowerResponse),
+                        "The stale successful candidate must be discarded after a newer revision activates.");
+                assertEquals("Prometheus Candidate B", source(service).get("name"));
+                assertEquals(sha256(candidateB.getBytes(StandardCharsets.UTF_8)), configuration(service).get("revision"));
+                assertEquals(1, ((List<?>) service.listSources("alice", false).get("items")).size());
+                assertTrue(((List<?>) service.listSources("bob", false).get("items")).isEmpty(),
+                        "A slower earlier revision must not restore a reader revoked by the newer Runtime Config.");
+            } finally {
+                releaseCandidate.countDown();
+                callers.shutdownNow();
+            }
         }
     }
 
@@ -196,6 +255,15 @@ class SutMetricsConfigCatalogTest {
                 + "  groups:\n"
                 + "    - {schemaVersion: att-sut-metrics-group/v1, id: runtime, title: Runtime, order: 1, match: {metricIds: [service-up]}, groupBy: [instance], display: chart}\n"
                 + "  profiles: []\n";
+    }
+
+    private static String firstSourceName(Map<String, Object> response) {
+        Map<?, ?> first = (Map<?, ?>) ((List<?>) response.get("items")).get(0);
+        return String.valueOf(first.get("name"));
+    }
+
+    private static String sha256(byte[] bytes) throws Exception {
+        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
     }
 
     private String dbHelperConfig(String allowedEnvironment) {

@@ -170,6 +170,7 @@ final class SutMetricsService implements AutoCloseable {
     private final Function<String, String> secretResolver;
     private final Consumer<Path> afterManifestPublication;
     private final Consumer<String> beforeThresholdEvidenceRead;
+    private final Consumer<String> beforeRuntimeConfigActivation;
     private volatile BusinessCallExecutor businessCallExecutor;
     private volatile BusinessCallLimits businessCallLimits = new BusinessCallLimits(MAX_BUSINESS_CALLS_PER_JOB,
             MAX_BUSINESS_CALL_TOTAL_MILLIS, MAX_BUSINESS_CALL_MILLIS);
@@ -237,6 +238,14 @@ final class SutMetricsService implements AutoCloseable {
     SutMetricsService(Path dataDir, Set<String> allowedPrometheusHosts, Function<String, String> secretResolver,
                       Consumer<Path> afterManifestPublication, Consumer<String> beforeThresholdEvidenceRead,
                       Path runtimeConfigPath, Path runtimeConfigRoot) throws Exception {
+        this(dataDir, allowedPrometheusHosts, secretResolver, afterManifestPublication, beforeThresholdEvidenceRead,
+                runtimeConfigPath, runtimeConfigRoot, ignored -> { });
+    }
+
+    SutMetricsService(Path dataDir, Set<String> allowedPrometheusHosts, Function<String, String> secretResolver,
+                      Consumer<Path> afterManifestPublication, Consumer<String> beforeThresholdEvidenceRead,
+                      Path runtimeConfigPath, Path runtimeConfigRoot,
+                      Consumer<String> beforeRuntimeConfigActivation) throws Exception {
         this.dataDir = dataDir.toAbsolutePath().normalize();
         this.jobsRoot = this.dataDir.resolve("jobs");
         this.catalogPath = this.dataDir.resolve("sut-metrics-catalog.json");
@@ -248,6 +257,7 @@ final class SutMetricsService implements AutoCloseable {
         this.secretResolver = java.util.Objects.requireNonNull(secretResolver, "secretResolver");
         this.afterManifestPublication = java.util.Objects.requireNonNull(afterManifestPublication, "afterManifestPublication");
         this.beforeThresholdEvidenceRead = java.util.Objects.requireNonNull(beforeThresholdEvidenceRead, "beforeThresholdEvidenceRead");
+        this.beforeRuntimeConfigActivation = java.util.Objects.requireNonNull(beforeRuntimeConfigActivation, "beforeRuntimeConfigActivation");
         if (this.runtimeConfigPath == null) loadCatalog();
         else refreshConfiguredCatalog(true);
         recoverInterruptedCollections();
@@ -256,34 +266,85 @@ final class SutMetricsService implements AutoCloseable {
 
     private void refreshConfiguredCatalog(boolean startup) {
         if (runtimeConfigPath == null) return;
-        String attemptedRevision = null;
-        try {
-            byte[] bytes = readRuntimeConfigBytes();
-            attemptedRevision = sha256(bytes);
-            String revision = attemptedRevision;
-            if (revision.equals(activeRuntimeConfigRevision)) {
-                rejectedRuntimeConfigRevision = null;
-                runtimeConfigDiagnosticCode = null;
-                runtimeConfigDiagnosticField = null;
+        while (true) {
+            String attemptedRevision = null;
+            try {
+                byte[] bytes = readRuntimeConfigBytes();
+                attemptedRevision = sha256(bytes);
+                String revision = attemptedRevision;
+                synchronized (catalogLock) {
+                    if (revision.equals(activeRuntimeConfigRevision)) {
+                        rejectedRuntimeConfigRevision = null;
+                        runtimeConfigDiagnosticCode = null;
+                        runtimeConfigDiagnosticField = null;
+                        return;
+                    }
+                    if (revision.equals(rejectedRuntimeConfigRevision)) return;
+                }
+                att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration loaded = new att.config.FrameworkConfigLoader()
+                        .loadSutMetricsRuntimeConfiguration(runtimeConfigPath, runtimeConfigRoot,
+                                new String(bytes, StandardCharsets.UTF_8));
+                beforeRuntimeConfigActivation.accept(revision);
+                synchronized (catalogLock) {
+                    // Validation is intentionally outside the catalog lock. Fence its result against
+                    // the on-disk revision at the serialized activation point so a stale successful
+                    // candidate cannot replace a newer revision that finished activating first.
+                    byte[] currentBytes;
+                    try { currentBytes = readRuntimeConfigBytes(); }
+                    catch (Exception unavailable) {
+                        if (activeRuntimeConfigRevision == null || startup)
+                            throw new IllegalStateException("The selected Runtime Config is unavailable.", unavailable);
+                        runtimeConfigDiagnosticCode = "SUT_METRICS_CONFIG_REJECTED";
+                        runtimeConfigDiagnosticField = safeConfigDiagnosticField(unavailable);
+                        rejectedRuntimeConfigRevision = null;
+                        return;
+                    }
+                    if (!revision.equals(sha256(currentBytes))) continue;
+                    if (revision.equals(activeRuntimeConfigRevision)) {
+                        rejectedRuntimeConfigRevision = null;
+                        runtimeConfigDiagnosticCode = null;
+                        runtimeConfigDiagnosticField = null;
+                        return;
+                    }
+                    activateConfiguredCatalog(loaded.definitions(), revision, loaded.environments());
+                    activeRuntimeConfigRevision = revision;
+                    rejectedRuntimeConfigRevision = null;
+                    runtimeConfigDiagnosticCode = null;
+                    runtimeConfigDiagnosticField = null;
+                }
+                return;
+            } catch (Exception invalid) {
+                synchronized (catalogLock) {
+                    // Fence failure diagnostics too: an old rejected candidate must not overwrite
+                    // the status or retry marker for a newer file revision that is already active.
+                    if (attemptedRevision != null) {
+                        byte[] currentBytes;
+                        try {
+                            currentBytes = readRuntimeConfigBytes();
+                        } catch (Exception unavailable) {
+                            if (activeRuntimeConfigRevision == null || startup)
+                                throw new IllegalStateException("The selected Runtime Config is unavailable.", unavailable);
+                            runtimeConfigDiagnosticCode = "SUT_METRICS_CONFIG_REJECTED";
+                            runtimeConfigDiagnosticField = safeConfigDiagnosticField(unavailable);
+                            rejectedRuntimeConfigRevision = null;
+                            return;
+                        }
+                        if (!attemptedRevision.equals(sha256(currentBytes))) continue;
+                    }
+                    if (attemptedRevision != null && attemptedRevision.equals(activeRuntimeConfigRevision)) {
+                        rejectedRuntimeConfigRevision = null;
+                        runtimeConfigDiagnosticCode = null;
+                        runtimeConfigDiagnosticField = null;
+                        return;
+                    }
+                    if (activeRuntimeConfigRevision == null || startup)
+                        throw new IllegalStateException("The selected Runtime Config did not produce a valid SUT Metrics catalog.", invalid);
+                    runtimeConfigDiagnosticCode = "SUT_METRICS_CONFIG_REJECTED";
+                    runtimeConfigDiagnosticField = safeConfigDiagnosticField(invalid);
+                    rejectedRuntimeConfigRevision = attemptedRevision;
+                }
                 return;
             }
-            if (revision.equals(rejectedRuntimeConfigRevision)) return;
-            att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration loaded = new att.config.FrameworkConfigLoader()
-                    .loadSutMetricsRuntimeConfiguration(runtimeConfigPath, runtimeConfigRoot,
-                            new String(bytes, StandardCharsets.UTF_8));
-            activateConfiguredCatalog(loaded.definitions(), revision, loaded.environments());
-            activeRuntimeConfigRevision = revision;
-            rejectedRuntimeConfigRevision = null;
-            runtimeConfigDiagnosticCode = null;
-            runtimeConfigDiagnosticField = null;
-        } catch (Exception invalid) {
-            if (activeRuntimeConfigRevision == null || startup)
-                throw new IllegalStateException("The selected Runtime Config did not produce a valid SUT Metrics catalog.", invalid);
-            runtimeConfigDiagnosticCode = "SUT_METRICS_CONFIG_REJECTED";
-            runtimeConfigDiagnosticField = safeConfigDiagnosticField(invalid);
-            // Reject only the exact candidate that failed validation. The file may
-            // already contain a newer revision by the time validation throws.
-            rejectedRuntimeConfigRevision = attemptedRevision;
         }
     }
 

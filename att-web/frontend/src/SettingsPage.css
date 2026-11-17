@@ -66,6 +66,8 @@
   .att-auth-password-control { grid-template-columns: minmax(0, 1fr); }
 }
 .att-sut-metrics-admin section { margin-top: 1.25rem; }
+.att-sut-read-only-banner { margin: .75rem 0; padding: .8rem 1rem; border: 1px solid var(--att-color-border); border-left: 4px solid var(--att-color-primary); border-radius: var(--att-radius-control); background: var(--att-color-surface-muted, #f1f3f6); color: var(--att-color-text); }
+.att-sut-read-only-banner p { margin: .35rem 0 0; max-width: 760px; line-height: 1.5; }
 .att-sut-metrics-admin textarea { box-sizing: border-box; display: block; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; margin: .35rem 0 .65rem; max-width: 100%; min-height: 8rem; width: 100%; }
 .att-sut-catalog-list { list-style: none; margin: .5rem 0; padding: 0; }
 .att-sut-catalog-list li { align-items: center; border-bottom: 1px solid var(--att-border, #ccd2d9); display: flex; flex-wrap: wrap; gap: .5rem; padding: .5rem 0; }
