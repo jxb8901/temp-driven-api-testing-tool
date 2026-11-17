@@ -122,6 +122,52 @@ describe('SettingsPage SUT Metrics profiles', () => {
       editor.value.includes('att-sut-metrics-source/v1') && !editor.readOnly)).toBe(true);
   });
 
+  it('keeps catalog editing unavailable until delayed metadata confirms a legacy writable catalog', async () => {
+    let resolveSources!: (value: { items: Array<Record<string, unknown>> }) => void;
+    vi.spyOn(api, 'listSutMetricSources').mockReturnValue(new Promise(resolve => { resolveSources = resolve; }) as never);
+    await act(async () => {
+      root.render(<AppShellContext.Provider value={context}><SettingsPage /></AppShellContext.Provider>);
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Editing stays unavailable until the server confirms whether this catalog is writable.');
+    let buttonTexts = Array.from(host.querySelectorAll('button')).map(button => button.textContent?.trim());
+    expect(buttonTexts).not.toContain('Save Data Source');
+    expect(buttonTexts).not.toContain('New Metric Source draft');
+    expect(buttonTexts).not.toContain('Edit JSON');
+    expect(Array.from(host.querySelectorAll<HTMLTextAreaElement>('.att-sut-metrics-admin textarea'))
+      .filter(editor => editor.value.includes('att-sut-metrics-')).every(editor => editor.readOnly)).toBe(true);
+
+    await act(async () => {
+      resolveSources({ items: [{ id: 'legacy-source', name: 'Legacy source' }] });
+      await Promise.resolve();
+    });
+
+    buttonTexts = Array.from(host.querySelectorAll('button')).map(button => button.textContent?.trim());
+    expect(buttonTexts).toContain('Save Data Source');
+    expect(buttonTexts).toContain('Edit JSON');
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('keeps catalog editing unavailable when catalog metadata cannot be loaded', async () => {
+    vi.spyOn(api, 'listSutMetricSources').mockRejectedValue(new Error('SUT Metrics catalog is unavailable.'));
+    await act(async () => {
+      root.render(<AppShellContext.Provider value={context}><SettingsPage /></AppShellContext.Provider>);
+      await new Promise(resolve => window.setTimeout(resolve, 0));
+    });
+
+    expect(host.textContent).toContain('The SUT Metrics catalog status could not be confirmed. Editing is disabled');
+    const buttonTexts = Array.from(host.querySelectorAll('button')).map(button => button.textContent?.trim());
+    expect(buttonTexts).not.toContain('Save Data Source');
+    expect(buttonTexts).not.toContain('Save Metric Source');
+    expect(buttonTexts).not.toContain('Save Metric Group');
+    expect(buttonTexts).not.toContain('Delete');
+    expect(buttonTexts).not.toContain('New Flat Profile draft');
+    expect(buttonTexts).not.toContain('Edit JSON');
+    expect(Array.from(host.querySelectorAll<HTMLTextAreaElement>('.att-sut-metrics-admin textarea'))
+      .filter(editor => editor.value.includes('att-sut-metrics-')).every(editor => editor.readOnly)).toBe(true);
+  });
+
   it('adds and saves a business mapping in its own profile while preserving the default PromQL profile', async () => {
     const save = vi.spyOn(api, 'saveSutMetricProfile').mockResolvedValue({});
     await act(async () => {
