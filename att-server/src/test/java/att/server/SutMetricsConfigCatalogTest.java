@@ -11,6 +11,7 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -126,6 +127,35 @@ class SutMetricsConfigCatalogTest {
             assertEquals("LAST_KNOWN_GOOD", rejectedSecret.get("state"));
             assertEquals("config.sutMetrics.dataSources[].auth.secretRef", rejectedSecret.get("field"));
             assertFalse(rejectedSecret.toString().contains("MISSING"));
+        }
+    }
+
+    @Test void rejectedCandidateDoesNotMaskAValidRevisionPublishedDuringValidation() throws Exception {
+        Path config = configPath();
+        Path data = temp.resolve("concurrent-validation-data");
+        writeConfig(config, "Prometheus");
+        AtomicBoolean publishValidRevisionDuringSecretResolution = new AtomicBoolean();
+        java.util.function.Function<String, String> resolver = reference -> {
+            if ("MISSING".equals(reference) && publishValidRevisionDuringSecretResolution.compareAndSet(true, false)) {
+                try { Files.writeString(config, configText("Prometheus Newer")); }
+                catch (Exception failure) { throw new IllegalStateException(failure); }
+                return null;
+            }
+            return "test-secret";
+        };
+
+        try (SutMetricsService service = new SutMetricsService(data,
+                Set.of("prometheus.example.invalid"), resolver, ignored -> { }, ignored -> { }, config, temp)) {
+            String invalidCandidate = configText("Prometheus Invalid")
+                    .replace("readers: ['*']", "readers: ['*']\n      auth: {mode: BEARER, secretRef: MISSING}");
+            Files.writeString(config, invalidCandidate);
+            publishValidRevisionDuringSecretResolution.set(true);
+
+            assertEquals("Prometheus", source(service).get("name"),
+                    "The invalid revision must leave the last-known-good catalog active.");
+            assertEquals("Prometheus Newer", source(service).get("name"),
+                    "A newer valid revision written during validation must be reconsidered immediately.");
+            assertEquals("ACTIVE", configuration(service).get("state"));
         }
     }
 

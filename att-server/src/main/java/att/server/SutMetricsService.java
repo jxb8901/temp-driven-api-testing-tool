@@ -256,9 +256,11 @@ final class SutMetricsService implements AutoCloseable {
 
     private void refreshConfiguredCatalog(boolean startup) {
         if (runtimeConfigPath == null) return;
+        String attemptedRevision = null;
         try {
             byte[] bytes = readRuntimeConfigBytes();
-            String revision = sha256(bytes);
+            attemptedRevision = sha256(bytes);
+            String revision = attemptedRevision;
             if (revision.equals(activeRuntimeConfigRevision)) {
                 rejectedRuntimeConfigRevision = null;
                 runtimeConfigDiagnosticCode = null;
@@ -279,8 +281,9 @@ final class SutMetricsService implements AutoCloseable {
                 throw new IllegalStateException("The selected Runtime Config did not produce a valid SUT Metrics catalog.", invalid);
             runtimeConfigDiagnosticCode = "SUT_METRICS_CONFIG_REJECTED";
             runtimeConfigDiagnosticField = safeConfigDiagnosticField(invalid);
-            try { rejectedRuntimeConfigRevision = sha256(readRuntimeConfigBytes()); }
-            catch (Exception unavailable) { rejectedRuntimeConfigRevision = null; }
+            // Reject only the exact candidate that failed validation. The file may
+            // already contain a newer revision by the time validation throws.
+            rejectedRuntimeConfigRevision = attemptedRevision;
         }
     }
 

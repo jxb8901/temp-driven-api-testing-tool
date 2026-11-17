@@ -146,9 +146,12 @@ public final class SutMetricsCatalogMigration {
             } else if (rowKind == RowKind.DATA_SOURCE) {
                 row.remove("revision");
                 removeNulls(row);
+            } else if (rowKind == RowKind.PROFILE) {
+                if ("att-sut-metrics-profile/v2".equals(row.get("schemaVersion"))) row.remove("revision");
+                // The legacy v1 API persisted absent parameter defaults as null, but the
+                // versioned profile contract represents an absent default by omission.
+                removeNulls(row);
             }
-            else if (rowKind == RowKind.PROFILE && "att-sut-metrics-profile/v2".equals(row.get("schemaVersion")))
-                row.remove("revision");
             normalized.add(row);
         }
         return normalized;

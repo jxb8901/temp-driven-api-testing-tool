@@ -31,6 +31,7 @@ class SutMetricsCatalogMigrationTest {
         assertTrue(text.contains("groups:"));
         assertTrue(text.contains("profiles:"));
         assertFalse(text.contains("createdAt:"));
+        assertFalse(text.contains("default: null"), "An absent legacy parameter default must be omitted in the strict v2.14 config.");
         assertFalse(text.contains("revision: bbbbbbbbb"));
         assertFalse(text.contains("password:"));
         assertArrayEquals(originalConfig, Files.readAllBytes(config));
@@ -117,6 +118,7 @@ class SutMetricsCatalogMigrationTest {
                 + "\"match\":{\"metricIds\":[\"service-up\"]},\"groupBy\":[\"instance\"],\"display\":\"chart\"}],"
                 + "\"profiles\":["
                 + "{\"schemaVersion\":\"att-sut-metrics-profile/v1\",\"id\":\"legacy-base\",\"name\":\"Legacy base\",\"kind\":\"base\",\"category\":\"app\","
+                + "\"params\":{\"instance\":{\"type\":\"text\",\"required\":false,\"default\":null}},"
                 + "\"metrics\":[{\"id\":\"legacy-cpu\",\"title\":\"CPU\",\"unit\":\"percent\",\"kind\":\"gauge\",\"query\":\"up\"}]},"
                 + "{\"schemaVersion\":\"att-sut-metrics-profile/v1\",\"id\":\"legacy-composite\",\"name\":\"Legacy composite\",\"kind\":\"composite\",\"category\":\"app\","
                 + "\"includes\":[{\"profile\":\"legacy-base\",\"alias\":\"legacy\",\"source\":\"prom\",\"targets\":[{\"id\":\"sut-1\",\"type\":\"application\"}]}]},"
