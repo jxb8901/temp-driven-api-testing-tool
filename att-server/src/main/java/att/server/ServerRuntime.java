@@ -5555,7 +5555,7 @@ final class ServerRuntime implements AutoCloseable {
         String state=String.valueOf(pointer.getOrDefault("state","FAILED"));
         if("READY".equals(state)) {
             if(!SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY.equals(pointer.get("groupMetadataPolicy"))) {
-                refreshLoadReportV2(id);
+                refreshOldPolicyLoadReportV2(id);
                 state="BUILDING";
             } else {
                 try {
@@ -5612,7 +5612,7 @@ final class ServerRuntime implements AutoCloseable {
             String expectedSha256=nullableText(pointer.get("archiveSha256"));
             if("READY".equals(pointer.get("state"))
                     &&!SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY.equals(pointer.get("groupMetadataPolicy"))) {
-                refreshLoadReportV2(id);
+                refreshOldPolicyLoadReportV2(id);
                 throw new ArchiveUnavailableException("BUILDING");
             }
             if(!"READY".equals(pointer.get("state"))||archiveName==null||!archiveName.matches("[a-f0-9]{64}\\.zip")
@@ -5637,6 +5637,13 @@ final class ServerRuntime implements AutoCloseable {
     void refreshLoadReportV2(String id) {
         if(id==null||!JOB_ID.matcher(id).matches()||closing)return;
         scheduleLoadReportV2(id);
+    }
+
+    private void refreshOldPolicyLoadReportV2(String id) {
+        synchronized(loadReportV2ScheduleLock) {
+            if(pendingLoadReportV2Jobs.contains(id))return;
+            scheduleLoadReportV2(id);
+        }
     }
 
     private void sutMetricsManifestPublished(Path manifestPath) {
@@ -5774,7 +5781,7 @@ final class ServerRuntime implements AutoCloseable {
                 String state=String.valueOf(pointer.getOrDefault("state","PENDING"));
                 if("READY".equals(state)) {
                     if(!SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY.equals(pointer.get("groupMetadataPolicy"))) {
-                        refreshLoadReportV2(id);
+                        refreshOldPolicyLoadReportV2(id);
                         continue;
                     }
                     String currentDigest=SutMetricsOfflineReportPublisher.verdictRecordSha256(id,config.dataDir.resolve("jobs").resolve(id));

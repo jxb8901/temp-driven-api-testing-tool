@@ -221,6 +221,10 @@ class ArtifactLifecycleTest {
             assertThrows(ServerRuntime.ArchiveUnavailableException.class,
                     ()->runtime.openLoadReportV2Archive(directId,"user-a",true),
                     "The previous archive stays unavailable while the replacement is being built.");
+            java.lang.reflect.Field requestedField=ServerRuntime.class.getDeclaredField("requestedLoadReportV2Jobs");
+            requestedField.setAccessible(true);
+            assertFalse(((java.util.Set<?>)requestedField.get(runtime)).contains(directId),
+                    "Repeated status/download requests must not queue another migration rebuild while one is active.");
 
             releaseRebuild.countDown();
             awaitLoadReportGroupPolicy(runtime,directId);
