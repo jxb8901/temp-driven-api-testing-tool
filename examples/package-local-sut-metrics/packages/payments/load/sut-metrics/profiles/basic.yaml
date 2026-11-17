@@ -1,0 +1,16 @@
+schemaVersion: att-sut-metrics-profile/v2
+id: basic
+name: Basic application metrics
+metricSourceIds: [app-runtime]
+groupIds: [app-servers]
+allowedBindings:
+  environments: [SIT, UAT]
+  targets:
+    - type: template
+      id: PAYMENTS_HEALTH
+  tenants: []
+  parameters: {}
+budgets:
+  maxFetches: 1
+  maxObservations: 512
+  maxArtifactBytes: 8388608

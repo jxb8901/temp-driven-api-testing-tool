@@ -75,9 +75,11 @@ The historical `att-load-profile/v1.0` policy file is migration-only: rewrite it
 
 Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](../actions.md), [Runtime and Context Model](../runtime-context.md), [Load Mode](../execution-modes/load.md) and [Schema Matrix](schema-matrix.md).
 
-## att-config/v2.14: centralized SUT Metrics catalog
+<!-- att-docs:historical -->
+## Historical centralized SUT Metrics catalog
 
-The current global config schema is `att-config/v2.14`. It adds bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays. These are authoritative in the selected server Runtime Config. Existing `att-config/v2.13` files remain compatible when they do not declare `sutMetrics`. To migrate `data/sut-metrics-catalog.json`, follow the explicit dry-run and apply workflow in the [SUT Metrics Runtime Config migration guide](../../guides/sut-metrics-config-migration.md). The tool validates a candidate, rejects duplicate IDs and conflicting definitions, and creates digest-named backups before applying.
+Before ATT 4.3.1, global config `att-config/v2.14` could own bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays; `att-config/v2.13` files remained compatible when they did not declare `sutMetrics`. In 4.3.1, global `att-config/v2.15` keeps Data Source descriptor paths, while each Package owns its Metric Sources, Groups, and Profiles. Upgrade using the [Package-local SUT Metrics migration guide](../../guides/sut-metrics-config-migration.md). The old `data/sut-metrics-catalog.json` is not an active source for Package definitions and has no automatic dry-run/apply migration command; reconcile its entries with their owners before retiring it.
+<!-- /att-docs:historical -->
 
 
 ## Historical schema migration

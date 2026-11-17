@@ -144,7 +144,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [File arguments and case-log paths](#file-arguments-and-case-log-paths)
   - [Previous release Testdata migration](#previous-release-testdata-migration)
   - [Execution identity format migration](#execution-identity-format-migration)
-  - [att-config/v2.14: centralized SUT Metrics catalog](#att-configv214-centralized-sut-metrics-catalog)
+  - [Historical centralized SUT Metrics catalog](#historical-centralized-sut-metrics-catalog)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
   - [Global configuration migration](#global-configuration-migration)
@@ -2440,11 +2440,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.14`. Current packages use config v2.14 and Tool Group v3.0. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
+Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.15`. Current packages use config v2.15 and Tool Group v3.0. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.14
+schemaVersion: att-config/v2.15
 environment: SIT
 environments:
   SIT:
@@ -2640,9 +2640,9 @@ Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXE
 
 ### Select an environment profile
 
-`att-config/v2.14` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper lists as a whole. Package Testdata lists belong to `package.yaml`. See the resource pages and [Testdata registry and input mapping](reference/test-authoring.md) for each binding.
+`att-config/v2.15` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper lists as a whole. Package Testdata lists belong to `package.yaml`. See the resource pages and [Testdata registry and input mapping](reference/test-authoring.md) for each binding.
 
-ATT selects an environment through one common `att-config/v2.14` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT selects an environment through one common `att-config/v2.15` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -2672,7 +2672,7 @@ The common config keeps run/execution/report settings and global DB/MQ/HTTP/SSH 
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.14
+schemaVersion: att-config/v2.15
 environment: SIT                 # default profile; --env overrides it
 templates: {root: templates}
 testcase: {root: testcase}
@@ -2756,7 +2756,7 @@ The repository `schemas/catalog.yaml` is build input for the active schema regis
 ### Set package-wide options
 
 ```yaml
-schemaVersion: att-config/v2.14
+schemaVersion: att-config/v2.15
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -2790,7 +2790,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.14`; the previous schema remains compatible. The example uses the active schema. |
+| `schemaVersion` | required | Current: `att-config/v2.15`; the previous schema remains compatible. The example uses the active schema. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -2950,7 +2950,7 @@ A pattern such as `${suiteName}-${RUN_ID}.xlsx` is rejected; unknown references 
 
 ## Package Manifest
 
-Use `<PACKAGE_ROOT>/package.yaml` to give one Package its own defaults, business roots, and Testdata inventory. The optional file uses `att-package/v1`, independently of Global Configuration. The matching Engine JAR supplies the authoritative schema.
+Use `<PACKAGE_ROOT>/package.yaml` to give one Package its own defaults, business roots, Testdata inventory, and SUT Metrics inventory. The optional file uses the current `att-package/v2` schema, independently of Global Configuration. The matching Engine JAR supplies the authoritative schema.
 
 A Package ID and its filesystem root come from trusted registration or the supported Local package selection. A Manifest never registers a Package, grants access, or supplies a privileged runtime configuration. Shared profiles, Tools, and DB/MQ/HTTP/SSH Helpers remain owned by Global Configuration.
 
@@ -2959,7 +2959,7 @@ A Package ID and its filesystem root come from trusted registration or the suppo
 This example selects an existing central profile and declares two Package-owned Testdata files. Create those descriptors before validating the Package.
 
 ```yaml
-schemaVersion: att-package/v1
+schemaVersion: att-package/v2
 metadata:
   name: Payments
   description: Payment regression resources
@@ -2972,12 +2972,22 @@ testdata:
   environments:
     UAT: [testdata/uat-accounts.yaml]
     PROD: []
+observability:
+  metricSources: []
+  groups: []
+  profiles: []
 defaults:
   timeoutMs: 15000
   report:
     columns: {result: Result, durationMs: Duration}
   xml: {namespaceMode: preserve}
 ```
+
+The `observability` paths are optional and list Package-owned Metric Sources, Groups, and Profiles under `load/sut-metrics/{sources,groups,profiles}/`. Empty inventories mean the Package has no SUT Metrics; they do not fall back to global definitions. See the [SUT Metrics migration guide](guides/sut-metrics-config-migration.md) for complete descriptors and shared Data Source connections.
+
+<!-- att-docs:historical -->
+Existing `att-package/v1` Manifests remain in compatibility mode and keep their legacy global SUT Metrics behavior. New or edited manifests use v2.
+<!-- /att-docs:historical -->
 
 `SIT`, `UAT`, and `PROD` must exist in the central `environments` mapping. Omitting a profile's Testdata entry inherits `descriptors`. A present list replaces that inventory completely; `[]` clears it.
 
@@ -3047,7 +3057,7 @@ Source reading uses the existing source browsing policy and structured masking. 
 
 Manifest publication fingerprints the central Runtime Config, explicitly listed Tool/Helper descriptors across its declared profiles, every candidate Testdata descriptor layer, business root bindings, and the embedded Schema Registry. It checks the fingerprint before and after validation and again at publication. It does not scan unrelated business files, archives, or unreferenced central files. The validation dependency set is bounded to 10000 distinct descriptor paths and 256 MiB of file content; these are dependency limits, not a total Package size limit. Execution and Job revisions retain their separate business dependency checks.
 
-Edited source and pending drafts participate in Studio navigation protection. Refresh and view switching stay disabled until the source is staged or explicitly discarded. A conflict requires a fresh draft. Publication records an audit intent before replacement and a completion record afterward. History stays in private Server data; the API returns revision identifiers rather than raw historical source, ordered by stored modification time newest first with an ascending digest tie-breaker. **Stage rollback** creates another candidate that must pass the same validation and review gates. Restoring pre-Manifest defaults produces a canonical empty `att-package/v1` file, as shown in review.
+Edited source and pending drafts participate in Studio navigation protection. Refresh and view switching stay disabled until the source is staged or explicitly discarded. A conflict requires a fresh draft. Publication records an audit intent before replacement and a completion record afterward. History stays in private Server data; the API returns revision identifiers rather than raw historical source, ordered by stored modification time newest first with an ascending digest tie-breaker. **Stage rollback** creates another candidate that must pass the same validation and review gates. Restoring pre-Manifest defaults produces a canonical empty `att-package/v2` file, as shown in review.
 
 The trusted deployment policy is optional and defaults to editing disabled:
 
@@ -3303,7 +3313,7 @@ This page defines target, `--input`, `--set` and `--env` syntax in the option ma
 
 ### Complete option matrix
 
-`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.14` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.15` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
 
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 
@@ -3739,8 +3749,8 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 |---|---|
 | Schedule creation | att-schedule/v2 |
 | RUN definition | att-execution/v1 |
-| Global configuration | att-config/v2.14 |
-| Package Manifest | att-package/v1 |
+| Global configuration | att-config/v2.15 |
+| Package Manifest | att-package/v2 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
 | MQHelper | att-mqhelper/v1.3 |
@@ -3870,9 +3880,11 @@ The historical `att-load-profile/v1.0` policy file is migration-only: rewrite it
 
 Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](reference/actions.md), [Runtime and Context Model](reference/runtime-context.md), [Load Mode](reference/execution-modes/load.md) and [Schema Matrix](reference/appendices/schema-matrix.md).
 
-### att-config/v2.14: centralized SUT Metrics catalog
+<!-- att-docs:historical -->
+### Historical centralized SUT Metrics catalog
 
-The current global config schema is `att-config/v2.14`. It adds bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays. These are authoritative in the selected server Runtime Config. Existing `att-config/v2.13` files remain compatible when they do not declare `sutMetrics`. To migrate `data/sut-metrics-catalog.json`, follow the explicit dry-run and apply workflow in the [SUT Metrics Runtime Config migration guide](guides/sut-metrics-config-migration.md). The tool validates a candidate, rejects duplicate IDs and conflicting definitions, and creates digest-named backups before applying.
+Before ATT 4.3.1, global config `att-config/v2.14` could own bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays; `att-config/v2.13` files remained compatible when they did not declare `sutMetrics`. In 4.3.1, global `att-config/v2.15` keeps Data Source descriptor paths, while each Package owns its Metric Sources, Groups, and Profiles. Upgrade using the [Package-local SUT Metrics migration guide](guides/sut-metrics-config-migration.md). The old `data/sut-metrics-catalog.json` is not an active source for Package definitions and has no automatic dry-run/apply migration command; reconcile its entries with their owners before retiring it.
+<!-- /att-docs:historical -->
 
 
 ### Historical schema migration

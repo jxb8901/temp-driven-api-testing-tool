@@ -103,6 +103,103 @@ class AuthenticationIntegrationTest {
             }
         } finally {try{tomcat.stop();}finally{tomcat.destroy();}}
     }
+
+    @Test void packageSutMetricsResourceDraftApiRequiresOwnerAndAcceptsManifestActivationPair() throws Exception {
+        previousAttHome=System.getProperty("att.home");Path home=createLocalRuntime();System.setProperty("att.home",home.toString());
+        Path packages=Files.createDirectories(temp.resolve("package-sut-metrics-packages"));Path pkg=Files.createDirectories(packages.resolve("owner"));
+        Files.createDirectories(pkg.resolve("templates"));Files.createDirectories(pkg.resolve("testcase"));
+        String original="schemaVersion: att-package/v2\nmetadata: {name: Owner Package}\ndefaultEnvironment: SIT\n"
+                +"observability: {metricSources: [], groups: [], profiles: []}\n";
+        Files.writeString(pkg.resolve("package.yaml"),original);
+        Path runtimeConfig=Files.createDirectories(temp.resolve("package-sut-metrics-runtime/config")).resolve("config.yaml");
+        Files.createDirectories(temp.resolve("package-sut-metrics-runtime/config/sut-metrics"));
+        Files.writeString(temp.resolve("package-sut-metrics-runtime/config/sut-metrics/prom.yaml"),
+                "schemaVersion: att-sut-metrics-source/v1\nid: prom-main\nname: Local Prometheus\n"
+                        +"url: http://localhost:9090\nreaders: [owner]\nreadRoles: [USER, ADMIN]\n");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.15\nenvironment: SIT\nenvironments:\n  SIT: {}\n"
+                +"sutMetrics:\n  dataSources: [config/sut-metrics/prom.yaml]\n");
+        Path data=temp.resolve("package-sut-metrics-data");Path config=Files.writeString(temp.resolve("package-sut-metrics-server.yaml"),
+                "server:\n  dataDir: "+yaml(data)+"\n  auth: {mode: local}\n  security: {checkCrossOrigin: true}\n"
+                +"  runtimeConfigPath: "+yaml(runtimeConfig)+"\n  inspection: {enabled: true}\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {owner: "+yaml(pkg)+"}\n");
+        System.setProperty("att.server.config",config.toString());
+        Path users=Files.writeString(temp.resolve("package-sut-metrics-users.xml"),"<tomcat-users></tomcat-users>");
+        Tomcat tomcat=start(users,appDirectory("package-sut-metrics-http"));
+        try {
+            int port=tomcat.getConnector().getLocalPort();String origin="http://localhost:"+port;HttpClient client=HttpClient.newHttpClient();
+            String password="package metrics owner secure password";
+            String bootstrap=ServerRuntime.JSON.writeValueAsString(Map.of("token",Files.readString(data.resolve("bootstrap-admin.token")).strip(),"loginId","admin","displayName","Admin","password",password));
+            assertEquals(201,send(client,port,"POST","/att/api/v1/auth/bootstrap",origin,null,bootstrap).statusCode());
+            ManifestSession admin=manifestLogin(client,port,"admin",password);
+            for(String login:List.of("owner","other")) {
+                String body=ServerRuntime.JSON.writeValueAsString(Map.of("loginId",login,"displayName",login,"password",password,"role","USER"));
+                assertEquals(201,sendWithCookie(client,port,"POST","/att/api/v1/auth/users",admin.cookie,origin,admin.csrf,body).statusCode());
+            }
+            ManifestSession owner=manifestLogin(client,port,"owner",password),other=manifestLogin(client,port,"other",password);
+            String base="/att/api/v1/packages/owner/sut-metrics";
+            HttpResponse<String> catalog=sendWithCookie(client,port,"GET",base+"/catalog",owner.cookie,null,null,null);
+            assertEquals(200,catalog.statusCode(),catalog.body());
+            JsonNode packageCatalog=ServerRuntime.JSON.readTree(catalog.body());
+            assertEquals("owner",packageCatalog.path("packageId").asText());
+            assertEquals(1,packageCatalog.path("resourceProvenance").size());
+            assertEquals("package-catalog",packageCatalog.path("resourceProvenance").path(0).path("kind").asText());
+            HttpResponse<String> source=sendWithCookie(client,port,"GET","/att/api/v1/packages/owner/package-configuration/source",owner.cookie,null,null,null);
+            assertEquals(200,source.statusCode(),source.body());
+            String manifestDigest=ServerRuntime.JSON.readTree(source.body()).path("manifestDigest").asText();
+            assertTrue(manifestDigest.matches("[a-f0-9]{64}"));
+            String candidate="schemaVersion: att-package/v2\nmetadata: {name: Owner Package}\ndefaultEnvironment: SIT\n"
+                    +"observability:\n  metricSources:\n    - load/sut-metrics/sources/cpu.yaml\n  groups: []\n  profiles: []\n";
+            String resource="schemaVersion: att-sut-metrics-metric-source/v1\nid: cpu\nname: CPU\n"
+                    +"connection: {kind: DATA_SOURCE, id: prom-main}\n"
+                    +"fetch: {id: cpu-range, mode: prometheus-range, query: up, parameters: {}, sampling: range, step: 30s}\n"
+                    +"mapping:\n  labels: {retain: [instance]}\n  outputs:\n    - {id: up, title: Up, unit: count, kind: gauge, metricName: up}\n"
+                    +"limits: {maxRows: 1024, maxSeries: 128, maxSamples: 10000, maxArtifactBytes: 1048576}\n";
+            String body=ServerRuntime.JSON.writeValueAsString(Map.of("resourcePath","load/sut-metrics/sources/cpu.yaml",
+                    "source",resource,"environment","SIT","expectedResourceDigest",sha256(""),
+                    "candidateManifestSource",candidate,"expectedManifestDigest",manifestDigest));
+            HttpResponse<String> denied=sendWithCookie(client,port,"POST",base+"/drafts",other.cookie,origin,other.csrf,body);
+            assertEquals(403,denied.statusCode(),"A different active USER may read safe catalog metadata but cannot stage raw Package source changes.");
+            assertEquals("private, no-store",denied.headers().firstValue("Cache-Control").orElse(""));
+            HttpResponse<String> unpaired=sendWithCookie(client,port,"POST",base+"/drafts",owner.cookie,origin,owner.csrf,
+                    ServerRuntime.JSON.writeValueAsString(Map.of("resourcePath","load/sut-metrics/sources/cpu.yaml","source",resource,
+                            "expectedResourceDigest",sha256(""),"candidateManifestSource",candidate)));
+            assertEquals(400,unpaired.statusCode(),unpaired.body());
+            HttpResponse<String> staged=sendWithCookie(client,port,"POST",base+"/drafts",owner.cookie,origin,owner.csrf,body);
+            assertEquals(201,staged.statusCode(),staged.body());
+            assertEquals("private, no-store",staged.headers().firstValue("Cache-Control").orElse(""));
+            JsonNode draft=ServerRuntime.JSON.readTree(staged.body());
+            assertTrue(draft.path("draftId").asText().startsWith("R"));
+            assertEquals("resource-then-manifest",draft.path("activationMode").asText());
+            assertEquals(manifestDigest,draft.path("expectedManifestDigest").asText());
+            assertTrue(draft.path("candidateManifestDigest").asText().matches("[a-f0-9]{64}"));
+            assertEquals(original,Files.readString(pkg.resolve("package.yaml")),"Staging must not activate the candidate inventory.");
+            assertFalse(Files.exists(pkg.resolve("load/sut-metrics/sources/cpu.yaml")),"Staging must not write candidate resource content.");
+            String draftId=draft.path("draftId").asText();
+            HttpResponse<String> validated=sendWithCookie(client,port,"POST",base+"/drafts/"+draftId+"/validate",owner.cookie,origin,owner.csrf,"{}");
+            assertEquals(200,validated.statusCode(),validated.body());
+            HttpResponse<String> reviewed=sendWithCookie(client,port,"POST",base+"/drafts/"+draftId+"/review",owner.cookie,origin,owner.csrf,"{}");
+            assertEquals(200,reviewed.statusCode(),reviewed.body());
+            HttpResponse<String> published=sendWithCookie(client,port,"POST",base+"/drafts/"+draftId+"/publish",owner.cookie,origin,owner.csrf,"{}");
+            assertEquals(200,published.statusCode(),published.body());
+            assertEquals("resource-then-manifest",ServerRuntime.JSON.readTree(published.body()).path("activationMode").asText());
+            assertEquals(candidate,Files.readString(pkg.resolve("package.yaml")));
+            assertEquals(resource,Files.readString(pkg.resolve("load/sut-metrics/sources/cpu.yaml")));
+            HttpResponse<String> activeCatalog=sendWithCookie(client,port,"GET",base+"/catalog?environment=SIT",owner.cookie,null,null,null);
+            assertEquals(200,activeCatalog.statusCode(),activeCatalog.body());
+            assertEquals("cpu",ServerRuntime.JSON.readTree(activeCatalog.body()).path("metricSources").path(0).path("id").asText());
+            HttpResponse<String> rawSource=sendWithCookie(client,port,"GET",base+"/resource?kind=source&id=cpu",owner.cookie,null,null,null);
+            assertEquals(200,rawSource.statusCode(),rawSource.body());
+            assertEquals(resource,ServerRuntime.JSON.readTree(rawSource.body()).path("source").asText());
+            assertEquals("private, no-store",rawSource.headers().firstValue("Cache-Control").orElse(""));
+            HttpResponse<String> peerRawSource=sendWithCookie(client,port,"GET",base+"/resource?kind=source&id=cpu",other.cookie,null,null,null);
+            assertEquals(404,peerRawSource.statusCode(),"Raw Package YAML is only visible to its registered Package owner.");
+        } finally {try{tomcat.stop();}finally{tomcat.destroy();}}
+    }
+
+    private static String sha256(String value) throws Exception {
+        byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return java.util.HexFormat.of().formatHex(digest);
+    }
     private record ManifestSession(String cookie,String csrf) { }
     private static ManifestSession manifestLogin(HttpClient client,int port,String login,String password) throws Exception {
         HttpResponse<String> response=send(client,port,"POST","/att/api/v1/auth/login","http://localhost:"+port,null,

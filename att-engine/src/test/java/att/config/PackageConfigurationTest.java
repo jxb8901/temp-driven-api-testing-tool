@@ -5,12 +5,26 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PackageConfigurationTest {
     @TempDir Path root;
+    private static final String METRIC_SOURCE = "schemaVersion: att-sut-metrics-metric-source/v1\n"
+            + "id: host-source\nname: Host metrics\nconnection: {kind: DATA_SOURCE, id: prometheus}\n"
+            + "fetch: {id: host-fetch, mode: prometheus-range, query: up, parameters: {}, sampling: range, step: 15s}\n"
+            + "mapping: {labels: {retain: [instance]}, outputs: [{id: up, title: Up, unit: count, kind: gauge, metricName: up}]}\n"
+            + "limits: {maxRows: 100, maxSeries: 10, maxSamples: 1000, maxArtifactBytes: 8192}\n";
+    private static final String METRIC_GROUP = "schemaVersion: att-sut-metrics-group/v1\n"
+            + "id: runtime\ntitle: Runtime\norder: 10\nmatch: {metricIds: [up]}\ngroupBy: [instance]\ndisplay: auto\n";
+    private static final String METRIC_PROFILE = "schemaVersion: att-sut-metrics-profile/v2\n"
+            + "id: default-profile\nname: Default\nmetricSourceIds: [host-source]\ngroupIds: [runtime]\n"
+            + "allowedBindings: {environments: [], targets: [], tenants: [], parameters: {}}\n";
+    private static final String LEGACY_COMPOSITE_PROFILE = "schemaVersion: att-sut-metrics-profile/v1\n"
+            + "id: legacy-composite\nkind: composite\ncategory: app\n"
+            + "includes: [{profile: legacy-base, source: prometheus, targets: [{id: host}]}]\n";
     private Path write(Path file, String text) throws Exception { Files.createDirectories(file.getParent()); Files.write(file, text.getBytes("UTF-8")); return file; }
     private Path global(String extra) throws Exception { return write(root.resolve("config/config.yaml"), "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments: {SIT: {}, UAT: {}}\n" + extra); }
     private FrameworkConfig load(Path config, Path pkg, String env) throws Exception { return new FrameworkConfigLoader().load(config, root, pkg, env); }
@@ -95,6 +109,147 @@ class PackageConfigurationTest {
         assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(root, "schemaVersion: att-package/v1\nresources: {templatesRoot: /private/tmp}\n"));
         Files.createSymbolicLink(root.resolve("escape"), root.getParent());
         assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(root, "schemaVersion: att-package/v1\nresources: {templatesRoot: escape/templates}\n"));
+    }
+
+    @Test void packageV2LoadsOnlyExplicitValidatedMetricInventoriesAndRoundTripsTheirPaths() throws Exception {
+        Path pkg = root.resolve("packages/v2");
+        write(pkg.resolve("load/sut-metrics/sources/host.yaml"), METRIC_SOURCE);
+        write(pkg.resolve("load/sut-metrics/groups/runtime.yaml"), METRIC_GROUP);
+        write(pkg.resolve("load/sut-metrics/profiles/default.yaml"), METRIC_PROFILE);
+        write(pkg.resolve("load/sut-metrics/sources/unlisted.yaml"), METRIC_SOURCE.replace("host-source", "unlisted-source"));
+
+        PackageConfig config = PackageConfig.parse(pkg,
+                "schemaVersion: att-package/v2\nobservability:\n"
+                        + "  metricSources: [load/sut-metrics/sources/host.yaml]\n"
+                        + "  groups: [load/sut-metrics/groups/runtime.yaml]\n"
+                        + "  profiles: [load/sut-metrics/profiles/default.yaml]\n");
+
+        assertEquals("att-package/v2", config.schemaVersion());
+        assertEquals(Collections.singleton("host-source"), config.metricSourceResources().keySet());
+        assertEquals(Collections.singleton("runtime"), config.metricGroupResources().keySet());
+        assertEquals(Collections.singleton("default-profile"), config.metricProfileResources().keySet());
+        assertTrue(config.hasMetricInventory());
+        assertEquals(pkg.resolve("load/sut-metrics/sources/host.yaml").toRealPath(),
+                config.metricSourceResources().get("host-source").canonicalPath());
+        assertEquals("load/sut-metrics/sources/host.yaml", config.metricSourceResources().get("host-source").relativePath());
+        assertTrue(config.metricSourceResources().get("host-source").digest().matches("[a-f0-9]{64}"));
+        assertEquals(Collections.singletonList("load/sut-metrics/sources/host.yaml"),
+                ((java.util.Map<?, ?>) config.declared(pkg).get("observability")).get("metricSources"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> config.metricSourceResources().put("extra", config.metricSourceResources().get("host-source")));
+        java.util.Map<String, Object> definition = config.metricSourceResources().get("host-source").definition();
+        assertThrows(UnsupportedOperationException.class, () -> ((java.util.Map) definition).put("id", "changed"));
+        java.util.Map<?, ?> mapping = (java.util.Map<?, ?>) definition.get("mapping");
+        assertThrows(UnsupportedOperationException.class, () -> ((List<?>) mapping.get("outputs")).clear());
+    }
+
+    @Test void packageV1RemainsCompatibleAndDoesNotDiscoverUnlistedMetricYaml() throws Exception {
+        Path pkg = root.resolve("packages/v1");
+        write(pkg.resolve("load/sut-metrics/sources/host.yaml"), METRIC_SOURCE);
+        PackageConfig config = PackageConfig.parse(pkg, "schemaVersion: att-package/v1\n");
+        assertEquals("att-package/v1", config.schemaVersion());
+        assertTrue(config.metricSourceResources().isEmpty());
+        assertTrue(config.metricGroupResources().isEmpty());
+        assertTrue(config.metricProfileResources().isEmpty());
+        assertFalse(config.declared(pkg).containsKey("observability"));
+        PackageConfig v2WithoutInventory = PackageConfig.parse(pkg, "schemaVersion: att-package/v2\n");
+        assertTrue(v2WithoutInventory.metricSourceResources().isEmpty());
+        assertTrue(v2WithoutInventory.metricGroupResources().isEmpty());
+        assertTrue(v2WithoutInventory.metricProfileResources().isEmpty());
+        assertFalse(v2WithoutInventory.hasMetricInventory());
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg, "metadata: {name: Legacy}\n"));
+        assertThrows(IllegalArgumentException.class,
+                () -> PackageConfig.parse(pkg, "schemaVersion: att-package/v1\nobservability: {metricSources: []}\n"));
+    }
+
+    @Test void metricInventoryRejectsWrongSubtreesMissingFilesInvalidDefinitionsAndDuplicateIds() throws Exception {
+        Path pkg = root.resolve("packages/invalid-inventory");
+        write(pkg.resolve("load/sut-metrics/sources/host.yaml"), METRIC_SOURCE);
+        write(pkg.resolve("load/sut-metrics/sources/host-copy.yaml"), METRIC_SOURCE);
+        write(pkg.resolve("load/sut-metrics/groups/runtime.yaml"), METRIC_GROUP);
+        write(pkg.resolve("load/sut-metrics/profiles/legacy-composite.yaml"), LEGACY_COMPOSITE_PROFILE);
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
+                "schemaVersion: att-package/v2\nobservability: {metricSources: [load/sut-metrics/groups/runtime.yaml]}\n"));
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
+                "schemaVersion: att-package/v2\nobservability: {metricSources: [load/sut-metrics/sources/missing.yaml]}\n"));
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
+                "schemaVersion: att-package/v2\nobservability: {profiles: [load/sut-metrics/profiles/legacy-composite.yaml]}\n"));
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
+                "schemaVersion: att-package/v2\nobservability: {metricSources: [../outside.yaml]}\n"));
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
+                "schemaVersion: att-package/v2\nobservability:\n  metricSources: [load/sut-metrics/sources/host.yaml, load/sut-metrics/sources/host-copy.yaml]\n"));
+        Files.createSymbolicLink(pkg.resolve("load/sut-metrics/sources/alias.yaml"), pkg.resolve("load/sut-metrics/sources/host.yaml"));
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
+                "schemaVersion: att-package/v2\nobservability:\n  metricSources: [load/sut-metrics/sources/host.yaml, load/sut-metrics/sources/alias.yaml]\n"));
+        Files.createSymbolicLink(pkg.resolve("load/sut-metrics/sources/cross-kind.yaml"), pkg.resolve("load/sut-metrics/groups/runtime.yaml"));
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
+                "schemaVersion: att-package/v2\nobservability: {metricSources: [load/sut-metrics/sources/cross-kind.yaml]}\n"));
+    }
+
+    @Test void candidateMetricResourceOverrideIsBoundedAndDoesNotWriteLivePackageFiles() throws Exception {
+        Path pkg = root.resolve("packages/resource-overlay");
+        String resourcePath = "load/sut-metrics/sources/host.yaml";
+        Path liveResource = write(pkg.resolve(resourcePath), METRIC_SOURCE);
+        write(pkg.resolve("load/sut-metrics/sources/unlisted.yaml"), METRIC_SOURCE.replace("host-source", "unlisted"));
+        write(pkg.resolve("package.yaml"), "schemaVersion: att-package/v2\n"
+                + "observability: {metricSources: [" + resourcePath + "]}\n");
+        byte[] before = Files.readAllBytes(liveResource);
+
+        PackageConfig candidate = PackageConfig.loadWithMetricResourceOverride(pkg, resourcePath,
+                METRIC_SOURCE.replace("Host metrics", "Candidate metrics"));
+        PackageConfig.PackageMetricResource resolved = candidate.metricSourceResources().get("host-source");
+        assertEquals("Candidate metrics", resolved.definition().get("name"));
+        assertNotEquals(PackageConfig.load(pkg).metricSourceResources().get("host-source").digest(), resolved.digest());
+        assertArrayEquals(before, Files.readAllBytes(liveResource));
+
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.loadWithMetricResourceOverride(pkg,
+                "load/sut-metrics/sources/unlisted.yaml", METRIC_SOURCE));
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.loadWithMetricResourceOverride(pkg,
+                "load/sut-metrics/sources/../groups/runtime.yaml", METRIC_SOURCE));
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.loadWithMetricResourceOverride(pkg,
+                resourcePath, "schemaVersion: att-sut-metrics-metric-source/v1\nid: invalid\n"));
+        assertArrayEquals(before, Files.readAllBytes(liveResource));
+
+        byte[] manifestPrefix = "schemaVersion: att-package/v2\n# ".getBytes("UTF-8");
+        byte[] malformedManifest = Arrays.copyOf(manifestPrefix, manifestPrefix.length + 3);
+        malformedManifest[manifestPrefix.length] = (byte) 0xc3;
+        malformedManifest[manifestPrefix.length + 1] = '(';
+        malformedManifest[manifestPrefix.length + 2] = '\n';
+        Files.write(pkg.resolve("package.yaml"), malformedManifest);
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.load(pkg));
+    }
+
+    @Test void candidateManifestCanActivateOneNewMetricResourceWithoutWritingEitherFile() throws Exception {
+        Path pkg = root.resolve("packages/create-first-metric");
+        write(pkg.resolve("package.yaml"), "schemaVersion: att-package/v2\nmetadata: {name: Metrics}");
+        String path = "load/sut-metrics/sources/first.yaml";
+        String source = METRIC_SOURCE.replace("host-source", "first-source");
+        String candidateManifest = "schemaVersion: att-package/v2\nmetadata: {name: Metrics}\n"
+                + "observability: {metricSources: [" + path + "]}\n";
+        String expectedManifestDigest = PackageConfig.load(pkg).digest();
+        byte[] manifestBefore = Files.readAllBytes(pkg.resolve("package.yaml"));
+
+        PackageConfig candidate = PackageConfig.loadWithCandidateManifestAndMetricResourceOverride(
+                pkg, candidateManifest, path, source, expectedManifestDigest);
+        assertEquals("first-source", candidate.metricSourceResources().get("first-source").id());
+        assertEquals("load/sut-metrics/sources/first.yaml",
+                candidate.metricSourceResources().get("first-source").relativePath());
+        assertEquals(PackageConfig.sha256(source.getBytes("UTF-8")),
+                candidate.metricSourceResources().get("first-source").digest());
+        assertFalse(Files.exists(pkg.resolve(path)));
+        assertArrayEquals(manifestBefore, Files.readAllBytes(pkg.resolve("package.yaml")));
+
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.loadWithCandidateManifestAndMetricResourceOverride(
+                pkg, candidateManifest.replace("metadata: {name: Metrics}", "metadata: {name: Changed}"),
+                path, source, expectedManifestDigest));
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.loadWithCandidateManifestAndMetricResourceOverride(
+                pkg, candidateManifest.replace(path, "load/sut-metrics/groups/other.yaml"), path,
+                source, expectedManifestDigest));
+        Files.createDirectories(pkg.resolve(path).getParent());
+        Files.write(pkg.resolve(path), "unrelated content".getBytes("UTF-8"));
+        assertThrows(IllegalArgumentException.class, () -> PackageConfig.loadWithCandidateManifestAndMetricResourceOverride(
+                pkg, candidateManifest, path, source, expectedManifestDigest));
+        assertArrayEquals(manifestBefore, Files.readAllBytes(pkg.resolve("package.yaml")));
     }
 
     @Test void lazyBaseValidationStillRequiresExplicitInvocationAndFullPackageValidation() throws Exception {

@@ -77,9 +77,11 @@ Unsupported schema version 會在 execution 前失敗並提供 migration guidanc
 
 現有 `att-load/v1.5` 檔案仍相容。升級至 `att-load/v1.6` 後，可將 workload 的 `target` 改為 `mix`，設定 closed-user weighted target mix。每個 entry 需要唯一 `id`、正整數 `weight`，以及 Template、Flow 或 Tool target。現行 summary contract 為 `att-load-summary/v1.1`；v1.0 保留作歷史格式。
 
-## att-config/v2.14：集中管理 SUT Metrics catalog
+<!-- att-docs:historical -->
+## 歷史的集中式 SUT Metrics catalog
 
-現行 global config schema 為 `att-config/v2.14`，新增有界的 `sutMetrics.dataSources`、`metricSources`、`groups` 和 `profiles` lists。所選 Server Runtime Config 是這些定義的唯一權威來源；沒有 `sutMetrics` 的既有 `att-config/v2.13` 檔案仍受支援。遷移 `data/sut-metrics-catalog.json` 請依照 [SUT Metrics Runtime Config migration guide](../../guides/sut-metrics-config-migration.zh.md) 執行明確的 dry-run 和 apply。遷移工具會驗證候選檔、拒絕重複 ID 或衝突定義，並在套用前建立以 digest 命名的備份。
+ATT 4.3.1 之前，global config `att-config/v2.14` 可管理有界的 `sutMetrics.dataSources`、`metricSources`、`groups` 和 `profiles` lists；沒有 `sutMetrics` 的 `att-config/v2.13` 檔案仍受支援。4.3.1 的 global `att-config/v2.15` 保留 Data Source 描述檔路徑，各 Package 則管理自己的 Metric Source、Group 和 Profile。升級時請依照 [Package-local SUT Metrics migration guide](../../guides/sut-metrics-config-migration.zh.md) 操作。舊的 `data/sut-metrics-catalog.json` 不是 Package 定義的有效來源，也沒有自動 dry-run/apply 遷移命令；停用前請先與各定義擁有者明確協調及整理內容。
+<!-- /att-docs:historical -->
 
 
 ## Historical schema migration

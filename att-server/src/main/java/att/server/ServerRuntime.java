@@ -227,6 +227,20 @@ final class ServerRuntime implements AutoCloseable {
         try{this.auth=new AuthService(config,store);}catch(Exception failed){sutMetrics.close();store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         manifestPublisher=new PackageManifestPublisher(config.dataDir,config.packageConfiguration,clock,
                 this::manifestEditableRoot,this::validateManifestCandidate,
+                new PackageManifestPublisher.ResourceValidator() {
+                    @Override public Map<String,Object> validate(String packageId,String actor,String relativePath,
+                                                                  String environment,String source) throws Exception {
+                        return validatePackageMetricResourceCandidate(packageId,actor,relativePath,environment,source,
+                                null,null);
+                    }
+                    @Override public Map<String,Object> validateCandidate(String packageId,String actor,String relativePath,
+                                                                          String environment,String source,
+                                                                          String candidateManifestSource,
+                                                                          String expectedManifestDigest) throws Exception {
+                        return validatePackageMetricResourceCandidate(packageId,actor,relativePath,environment,source,
+                                candidateManifestSource,expectedManifestDigest);
+                    }
+                },
                 (actor,action,packageId,detail)->store.audit(actor,action,null,packageId,detail));
         cursorRandom.nextBytes(cursorKey);
         java.util.concurrent.BlockingQueue<Runnable> queue=config.queuedLimit==0?new SynchronousQueue<>():new ArrayBlockingQueue<>(config.queuedLimit);
@@ -854,8 +868,8 @@ final class ServerRuntime implements AutoCloseable {
                 Object rawObservability=scenario==null?null:scenario.get("observability");
                 if(rawObservability instanceof Map<?,?>) {
                     Map<String,Object> observability=JSON.convertValue(rawObservability,Map.class);
-                    SutMetricsService.BusinessCallContext callContext=sutMetrics.scenarioRequiresBusinessCallContext(observability)
-                            ?businessCallContext(packageId,root,request.environment,request.expectedRevisionDigest,workloadSubjects(scenario)):null;
+                    SutMetricsService.BusinessCallContext callContext=businessCallContext(packageId,root,request.environment,
+                            request.expectedRevisionDigest,workloadSubjects(scenario),observability);
                     sutSnapshot=sutMetrics.resolveScenario(observability,observationPrincipal,
                             sutAdminPrincipal(observationPrincipal),callContext);
                 }
@@ -1396,6 +1410,72 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> sutMetricProfiles(String principal,boolean admin) { return sutMetrics.listProfiles(principal,admin); }
     Map<String,Object> sutMetricSourcesV2(String principal,boolean admin) { return sutMetrics.listMetricSources(principal,admin); }
     Map<String,Object> sutMetricGroups(String principal,boolean admin) { return sutMetrics.listGroups(principal,admin); }
+    Map<String,Object> packageSutMetricsCatalog(String packageId,String environment,String principal,boolean admin) throws Exception {
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        String selectedEnvironment=environment;
+        if(selectedEnvironment==null||selectedEnvironment.isBlank())
+            selectedEnvironment=new att.config.FrameworkConfigLoader().loadDiscovery(config.runtimeConfigPath,
+                    ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),root,null).environment();
+        Map<String,Object> catalog=sutMetrics.packageCatalog(root,packageId,selectedEnvironment,principal,admin);
+        catalog.put("canEdit",canEditPackageSource(packageId,principal));
+        return catalog;
+    }
+    Map<String,Object> packageSutMetricsResource(String packageId,String kind,String id,String principal) throws Exception {
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        // Raw resource YAML can contain query expressions and Package implementation details. The
+        // safe catalog endpoint applies Data Source reader policy; source text is limited to the
+        // same registered Package owner that is allowed to edit it.
+        if(!canEditPackageSource(packageId,principal))throw new NotFoundException();
+        if(id==null||!id.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,79}"))throw new NotFoundException();
+        att.config.PackageConfig configuration=att.config.PackageConfig.load(root);
+        Map<String,att.config.PackageConfig.PackageMetricResource> resources=switch(kind==null?"":kind) {
+            case "source" -> configuration.metricSourceResources();
+            case "group" -> configuration.metricGroupResources();
+            case "profile" -> configuration.metricProfileResources();
+            default -> throw new NotFoundException();
+        };
+        att.config.PackageConfig.PackageMetricResource resource=resources.get(id);
+        if(resource==null)throw new NotFoundException();
+        Path file=resource.canonicalPath();
+        byte[] bytes=readBoundedPackageMetricResource(file);
+        byte[] second=readBoundedPackageMetricResource(file);
+        String digest=PackageManifestPublisher.digest(bytes);
+        if(!java.util.Arrays.equals(bytes,second)||!digest.equals(resource.digest()))
+            throw new StaleCursorException();
+        String source;
+        try {source=StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString();}
+        catch(java.nio.charset.CharacterCodingException invalid){throw new IllegalArgumentException("Package SUT Metrics resource is not valid UTF-8.");}
+        att.config.PackageConfig reloaded=att.config.PackageConfig.load(root);
+        Map<String,att.config.PackageConfig.PackageMetricResource> current=switch(kind) {
+            case "source" -> reloaded.metricSourceResources();
+            case "group" -> reloaded.metricGroupResources();
+            case "profile" -> reloaded.metricProfileResources();
+            default -> Map.of();
+        };
+        att.config.PackageConfig.PackageMetricResource currentResource=current.get(id);
+        if(currentResource==null||!resource.relativePath().equals(currentResource.relativePath())||!digest.equals(currentResource.digest()))
+            throw new StaleCursorException();
+        Map<String,Object> view=new LinkedHashMap<>();view.put("schemaVersion","att-package-sut-metrics-resource/v1");
+        view.put("packageId",packageId);view.put("kind",kind);view.put("id",id);view.put("path",resource.relativePath());
+        view.put("resourceDigest",digest);view.put("source",source);view.put("canEdit",canEditPackageSource(packageId,principal));
+        return view;
+    }
+    private static byte[] readBoundedPackageMetricResource(Path file) throws Exception {
+        if(Files.isSymbolicLink(file)||!Files.isRegularFile(file,java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            throw new IllegalArgumentException("Package SUT Metrics resource is unavailable or exceeds its limit.");
+        byte[] bytes;
+        try(java.io.InputStream input=Files.newInputStream(file,java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            bytes=input.readNBytes(att.config.PackageConfig.MAX_BYTES+1);
+        }
+        if(bytes.length>att.config.PackageConfig.MAX_BYTES)
+            throw new IllegalArgumentException("Package SUT Metrics resource is unavailable or exceeds its limit.");
+        return bytes;
+    }
+    private boolean canEditPackageSource(String packageId,String principal) throws Exception {
+        return config.authenticationRequired&&config.packageConfiguration.sourceEditingEnabled&&principal!=null
+                &&principal.equals(packageId)&&isOperationalPrincipal(principal);
+    }
     Map<String,Object> saveSutMetricSource(Map<String,Object> value) throws Exception { return sutMetrics.upsertSource(value); }
     Map<String,Object> saveSutMetricProfile(Map<String,Object> value) throws Exception { return sutMetrics.upsertProfile(value); }
     Map<String,Object> saveSutMetricSourceV2(Map<String,Object> value) throws Exception { return sutMetrics.upsertMetricSource(value); }
@@ -2237,8 +2317,8 @@ final class ServerRuntime implements AutoCloseable {
                 sutSnapshot=pinnedSutSnapshot;
             } else {
                 Map<String,Object> observability=JSON.convertValue(rawObservability,Map.class);
-                SutMetricsService.BusinessCallContext callContext=sutMetrics.scenarioRequiresBusinessCallContext(observability)
-                        ?businessCallContext(packageId,root,environment,(String)rawDigest,workloadSubjects(scenario)):null;
+                SutMetricsService.BusinessCallContext callContext=businessCallContext(packageId,root,environment,
+                        (String)rawDigest,workloadSubjects(scenario),observability);
                 sutSnapshot=sutMetrics.resolveScenario(observability,principal,
                         administrator||sutAdminPrincipal(principal),callContext);
             }
@@ -2725,7 +2805,8 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private SutMetricsService.BusinessCallContext businessCallContext(String packageId,Path root,String environment,
-                                                                       String packageRevision,List<SutMetricsService.WorkloadSubject> workloadSubjects) throws Exception {
+                                                                       String packageRevision,List<SutMetricsService.WorkloadSubject> workloadSubjects,
+                                                                       Map<String,Object> observability) throws Exception {
         validatePackageRoot(root);
         String pinnedRevision=packageRevision;
         if(pinnedRevision==null||pinnedRevision.isBlank()) {
@@ -2736,11 +2817,14 @@ final class ServerRuntime implements AutoCloseable {
                 throw new IllegalStateException("The selected Package revision could not be pinned for business metrics.");
             pinnedRevision=(String)current;
         }
-        String pinnedRuntimeRevision=runtimeConfigRevision();
-        att.config.FrameworkConfig frameworkConfig=new att.config.FrameworkConfigLoader().load(config.runtimeConfigPath,
-                ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),root,environment);
-        frameworkConfig.requireExecutionConfig();
-        if(!pinnedRuntimeRevision.equals(runtimeConfigRevision()))
+        String pinnedRuntimeRevision=runtimeConfigRevision(environment);
+        att.config.FrameworkConfigLoader loader=new att.config.FrameworkConfigLoader();
+        boolean requiresBusinessCalls=sutMetrics.scenarioRequiresBusinessCallContext(observability,root);
+        att.config.FrameworkConfig frameworkConfig=requiresBusinessCalls
+                ?loader.load(config.runtimeConfigPath,ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),root,environment)
+                :loader.loadDiscovery(config.runtimeConfigPath,ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),root,environment);
+        if(requiresBusinessCalls)frameworkConfig.requireExecutionConfig();
+        if(!pinnedRuntimeRevision.equals(runtimeConfigRevision(environment)))
             throw new IllegalStateException("The shared Runtime Config changed while business metrics were being admitted.");
         return new SutMetricsService.BusinessCallContext(packageId,root,config.runtimeConfigPath,
                 ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),environment,pinnedRevision,
@@ -2749,12 +2833,15 @@ final class ServerRuntime implements AutoCloseable {
                 workloadSubjects==null?List.of():List.copyOf(workloadSubjects),frameworkConfig);
     }
 
-    private String runtimeConfigRevision() throws Exception {
-        byte[] bytes=Files.readAllBytes(config.runtimeConfigPath);
-        byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
-        StringBuilder value=new StringBuilder(64);
-        for(byte item:digest)value.append(String.format(java.util.Locale.ROOT,"%02x",item));
-        return value.toString();
+    private String runtimeConfigRevision(String environment) throws Exception {
+        String source=Files.readString(config.runtimeConfigPath,StandardCharsets.UTF_8);
+        att.config.FrameworkConfigLoader loader=new att.config.FrameworkConfigLoader();
+        att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration snapshot=loader
+                .loadSutMetricsRuntimeConfiguration(config.runtimeConfigPath,
+                        ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),source);
+        String revision=snapshot.effectiveRevision(environment);
+        if(revision==null)throw new IllegalStateException("The selected Environment is not declared by the shared Runtime Config.");
+        return revision;
     }
 
     private SutMetricsService.BusinessCallSession openBusinessCallSession(String jobId,Map<String,Object> snapshot) throws Exception {
@@ -2767,13 +2854,13 @@ final class ServerRuntime implements AutoCloseable {
             throw new IllegalStateException("The immutable business-metric execution snapshot is incomplete.");
         Path root=packageRoot(packageId);if(root==null)throw new IllegalStateException("The pinned Package is unavailable for business metrics.");
         validatePackageRoot(root);
-        if(!runtimeRevision.equals(runtimeConfigRevision()))
+        if(!runtimeRevision.equals(runtimeConfigRevision(environment)))
             throw new IllegalStateException("The shared Runtime Config changed after LOAD admission; business metrics were not executed.");
         verifyPackageRevision(packageId,environment,packageRevision);
         att.config.FrameworkConfig frameworkConfig=new att.config.FrameworkConfigLoader().load(config.runtimeConfigPath,
                 ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),root,environment);
         frameworkConfig.requireExecutionConfig();
-        if(!runtimeRevision.equals(runtimeConfigRevision()))
+        if(!runtimeRevision.equals(runtimeConfigRevision(environment)))
             throw new IllegalStateException("The shared Runtime Config changed while business metric execution was being prepared.");
         att.exec.DbHelperExecutor dbHelpers=new att.exec.DbHelperExecutor(root,frameworkConfig);
         att.exec.ToolInvoker tools=new att.exec.ToolInvoker(root,frameworkConfig);
@@ -3689,6 +3776,15 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=inspectionRequest(packageId,root,null);
         request.inspectionType="package-configuration";request.inspectionAction="validate";request.packageManifestSource=source;
         return executeInspection(root,request);
+    }
+    private Map<String,Object> validatePackageMetricResourceCandidate(String packageId,String actor,String relativePath,
+                                                                        String environment,String source,
+                                                                        String candidateManifestSource,
+                                                                        String expectedManifestDigest) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
+        return sutMetrics.validatePackageMetricResource(root,packageId,actor,relativePath,environment,source,
+                candidateManifestSource,expectedManifestDigest);
     }
     Map<String,Object> inspectPackageConfiguration(String packageId,String action,String environment,String principal) throws Exception {
         if(!config.inspection.enabled)throw new NotFoundException();

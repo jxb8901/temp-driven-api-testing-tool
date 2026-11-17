@@ -14,6 +14,10 @@ function makeApi(): LoadJobsApi {
       policy: { schemaVersion: 'att-load/v1.6', load: { warmup: '5s', rampUp: '10s', duration: '30s', rampDown: '5s' } },
       redacted: true,
     })),
+    getPackageSutMetricsCatalog: vi.fn(async (packageId) => ({
+      schemaVersion: 'att-package-sut-metrics-catalog/v1' as const, packageId, environment: 'SIT',
+      metricSources: [], groups: [], profiles: [], resourceProvenance: [],
+    })),
     getTargetLoadForm: vi.fn(async () => ({
       model: 'virtualUsers' as const, target: { type: 'template' as const, id: 'Payments.create' },
       input: { inputs: { accountId: 'acct-1', retry: 2 }, vars: { token: { $attDebugKeepDefault: 'hidden' } } }, redacted: true,
@@ -53,32 +57,49 @@ async function click(element: Element) {
 }
 
 describe('LoadPage React feature', () => {
-  it('adds a profile-bound steady maximum rule from the SUT threshold editor', async () => {
+  it('builds flat Profile threshold choices from the Package catalog projection and filters by Environment', async () => {
     const api = makeApi();
     api.getLoadPolicy = vi.fn(async () => ({
       model: 'virtualUsers' as const,
       policy: { schemaVersion: 'att-load/v1.6', load: { warmup: '5s', rampUp: '10s', duration: '30s', rampDown: '5s' },
         observability: { schemaVersion: 'att-load-observability/v1', collections: [
-          { id: 'payments-preset', profile: 'preset-os' },
+          { id: 'payments-preset', profile: 'package-flat', targetIds: ['Payments.create'], parameters: {} },
         ] } },
       redacted: true,
     }));
-    api.listSutMetricProfiles = vi.fn(async () => ({ items: [
-      { id: 'profile-os', name: 'OS metrics', kind: 'base',
-        metricCatalog: [{ id: 'cpu', title: 'CPU utilization', unit: 'percent', kind: 'gauge' }] },
-      { id: 'preset-os', name: 'Platform preset', kind: 'composite', includes: [{ profile: 'profile-os', alias: 'host' }] },
+    api.getPackageSutMetricsCatalog = vi.fn(async () => ({
+      schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'SIT',
+      metricSources: [{ id: 'host', name: 'Host source', revision: 'a'.repeat(64),
+        connection: { kind: 'DATA_SOURCE', id: 'prom-main' },
+        fetch: { id: 'cpu-range', mode: 'prometheus-range', sampling: 'range', step: '30s' },
+        outputs: [{ id: 'cpu', title: 'CPU utilization', unit: 'percent', kind: 'gauge' }],
+        limits: { maxRows: 100, maxSeries: 16, maxSamples: 1000, maxArtifactBytes: 8192 } }],
+      groups: [], profiles: [
+      { schemaVersion: 'att-sut-metrics-profile/v2', packageOwned: true, id: 'package-flat', name: 'Package flat profile',
+        metricSourceIds: ['host'], groupIds: [], allowedBindings: { environments: ['SIT'],
+          targets: [{ type: 'template', id: 'Payments.create' }], tenants: [], parameters: {} },
+        budgets: { maxFetches: 1, maxObservations: 512, maxArtifactBytes: 8192 } },
+      { schemaVersion: 'att-sut-metrics-profile/v2', packageOwned: true, id: 'uat-only', name: 'UAT only profile',
+        metricSourceIds: ['host'], groupIds: [], allowedBindings: { environments: ['UAT'],
+          targets: [{ type: 'template', id: 'Payments.create' }], tenants: [], parameters: {} },
+        budgets: { maxFetches: 1, maxObservations: 512, maxArtifactBytes: 8192 } },
     ] }));
     await act(async () => root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>vi.fn())} as never}><LoadPage
-      api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="" environments={['SIT']} inlineLoadEnabled
+      api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="SIT" environments={['SIT']} inlineLoadEnabled
       onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}
     /></NavigationGuardContext.Provider>));
     await flush();
     const advanced = [...host.querySelectorAll('details')].find(item => item.querySelector('summary')?.textContent?.includes('Advanced scenario settings'))!;
     advanced.open = true;
+    const profilePicker = [...host.querySelectorAll('fieldset.att-sut-package-profile-picker label')]
+      .find(label => label.textContent?.trim().startsWith('Profile'))?.querySelector('select') as HTMLSelectElement;
+    expect([...profilePicker.options].map(option => option.value)).toEqual(['', 'package-flat']);
     const profile = [...host.querySelectorAll('label')].find(label => label.textContent?.includes('Resolved Metrics Binding'))?.querySelector('select') as HTMLSelectElement;
     await act(async () => { profile.value = 'payments-preset'; profile.dispatchEvent(new Event('change', { bubbles: true })); });
     await flush();
     const thresholdEditor = host.querySelector('.att-sut-threshold-editor')!;
+    const metric = [...thresholdEditor.querySelectorAll('label')].find(label => label.textContent?.startsWith('Metric'))?.querySelector('select') as HTMLSelectElement;
+    expect([...metric.options].map(option => option.value)).toEqual(['', 'cpu']);
     const maximum = thresholdEditor.querySelector('input[type="number"]') as HTMLInputElement;
     const addRule = [...host.querySelectorAll('button')].find(button => button.textContent === 'Add maximum rule')!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(maximum, ''); maximum.dispatchEvent(new Event('input', { bubbles: true })); });
@@ -100,8 +121,83 @@ describe('LoadPage React feature', () => {
     expect(editor?.textContent).toContain('0.95');
     expect(editor?.textContent).toContain('NOT_EVALUATED');
     const observability = JSON.parse(editor?.textContent || '{}');
-    expect(observability.collections).toEqual([{ id: 'payments-preset', profile: 'preset-os' }]);
+    expect(observability.collections).toEqual([{
+      id: 'payments-preset', profile: 'package-flat', targetIds: ['Payments.create'], parameters: {},
+    }]);
     expect(observability.thresholds[0].profile).toBe('payments-preset');
+  });
+
+  it('uses only the selected Package catalog for flat SUT Metrics Profiles', async () => {
+    const api = makeApi();
+    api.listSutMetricProfiles = vi.fn(async () => ({ items: [
+      { id: 'global-only-profile', name: 'Must not be offered' },
+    ] }));
+    api.getPackageSutMetricsCatalog = vi.fn(async () => ({
+      schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'SIT',
+      metricSources: [{ id: 'host', name: 'Host source' }], groups: [],
+      profiles: [{ schemaVersion: 'att-sut-metrics-profile/v2', packageOwned: true, id: 'package-flat', name: 'Package flat profile',
+        metricSourceIds: ['host'], groupIds: [], allowedBindings: { environments: ['SIT'] } }],
+    }));
+    await act(async () => root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>vi.fn())} as never}><LoadPage
+      api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="SIT" environments={['SIT']} inlineLoadEnabled
+      onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}
+    /></NavigationGuardContext.Provider>));
+    await flush();
+    expect(api.getPackageSutMetricsCatalog).toHaveBeenCalledWith('payments', 'SIT', expect.any(AbortSignal));
+    expect(api.listSutMetricProfiles).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('Package flat profile');
+    expect(host.textContent).not.toContain('Must not be offered');
+  });
+
+  it('keeps legacy metrics available for existing bindings without offering new global Profile bindings', async () => {
+    const api = makeApi();
+    api.getPackageSutMetricsCatalog = vi.fn(async () => ({
+      schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'SIT',
+      metricSources: [], groups: [], profiles: [{
+        schemaVersion: 'att-sut-metrics-profile/v1', packageOwned: false, id: 'legacy-base', name: 'Legacy base',
+        kind: 'base', metricCatalog: [{ id: 'cpu', title: 'CPU usage', unit: 'percent', kind: 'gauge' }],
+      }],
+    }));
+    const scenario = {
+      schemaVersion: 'att-load/v1.9', load: { warmup: '5s', rampUp: '10s', duration: '30s', rampDown: '5s' },
+      workloads: [{ id: 'main', target: { type: 'template', id: 'Payments.create' }, load: { users: 2 } }],
+      observability: { schemaVersion: 'att-load-observability/v1', collections: [{
+        id: 'legacy-binding', profile: 'legacy-base', source: 'prom-main',
+        targets: [{ type: 'template', id: 'Payments.create' }],
+      }] },
+    };
+    await act(async () => root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>vi.fn())} as never}><LoadPage
+      api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="SIT" environments={['SIT']} inlineLoadEnabled
+      savedScenario={{ id:'saved-legacy', name:'Legacy Load', description:'', tags:[], revision:1, packageId:'payments', definition:{scenario} }}
+      onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}
+    /></NavigationGuardContext.Provider>));
+    await flush();
+    const advanced = [...host.querySelectorAll('details')].find(item => item.querySelector('summary')?.textContent?.includes('Advanced scenario settings'))!;
+    advanced.open = true;
+    expect(host.querySelector('.att-sut-package-profile-picker select')).toBeNull();
+    expect([...host.querySelectorAll('.att-sut-package-profile-picker button')].some(button => button.textContent?.includes('Add Profile binding'))).toBe(false);
+    expect(host.textContent).toContain('Legacy global Profiles remain available to existing manual bindings');
+    const binding = [...host.querySelectorAll('fieldset.att-sut-threshold-editor label')]
+      .find(label => label.textContent?.startsWith('Resolved Metrics Binding'))?.querySelector('select') as HTMLSelectElement;
+    await act(async () => { binding.value = 'legacy-binding'; binding.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    const metric = [...host.querySelectorAll('fieldset.att-sut-threshold-editor label')]
+      .find(label => label.textContent?.startsWith('Metric'))?.querySelector('select') as HTMLSelectElement;
+    expect([...metric.options].map(option => option.value)).toEqual(['', 'cpu']);
+  });
+
+  it('shows package catalog load failures and never falls back to global profiles', async () => {
+    const api = makeApi();
+    api.listSutMetricProfiles = vi.fn(async () => ({ items: [{ id: 'global-only-profile', name: 'Global only' }] }));
+    api.getPackageSutMetricsCatalog = vi.fn(async () => { throw new Error('offline'); });
+    await act(async () => root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>vi.fn())} as never}><LoadPage
+      api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="SIT" environments={['SIT']} inlineLoadEnabled
+      onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}
+    /></NavigationGuardContext.Provider>));
+    await flush();
+    expect(host.textContent).toContain('Package SUT Metrics inventory could not be loaded');
+    expect(host.textContent).not.toContain('Global only');
+    expect(api.listSutMetricProfiles).not.toHaveBeenCalled();
   });
 
   it('inherits retained root pacing defaults and leaves unavailable workload values empty', () => {

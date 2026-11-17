@@ -213,11 +213,9 @@ function SutMetricsAdminPanel() {
 
   async function reload(signal?: AbortSignal) {
     try {
-      const [sourceResponse, metricSourceResponse, groupResponse, profileResponse] = await Promise.all([
-        api.listSutMetricSources(signal), api.listSutMetricAcquisitions(signal), api.listSutMetricGroups(signal), api.listSutMetricProfiles(signal),
-      ]);
-      setSources(sourceResponse.items || []); setMetricSources(metricSourceResponse.items || []);
-      setGroups(groupResponse.items || []); setProfiles(profileResponse.items || []);
+      const sourceResponse = await api.listSutMetricSources(signal);
+      setSources(sourceResponse.items || []);
+      setMetricSources([]); setGroups([]); setProfiles([]);
       setCatalogConfiguration(sourceResponse.configuration || null);
       setCatalogStatus('ready');
     } catch (error) {
@@ -397,16 +395,16 @@ function SutMetricsAdminPanel() {
   }
 
   return <section className="panel att-settings-section att-sut-metrics-admin" aria-labelledby="sut-metrics-admin-title">
-    <div className="att-settings-section-heading"><div><h2 id="sut-metrics-admin-title">SUT Metrics administration</h2>
+    <div className="att-settings-section-heading"><div><h2 id="sut-metrics-admin-title">SUT Metrics connections</h2>
       <p className="att-settings-help">{catalogReadOnly
-        ? (zh ? 'SUT Metrics 定義由核准的中央 Runtime Config 提供。此頁可檢視、測試來源及預覽設定；請透過核准的部署流程更新設定。' : 'SUT Metrics definitions come from the approved central Runtime Config. View, test, and preview them here; update definitions through the approved deployment process.')
-        : 'Register approved Prometheus or Grafana sources and versioned metrics profiles. Profiles may define one DBHelper or Package Tool call group with multiple numeric outputs; Package Tools require sideEffectsAcknowledged: true. Validate and live preview never execute calls. Grafana uses one pinned Prometheus datasource UID through its fixed query endpoint and a service-account secret. HTTPS hosts must exactly match ATT_SUT_METRICS_ALLOWED_HOSTS; HTTP is limited to loopback. Secret values are read from ATT_SECRET_* environment variables and are never returned by the API.'}</p></div></div>
+        ? (zh ? '全域 Data Source 連線和安全政策由核准的中央 Runtime Config 管理。此處可檢視 Data Source 連線、讀取權限與資源上限。' : 'Global Data Source connections and security policy come from the approved central Runtime Config. Review connection metadata, reader permissions, and resource limits here.')
+        : (zh ? '管理全域 Prometheus/Grafana Data Source 連線、讀取權限與資源上限。Metric Sources、Groups 和 Profiles 由各 Package 的 LOAD 資源擁有。' : 'Manage global Prometheus/Grafana Data Source connections, reader permissions, and resource limits. Packages own their Metric Sources, Groups, and Profiles under LOAD resources.')}</p></div></div>
     {message && <p role="status" aria-live="polite">{message}</p>}
     {catalogReadOnly && <aside className="att-sut-read-only-banner" aria-label={zh ? 'SUT Metrics 設定唯讀' : 'SUT Metrics configuration is read-only'}>
       <strong>{zh ? '由中央 Runtime Config 管理 · 唯讀' : 'Managed by central Runtime Config · read-only'}</strong>
       <p>{zh
-        ? '此部署的 SUT Metrics 定義來自伺服器核准的中央設定。請透過核准的部署流程更新 Runtime Config（config.yaml）；此頁仍可檢視定義、測試來源及執行安全預覽。'
-        : 'This deployment loads SUT Metrics definitions from the server-approved central configuration. Update the Runtime Config (config.yaml) through the approved deployment process. You can still view definitions, test sources, and run safe previews here.'}</p>
+        ? '此部署的全域 Data Source 連線由伺服器核准的中央設定提供。請透過核准的部署流程更新 Runtime Config（config.yaml）。'
+        : 'This deployment loads global Data Source connections from the server-approved central configuration. Update the Runtime Config (config.yaml) through the approved deployment process.'}</p>
       <p>{zh
         ? catalogConfiguration?.state === 'LAST_KNOWN_GOOD' ? '目前啟用最後一個有效版本。' : '目前使用已啟用的 Runtime Config。'
         : catalogConfiguration?.state === 'LAST_KNOWN_GOOD' ? 'The active catalog is the last known good revision.' : 'The selected Runtime Config is active.'}</p>
@@ -430,6 +428,10 @@ function SutMetricsAdminPanel() {
       <p className="att-settings-help">Set <code>provider</code> to <code>GRAFANA</code> to pin <code>grafanaDatasourceUid</code>. Grafana organization IDs in <code>allowedTenants</code> and <code>defaultTenant</code> must be numeric. The adapter accepts only server-owned profiles and never accepts a browser query or proxy URL.</p>
       {catalogCanEdit && <button type="button" disabled={busy} onClick={() => void run(() => api.saveSutMetricSource(parseEditor(sourceJson, 'Data Source')), 'Data Source saved.', 'data-source')}>Save Data Source</button>}
     </section>
+    <p className="att-settings-help">{zh
+      ? 'Package 的 Metric Sources、Metric Groups 和 Metrics Profiles 位於所選 Package 的 LOAD → SUT Metrics。此處不會登錄或合併 Package 定義。'
+      : 'Package Metric Sources, Metric Groups, and Metrics Profiles live under the selected Package’s LOAD → SUT Metrics resources. This page does not register or merge Package definitions.'}</p>
+    {false && <div>
     <section aria-labelledby="sut-metric-sources-title">
       <h3 id="sut-metric-sources-title">Metric Sources</h3>
       <p className="att-settings-help">{zh
@@ -576,6 +578,7 @@ function SutMetricsAdminPanel() {
       }}>Validate binding</button>
       {preview !== null && <pre className="att-sut-preview" aria-label="Redacted SUT Metrics preview">{JSON.stringify(preview, null, 2)}</pre>}
     </section>
+    </div>}
   </section>;
 }
 

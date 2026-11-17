@@ -8,6 +8,8 @@ import { ResourceTree } from './ResourceTree';
 import { ConfigurationExplorer } from './ConfigurationExplorer';
 import { TypedSidecarForm } from './TypedSidecarForm';
 import { inspectionCache } from '../../inspectionCache';
+import { ApiError } from '../../types';
+import { parseDocument } from 'yaml';
 import type { ConfigurationResponse, ExplorerApi, JsonObject, ResourceDetail, ResourceIdentity, ResourceSummary } from './types';
 
 vi.mock('../code/CodeEditor', () => ({
@@ -488,6 +490,311 @@ describe('typed sidecar form', () => {
 });
 
 describe('Explorer page integration', () => {
+  it('shows only the explicit Package SUT Metrics inventory with environment and revision provenance', async () => {
+    const getPackageSutMetricCatalog = vi.fn(async (_packageId: string, _environment?: string, _signal?: AbortSignal) => ({
+      schemaVersion: 'att-package-sut-metrics-catalog/v1',
+      packageId: 'payments', environment: 'UAT', manifestDigest: 'a'.repeat(64),
+      packageRevision: 'b'.repeat(64), runtimeConfigRevision: 'c'.repeat(64),
+      canEdit: false,
+      metricSources: [{ id: 'db-health', name: 'Database health', kind: 'SQL', connection: { kind: 'DATA_SOURCE', id: 'payments-db', secretRef: 'must-not-render' } }],
+      groups: [{ id: 'checkout', name: 'Checkout' }],
+      profiles: [{ id: 'checkout-load', name: 'Checkout Load', kind: 'flat' }],
+      resourceProvenance: [{ kind: 'metricSource', id: 'db-health', path: 'load/sut-metrics/sources/db-health.yaml', sha256: 'd'.repeat(64) }],
+    }));
+    const getPackageSutMetricsResource = vi.fn(async () => { throw new ApiError('Forbidden', { status: 403 }); });
+    const api = Object.assign(apiWith({}), { getPackageSutMetricsCatalog: getPackageSutMetricCatalog, getPackageSutMetricsResource });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+
+    expect(getPackageSutMetricCatalog).toHaveBeenCalledWith('payments', 'UAT', expect.any(AbortSignal));
+    const panel = container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    expect(panel.textContent).toContain('Environment: UAT');
+    expect(panel.textContent).toContain('Database health');
+    expect(panel.textContent).toContain('DATA_SOURCE · payments-db');
+    expect(panel.textContent).toContain('checkout-load');
+    expect(panel.textContent).toContain('a'.repeat(64));
+    expect(panel.textContent).toContain('b'.repeat(64));
+    expect(panel.textContent).toContain('c'.repeat(64));
+    expect(panel.textContent).toContain('Package resource provenance');
+    expect(panel.textContent).toContain('Package-relative path: load/sut-metrics/sources/db-health.yaml');
+    expect(panel.textContent).toContain('SHA-256:');
+    expect(panel.textContent).toContain('d'.repeat(64));
+    expect(panel.textContent).toContain('This view does not query metric sources.');
+    expect(panel.textContent).not.toContain('must-not-render');
+    const selection = panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')!;
+    expect(selection).not.toBeNull();
+    click(selection);
+    await settle();
+    expect(getPackageSutMetricsResource).toHaveBeenCalledWith('payments', 'source', 'db-health', expect.any(AbortSignal));
+    expect(selection.getAttribute('aria-pressed')).toBe('true');
+    expect(panel.textContent).toContain('Your account cannot view or edit this Package resource.');
+    const mutationButtons = [...panel.querySelectorAll('button')].filter(item =>
+      /create .*draft|validate draft|review draft|publish draft|discard draft/i.test(item.textContent || ''));
+    expect(mutationButtons).toHaveLength(0);
+    expect(panel.querySelector('textarea')).toBeNull();
+    expect(panel.textContent).not.toContain('source is available for viewing');
+  });
+
+  it('states when no explicit Package SUT Metrics definitions are listed', async () => {
+    const getPackageSutMetricCatalog = vi.fn(async () => ({
+      schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'SIT',
+      manifestDigest: 'a'.repeat(64), packageRevision: 'b'.repeat(64), runtimeConfigRevision: 'c'.repeat(64),
+      metricSources: [], groups: [], profiles: [],
+    }));
+    const api = Object.assign(apiWith({}), { getPackageSutMetricsCatalog: getPackageSutMetricCatalog });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+
+    const panel = container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    expect(panel.textContent).toContain('This Package has no explicitly listed SUT Metrics definitions.');
+    expect(panel.textContent).toContain('Manifest digest');
+    expect(panel.textContent).not.toContain('global profile');
+  });
+
+  it('registers Package SUT Metrics source edits with the navigation guard and clears them on discard', async () => {
+    const registerUnsavedChanges = vi.fn((_dirty: boolean, _description?: string) => () => {});
+    const getPackageSutMetricsCatalog = vi.fn(async () => ({
+      schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'UAT',
+      canEdit: true, metricSources: [{ id: 'db-health', name: 'Database health' }], groups: [], profiles: [],
+    }));
+    const getPackageSutMetricsResource = vi.fn(async () => ({
+      packageId: 'payments', kind: 'source' as const, id: 'db-health', path: 'load/sut-metrics/sources/db-health.yaml',
+      resourceDigest: 'a'.repeat(64), source: 'enabled: true\n', canEdit: true,
+    }));
+    const api = Object.assign(apiWith({}), { getPackageSutMetricsCatalog, getPackageSutMetricsResource });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={registerUnsavedChanges} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+
+    const panel = container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    click(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')!);
+    await settle();
+    const editor = panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!;
+    setValue(editor, 'enabled: false\n');
+    expect(registerUnsavedChanges).toHaveBeenCalledWith(true, 'unpublished Package SUT Metrics changes');
+
+    click(button('Discard source edits'));
+    expect((panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]'))?.value).toBe('enabled: true\n');
+    expect(registerUnsavedChanges).toHaveBeenCalledWith(false, 'unpublished Package SUT Metrics changes');
+  });
+
+  it('validates, reviews, publishes, and refreshes an edited Package resource', async () => {
+    const resourceDigest = 'a'.repeat(64);
+    const candidateResourceDigest = 'b'.repeat(64);
+    const getPackageSutMetricsCatalog = vi.fn(async () => ({
+      schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'UAT',
+      manifestDigest: 'c'.repeat(64), packageRevision: 'd'.repeat(64), runtimeConfigRevision: 'e'.repeat(64), canEdit: true,
+      metricSources: [{ id: 'db-health', name: 'Database health' }], groups: [], profiles: [],
+    }));
+    const getPackageSutMetricsResource = vi.fn()
+      .mockResolvedValueOnce({ packageId: 'payments', kind: 'source', id: 'db-health',
+        path: 'load/sut-metrics/sources/db-health.yaml', resourceDigest, source: 'enabled: true\n', canEdit: true })
+      .mockResolvedValueOnce({ packageId: 'payments', kind: 'source', id: 'db-health',
+        path: 'load/sut-metrics/sources/db-health.yaml', resourceDigest: candidateResourceDigest, source: 'enabled: false\n', canEdit: true });
+    const createPackageSutMetricsDraft = vi.fn(async () => ({ draftId: 'D-EDIT', packageId: 'payments',
+      resourcePath: 'load/sut-metrics/sources/db-health.yaml', expectedResourceDigest: resourceDigest, state: 'draft' as const }));
+    const packageSutMetricsDraftAction = vi.fn(async (_packageId: string, _draftId: string, action: 'validate' | 'review' | 'publish' | 'discard') => {
+      if (action === 'validate') return { draftId: 'D-EDIT', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/db-health.yaml',
+        expectedResourceDigest: resourceDigest, state: 'validated', validation: { valid: true, resourceDigest: candidateResourceDigest, validationRevision: 'f'.repeat(64) } };
+      if (action === 'review') return { draftId: 'D-EDIT', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/db-health.yaml',
+        expectedResourceDigest: resourceDigest, state: 'reviewed' };
+      if (action === 'publish') return { draftId: 'D-EDIT', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/db-health.yaml',
+        expectedResourceDigest: resourceDigest, state: 'reviewed', published: true, refreshRequired: true,
+        resourceDigest: candidateResourceDigest, environment: 'UAT', configurationIdentity: 'config-revision-UAT' };
+      return { draftId: 'D-EDIT', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/db-health.yaml',
+        expectedResourceDigest: resourceDigest, state: 'discarded' };
+    });
+    const api = Object.assign(apiWith({}), { getPackageSutMetricsCatalog, getPackageSutMetricsResource,
+      createPackageSutMetricsDraft, packageSutMetricsDraftAction });
+    const registerUnsavedChanges = vi.fn((_dirty: boolean, _description?: string) => () => {});
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={registerUnsavedChanges} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    const panel = container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    click(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')!);
+    await settle();
+    setValue(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!, 'enabled: false\n');
+    expect(registerUnsavedChanges).toHaveBeenCalledWith(true, 'unpublished Package SUT Metrics changes');
+    click(button('Create SUT Metrics draft'));
+    await settle();
+    expect(createPackageSutMetricsDraft).toHaveBeenCalledWith('payments', {
+      resourcePath: 'load/sut-metrics/sources/db-health.yaml', environment: 'UAT', source: 'enabled: false\n', expectedResourceDigest: resourceDigest,
+    }, expect.any(AbortSignal));
+    click(button('Validate draft'));
+    await settle();
+    expect(panel.textContent).toContain('Validation passed.');
+    click(button('Review draft'));
+    await settle();
+    click(button('Publish draft'));
+    await settle(); await settle();
+    expect(packageSutMetricsDraftAction.mock.calls.map(call => call[2])).toEqual(['validate', 'review', 'publish']);
+    expect(getPackageSutMetricsCatalog).toHaveBeenCalledTimes(2);
+    expect(getPackageSutMetricsResource).toHaveBeenCalledTimes(2);
+    expect(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')?.value).toBe('enabled: false\n');
+  });
+
+  it('shows bounded field diagnostics for a rejected validation and preserves source after draft discard', async () => {
+    const resourceDigest = 'a'.repeat(64);
+    const getPackageSutMetricsCatalog = vi.fn(async () => ({
+      schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'UAT',
+      manifestDigest: 'c'.repeat(64), canEdit: true,
+      metricSources: [{ id: 'db-health', name: 'Database health' }], groups: [], profiles: [],
+    }));
+    const getPackageSutMetricsResource = vi.fn(async () => ({ packageId: 'payments', kind: 'source' as const, id: 'db-health',
+      path: 'load/sut-metrics/sources/db-health.yaml', resourceDigest, source: 'enabled: true\n', canEdit: true }));
+    const createPackageSutMetricsDraft = vi.fn(async () => ({ draftId: 'D-INVALID', packageId: 'payments',
+      resourcePath: 'load/sut-metrics/sources/db-health.yaml', expectedResourceDigest: resourceDigest, state: 'draft' as const }));
+    const packageSutMetricsDraftAction = vi.fn(async (_packageId: string, _draftId: string, action: 'validate' | 'review' | 'publish' | 'discard') => {
+      if (action === 'validate') throw new ApiError('Draft rejected at /Users/worker/private.yaml token=top-secret', { status: 400,
+        diagnostics: [{ code: 'ATT-SUT-METRICS-FIELD', field: 'profiles[0].metricSourceIds[0]',
+          summary: 'Metric Source was not found; password=private-value', path: '/Users/worker/package.yaml' }] });
+      return { draftId: 'D-INVALID', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/db-health.yaml',
+        expectedResourceDigest: resourceDigest, state: 'discarded' };
+    });
+    const api = Object.assign(apiWith({}), { getPackageSutMetricsCatalog, getPackageSutMetricsResource,
+      createPackageSutMetricsDraft, packageSutMetricsDraftAction });
+    const registerUnsavedChanges = vi.fn((_dirty: boolean, _description?: string) => () => {});
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={registerUnsavedChanges} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    const panel = container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    click(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')!);
+    await settle();
+    setValue(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!, 'enabled: false\n');
+    click(button('Create SUT Metrics draft')); await settle();
+    click(button('Validate draft')); await settle();
+
+    expect(panel.textContent).toContain('profiles[0].metricSourceIds[0]');
+    expect(panel.textContent).toContain('Metric Source was not found');
+    expect(panel.textContent).not.toContain('top-secret');
+    expect(panel.textContent).not.toContain('private-value');
+    expect(panel.textContent).not.toContain('/Users/worker');
+    expect(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')?.readOnly).toBe(true);
+    expect(panel.textContent).toContain('Discard draft and edit source');
+
+    click(button('Discard draft and edit source')); await settle();
+    const editor = panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!;
+    expect(editor.readOnly).toBe(false);
+    expect(editor.value).toBe('enabled: false\n');
+    expect(registerUnsavedChanges).toHaveBeenCalledWith(true, 'unpublished Package SUT Metrics changes');
+    click(button('Discard source edits'));
+    expect(registerUnsavedChanges).toHaveBeenCalledWith(false, 'unpublished Package SUT Metrics changes');
+  });
+
+  it('adds a new Metric Source to an existing v2 Package inventory and publishes resource before Manifest refresh', async () => {
+    const emptyResourceDigest = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    const manifestDigest = 'a'.repeat(64);
+    const candidateManifestDigest = 'b'.repeat(64);
+    const resourceDigest = 'c'.repeat(64);
+    const manifestSource = 'schemaVersion: att-package/v2\nmetadata:\n  name: Payments\nobservability:\n  metricSources: []\n  groups: []\n  profiles: []\n';
+    const getPackageSutMetricsCatalog = vi.fn()
+      .mockResolvedValueOnce({ schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'UAT',
+        manifestDigest, packageRevision: 'd'.repeat(64), runtimeConfigRevision: 'e'.repeat(64), canEdit: true, metricSources: [], groups: [], profiles: [] })
+      .mockResolvedValue({ schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'UAT',
+        manifestDigest: candidateManifestDigest, packageRevision: 'f'.repeat(64), runtimeConfigRevision: 'e'.repeat(64), canEdit: true,
+        metricSources: [{ id: 'new-health', name: 'New Metric Source' }], groups: [], profiles: [] });
+    const getPackageManifest = vi.fn(async () => ({ packageId: 'payments', manifestDigest, present: true, canEdit: true,
+      available: true, text: manifestSource, redacted: false }));
+    const getPackageSutMetricsResource = vi.fn(async () => ({ packageId: 'payments', kind: 'source' as const, id: 'new-health',
+      path: 'load/sut-metrics/sources/new-health.yaml', resourceDigest, source: 'schemaVersion: att-sut-metrics-metric-source/v1\nid: new-health\n', canEdit: true }));
+    const createPackageSutMetricsDraft = vi.fn(async () => ({ draftId: 'D-NEW', packageId: 'payments',
+      resourcePath: 'load/sut-metrics/sources/new-health.yaml', expectedResourceDigest: emptyResourceDigest,
+      expectedManifestDigest: manifestDigest, candidateManifestDigest, activationMode: 'resource-then-manifest' as const, state: 'draft' as const }));
+    const packageSutMetricsDraftAction = vi.fn(async (_packageId: string, _draftId: string, action: 'validate' | 'review' | 'publish' | 'discard') => {
+      if (action === 'validate') return { draftId: 'D-NEW', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/new-health.yaml',
+        expectedResourceDigest: emptyResourceDigest, expectedManifestDigest: manifestDigest, candidateManifestDigest,
+        activationMode: 'resource-then-manifest' as const, state: 'validated',
+        validation: { valid: true, resourceDigest, candidateManifestDigest, validationRevision: '1'.repeat(64) } };
+      if (action === 'review') return { draftId: 'D-NEW', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/new-health.yaml',
+        expectedResourceDigest: emptyResourceDigest, expectedManifestDigest: manifestDigest, candidateManifestDigest,
+        activationMode: 'resource-then-manifest' as const, state: 'reviewed' };
+      if (action === 'publish') return { draftId: 'D-NEW', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/new-health.yaml',
+        expectedResourceDigest: emptyResourceDigest, expectedManifestDigest: manifestDigest, candidateManifestDigest,
+        activationMode: 'resource-then-manifest' as const, beforeResourceDigest: emptyResourceDigest,
+        manifestDigest: candidateManifestDigest, state: 'reviewed', published: true, refreshRequired: true,
+        resourceDigest, environment: 'UAT', configurationIdentity: 'config-revision-UAT' };
+      return { draftId: 'D-NEW', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/new-health.yaml',
+        expectedResourceDigest: emptyResourceDigest, state: 'discarded' };
+    });
+    const api = Object.assign(apiWith({}), { getPackageSutMetricsCatalog, getPackageManifest, getPackageSutMetricsResource,
+      createPackageSutMetricsDraft, packageSutMetricsDraftAction });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    const panel = container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    expect(getPackageManifest).not.toHaveBeenCalled();
+    setValue(panel.querySelector<HTMLInputElement>('input[aria-label="Resource ID"]')!, 'new-health');
+    click(button('Prepare new resource')); await settle();
+    expect(getPackageManifest).toHaveBeenCalledWith('payments', 'source', undefined, expect.any(AbortSignal));
+    expect(panel.textContent).toContain('load/sut-metrics/sources/new-health.yaml');
+    const editor = panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!;
+    expect(editor.value).toContain('id: new-health');
+
+    click(button('Create SUT Metrics draft')); await settle();
+    const [, draftInput] = createPackageSutMetricsDraft.mock.calls[0] as unknown as [string, {
+      resourcePath: string; expectedResourceDigest: string; candidateManifestSource: string; expectedManifestDigest: string;
+    }];
+    expect(draftInput).toMatchObject({ resourcePath: 'load/sut-metrics/sources/new-health.yaml',
+      expectedResourceDigest: emptyResourceDigest, expectedManifestDigest: manifestDigest });
+    const candidateManifest = parseDocument(draftInput.candidateManifestSource).toJS() as { observability: { metricSources: string[]; groups: string[]; profiles: string[] }; metadata: { name: string } };
+    expect(candidateManifest.observability.metricSources).toEqual(['load/sut-metrics/sources/new-health.yaml']);
+    expect(candidateManifest.observability.groups).toEqual([]);
+    expect(candidateManifest.observability.profiles).toEqual([]);
+    expect(candidateManifest.metadata.name).toBe('Payments');
+
+    click(button('Validate draft')); await settle();
+    click(button('Review draft')); await settle();
+    click(button('Publish draft')); await settle(); await settle();
+    expect(packageSutMetricsDraftAction.mock.calls.map(call => call[2])).toEqual(['validate', 'review', 'publish']);
+    expect(getPackageSutMetricsCatalog).toHaveBeenCalledTimes(2);
+    expect(getPackageSutMetricsResource).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { kind: 'group', path: 'load/sut-metrics/groups/new-thing.yaml', schema: 'att-sut-metrics-group/v1', label: 'Metric Group YAML' },
+    { kind: 'profile', path: 'load/sut-metrics/profiles/new-thing.yaml', schema: 'att-sut-metrics-profile/v2', label: 'Metrics Profile YAML' },
+  ] as const)('prepares a $kind starter and matching Package inventory path', async ({ kind, path, schema, label }) => {
+    const manifestDigest = 'a'.repeat(64);
+    const api = Object.assign(apiWith({}), {
+      getPackageSutMetricsCatalog: vi.fn(async () => ({ schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments',
+        environment: 'UAT', manifestDigest, canEdit: true, metricSources: [], groups: [], profiles: [] })),
+      getPackageManifest: vi.fn(async () => ({ packageId: 'payments', manifestDigest, present: true, canEdit: true,
+        available: true, redacted: false, text: 'schemaVersion: att-package/v2\nobservability:\n  metricSources: []\n  groups: []\n  profiles: []\n' })),
+      createPackageSutMetricsDraft: vi.fn(),
+    });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    const panel = container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    setValue(panel.querySelector<HTMLSelectElement>('select[aria-label="Resource kind"]')!, kind);
+    setValue(panel.querySelector<HTMLInputElement>('input[aria-label="Resource ID"]')!, 'new-thing');
+    click(button('Prepare new resource')); await settle();
+    expect(panel.textContent).toContain(path);
+    expect(panel.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${label}"]`)?.value).toContain(schema);
+    expect(api.createPackageSutMetricsDraft).not.toHaveBeenCalled();
+  });
+
+  it('requires an existing att-package/v2 Manifest before preparing a new resource', async () => {
+    const getPackageSutMetricsCatalog = vi.fn(async () => ({ schemaVersion: 'att-package-sut-metrics-catalog/v1',
+      packageId: 'payments', environment: 'UAT', manifestDigest: 'a'.repeat(64), canEdit: true,
+      metricSources: [], groups: [], profiles: [] }));
+    const getPackageManifest = vi.fn(async () => ({ packageId: 'payments', manifestDigest: 'a'.repeat(64), present: true,
+      canEdit: true, available: true, redacted: false, text: 'schemaVersion: att-package/v1\n' }));
+    const createPackageSutMetricsDraft = vi.fn();
+    const api = Object.assign(apiWith({}), { getPackageSutMetricsCatalog, getPackageManifest, createPackageSutMetricsDraft });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    const panel = container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    setValue(panel.querySelector<HTMLInputElement>('input[aria-label="Resource ID"]')!, 'new-health');
+    click(button('Prepare new resource')); await settle();
+    expect(panel.textContent).toContain('migrating the Package inventory to att-package/v2 first');
+    expect(createPackageSutMetricsDraft).not.toHaveBeenCalled();
+    expect(panel.querySelector('textarea[aria-label="Metric Source YAML"]')).toBeNull();
+  });
+
   it('shows an environment-neutral full-width resource list until a package resource is selected', async () => {
     const flow = resource('flow', 'checkout');
     const api = apiWith({ listResources: vi.fn(async () => ({ items: [flow], total: 1, nextCursor: null })) });

@@ -59,6 +59,12 @@ final class PackageSourceRevision {
         binding(digest, root, candidate.templatesRoot());
         binding(digest, root, candidate.testcaseRoot());
         for (Path dependency : business) file(digest, root, dependency, bytes);
+        int metricCount = candidate.metricSourceResources().size() + candidate.metricGroupResources().size()
+                + candidate.metricProfileResources().size();
+        if (business.size() + shared.size() + metricCount > MAX_DEPENDENCIES) throw limit("dependency count");
+        metricResources(digest, root, "metricSources", candidate.metricSourceResources(), bytes);
+        metricResources(digest, root, "groups", candidate.metricGroupResources(), bytes);
+        metricResources(digest, root, "profiles", candidate.metricProfileResources(), bytes);
         Path toolRoot = root.resolve("tools");
         text(digest, "tools/");
         if (Files.exists(toolRoot, LinkOption.NOFOLLOW_LINKS)) {
@@ -87,7 +93,7 @@ final class PackageSourceRevision {
                     }
                 }
             }
-            if (descriptors.size() + business.size() + shared.size() > MAX_DEPENDENCIES)
+            if (descriptors.size() + business.size() + shared.size() + metricCount > MAX_DEPENDENCIES)
                 throw limit("dependency count");
             for (Path descriptor : descriptors) file(digest, root, descriptor, bytes);
             // A queued/prewarmed Job must become stale on script changes even if
@@ -100,7 +106,7 @@ final class PackageSourceRevision {
                 Map<?, ?> fields = (Map<?, ?>) authored;
                 scripts.addAll(PackageToolScripts.referencedArgv(root, fields.get("script")));
                 scripts.addAll(PackageToolScripts.referencedArgv(root, fields.get("command")));
-                if (scripts.size() + descriptors.size() + business.size() + shared.size() > MAX_DEPENDENCIES)
+                if (scripts.size() + descriptors.size() + business.size() + shared.size() + metricCount > MAX_DEPENDENCIES)
                     throw limit("dependency count");
             }
             text(digest, "tool-scripts/");
@@ -142,6 +148,17 @@ final class PackageSourceRevision {
         text(digest, relative.toString().replace('\\', '/'));
         text(digest, Files.exists(path, LinkOption.NOFOLLOW_LINKS)
                 ? root.relativize(path.toRealPath()).toString().replace('\\', '/') : "missing");
+    }
+
+    private static void metricResources(MessageDigest digest, Path root, String kind,
+                                        Map<String, PackageConfig.PackageMetricResource> resources,
+                                        long[] bytes) throws Exception {
+        text(digest, "observability/" + kind);
+        for (PackageConfig.PackageMetricResource resource : resources.values()) {
+            text(digest, resource.id());
+            text(digest, resource.relativePath());
+            file(digest, root, resource.canonicalPath(), bytes);
+        }
     }
 
     private static void file(MessageDigest digest, Path root, Path file, long[] bytes) throws Exception {

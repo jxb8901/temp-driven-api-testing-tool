@@ -6,13 +6,27 @@ import att.resource.PackageResourceResolver;
 
 import java.io.IOException;
 import java.io.Reader;
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.CharacterCodingException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -20,18 +34,46 @@ import java.util.Locale;
 
 /** Loads V2 global configuration. Excel and stages are intentionally rejected here. */
 public final class FrameworkConfigLoader {
+    private static final int MAX_SUT_METRICS_DATA_SOURCES = 64;
+    private static final long MAX_SUT_METRICS_DESCRIPTOR_BYTES = 3_000_000L;
+    private static final long MAX_SUT_METRICS_TOTAL_DESCRIPTOR_BYTES = 16_777_216L;
+
     public static final class SutMetricsRuntimeConfiguration {
         private final Map<String, Object> definitions;
         private final Map<String, FrameworkConfig> environments;
+        private final Map<String, List<Map<String, Object>>> dataSourcesByEnvironment;
+        private final Map<String, Map<String, String>> dataSourceDescriptorDigestsByEnvironment;
+        private final Map<String, String> effectiveRevisionsByEnvironment;
+        private final String configSha256;
+        private final String overallRevision;
 
         private SutMetricsRuntimeConfiguration(Map<String, Object> definitions,
-                                               Map<String, FrameworkConfig> environments) {
+                                               Map<String, FrameworkConfig> environments,
+                                               Map<String, List<Map<String, Object>>> dataSourcesByEnvironment,
+                                               Map<String, Map<String, String>> dataSourceDescriptorDigestsByEnvironment,
+                                               Map<String, String> effectiveRevisionsByEnvironment,
+                                               String configSha256,
+                                               String overallRevision) {
             this.definitions = definitions;
             this.environments = environments;
+            this.dataSourcesByEnvironment = dataSourcesByEnvironment;
+            this.dataSourceDescriptorDigestsByEnvironment = dataSourceDescriptorDigestsByEnvironment;
+            this.effectiveRevisionsByEnvironment = effectiveRevisionsByEnvironment;
+            this.configSha256 = configSha256;
+            this.overallRevision = overallRevision;
         }
 
         public Map<String, Object> definitions() { return definitions; }
         public Map<String, FrameworkConfig> environments() { return environments; }
+        public Map<String, List<Map<String, Object>>> dataSourcesByEnvironment() { return dataSourcesByEnvironment; }
+        public Map<String, Map<String, String>> dataSourceDescriptorDigestsByEnvironment() { return dataSourceDescriptorDigestsByEnvironment; }
+        public Map<String, String> effectiveRevisionsByEnvironment() { return effectiveRevisionsByEnvironment; }
+        public String configSha256() { return configSha256; }
+        public String overallRevision() { return overallRevision; }
+        public String effectiveRevision(String environment) {
+            if (environment == null) return null;
+            return effectiveRevisionsByEnvironment.get(environment.toLowerCase(Locale.ROOT));
+        }
     }
 
     public FrameworkConfig load(Path path) throws IOException {
@@ -106,41 +148,346 @@ public final class FrameworkConfigLoader {
     @SuppressWarnings("unchecked")
     public SutMetricsRuntimeConfiguration loadSutMetricsRuntimeConfiguration(Path path, Path runtimeConfigRoot,
                                                                             String source) throws IOException {
+        if (source == null) throw new IllegalArgumentException("Runtime Config source is required");
         Object loaded = YamlSupport.parse(source);
         if (!(loaded instanceof Map)) throw new IllegalArgumentException("Config must be a YAML map: " + path);
         Map<?, ?> raw = (Map<?, ?>) loaded;
+        String schemaVersion = String.valueOf(raw.get("schemaVersion"));
+        boolean packageLocalMetricsConfig = Version.CONFIG_SCHEMA.equals(schemaVersion);
         Object catalog = raw.get("sutMetrics");
         Map<String, Object> definitions;
         if (catalog == null) definitions = Collections.emptyMap();
         else if (!(catalog instanceof Map)) throw new IllegalArgumentException("config.sutMetrics must be a mapping");
-        else definitions = new LinkedHashMap<>((Map<String, Object>) catalog);
+        else {
+            definitions = new LinkedHashMap<>((Map<String, Object>) catalog);
+            if (packageLocalMetricsConfig) definitions.remove("dataSources");
+        }
 
         Map<String, FrameworkConfig> environments = new LinkedHashMap<>();
-        Object configuredEnvironments = raw.get("environments");
-        if (configuredEnvironments instanceof Map && !((Map<?, ?>) configuredEnvironments).isEmpty()) {
-            Map<?, ?> profiles = (Map<?, ?>) configuredEnvironments;
-            boolean loadedEnvironment = false;
-            for (Object key : profiles.keySet()) {
-                if (SchemaSupport.isDisabledKey(key)) continue;
-                if (!(key instanceof String)) throw new IllegalArgumentException("config.environments keys must be strings");
-                String name = (String) key;
-                FrameworkConfig framework = loadInternal(path, runtimeConfigRoot, runtimeConfigRoot, name,
-                        loaded, true, EnvironmentReferences.discovery(), false);
-                environments.put(framework.environment().toLowerCase(Locale.ROOT), framework);
-                loadedEnvironment = true;
-            }
-            if (!loadedEnvironment) {
-                FrameworkConfig framework = loadInternal(path, runtimeConfigRoot, runtimeConfigRoot, null,
-                        loaded, true, EnvironmentReferences.discovery(), false);
-                environments.put(framework.environment().toLowerCase(Locale.ROOT), framework);
-            }
-        } else {
-            FrameworkConfig framework = loadInternal(path, runtimeConfigRoot, runtimeConfigRoot, null,
-                    loaded, true, EnvironmentReferences.discovery(), false);
-            environments.put(framework.environment().toLowerCase(Locale.ROOT), framework);
+        Map<String, List<Map<String, Object>>> dataSourcesByEnvironment = new LinkedHashMap<>();
+        Map<String, Map<String, String>> descriptorDigestsByEnvironment = new LinkedHashMap<>();
+        Map<String, String> revisionsByEnvironment = new LinkedHashMap<>();
+        String configSha256 = sha256(source.getBytes(StandardCharsets.UTF_8));
+        List<String> selectors = environmentSelectors(raw, packageLocalMetricsConfig);
+        for (String selector : selectors) {
+            FrameworkConfig framework = loadInternal(path, runtimeConfigRoot, runtimeConfigRoot, selector,
+                    loaded, true, EnvironmentReferences.discovery(), false, null, false);
+            String environment = framework.environment().toLowerCase(Locale.ROOT);
+            Map<String, Object> effective = resolveEnvironment(raw, true, true, true, selector,
+                    packageLocalMetricsConfig);
+            Object effectiveCatalog = effective.get("sutMetrics");
+            DataSourceSnapshot snapshot = packageLocalMetricsConfig
+                    ? loadDataSourceDescriptors(effectiveCatalog, runtimeConfigRoot)
+                    : inlineDataSources(effectiveCatalog);
+            if (environments.put(environment, framework) != null)
+                throw new IllegalArgumentException("Duplicate effective Runtime Config environment: " + environment);
+            dataSourcesByEnvironment.put(environment, snapshot.dataSources);
+            descriptorDigestsByEnvironment.put(environment, snapshot.descriptorDigests);
+            revisionsByEnvironment.put(environment,
+                    effectiveRevision(configSha256, environment, snapshot.descriptorDigests));
         }
-        return new SutMetricsRuntimeConfiguration(Collections.unmodifiableMap(definitions),
-                Collections.unmodifiableMap(environments));
+        return new SutMetricsRuntimeConfiguration(
+                Collections.unmodifiableMap(definitions),
+                Collections.unmodifiableMap(environments),
+                immutableDataSourcesByEnvironment(dataSourcesByEnvironment),
+                immutableDigestsByEnvironment(descriptorDigestsByEnvironment),
+                Collections.unmodifiableMap(revisionsByEnvironment),
+                configSha256,
+                overallRevision(configSha256, descriptorDigestsByEnvironment));
+    }
+
+    private static List<String> environmentSelectors(Map<?, ?> raw, boolean includeBaseEnvironment) {
+        Object configured = raw.get("environments");
+        if (!(configured instanceof Map)) return Collections.<String>singletonList(null);
+        Map<?, ?> profiles = (Map<?, ?>) configured;
+        List<String> selectors = new ArrayList<>();
+        Set<String> selected = new LinkedHashSet<>();
+        boolean hasActiveProfile = false;
+        for (Object key : profiles.keySet()) {
+            if (SchemaSupport.isDisabledKey(key)) continue;
+            if (!(key instanceof String)) throw new IllegalArgumentException("config.environments keys must be strings");
+            hasActiveProfile = true;
+        }
+        if (!hasActiveProfile) return Collections.<String>singletonList(null);
+
+        Object defaultEnvironment = raw.get("environment");
+        if (includeBaseEnvironment && defaultEnvironment instanceof String && !((String) defaultEnvironment).trim().isEmpty())
+            addEnvironmentSelector(selectors, selected, (String) defaultEnvironment);
+        for (Object key : profiles.keySet()) {
+            if (SchemaSupport.isDisabledKey(key)) continue;
+            addEnvironmentSelector(selectors, selected, (String) key);
+        }
+        return selectors;
+    }
+
+    private static void addEnvironmentSelector(List<String> selectors, Set<String> selected, String value) {
+        String name = value.trim();
+        String key = name.toLowerCase(Locale.ROOT);
+        if (selected.add(key)) selectors.add(name);
+    }
+
+    private static DataSourceSnapshot inlineDataSources(Object catalog) {
+        if (catalog == null) return DataSourceSnapshot.empty();
+        if (!(catalog instanceof Map)) throw new IllegalArgumentException("config.sutMetrics must be a mapping");
+        Object configured = ((Map<?, ?>) catalog).get("dataSources");
+        if (configured == null) return DataSourceSnapshot.empty();
+        if (!(configured instanceof List)) throw new IllegalArgumentException("config.sutMetrics.dataSources must be a list");
+        List<?> entries = (List<?>) configured;
+        if (entries.size() > MAX_SUT_METRICS_DATA_SOURCES)
+            throw new IllegalArgumentException("config.sutMetrics.dataSources exceeds the descriptor limit");
+        List<Map<String, Object>> sources = new ArrayList<>();
+        Set<String> ids = new LinkedHashSet<>();
+        for (Object entry : entries) {
+            if (!(entry instanceof Map)) throw new IllegalArgumentException("config.sutMetrics.dataSources entries must be maps");
+            Map<String, Object> source = immutableStringMap((Map<?, ?>) entry, "SUT Metrics Data Source");
+            Object id = source.get("id");
+            if (!(id instanceof String) || !ids.add(((String) id).toLowerCase(Locale.ROOT)))
+                throw new IllegalArgumentException("Duplicate or invalid inline SUT Metrics Data Source ID");
+            sources.add(source);
+        }
+        return new DataSourceSnapshot(Collections.unmodifiableList(sources), Collections.<String, String>emptyMap());
+    }
+
+    private static DataSourceSnapshot loadDataSourceDescriptors(Object catalog, Path runtimeConfigRoot) throws IOException {
+        if (catalog == null) return DataSourceSnapshot.empty();
+        if (!(catalog instanceof Map)) throw new IllegalArgumentException("config.sutMetrics must be a mapping");
+        Object configured = ((Map<?, ?>) catalog).get("dataSources");
+        if (configured == null) return DataSourceSnapshot.empty();
+        if (!(configured instanceof List)) throw new IllegalArgumentException("config.sutMetrics.dataSources must be a list of descriptor paths");
+        List<?> descriptors = (List<?>) configured;
+        if (descriptors.size() > MAX_SUT_METRICS_DATA_SOURCES)
+            throw new IllegalArgumentException("config.sutMetrics.dataSources exceeds the descriptor limit");
+        if (descriptors.isEmpty()) return DataSourceSnapshot.empty();
+
+        Path projectRoot = runtimeConfigRoot.toAbsolutePath().normalize().toRealPath();
+        Path metricsRoot = projectRoot.resolve("config/sut-metrics").normalize();
+        rejectSymbolicAncestors(metricsRoot, projectRoot, "SUT Metrics descriptor directory");
+        if (!Files.isDirectory(metricsRoot, LinkOption.NOFOLLOW_LINKS))
+            throw new IllegalArgumentException("Missing config/sut-metrics directory for declared Data Source descriptors");
+        Path canonicalMetricsRoot = metricsRoot.toRealPath();
+        if (!canonicalMetricsRoot.startsWith(projectRoot))
+            throw new IllegalArgumentException("SUT Metrics descriptor directory escapes the Runtime Config root");
+
+        Path descriptorSchema = att.validation.SchemaFiles.resolveVersion(projectRoot, Version.SUT_METRICS_DATA_SOURCE_SCHEMA);
+        try { att.validation.JsonSchemaVerifier.compile(descriptorSchema); }
+        catch (Exception unavailable) { throw new IllegalStateException("SUT Metrics Data Source schema is unavailable", unavailable); }
+        List<Map<String, Object>> sources = new ArrayList<>();
+        Map<String, String> digests = new LinkedHashMap<>();
+        Set<Path> canonicalFiles = new LinkedHashSet<>();
+        Set<String> ids = new LinkedHashSet<>();
+        long totalBytes = 0;
+        for (Object descriptor : descriptors) {
+            if (!(descriptor instanceof String))
+                throw new IllegalArgumentException("config.sutMetrics.dataSources paths must be strings");
+            String authoredPath = (String) descriptor;
+            if (authoredPath.length() > 512 || !authoredPath.matches("config/sut-metrics/.+\\.ya?ml"))
+                throw new IllegalArgumentException("SUT Metrics Data Source paths must point to YAML files under config/sut-metrics/");
+            Path relative = att.core.IdentifierValidator.relativePath(authoredPath, "config.sutMetrics.dataSources path");
+            Path expectedPrefix = Paths.get("config", "sut-metrics");
+            if (!relative.startsWith(expectedPrefix) || relative.getNameCount() < 3)
+                throw new IllegalArgumentException("SUT Metrics Data Source path must remain inside config/sut-metrics/");
+            Path logical = projectRoot.resolve(relative).normalize();
+            if (!logical.startsWith(metricsRoot))
+                throw new IllegalArgumentException("SUT Metrics Data Source path escapes config/sut-metrics/");
+            rejectSymbolicAncestors(logical, projectRoot, "SUT Metrics Data Source descriptor");
+            if (!Files.isRegularFile(logical, LinkOption.NOFOLLOW_LINKS) || !Files.isReadable(logical))
+                throw new IllegalArgumentException("Missing, unreadable or unsafe SUT Metrics Data Source descriptor: " + authoredPath);
+            Path canonical = logical.toRealPath();
+            if (!canonical.startsWith(canonicalMetricsRoot) || !canonicalFiles.add(canonical))
+                throw new IllegalArgumentException("Duplicate or out-of-directory SUT Metrics Data Source descriptor: " + authoredPath);
+            BasicFileAttributes attributes = Files.readAttributes(canonical, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            if (!attributes.isRegularFile() || attributes.size() > MAX_SUT_METRICS_DESCRIPTOR_BYTES)
+                throw new IllegalArgumentException("SUT Metrics Data Source descriptor exceeds the per-file size limit: " + authoredPath);
+            totalBytes += attributes.size();
+            if (totalBytes > MAX_SUT_METRICS_TOTAL_DESCRIPTOR_BYTES)
+                throw new IllegalArgumentException("SUT Metrics Data Source descriptors exceed the total size limit");
+
+            byte[] bytes = readStableDescriptor(canonical, authoredPath);
+            String digest = sha256(bytes);
+            String relativeName = relative.toString().replace('\\', '/');
+            Object parsed;
+            try {
+                String descriptorSource = StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT)
+                        .decode(ByteBuffer.wrap(bytes)).toString();
+                parsed = YamlSupport.parse(descriptorSource);
+                if (!(parsed instanceof Map)) throw new IllegalArgumentException("descriptor must contain one YAML map");
+                att.validation.JsonSchemaVerifier.verify(descriptorSchema, parsed);
+            } catch (CharacterCodingException malformedUtf8) {
+                throw new IllegalArgumentException("Invalid SUT Metrics Data Source descriptor " + relativeName + " at UTF-8", malformedUtf8);
+            } catch (Exception invalid) {
+                att.validation.JsonSchemaVerifier.SchemaValidationException schemaError =
+                        att.validation.JsonSchemaVerifier.SchemaValidationException.find(invalid);
+                String field = schemaError == null ? "YAML" : schemaError.field();
+                throw new IllegalArgumentException("Invalid SUT Metrics Data Source descriptor " + relativeName + " at " + field, invalid);
+            }
+            Map<String, Object> source = immutableStringMap((Map<?, ?>) parsed, relativeName);
+            Object id = source.get("id");
+            if (!(id instanceof String) || ((String) id).trim().isEmpty()
+                    || !ids.add(((String) id).toLowerCase(Locale.ROOT)))
+                throw new IllegalArgumentException("Duplicate or invalid SUT Metrics Data Source ID in " + relativeName);
+            sources.add(source);
+            digests.put(relativeName, digest);
+
+            if (!canonical.equals(logical.toRealPath()))
+                throw new IllegalArgumentException("SUT Metrics Data Source descriptor changed while it was being loaded: " + relativeName);
+        }
+        return new DataSourceSnapshot(Collections.unmodifiableList(sources), Collections.unmodifiableMap(digests));
+    }
+
+    private static void rejectSymbolicAncestors(Path path, Path root, String owner) {
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        Path normalized = path.toAbsolutePath().normalize();
+        if (!normalized.startsWith(normalizedRoot)) throw new IllegalArgumentException(owner + " escapes the Runtime Config root");
+        for (Path current = normalized; current != null && current.startsWith(normalizedRoot); current = current.getParent()) {
+            if (Files.isSymbolicLink(current)) throw new IllegalArgumentException("Unsafe symbolic link in " + owner + ": " + normalizedRoot.relativize(current));
+            if (current.equals(normalizedRoot)) break;
+        }
+    }
+
+    private static byte[] readStableDescriptor(Path file, String displayPath) throws IOException {
+        byte[] first = readDescriptorOnce(file, displayPath);
+        byte[] second = readDescriptorOnce(file, displayPath);
+        if (!Arrays.equals(first, second))
+            throw new IllegalArgumentException("SUT Metrics Data Source descriptor changed while it was being read: " + displayPath);
+        return first;
+    }
+
+    private static byte[] readDescriptorOnce(Path file, String displayPath) throws IOException {
+        BasicFileAttributes before = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (!before.isRegularFile() || before.size() > MAX_SUT_METRICS_DESCRIPTOR_BYTES)
+            throw new IllegalArgumentException("Invalid or oversized SUT Metrics Data Source descriptor: " + displayPath);
+        ByteArrayOutputStream output = new ByteArrayOutputStream((int) before.size());
+        Set<OpenOption> options = new HashSet<>();
+        options.add(StandardOpenOption.READ);
+        options.add(LinkOption.NOFOLLOW_LINKS);
+        try (SeekableByteChannel channel = Files.newByteChannel(file, options)) {
+            if (channel.size() != before.size())
+                throw new IllegalArgumentException("SUT Metrics Data Source descriptor changed while it was opened: " + displayPath);
+            ByteBuffer buffer = ByteBuffer.allocate(8192);
+            int read;
+            long total = 0;
+            while ((read = channel.read(buffer)) >= 0) {
+                if (read == 0) continue;
+                total += read;
+                if (total > MAX_SUT_METRICS_DESCRIPTOR_BYTES)
+                    throw new IllegalArgumentException("SUT Metrics Data Source descriptor exceeds the per-file size limit: " + displayPath);
+                output.write(buffer.array(), 0, read);
+                buffer.clear();
+            }
+            if (channel.size() != before.size() || total != before.size())
+                throw new IllegalArgumentException("SUT Metrics Data Source descriptor changed while it was read: " + displayPath);
+        }
+        BasicFileAttributes after = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (!after.isRegularFile() || after.size() != before.size()
+                || !after.lastModifiedTime().equals(before.lastModifiedTime())
+                || (before.fileKey() != null && after.fileKey() != null && !before.fileKey().equals(after.fileKey())))
+            throw new IllegalArgumentException("SUT Metrics Data Source descriptor changed while it was read: " + displayPath);
+        return output.toByteArray();
+    }
+
+    private static Map<String, Object> immutableStringMap(Map<?, ?> value, String owner) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : value.entrySet()) {
+            if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException(owner + " keys must be strings");
+            copy.put((String) entry.getKey(), immutableValue(entry.getValue(), owner));
+        }
+        return Collections.unmodifiableMap(copy);
+    }
+
+    private static Object immutableValue(Object value, String owner) {
+        if (value instanceof Map) return immutableStringMap((Map<?, ?>) value, owner);
+        if (value instanceof List) {
+            List<Object> copy = new ArrayList<>();
+            for (Object item : (List<?>) value) copy.add(immutableValue(item, owner));
+            return Collections.unmodifiableList(copy);
+        }
+        return value;
+    }
+
+    private static Map<String, List<Map<String, Object>>> immutableDataSourcesByEnvironment(
+            Map<String, List<Map<String, Object>>> values) {
+        Map<String, List<Map<String, Object>>> copy = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Map<String, Object>>> entry : values.entrySet()) {
+            List<Map<String, Object>> sources = new ArrayList<>();
+            for (Map<String, Object> source : entry.getValue()) sources.add(immutableStringMap(source, "SUT Metrics Data Source"));
+            copy.put(entry.getKey().toLowerCase(Locale.ROOT), Collections.unmodifiableList(sources));
+        }
+        return Collections.unmodifiableMap(copy);
+    }
+
+    private static Map<String, Map<String, String>> immutableDigestsByEnvironment(Map<String, Map<String, String>> values) {
+        Map<String, Map<String, String>> copy = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, String>> entry : values.entrySet())
+            copy.put(entry.getKey().toLowerCase(Locale.ROOT), Collections.unmodifiableMap(new LinkedHashMap<>(entry.getValue())));
+        return Collections.unmodifiableMap(copy);
+    }
+
+    private static String effectiveRevision(String configSha256, String environment, Map<String, String> descriptorDigests) {
+        MessageDigest digest = sha256Digest();
+        digestField(digest, "att-effective-runtime-config/v1");
+        digestField(digest, configSha256);
+        digestField(digest, environment.toLowerCase(Locale.ROOT));
+        List<String> paths = new ArrayList<>(descriptorDigests.keySet());
+        Collections.sort(paths);
+        for (String path : paths) {
+            digestField(digest, path);
+            digestField(digest, descriptorDigests.get(path));
+        }
+        return toHex(digest.digest());
+    }
+
+    private static String overallRevision(String configSha256, Map<String, Map<String, String>> descriptorDigestsByEnvironment) {
+        MessageDigest digest = sha256Digest();
+        digestField(digest, "att-runtime-config-overall/v1");
+        digestField(digest, configSha256);
+        List<String> environments = new ArrayList<>(descriptorDigestsByEnvironment.keySet());
+        Collections.sort(environments);
+        for (String environment : environments) {
+            digestField(digest, environment.toLowerCase(Locale.ROOT));
+            Map<String, String> descriptors = descriptorDigestsByEnvironment.get(environment);
+            List<String> paths = new ArrayList<>(descriptors.keySet());
+            Collections.sort(paths);
+            for (String path : paths) {
+                digestField(digest, path);
+                digestField(digest, descriptors.get(path));
+            }
+        }
+        return toHex(digest.digest());
+    }
+
+    private static void digestField(MessageDigest digest, String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        digest.update(ByteBuffer.allocate(4).putInt(bytes.length).array());
+        digest.update(bytes);
+    }
+
+    private static String sha256(byte[] bytes) {
+        return toHex(sha256Digest().digest(bytes));
+    }
+
+    private static MessageDigest sha256Digest() {
+        try { return MessageDigest.getInstance("SHA-256"); }
+        catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException("SHA-256 is unavailable", impossible); }
+    }
+
+    private static String toHex(byte[] bytes) {
+        StringBuilder value = new StringBuilder(bytes.length * 2);
+        for (byte item : bytes) value.append(String.format(Locale.ROOT, "%02x", item & 0xff));
+        return value.toString();
+    }
+
+    private static final class DataSourceSnapshot {
+        private final List<Map<String, Object>> dataSources;
+        private final Map<String, String> descriptorDigests;
+        private DataSourceSnapshot(List<Map<String, Object>> dataSources, Map<String, String> descriptorDigests) {
+            this.dataSources = dataSources;
+            this.descriptorDigests = descriptorDigests;
+        }
+        private static DataSourceSnapshot empty() {
+            return new DataSourceSnapshot(Collections.<Map<String, Object>>emptyList(), Collections.<String, String>emptyMap());
+        }
     }
 
     private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
@@ -166,19 +513,28 @@ public final class FrameworkConfigLoader {
     private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
                                          String selectedEnvironment, Object parsed, boolean supplied, EnvironmentReferences references,
                                          boolean packageAware, PackageConfig candidate) throws IOException {
+        return loadInternal(path, runtimeConfigRoot, packageRoot, selectedEnvironment, parsed, supplied,
+                references, packageAware, candidate, true);
+    }
+
+    private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
+                                         String selectedEnvironment, Object parsed, boolean supplied, EnvironmentReferences references,
+                                         boolean packageAware, PackageConfig candidate, boolean validateSutMetrics) throws IOException {
         long inspectionStarted=System.nanoTime();
         try {
             Object loaded=supplied?parsed:YamlSupport.load(path);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Config must be a YAML map: " + path);
             Map<?, ?> rawMap = (Map<?, ?>) loaded;
             String schemaVersion = String.valueOf(rawMap.get("schemaVersion"));
-            boolean v210 = Version.CONFIG_SCHEMA.equals(schemaVersion)
+            boolean currentConfig = Version.CONFIG_SCHEMA.equals(schemaVersion);
+            boolean v210 = currentConfig
                     || Version.PREVIOUS_CONFIG_SCHEMA.equals(schemaVersion)
+                    || "att-config/v2.13".equals(schemaVersion)
                     || "att-config/v2.12".equals(schemaVersion) || "att-config/v2.11".equals(schemaVersion);
             if (!v210) {
                 runtimeConfigRoot = runtimeConfigRoot.toAbsolutePath().normalize();
                 Path declaredSchema = att.validation.SchemaFiles.resolveVersion(runtimeConfigRoot, schemaVersion);
-                Path currentSchema = schema(runtimeConfigRoot, "att-config-v2.14.schema.json");
+                Path currentSchema = schema(runtimeConfigRoot, "att-config-v2.15.schema.json");
                 att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, rawMap,
                         schemaVersion, Version.CONFIG_SCHEMA);
                 throw new IllegalArgumentException("Unsupported config schemaVersion '" + schemaVersion
@@ -195,12 +551,12 @@ public final class FrameworkConfigLoader {
             packageRoot = packageRoot.toAbsolutePath().normalize();
             String schemaName = v210 ? null : v29 ? "att-config-v2.9.schema.json" : v28 ? "att-config-v2.8.schema.json" : v27 ? "att-config-v2.7.schema.json" : v26 ? "att-config-v2.6.schema.json" : v25 ? "att-config-v2.5.schema.json" : v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json";
             Path schema = v210 ? (Version.CONFIG_SCHEMA.equals(schemaVersion)
-                    ? schema(runtimeConfigRoot, "att-config-v2.14.schema.json")
+                    ? schema(runtimeConfigRoot, "att-config-v2.15.schema.json")
                     : att.validation.SchemaFiles.resolveVersion(runtimeConfigRoot, schemaVersion))
                     : schema(runtimeConfigRoot, schemaName);
             rejectLegacyGlobalTools(rawMap);
             att.validation.SchemaMigrationGuidance.verify(schema,
-                    schema(runtimeConfigRoot, "att-config-v2.14.schema.json"), rawMap, schemaVersion, Version.CONFIG_SCHEMA);
+                    schema(runtimeConfigRoot, "att-config-v2.15.schema.json"), rawMap, schemaVersion, Version.CONFIG_SCHEMA);
             SchemaSupport.rejectUnknown(rawMap, "config", v28
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata", "ssh", "tools", "environments", "packagePolicy"}
                     : v29
@@ -222,9 +578,10 @@ public final class FrameworkConfigLoader {
             String selector = selectedEnvironment == null ? packageConfig.defaultEnvironment() : selectedEnvironment;
             String environmentOrigin = selectedEnvironment != null ? "request" : packageConfig.defaultEnvironment() != null ? "package" : rawMap.get("environment") != null ? "global" : "runtime-default";
             Map<String, Object> map = resolveEnvironment(rawMap, v29 || v28 || v27 || v26, v29 || v28 || v27,
-                    v29 || v28, selector);
+                    v29 || v28, selector, currentConfig);
             att.validation.SchemaMigrationGuidance.verify(schema,
-                    schema(runtimeConfigRoot, "att-config-v2.14.schema.json"), map, schemaVersion, Version.CONFIG_SCHEMA);
+                    schema(runtimeConfigRoot, "att-config-v2.15.schema.json"), map, schemaVersion, Version.CONFIG_SCHEMA);
+            if (validateSutMetrics && currentConfig) loadDataSourceDescriptors(map.get("sutMetrics"), runtimeConfigRoot);
             rejectLegacyGlobalTools(map);
             validateGlobalMappings(map);
             Map<String, ToolConfig> tools = packageAware ? PackageToolRegistry.load(packageRoot)
@@ -311,7 +668,7 @@ public final class FrameworkConfigLoader {
     }
 
     static Map<String, Object> resolveEnvironment(Map<?, ?> raw, boolean profileSupported, boolean sshSupported,
-                                                           boolean httpSupported, String requested) {
+                                                   boolean httpSupported, String requested, boolean sutMetricsSupported) {
         Object configured = raw.get("environments");
         if (configured == null) {
             String canonical = raw.get("environment") instanceof String ? (String)raw.get("environment") : "SIT";
@@ -336,7 +693,9 @@ public final class FrameworkConfigLoader {
             names.put(canonical, name);
             if (!(entry.getValue() instanceof Map)) throw new IllegalArgumentException("Environment profile must be a map: " + name);
             Map<?, ?> profile = (Map<?, ?>) entry.getValue();
-            if (httpSupported) SchemaSupport.rejectUnknown(profile, "config.environments." + name, "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata");
+            if (sutMetricsSupported) SchemaSupport.rejectUnknown(profile, "config.environments." + name,
+                    "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata", "sutMetrics");
+            else if (httpSupported) SchemaSupport.rejectUnknown(profile, "config.environments." + name, "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata");
             else if (sshSupported) SchemaSupport.rejectUnknown(profile, "config.environments." + name, "dbhelpers", "mqhelpers", "sshhelpers");
             else SchemaSupport.rejectUnknown(profile, "config.environments." + name, "dbhelpers", "mqhelpers");
             if (profile.containsKey("dbhelpers")) validateProfileList(profile.get("dbhelpers"), "config.environments." + name + ".dbhelpers");
@@ -344,10 +703,16 @@ public final class FrameworkConfigLoader {
             if (profile.containsKey("sshhelpers")) validateProfileList(profile.get("sshhelpers"), "config.environments." + name + ".sshhelpers");
             if (profile.containsKey("httphelpers")) validateProfileList(profile.get("httphelpers"), "config.environments." + name + ".httphelpers");
             if (profile.containsKey("testdata")) validateProfileList(profile.get("testdata"), "config.environments." + name + ".testdata");
+            if (profile.containsKey("sutMetrics")) validateSutMetricsPathList(profile.get("sutMetrics"), "config.environments." + name + ".sutMetrics");
         }
 
         if (names.isEmpty()) {
-            if (requested != null) throw new IllegalArgumentException("--env requires a profile config with an active environments map");
+            if (requested != null) {
+                if (sutMetricsSupported && raw.get("environment") instanceof String
+                        && ((String) raw.get("environment")).equalsIgnoreCase(requested))
+                    return baseEnvironment(raw, requested);
+                throw new IllegalArgumentException("--env requires a profile config with an active environments map");
+            }
             Map<String, Object> copy = new LinkedHashMap<String, Object>();
             for (Map.Entry<?, ?> entry : raw.entrySet()) copy.put(String.valueOf(entry.getKey()), entry.getValue());
             return copy;
@@ -362,7 +727,12 @@ public final class FrameworkConfigLoader {
             requestedName = (String) declared;
         }
         String canonical = names.get(requestedName.trim().toLowerCase(Locale.ROOT));
-        if (canonical == null) throw new IllegalArgumentException("Unknown environment '" + requestedName + "'; available environments: " + names.values());
+        if (canonical == null) {
+            if (sutMetricsSupported && raw.get("environment") instanceof String
+                    && ((String) raw.get("environment")).equalsIgnoreCase(requestedName))
+                return baseEnvironment(raw, requestedName);
+            throw new IllegalArgumentException("Unknown environment '" + requestedName + "'; available environments: " + names.values());
+        }
         Map<?, ?> profile = (Map<?, ?>) profiles.get(canonical);
         Map<String, Object> effective = new LinkedHashMap<String, Object>();
         for (Map.Entry<?, ?> entry : raw.entrySet()) {
@@ -373,8 +743,38 @@ public final class FrameworkConfigLoader {
         if (profile.containsKey("sshhelpers")) effective.put("sshhelpers", profile.get("sshhelpers"));
         if (profile.containsKey("httphelpers")) effective.put("httphelpers", profile.get("httphelpers"));
         if (profile.containsKey("testdata")) effective.put("testdata", profile.get("testdata"));
+        if (profile.containsKey("sutMetrics")) effective.put("sutMetrics", profile.get("sutMetrics"));
         effective.put("environment", canonical);
         return effective;
+    }
+
+    private static Map<String, Object> baseEnvironment(Map<?, ?> raw, String environment) {
+        Map<String, Object> effective = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : raw.entrySet())
+            if (!"environments".equals(entry.getKey())) effective.put(String.valueOf(entry.getKey()), entry.getValue());
+        effective.put("environment", environment);
+        return effective;
+    }
+
+    private static void validateSutMetricsPathList(Object value, String owner) {
+        if (!(value instanceof Map)) throw new IllegalArgumentException(owner + " must be a mapping");
+        Map<?, ?> sutMetrics = (Map<?, ?>) value;
+        SchemaSupport.rejectUnknown(sutMetrics, owner, "dataSources");
+        Object dataSources = sutMetrics.get("dataSources");
+        if (!(dataSources instanceof List)) throw new IllegalArgumentException(owner + ".dataSources must be a list of descriptor paths");
+        List<?> paths = (List<?>) dataSources;
+        if (paths.size() > MAX_SUT_METRICS_DATA_SOURCES)
+            throw new IllegalArgumentException(owner + ".dataSources exceeds the descriptor limit");
+        Set<String> unique = new LinkedHashSet<>();
+        for (Object path : paths) {
+            if (!(path instanceof String)) throw new IllegalArgumentException(owner + ".dataSources paths must be strings");
+            String text = (String) path;
+            Path relative = att.core.IdentifierValidator.relativePath(text, owner + ".dataSources path");
+            if (!text.matches("config/sut-metrics/.+\\.ya?ml")
+                    || !relative.startsWith(Paths.get("config", "sut-metrics")) || relative.getNameCount() < 3)
+                throw new IllegalArgumentException(owner + ".dataSources paths must remain inside config/sut-metrics/");
+            if (!unique.add(text)) throw new IllegalArgumentException(owner + ".dataSources contains a duplicate path");
+        }
     }
 
     private static void validateProfileList(Object value, String owner) {

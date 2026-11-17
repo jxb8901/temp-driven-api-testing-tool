@@ -3,7 +3,10 @@ package att.config;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
@@ -43,7 +46,7 @@ class FrameworkConfigLoaderTest {
         assertThrows(IllegalArgumentException.class,()->loader.load(config,tempDir,"UAT"));
     }
 
-    @Test void currentConfigLoadsStrictCentralSutMetricsDefinitionsAndKeepsV213Readable() throws Exception {
+    @Test void previousConfigLoadsStrictCentralSutMetricsDefinitionsAndKeepsV213Readable() throws Exception {
         String valid = "schemaVersion: att-config/v2.14\n"
                 + "sutMetrics:\n  dataSources: []\n  metricSources: []\n  groups: []\n  profiles: []\n";
         Path config = write("sut-metrics-config.yaml", valid);
@@ -60,6 +63,157 @@ class FrameworkConfigLoaderTest {
         Path previous = write("previous-config.yaml", "schemaVersion: att-config/v2.13\nenvironment: SIT\n");
         assertTrue(new FrameworkConfigLoader().loadSutMetricsConfiguration(previous, tempDir,
                 new String(Files.readAllBytes(previous), java.nio.charset.StandardCharsets.UTF_8)).isEmpty());
+
+        String profiledV214 = "schemaVersion: att-config/v2.14\nenvironment: SIT\n"
+                + "sutMetrics: {dataSources: [], metricSources: [], groups: [], profiles: []}\n"
+                + "environments: {UAT: {}}\n";
+        Path profiled = write("profiled-previous-config.yaml", profiledV214);
+        FrameworkConfigLoader.SutMetricsRuntimeConfiguration profiledLoaded = new FrameworkConfigLoader()
+                .loadSutMetricsRuntimeConfiguration(profiled, tempDir, profiledV214);
+        assertEquals(Collections.singleton("uat"), profiledLoaded.environments().keySet());
+    }
+
+    @Test void currentConfigLoadsPackageLocalSourceDescriptorsAndPinsTheirBytesPerEnvironment() throws Exception {
+        Path directory = tempDir.resolve("config/sut-metrics");
+        Files.createDirectories(directory);
+        Path sitSource = directory.resolve("prometheus-sit.yaml");
+        Path uatSource = directory.resolve("prometheus-uat.yaml");
+        Files.write(sitSource, dataSource("SIT Prometheus", "sit").getBytes(StandardCharsets.UTF_8));
+        Files.write(uatSource, dataSource("UAT Prometheus", "uat").getBytes(StandardCharsets.UTF_8));
+        String config = "schemaVersion: att-config/v2.15\n"
+                + "environment: SIT\n"
+                + "sutMetrics:\n  dataSources: [config/sut-metrics/prometheus-sit.yaml]\n"
+                + "environments:\n  UAT:\n    sutMetrics:\n      dataSources: [config/sut-metrics/prometheus-uat.yaml]\n";
+        Path path = write("config/config.yaml", config);
+
+        FrameworkConfigLoader.SutMetricsRuntimeConfiguration loaded = new FrameworkConfigLoader()
+                .loadSutMetricsRuntimeConfiguration(path, tempDir, config);
+
+        assertEquals(java.util.Arrays.asList("sit", "uat"), new java.util.ArrayList<>(loaded.dataSourcesByEnvironment().keySet()));
+        assertEquals("prom-main", loaded.dataSourcesByEnvironment().get("sit").get(0).get("id"));
+        assertEquals("prom-main", loaded.dataSourcesByEnvironment().get("uat").get(0).get("id"));
+        assertTrue(loaded.definitions().isEmpty(), "v2.15 returns connection descriptors separately");
+        assertEquals("prometheus-sit.yaml", Paths.get(loaded.dataSourceDescriptorDigestsByEnvironment()
+                .get("sit").keySet().iterator().next()).getFileName().toString());
+        assertEquals(64, loaded.dataSourceDescriptorDigestsByEnvironment().get("sit")
+                .get("config/sut-metrics/prometheus-sit.yaml").length());
+        assertTrue(loaded.overallRevision().matches("[a-f0-9]{64}"));
+        assertEquals(loaded.effectiveRevision("SIT"), loaded.effectiveRevision("sit"));
+        assertNotEquals(loaded.effectiveRevision("sit"), loaded.effectiveRevision("uat"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> loaded.dataSourcesByEnvironment().get("sit").add(Collections.<String, Object>emptyMap()));
+        assertThrows(UnsupportedOperationException.class,
+                () -> loaded.dataSourcesByEnvironment().get("sit").get(0).put("id", "changed"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> loaded.dataSourceDescriptorDigestsByEnvironment().get("sit").put("x", "x"));
+
+        String originalConfigDigest = loaded.configSha256();
+        String originalSitRevision = loaded.effectiveRevision("sit");
+        String originalUatRevision = loaded.effectiveRevision("uat");
+        Files.write(uatSource, dataSource("Updated UAT Prometheus", "uat").getBytes(StandardCharsets.UTF_8));
+        FrameworkConfigLoader.SutMetricsRuntimeConfiguration changed = new FrameworkConfigLoader()
+                .loadSutMetricsRuntimeConfiguration(path, tempDir, config);
+        assertEquals(originalConfigDigest, changed.configSha256());
+        assertEquals(originalSitRevision, changed.effectiveRevision("sit"));
+        assertNotEquals(originalUatRevision, changed.effectiveRevision("uat"));
+        assertNotEquals(loaded.overallRevision(), changed.overallRevision());
+    }
+
+    @Test void currentConfigAcceptsAnEmptyMetricInventoryAndRejectsLegacyInlineDefinitions() throws Exception {
+        String empty = "schemaVersion: att-config/v2.15\nenvironment: SIT\nsutMetrics: {dataSources: []}\n";
+        Path path = write("empty-sut-metrics-v215.yaml", empty);
+        FrameworkConfigLoader.SutMetricsRuntimeConfiguration loaded = new FrameworkConfigLoader()
+                .loadSutMetricsRuntimeConfiguration(path, tempDir, empty);
+        assertTrue(loaded.definitions().isEmpty());
+        assertTrue(loaded.dataSourcesByEnvironment().get("sit").isEmpty());
+        assertTrue(loaded.dataSourceDescriptorDigestsByEnvironment().get("sit").isEmpty());
+
+        String inline = "schemaVersion: att-config/v2.15\nenvironment: SIT\n"
+                + "sutMetrics: {dataSources: [], metricSources: [], groups: [], profiles: []}\n";
+        assertThrows(IllegalArgumentException.class, () -> new FrameworkConfigLoader()
+                .loadSutMetricsRuntimeConfiguration(path, tempDir, inline));
+    }
+
+    @Test void currentConfigRejectsMissingTraversalDuplicateIdAndSymbolicMetricDescriptors() throws Exception {
+        String prefix = "schemaVersion: att-config/v2.15\nenvironment: SIT\nsutMetrics:\n  dataSources:\n";
+        Path configPath = write("unsafe-sut-metrics-v215.yaml", prefix + "    - config/sut-metrics/missing.yaml\n");
+        FrameworkConfigLoader loader = new FrameworkConfigLoader();
+        IllegalArgumentException missing = assertThrows(IllegalArgumentException.class,
+                () -> loader.loadSutMetricsRuntimeConfiguration(configPath, tempDir,
+                        prefix + "    - config/sut-metrics/missing.yaml\n"));
+        assertTrue(missing.getMessage().contains("Missing"), String.valueOf(missing));
+
+        String traversal = prefix + "    - config/sut-metrics/../../outside.yaml\n";
+        assertThrows(IllegalArgumentException.class,
+                () -> loader.loadSutMetricsRuntimeConfiguration(configPath, tempDir, traversal));
+
+        Path directory = tempDir.resolve("config/sut-metrics");
+        Files.createDirectories(directory);
+        Files.write(directory.resolve("one.yaml"), dataSource("One", "same").getBytes(StandardCharsets.UTF_8));
+        Files.write(directory.resolve("two.yaml"), dataSource("Two", "same").getBytes(StandardCharsets.UTF_8));
+        String duplicateIds = prefix + "    - config/sut-metrics/one.yaml\n    - config/sut-metrics/two.yaml\n";
+        IllegalArgumentException duplicate = assertThrows(IllegalArgumentException.class,
+                () -> loader.loadSutMetricsRuntimeConfiguration(configPath, tempDir, duplicateIds));
+        assertTrue(duplicate.getMessage().toLowerCase(java.util.Locale.ROOT).contains("duplicate"), String.valueOf(duplicate));
+
+        Path outside = tempDir.resolve("outside.yaml");
+        Files.write(outside, dataSource("Outside", "outside").getBytes(StandardCharsets.UTF_8));
+        Path link = directory.resolve("linked.yaml");
+        try {
+            Files.createSymbolicLink(link, outside);
+        } catch (UnsupportedOperationException | IOException denied) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(false, "Symlink creation is unavailable in this test environment");
+        }
+        String symlink = prefix + "    - config/sut-metrics/linked.yaml\n";
+        assertThrows(IllegalArgumentException.class,
+                () -> loader.loadSutMetricsRuntimeConfiguration(configPath, tempDir, symlink));
+    }
+
+    @Test void currentConfigBoundsReferencedDataSourceDescriptorBytes() throws Exception {
+        Path directory = tempDir.resolve("config/sut-metrics");
+        Files.createDirectories(directory);
+        byte[] oversized = new byte[3_000_001];
+        java.util.Arrays.fill(oversized, (byte) '#');
+        Files.write(directory.resolve("oversized.yaml"), oversized);
+        String config = "schemaVersion: att-config/v2.15\nenvironment: SIT\n"
+                + "sutMetrics:\n  dataSources: [config/sut-metrics/oversized.yaml]\n";
+        Path path = write("oversized-sut-metrics-v215.yaml", config);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> new FrameworkConfigLoader().loadSutMetricsRuntimeConfiguration(path, tempDir, config));
+
+        assertTrue(error.getMessage().contains("size limit"), String.valueOf(error));
+    }
+
+    @Test void currentConfigRejectsMalformedUtf8InOtherwiseValidDataSourceDescriptor() throws Exception {
+        Path directory = tempDir.resolve("config/sut-metrics");
+        Files.createDirectories(directory);
+        byte[] valid = dataSource("SIT Prometheus", "sit").getBytes(StandardCharsets.UTF_8);
+        byte[] invalidComment = new byte[] {'#', ' ', 'm', 'a', 'l', 'f', 'o', 'r', 'm', 'e', 'd', ':', ' ',
+                (byte) 0xc3, '(', '\n'};
+        byte[] malformed = java.util.Arrays.copyOf(valid, valid.length + invalidComment.length);
+        System.arraycopy(invalidComment, 0, malformed, valid.length, invalidComment.length);
+        Files.write(directory.resolve("malformed-utf8.yaml"), malformed);
+        String config = "schemaVersion: att-config/v2.15\nenvironment: SIT\n"
+                + "sutMetrics:\n  dataSources: [config/sut-metrics/malformed-utf8.yaml]\n";
+        Path path = write("malformed-utf8-sut-metrics.yaml", config);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> new FrameworkConfigLoader().loadSutMetricsRuntimeConfiguration(path, tempDir, config));
+        assertTrue(error.getMessage().contains("UTF-8"), String.valueOf(error));
+    }
+
+    private String dataSource(String name, String suffix) {
+        return "schemaVersion: att-sut-metrics-source/v1\n"
+                + "id: prom-main\n"
+                + "name: " + name + "\n"
+                + "url: https://prometheus-" + suffix + ".example.invalid\n"
+                + "apiPath: /api/v1/query_range\n"
+                + "tls: {verify: true}\n"
+                + "auth: {mode: NONE}\n"
+                + "readers: [load-observer]\n"
+                + "readRoles: [USER]\n"
+                + "limits: {requestTimeoutMs: 15000, maxRangeSeconds: 86400, maxResponseBytes: 2097152, maxSamplesPerJob: 250000, maxSeriesPerJob: 128}\n";
     }
 
     @Test void loadsRunAndDebugIdentityFormatsFromCurrentConfigSchema() throws Exception {

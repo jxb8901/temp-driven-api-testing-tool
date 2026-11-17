@@ -413,6 +413,17 @@ export interface LoadJobsApi {
 
   listLoadCatalog?(packageId: string, input?: { query?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<LoadCatalogPage>;
   listSutMetricProfiles?(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> }>;
+  getPackageSutMetricsCatalog?(packageId: string, environment?: string, signal?: AbortSignal): Promise<{
+    schemaVersion: string;
+    packageId: string;
+    environment: string;
+    manifestDigest?: string;
+    packageRevision?: string;
+    runtimeConfigRevision?: string;
+    metricSources: Array<Record<string, unknown>>;
+    groups: Array<Record<string, unknown>>;
+    profiles: Array<Record<string, unknown>>;
+  }>;
   getLoadCatalogDetail?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<LoadCatalogDetail>;
   getLoadSource?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<{ available: boolean; logicalPath?: string; text?: string; redacted?: boolean; reason?: string }>;
   submitLoadScenario?(input: { packageId: string; scenario: string; environment?: string }): Promise<JobAccepted>;

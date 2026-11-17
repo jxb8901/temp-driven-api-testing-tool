@@ -1,6 +1,6 @@
 # Package Manifest
 
-使用 `<PACKAGE_ROOT>/package.yaml` 為單一 Package 宣告預設值、業務Resource根目錄及 Testdata inventory。此檔案可省略，schema 為獨立的 `att-package/v1`；權威定義來自相符 Engine JAR 內嵌的 registry。
+使用 `<PACKAGE_ROOT>/package.yaml` 為單一 Package 宣告預設值、業務Resource根目錄、Testdata inventory 及 SUT Metrics inventory。此檔案可省略，現行 schema 為獨立的 `att-package/v2`；權威定義來自相符 Engine JAR 內嵌的 registry。
 
 Package ID 與實體根目錄來自可信註冊或既有 Local Package 選取。Manifest 不會註冊 Package、授權使用者或提供具特權的 runtime configuration。共用 Environment profiles、Tools 與 DB/MQ/HTTP/SSH Helpers 仍由 Global Configuration 管理。
 
@@ -9,7 +9,7 @@ Package ID 與實體根目錄來自可信註冊或既有 Local Package 選取。
 此範例選取中央既有 profile，並宣告 Package 自己的 Testdata。執行完整驗證前，先建立引用的 descriptor。
 
 ```yaml
-schemaVersion: att-package/v1
+schemaVersion: att-package/v2
 metadata:
   name: Payments
   description: Payment regression resources
@@ -22,12 +22,22 @@ testdata:
   environments:
     UAT: [testdata/uat-accounts.yaml]
     PROD: []
+observability:
+  metricSources: []
+  groups: []
+  profiles: []
 defaults:
   timeoutMs: 15000
   report:
     columns: {result: Result, durationMs: Duration}
   xml: {namespaceMode: preserve}
 ```
+
+`observability` paths 為可選欄位，用來列出 Package 自有、位於 `load/sut-metrics/{sources,groups,profiles}/` 的 Metric Sources、Groups 及 Profiles。清單為空代表 Package 沒有 SUT Metrics，不會退回全域定義。完整 descriptor 與共用 Data Source connection 範例請參閱 [SUT Metrics migration guide](../guides/sut-metrics-config-migration.zh.md)。
+
+<!-- att-docs:historical -->
+既有 `att-package/v1` Manifest 仍採相容模式，保留舊有全域 SUT Metrics 行為。新建或編輯的 Manifest 使用 v2。
+<!-- /att-docs:historical -->
 
 中央 `environments` 必須定義 `SIT`、`UAT` 及 `PROD`。某個 Environment 未出現在 `testdata.environments` 時，繼承 `descriptors`；存在的 list 會整份取代 inventory，`[]` 代表清空。
 
@@ -99,7 +109,7 @@ Manifest 發布的 fingerprint 涵蓋中央 Runtime Config、其所有已宣告 
 
 Studio 會保護已修改的 Manifest source 與尚未發佈的 Draft；建立 Draft 或明確捨棄 source 變更前，不能重新整理或切換檢視。離開頁面亦使用現有的未儲存變更確認流程。
 
-發生衝突時需建立新 draft。發布前保存 audit intent，發布後記錄完成狀態。History 位於私有 Server data，API 只回傳 revisions，不回傳歷史原始 source；按保存檔案的修改時間由新至舊排序，同時刻以 digest 升序排列。**Stage rollback** 只建立 candidate，仍需驗證與審閱。回復至沒有 Manifest 前的預設行為時，使用 canonical empty `att-package/v1` 檔案，審閱畫面會明確標示。
+發生衝突時需建立新 draft。發布前保存 audit intent，發布後記錄完成狀態。History 位於私有 Server data，API 只回傳 revisions，不回傳歷史原始 source；按保存檔案的修改時間由新至舊排序，同時刻以 digest 升序排列。**Stage rollback** 只建立 candidate，仍需驗證與審閱。回復至沒有 Manifest 前的預設行為時，使用 canonical empty `att-package/v2` 檔案，審閱畫面會明確標示。
 
 以下可信部署 policy 可省略；預設不允許編輯：
 
