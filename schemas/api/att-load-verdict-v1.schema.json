@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:api-schema:load-verdict:v1",
+  "$comment": "Interoperability contract for a separately produced verdict record; this report does not evaluate thresholds.",
+  "title": "ATT external LOAD verdict reference",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schemaVersion", "jobId", "externalEvaluationStatus"],
+  "properties": {
+    "schemaVersion": { "const": "att-load-verdict/v1" },
+    "jobId": { "type": "string", "pattern": "^J[A-F0-9]{16}$" },
+    "externalEvaluationStatus": {
+      "type": "string",
+      "enum": ["PENDING", "EVALUATING", "MET", "NOT_MET", "NOT_EVALUATED", "ERROR"]
+    },
+    "performanceVerdict": {
+      "type": "string",
+      "enum": ["PENDING", "MET", "NOT_MET", "NOT_EVALUATED"]
+    },
+    "evidencePath": {
+      "anyOf": [
+        { "const": "load-verdict/v1/evidence.json" },
+        { "const": "" }
+      ]
+    },
+    "evidenceSha256": {
+      "anyOf": [
+        { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        { "const": "" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["evidencePath"] },
+      "then": {
+        "if": { "properties": { "evidencePath": { "const": "load-verdict/v1/evidence.json" } } },
+        "then": {
+          "required": ["evidenceSha256"],
+          "properties": { "evidenceSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+        }
+      }
+    }
+  ]
+}

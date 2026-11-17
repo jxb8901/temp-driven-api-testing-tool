@@ -75,6 +75,11 @@ The historical `att-load-profile/v1.0` policy file is migration-only: rewrite it
 
 Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](../actions.md), [Runtime and Context Model](../runtime-context.md), [Load Mode](../execution-modes/load.md) and [Schema Matrix](schema-matrix.md).
 
+## att-config/v2.14: centralized SUT Metrics catalog
+
+The current global config schema is `att-config/v2.14`. It adds bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays. These are authoritative in the selected server Runtime Config. Existing `att-config/v2.13` files remain compatible when they do not declare `sutMetrics`. To migrate `data/sut-metrics-catalog.json`, follow the explicit dry-run and apply workflow in the [SUT Metrics Runtime Config migration guide](../../guides/sut-metrics-config-migration.md). The tool validates a candidate, rejects duplicate IDs and conflicting definitions, and creates digest-named backups before applying.
+
+
 ## Historical schema migration
 
 ATT 3.6.2 uses `att-template/v3.6` and `att-flow/v3.6` as the active schemas. The published `att-template/v3.5`, `att-flow/v3.5`, and older definitions remain under `schemas/history/`; their historical DB and Render Actions are compatibility-only and are not part of the active contract. When migrating those descriptors, change their schema versions to v3.6 and apply the migration table's field changes.

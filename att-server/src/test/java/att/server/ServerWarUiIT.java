@@ -437,7 +437,10 @@ class ServerWarUiIT {
                 if("load".equals(command)) {
                     assertTrue(overview.path("reportPath").isTextual(),overview.toString());
                     assertTrue(index.path("primaryReports").findValuesAsText("path").contains(overview.path("reportPath").asText()),overview.toString());
-                } else assertTrue(overview.path("reportPath").isNull(),overview.toString());
+                } else {
+                    assertTrue(overview.path("reportPath").isNull(),overview.toString());
+                    assertFalse(overview.has("loadReportV2"),"Non-LOAD Jobs must not expose LOAD report status");
+                }
                 JsonNode journal=getJson(port,api+"/monitoring/jobs/"+id+"/journal",peer);
                 assertEquals(id,journal.path("jobId").asText());assertTrue(journal.path("metricsAvailable").isBoolean());
                 if(journal.path("metricsAvailable").asBoolean())assertTrue(journal.path("journalBytes").isIntegralNumber(),journal.toString());
@@ -837,10 +840,10 @@ class ServerWarUiIT {
             tomcat = startScheduledWar(war, users);
             int port = tomcat.getConnector().getLocalPort();
             String resourceRoute = api + "/packages/payments/resources?type=template&query=DEGRADED";
-            // The cold inspection Worker can need the configured inspection timeout to
-            // start on a busy CI runner; keep this first catalog read from timing out
-            // before the Server's own 30-second inspection deadline is reached.
-            HttpURLConnection baselineResponse = open(port, resourceRoute, auth, 30000);
+            // The first resource request can overlap lazy ServerRuntime startup and cold
+            // inspection Worker startup in the packaged WAR. Keep its wait bounded while
+            // allowing initialization to finish on slower release runners.
+            HttpURLConnection baselineResponse = open(port, resourceRoute, auth, 30_000);
             String baselineRevision;
             JsonNode baseline;
             try (var input = baselineResponse.getInputStream()) {
@@ -951,8 +954,8 @@ class ServerWarUiIT {
             assertNull(archive.getJarEntry("WEB-INF/classes/att/server/ApiServlet.class"),
                     "ATT application classes must not be duplicated in WEB-INF/classes");
             assertFalse(archive.stream().map(JarEntry::getName).anyMatch(name ->
-                    name.matches("WEB-INF/lib/att-(server-api|web|worker|engine)-[^/]+\\.jar")),
-                    "ATT module jars must be combined into the versioned att-server jar");
+                    name.matches("WEB-INF/lib/att-(server-api|web|worker)-[^/]+\\.jar")),
+                    "ATT Server API, Web, and Worker jars must be combined into the versioned att-server jar; Engine remains a runtime module dependency");
             Set<String> entries = new HashSet<>();
             try (JarInputStream app = new JarInputStream(archive.getInputStream(application))) {
                 JarEntry entry;
@@ -1792,13 +1795,13 @@ class ServerWarUiIT {
     }
 
     private static HttpURLConnection open(int port, String path, String authorization) throws Exception {
-        return open(port, path, authorization, 3000);
+        return open(port, path, authorization, 3_000);
     }
 
-    private static HttpURLConnection open(int port, String path, String authorization, int readTimeout) throws Exception {
+    private static HttpURLConnection open(int port, String path, String authorization, int readTimeoutMillis) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL("http://127.0.0.1:" + port + path).openConnection();
         connection.setConnectTimeout(3000);
-        connection.setReadTimeout(readTimeout);
+        connection.setReadTimeout(readTimeoutMillis);
         if (authorization != null) connection.setRequestProperty("Authorization", authorization);
         return connection;
     }

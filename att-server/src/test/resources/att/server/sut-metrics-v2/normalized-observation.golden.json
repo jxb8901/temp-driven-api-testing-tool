@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "att-sut-metrics-observation/v2",
+  "observationId": "$OBSERVATION_ID",
+  "identity": {
+    "metricId": "cpu",
+    "binding": {"sourceId": "$METRIC_SOURCE_ID", "fetchId": "$FETCH_ID"},
+    "target": {"id": "node-1", "type": "instance"},
+    "labels": {"instance": "node-1", "role": "blue"},
+    "subject": {"scope": "job"},
+    "window": {
+      "kind": "sampled-time-series",
+      "startAt": "2026-11-16T12:00:00Z",
+      "endAt": "2026-11-16T12:01:00Z",
+      "step": "15s",
+      "semantics": "sampled-time-series"
+    }
+  },
+  "metric": {"id": "cpu", "name": "CPU", "unit": "percent", "kind": "gauge"},
+  "data": {
+    "state": "AVAILABLE",
+    "freshness": "FRESH",
+    "coverage": {
+      "sampleCount": 2,
+      "seriesCount": 1,
+      "gapCount": 0,
+      "firstSampleAt": "2026-11-16T12:00:00Z",
+      "lastSampleAt": "2026-11-16T12:01:00Z",
+      "windowStart": "2026-11-16T12:00:00Z",
+      "windowEnd": "2026-11-16T12:01:00Z"
+    },
+    "diagnostics": [],
+    "series": [
+      {"timestamp": "2026-11-16T12:00:00Z", "value": 42.0},
+      {"timestamp": "2026-11-16T12:01:00Z", "value": 43.0}
+    ]
+  },
+  "acquisition": {
+    "invocationId": "$INVOCATION_ID",
+    "source": {
+      "id": "$METRIC_SOURCE_ID",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "connectionKind": "DATA_SOURCE"
+    },
+    "fetch": {"id": "$FETCH_ID", "revision": "$FETCH_REVISION"},
+    "execution": {
+      "state": "SUCCEEDED",
+      "startedAt": "2026-11-16T12:00:00Z",
+      "completedAt": "2026-11-16T12:01:00Z",
+      "durationMs": 10,
+      "requestCount": 1,
+      "diagnostics": []
+    },
+    "job": {"jobId": "J0000000000000001", "snapshotId": "$SNAPSHOT_ID"}
+  }
+}

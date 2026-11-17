@@ -1,7 +1,7 @@
-# ATT v4.2.10 使用手冊與參考
+# ATT v4.3.1 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.2.10
+Version: 4.3.1
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -101,7 +101,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [API paths](#api-paths)
 - [CLI 參考](#cli-參考)
   - [選擇命令](#選擇命令)
-  - [ATT 4.2.10 的可用性](#att-4210-的可用性)
+  - [ATT 4.3.1 的可用性](#att-431-的可用性)
   - [編譯 source checkout](#編譯-source-checkout)
   - [按任務查閱語法、option 和範例](#按任務查閱語法option-和範例)
   - [透過 CLI 使用 ATT Server](#透過-cli-使用-att-server)
@@ -123,6 +123,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [從 execution identity 追蹤 artifact](#從-execution-identity-追蹤-artifact)
   - [查閱 generated-output schemas](#查閱-generated-output-schemas)
   - [Reading `case.log` and `case.yaml`](#reading-caselog-and-caseyaml)
+  - [離線 SUT Metrics 報告](#離線-sut-metrics-報告)
 - [Validation 與 troubleshooting](#validation-與-troubleshooting)
   - [選擇第一個診斷步驟](#選擇第一個診斷步驟)
   - [先從 Validation 開始](#先從-validation-開始)
@@ -144,6 +145,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [Previous release Testdata migration](#previous-release-testdata-migration)
   - [Execution identity format migration](#execution-identity-format-migration)
   - [Load mix migration](#load-mix-migration)
+  - [att-config/v2.14：集中管理 SUT Metrics catalog](#att-configv214集中管理-sut-metrics-catalog)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
   - [Environment profile migration](#environment-profile-migration)
@@ -958,9 +960,9 @@ RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型�
 
 ### 統一 RUN 與排程
 
-<!-- att-doc-status: current release=4.2.10 -->
+<!-- att-doc-status: current release=4.3.1 -->
 
-ATT 4.2.10 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+ATT 4.3.1 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
 
 已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](interfaces/cli/vnext-proposed.zh.md)。
 
@@ -1047,7 +1049,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 
 #### 遷移既有用戶端
 
-| 既有介面 | 4.2.10 對應 |
+| 既有介面 | 4.3.1 對應 |
 |---|---|
 | CLI `validate`、`run`、`report` | 保留驗證、Case RUN、報告命令 |
 | CLI `--suite`、`--suite-dir`、`--case`、`--tag`、`--rerun-failed` | 保留選取行為；Server 批次使用 `selection` |
@@ -1056,7 +1058,7 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 | `/load-schedules`、`jobType:load/debug` | 共用 scheduler 相容路徑，保留既有定義 |
 | `/jobs/...`、既有 Studio 工作/結果連結 | 保留共用 history、取消、事件與結果路徑 |
 
-4.2.10 沒有移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.6；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
+此 release 不會移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.6；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
 
 持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
 
@@ -1087,9 +1089,9 @@ Schedule 使用一般已驗證 draft 合約。RUN Debug 仍使用 `options.debug
 
 ### Run 模式
 
-<!-- att-doc-status: current release=4.2.10 -->
+<!-- att-doc-status: current release=4.3.1 -->
 
-ATT 4.2.10 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
+ATT 4.3.1 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
 
 ```sh
 ./att.sh run --all
@@ -1547,6 +1549,85 @@ Load v1.9 新增 `all`、`measured`、`steady` 三個 event-time window。`measu
 
 巢狀 `thresholds.steady` 和 `thresholds.overall` 分別對 steady 與 all-execution window 評估。Top-level measured threshold 使用修正後的 measured interval，即 `STEADY + RAMP_DOWN`；ramp-up 和 warm-up 不計入。Window 不完整或無法評估時回報 `NOT_EVALUATED`，不視為 performance pass。Report 會把 execution status 與 performance verdict 分開，並顯示 percentile sample／observation count，讓稀疏估算可被辨識。直接 Engine／CLI summary 使用 legacy summary contract (schema under `schemas/history/`)；archived report 使用新增 `detailManifestPath` 和 workload sidecar references 的 `att-load-summary/v1.3`。
 
+##### SUT threshold acceptance
+
+LOAD scenario 可針對已登記的 SUT Metrics profile 設定 `observability.thresholds`。目前規則支援在實際 UTC `STEADY` interval 內計算 sampled `max <= value`，並套用至所有已綁定 target。每個 source target 都會獨立評估。數值等於上限時為 `MET`；任何有效 sample 超標時，即使 coverage 不完整仍為 `NOT_MET`。缺少、過舊、部分或覆蓋不足的 samples 會回報 `NOT_EVALUATED`，除非有效超標已能證明 `NOT_MET`。最低 coverage 預設為 95%。
+
+Server 會將正規化規則固定在 Job 的 SUT snapshot，並把 post-run 結果寫入獨立版本化 `att-sut-threshold-evaluation/v1` record。`GET /api/v1/jobs/{id}/result` 可在授權後加入 `performanceAcceptance` object，包含 `executionStatus`、`nativeLoadThresholds`、`sutThresholds`、`externalEvaluationStatus` 及 combined `performanceVerdict`。每個 target 的 evidence 會列出實際 UTC STEADY window、sampled peak 和時間、resolution、coverage，以及固定的 source/profile/target revision。Worker terminal result 和 native thresholds 保持不變。External evaluation pending 時，combined verdict 會保持 pending；已知的 native 或 SUT threshold failure 則維持 `NOT_MET`。
+
+Scenario authoring、完整 rule 欄位、coverage 條件及 Studio evidence 見 [Studio Load testing](interfaces/studio/load-testing.zh.md#sut-metrics)。
+
+##### 單次呼叫業務指標
+
+Base profile 可使用已配置的 `call` 定義業務指標，代替 PromQL。LOAD drain 後，ATT 會透過所選 package 現有的 DBHelper 或 Package Tool configuration，對每個 call group 執行一次。預設為 Job scope；單一 Workload binding 必須指定完全相符的 `workloadId`；以列對照的輸出則使用 LOAD scenario 中不可變的 Workload 和 mix identity。ATT 不會 fan-out 呼叫、輪詢、重試，或從 target ID 推斷 identity。DBHelper call 使用既有 helper configuration、bind parameters 和 connection limits。由於 ATT 無法判斷 Package Tool code 是否有 side effects，使用 Package Tool 必須設定 `sideEffectsAcknowledged: true`。
+
+~~~json
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "active-sessions",
+  "kind": "base",
+  "category": "db",
+  "metrics": [
+    {
+      "id": "active",
+      "title": "Active sessions",
+      "unit": "count",
+      "kind": "gauge",
+      "call": "#{db.reporting.scalar(sql='select count(*) from active_sessions')}",
+      "sampling": "afterDrain"
+    }
+  ]
+}
+~~~
+
+如一次 query 或 Package Tool invocation 回傳多個數值欄位或資料列，請使用 `outputs`。每個 output 分別設定 metric ID、title、result column、unit 和 kind。以下設定以一次 DBHelper query，將兩個固定欄位對應至不同 counter metric：
+
+~~~json
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "transaction-summary",
+  "kind": "base",
+  "category": "db",
+  "metrics": [{
+    "id": "transaction-query",
+    "call": "#{db.reporting.query(sql='select workload_id, mix_id, success, failure from transaction_summary')}",
+    "sampling": "afterDrain",
+    "mapping": {
+      "rows": "rows",
+      "workloadColumn": "workload_id",
+      "mixColumn": "mix_id"
+    },
+    "outputs": [
+      {"id": "successful_transactions", "title": "Successful transactions", "column": "success", "unit": "transactions", "kind": "counter"},
+      {"id": "failed_transactions", "title": "Failed transactions", "column": "failure", "unit": "transactions", "kind": "counter"}
+    ]
+  }]
+}
+~~~
+
+Result path 預設為 `rows`，也可指定 `payload.rows` 等有界 object/list path。若沒有 `workloadColumn`，Job-wide binding 必須恰好回傳一列。設定 `workloadColumn` 但不設定 `mixColumn` 時，每列都會對應至 Workload scope，mixed Workload 亦然。若 query 回傳跨 mix slot 的 aggregate，必須由 query 或 Tool 明確計算；ATT 會保留 Workload scope，不會將數值複製或歸屬至個別 slot。每個 Workload 最多只能有一列。設定 `mixColumn` 可用 `workloadId` 和 `mixId` 配對 mix slot，並且必須同時設定 `workloadColumn`。缺少或未知 mix ID 的 row 會保持未歸屬並記錄於 mapping diagnostics；其他已明確對應的 slot 仍可用。ATT 不會以 target ID、動態 pivot、模糊 join 或隱式 aggregation 對照資料列。欄位名稱會區分大小寫，mapping 必須與 query 或 Tool 回傳的欄名完全一致。
+
+每個 call group 最多可有 64 個 output 及 4,096 列 result。每個 Job 最多執行 16 次實際呼叫，每次最多 60 秒，所有呼叫合計最多 120 秒。回傳列只保存在記憶體；sidecar 和報告會保存各個數值 output 及 mapping diagnostics，不保存 raw rows。無效欄位只影響該 metric 和 subject。Call 失敗或 timeout 會令同一 group 的所有 outputs unavailable。重複、未知、缺少或有歧義的 rows 會保留為 diagnostics；每個預期的 Workload/mix output 仍會出現在結果中。Partial 或 unavailable value 不會替換為零。
+
+設定 `sampling: windowQuery` 和 `window: steady`，即可在 drain 後執行一次 call，並透過 `EXEC.OBSERVATION.WINDOW_START` 和 `EXEC.OBSERVATION.WINDOW_END` 讀取實際 STEADY bounds。Aggregation 由 query author 定義；成功回傳數值不代表已完整覆蓋該 interval。單一輸出的 map 或 list result 必須使用明確 `valuePath`，例如 `rows[0].active`；解析後必須是單一有限數字。Server 會在 Job admission 時固定 Package 和 Runtime Config revision，但不會保留 executable source 供延遲執行；若任一 revision 在 collection 前改變，sidecar 會記為 `NOT_EVALUATED`，Job diagnostics 會回報 `BUSINESS_CALL_PACKAGE_CHANGED` 或 `BUSINESS_CALL_CONFIG_CHANGED`。ATT 不會靜默使用已改動的檔案執行 call。Calls 在有界的 Server worker pool 中執行，不會佔用 LOAD worker。After-drain value 只有在 LOAD 完成後兩分鐘內收集才會視為 fresh；此上限不受 Prometheus after buffer 影響，較遲的 value 會標示 stale。Mixed Job 的 after-drain call 會在 LOAD 完成後儘快執行。已驗證的 business sidecar 會在 combined manifest 仍為 `PENDING` 時，以 provisional 唯讀證據提供，並標示 `business: COMPLETE`、`prometheus: PENDING` 及 Prometheus `eligibleAt`。Threshold 和 combined performance verdict 會等到完整 collection 終結；buffer 期間的 polling 會依 deadline 逐步退避。Server 重啟後，會恢復尚未完成的 Prometheus phase，不會重複執行已完成的 Business phase。若重啟時 Business call 尚未完成，系統會以 `SERVER_RESTART_INTERRUPTED` fail closed，不會重試可能有 side effect 的 call。Call 失敗、timeout、過期或結果非數字會評估為 `NOT_EVALUATED`；不會代入零值，也不會改變 Worker result。Binding validation 和 live preview 都不會執行 business call。
+
+Business metric（包括 numeric counter）支援 `max <= value` threshold。`afterDrain` metric 使用 `window: afterDrain`；`windowQuery` metric 使用 `window: steady`。這些單值規則不使用 `minimumCoverage`。省略 `subjects` 或設定 `all` 會評估所有預期 subject。若要指定 Workload 或 mix，請將 `subjects` 設為明確清單；mix selector 必須同時包含不可變 ID：
+
+~~~yaml
+thresholds:
+  - id: mobile-success-limit
+    profile: transaction-summary
+    metric: successful_transactions
+    max: 1000
+    unit: transactions
+    subjects:
+      - scope: mix
+        workloadId: checkout
+        mixId: mobile
+~~~
+
+每個 selector 必須恰好解析至一個已固定的 Job、Workload 或 Workload/mix metric identity。同一 metric ID 在多個 Workload 中會保留為不同 threshold result。缺少、過期、partial 或有歧義的 mapping 會得到 `NOT_EVALUATED`，除非另一個有效的已選 subject 證明 `NOT_MET`。
+
 Summary 的 `thresholds` object 中，`status` 和 `performanceVerdict` 是 authoritative tri-state 欄位，值為 `MET`、`NOT_MET` 或 `NOT_EVALUATED`。Optional `legacyPassed` boolean 維持舊有 `passed()` 語義：已配置但無法評估的 threshold 為 false，未配置 threshold 時為 true。Consumer 應使用 tri-state 欄位，區分 evidence 不完整與 threshold 未達標。
 
 Summary 會將 generator observation 與 SUT outcome 分開。`metrics.generator` 包含 sampled heap used/committed/maximum、觀察到的 peak live threads、GC count/time，以及 JVM 支援時的 process CPU。Sampling 限制為每 100 ms 至多一次，較短暫的 peak 可能錯過。`schedulerWakeups`、`submitLag*` 與 `workerQueueDepth*` 描述 scheduler pressure；arrival drops 與 SUT error 分開。`resources.http` 會按 HTTP helper 報告 active/idle/waiting 與觀察到的 peak connections，並與 DB、MQ、Render pool/plan diagnostics 並列；`resources.resourceMetricSamples` 顯示 rate-limited resource observations 的數量。`resources.executionIds` 顯示 custom execution-ID reservation 數量。Testdata mapping/selection counts 位於 `resources.generator.testdata`；解讀方式和 implementation limits 見 [Load Generator Telemetry](system-design/load-telemetry.zh.md)。
@@ -1862,7 +1943,7 @@ Call-backed Tool 使用相同的聲明參數理念，但保留 typed value，並
 
 `type` 宣告 configured Tool 完整解析後的值 contract，可用 `any`、`string`、`integer`、`long`、`decimal`、`boolean`、`enum`、`bytes`、`map` 或 `list`。未填 `type` 時仍按 `any` 處理，維持舊 descriptor 行為。數值和 Boolean scalar 接受原生值或去除前後空白的數字／`true`／`false` 字串；enum 必須符合其中一個 `enumValues`；`bytes` 接受 byte array 或 UTF-8 String。`string`、`map` 和 `list` 要求原生值型別吻合。這些檢查在巢狀 expression 完整解析後執行；靜態安全可求值的內容會在 validation 檢查，其餘在 runtime 檢查。
 
-#### Package-local Tool Group（ATT 4.2.10）
+#### Package-local Tool Group
 
 Standalone Tool 使用 `tools/<id>.yaml` 與 `att-tool/v1`；Grouped Tools 則由固定名稱 `tools/<folder>/tool-group.yaml`（`att-tool-group/v3.0`）明確列出每個 `att-tool/v1` 成員，不遞迴掃描。
 
@@ -2275,11 +2356,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-在 `att-config/v2.13` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.13 與 Tool Group v3.0。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
+在 `att-config/v2.14` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.14 與 Tool Group v3.0。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 environment: SIT
 environments:
   SIT:
@@ -2476,9 +2557,9 @@ actions:
 
 ### 選擇 environment profile
 
-`att-config/v2.13` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper 與 HTTPHelper lists；Package Testdata lists 由 `package.yaml` 管理。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md) 見對應頁面。
+`att-config/v2.14` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper 與 HTTPHelper lists；Package Testdata lists 由 `package.yaml` 管理。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md) 見對應頁面。
 
-ATT 使用一份 common `att-config/v2.13` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
+ATT 使用一份 common `att-config/v2.14` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -2508,7 +2589,7 @@ common config 保留 run/execution/report 與全局 DB/MQ/HTTP/SSH Helpers。Too
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 environment: SIT                 # default；--env 会覆盖
 templates: {root: templates}
 testcase: {root: testcase}
@@ -2521,7 +2602,7 @@ environments:
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-SIT 與 UAT Config 只保留共用 Helper/Environment 綁定；`invokePaymentApi` 與 `sample.getAcDate` 改由所選 Package 提供。升級至 4.2.10 時必須明確遷移舊式全局 Tools。
+SIT 與 UAT Config 只保留共用 Helper/Environment 綁定；`invokePaymentApi` 與 `sample.getAcDate` 改由所選 Package 提供。升級至目前的 ATT runtime 前，必須明確遷移舊式全局 Tools。
 
 SIT 與 UAT 的 DBHelper 都保持 `id: orders`，只改變 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改變 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可復制例子見 [`examples/environments/README.md`](../examples/environments/README.md)。
 
@@ -2594,7 +2675,7 @@ Repository `schemas/catalog.yaml` 是建立版本相符 ATT Engine JAR 內嵌 re
 以下 configuration example 與 field table 和英文版共用相同 contract；欄位名與 literal values 保留英文。
 
 ```yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -2628,7 +2709,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | 現行版本：`att-config/v2.13`；上一版 schema 仍受支援。本例採用現行 schema。 |
+| `schemaVersion` | required | 現行版本：`att-config/v2.14`；上一版 schema 仍受支援。本例採用現行 schema。 |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -2913,7 +2994,7 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 
 ## CLI 參考
 
-<!-- att-doc-status: current release=4.2.10 -->
+<!-- att-doc-status: current release=4.3.1 -->
 
 
 ### 選擇命令
@@ -2933,11 +3014,11 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
-上表列出 ATT 4.2.10 CLI command。獨立的 vNext proposal 尚未包含在此 release。
+上表列出 ATT 4.3.1 CLI command。獨立的 vNext proposal 尚未包含在此 release。
 
-### ATT 4.2.10 的可用性
+### ATT 4.3.1 的可用性
 
-本 Reference 說明 ATT 4.2.10 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
+本 Reference 說明 ATT 4.3.1 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
 
 ### 編譯 source checkout
 
@@ -3088,7 +3169,7 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix�
 
 ### 完整 CLI option matrix
 
-`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.13` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
+`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.14` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
 
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 
@@ -3354,6 +3435,12 @@ Case log structured entries use YAML. The human log records each normal Action a
 
 ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or INVALID with `【!!!!!】`. Search for that marker to find abnormal blocks; PASS, SKIPPED and informational blocks remain unmarked.
 
+### 離線 SUT Metrics 報告
+
+完成的 LOAD 若有 SUT collection evidence，可另外發佈獨立版本化的離線報告 archive。Publisher 會驗證來源 manifest 及每個 observation sidecar，逐 byte 保留原本 sealed native archive，並以不可變 snapshot 發佈。`att-load-report-extension/v2` manifest 會引用 source-neutral 的 `att-load-offline-observations/v1` record。`att-load-offline-observation/v1` entries 記錄 source、metric、profile、target、UTC window、phase、單位、quality 和 checksum；time-series 會提供有界 chart preview，business metric 則提供單一數值、scope、不可變 Workload/mix identity、call-group metadata、mapping quality 及 unmatched-row count。若 Job snapshot 固定了 Metric Groups，報告只會包含安全的 Group metadata（schema version、ID、title、order、`groupBy` 欄位及 display mode），以及每個 observation 的 `groupView` assignment、labels 和 `groupBy` values；原始 `match` selectors 不會發佈。靜態 Group index 會連結每個已分組 instance 與其 metric observation；unassigned 和 ambiguous observations 仍會連同 diagnostics 列出。此 index 只提供導覽 metadata，不會重新查詢或改寫 source observations。Group 欄位為 optional，因此舊報告 archive 仍相容。Unavailable value 會保留為 null；完整 sidecar 使用 normalized `att-sut-metrics-observation/v1` 和 v2 forms。Partial 或 unavailable source data 會明確標示，不會改變 native Job result。
+
+報告可在沒有 network access 時使用，並採用 restrictive Content Security Policy。報告不會評估 performance threshold。如有獨立版本化的 `att-load-verdict/v1` record，報告只顯示其 evaluation state 與 evidence reference，不會重新計算 verdict。只有在驗證發佈成功後，才可透過 authenticated Job download route 取得 archive。
+
 ## Validation 與 troubleshooting
 
 ### 選擇第一個診斷步驟
@@ -3442,7 +3529,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.2.10",
+  "attVersion": "4.3.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -3481,7 +3568,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.2.10-local.tar.gz`、包含 WAR 和部署指南的 `att-4.2.10-server.tar.gz`，以及 source archive `att-4.2.10-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
+`build.sh` 會執行 release gate、重新生成 modular Reference Manual、建立 application jar 和 release archive，並 smoke-test 解壓後的 local package。Reference generation 另外需要 Python 3 與 Pandoc。它會輸出供 CLI 使用的 `att-4.3.1-local.tar.gz`、包含 WAR 和部署指南的 `att-4.3.1-server.tar.gz`，以及 source archive `att-4.3.1-src.tar.gz`。每個 binary archive 均須小於 25 MB。Local package 不再包含 WAR 或其中重複的 runtime library。
 
 ### Runtime dependencies
 
@@ -3525,7 +3612,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 |---|---|
 | 排程建立 | att-schedule/v2 |
 | RUN 定義 | att-execution/v1 |
-| Global configuration | att-config/v2.13 |
+| Global configuration | att-config/v2.14 |
 | Package Manifest | att-package/v1 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
@@ -3540,6 +3627,21 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Flow | att-flow/v3.6 |
 | Debug input | att-debug/v1.2 |
 | Load scenario | att-load/v1.9 |
+| LOAD observability binding | att-load-observability/v1 |
+| SUT Metrics Data Source | att-sut-metrics-source/v1 |
+| SUT Metrics Profile | att-sut-metrics-profile/v1 |
+| SUT Metrics Job snapshot | att-sut-metrics-snapshot/v1 |
+| SUT Metric Source acquisition and output mapping | att-sut-metrics-metric-source/v1 |
+| SUT logical Metric Group | att-sut-metrics-group/v1 |
+| SUT flat Metrics Profile | att-sut-metrics-profile/v2 |
+| SUT Metrics Job snapshot | att-sut-metrics-snapshot/v2 |
+| Server-private SUT Metrics execution payload | att-sut-metrics-execution-payload/v2 |
+| SUT Metrics collection manifest | att-sut-metrics-manifest/v1 |
+| 同一檔案內的 SUT Metrics Manifest 完整性歷程 | att-sut-metrics-manifest-integrity/v1 |
+| SUT Metrics normalized observation | att-sut-metrics-observation/v1 |
+| SUT Metrics normalized observation | att-sut-metrics-observation/v2 |
+| SUT Metrics series sidecar | att-sut-metrics-series/v1 |
+| SUT Metrics threshold evaluation record | att-sut-threshold-evaluation/v1 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
 | Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
 | Load summary | 直接 Engine／CLI：legacy summary contract (schema under `schemas/history/`)；封存報告：att-load-summary/v1.3 |
@@ -3551,6 +3653,8 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | JUnit XML | att-junit/v2.1 |
 
 本次調整的 resource/config schema 舊版本位於 `schemas/history/`，除非嵌入的 Engine registry 登錄且支援，否則僅供歷史參考，不是 active execution contract。Unsupported version 會在 validation 失敗並提供 migration guidance。Repository `schemas/catalog.yaml` 僅為 build input；runtime 唯一權威來源是版本相符 ATT Engine JAR 內嵌 registry。Runtime 會從 classpath 讀取 schema files，並可在 private per-user temporary directory 建立經驗證、以內容 SHA-256 定位的相容快取。快取會保留目前及緊接上一版 registry 供 rollback；只有取得排他 OS lock 並確認沒有 Worker 使用後，才會刪除較舊版本。若清理中斷，下一次初始化會重試。不完整或遭竄改的快取只會在確認沒有程序持有 use lease 後重建；若仍有程序使用，validation 會 fail closed，並於 Worker 結束後重試。Validation revision 會綁定 Engine/registry identity、Package files、shared config files 及選定 Environment；Worker 處理請求前會驗證 Server 傳入的 registry identity。`ATT_HOME/schemas/` 及 package-local `schemas/` 不是 runtime 來源，也不能覆寫 registry。Package validation 會驗證 Engine 登錄的 schema resources；封存 schema 不會自動成為可用的 runtime contract。
+
+上表中的 SUT Metrics Data Source schema 仍是 registered connection 定義。新的 [Metric Source schema](../schemas/att-sut-metrics-metric-source-v1.schema.json) (`att-sut-metrics-metric-source/v1`) 定義一次 acquisition 及其 declared output mapping，不會另外登錄 Data Source、DBHelper 或 Package Tool。Server 私有的 [SUT Metrics execution payload schema](../schemas/att-sut-metrics-execution-payload-v2.schema.json) (`att-sut-metrics-execution-payload/v2`) 將可執行 fetch/call data 綁定至不可變 Job snapshot，且不會透過 API 或 report 回傳。離線報告 metadata 及外部提供的 verdict record 使用 `schemas/api/` 下的獨立 Server contracts，不屬於 Engine execution registry。詳見[離線 SUT Metrics 報告](reference.zh/results-reports-evidence.md)。
 
 <!-- att-docs:historical -->
 Load v1.6 及 MQHelper v1.2 是 loader 支援的相容歷史 schema；既有 scalar routing 及 legacy evidence policy 維持。新路由／配額欄位須使用 active schema。
@@ -3641,6 +3745,11 @@ Unsupported schema version 會在 execution 前失敗並提供 migration guidanc
 
 現有 `att-load/v1.5` 檔案仍相容。升級至 `att-load/v1.6` 後，可將 workload 的 `target` 改為 `mix`，設定 closed-user weighted target mix。每個 entry 需要唯一 `id`、正整數 `weight`，以及 Template、Flow 或 Tool target。現行 summary contract 為 `att-load-summary/v1.1`；v1.0 保留作歷史格式。
 
+### att-config/v2.14：集中管理 SUT Metrics catalog
+
+現行 global config schema 為 `att-config/v2.14`，新增有界的 `sutMetrics.dataSources`、`metricSources`、`groups` 和 `profiles` lists。所選 Server Runtime Config 是這些定義的唯一權威來源；沒有 `sutMetrics` 的既有 `att-config/v2.13` 檔案仍受支援。遷移 `data/sut-metrics-catalog.json` 請依照 [SUT Metrics Runtime Config migration guide](guides/sut-metrics-config-migration.zh.md) 執行明確的 dry-run 和 apply。遷移工具會驗證候選檔、拒絕重複 ID 或衝突定義，並在套用前建立以 digest 命名的備份。
+
+
 ### Historical schema migration
 
 ATT 3.6.2 使用 `att-template/v3.6` 與 `att-flow/v3.6` 作為 active schemas。已發布的 `att-template/v3.5`、`att-flow/v3.5` 及更舊定義保留於 `schemas/history/`；其中 historical DB 與 Render Action 只供 compatibility 使用，不是 active contract。遷移這些 descriptor 時，先將 schema version 改為 v3.6，再套用以下欄位變更。
@@ -3713,7 +3822,7 @@ Timeout range、evidence sample bound、result limit、pool size 等 operational
 
 #### 為什麼 `Att.bat` 會要求 Maven，或者為什麼 `.sh` Tool 在 windows 上失敗？
 
-在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.2.10.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
+在二進制發布中，`att.bat` 會找到有版本號的 runtime JAR，例如 `lib\att-local-4.3.1.jar`，只需要 Java 8+。每個 `ATT_HOME/lib` 只保留一個 `att-local-<version>.jar`，讓啟動器能明確選取 runtime。源碼樹中，`att.bat` 會在 Maven 位於 `PATH` 時使用 Maven；沒有 Maven 時，需要已有的 `target\classes`。先用 `att.bat version` 確認啟動器後再校驗套件。
 
 啟動器讓 ATT 自身跨平臺；它無法翻譯外部 Tool 可執行文件。請為 Windows 配置 `.bat`、`.cmd`、PowerShell 腳本（需要顯式 `powershell`/`pwsh` argv）或原生可執行文件，而不是 POSIX-only `.sh`。PATH 校驗遵循 Windows `PATHEXT`，因此如 `pwsh` 這類名稱可解析為 `pwsh.exe`。維護多平臺版本時，請保持參數契約和 stdout 輸出格式一致。
 

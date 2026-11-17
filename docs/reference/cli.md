@@ -1,6 +1,6 @@
 # CLI reference
 
-<!-- att-doc-status: current release=4.2.10 -->
+<!-- att-doc-status: current release=4.3.1 -->
 
 
 ## Choose a command
@@ -20,11 +20,11 @@
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
-The commands in this table are the ATT 4.2.10 CLI. The separate vNext proposal is not part of this release.
+The commands in this table are the ATT 4.3.1 CLI. The separate vNext proposal is not part of this release.
 
-## Availability in ATT 4.2.10
+## Availability in ATT 4.3.1
 
-This Reference describes the CLI shipped with ATT 4.2.10. The vNext grammar is a separate [Planned proposal](../interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
+This Reference describes the CLI shipped with ATT 4.3.1. The vNext grammar is a separate [Planned proposal](../interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
 
 ## Build a source checkout
 
@@ -208,7 +208,7 @@ This page defines target, `--input`, `--set` and `--env` syntax in the option ma
 
 ## Complete option matrix
 
-`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.13` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.14` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
 
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 

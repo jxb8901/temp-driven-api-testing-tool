@@ -1,0 +1,609 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:sut-threshold-evaluation:v1",
+  "title": "ATT durable SUT threshold evaluation",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "jobId",
+    "snapshotId",
+    "snapshotSha256",
+    "state",
+    "complete",
+    "attempt",
+    "createdAt",
+    "updatedAt",
+    "collectionState",
+    "effectiveRules",
+    "diagnostics"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "att-sut-threshold-evaluation/v1"
+    },
+    "jobId": {
+      "type": "string",
+      "pattern": "^J[0-9A-F]{16}$"
+    },
+    "snapshotId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "snapshotSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "state": {
+      "enum": [
+        "PENDING",
+        "EVALUATING",
+        "MET",
+        "NOT_MET",
+        "NOT_EVALUATED",
+        "ERROR"
+      ]
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "evaluatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "collectionState": {
+      "enum": [
+        "PENDING",
+        "COLLECTING",
+        "READY",
+        "PARTIAL",
+        "UNAVAILABLE",
+        "FAILED",
+        "UNKNOWN"
+      ]
+    },
+    "collectionUpdatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "effectiveRules": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/effectiveRule"
+      }
+    },
+    "window": {
+      "$ref": "#/$defs/evaluationWindow"
+    },
+    "completeness": {
+      "$ref": "#/$defs/completeness"
+    },
+    "sutThresholds": {
+      "$ref": "#/$defs/results"
+    },
+    "diagnostics": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      }
+    }
+  },
+  "$defs": {
+    "effectiveRule": {
+      "type": "object",
+      "required": [
+        "id",
+        "profile",
+        "profilePath",
+        "metricId",
+        "metricName",
+        "unit",
+        "reduction",
+        "operator",
+        "value",
+        "window",
+        "targets",
+        "onInsufficientData",
+        "required",
+        "queryIds"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "bindingId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profilePath": {
+          "type": "string"
+        },
+        "metricId": {
+          "type": "string"
+        },
+        "metricName": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "gauge",
+            "rate",
+            "counter"
+          ]
+        },
+        "reduction": {
+          "const": "max"
+        },
+        "operator": {
+          "const": "<="
+        },
+        "value": {
+          "type": "number"
+        },
+        "window": {
+          "enum": [
+            "steady",
+            "afterDrain"
+          ]
+        },
+        "targets": {
+          "enum": [
+            "all",
+            "selected"
+          ]
+        },
+        "onInsufficientData": {
+          "const": "NOT_EVALUATED"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "queryIds": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "string"
+          }
+        },
+        "sampling": {
+          "enum": [
+            "afterDrain",
+            "windowQuery"
+          ]
+        },
+        "subjects": {
+          "oneOf": [
+            {
+              "const": "all"
+            },
+            {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/thresholdSubject"
+              }
+            }
+          ]
+        },
+        "minimumCoverage": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "maximum": 1.0
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "kind",
+            "window",
+            "minimumCoverage",
+            "targets"
+          ],
+          "not": {
+            "required": [
+              "sampling"
+            ]
+          }
+        },
+        {
+          "required": [
+            "kind",
+            "window",
+            "sampling",
+            "targets"
+          ],
+          "not": {
+            "required": [
+              "minimumCoverage"
+            ]
+          }
+        }
+      ]
+    },
+    "evaluationWindow": {
+      "type": "object",
+      "required": [
+        "phase",
+        "phaseWindows",
+        "step"
+      ],
+      "properties": {
+        "phase": {
+          "const": "steady"
+        },
+        "phaseWindows": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object"
+          }
+        },
+        "step": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "completeness": {
+      "type": "object",
+      "required": [
+        "complete",
+        "ruleCount",
+        "requiredRuleCount",
+        "targetCount",
+        "notEvaluatedTargetCount"
+      ],
+      "properties": {
+        "complete": {
+          "const": true
+        },
+        "ruleCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "requiredRuleCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "targetCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 256
+        },
+        "notEvaluatedTargetCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 256
+        }
+      },
+      "additionalProperties": false
+    },
+    "results": {
+      "type": "object",
+      "required": [
+        "status",
+        "requiredThresholdCount",
+        "items",
+        "targets"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "MET",
+            "NOT_MET",
+            "NOT_EVALUATED"
+          ]
+        },
+        "requiredThresholdCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/ruleResult"
+          }
+        },
+        "targets": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/targetResult"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ruleResult": {
+      "type": "object",
+      "required": [
+        "id",
+        "profile",
+        "profilePath",
+        "metricId",
+        "metricName",
+        "unit",
+        "reduction",
+        "operator",
+        "value",
+        "required",
+        "status",
+        "targets"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "profilePath": {
+          "type": "string"
+        },
+        "metricId": {
+          "type": "string"
+        },
+        "metricName": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "reduction": {
+          "const": "max"
+        },
+        "operator": {
+          "const": "<="
+        },
+        "value": {
+          "type": "number"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "MET",
+            "NOT_MET",
+            "NOT_EVALUATED"
+          ]
+        },
+        "targets": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/targetResult"
+          }
+        },
+        "selection": {
+          "oneOf": [
+            {
+              "const": "all"
+            },
+            {
+              "const": "selected"
+            },
+            {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/thresholdSubject"
+              }
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "targetResult": {
+      "type": "object",
+      "required": [
+        "ruleId",
+        "queryId",
+        "profile",
+        "profilePath",
+        "metricId",
+        "metricName",
+        "unit",
+        "required",
+        "source",
+        "profileRevision",
+        "target",
+        "window",
+        "sampleResolution",
+        "threshold",
+        "actual",
+        "peakObservedAt",
+        "coverage",
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "ruleId": {
+          "type": "string"
+        },
+        "queryId": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "profilePath": {
+          "type": "string"
+        },
+        "metricId": {
+          "type": "string"
+        },
+        "metricName": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "object"
+        },
+        "profileRevision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "type": "object"
+        },
+        "window": {
+          "type": "object"
+        },
+        "sampleResolution": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threshold": {
+          "type": "object"
+        },
+        "actual": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "peakObservedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "coverage": {
+          "type": "object"
+        },
+        "status": {
+          "enum": [
+            "MET",
+            "NOT_MET",
+            "NOT_EVALUATED"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "scope": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "job",
+            "workload",
+            "mix",
+            null
+          ]
+        },
+        "workloadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mixId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mappingStatus": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 32
+        },
+        "unmatchedRowCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 4096
+        }
+      },
+      "additionalProperties": false
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 240
+        }
+      },
+      "additionalProperties": false
+    },
+    "thresholdSubject": {
+      "type": "object",
+      "required": [
+        "scope"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "enum": [
+            "job",
+            "workload",
+            "mix"
+          ]
+        },
+        "workloadId": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "mixId": {
+          "type": "string",
+          "maxLength": 80
+        }
+      }
+    }
+  }
+}

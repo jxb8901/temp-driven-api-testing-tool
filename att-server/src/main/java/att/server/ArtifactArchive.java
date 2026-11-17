@@ -307,6 +307,7 @@ final class ArtifactArchive {
     }
 
     private static int archivePriority(String path) {
+        if (path.startsWith("report/v2/")) return -1;
         if (path.endsWith("/load-summary.json") || path.endsWith("/load-summary.yaml")
                 || path.endsWith("/report/index.html") || path.endsWith("/report-commit-manifest.json")
                 || path.endsWith("/" + LOAD_REPORT_MANIFEST)) return 0;

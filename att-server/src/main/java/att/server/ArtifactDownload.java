@@ -25,6 +25,10 @@ final class ArtifactDownload implements AutoCloseable {
     }
 
     static ArtifactDownload open(Path archive) throws Exception {
+        return open(archive, null);
+    }
+
+    static ArtifactDownload open(Path archive, String expectedArchiveSha256) throws Exception {
         // A private OS-temp directory keeps the copy outside publication/recovery's namespace.
         Path directory=Files.createTempDirectory("att-artifact-download-");
         Path snapshot=directory.resolve("archive.zip");
@@ -32,6 +36,7 @@ final class ArtifactDownload implements AutoCloseable {
         try {
             channel=FileChannel.open(snapshot,StandardOpenOption.CREATE_NEW,StandardOpenOption.READ,StandardOpenOption.WRITE);
             List<byte[]> hashes=new ArrayList<>();long length=0;
+            MessageDigest archiveDigest=MessageDigest.getInstance("SHA-256");
             ByteBuffer buffer=ByteBuffer.allocate(CHUNK_BYTES);
             try(FileChannel input=FileChannel.open(archive,StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS)) {
                 if(input.size()>ArtifactArchive.MAX_ARCHIVE_BYTES)throw new IOException("Artifact archive exceeds download limit");
@@ -42,10 +47,13 @@ final class ArtifactDownload implements AutoCloseable {
                     if(read==0)break;
                     length+=read;
                     if(length>ArtifactArchive.MAX_ARCHIVE_BYTES)throw new IOException("Artifact archive exceeds download limit");
+                    archiveDigest.update(buffer.array(),0,read);
                     hashes.add(digest(buffer.array(),read));
                     buffer.flip();while(buffer.hasRemaining())channel.write(buffer);
                 }
             }
+            if(expectedArchiveSha256!=null&&!expectedArchiveSha256.equals(java.util.HexFormat.of().formatHex(archiveDigest.digest())))
+                throw new IOException("Artifact archive digest does not match its publication record");
             // Validate the copied bytes, not a source that publication may atomically replace.
             ArtifactArchive.verify(snapshot,true);
             return new ArtifactDownload(directory,channel,hashes,length);

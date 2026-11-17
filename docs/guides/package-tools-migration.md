@@ -1,4 +1,4 @@
-# Package-owned Tools (ATT 4.2.10)
+# Package-owned Tools
 
 ATT Tools belong to the **selected registered Package**, not shared Runtime Configuration. Create standalone Tool YAML under `<PACKAGE_ROOT>/tools/*.yaml`, or grouped Tools under `tools/<group>/` with a fixed `tool-group.yaml` manifest. Tool descriptors use `att-tool/v1`; Group manifests use `att-tool-group/v3.0`. This feature does not require Studio online source editing (#233).
 
@@ -33,7 +33,7 @@ Tool IDs are scoped to `(registeredPackageId, toolId)`. Identical IDs in separat
 
 ### Migrating a 4.2.9 installation
 
-Legacy `config/config.yaml: tools:` and `toolGroups:` **must be converted before a 4.2.10 runtime starts**. The new runtime fails with a migration diagnostic rather than silently running a global Tool.
+Legacy `config/config.yaml: tools:` and `toolGroups:` **must be converted before the current ATT runtime starts**. The new runtime fails with a migration diagnostic rather than silently running a global Tool.
 
 1. Back up your configuration and Package repositories.
 2. Run `python3 tools/migrate_package_tools.py --config config/config.yaml --package packages/default` for a **dry run**. Install PyYAML if not already installed (`python3 -m pip install pyyaml`).

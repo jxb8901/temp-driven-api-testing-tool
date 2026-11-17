@@ -1,0 +1,710 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:sut-metrics-observation:v1",
+  "title": "Provider-neutral ATT SUT Metrics sampled observation",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "queryId",
+    "profile",
+    "profilePath",
+    "sourceId",
+    "sourceName",
+    "metricId",
+    "title",
+    "category",
+    "kind",
+    "targetId",
+    "targetType",
+    "unit",
+    "observation"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "att-sut-metrics-observation/v1"
+    },
+    "queryId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "profile": {
+      "type": "string"
+    },
+    "profilePath": {
+      "type": "string"
+    },
+    "sourceId": {
+      "type": "string"
+    },
+    "sourceName": {
+      "type": "string"
+    },
+    "metricId": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "gauge",
+        "rate",
+        "counter",
+        "histogram"
+      ]
+    },
+    "targetId": {
+      "type": "string"
+    },
+    "targetType": {
+      "type": "string"
+    },
+    "unit": {
+      "type": "string"
+    },
+    "observation": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "kind",
+        "effectiveBindingId",
+        "source",
+        "profile",
+        "target",
+        "metric",
+        "window",
+        "availability",
+        "provenance"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "att-sut-metrics-observation/v1"
+        },
+        "kind": {
+          "enum": [
+            "sampled-time-series",
+            "timed-snapshot",
+            "window-aggregate"
+          ]
+        },
+        "effectiveBindingId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "source": {
+          "type": "object",
+          "required": [
+            "id",
+            "name",
+            "revision"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "revision": {
+              "$ref": "#/$defs/revision"
+            }
+          }
+        },
+        "profile": {
+          "type": "object",
+          "required": [
+            "id",
+            "path",
+            "revision"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "revision": {
+              "$ref": "#/$defs/revision"
+            }
+          }
+        },
+        "target": {
+          "type": "object",
+          "required": [
+            "id",
+            "type",
+            "revision"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "revision": {
+              "$ref": "#/$defs/revision"
+            }
+          }
+        },
+        "metric": {
+          "type": "object",
+          "required": [
+            "id",
+            "name",
+            "category",
+            "unit",
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string"
+            },
+            "unit": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "gauge",
+                "rate",
+                "counter",
+                "histogram"
+              ]
+            }
+          }
+        },
+        "window": {
+          "type": "object",
+          "required": [],
+          "additionalProperties": false,
+          "properties": {
+            "executionStartedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "executionFinishedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "queryStart": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "queryEnd": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "step": {
+              "type": "string"
+            },
+            "phaseWindows": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "type": "object",
+                "required": [
+                  "phase",
+                  "startAt",
+                  "endAt",
+                  "durationMs",
+                  "measured"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "phase": {
+                    "enum": [
+                      "RAMP_UP",
+                      "WARMUP",
+                      "STEADY",
+                      "RAMP_DOWN",
+                      "DRAIN"
+                    ]
+                  },
+                  "startAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "endAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "measured": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            },
+            "kind": {
+              "enum": [
+                "after-drain",
+                "steady-window-query"
+              ]
+            },
+            "observedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "completedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "delayFromExecutionEndMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "semantics": {
+              "type": "string",
+              "maxLength": 240
+            }
+          }
+        },
+        "availability": {
+          "type": "object",
+          "required": [
+            "state",
+            "freshness",
+            "diagnostics"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "enum": [
+                "AVAILABLE",
+                "PARTIAL",
+                "NO_DATA",
+                "UNAVAILABLE",
+                "NOT_EVALUATED"
+              ]
+            },
+            "freshness": {
+              "enum": [
+                "FRESH",
+                "STALE",
+                "UNKNOWN"
+              ]
+            },
+            "coverage": {
+              "$ref": "#/$defs/coverage"
+            },
+            "diagnostics": {
+              "type": "array",
+              "maxItems": 512,
+              "items": {
+                "type": "object",
+                "required": [
+                  "code",
+                  "message"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 240
+                  }
+                }
+              }
+            },
+            "quality": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "collectionDurationMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "mappingStatus": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "unmatchedRowCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4096
+            },
+            "callCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "callSubmitted": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "required": [
+            "provider",
+            "jobId",
+            "snapshotId",
+            "queryId"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "provider": {
+              "enum": [
+                "prometheus",
+                "att-call"
+              ]
+            },
+            "jobId": {
+              "type": "string",
+              "pattern": "^J[A-F0-9]{16}$"
+            },
+            "snapshotId": {
+              "$ref": "#/$defs/revision"
+            },
+            "queryId": {
+              "type": "string"
+            },
+            "sourceType": {
+              "enum": [
+                "DBHELPER",
+                "PACKAGE_TOOL"
+              ]
+            },
+            "sourceName": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "packageRevision": {
+              "$ref": "#/$defs/revision"
+            },
+            "runtimeConfigRevision": {
+              "$ref": "#/$defs/revision"
+            },
+            "callGroupId": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "scope": {
+              "enum": [
+                "job",
+                "workload",
+                "mix"
+              ]
+            },
+            "workloadId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 80
+            },
+            "mixId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 80
+            },
+            "association": {
+              "enum": [
+                "user-authored-mapping",
+                "explicit-binding"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "series": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "required": [
+          "labels",
+          "samples",
+          "coverage"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "labels": {
+            "type": "object",
+            "maxProperties": 40,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          "samples": {
+            "type": "array",
+            "maxItems": 250000,
+            "items": {
+              "type": "object",
+              "required": [
+                "timestamp",
+                "timestampEpochMs",
+                "value"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "timestampEpochMs": {
+                  "type": "integer"
+                },
+                "value": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "coverage": {
+            "$ref": "#/$defs/coverage"
+          }
+        }
+      }
+    },
+    "value": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "labeledValues": {
+      "description": "Bounded one-time values returned by one wide-row acquisition; each value keeps its explicit source labels.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "required": ["labels", "value"],
+        "additionalProperties": false,
+        "properties": {
+          "labels": {
+            "type": "object",
+            "minProperties": 1,
+            "maxProperties": 40,
+            "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 512 }
+          },
+          "value": { "type": "number" }
+        }
+      }
+    },
+    "callGroupId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "scope": {
+      "enum": [
+        "job",
+        "workload",
+        "mix"
+      ]
+    },
+    "workloadId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 80
+    },
+    "mixId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 80
+    },
+    "callCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "mappingStatus": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "unmatchedRowCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4096
+    },
+    "queryStatus": {
+      "enum": [
+        "READY",
+        "PARTIAL",
+        "STALE",
+        "UNAVAILABLE",
+        "NOT_EVALUATED"
+      ]
+    },
+    "normalizedObservationsV2": {
+      "description": "Optional canonical v2 observations emitted alongside the unchanged v1 sidecar envelope during the compatibility period.",
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "$ref": "#/$defs/normalizedObservationV2"
+      }
+    },
+    "normalizationStatus": {
+      "enum": ["MIGRATED", "UNSUPPORTED"]
+    },
+    "normalizationDiagnostic": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "const": "V1_OBSERVATION_MIGRATION_UNSUPPORTED" },
+        "message": { "type": "string", "maxLength": 240 }
+      }
+    }
+  },
+  "$defs": {
+    "normalizedObservationV2": {
+      "type": "object",
+      "required": ["schemaVersion", "observationId", "identity", "metric", "data", "acquisition"],
+      "properties": {
+        "schemaVersion": { "const": "att-sut-metrics-observation/v2" },
+        "observationId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "identity": { "type": "object" },
+        "metric": { "type": "object" },
+        "data": { "type": "object" },
+        "acquisition": { "type": "object" }
+      }
+    },
+    "revision": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "coverage": {
+      "type": "object",
+      "required": [
+        "sampleCount",
+        "seriesCount",
+        "gapCount",
+        "firstSampleAt",
+        "lastSampleAt",
+        "windowStart",
+        "windowEnd"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "sampleCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "seriesCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gapCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "firstSampleAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastSampleAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "windowStart": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "windowEnd": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "series"
+      ],
+      "not": {
+        "anyOf": [{ "required": ["value"] }, { "required": ["labeledValues"] }]
+      },
+      "properties": {
+        "observation": {
+          "properties": {
+            "kind": {
+              "const": "sampled-time-series"
+            }
+          }
+        }
+      }
+    },
+    {
+      "required": [
+        "value"
+      ],
+      "not": {
+        "anyOf": [{ "required": ["series"] }, { "required": ["labeledValues"] }]
+      },
+      "properties": {
+        "observation": {
+          "properties": {
+            "kind": {
+              "enum": [
+                "timed-snapshot",
+                "window-aggregate"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "required": ["labeledValues"],
+      "not": { "anyOf": [{ "required": ["value"] }, { "required": ["series"] }] },
+      "properties": {
+        "observation": {
+          "properties": {
+            "kind": { "enum": ["timed-snapshot", "window-aggregate"] }
+          }
+        }
+      }
+    }
+  ]
+}

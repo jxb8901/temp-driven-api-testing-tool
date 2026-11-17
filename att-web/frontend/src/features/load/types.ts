@@ -242,6 +242,67 @@ export interface JobResultResponse {
   job: JobResultSummary;
   result: Record<string, unknown> | null;
   diagnostic?: Record<string, unknown> | null;
+  performanceAcceptance?: Record<string, unknown>;
+}
+
+export interface SutMetricPoint { timestamp: string; timestampEpochMs: number; value: number }
+export interface SutMetricSeries { labels: Record<string, string>; samples: SutMetricPoint[]; coverage?: Record<string, unknown> }
+export interface SutMetricGroupAssignment {
+  observationId: string; groupId: string; title?: string; order?: number; display?: string;
+  groupBy?: Record<string, string>; labels?: Record<string, string>;
+  value?: number | null; status?: string; freshness?: string; observedAt?: string;
+}
+export interface SutMetricGroupView {
+  assignments?: SutMetricGroupAssignment[];
+  unassigned?: Array<{ observationId?: string; metricId?: string; sourceId?: string; reason?: string; labels?: Record<string, string> }>;
+  diagnostics?: Array<{ code?: string; message?: string; observationId?: string; groupId?: string }>;
+}
+export interface SutMetricGroupDefinition {
+  schemaVersion?: string; id: string; title: string; order?: number; display?: string;
+  match?: { metricIds?: string[]; sourceIds?: string[]; labels?: Record<string, string> };
+  groupBy?: string[];
+}
+export interface SutMetricQueryMetadata {
+  id: string; profile?: string; profilePath?: string; sourceId?: string; metricSourceId?: string; sourceName?: string; kind?: string;
+  targetId: string; targetType?: string; metricId: string; title?: string; category?: string; unit?: string;
+  observationType?: string; observationKind?: string; sampling?: string; scope?: string; workloadId?: string; sourceType?: string;
+  metricGroupIds?: string[];
+}
+export interface SutMetricLabeledValue {
+  labels: Record<string, string>; value?: number | null; state?: string;
+  diagnostics?: Array<{ code?: string; message?: string }>;
+}
+export interface SutMetricItem {
+  id?: string; queryId?: string; profile?: string; profilePath?: string; metricId: string; title: string; category?: string; targetId: string; targetType?: string; kind?: string;
+  sourceId?: string; sourceName?: string; unit: string; queryStatus?: string; observation?: Record<string, unknown>; series?: SutMetricSeries[];
+  value?: number | null; coverage?: Record<string, unknown>; error?: string;
+  scope?: 'job' | 'workload' | 'mix'; workloadId?: string | null; mixId?: string | null;
+  callGroupId?: string; callCount?: number; mappingStatus?: string; unmatchedRowCount?: number;
+  groupView?: SutMetricGroupView;
+  labeledValues?: SutMetricLabeledValue[];
+  normalizedObservationsV2?: Array<{
+    observationId?: string;
+    identity?: { metricId?: string; binding?: { sourceId?: string }; labels?: Record<string, string> };
+    data?: { value?: number | null; state?: string; freshness?: string; diagnostics?: Array<{ code?: string; message?: string }> };
+  }>;
+}
+export interface SutMetricsManifest {
+  schemaVersion?: string; state?: string; complete?: boolean; createdAt?: string; updatedAt?: string;
+  windowStart?: string; windowEnd?: string; eligibleAt?: string; step?: string; coverage?: Record<string, unknown>;
+  collectionProgress?: { business?: string; prometheus?: string };
+  queries?: SutMetricQueryMetadata[];
+  diagnostics?: Array<{ code?: string; message?: string }>; files?: Array<Record<string, unknown>>;
+}
+export interface SutMetricsJobResponse {
+  schemaVersion?: string; state?: string; jobId?: string; snapshotId?: string;
+  provisional?: boolean;
+  collection?: SutMetricsManifest | null; livePreview?: Record<string, unknown>;
+  thresholdEvaluation?: Record<string, unknown>; performanceAcceptance?: Record<string, unknown>;
+  groups?: SutMetricGroupDefinition[]; items?: SutMetricItem[]; nextOffset?: number | null;
+}
+export interface SutMetricsLiveResponse {
+  schemaVersion?: string; state?: string; snapshotId?: string; windowStart?: string; windowEnd?: string;
+  sourceQueryTime?: string; sampleCount?: number; stepSeconds?: number; message?: string; queries?: SutMetricQueryMetadata[]; items?: SutMetricItem[];
 }
 
 export interface JobArtifact {
@@ -315,6 +376,17 @@ export interface JobArtifactOverview {
   complete?: boolean | null;
   omissions?: Array<{ count: number; category: string }> | null;
   omissionReasonsAvailable: boolean;
+  loadReportV2?: {
+    schemaVersion?: string;
+    state?: 'DISABLED' | 'PENDING' | 'BUILDING' | 'READY' | 'FAILED' | string;
+    collectionState?: string;
+    externalEvaluationStatus?: string;
+    performanceVerdict?: string;
+    publicationId?: string;
+    updatedAt?: string;
+    downloadPath?: string;
+    lastAttemptState?: string;
+  };
 }
 
 export interface JobEvent {
@@ -340,6 +412,7 @@ export interface LoadJobsApi {
   rerunJob?(jobId: string, intentId: string, sourcePolicy?: 'current' | 'strict'): Promise<{ jobId: string }>;
 
   listLoadCatalog?(packageId: string, input?: { query?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<LoadCatalogPage>;
+  listSutMetricProfiles?(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> }>;
   getLoadCatalogDetail?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<LoadCatalogDetail>;
   getLoadSource?(packageId: string, resourceId: string, signal?: AbortSignal): Promise<{ available: boolean; logicalPath?: string; text?: string; redacted?: boolean; reason?: string }>;
   submitLoadScenario?(input: { packageId: string; scenario: string; environment?: string }): Promise<JobAccepted>;
@@ -359,6 +432,9 @@ export interface LoadJobsApi {
   listJobs(input?: { principal?: string; pinnedOnly?: boolean; signal?: AbortSignal }): Promise<JobSummary[]>;
   getJob(jobId: string, signal?: AbortSignal): Promise<JobView>;
   getJobResult(jobId: string, signal?: AbortSignal): Promise<JobResultResponse>;
+  getJobSutMetrics?(jobId: string, input?: { offset?: number; limit?: number; queryId?: string; targetId?: string; profilePath?: string; signal?: AbortSignal }): Promise<SutMetricsJobResponse>;
+  getJobSutMetricSeries?(jobId: string, input: { offset?: number; limit?: number; queryId: string; targetId?: string; profilePath?: string; signal?: AbortSignal }): Promise<SutMetricsJobResponse>;
+  getJobSutMetricsLive?(jobId: string, input?: { range?: string; step?: string; targetId?: string; profilePath?: string; signal?: AbortSignal }): Promise<SutMetricsLiveResponse>;
   getJobArtifacts(jobId: string, signal?: AbortSignal): Promise<JobArtifact[]>;
   getJobArtifactArchive?(jobId: string, offset?: number, signal?: AbortSignal): Promise<JobArtifactArchive>;
   getJobArtifactOverview?(jobId: string, signal?: AbortSignal): Promise<JobArtifactOverview>;
@@ -407,8 +483,8 @@ export interface LoadFeatureProps {
 }
 
 export interface JobsFeatureProps {
-  initialTab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics';
-  onTabChange?(tab: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics'): void;
+  initialTab?: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics' | 'correlation';
+  onTabChange?(tab: 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics' | 'correlation'): void;
   standalone?: boolean;
   jobsTab?: 'jobs' | 'validations';
   onJobsTabChange?(tab: 'jobs' | 'validations'): void;

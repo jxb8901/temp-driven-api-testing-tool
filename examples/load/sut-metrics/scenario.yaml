@@ -1,0 +1,11 @@
+schemaVersion: att-load/v1.9
+workloads:
+  - id: payments-smoke
+    target: { type: template, id: PAYMENTS_HEALTH }
+    load: { users: 1, duration: 1m }
+observability:
+  schemaVersion: att-load-observability/v1
+  collections:
+    - profile: profile-platform
+  collection: { mode: post-run, before: 5m, after: 2m, step: 30s }
+  livePreview: { enabled: true, refreshInterval: 30s, defaultRange: 15m }

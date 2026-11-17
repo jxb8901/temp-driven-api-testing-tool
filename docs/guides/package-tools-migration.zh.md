@@ -1,4 +1,4 @@
-# Package 專屬 Tool（ATT 4.2.10）
+# Package 專屬 Tool
 
 Tool 定義由**所選已註冊 Package** 擁有，不再屬於全域 Runtime Configuration。獨立 Tool 位於 `<PACKAGE_ROOT>/tools/*.yaml`；分組 Tool 位於 `tools/<group>/`，並由固定檔名 `tool-group.yaml` 的 Manifest 列出。Tool 定義使用 `att-tool/v1`，Group Manifest 使用 `att-tool-group/v3.0`。此功能無須等待 #233 線上編輯功能。
 
@@ -18,7 +18,7 @@ Tool 的識別為 `(registeredPackageId, toolId)`，不同 Package 可使用相�
 
 ### 由 4.2.9 升級
 
-舊版 `config/config.yaml` 的 `tools:` 和 `toolGroups:` 不會在 4.2.10 自動生效，必須明確遷移。
+舊版 `config/config.yaml` 的 `tools:` 和 `toolGroups:` 不會自動轉換；啟動目前的 ATT runtime 前，必須先明確遷移。
 
 1. 備份原始 Config 與各 Package。
 2. 使用 `python3 tools/migrate_package_tools.py --config config/config.yaml --package packages/default` 預覽遷移（預設 dry run，需 PyYAML）。

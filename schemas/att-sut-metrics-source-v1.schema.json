@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:sut-metrics-source:v1",
+  "title": "ATT SUT Metrics Data Source",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "url"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "provider": { "const": "GRAFANA" } },
+        "required": ["provider"]
+      },
+      "then": {
+        "required": ["grafanaDatasourceUid", "defaultTenant", "allowedTenants", "auth"],
+        "properties": {
+          "apiPath": { "const": "/api/ds/query" },
+          "auth": {
+            "properties": { "mode": { "const": "BEARER" } },
+            "required": ["mode", "secretRef"]
+          },
+          "allowedTenants": {
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^[1-9][0-9]{0,9}$" }
+          },
+          "defaultTenant": { "type": "string", "pattern": "^[1-9][0-9]{0,9}$" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "provider": { "const": "PROMETHEUS" } },
+        "required": ["provider"]
+      },
+      "then": { "not": { "required": ["grafanaDatasourceUid"] } }
+    },
+    {
+      "if": { "required": ["grafanaDatasourceUid"] },
+      "then": {
+        "required": ["provider"],
+        "properties": { "provider": { "const": "GRAFANA" } }
+      }
+    }
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "att-sut-metrics-source/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["PROMETHEUS", "GRAFANA"],
+      "default": "PROMETHEUS"
+    },
+    "grafanaDatasourceUid": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,80}$"
+    },
+    "url": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://|^http://(localhost|127\\.0\\.0\\.1|\\[::1\\])"
+    },
+    "apiPath": {
+      "type": "string",
+      "pattern": "^/(?!.*\\.\\.).{0,255}$"
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verify": {
+          "type": "boolean"
+        },
+        "caSecretRef": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "NONE",
+            "BEARER",
+            "BASIC"
+          ]
+        },
+        "secretRef": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        }
+      }
+    },
+    "readers": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 256,
+      "items": {
+        "type": "string",
+        "maxLength": 120
+      }
+    },
+    "readRoles": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 8,
+      "items": {
+        "enum": [
+          "USER",
+          "ADMIN"
+        ]
+      }
+    },
+    "allowedTenants": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "defaultTenant": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectTimeoutMs": {
+          "type": "integer",
+          "minimum": 250,
+          "maximum": 30000
+        },
+        "requestTimeoutMs": {
+          "type": "integer",
+          "minimum": 250,
+          "maximum": 60000
+        },
+        "maxRangeSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 93600
+        },
+        "maxResponseBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 8388608
+        },
+        "maxQueriesPerJob": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2048
+        },
+        "maxSamplesPerQuery": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 250000
+        },
+        "maxSamplesPerJob": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1500000
+        },
+        "maxSeriesPerJob": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
+        },
+        "maxTargets": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "maxMetrics": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        }
+      }
+    }
+  }
+}

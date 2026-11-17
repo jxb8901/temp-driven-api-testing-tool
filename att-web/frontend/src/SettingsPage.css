@@ -65,3 +65,36 @@
   .att-auth-dialog { padding: var(--att-space-4); }
   .att-auth-password-control { grid-template-columns: minmax(0, 1fr); }
 }
+.att-sut-metrics-admin section { margin-top: 1.25rem; }
+.att-sut-read-only-banner { margin: .75rem 0; padding: .8rem 1rem; border: 1px solid var(--att-color-border); border-left: 4px solid var(--att-color-primary); border-radius: var(--att-radius-control); background: var(--att-color-surface-muted, #f1f3f6); color: var(--att-color-text); }
+.att-sut-read-only-banner p { margin: .35rem 0 0; max-width: 760px; line-height: 1.5; }
+.att-sut-metrics-admin textarea { box-sizing: border-box; display: block; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; margin: .35rem 0 .65rem; max-width: 100%; min-height: 8rem; width: 100%; }
+.att-sut-catalog-list { list-style: none; margin: .5rem 0; padding: 0; }
+.att-sut-catalog-list li { align-items: center; border-bottom: 1px solid var(--att-border, #ccd2d9); display: flex; flex-wrap: wrap; gap: .5rem; padding: .5rem 0; }
+.att-sut-catalog-list li button { margin-left: .25rem; }
+.att-sut-preview { max-height: 30rem; overflow: auto; }
+.att-sut-editor-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; }
+.att-sut-definition-preview pre { background: var(--att-color-surface-muted, #f1f3f6); border-radius: var(--att-radius-control); max-height: 18rem; overflow: auto; padding: .75rem; white-space: pre-wrap; }
+.att-sut-field-errors { margin: .35rem 0 .75rem; padding: .65rem .75rem .65rem 2rem; border-left: 3px solid var(--att-color-danger, #a43d35); background: color-mix(in srgb, var(--att-color-danger, #a43d35) 7%, var(--att-color-surface)); color: var(--att-color-danger, #a43d35); font-size: .82rem; line-height: 1.5; }
+.att-sut-field-errors code { color: inherit; font-weight: 700; }
+.att-sut-profile-selection { display: grid; gap: .4rem; margin: .75rem 0; padding: .75rem; border: 1px solid var(--att-color-border); border-radius: var(--att-radius-control); }
+.att-sut-profile-selection legend { padding: 0 .25rem; color: var(--att-color-text); font-weight: 700; }
+.att-sut-profile-selection label { display: flex; align-items: flex-start; gap: .5rem; color: var(--att-color-text); font-size: .84rem; }
+.att-sut-profile-selection input { margin-top: .15rem; accent-color: var(--att-color-primary); }
+.att-sut-metrics-admin textarea[aria-invalid="true"] { border-color: var(--att-color-danger, #a43d35); box-shadow: 0 0 0 1px var(--att-color-danger, #a43d35); }
+.att-sut-mapped-call-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin: 1rem 0; padding: 1rem; border: 1px solid var(--att-color-border); border-radius: var(--att-radius-panel); }
+.att-sut-mapped-call-editor > legend, .att-sut-mapped-call-outputs > strong { color: var(--att-color-text); font-weight: 700; }
+.att-sut-mapped-call-editor > p, .att-sut-mapped-call-editor > label, .att-sut-mapped-call-editor > button, .att-sut-mapped-call-outputs { grid-column: 1 / -1; }
+.att-sut-mapped-call-editor > label, .att-sut-mapped-call-outputs fieldset label { display: grid; gap: .3rem; color: var(--att-color-text); font-size: .82rem; font-weight: 650; }
+.att-sut-mapped-call-editor input:not([type="checkbox"]), .att-sut-mapped-call-editor select, .att-sut-mapped-call-editor textarea { width: 100%; min-height: 40px; padding: .55rem .7rem; border: 1px solid var(--att-color-border); border-radius: var(--att-radius-control); background: var(--att-color-surface); color: var(--att-color-text); font: inherit; }
+.att-sut-mapped-call-editor textarea { min-height: 4.5rem; }
+.att-sut-mapped-call-editor input:focus-visible, .att-sut-mapped-call-editor select:focus-visible, .att-sut-mapped-call-editor textarea:focus-visible { outline: 0; box-shadow: var(--att-focus-ring); }
+.att-sut-mapped-call-check { display: flex !important; align-items: center; gap: .5rem !important; }
+.att-sut-mapped-call-check input { width: 1rem; height: 1rem; }
+.att-sut-mapped-call-outputs { display: grid; gap: .65rem; }
+.att-sut-mapped-call-outputs > fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; margin: 0; padding: .75rem; border: 1px solid var(--att-color-border); border-radius: var(--att-radius-control); }
+.att-sut-mapped-call-outputs > fieldset > legend { color: var(--att-color-muted); font-size: .78rem; }
+.att-sut-mapped-call-outputs > fieldset > button { grid-column: 1 / -1; justify-self: start; }
+@media (max-width: 640px) {
+  .att-sut-mapped-call-editor, .att-sut-mapped-call-outputs > fieldset { grid-template-columns: minmax(0, 1fr); }
+}

@@ -31,6 +31,12 @@ public final class YamlSupport {
     }
     public static Yaml parser() { return PARSER; }
 
+    /** Parses an already bounded source string with the same safe duplicate-key and alias policy. */
+    public static Object parse(String source) {
+        if (source == null) throw new IllegalArgumentException("YAML source is required");
+        return new Yaml(new SafeConstructor(options())).load(source);
+    }
+
     private static final Map<Path, YamlSource> SOURCES = new LinkedHashMap<Path, YamlSource>(128, .75f, true) {
         @Override protected boolean removeEldestEntry(Map.Entry<Path, YamlSource> eldest) { return size() > 4096; }
     };

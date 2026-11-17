@@ -11,6 +11,7 @@ import type {
   JobAccepted as LoadJobAccepted, JobArtifact, JobEventHandlers, JobResultResponse,
   JobSummary as LoadJobSummary, JobView, LoadDraftInput, LoadDraftResponse, LoadModel,
   LoadPolicyResponse, LoadTargetType, QuickLoadFormResponse, SubmitLoadDraftInput, TargetResource, LoadCatalogPage, LoadCatalogDetail,
+  SutMetricsJobResponse, SutMetricsLiveResponse,
 } from './features/load/types';
 import type { RunDefinition } from './features/run/RunPage';
 import { contextRelativeReturnTo } from './contextPaths';
@@ -21,6 +22,11 @@ import type {
 } from './features/schedules/types';
 import { normalizeSchedule, scheduleTransport } from './features/schedules/types';
 import type { ValidationRecord, ValidationRecordPage, ValidationReportData, ValidationRequest } from './features/validation/types';
+
+interface SutMetricCatalogResponse {
+  items: Array<Record<string, unknown>>;
+  configuration?: Record<string, unknown>;
+}
 
 export interface ServerJobStorageMetrics {
   enabled?: boolean;
@@ -286,6 +292,48 @@ export const api = {
   }> {
     return request('auth/capabilities', { signal });
   },
+  listSutMetricSources(signal?: AbortSignal): Promise<SutMetricCatalogResponse> {
+    return request('sut-metrics/sources', { signal });
+  },
+  listSutMetricAcquisitions(signal?: AbortSignal): Promise<SutMetricCatalogResponse> {
+    return request('sut-metrics/metric-sources', { signal });
+  },
+  listSutMetricGroups(signal?: AbortSignal): Promise<SutMetricCatalogResponse> {
+    return request('sut-metrics/groups', { signal });
+  },
+  listSutMetricProfiles(signal?: AbortSignal): Promise<SutMetricCatalogResponse> {
+    return request('sut-metrics/profiles', { signal });
+  },
+  saveSutMetricSource(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/sources', input);
+  },
+  deleteSutMetricSource(id: string): Promise<Record<string, unknown>> {
+    return request('admin/sut-metrics/sources/' + encodeURIComponent(id), { method: 'DELETE' });
+  },
+  saveSutMetricAcquisition(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/metric-sources', input);
+  },
+  deleteSutMetricAcquisition(id: string): Promise<Record<string, unknown>> {
+    return request('admin/sut-metrics/metric-sources/' + encodeURIComponent(id), { method: 'DELETE' });
+  },
+  saveSutMetricGroup(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/groups', input);
+  },
+  deleteSutMetricGroup(id: string): Promise<Record<string, unknown>> {
+    return request('admin/sut-metrics/groups/' + encodeURIComponent(id), { method: 'DELETE' });
+  },
+  testSutMetricSource(id: string): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/sources/' + encodeURIComponent(id) + '/test', {});
+  },
+  saveSutMetricProfile(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/profiles', input);
+  },
+  deleteSutMetricProfile(id: string): Promise<Record<string, unknown>> {
+    return request('admin/sut-metrics/profiles/' + encodeURIComponent(id), { method: 'DELETE' });
+  },
+  previewSutMetricBinding(observability: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/profiles/preview', { observability });
+  },
   logout(): Promise<{ loggedOut: boolean }> {
     return request('auth/logout', { method: 'POST', body: '{}' });
   },
@@ -441,6 +489,15 @@ export const api = {
   },
   getJobResult(jobId: string, signal?: AbortSignal): Promise<JobResultResponse> {
     return request<JobResultResponse>('jobs/' + encodeURIComponent(jobId) + '/result', { signal });
+  },
+  getJobSutMetrics(jobId: string, input: { offset?: number; limit?: number; queryId?: string; targetId?: string; profilePath?: string; signal?: AbortSignal } = {}): Promise<SutMetricsJobResponse> {
+    return request<SutMetricsJobResponse>('jobs/' + encodeURIComponent(jobId) + '/sut-metrics' + queryString({ offset: input.offset, limit: input.limit, queryId: input.queryId, targetId: input.targetId, profilePath: input.profilePath }), { signal: input.signal });
+  },
+  getJobSutMetricSeries(jobId: string, input: { offset?: number; limit?: number; queryId: string; targetId?: string; profilePath?: string; signal?: AbortSignal }): Promise<SutMetricsJobResponse> {
+    return request<SutMetricsJobResponse>('jobs/' + encodeURIComponent(jobId) + '/sut-metrics/series' + queryString({ offset: input.offset, limit: input.limit, queryId: input.queryId, targetId: input.targetId, profilePath: input.profilePath }), { signal: input.signal });
+  },
+  getJobSutMetricsLive(jobId: string, input: { range?: string; step?: string; targetId?: string; profilePath?: string; signal?: AbortSignal } = {}): Promise<SutMetricsLiveResponse> {
+    return request<SutMetricsLiveResponse>('jobs/' + encodeURIComponent(jobId) + '/sut-metrics/live' + queryString({ range: input.range || '15m', step: input.step || '30s', targetId: input.targetId, profilePath: input.profilePath }), { signal: input.signal });
   },
   async getJobArtifacts(jobId: string, signal?: AbortSignal): Promise<JobArtifact[]> {
     const envelope = await request<ApiEnvelope<JobArtifact>>('jobs/' + encodeURIComponent(jobId) + '/artifacts', { signal });

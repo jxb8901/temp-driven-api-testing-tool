@@ -1,3 +1,5 @@
+<!-- att-doc-status: historical release=4.2.10 -->
+<!-- att-docs:historical -->
 # Default Package maintenance audit — ATT 4.2.10
 
 This audit records the before/after evidence for issue #368. The baseline is commit `0ec52acfd2bbe6981d65d322da7b8d9ae5b5d2d8`, the source state before the #368 cleanup. Schema checks use the Engine's embedded registry and schemas under `schemas/`; no external `ATT_HOME/schemas` copy was used.
@@ -66,3 +68,4 @@ The original LOAD runtime finding was not visible to static `att validate`: Quic
 - `mvn -pl att-cli -am -Dtest=DocumentationExamplesTest -Datt.skipFrontendUnitTests=true -Dsurefire.failIfNoSpecifiedTests=false test` — passed; documentation examples, Package SIT/UAT checks and all Package YAML schema checks.
 - `python3 tools/build_reference_manual.py`, `python3 -B tools/build_documentation_inventory.py`, `python3 tools/verify_documentation.py`, and `python3 tools/validate_reference_content.py` — passed.
 - `./att.sh validate` for Package, SIT and UAT — passed as recorded above.
+<!-- /att-docs:historical -->

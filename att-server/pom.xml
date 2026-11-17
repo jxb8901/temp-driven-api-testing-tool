@@ -3,13 +3,20 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <parent><groupId>att</groupId><artifactId>template-driven-api-testing-tool</artifactId><version>4.2.10</version><relativePath>../pom.xml</relativePath></parent>
+    <parent><groupId>att</groupId><artifactId>template-driven-api-testing-tool</artifactId><version>4.3.1</version><relativePath>../pom.xml</relativePath></parent>
     <artifactId>att-server</artifactId>
     <packaging>war</packaging>
     <name>ATT Server</name>
     <description>Single-node ATT control plane for external Jakarta Servlet containers.</description>
     <dependencies>
         <dependency><groupId>att</groupId><artifactId>att-server-api</artifactId><version>${project.version}</version></dependency>
+        <!-- Business metrics execute one bounded post-run call through the existing Engine DBHelper/Tool APIs. -->
+        <!-- Business-call execution uses the Engine DBHelper/Tool path, not its Excel import/report suite. -->
+        <dependency><groupId>att</groupId><artifactId>att-engine</artifactId><version>${project.version}</version>
+            <exclusions><exclusion><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId></exclusion></exclusions>
+        </dependency>
+        <!-- Server test fixtures exercise the Engine Excel/Archive helpers; keep those libraries out of the runtime WAR. -->
+        <dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId><scope>test</scope></dependency>
         <!-- ServerRuntime directly uses att.metrics/att.security classes, so keep the
              dependency explicit: the application-jar assembly only bundles direct deps. -->
         <dependency><groupId>att</groupId><artifactId>att-security</artifactId><version>${project.version}</version></dependency>

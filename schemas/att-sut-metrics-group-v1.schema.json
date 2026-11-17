@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:sut-metrics-group:v1",
+  "title": "ATT SUT Logical Metric Group",
+  "type": "object",
+  "required": ["schemaVersion", "id", "title", "order", "match", "groupBy", "display"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "att-sut-metrics-group/v1" },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "order": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "match": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "metricIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" }
+        },
+        "labels": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 40,
+          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+          "additionalProperties": { "type": "string", "maxLength": 512 }
+        },
+        "sourceIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" }
+        }
+      },
+      "anyOf": [
+        { "required": ["metricIds"] },
+        { "required": ["labels"] },
+        { "required": ["sourceIds"] }
+      ]
+    },
+    "groupBy": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 8,
+      "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+    },
+    "display": { "enum": ["auto", "summary", "table", "chart"] }
+  }
+}

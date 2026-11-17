@@ -1,0 +1,298 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:sut-metrics-snapshot:v2",
+  "title": "Immutable ATT SUT Metrics Job snapshot v2",
+  "description": "Pins redacted fetch plans, mapping/output revisions, expected subjects, Group rules, Profile revision, and budgets. Executable payloads are stored in a separate private file.",
+  "type": "object",
+  "required": ["schemaVersion", "snapshotId", "createdAt", "profile", "metricSources", "groups", "bindings", "fetchPlan", "expectedSubjects", "collection", "livePreview", "provenance", "queries", "sources", "budgets", "executionPayloadSha256"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "att-sut-metrics-snapshot/v2" },
+    "snapshotId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "profile": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "revision", "migration"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "enum": ["att-sut-metrics-profile/v1", "att-sut-metrics-profile/v2"] },
+        "id": { "type": ["string", "null"], "maxLength": 80 },
+        "revision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "migration": { "enum": ["native-v2", "legacy-v1-adapter"] }
+      }
+    },
+    "metricSources": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": ["id", "revision", "connectionKind", "connectionId", "fetchIds"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "maxLength": 80 },
+          "revision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "connectionKind": { "enum": ["DATA_SOURCE", "DBHELPER", "PACKAGE_TOOL", "LEGACY"] },
+          "connectionId": { "type": "string", "maxLength": 120 },
+          "fetchIds": { "type": "array", "uniqueItems": true, "maxItems": 256, "items": { "type": "string", "maxLength": 120 } },
+          "mapping": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "labels": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": ["retain"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "retain": {
+                        "type": "array", "uniqueItems": true, "maxItems": 40,
+                        "items": { "type": "string", "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object", "maxProperties": 40,
+                    "propertyNames": { "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                    "additionalProperties": { "type": "string", "maxLength": 128, "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
+                  }
+                ]
+              },
+              "allowedLabels": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 40,
+                "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+              }
+            }
+          },
+          "limits": {
+            "type": "object",
+            "required": ["maxRows", "maxSeries", "maxSamples", "maxArtifactBytes"],
+            "additionalProperties": false,
+            "properties": {
+              "maxRows": { "type": "integer", "minimum": 1, "maximum": 4096 },
+              "maxSeries": { "type": "integer", "minimum": 1, "maximum": 512 },
+              "maxSamples": { "type": "integer", "minimum": 1, "maximum": 250000 },
+              "maxArtifactBytes": { "type": "integer", "minimum": 1024, "maximum": 67108864 }
+            }
+          }
+        }
+      }
+    },
+    "groups": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/group" } },
+    "bindings": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "required": ["sourceId", "targetId", "targetType"],
+        "additionalProperties": false,
+        "properties": {
+          "sourceId": { "type": "string", "maxLength": 80 },
+          "targetId": { "type": "string", "maxLength": 120 },
+          "targetType": { "type": "string", "maxLength": 80 },
+          "tenant": { "type": ["string", "null"], "maxLength": 120 },
+          "parameters": { "type": "object", "maxProperties": 32, "additionalProperties": { "type": ["string", "number", "boolean"] } }
+        }
+      }
+    },
+    "fetchPlan": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "required": ["id", "sourceId", "revision", "fingerprint", "sampling", "outputs", "expectedSubjects"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "maxLength": 120 },
+          "sourceId": { "type": "string", "maxLength": 80 },
+          "revision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "sampling": { "type": "string", "maxLength": 32 },
+          "window": { "type": ["string", "null"], "maxLength": 32 },
+          "parameters": { "type": "object", "maxProperties": 32, "additionalProperties": { "type": ["string", "number", "boolean"] } },
+          "outputs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "required": ["metricId", "unit", "kind", "mappingRevision"],
+              "additionalProperties": false,
+              "properties": {
+                "metricId": { "type": "string", "maxLength": 80 },
+                "unit": { "type": "string", "maxLength": 32 },
+                "kind": { "type": "string", "maxLength": 32 },
+                "mappingRevision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                "column": { "type": ["string", "null"], "maxLength": 128 },
+                "metricName": { "type": ["string", "null"], "maxLength": 128 },
+                "discriminator": {
+                  "type": ["object", "null"],
+                  "maxProperties": 40,
+                  "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                  "additionalProperties": { "type": "string", "maxLength": 512 }
+                }
+              }
+            }
+          },
+          "expectedSubjects": { "type": "array", "maxItems": 256, "items": { "type": "object", "maxProperties": 8, "additionalProperties": { "type": ["string", "null"] } } }
+        },
+        "not": { "anyOf": [{ "required": ["query"] }, { "required": ["call"] }, { "required": ["sql"] }, { "required": ["executable"] }] }
+      }
+    },
+    "expectedSubjects": { "type": "array", "maxItems": 256, "items": { "type": "object", "maxProperties": 8, "additionalProperties": { "type": ["string", "null"] } } },
+    "collection": { "type": "object" },
+    "livePreview": { "type": "object" },
+    "provenance": { "type": "array", "maxItems": 4096, "items": { "type": "object" } },
+    "queries": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "required": ["id", "metricId", "sourceId"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "fetchId": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "metricSourceId": { "type": "string", "maxLength": 80 },
+          "fetchFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "bindingId": { "type": "string", "maxLength": 120 },
+          "profile": { "type": ["string", "null"], "maxLength": 80 },
+          "profilePath": { "type": ["string", "null"], "maxLength": 240 },
+          "profileRevision": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "sourceId": { "type": "string", "maxLength": 120 },
+          "sourceName": { "type": ["string", "null"], "maxLength": 120 },
+          "sourceType": { "type": ["string", "null"], "maxLength": 32 },
+          "sourceRevision": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "targetId": { "type": ["string", "null"], "maxLength": 120 },
+          "targetType": { "type": ["string", "null"], "maxLength": 80 },
+          "targetRevision": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "metricId": { "type": "string", "maxLength": 80 },
+          "title": { "type": ["string", "null"], "maxLength": 120 },
+          "category": { "type": ["string", "null"], "maxLength": 32 },
+          "unit": { "type": ["string", "null"], "maxLength": 32 },
+          "kind": { "type": ["string", "null"], "maxLength": 32 },
+          "observationType": { "type": ["string", "null"], "maxLength": 32 },
+          "observationKind": { "type": ["string", "null"], "maxLength": 32 },
+          "sampling": { "type": ["string", "null"], "maxLength": 32 },
+          "window": { "type": ["string", "null"], "maxLength": 32 },
+          "metricName": { "type": ["string", "null"], "maxLength": 128 },
+          "discriminator": {
+            "type": ["object", "null"],
+            "maxProperties": 40,
+            "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+            "additionalProperties": { "type": "string", "maxLength": 512 }
+          },
+          "tenant": { "type": ["string", "null"], "maxLength": 120 },
+          "step": { "type": ["string", "null"], "maxLength": 16 },
+          "scope": { "enum": ["job", "workload", "mix", null] },
+          "workloadId": { "type": ["string", "null"], "maxLength": 80 },
+          "mixId": { "type": ["string", "null"], "maxLength": 80 },
+          "subjectKey": { "type": ["string", "null"], "maxLength": 240 },
+          "callGroupId": { "type": ["string", "null"], "maxLength": 120 },
+          "callType": { "type": ["string", "null"], "maxLength": 32 },
+          "callName": { "type": ["string", "null"], "maxLength": 120 },
+          "callWorkloadId": { "type": ["string", "null"], "maxLength": 80 },
+          "valuePath": { "type": ["string", "null"], "maxLength": 256 },
+          "column": { "type": ["string", "null"], "maxLength": 128 },
+          "multiOutput": { "type": ["boolean", "null"] },
+          "sideEffectsAcknowledged": { "type": ["boolean", "null"] },
+          "mapping": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "rows": { "type": "string", "maxLength": 256 },
+              "workloadColumn": { "type": ["string", "null"], "maxLength": 128 },
+              "mixColumn": { "type": ["string", "null"], "maxLength": 128 },
+              "labels": {
+                "oneOf": [
+                  {
+                    "type": "object", "required": ["retain"], "additionalProperties": false,
+                    "properties": {
+                      "retain": {
+                        "type": "array", "uniqueItems": true, "maxItems": 40,
+                        "items": { "type": "string", "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object", "maxProperties": 40,
+                    "propertyNames": { "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                    "additionalProperties": { "type": "string", "maxLength": 128, "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
+                  }
+                ]
+              },
+              "allowedLabels": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 40,
+                "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+              },
+              "labelColumns": {
+                "type": "object",
+                "maxProperties": 40,
+                "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                "additionalProperties": { "type": "string", "maxLength": 128, "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "maxProperties": 64,
+      "additionalProperties": { "type": "object" }
+    },
+    "execution": { "type": "object" },
+    "thresholds": { "type": "array", "maxItems": 64, "items": { "type": "object" } },
+    "budgets": {
+      "type": "object",
+      "properties": {
+        "maxFetches": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "maxObservations": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "maxArtifactBytes": { "type": "integer", "minimum": 1024, "maximum": 67108864 }
+      }
+    },
+    "executionPayloadSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "compatibility": {
+      "type": "object",
+      "required": ["sourceSchema", "adapterVersion"],
+      "additionalProperties": false,
+      "properties": {
+        "sourceSchema": { "const": "att-sut-metrics-profile/v1" },
+        "adapterVersion": { "const": "v1-to-v2" },
+        "unsupportedFeatures": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "maxLength": 80 } }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
+    "group": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "title", "order", "match", "groupBy", "display"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "const": "att-sut-metrics-group/v1" },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "order": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "match": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 3,
+          "additionalProperties": false,
+          "properties": {
+            "metricIds": { "type": "array", "minItems": 1, "uniqueItems": true, "maxItems": 64, "items": { "$ref": "#/$defs/id" } },
+            "sourceIds": { "type": "array", "minItems": 1, "uniqueItems": true, "maxItems": 64, "items": { "$ref": "#/$defs/id" } },
+            "labels": { "type": "object", "minProperties": 1, "maxProperties": 40, "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" }, "additionalProperties": { "type": "string", "maxLength": 512 } }
+          },
+          "anyOf": [{ "required": ["metricIds"] }, { "required": ["labels"] }, { "required": ["sourceIds"] }]
+        },
+        "groupBy": { "type": "array", "uniqueItems": true, "maxItems": 8, "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" } },
+        "display": { "enum": ["auto", "summary", "table", "chart"] }
+      }
+    }
+  }
+}

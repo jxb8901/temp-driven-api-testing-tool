@@ -85,6 +85,58 @@ function parseObjectJson(raw: string, label: string): JsonObject {
   return value as JsonObject;
 }
 
+type SutThresholdBindingChoice = {
+  alias: string;
+  profileId: string;
+  label: string;
+  metrics: Record<string, unknown>[];
+};
+
+function sutThresholdBindingChoices(profiles: Array<Record<string, unknown>>, raw: string): SutThresholdBindingChoice[] {
+  let observability: Record<string, unknown>;
+  try { observability = parseObjectJson(raw || '{}', 'SUT Metrics observability'); }
+  catch { return []; }
+  const profileById = new Map(profiles.map(profile => [String(profile.id), profile]));
+  const aliases = new Set<string>();
+  const duplicateAliases = new Set<string>();
+  const choices: SutThresholdBindingChoice[] = [];
+  const collections = Array.isArray(observability.collections) ? observability.collections : [];
+  for (const value of collections) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const binding = value as Record<string, unknown>;
+    const profileId = typeof binding.profile === 'string' ? binding.profile : '';
+    const profile = profileById.get(profileId);
+    if (!profile) continue;
+    const alias = typeof binding.id === 'string' ? binding.id : profileId;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(alias)) continue;
+    if (aliases.has(alias)) {
+      duplicateAliases.add(alias);
+      continue;
+    }
+    if (profile.kind === 'base') {
+      const targets = Array.isArray(binding.targets) ? binding.targets : [];
+      if (typeof binding.source !== 'string' || !binding.source || !targets.length
+        || !targets.every(target => typeof (target as Record<string, unknown> | null)?.id === 'string'
+          && typeof (target as Record<string, unknown> | null)?.type === 'string')) continue;
+    } else if (profile.kind !== 'composite' || !Array.isArray(profile.includes) || !profile.includes.length) continue;
+    const metricProfiles = profile.kind === 'base'
+      ? [profile]
+      : (profile.includes as Array<Record<string, unknown>>).map(include => profileById.get(String(include.profile))).filter(Boolean) as Array<Record<string, unknown>>;
+    const candidates = metricProfiles.flatMap(metricProfile => {
+      const rows = Array.isArray(metricProfile.metricCatalog) ? metricProfile.metricCatalog
+        : Array.isArray(metricProfile.metrics) ? metricProfile.metrics : [];
+      return rows.filter((metric): metric is Record<string, unknown> => Boolean(metric && typeof metric === 'object' && !Array.isArray(metric)));
+    });
+    const counts = new Map<string, number>();
+    for (const metric of candidates) if (typeof metric.id === 'string') counts.set(metric.id, (counts.get(metric.id) || 0) + 1);
+    const metrics = candidates.filter(metric => typeof metric.id === 'string' && counts.get(metric.id) === 1);
+    if (!metrics.length) continue;
+    aliases.add(alias);
+    choices.push({ alias, profileId, label: `${String(profile.name || profileId)} · ${alias}`, metrics });
+  }
+  return choices.filter(choice => !duplicateAliases.has(choice.alias));
+}
+
 function parseThinkTime(value: ThinkTime): string | { min: string; max: string } | undefined {
   if (typeof value === 'string') return value.trim() || undefined;
   const min = value.min.trim();
@@ -120,7 +172,7 @@ export function makeScenario(
   model: LoadModel,
   timing: TimingDraft,
   workloads: WorkloadDraft[],
-  advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string },
+  advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string; observability?: string },
   options: { clearWorkloadTimingOverrides?: boolean } = {},
 ): JsonObject {
   const scenario: JsonObject = { ...policy, schemaVersion: String(policy.schemaVersion || 'att-load/v1.9') };
@@ -205,10 +257,15 @@ export function makeScenario(
   if (!Array.isArray(testdata) || testdata.some(item => typeof item !== 'string')) throw new Error('Scenario Testdata must be an array of package-relative paths.');
   const thresholds = parseObjectJson(advanced.thresholds, 'Aggregate thresholds');
   const evidence = parseObjectJson(advanced.evidence, 'Evidence settings');
+  const observability = parseObjectJson(advanced.observability || '{}', 'SUT Metrics observability');
   if (Object.keys(execution).length) scenario.execution = execution; else delete scenario.execution;
   if (testdata.length) scenario.testdata = testdata; else delete scenario.testdata;
   if (Object.keys(thresholds).length) scenario.thresholds = thresholds; else delete scenario.thresholds;
   if (Object.keys(evidence).length) scenario.evidence = evidence; else delete scenario.evidence;
+  if (Object.keys(observability).length) {
+    scenario.observability = observability;
+    scenario.schemaVersion = 'att-load/v1.9';
+  } else delete scenario.observability;
   if (evidence.maxFailureSamples != null || evidence.maxSuccessSamples != null
       || evidence.quotaScope != null || evidence.defaults != null) scenario.schemaVersion = 'att-load/v1.9';
   if (advanced.seed.trim()) {
@@ -231,7 +288,7 @@ export function initialTiming(policy: JsonObject): TimingDraft {
   };
 }
 
-export function retainedScenarioToEditor(value: unknown): { model: LoadModel; timing: TimingDraft; workloads: WorkloadDraft[]; advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string }; diagnostics: ServerDiagnostic[] } {
+export function retainedScenarioToEditor(value: unknown): { model: LoadModel; timing: TimingDraft; workloads: WorkloadDraft[]; advanced: { execution: string; testdata: string; thresholds: string; evidence: string; seed: string; observability: string }; diagnostics: ServerDiagnostic[] } {
   const scenario=asObject(value),rootLoad=asObject(scenario.load),rows=Array.isArray(scenario.workloads)?scenario.workloads:[];
   if(!rows.length)throw new Error('The retained LOAD draft has no workloads.');
   const targetDiagnostics:ServerDiagnostic[]=[];
@@ -270,7 +327,8 @@ export function retainedScenarioToEditor(value: unknown): { model: LoadModel; ti
     };
   });
   const advanced={execution:JSON.stringify(asObject(scenario.execution),null,2),testdata:JSON.stringify(Array.isArray(scenario.testdata)?scenario.testdata:[],null,2),
-    thresholds:JSON.stringify(asObject(scenario.thresholds),null,2),evidence:JSON.stringify(asObject(scenario.evidence),null,2),seed:scenario.seed==null?'':String(scenario.seed)};
+    thresholds:JSON.stringify(asObject(scenario.thresholds),null,2),evidence:JSON.stringify(asObject(scenario.evidence),null,2),seed:scenario.seed==null?'':String(scenario.seed),
+    observability:JSON.stringify(asObject(scenario.observability),null,2)};
   return {model,timing,workloads,advanced,diagnostics:targetDiagnostics};
 }
 
@@ -300,7 +358,12 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const [timing, setTiming] = useState<TimingDraft>({ warmup: '', rampUp: '', duration: '', rampDown: '' });
   const effectiveEnvelopeMs = timing.duration.trim() ? effectiveLoadEnvelopeMs([timing.rampUp, timing.warmup, timing.duration, timing.rampDown]) : null;
   const [workloads, setWorkloads] = useState<WorkloadDraft[]>([]);
-  const [advanced, setAdvanced] = useState({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '' });
+  const [advanced, setAdvanced] = useState({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '', observability: '{}' });
+  const [sutMetricsProfiles, setSutMetricsProfiles] = useState<Array<Record<string, unknown>>>([]);
+  const [sutThresholdProfile, setSutThresholdProfile] = useState('');
+  const [sutThresholdMetric, setSutThresholdMetric] = useState('');
+  const [sutThresholdMaximum, setSutThresholdMaximum] = useState('90');
+  const [sutThresholdEditorError, setSutThresholdEditorError] = useState('');
   const [draft, setDraft] = useState<import('./types').LoadDraftResponse | null>(null);
   const [draftState, setDraftState] = useState<'idle' | 'validating' | 'valid' | 'error' | 'submitting'>('idle');
   const [confirmationPending, setConfirmationPending] = useState(false);
@@ -336,6 +399,14 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const savedSeeded = useRef(false);
   const replayEnvironmentOrigin = useRef('');
   const replayPackageDefaultEnvironment = useRef('');
+  useEffect(() => {
+    if (!api.listSutMetricProfiles) return;
+    const controller = new AbortController();
+    api.listSutMetricProfiles(controller.signal).then(value => {
+      if (!controller.signal.aborted) setSutMetricsProfiles(value.items || []);
+    }).catch(() => { if (!controller.signal.aborted) setSutMetricsProfiles([]); });
+    return () => controller.abort();
+  }, [api]);
   useEffect(()=>{
     const release=navigation.registerUnsavedChanges(Boolean((replaySourceJobId&&replayDirty)||(savedScenario&&savedDirty)),replaySourceJobId?'Edited Job replay settings':'Saved scenario edits');
     releaseReplayNavigationGuard.current=release;
@@ -380,7 +451,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
       setPolicy(null);
       setWorkloads([]);
       setTiming({ warmup: '', rampUp: '', duration: '', rampDown: '' });
-      setAdvanced({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '' });
+      setAdvanced({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '', observability: '{}' });
     }
     if (!selectedPackage) {
       setServerLimits(null);
@@ -415,6 +486,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
             thresholds: JSON.stringify(asObject(nextPolicy.thresholds), null, 2),
             evidence: JSON.stringify(asObject(nextPolicy.evidence), null, 2),
             seed: nextPolicy.seed == null ? '' : String(nextPolicy.seed),
+            observability: JSON.stringify(asObject(nextPolicy.observability), null, 2),
           });
         }
       })
@@ -630,12 +702,51 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   function updateAdvanced<K extends keyof typeof advanced>(key: K, value: (typeof advanced)[K]) {
     markReplayDirty();setAdvanced(current => ({ ...current, [key]: value }));
   }
+  function addSutThresholdRule() {
+    setSutThresholdEditorError('');
+    const bindingChoice = thresholdBindings.find(item => item.alias === sutThresholdProfile);
+    const metric = bindingChoice?.metrics.find(value => String(value.id) === sutThresholdMetric);
+    const maximumText = sutThresholdMaximum.trim();
+    const maximum = maximumText ? Number(maximumText) : Number.NaN;
+    if (!bindingChoice || !metric || !Number.isFinite(maximum)) {
+      setSutThresholdEditorError('Choose a complete resolved profile binding and metric, then enter a finite maximum.');
+      return;
+    }
+    try {
+      const observability = parseObjectJson(advanced.observability || '{}', 'SUT Metrics observability');
+      const collections = Array.isArray(observability.collections)
+        ? observability.collections.filter(value => value && typeof value === 'object' && !Array.isArray(value)).map(value => ({ ...(value as Record<string, unknown>) }))
+        : [];
+      const bindingExists = collections.some(value => (typeof value.id === 'string' ? value.id : String(value.profile)) === bindingChoice.alias
+        && String(value.profile) === bindingChoice.profileId);
+      if (!bindingExists) throw new Error('The selected binding is no longer present in the observability configuration.');
+      const rules = Array.isArray(observability.thresholds)
+        ? observability.thresholds.filter(value => value && typeof value === 'object' && !Array.isArray(value)).map(value => ({ ...(value as Record<string, unknown>) }))
+        : [];
+      const stem = `sut-${bindingChoice.alias}-${String(metric.id)}`.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80);
+      let id = stem, suffix = 2;
+      while (rules.some(rule => rule.id === id)) {
+        const ending = `-${suffix++}`;
+        id = `${stem.slice(0, 80 - ending.length)}${ending}`;
+      }
+      rules.push({ id, profile: bindingChoice.alias, metric: metric.id, max: maximum, unit: metric.unit,
+        window: 'steady', targets: 'all', minimumCoverage: 0.95, onInsufficientData: 'NOT_EVALUATED', required: true });
+      observability.schemaVersion = 'att-load-observability/v1';
+      observability.thresholds = rules;
+      updateAdvanced('observability', JSON.stringify(observability, null, 2));
+    } catch (failure) {
+      setSutThresholdEditorError(failure instanceof Error ? failure.message : 'SUT threshold could not be added.');
+    }
+  }
   function updateThresholdEditorValidity(key: string, message: string) {
     setThresholdEditorErrors(current => { const next = { ...current }; if (message) next[key] = message; else delete next[key]; return next; });
   }
 
   const preview = draft?.previewYaml || (draft?.preview ? JSON.stringify(draft.preview, null, 2) : '');
   const hasLiveDraft = Boolean(draft && Date.parse(draft.expiresAt) > Date.now());
+  const thresholdBindings = sutThresholdBindingChoices(sutMetricsProfiles, advanced.observability);
+  const selectedThresholdBinding = thresholdBindings.find(binding => binding.alias === sutThresholdProfile);
+  const selectedThresholdMetrics = selectedThresholdBinding?.metrics || [];
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter'
@@ -773,7 +884,32 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
             </label>
             <JsonObjectField label="Root execution defaults" value={advanced.execution} onChange={value => updateAdvanced('execution', value)} />
             <JsonArrayField label="Package-relative Testdata paths" value={advanced.testdata} onChange={value => updateAdvanced('testdata', value)} />
+            <JsonObjectField label="SUT Metrics observability binding (att-load-observability/v1)" value={advanced.observability} onChange={value => updateAdvanced('observability', value)} />
           </div>
+          {sutMetricsProfiles.length > 0 && <fieldset className="att-sut-threshold-editor">
+            <legend>Add a SUT maximum rule</legend>
+            {thresholdBindings.length === 0 ? <p className="att-help">Add a complete source and target binding for a registered profile in the observability JSON above before creating a rule. Composite profile bindings can use their distinct metrics here.</p> : <>
+              <div className="att-load-grid">
+              <label>Resolved Metrics Binding<select value={sutThresholdProfile} onChange={event => {
+                const next = event.target.value; setSutThresholdProfile(next);
+                const rows = thresholdBindings.find(item => item.alias === next)?.metrics || [];
+                setSutThresholdMetric(rows.length && rows[0] && typeof rows[0] === 'object' ? String((rows[0] as Record<string, unknown>).id || '') : '');
+              }}><option value="">Choose binding</option>{thresholdBindings.map(binding => <option key={binding.alias} value={binding.alias}>{binding.label}</option>)}</select></label>
+              <label>Metric<select value={sutThresholdMetric} onChange={event => setSutThresholdMetric(event.target.value)} disabled={!selectedThresholdBinding}>
+                <option value="">Choose metric</option>{selectedThresholdMetrics.map(value => {
+                  const metric = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+                  return <option key={String(metric.id)} value={String(metric.id)}>{String(metric.title || metric.id)} · {String(metric.unit || '')}</option>;
+                })}
+              </select></label>
+              <label>Maximum value<input type="number" step="any" value={sutThresholdMaximum} onChange={event => setSutThresholdMaximum(event.target.value)} /></label>
+              </div>
+              <p className="att-help">Adds a required maximum ≤ rule for the selected resolved binding over actual STEADY samples. The default minimum coverage is 95%.</p>
+              <button type="button" onClick={addSutThresholdRule} disabled={!sutThresholdProfile || !sutThresholdMetric}>Add maximum rule</button>
+            </>}
+            {sutThresholdEditorError && <p role="alert" className="att-inline-error">{sutThresholdEditorError}</p>}
+          </fieldset>}
+          <p className="att-help">Bind only registered Metrics Profile IDs. Prometheus URLs and credentials are configured by a Server administrator and cannot be submitted in a scenario.</p>
+          {sutMetricsProfiles.length > 0 && <details><summary>Profiles available to this account ({sutMetricsProfiles.length})</summary><ul>{sutMetricsProfiles.map(profile => <li key={String(profile.id)}><code>{String(profile.id)}</code> · {String(profile.kind)} / {String(profile.category)} · {String(profile.name || profile.id)}</li>)}</ul></details>}
           {rawScenarioJson && <details><summary>Current complete scenario JSON</summary><CodeEditor value={rawScenarioJson} language="json" label="Complete scenario JSON" readOnly /></details>}
         </details>
       </section>

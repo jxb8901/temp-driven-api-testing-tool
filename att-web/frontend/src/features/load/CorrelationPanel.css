@@ -1,0 +1,26 @@
+.att-correlation-panel > h2 { margin-top: 0; }
+.att-correlation-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: .75rem 1rem; margin: 1rem 0; }
+.att-correlation-filters label { display: grid; gap: .25rem; }
+.att-correlation-filters select, .att-correlation-filters input { min-height: 40px; min-width: 0; padding: .45rem .6rem; }
+.att-correlation-provenance, .att-correlation-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: .7rem 1.25rem; margin: 1rem 0; }
+.att-correlation-provenance > div, .att-correlation-summary > div { min-width: 0; overflow-wrap: anywhere; }
+.att-correlation-provenance dt, .att-correlation-summary dt { color: var(--att-muted, #5f6873); font-size: .8rem; }
+.att-correlation-provenance dd, .att-correlation-summary dd { margin: .2rem 0 0; font-weight: 600; }
+.att-correlation-chart { margin: 1rem 0; }
+.att-correlation-chart svg { display: block; height: auto; max-height: 28rem; overflow: visible; width: 100%; }
+.att-correlation-chart svg text { fill: currentColor; font-size: 10px; }
+.att-correlation-chart figcaption { color: var(--att-muted, #5f6873); font-size: .85rem; margin-top: .4rem; }
+.att-correlation-grid { stroke: var(--att-border, #ccd2d9); stroke-dasharray: 3 4; stroke-width: 1; }
+.att-correlation-axis { stroke: currentColor; stroke-width: 1; }
+.att-correlation-phase { fill: #6f8da5; opacity: .075; }
+.att-correlation-phase-1 { fill: #ad8d52; }
+.att-correlation-phase-2 { fill: #547c61; }
+.att-correlation-phase-3 { fill: #9a6a76; }
+.att-correlation-phase text { opacity: .8; }
+.att-correlation-load-line { fill: none; stroke: #146eb4; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.att-correlation-sut-line { fill: none; stroke: #c64e25; stroke-dasharray: 6 3; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.att-correlation-load-point { fill: #146eb4; }
+.att-correlation-sut-point { fill: #c64e25; }
+.att-correlation-caveat { border-left: 3px solid var(--att-border, #ccd2d9); color: var(--att-muted, #5f6873); padding-left: .75rem; }
+.att-correlation-boundaries summary { cursor: pointer; }
+@media (max-width: 620px) { .att-correlation-chart svg { max-height: none; } }

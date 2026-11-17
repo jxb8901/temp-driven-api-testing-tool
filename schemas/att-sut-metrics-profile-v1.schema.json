@@ -1,0 +1,767 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:sut-metrics-profile:v1",
+  "title": "ATT SUT Metrics Profile",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "id",
+    "kind",
+    "category"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "att-sut-metrics-profile/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "kind": {
+      "enum": [
+        "base",
+        "composite"
+      ]
+    },
+    "category": {
+      "enum": [
+        "os",
+        "jvm",
+        "app",
+        "db",
+        "mq",
+        "custom"
+      ]
+    },
+    "overridableParams": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+      }
+    },
+    "params": {
+      "type": "object",
+      "maxProperties": 32,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "enum": [
+              "promLabelValue",
+              "promLabelRegex",
+              "text",
+              "enum",
+              "number",
+              "duration"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "default": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "allowedValues": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "type": [
+                "string",
+                "number"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "maxProperties": 32,
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number"
+        ]
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "unit": {
+            "enum": [
+              "percent",
+              "bytes",
+              "bytes_per_second",
+              "seconds",
+              "milliseconds",
+              "count",
+              "transactions",
+              "ratio",
+              "cores",
+              "custom"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "gauge",
+              "rate",
+              "counter",
+              "histogram"
+            ]
+          },
+          "category": {
+            "enum": [
+              "os",
+              "jvm",
+              "app",
+              "db",
+              "mq",
+              "custom"
+            ]
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "not": {
+              "pattern": ";"
+            }
+          },
+          "metricName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z_:][A-Za-z0-9_:]*$"
+          },
+          "discriminator": {
+            "type": "object",
+            "maxProperties": 40,
+            "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+            "additionalProperties": { "type": "string", "maxLength": 512 }
+          },
+          "call": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "sampling": {
+            "enum": [
+              "afterDrain",
+              "windowQuery"
+            ]
+          },
+          "window": {
+            "anyOf": [
+              {
+                "const": "steady"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "valuePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[[0-9]{1,6}\\]){0,16}$"
+          },
+          "sideEffectsAcknowledged": {
+            "type": "boolean"
+          },
+          "mapping": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "rows": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[[0-9]{1,6}\\]){0,16}$"
+              },
+              "workloadColumn": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+              },
+              "mixColumn": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+              },
+              "labels": {
+                "type": "object",
+                "maxProperties": 40,
+                "propertyNames": { "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                "additionalProperties": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
+              },
+              "allowedLabels": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 40,
+                "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+              },
+              "labelColumns": {
+                "type": "object",
+                "maxProperties": 40,
+                "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                "additionalProperties": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "required": [
+                    "mixColumn"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "workloadColumn"
+                  ]
+                }
+              }
+            ]
+          },
+          "callGroupId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+          },
+          "column": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+          },
+          "multiOutput": {
+            "const": true
+          },
+          "outputs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "title",
+                "column",
+                "unit"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "column": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                },
+                "unit": {
+                  "enum": [
+                    "percent",
+                    "bytes",
+                    "bytes_per_second",
+                    "seconds",
+                    "milliseconds",
+                    "count",
+                    "transactions",
+                    "ratio",
+                    "cores",
+                    "custom"
+                  ]
+                },
+                "kind": {
+                  "enum": [
+                    "gauge",
+                    "rate",
+                    "counter",
+                    "histogram"
+                  ]
+                },
+                "category": {
+                  "enum": [
+                    "os",
+                    "jvm",
+                    "app",
+                    "db",
+                    "mq",
+                    "custom"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "id",
+              "title",
+              "unit",
+              "query"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "call"
+                  ]
+                },
+                {
+                  "required": [
+                    "sampling"
+                  ]
+                },
+                {
+                  "required": [
+                    "window"
+                  ]
+                },
+                {
+                  "required": [
+                    "valuePath"
+                  ]
+                },
+                {
+                  "required": [
+                    "sideEffectsAcknowledged"
+                  ]
+                },
+                {
+                  "required": [
+                    "outputs"
+                  ]
+                },
+                {
+                  "required": [
+                    "mapping"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "id",
+              "title",
+              "unit",
+              "call",
+              "sampling"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "query"
+                  ]
+                },
+                {
+                  "required": [
+                    "outputs"
+                  ]
+                },
+                {
+                  "required": [
+                    "mapping"
+                  ]
+                }
+              ]
+            },
+            "if": {
+              "properties": {
+                "sampling": {
+                  "const": "windowQuery"
+                }
+              },
+              "required": [
+                "sampling"
+              ]
+            },
+            "then": {
+              "required": [
+                "window"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "window"
+                ]
+              }
+            }
+          },
+          {
+            "required": [
+              "id",
+              "call",
+              "sampling",
+              "outputs"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "query"
+                  ]
+                },
+                {
+                  "required": [
+                    "title"
+                  ]
+                },
+                {
+                  "required": [
+                    "unit"
+                  ]
+                },
+                {
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "required": [
+                    "category"
+                  ]
+                },
+                {
+                  "required": [
+                    "valuePath"
+                  ]
+                }
+              ]
+            },
+            "if": {
+              "properties": {
+                "sampling": {
+                  "const": "windowQuery"
+                }
+              },
+              "required": [
+                "sampling"
+              ]
+            },
+            "then": {
+              "required": [
+                "window"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "window"
+                ]
+              }
+            }
+          },
+          {
+            "required": [
+              "id",
+              "title",
+              "unit",
+              "kind",
+              "category",
+              "call",
+              "sampling",
+              "window",
+              "sideEffectsAcknowledged",
+              "mapping",
+              "callGroupId",
+              "column",
+              "multiOutput"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "query"
+                  ]
+                },
+                {
+                  "required": [
+                    "outputs"
+                  ]
+                }
+              ]
+            },
+            "if": {
+              "properties": {
+                "sampling": {
+                  "const": "windowQuery"
+                }
+              },
+              "required": [
+                "sampling"
+              ]
+            },
+            "then": {
+              "properties": {
+                "window": {
+                  "const": "steady"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "window": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "includes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": [
+          "profile"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "profile": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "alias": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+          },
+          "source": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "maxProperties": 40,
+              "additionalProperties": {}
+            }
+          },
+          "parameters": {
+            "type": "object",
+            "maxProperties": 32,
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number"
+              ]
+            }
+          },
+          "scope": {
+            "enum": [
+              "job",
+              "workload"
+            ]
+          },
+          "workloadId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "source",
+              "targets"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "scope"
+                  ]
+                },
+                {
+                  "required": [
+                    "workloadId"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "scope": {
+                "enum": [
+                  "job",
+                  "workload"
+                ]
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "source"
+                  ]
+                },
+                {
+                  "required": [
+                    "tenant"
+                  ]
+                },
+                {
+                  "required": [
+                    "targets"
+                  ]
+                },
+                {
+                  "required": [
+                    "parameters"
+                  ]
+                }
+              ]
+            },
+            "if": {
+              "properties": {
+                "scope": {
+                  "const": "workload"
+                }
+              },
+              "required": [
+                "scope"
+              ]
+            },
+            "then": {
+              "required": [
+                "workloadId"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "workloadId"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "const": "base"
+        }
+      },
+      "required": [
+        "metrics"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "extends"
+            ]
+          },
+          {
+            "required": [
+              "includes"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "composite"
+        }
+      },
+      "required": [
+        "includes"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "extends"
+            ]
+          },
+          {
+            "required": [
+              "metrics"
+            ]
+          },
+          {
+            "required": [
+              "params"
+            ]
+          },
+          {
+            "required": [
+              "parameters"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

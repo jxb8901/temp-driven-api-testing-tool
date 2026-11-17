@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "profile-jvm-prod",
+  "name": "Production JVM profile",
+  "kind": "composite",
+  "category": "jvm",
+  "includes": [
+    {
+      "profile": "profile-jvm",
+      "alias": "jvm",
+      "source": "prom-main",
+      "tenant": "production",
+      "targets": [
+        { "id": "payments-api", "type": "application", "parameters": { "instance": "payments-api-prod:8080" } }
+      ]
+    }
+  ]
+}

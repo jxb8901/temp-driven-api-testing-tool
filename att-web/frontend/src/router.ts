@@ -29,7 +29,7 @@ export interface ValidationRouteState {
   resource?: ResourceRoute;
 }
 
-export type JobDetailTab = 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics';
+export type JobDetailTab = 'overview' | 'live' | 'events' | 'results' | 'artifacts' | 'metrics' | 'sutMetrics' | 'correlation';
 export type JobsRouteTab = JobDetailTab | 'validations';
 
 export type ConfigurationTab = 'source' | 'declared' | 'effective' | 'compare';
@@ -217,7 +217,7 @@ export function parseRoute(hash: string): AppRoute {
       return { kind: 'job-artifact', jobId: parts[1], path: query.get('path') || '' };
     }
     const rawTab = query.get('tab') || '';
-    const jobTabs = ['overview', 'live', 'events', 'results', 'artifacts', 'metrics'];
+    const jobTabs = ['overview', 'live', 'events', 'results', 'artifacts', 'metrics', 'sutMetrics', 'correlation'];
     const validTab = parts[1]
       ? jobTabs.includes(rawTab) ? rawTab as JobDetailTab : undefined
       : rawTab === 'validations' ? 'validations' : undefined;

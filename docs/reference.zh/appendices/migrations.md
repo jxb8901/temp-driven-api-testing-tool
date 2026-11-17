@@ -77,6 +77,11 @@ Unsupported schema version 會在 execution 前失敗並提供 migration guidanc
 
 現有 `att-load/v1.5` 檔案仍相容。升級至 `att-load/v1.6` 後，可將 workload 的 `target` 改為 `mix`，設定 closed-user weighted target mix。每個 entry 需要唯一 `id`、正整數 `weight`，以及 Template、Flow 或 Tool target。現行 summary contract 為 `att-load-summary/v1.1`；v1.0 保留作歷史格式。
 
+## att-config/v2.14：集中管理 SUT Metrics catalog
+
+現行 global config schema 為 `att-config/v2.14`，新增有界的 `sutMetrics.dataSources`、`metricSources`、`groups` 和 `profiles` lists。所選 Server Runtime Config 是這些定義的唯一權威來源；沒有 `sutMetrics` 的既有 `att-config/v2.13` 檔案仍受支援。遷移 `data/sut-metrics-catalog.json` 請依照 [SUT Metrics Runtime Config migration guide](../../guides/sut-metrics-config-migration.zh.md) 執行明確的 dry-run 和 apply。遷移工具會驗證候選檔、拒絕重複 ID 或衝突定義，並在套用前建立以 digest 命名的備份。
+
+
 ## Historical schema migration
 
 ATT 3.6.2 使用 `att-template/v3.6` 與 `att-flow/v3.6` 作為 active schemas。已發布的 `att-template/v3.5`、`att-flow/v3.5` 及更舊定義保留於 `schemas/history/`；其中 historical DB 與 Render Action 只供 compatibility 使用，不是 active contract。遷移這些 descriptor 時，先將 schema version 改為 v3.6，再套用以下欄位變更。

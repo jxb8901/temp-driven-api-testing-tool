@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "att-sut-metrics-profile/v1",
+  "id": "profile-app",
+  "name": "Application request health",
+  "kind": "base",
+  "category": "app",
+  "metrics": [
+    { "id": "active-requests", "title": "Active requests", "unit": "count", "kind": "gauge", "query": "application_active_requests" }
+  ]
+}

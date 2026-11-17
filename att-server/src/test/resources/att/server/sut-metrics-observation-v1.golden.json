@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "att-sut-metrics-observation/v1",
+  "queryId": "prom/base/sut-1/metric-1",
+  "profile": "base",
+  "profilePath": "base",
+  "sourceId": "prom",
+  "sourceName": "Prometheus prom",
+  "metricId": "metric-1",
+  "title": "Metric 1",
+  "category": "app",
+  "kind": "gauge",
+  "targetId": "sut-1",
+  "targetType": "app",
+  "unit": "count",
+  "observation": {
+    "schemaVersion": "att-sut-metrics-observation/v1",
+    "kind": "sampled-time-series",
+    "effectiveBindingId": "prom/base/sut-1/metric-1",
+    "source": { "id": "prom", "name": "Prometheus prom", "revision": "$REVISION" },
+    "profile": { "id": "base", "path": "base", "revision": "$REVISION" },
+    "target": { "id": "sut-1", "type": "app", "revision": "$REVISION" },
+    "metric": { "id": "metric-1", "name": "Metric 1", "category": "app", "unit": "count", "kind": "gauge" },
+    "window": {
+      "executionStartedAt": "$TIME",
+      "executionFinishedAt": "$TIME",
+      "queryStart": "$TIME",
+      "queryEnd": "$TIME",
+      "step": "15s",
+      "phaseWindows": [
+        { "phase": "RAMP_UP", "startAt": "$TIME", "endAt": "$TIME", "durationMs": 10000, "measured": false },
+        { "phase": "WARMUP", "startAt": "$TIME", "endAt": "$TIME", "durationMs": 10000, "measured": false },
+        { "phase": "STEADY", "startAt": "$TIME", "endAt": "$TIME", "durationMs": 30000, "measured": true },
+        { "phase": "RAMP_DOWN", "startAt": "$TIME", "endAt": "$TIME", "durationMs": 10000, "measured": true }
+      ]
+    },
+    "availability": {
+      "state": "AVAILABLE",
+      "freshness": "FRESH",
+      "coverage": {
+        "sampleCount": 1,
+        "seriesCount": 1,
+        "gapCount": 0,
+        "firstSampleAt": "$TIME",
+        "lastSampleAt": "$TIME",
+        "windowStart": "$TIME",
+        "windowEnd": "$TIME"
+      },
+      "diagnostics": []
+    },
+    "provenance": {
+      "provider": "prometheus",
+      "jobId": "$JOB",
+      "snapshotId": "$SNAPSHOT",
+      "queryId": "prom/base/sut-1/metric-1"
+    }
+  },
+  "series": [
+    {
+      "labels": { "instance": "sut-1" },
+      "samples": [
+        { "timestamp": "$TIME", "timestampEpochMs": "$EPOCH", "value": 1.0 }
+      ],
+      "coverage": {
+        "sampleCount": 1,
+        "seriesCount": 1,
+        "gapCount": 0,
+        "firstSampleAt": "$TIME",
+        "lastSampleAt": "$TIME",
+        "windowStart": "$TIME",
+        "windowEnd": "$TIME"
+      }
+    }
+  ]
+}

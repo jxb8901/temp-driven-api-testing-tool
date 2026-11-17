@@ -1,3 +1,18 @@
+# ATT 4.3.1 - release candidate (2026-11-16; not released)
+
+- Add versioned Metric Source, Metric Group, flat Profile, normalized Observation v2, Job snapshot v2, and execution payload v2 contracts with bounded schema validation and v1 compatibility readers (#374).
+- Reuse one admitted acquisition for multiple explicitly mapped outputs from SQL/Package Tool wide rows or Prometheus labelled series; preserve per-output quality, labels, provenance, and time coverage (#375).
+- Resolve pinned logical Groups over observations without new source calls or implicit aggregation; enforce source, fetch, output, label, row, series, sample, and artifact budgets (#376).
+- Add Settings authoring and static previews, group-aware Job Details and Correlation views, and a self-contained offline report Group index while preserving sealed native artifacts (#377).
+- Keep historical v1 Job contracts readable and avoid rewriting old snapshots or reports. This release adds no Long Rows, dynamic metric-name pivot, or new threshold engine (#374–#377).
+- Release acceptance is in progress under #378. Do not tag or publish until the exact release candidate passes hosted CI and the complete package gate.
+
+# ATT 4.3.0 - release preparation (2026-11-16)
+
+- Establish the 4.3.0 baseline from the Issue #348 SUT Observability implementation (`612e277a53b7a21a03261834e5ff56a58b0cb64b`, PR #357).
+- Include the Prometheus/Grafana SUT metrics collection, immutable snapshots, correlation, threshold evidence, DBHelper/Package Tool metrics, multi-column/row mappings and versioned offline report from #348/#349/#350/#351/#358/#359.
+- Release preparation only: full packaging, integration smoke, supported deployment security/egress and production-scale operational readiness still require release-gate verification before publishing or tagging.
+
 # ATT 4.2.10 - 2026-11-11
 
 - Introduce `att-tool/v1` as a versioned, JAR-embedded schema for Package-owned Tools, with deterministic `tools/*.yaml` discovery and Package-scoped Tool resolution (#352).
@@ -5,6 +20,23 @@
 - Add Package Tool source inspection to Explorer; remove Tool and Tool Group catalogs from Shared Configuration; include Package Tool descriptors in revision fingerprints.
 - Convert bundled Package examples from global Tool declarations and document migration from older configurations.
 - Add the Studio Read-only Validate workspace for shared/effective Config, registered Packages, Explorer resources, and executable LOAD Scenarios; advertise the `att-validation/v1` Server capability and report contract (#355).
+- Add Server-managed Prometheus sources and reusable SUT Metrics profiles to LOAD Jobs, with immutable per-Job snapshots, bounded post-run sidecars, on-demand live preview, and a dedicated Job Details tab (#348).
+- Add the Grafana SUT Metrics adapter and a verified, versioned offline LOAD report that references the native archive by digest and includes bounded observations, chart previews, diagnostics, and optional verdict state (#350).
+- Keep LOAD report recovery active through retry backoff while releasing the publication fence, so persistent optional-report failures do not block age, manual, or storage-pressure retention (#350).
+- Add pinned per-target SUT maximum thresholds, coverage-aware asynchronous evaluation and recovery, durable versioned records, authorized combined LOAD performance acceptance, and Studio rule/evidence views (#351).
+- Short-circuit SUT evidence loading only after a proven required-rule violation; continue evaluating optional rules (#351).
+- Keep native LOAD results available when optional SUT snapshots are corrupt, and retain SUT collection evidence when threshold records are corrupt without inferring a combined MET verdict (#351).
+- Return the configured 413 size-limit response for oversized SUT Metrics requests and enforce Admin-only catalog writes.
+- Preserve live SUT Metrics cache coalescing, chronological coverage, explicit empty-result status, and timestamp-scaled chart gaps (#348).
+- Align #348 with the simplified two-form profile model: base profiles own only metric definitions and typed parameters; source/tenant/target bindings belong to direct Scenario bindings or one-level composite presets. Reject `extends`, derived profiles, nested composites, and incomplete preset bindings.
+- Publish the #348 provider-neutral `att-sut-metrics-observation/v1` contract with pinned source/profile/target revisions, UTC execution/phase/query windows, coverage, gaps, availability, and safe provenance.
+- Keep post-run metrics PENDING through the configured after-buffer and one query-step ingestion grace; mark missing or stale-tail coverage PARTIAL using a two-step/30-second tolerance, and atomically publish each snapshot-anchored manifest integrity transition with its manifest.
+- Collect after-drain business metrics promptly while mixed Jobs remain PENDING for buffered Prometheus collection; fail closed with NOT_EVALUATED diagnostics when pinned Package or Runtime Config revisions change.
+- Draft mapped business calls in a separate business-only Settings Profile, and label LOAD correlation means as unweighted arithmetic means of observed bins.
+- Show verified mixed-Job Business Metrics as provisional read-only evidence during the Prometheus buffer, poll with deadline-aware backoff, and resume only the unfinished phase after restart; fail closed when a restart interrupts an uncertain business call. Keep the starter SQL's case-sensitive result mappings aligned with its lowercase columns.
+- Serialize manifest writes per Job while keeping reads independent across Jobs.
+- Add a read-only Correlation view to LOAD Job details for comparing selected native LOAD metrics with a post-run SUT query over UTC time, with workload, phase, time-range, and SUT-series filters (#349).
+- Preserve native-bin and source-gap semantics in Correlation charts, including partial-range bins, extrema-aware downsampling, a 1,200-point cap, selected-versus-displayed counts, and no value extension across bins omitted by downsampling (#349).
 - Add owner-scoped asynchronous validation records with bounded retention, status/list/cancel APIs, restart recovery, and contextual Studio validation that survives navigation and reload while preserving the synchronous validation contract (#364, #367).
 - Preserve authorized opaque source references for Tool Group manifests and improve Explorer source presentation with compact related-manifest links (#365, #366, #367).
 - Remove duplicate legacy global Tool Groups after auditing their Package-owned equivalents, verify the default Package schema inventory, and fix shared Flow identity across Run, Debug, Quick Load, and Advanced Load (#368, #367).
