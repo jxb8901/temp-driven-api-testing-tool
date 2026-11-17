@@ -188,50 +188,66 @@ class ArtifactLifecycleTest {
     }
 
     @Test void oldReadyLoadReportsRebuildForGroupPolicyBeforeStatusOrDownload() throws Exception {
-        String id="J0000000000000814";
-        java.util.concurrent.atomic.AtomicInteger reportAttempts=new java.util.concurrent.atomic.AtomicInteger();
+        String directId="J0000000000000814",recoveryId="J0000000000000815",statusId="J0000000000000816";
+        String[] reportIds={directId,recoveryId,statusId};
+        Map<String,java.util.concurrent.atomic.AtomicInteger> reportAttempts=new java.util.concurrent.ConcurrentHashMap<>();
         java.util.concurrent.CountDownLatch rebuildEntered=new java.util.concurrent.CountDownLatch(1);
         java.util.concurrent.CountDownLatch releaseRebuild=new java.util.concurrent.CountDownLatch(1);
         ServerRuntime.ArtifactPublisher publisher=(output,archive,validator)->{
-            if(archive.toString().contains("load-report-publications")&&reportAttempts.incrementAndGet()==2) {
-                rebuildEntered.countDown();
-                if(!releaseRebuild.await(10,TimeUnit.SECONDS))throw new java.io.IOException("test did not release report rebuild");
+            if(archive.toString().contains("load-report-publications")) {
+                for(String reportId:reportIds) {
+                    if(!archive.toString().contains(reportId))continue;
+                    int attempt=reportAttempts.computeIfAbsent(reportId,ignored->new java.util.concurrent.atomic.AtomicInteger()).incrementAndGet();
+                    if(directId.equals(reportId)&&attempt==2) {
+                        rebuildEntered.countDown();
+                        if(!releaseRebuild.await(10,TimeUnit.SECONDS))throw new java.io.IOException("test did not release report rebuild");
+                    }
+                    break;
+                }
             }
             return ArtifactArchive.build(output,archive,validator);
         };
         try(ServerRuntime runtime=runtime(publisher,java.time.Clock.systemUTC())) {
-            publishReadyLoadReport(runtime,id,"MET");
-            Path current=runtime.config.dataDir.resolve("jobs").resolve(id).resolve("load-report-publications/v2/current.json");
-            String publishedVerdict=simulatePrePolicyReadyPointer(current,"f".repeat(64));
+            publishReadyLoadReport(runtime,directId,"MET");
+            Path directCurrent=runtime.config.dataDir.resolve("jobs").resolve(directId).resolve("load-report-publications/v2/current.json");
+            String publishedVerdict=simulatePrePolicyReadyPointer(directCurrent,"f".repeat(64));
             assertFalse(publishedVerdict.isBlank());
 
             assertThrows(ServerRuntime.ArchiveUnavailableException.class,
-                    ()->runtime.openLoadReportV2Archive(id,"user-a",true),
+                    ()->runtime.openLoadReportV2Archive(directId,"user-a",true),
                     "A READY pointer from the pre-policy format must be blocked and scheduled for rebuild.");
             assertTrue(rebuildEntered.await(5,TimeUnit.SECONDS),"The policy migration must schedule a replacement publication.");
-            assertEquals("BUILDING",runtime.loadReportV2Status(id,"user-a",true).get("state"));
+            assertEquals("BUILDING",runtime.loadReportV2Status(directId,"user-a",true).get("state"));
             assertThrows(ServerRuntime.ArchiveUnavailableException.class,
-                    ()->runtime.openLoadReportV2Archive(id,"user-a",true),
+                    ()->runtime.openLoadReportV2Archive(directId,"user-a",true),
                     "The previous archive stays unavailable while the replacement is being built.");
 
             releaseRebuild.countDown();
-            awaitLoadReportGroupPolicy(runtime,id);
-            Map<String,Object> rebuilt=runtime.loadReportV2Status(id,"user-a",true);
+            awaitLoadReportGroupPolicy(runtime,directId);
+            Map<String,Object> rebuilt=runtime.loadReportV2Status(directId,"user-a",true);
             assertEquals("READY",rebuilt.get("state"));
-            assertEquals(publishedVerdict,ServerRuntime.JSON.readTree(current.toFile()).path("verdictRecordSha256").asText(),
+            assertEquals(publishedVerdict,ServerRuntime.JSON.readTree(directCurrent.toFile()).path("verdictRecordSha256").asText(),
                     "The regression keeps the verdict unchanged so the Group policy alone triggers publication.");
 
-            assertEquals(publishedVerdict,simulatePrePolicyReadyPointer(current,"e".repeat(64)));
-            runtime.store.loadReportRecoveryNeeded(id,true);
+            publishReadyLoadReport(runtime,recoveryId,"MET");
+            Path recoveryCurrent=runtime.config.dataDir.resolve("jobs").resolve(recoveryId).resolve("load-report-publications/v2/current.json");
+            String recoveryVerdict=simulatePrePolicyReadyPointer(recoveryCurrent,"e".repeat(64));
+            assertFalse(recoveryVerdict.isBlank());
+            runtime.store.loadReportRecoveryNeeded(recoveryId,true);
             assertEquals(1,runtime.recoverLoadReportV2(),"Recovery must rebuild an old READY report even when its verdict digest is unchanged.");
-            awaitLoadReportGroupPolicy(runtime,id);
+            awaitLoadReportGroupPolicy(runtime,recoveryId);
+            assertEquals(recoveryVerdict,ServerRuntime.JSON.readTree(recoveryCurrent.toFile()).path("verdictRecordSha256").asText());
 
-            assertEquals(publishedVerdict,simulatePrePolicyReadyPointer(current,"d".repeat(64)));
-            assertEquals("BUILDING",runtime.loadReportV2Status(id,"user-a",true).get("state"),
+            publishReadyLoadReport(runtime,statusId,"MET");
+            Path statusCurrent=runtime.config.dataDir.resolve("jobs").resolve(statusId).resolve("load-report-publications/v2/current.json");
+            String statusVerdict=simulatePrePolicyReadyPointer(statusCurrent,"d".repeat(64));
+            assertFalse(statusVerdict.isBlank());
+            assertEquals("BUILDING",runtime.loadReportV2Status(statusId,"user-a",true).get("state"),
                     "A status request must schedule a rebuild for an old-policy READY pointer.");
-            awaitLoadReportGroupPolicy(runtime,id);
-            assertEquals("READY",runtime.loadReportV2Status(id,"user-a",true).get("state"));
-            assertEquals(4,reportAttempts.get());
+            awaitLoadReportGroupPolicy(runtime,statusId);
+            assertEquals("READY",runtime.loadReportV2Status(statusId,"user-a",true).get("state"));
+            assertEquals(statusVerdict,ServerRuntime.JSON.readTree(statusCurrent.toFile()).path("verdictRecordSha256").asText());
+            for(String reportId:reportIds)assertEquals(2,reportAttempts.get(reportId).get());
         } finally {
             releaseRebuild.countDown();
         }
