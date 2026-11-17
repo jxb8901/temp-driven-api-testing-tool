@@ -1395,7 +1395,7 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> sutMetricSources(String principal,boolean admin) { return sutMetrics.listSources(principal,admin); }
     Map<String,Object> sutMetricProfiles(String principal,boolean admin) { return sutMetrics.listProfiles(principal,admin); }
     Map<String,Object> sutMetricSourcesV2(String principal,boolean admin) { return sutMetrics.listMetricSources(principal,admin); }
-    Map<String,Object> sutMetricGroups() { return sutMetrics.listGroups(); }
+    Map<String,Object> sutMetricGroups(String principal,boolean admin) { return sutMetrics.listGroups(principal,admin); }
     Map<String,Object> saveSutMetricSource(Map<String,Object> value) throws Exception { return sutMetrics.upsertSource(value); }
     Map<String,Object> saveSutMetricProfile(Map<String,Object> value) throws Exception { return sutMetrics.upsertProfile(value); }
     Map<String,Object> saveSutMetricSourceV2(Map<String,Object> value) throws Exception { return sutMetrics.upsertMetricSource(value); }

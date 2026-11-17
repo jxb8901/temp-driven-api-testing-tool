@@ -454,7 +454,11 @@ class ApiServletIntegratedLimitsTest {
         List<Map<String,Object>> profiles=List.of(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
                 "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
                         "kind","gauge","query","up"))));
-        writeSutMetricsConfig(runtimeConfig,dataSources,metricSources,List.of(),profiles,true);
+        List<Map<String,Object>> groups=List.of(Map.of("schemaVersion","att-sut-metrics-group/v1","id","private-prom-group",
+                "title","Private Prometheus group","order",1,"match",Map.of("metricIds",List.of("prom-up"),
+                        "sourceIds",List.of("prom"),"labels",Map.of("tenant","sentinel_private_tenant")),
+                "groupBy",List.of("instance"),"display","table"));
+        writeSutMetricsConfig(runtimeConfig,dataSources,metricSources,groups,profiles,true);
         try(ServerRuntime runtime=runtime(packages,runtimeConfig,"sut-metrics-route-data",DEFAULT_INSPECTION_TIMEOUT_MS,
                 null,workerLibraries("sut-metrics-route-libs"),true,ref->"PROM_TOKEN".equals(ref)?"api-test-token":null)) {
             ApiServlet servlet=servlet(runtime);
@@ -533,6 +537,22 @@ class ApiServletIntegratedLimitsTest {
             assertFalse(safeMetricSource.has("fetch"),safeMetricSource.toString());
             assertEquals("DBHELPER",safeMetricSource.path("connection").path("kind").asText());
             assertEquals("db-count",safeMetricSource.path("mapping").path("outputs").path(0).path("id").asText());
+
+            Captured readerGroups=invokeAs(servlet,"GET","/sut-metrics/groups",Collections.emptyMap(),
+                    new byte[0],"bob",Set.of(userRole));
+            assertEquals(200,readerGroups.status,readerGroups.bodyText());
+            JsonNode safeGroup=ServerRuntime.JSON.readTree(readerGroups.body()).path("items").path(0);
+            assertEquals("private-prom-group",safeGroup.path("id").asText());
+            assertFalse(safeGroup.has("match"),safeGroup.toString());
+            assertFalse(readerGroups.bodyText().contains("sentinel_private_tenant"),readerGroups.bodyText());
+            assertFalse(readerGroups.bodyText().contains("prom-up"),readerGroups.bodyText());
+            assertFalse(readerGroups.bodyText().contains("sourceIds"),readerGroups.bodyText());
+
+            Captured adminGroups=invokeAs(servlet,"GET","/sut-metrics/groups",Collections.emptyMap(),
+                    new byte[0],"admin",Set.of(adminRole));
+            assertEquals(200,adminGroups.status,adminGroups.bodyText());
+            assertTrue(adminGroups.bodyText().contains("sentinel_private_tenant"),adminGroups.bodyText());
+            assertTrue(adminGroups.bodyText().contains("prom-up"),adminGroups.bodyText());
 
             Captured adminMetricSources=invokeAs(servlet,"GET","/sut-metrics/metric-sources",Collections.emptyMap(),
                     new byte[0],"admin",Set.of(adminRole));

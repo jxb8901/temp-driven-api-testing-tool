@@ -602,14 +602,22 @@ final class SutMetricsService implements AutoCloseable {
         }
     }
 
-    Map<String, Object> listGroups() {
+    Map<String, Object> listGroups(String principal, boolean admin) {
         refreshConfiguredCatalog(false);
         synchronized (catalogLock) {
-            List<Map<String, Object>> result = new ArrayList<>(metricGroups.values());
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (Map<String, Object> group : metricGroups.values()) result.add(groupView(group, admin));
             result.sort(Comparator.comparingInt((Map<String, Object> value) -> ((Number) value.get("order")).intValue())
                     .thenComparing(value -> String.valueOf(value.get("id"))));
             return catalogResponse("att-sut-metrics-groups/v1", result);
         }
+    }
+
+    private static Map<String, Object> groupView(Map<String, Object> group, boolean admin) {
+        if (admin) return new LinkedHashMap<>(group);
+        return fields("schemaVersion", group.get("schemaVersion"), "id", group.get("id"),
+                "title", group.get("title"), "order", group.get("order"),
+                "groupBy", group.get("groupBy"), "display", group.get("display"));
     }
 
     Map<String, Object> upsertSource(Map<String, Object> submitted) throws Exception {

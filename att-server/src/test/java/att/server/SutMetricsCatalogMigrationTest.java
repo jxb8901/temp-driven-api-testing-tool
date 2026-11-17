@@ -32,6 +32,7 @@ class SutMetricsCatalogMigrationTest {
         assertTrue(text.contains("profiles:"));
         assertFalse(text.contains("createdAt:"));
         assertFalse(text.contains("default: null"), "An absent legacy parameter default must be omitted in the strict v2.14 config.");
+        assertTrue(text.contains("window: null"), "The strict v2.14 schema requires null windows on normalized afterDrain multi-output metrics.");
         assertFalse(text.contains("revision: bbbbbbbbb"));
         assertFalse(text.contains("password:"));
         assertArrayEquals(originalConfig, Files.readAllBytes(config));
@@ -119,7 +120,11 @@ class SutMetricsCatalogMigrationTest {
                 + "\"profiles\":["
                 + "{\"schemaVersion\":\"att-sut-metrics-profile/v1\",\"id\":\"legacy-base\",\"name\":\"Legacy base\",\"kind\":\"base\",\"category\":\"app\","
                 + "\"params\":{\"instance\":{\"type\":\"text\",\"required\":false,\"default\":null}},"
-                + "\"metrics\":[{\"id\":\"legacy-cpu\",\"title\":\"CPU\",\"unit\":\"percent\",\"kind\":\"gauge\",\"query\":\"up\"}]},"
+                + "\"metrics\":[{\"id\":\"legacy-cpu\",\"title\":\"CPU\",\"unit\":\"percent\",\"kind\":\"gauge\",\"query\":\"up\"},"
+                + "{\"id\":\"legacy-sessions\",\"title\":\"Sessions\",\"unit\":\"count\",\"kind\":\"gauge\",\"category\":\"app\","
+                + "\"call\":\"#{db.orders.query(sql='select instance, sessions from metric_summary')}\",\"sampling\":\"afterDrain\",\"window\":null,"
+                + "\"sideEffectsAcknowledged\":false,\"mapping\":{\"rows\":\"rows\",\"labels\":{\"instance\":\"INSTANCE\"}},"
+                + "\"callGroupId\":\"legacy-sessions-call\",\"column\":\"SESSIONS\",\"multiOutput\":true}]},"
                 + "{\"schemaVersion\":\"att-sut-metrics-profile/v1\",\"id\":\"legacy-composite\",\"name\":\"Legacy composite\",\"kind\":\"composite\",\"category\":\"app\","
                 + "\"includes\":[{\"profile\":\"legacy-base\",\"alias\":\"legacy\",\"source\":\"prom\",\"targets\":[{\"id\":\"sut-1\",\"type\":\"application\"}]}]},"
                 + "{\"schemaVersion\":\"att-sut-metrics-profile/v2\",\"id\":\"flat\",\"name\":\"Flat profile\",\"revision\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\","

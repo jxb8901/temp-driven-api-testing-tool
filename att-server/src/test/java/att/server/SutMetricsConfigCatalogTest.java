@@ -81,7 +81,7 @@ class SutMetricsConfigCatalogTest {
             assertEquals("host-cpu", metricSource(service).get("id"));
             assertEquals("ACTIVE", configuration(service).get("state"));
             assertEquals("host-observability", ((Map<?, ?>) ((List<?>) service.listProfiles("admin", true).get("items")).get(0)).get("id"));
-            assertEquals("host-runtime", ((Map<?, ?>) ((List<?>) service.listGroups().get("items")).get(0)).get("id"));
+            assertEquals("host-runtime", ((Map<?, ?>) ((List<?>) service.listGroups("admin", true).get("items")).get(0)).get("id"));
         }
     }
 

@@ -150,7 +150,7 @@ public final class SutMetricsCatalogMigration {
                 if ("att-sut-metrics-profile/v2".equals(row.get("schemaVersion"))) row.remove("revision");
                 // The legacy v1 API persisted absent parameter defaults as null, but the
                 // versioned profile contract represents an absent default by omission.
-                removeNulls(row);
+                removeProfileNulls(row);
             }
             normalized.add(row);
         }
@@ -168,6 +168,23 @@ public final class SutMetricsCatalogMigration {
                 for (Object item : list) if (item instanceof Map<?, ?> nested) {
                     @SuppressWarnings("unchecked") Map<String, Object> map = (Map<String, Object>) nested;
                     removeNulls(map);
+                }
+            }
+        }
+    }
+
+    private static void removeProfileNulls(Map<String, Object> value) {
+        boolean normalizedMultiOutput = Boolean.TRUE.equals(value.get("multiOutput"));
+        value.entrySet().removeIf(entry -> entry.getValue() == null
+                && !(normalizedMultiOutput && "window".equals(entry.getKey())));
+        for (Object child : value.values()) {
+            if (child instanceof Map<?, ?> nested) {
+                @SuppressWarnings("unchecked") Map<String, Object> map = (Map<String, Object>) nested;
+                removeProfileNulls(map);
+            } else if (child instanceof List<?> list) {
+                for (Object item : list) if (item instanceof Map<?, ?> nested) {
+                    @SuppressWarnings("unchecked") Map<String, Object> map = (Map<String, Object>) nested;
+                    removeProfileNulls(map);
                 }
             }
         }

@@ -1929,7 +1929,7 @@ class SutMetricsServiceTest {
             assertTrue(html.contains(String.valueOf(object(offlineSessions.get("window")).get("observedAt"))));
         }
         try (SutMetricsService restarted = new SutMetricsService(data)) {
-            assertEquals(2, maps(restarted.listGroups().get("items")).size());
+            assertEquals(2, maps(restarted.listGroups("admin", true).get("items")).size());
             List<Map<String, Object>> replayedItems = maps(restarted.readCollectionPage(JOB_ID, 0, 16, null, null, null).get("items"));
             Map<String, Object> replayedCpu = replayedItems.stream()
                     .filter(item -> "cpu".equals(item.get("metricId"))).findFirst().orElseThrow();

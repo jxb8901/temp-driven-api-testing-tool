@@ -121,7 +121,7 @@ public final class ApiServlet extends HttpServlet {
                     case "/sut-metrics/sources" -> runtime.sutMetricSources(principal,admin);
                     case "/sut-metrics/profiles" -> runtime.sutMetricProfiles(principal,admin);
                     case "/sut-metrics/metric-sources" -> runtime.sutMetricSourcesV2(principal,admin);
-                    default -> runtime.sutMetricGroups();
+                    default -> runtime.sutMetricGroups(principal,admin);
                 };
                 response.put("requestId",requestId);json(res,200,response);return;
             }
