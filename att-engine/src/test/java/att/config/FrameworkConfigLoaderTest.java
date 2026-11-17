@@ -49,7 +49,7 @@ class FrameworkConfigLoaderTest {
         Path config = write("sut-metrics-config.yaml", valid);
         Map<String, Object> sutMetrics = new FrameworkConfigLoader()
                 .loadSutMetricsConfiguration(config, tempDir, valid);
-        assertEquals(List.of(), sutMetrics.get("dataSources"));
+        assertEquals(java.util.Collections.emptyList(), sutMetrics.get("dataSources"));
 
         String unknownNestedField = "schemaVersion: att-config/v2.14\n"
                 + "sutMetrics:\n  dataSources:\n    - {schemaVersion: att-sut-metrics-source/v1, id: prom, name: Prom, url: https://metrics.example, password: secret}\n"
@@ -59,7 +59,7 @@ class FrameworkConfigLoaderTest {
 
         Path previous = write("previous-config.yaml", "schemaVersion: att-config/v2.13\nenvironment: SIT\n");
         assertTrue(new FrameworkConfigLoader().loadSutMetricsConfiguration(previous, tempDir,
-                Files.readString(previous)).isEmpty());
+                new String(Files.readAllBytes(previous), java.nio.charset.StandardCharsets.UTF_8)).isEmpty());
     }
 
     @Test void loadsRunAndDebugIdentityFormatsFromCurrentConfigSchema() throws Exception {

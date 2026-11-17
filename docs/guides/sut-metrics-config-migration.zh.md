@@ -36,4 +36,4 @@ scripts/migrate-sut-metrics-catalog.sh \
 
 Apply 會再次檢查兩個輸入檔，為 Runtime Config 和舊 catalog 建立以 digest 命名的唯讀備份，並以 atomic replace 發佈已驗證的 `att-config/v2.14` 候選檔。舊 catalog 會保留供 rollback；Server 不會讀取它。重複執行相同遷移不會改檔。若 Runtime Config 已有完全相同的定義，命令會回報已完成；若定義不同則停止，不會合併。
 
-沒有 `sutMetrics` 的 `att-config/v2.13` 設定仍可讀取。遷移會將 config 版本升至 v2.14，使新的 strict block 通過驗證。已提交的 Job 仍保留原本固定的 SUT Metrics snapshots 和 revisions。
+沒有 `sutMetrics` 的舊版 ATT config 設定仍可讀取。遷移會將 config 版本升至 v2.14，使新的 strict block 通過驗證。已提交的 Job 仍保留原本固定的 SUT Metrics snapshots 和 revisions。

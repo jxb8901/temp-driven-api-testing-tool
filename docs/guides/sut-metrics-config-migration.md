@@ -36,4 +36,4 @@ scripts/migrate-sut-metrics-catalog.sh \
 
 Apply rechecks both input files, writes digest-named read-only backups for the Runtime Config and old catalog, and atomically publishes the validated `att-config/v2.14` candidate. It leaves the original catalog in place for rollback; the Server does not consult it. Repeating the same migration is a no-op. If the Runtime Config already contains matching definitions, the command reports that state; different definitions fail without merging.
 
-`att-config/v2.13` remains readable for configurations without `sutMetrics`. Migration upgrades the config version to v2.14 so the new strict block is accepted. Jobs already submitted retain their pinned SUT Metrics snapshots and revisions.
+The previous ATT config schema remains readable for configurations without `sutMetrics`. Migration upgrades the config version to v2.14 so the new strict block is accepted. Jobs already submitted retain their pinned SUT Metrics snapshots and revisions.
