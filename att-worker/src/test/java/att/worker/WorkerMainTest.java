@@ -134,7 +134,12 @@ class WorkerMainTest {
             cacheRoot=paths.filter(path->path.getFileName().toString().matches("[0-9a-f]{64}"))
                     .findFirst().orElseThrow(()->new AssertionError("Trusted schema cache root is missing"));
         }
-        Files.delete(cacheRoot.resolve(".cache-use.lock"));
+        List<Path> cacheLeases=new ArrayList<Path>();
+        try(java.util.stream.Stream<Path> paths=Files.list(cacheRoot)) {
+            paths.filter(path->path.getFileName().toString().startsWith(".cache-use.lock"))
+                    .forEach(cacheLeases::add);
+        }
+        for(Path lease:cacheLeases)Files.deleteIfExists(lease);
         Files.delete(cacheRoot.resolve("schemas/catalog.yaml")); // Simulate termination before lease publication.
 
         Process repair=new ProcessBuilder(javaExecutable,"-Djava.io.tmpdir="+temporary.toAbsolutePath(),"-cp",classpath,
@@ -144,7 +149,10 @@ class WorkerMainTest {
         assertEquals(0,repair.waitFor(),repairErr+"\n"+repairOut);
         assertTrue(Files.isRegularFile(cacheRoot.resolve("schemas/catalog.yaml")),
                 "A fresh Worker must replace an incomplete fingerprint directory that has no lease");
-        assertTrue(Files.isRegularFile(cacheRoot.resolve(".cache-use.lock")));
+        try(java.util.stream.Stream<Path> paths=Files.list(cacheRoot)) {
+            assertTrue(paths.anyMatch(path->path.getFileName().toString().startsWith(".cache-use.lock")
+                    &&Files.isRegularFile(path)),"A repaired registry must publish its process lease");
+        }
     }
 
     @Test void workerFailsClosedWhenServerAndEmbeddedRegistryIdentitiesDiffer() throws Exception {

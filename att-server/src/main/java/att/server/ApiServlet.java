@@ -59,6 +59,7 @@ public final class ApiServlet extends HttpServlet {
     @Override protected void doGet(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String path=path(req);String requestId=requestId(req,res);
         if(path.equals("/sut-metrics/sources")||path.equals("/sut-metrics/profiles")
+                ||path.equals("/sut-metrics/metric-sources")||path.equals("/sut-metrics/groups")
                 ||path.matches("/jobs/[^/]+/sut-metrics(?:/.*)?")
                 ||path.matches("/jobs/[^/]+/load-report/v2/.*"))
             res.setHeader("Cache-Control","private, no-store");
@@ -109,13 +110,19 @@ public final class ApiServlet extends HttpServlet {
                 res.setHeader("Cache-Control","no-store");json(res,200,runtime.monitoringJobJournal(id));return;
             }
             if("/metrics".equals(path)){if(!requireSystemAdmin(req,res,requestId))return;Map<String,Object> metrics=runtime.counts();metrics.put("requestId",requestId);json(res,200,metrics);return;}
-            if("/sut-metrics/sources".equals(path)||"/sut-metrics/profiles".equals(path)) {
+            if("/sut-metrics/sources".equals(path)||"/sut-metrics/profiles".equals(path)
+                    ||"/sut-metrics/metric-sources".equals(path)||"/sut-metrics/groups".equals(path)) {
                 boolean admin,operator;
                 try {admin=systemAdminCapability(req,principal);operator=operatorCapability(req,principal);}
                 catch(Exception unavailable){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return;}
                 if(!requireSutMetricsReadAccess(req,res,requestId,principal))return;
                 res.setHeader("Cache-Control","private, no-store");
-                Map<String,Object> response="/sut-metrics/sources".equals(path)?runtime.sutMetricSources(principal,admin):runtime.sutMetricProfiles(principal,admin);
+                Map<String,Object> response=switch(path) {
+                    case "/sut-metrics/sources" -> runtime.sutMetricSources(principal,admin);
+                    case "/sut-metrics/profiles" -> runtime.sutMetricProfiles(principal,admin);
+                    case "/sut-metrics/metric-sources" -> runtime.sutMetricSourcesV2(principal,admin);
+                    default -> runtime.sutMetricGroups(principal,admin);
+                };
                 response.put("requestId",requestId);json(res,200,response);return;
             }
             if(!requireOperator(req,res,requestId))return;
@@ -268,7 +275,7 @@ public final class ApiServlet extends HttpServlet {
             res.setHeader("Cache-Control","private, no-store");
         if(path.startsWith("/auth/")){authPost(req,res,path,requestId);return;}
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
-        if(path.matches("/admin/sut-metrics/(?:sources|profiles|sources/[^/]+/test|profiles/preview)")) {
+        if(path.matches("/admin/sut-metrics/(?:sources|profiles|metric-sources|groups|sources/[^/]+/test|profiles/preview)")) {
             if(!requireSystemAdmin(req,res,requestId))return;
             if(!checkOrigin(req,res,requestId,false))return;
             try {
@@ -282,12 +289,23 @@ public final class ApiServlet extends HttpServlet {
                     preview.put("requestId",requestId);res.setHeader("Cache-Control","no-store");json(res,200,preview);return;
                 }
                 Map<String,Object> value=ServerRuntime.JSON.convertValue(input,Map.class);
-                Map<String,Object> saved=path.endsWith("/sources")?runtime.saveSutMetricSource(value):runtime.saveSutMetricProfile(value);
+                Map<String,Object> saved=switch(path) {
+                    case "/admin/sut-metrics/sources" -> runtime.saveSutMetricSource(value);
+                    case "/admin/sut-metrics/profiles" -> runtime.saveSutMetricProfile(value);
+                    case "/admin/sut-metrics/metric-sources" -> runtime.saveSutMetricSourceV2(value);
+                    case "/admin/sut-metrics/groups" -> runtime.saveSutMetricGroup(value);
+                    default -> throw new IllegalArgumentException("Unsupported SUT Metrics administration route.");
+                };
                 saved.put("requestId",requestId);json(res,201,saved);return;
-            } catch(SutMetricsService.CapacityException full){error(res,503,"ATT-SUT-METRICS-CAPACITY","SUT Metrics capacity is full; retry shortly",requestId);}
+            } catch(SutMetricsService.ReadOnlyCatalogException readOnly){error(res,409,"ATT-SUT-METRICS-CONFIG-READ-ONLY","SUT Metrics definitions are read-only here; update the selected Runtime Config source through the approved configuration change process",requestId);}
+              catch(SutMetricsService.CapacityException full){error(res,503,"ATT-SUT-METRICS-CAPACITY","SUT Metrics capacity is full; retry shortly",requestId);}
               catch(SutMetricsService.SutMetricsTimeoutException timeout){error(res,504,"ATT-SUT-METRICS-TIMEOUT","SUT Metrics source query timed out",requestId);}
               catch(SutMetricsRequestTooLargeException oversized){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","SUT Metrics request exceeds the configured size limit",requestId);}
-              catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+              catch(IllegalArgumentException invalid){
+                  List<Map<String,Object>> fieldDiagnostics=schemaFieldDiagnostics(invalid);
+                  if(fieldDiagnostics.isEmpty())error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);
+                  else error(res,400,"ATT-SUT-METRICS-INVALID-DEFINITION","SUT Metrics definition has field validation errors",requestId,fieldDiagnostics);
+              }
               catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","SUT Metrics administration could not be completed",requestId);getServletContext().log("SUT Metrics administration failed id="+requestId,failure);}
             return;
         }
@@ -475,15 +493,18 @@ public final class ApiServlet extends HttpServlet {
         if(path.startsWith("/admin/sut-metrics/"))res.setHeader("Cache-Control","private, no-store");
         if(path.startsWith("/auth/")){authDelete(req,res,path,requestId);return;}
         if(principal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
-        if(path.matches("/admin/sut-metrics/(?:sources|profiles)/[^/]+")) {
+        if(path.matches("/admin/sut-metrics/(?:sources|profiles|metric-sources|groups)/[^/]+")) {
             if(!requireSystemAdmin(req,res,requestId))return;
             if(!checkOrigin(req,res,requestId,false))return;
             try {
                 String id=segment(path,4);
                 Map<String,Object> deleted=path.startsWith("/admin/sut-metrics/sources/")
-                        ?runtime.deleteSutMetricSource(id):runtime.deleteSutMetricProfile(id);
+                        ?runtime.deleteSutMetricSource(id):path.startsWith("/admin/sut-metrics/metric-sources/")
+                        ?runtime.deleteSutMetricSourceV2(id):path.startsWith("/admin/sut-metrics/groups/")
+                        ?runtime.deleteSutMetricGroup(id):runtime.deleteSutMetricProfile(id);
                 deleted.put("requestId",requestId);json(res,200,deleted);
-            } catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+            } catch(SutMetricsService.ReadOnlyCatalogException readOnly){error(res,409,"ATT-SUT-METRICS-CONFIG-READ-ONLY","SUT Metrics definitions are read-only here; update the selected Runtime Config source through the approved configuration change process",requestId);}
+              catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
               catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","SUT Metrics administration could not be completed",requestId);getServletContext().log("SUT Metrics deletion failed id="+requestId,failure);}
             return;
         }
@@ -1191,4 +1212,19 @@ public final class ApiServlet extends HttpServlet {
         Map<String,Object> response=new LinkedHashMap<>();response.put("error",e);response.put("diagnostics",correlated);response.put("requestId",requestId);json(res,status,response);
     }
     static String safeDetail(IllegalArgumentException e){String m=e.getMessage();if(m==null)return "Invalid request";m=att.server.api.internal.DiagnosticSanitizer.redactAbsolutePaths(att.server.api.internal.DiagnosticSanitizer.redactText(m));return m.length()>300?m.substring(0,300):m;}
+
+    private static List<Map<String,Object>> schemaFieldDiagnostics(Throwable failure){
+        att.validation.JsonSchemaVerifier.SchemaValidationException validation=
+                att.validation.JsonSchemaVerifier.SchemaValidationException.find(failure);
+        if(validation==null)return List.of();
+        List<Map<String,Object>> diagnostics=new ArrayList<>();
+        for(att.validation.JsonSchemaVerifier.SchemaViolation violation:validation.structuredViolations()){
+            Map<String,Object> item=new LinkedHashMap<>();
+            item.put("code","ATT-SUT-METRICS-FIELD-INVALID");item.put("severity","ERROR");
+            item.put("path",violation.path());item.put("message",violation.message());item.put("keyword",violation.keyword());
+            diagnostics.add(item);
+            if(diagnostics.size()>=64)break;
+        }
+        return List.copyOf(diagnostics);
+    }
 }

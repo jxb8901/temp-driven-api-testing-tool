@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "att-sut-metrics-metric-source/v1",
+  "id": "prom-host-metrics",
+  "name": "Host CPU metrics",
+  "connection": {
+    "kind": "DATA_SOURCE",
+    "id": "prometheus-prod",
+    "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "fetch": {
+    "id": "host-counters",
+    "mode": "prometheus-range",
+    "query": "node_cpu_seconds_total{mode=\"idle\"} or http_requests_total",
+    "parameters": {},
+    "sampling": "range",
+    "step": "15s"
+  },
+  "mapping": {
+    "labels": {"retain": ["instance", "job", "mode"]},
+    "outputs": [
+      {
+        "id": "cpu-idle-seconds",
+        "title": "CPU idle seconds",
+        "unit": "seconds",
+        "kind": "counter",
+        "metricName": "node_cpu_seconds_total",
+        "discriminator": {"mode": "idle"}
+      },
+      {
+        "id": "http-requests",
+        "title": "HTTP requests",
+        "unit": "count",
+        "kind": "counter",
+        "metricName": "http_requests_total"
+      }
+    ]
+  },
+  "limits": {"maxRows": 1024, "maxSeries": 128, "maxSamples": 250000, "maxArtifactBytes": 8388608}
+}

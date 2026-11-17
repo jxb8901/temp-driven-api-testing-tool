@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "att-sut-metrics-observation/v2",
+  "observationId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "identity": {
+    "metricId": "cpu-idle-seconds",
+    "binding": {"sourceId": "prom-host-metrics", "fetchId": "host-counters"},
+    "target": {"id": "payments-api-01", "type": "target"},
+    "labels": {"__name__": "node_cpu_seconds_total", "instance": "payments-api-01:9100", "mode": "idle"},
+    "subject": {"scope": "job"},
+    "window": {
+      "kind": "sampled-time-series",
+      "startAt": "2026-11-16T12:00:00Z",
+      "endAt": "2026-11-16T12:01:00Z",
+      "step": "15s",
+      "semantics": "Counter samples from a range query"
+    }
+  },
+  "metric": {"id": "cpu-idle-seconds", "name": "CPU idle seconds", "unit": "seconds", "kind": "counter"},
+  "data": {
+    "state": "AVAILABLE",
+    "freshness": "FRESH",
+    "coverage": {
+      "sampleCount": 2,
+      "seriesCount": 1,
+      "gapCount": 0,
+      "firstSampleAt": "2026-11-16T12:00:00Z",
+      "lastSampleAt": "2026-11-16T12:01:00Z",
+      "windowStart": "2026-11-16T12:00:00Z",
+      "windowEnd": "2026-11-16T12:01:00Z"
+    },
+    "diagnostics": [],
+    "series": [
+      {"timestamp": "2026-11-16T12:00:00Z", "value": 432.4},
+      {"timestamp": "2026-11-16T12:01:00Z", "value": 433.1}
+    ]
+  },
+  "acquisition": {
+    "invocationId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "source": {"id": "prom-host-metrics", "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "connectionKind": "DATA_SOURCE"},
+    "fetch": {"id": "host-counters", "revision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+    "execution": {"state": "SUCCEEDED", "startedAt": "2026-11-16T12:00:00Z", "completedAt": "2026-11-16T12:01:00Z", "durationMs": 120, "requestCount": 1, "diagnostics": []},
+    "job": {"jobId": "J0000000000000001", "snapshotId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+  }
+}

@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -44,7 +46,29 @@ class SchemaMigrationGuidanceTest {
         Path sourceCatalog=Paths.get("").toAbsolutePath().resolve("schemas/catalog.yaml");
         String catalog = new String(Files.readAllBytes(sourceCatalog), StandardCharsets.UTF_8);
         assertTrue(catalog.contains("history/att-flow-v3.0.schema.json"));
-        assertTrue(catalog.contains("globalConfig: att-config-v2.13.schema.json"));
+        assertTrue(catalog.contains("globalConfig: att-config-v2.14.schema.json"));
+    }
+
+    @Test void trustedSchemaCacheSupportsMultipleEngineClassLoadersInOneJvm() throws Exception {
+        String expectedDigest = SchemaFiles.registryDigest();
+        URL engineClasses = SchemaFiles.class.getProtectionDomain().getCodeSource().getLocation();
+        ClassLoader parent = SchemaFiles.class.getClassLoader();
+        try (URLClassLoader isolated = new URLClassLoader(new URL[]{engineClasses}, parent) {
+            @Override protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+                if (!name.equals("att.validation.SchemaFiles") && !name.startsWith("att.validation.SchemaFiles$"))
+                    return super.loadClass(name, resolve);
+                synchronized (getClassLoadingLock(name)) {
+                    Class<?> loaded = findLoadedClass(name);
+                    if (loaded == null) loaded = findClass(name);
+                    if (resolve) resolveClass(loaded);
+                    return loaded;
+                }
+            }
+        }) {
+            Class<?> isolatedSchemaFiles = isolated.loadClass("att.validation.SchemaFiles");
+            assertNotSame(SchemaFiles.class, isolatedSchemaFiles);
+            assertEquals(expectedDigest, isolatedSchemaFiles.getMethod("registryDigest").invoke(null));
+        }
     }
 
     @Test void olderConfigWithNewFieldHasProvenMigrationAndSource() throws Exception {
@@ -55,7 +79,7 @@ class SchemaMigrationGuidanceTest {
         DiagnosticException error = assertThrows(DiagnosticException.class,
                 () -> new FrameworkConfigLoader().load(file, root));
         assertTrue(error.detail().contains("att-config/v2.7"));
-        assertTrue(error.detail().contains("att-config/v2.13"));
+        assertTrue(error.detail().contains("att-config/v2.14"));
         assertTrue(error.detail().contains("Upgrade schemaVersion"));
         assertTrue(error.detail().contains("Schema validation failed"));
         assertEquals("$ATT_PACKAGE_ROOT/config/config.yaml", error.file());
@@ -65,13 +89,13 @@ class SchemaMigrationGuidanceTest {
 
     @Test void unrelatedInvalidFieldsDoNotClaimVersionBumpIsEnough() throws Exception {
         Path oldSchema = root.resolve("schemas/history/att-config-v2.8.schema.json");
-        Path currentSchema = root.resolve("schemas/att-config-v2.13.schema.json");
+        Path currentSchema = root.resolve("schemas/att-config-v2.14.schema.json");
         Map<String, Object> descriptor = new LinkedHashMap<String, Object>();
         descriptor.put("schemaVersion", "att-config/v2.8");
         descriptor.put("timeoutMs", -1);
         SchemaMigrationGuidance.MigrationException error = assertThrows(SchemaMigrationGuidance.MigrationException.class,
                 () -> SchemaMigrationGuidance.verify(oldSchema, currentSchema, descriptor,
-                        "att-config/v2.8", "att-config/v2.13"));
+                        "att-config/v2.8", "att-config/v2.14"));
         assertTrue(error.getMessage().contains("timeoutMs"));
         assertFalse(error.getMessage().contains("Upgrade schemaVersion"));
         assertTrue(error.getMessage().contains("version change alone is not sufficient"));

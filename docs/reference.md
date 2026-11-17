@@ -1,7 +1,7 @@
-# ATT v4.2.10 reference manual
+# ATT v4.3.1 reference manual
 
 Author: Jeffrey + ChatGPT
-Version: 4.2.10
+Version: 4.3.1
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -101,7 +101,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [API paths](#api-paths)
 - [CLI reference](#cli-reference)
   - [Choose a command](#choose-a-command)
-  - [Availability in ATT 4.2.10](#availability-in-att-4210)
+  - [Availability in ATT 4.3.1](#availability-in-att-431)
   - [Build a source checkout](#build-a-source-checkout)
   - [Find syntax, options, and examples by task](#find-syntax-options-and-examples-by-task)
   - [Use ATT Server from the CLI](#use-att-server-from-the-cli)
@@ -144,6 +144,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [File arguments and case-log paths](#file-arguments-and-case-log-paths)
   - [Previous release Testdata migration](#previous-release-testdata-migration)
   - [Execution identity format migration](#execution-identity-format-migration)
+  - [att-config/v2.14: centralized SUT Metrics catalog](#att-configv214-centralized-sut-metrics-catalog)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
   - [Global configuration migration](#global-configuration-migration)
@@ -977,9 +978,9 @@ All adapters resolve the environment, construct canonical Context, validate the 
 
 ### Unified RUN and schedules
 
-<!-- att-doc-status: current release=4.2.10 -->
+<!-- att-doc-status: current release=4.3.1 -->
 
-ATT 4.2.10 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+ATT 4.3.1 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
 
 The released Local CLI keeps its interface-specific compatibility boundary: its run verb selects workbook Cases, and standalone debug runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. This shared RUN model does not mean the proposed vNext CLI grammar is released; see the [Planned vNext page](interfaces/cli/vnext-proposed.md).
 
@@ -1068,7 +1069,7 @@ Every active local `USER` or authenticated container principal in `server.author
 
 #### Migrate existing clients
 
-| Existing interface | Mapping in 4.2.10 |
+| Existing interface | Mapping in 4.3.1 |
 |---|---|
 | CLI `validate`, `run`, `report` | Existing validation, Case RUN and report commands remain valid |
 | CLI `--suite`, `--suite-dir`, `--case`, `--tag`, `--rerun-failed` | Existing selectors retain their behavior; Server batches use `selection` |
@@ -1077,7 +1078,7 @@ Every active local `USER` or authenticated container principal in `server.author
 | `/load-schedules`, legacy `jobType:load/debug` | Shared scheduler compatibility routes; existing definitions remain readable |
 | `/jobs/...`, saved Studio job/result links | Existing shared history, cancellation, events and results routes |
 
-No legacy endpoint is removed in 4.2.10. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.6; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
+This release does not remove legacy endpoints. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.6; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
 
 Schedule persistence adds JSON fields in the existing H2 tables, leaving legacy LOAD rows unchanged. Before downgrade, stop scheduling, export new definitions, remove RUN/one-time definitions and restore the pre-upgrade database backup. An older scheduler must not interpret a new RUN definition as LOAD. Retained job artifacts remain separate from database metadata.
 
@@ -1108,9 +1109,9 @@ Schedule creation uses its normal validated draft contract. Debug remains `optio
 
 ### Run mode
 
-<!-- att-doc-status: current release=4.2.10 -->
+<!-- att-doc-status: current release=4.3.1 -->
 
-The ATT 4.2.10 Local CLI run command is a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](reference/execution-modes/unified-run.md).
+The ATT 4.3.1 Local CLI run command is a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](reference/execution-modes/unified-run.md).
 
 ```sh
 ./att.sh run --all
@@ -2032,7 +2033,7 @@ Each `att-tool/v1` file defines one Package Tool. Global `tools` and `toolGroups
 
 An argument `type` declares the final resolved value contract for configured Tools: `string`, `integer`, `long`, `decimal`, `boolean`, `enum`, `bytes`, `map`, or `list`. Omitted `type` remains `any` for existing descriptors. Numeric and Boolean scalar types accept native values or trimmed numeric/`true`/`false` Strings; enum values must match one of `enumValues`; `bytes` accepts a byte array or converts a String to UTF-8. `string`, `map`, and `list` require that native value type. These checks run after the complete nested expression resolves, in validation when safely static and at runtime otherwise.
 
-#### Package-local Tool Groups (ATT 4.2.10)
+#### Package-local Tool Groups
 
 Standalone Tools use `tools/<id>.yaml` and `att-tool/v1`. Grouped Tools use a fixed `tools/<folder>/tool-group.yaml` manifest with **`att-tool-group/v3.0`**, which lists each `att-tool/v1` member explicitly (no recursive discovery):
 
@@ -2439,11 +2440,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.13`. Current packages use config v2.13 and Tool Group v3.0. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
+Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.14`. Current packages use config v2.14 and Tool Group v3.0. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 environment: SIT
 environments:
   SIT:
@@ -2639,9 +2640,9 @@ Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXE
 
 ### Select an environment profile
 
-`att-config/v2.13` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper lists as a whole. Package Testdata lists belong to `package.yaml`. See the resource pages and [Testdata registry and input mapping](reference/test-authoring.md) for each binding.
+`att-config/v2.14` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper lists as a whole. Package Testdata lists belong to `package.yaml`. See the resource pages and [Testdata registry and input mapping](reference/test-authoring.md) for each binding.
 
-ATT selects an environment through one common `att-config/v2.13` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT selects an environment through one common `att-config/v2.14` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -2671,7 +2672,7 @@ The common config keeps run/execution/report settings and global DB/MQ/HTTP/SSH 
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 environment: SIT                 # default profile; --env overrides it
 templates: {root: templates}
 testcase: {root: testcase}
@@ -2684,7 +2685,7 @@ environments:
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-The executable SIT and UAT configs retain common Helper and Environment bindings. `invokePaymentApi` and `sample.getAcDate` now live in the selected Package; legacy global Tools require explicit migration before running ATT 4.2.10.
+The executable SIT and UAT configs retain common Helper and Environment bindings. `invokePaymentApi` and `sample.getAcDate` now live in the selected Package; legacy global Tools require explicit migration before running the current ATT runtime.
 
 The SIT and UAT DBHelper descriptors both use `id: orders`, while their JDBC URL and other physical connection details differ. The MQHelper descriptors both use `id: payment`, while host, queue manager, port, and channel differ. A complete descriptor pair, including pool settings and safe evidence policy, is in [`examples/environments/README.md`](../examples/environments/README.md).
 
@@ -2755,7 +2756,7 @@ The repository `schemas/catalog.yaml` is build input for the active schema regis
 ### Set package-wide options
 
 ```yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -2789,7 +2790,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.13`; the previous schema remains compatible. The example uses the active schema. |
+| `schemaVersion` | required | Current: `att-config/v2.14`; the previous schema remains compatible. The example uses the active schema. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -3094,7 +3095,7 @@ Source revision conflicts return `409`; denied source access or Environment poli
 
 ## CLI reference
 
-<!-- att-doc-status: current release=4.2.10 -->
+<!-- att-doc-status: current release=4.3.1 -->
 
 
 ### Choose a command
@@ -3114,11 +3115,11 @@ Source revision conflicts return `409`; denied source access or Environment poli
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
-The commands in this table are the ATT 4.2.10 CLI. The separate vNext proposal is not part of this release.
+The commands in this table are the ATT 4.3.1 CLI. The separate vNext proposal is not part of this release.
 
-### Availability in ATT 4.2.10
+### Availability in ATT 4.3.1
 
-This Reference describes the CLI shipped with ATT 4.2.10. The vNext grammar is a separate [Planned proposal](interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
+This Reference describes the CLI shipped with ATT 4.3.1. The vNext grammar is a separate [Planned proposal](interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
 
 ### Build a source checkout
 
@@ -3302,7 +3303,7 @@ This page defines target, `--input`, `--set` and `--env` syntax in the option ma
 
 ### Complete option matrix
 
-`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.13` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.14` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
 
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 
@@ -3563,7 +3564,7 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 
 ### Offline SUT metrics report
 
-A completed LOAD with SUT collection evidence can publish a separate, versioned offline report archive. The publisher verifies the source manifest and each observation sidecar, preserves the original sealed native archive byte-for-byte, and publishes an immutable snapshot. Its `att-load-report-extension/v2` manifest references the source-neutral `att-load-offline-observations/v1` record. The `att-load-offline-observation/v1` entries carry source, metric, profile, target, UTC window, phase, units, quality, checksums, and bounded chart previews for time series or one numeric value plus scope, immutable Workload/mix identity, call-group metadata, mapping quality, and unmatched-row count for a business metric. Unavailable values remain null; full sidecars retain the normalized `att-sut-metrics-observation/v1` contract. Partial or unavailable source data is reported explicitly and does not change the native Job result.
+A completed LOAD with SUT collection evidence can publish a separate, versioned offline report archive. The publisher verifies the source manifest and each observation sidecar, preserves the original sealed native archive byte-for-byte, and publishes an immutable snapshot. Its `att-load-report-extension/v2` manifest references the source-neutral `att-load-offline-observations/v1` record. The `att-load-offline-observation/v1` entries carry source, metric, profile, target, UTC window, phase, units, quality, checksums, and bounded chart previews for time series or one numeric value plus scope, immutable Workload/mix identity, call-group metadata, mapping quality, and unmatched-row count for a business metric. When the Job snapshot pins Metric Groups, the report includes safe group metadata (schema version, ID, title, order, `groupBy`, and display mode) and per-observation `groupView` assignments with labels and `groupBy` values; it does not publish raw `match` selectors. A static Group index links each assigned instance to its metric observation; unassigned and ambiguous observations remain listed with diagnostics. This index is navigation metadata and does not refetch or rewrite source observations. Group fields are optional, preserving compatibility with existing report archives. Unavailable values remain null; full sidecars retain normalized `att-sut-metrics-observation/v1` and v2 forms. Partial or unavailable source data is reported explicitly and does not change the native Job result.
 
 The report works without network access and uses a restrictive Content Security Policy. It does not evaluate performance thresholds. If a separately versioned `att-load-verdict/v1` record is supplied, the report displays its recorded evaluation state and evidence reference without recalculating the verdict. The archive is available through the authenticated Job download route only after verified publication.
 
@@ -3655,7 +3656,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.2.10",
+  "attVersion": "4.3.1",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -3694,7 +3695,7 @@ python3 tools/validate_reference_content.py
 ./att.sh validate --package
 ```
 
-`build.sh` runs the release gate, regenerates the modular Markdown Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven and Python 3. It outputs `att-4.2.10-local.tar.gz` for the CLI, `att-4.2.10-server.tar.gz` for the WAR and deployment guides, and `att-4.2.10-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
+`build.sh` runs the release gate, regenerates the modular Markdown Reference Manual, builds the application jar and release archives, and smoke-tests the extracted local package. It requires Java/Maven and Python 3. It outputs `att-4.3.1-local.tar.gz` for the CLI, `att-4.3.1-server.tar.gz` for the WAR and deployment guides, and `att-4.3.1-src.tar.gz` for source. Each binary archive must be smaller than 25 MB. The local package no longer includes the WAR or its duplicate runtime libraries.
 
 ### Runtime dependencies
 
@@ -3738,7 +3739,7 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 |---|---|
 | Schedule creation | att-schedule/v2 |
 | RUN definition | att-execution/v1 |
-| Global configuration | att-config/v2.13 |
+| Global configuration | att-config/v2.14 |
 | Package Manifest | att-package/v1 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
@@ -3757,9 +3758,15 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | SUT Metrics Data Source | att-sut-metrics-source/v1 |
 | SUT Metrics Profile | att-sut-metrics-profile/v1 |
 | SUT Metrics Job snapshot | att-sut-metrics-snapshot/v1 |
+| SUT Metric Source acquisition and output mapping | att-sut-metrics-metric-source/v1 |
+| SUT logical Metric Group | att-sut-metrics-group/v1 |
+| SUT flat Metrics Profile | att-sut-metrics-profile/v2 |
+| SUT Metrics Job snapshot | att-sut-metrics-snapshot/v2 |
+| Server-private SUT Metrics execution payload | att-sut-metrics-execution-payload/v2 |
 | SUT Metrics collection manifest | att-sut-metrics-manifest/v1 |
 | Embedded SUT Metrics manifest integrity history | att-sut-metrics-manifest-integrity/v1 |
 | SUT Metrics normalized observation | att-sut-metrics-observation/v1 |
+| SUT Metrics normalized observation | att-sut-metrics-observation/v2 |
 | SUT Metrics series sidecar | att-sut-metrics-series/v1 |
 | SUT Metrics threshold evaluation record | att-sut-threshold-evaluation/v1 |
 | Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
@@ -3774,7 +3781,7 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 
 For the changed resource/configuration schemas, older versions are historical definitions under `schemas/history/`; they are not active execution contracts unless the embedded Engine registry registers and supports them. Unsupported versions fail validation with migration guidance. The repository catalog at `schemas/catalog.yaml` is build input; at runtime, the registry embedded in the matching ATT Engine JAR is authoritative. The Engine parses its Classpath catalog once per JVM and reads schema bytes directly from the JAR. Compiled JSON validators are held in a bounded, in-memory cache keyed by registry digest and schema resource. A verified, content-addressed cache in a private per-user temporary directory remains only as a transitional bridge for Path-based compatibility APIs. It retains the active registry and the immediately previous version for rollback; older entries are deleted only when an exclusive OS lock confirms no Worker is using them, and interrupted cleanup is retried at the next initialization. An incomplete or tampered cache is rebuilt only when no process holds its use lease; otherwise validation fails closed and retries after the active Worker exits. Validation revisions bind Engine and registry identity, Package files, shared config files and selected Environment; Workers verify the registry identity supplied by the Server before handling requests. `ATT_HOME/schemas/` and package-local `schemas/` are not runtime sources and cannot override that registry. Package validation checks the Engine's registered schema resources; it does not enable compatibility for unregistered archived versions.
 
-The [SUT Metrics data source schema](../schemas/att-sut-metrics-source-v1.schema.json) (`att-sut-metrics-source/v1`) is part of the active Engine registry. Offline report metadata and externally supplied verdict records use standalone Server-side contracts under `schemas/api/`; they are not registered Engine execution schemas. See [Offline SUT metrics report](reference/results-reports-evidence.md).
+The [SUT Metrics data source schema](../schemas/att-sut-metrics-source-v1.schema.json) (`att-sut-metrics-source/v1`) remains the registered connection definition. The new [Metric Source schema](../schemas/att-sut-metrics-metric-source-v1.schema.json) (`att-sut-metrics-metric-source/v1`) describes one acquisition and its declared output mapping; it does not register a second Data Source, DBHelper, or Package Tool. The Server-private [SUT Metrics execution payload schema](../schemas/att-sut-metrics-execution-payload-v2.schema.json) (`att-sut-metrics-execution-payload/v2`) binds executable fetch/call data to the immutable Job snapshot and is never returned by an API or report. Offline report metadata and externally supplied verdict records use standalone Server-side contracts under `schemas/api/`; they are not registered Engine execution schemas. See [Offline SUT metrics report](reference/results-reports-evidence.md).
 
 <!-- att-docs:historical -->
 Load v1.6 and MQHelper v1.2 are compatible historical schemas supported by their loaders; their existing scalar routing and legacy evidence policies remain unchanged. New routing/quota fields require the active schema.
@@ -3863,6 +3870,11 @@ The historical `att-load-profile/v1.0` policy file is migration-only: rewrite it
 
 Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](reference/actions.md), [Runtime and Context Model](reference/runtime-context.md), [Load Mode](reference/execution-modes/load.md) and [Schema Matrix](reference/appendices/schema-matrix.md).
 
+### att-config/v2.14: centralized SUT Metrics catalog
+
+The current global config schema is `att-config/v2.14`. It adds bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays. These are authoritative in the selected server Runtime Config. Existing `att-config/v2.13` files remain compatible when they do not declare `sutMetrics`. To migrate `data/sut-metrics-catalog.json`, follow the explicit dry-run and apply workflow in the [SUT Metrics Runtime Config migration guide](guides/sut-metrics-config-migration.md). The tool validates a candidate, rejects duplicate IDs and conflicting definitions, and creates digest-named backups before applying.
+
+
 ### Historical schema migration
 
 ATT 3.6.2 uses `att-template/v3.6` and `att-flow/v3.6` as the active schemas. The published `att-template/v3.5`, `att-flow/v3.5`, and older definitions remain under `schemas/history/`; their historical DB and Render Actions are compatibility-only and are not part of the active contract. When migrating those descriptors, change their schema versions to v3.6 and apply the migration table's field changes.
@@ -3939,7 +3951,7 @@ Unexpected internal failures such as `NullPointerException`, `ClassCastException
 
 #### Why does `att.bat` ask for Maven, or why does a `.sh` Tool fail on windows?
 
-In a binary release, `att.bat` finds the versioned runtime JAR, such as `lib\att-local-4.2.10.jar`, and only requires Java 8+. Keep one `att-local-<version>.jar` in each `ATT_HOME/lib` so the launcher selects an unambiguous runtime. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
+In a binary release, `att.bat` finds the versioned runtime JAR, such as `lib\att-local-4.3.1.jar`, and only requires Java 8+. Keep one `att-local-<version>.jar` in each `ATT_HOME/lib` so the launcher selects an unambiguous runtime. In a source tree it compiles with Maven when Maven is on `PATH`; without Maven, previously compiled `target\classes` must exist. Use `att.bat version` to confirm the launcher before validating the package.
 
 The launcher makes ATT itself cross-platform; it cannot translate external tool executables. Configure a Windows-compatible `.bat`, `.cmd`, PowerShell script (with an explicit `powershell`/`pwsh` argv), or native executable instead of a POSIX-only `.sh` command. PATH validation follows Windows `PATHEXT`, so names such as `pwsh` can resolve `pwsh.exe`. Keep argument contracts and stdout output formats identical when maintaining platform variants.
 

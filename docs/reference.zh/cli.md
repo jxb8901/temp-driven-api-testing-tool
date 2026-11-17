@@ -1,6 +1,6 @@
 # CLI 參考
 
-<!-- att-doc-status: current release=4.2.10 -->
+<!-- att-doc-status: current release=4.3.1 -->
 
 
 ## 選擇命令
@@ -20,11 +20,11 @@
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
-上表列出 ATT 4.2.10 CLI command。獨立的 vNext proposal 尚未包含在此 release。
+上表列出 ATT 4.3.1 CLI command。獨立的 vNext proposal 尚未包含在此 release。
 
-## ATT 4.2.10 的可用性
+## ATT 4.3.1 的可用性
 
-本 Reference 說明 ATT 4.2.10 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](../interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
+本 Reference 說明 ATT 4.3.1 已發行的 CLI。vNext grammar 是獨立的[規劃中 proposal](../interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
 
 ## 編譯 source checkout
 
@@ -175,7 +175,7 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix�
 
 ## 完整 CLI option matrix
 
-`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.13` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
+`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.14` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
 
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 

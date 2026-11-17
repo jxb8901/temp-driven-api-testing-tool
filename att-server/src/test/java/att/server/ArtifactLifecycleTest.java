@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -96,8 +97,7 @@ class ArtifactLifecycleTest {
             job(runtime,id,"PASS","load");
             Files.writeString(runtime.outputDirectoryForJob(id).resolve("native.txt"),"native evidence");
             runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
-            runtime.sutMetrics.writeSnapshot(id,Map.of("schemaVersion",SutMetricsService.SNAPSHOT_SCHEMA,
-                    "snapshotId","snapshot-1","queries",List.of()));
+            runtime.sutMetrics.writeSnapshot(id,emptySutMetricsSnapshot());
             runtime.sutMetrics.jobFinished(id,null,null);
             awaitLoadReport(runtime,id,"FAILED","user-a");
             assertFalse(runtime.store.loadReportPublicationPending(id),"A deferred retry keeps recovery scheduled without fencing retention during backoff.");
@@ -184,6 +184,76 @@ class ArtifactLifecycleTest {
             assertTrue(runtime.store.markManualDeleting(manual.id,"operator"),"A READY report with no verdict remains manually deletable.");
             assertTrue(runtime.reconcileDeletingJobs());
             assertFalse(runtime.store.jobRowExists(manual.id));
+        }
+    }
+
+    @Test void oldReadyLoadReportsRebuildForGroupPolicyBeforeStatusOrDownload() throws Exception {
+        String directId="J0000000000000814",recoveryId="J0000000000000815",statusId="J0000000000000816";
+        String[] reportIds={directId,recoveryId,statusId};
+        Map<String,java.util.concurrent.atomic.AtomicInteger> reportAttempts=new java.util.concurrent.ConcurrentHashMap<>();
+        java.util.concurrent.CountDownLatch rebuildEntered=new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch releaseRebuild=new java.util.concurrent.CountDownLatch(1);
+        ServerRuntime.ArtifactPublisher publisher=(output,archive,validator)->{
+            if(archive.toString().contains("load-report-publications")) {
+                for(String reportId:reportIds) {
+                    if(!archive.toString().contains(reportId))continue;
+                    int attempt=reportAttempts.computeIfAbsent(reportId,ignored->new java.util.concurrent.atomic.AtomicInteger()).incrementAndGet();
+                    if(directId.equals(reportId)&&attempt==2) {
+                        rebuildEntered.countDown();
+                        if(!releaseRebuild.await(10,TimeUnit.SECONDS))throw new java.io.IOException("test did not release report rebuild");
+                    }
+                    break;
+                }
+            }
+            return ArtifactArchive.build(output,archive,validator);
+        };
+        try(ServerRuntime runtime=runtime(publisher,java.time.Clock.systemUTC())) {
+            publishReadyLoadReport(runtime,directId,"MET");
+            Path directCurrent=runtime.config.dataDir.resolve("jobs").resolve(directId).resolve("load-report-publications/v2/current.json");
+            String publishedVerdict=simulatePrePolicyReadyPointer(directCurrent,"f".repeat(64));
+            assertFalse(publishedVerdict.isBlank());
+
+            assertThrows(ServerRuntime.ArchiveUnavailableException.class,
+                    ()->runtime.openLoadReportV2Archive(directId,"user-a",true),
+                    "A READY pointer from the pre-policy format must be blocked and scheduled for rebuild.");
+            assertTrue(rebuildEntered.await(5,TimeUnit.SECONDS),"The policy migration must schedule a replacement publication.");
+            assertEquals("BUILDING",runtime.loadReportV2Status(directId,"user-a",true).get("state"));
+            assertThrows(ServerRuntime.ArchiveUnavailableException.class,
+                    ()->runtime.openLoadReportV2Archive(directId,"user-a",true),
+                    "The previous archive stays unavailable while the replacement is being built.");
+            java.lang.reflect.Field requestedField=ServerRuntime.class.getDeclaredField("requestedLoadReportV2Jobs");
+            requestedField.setAccessible(true);
+            assertFalse(((java.util.Set<?>)requestedField.get(runtime)).contains(directId),
+                    "Repeated status/download requests must not queue another migration rebuild while one is active.");
+
+            releaseRebuild.countDown();
+            awaitLoadReportGroupPolicy(runtime,directId);
+            Map<String,Object> rebuilt=runtime.loadReportV2Status(directId,"user-a",true);
+            assertEquals("READY",rebuilt.get("state"));
+            assertEquals(publishedVerdict,ServerRuntime.JSON.readTree(directCurrent.toFile()).path("verdictRecordSha256").asText(),
+                    "The regression keeps the verdict unchanged so the Group policy alone triggers publication.");
+
+            publishReadyLoadReport(runtime,recoveryId,"MET");
+            Path recoveryCurrent=runtime.config.dataDir.resolve("jobs").resolve(recoveryId).resolve("load-report-publications/v2/current.json");
+            String recoveryVerdict=simulatePrePolicyReadyPointer(recoveryCurrent,"e".repeat(64));
+            assertFalse(recoveryVerdict.isBlank());
+            runtime.store.loadReportRecoveryNeeded(recoveryId,true);
+            assertEquals(1,runtime.recoverLoadReportV2(),"Recovery must rebuild an old READY report even when its verdict digest is unchanged.");
+            awaitLoadReportGroupPolicy(runtime,recoveryId);
+            assertEquals(recoveryVerdict,ServerRuntime.JSON.readTree(recoveryCurrent.toFile()).path("verdictRecordSha256").asText());
+
+            publishReadyLoadReport(runtime,statusId,"MET");
+            Path statusCurrent=runtime.config.dataDir.resolve("jobs").resolve(statusId).resolve("load-report-publications/v2/current.json");
+            String statusVerdict=simulatePrePolicyReadyPointer(statusCurrent,"d".repeat(64));
+            assertFalse(statusVerdict.isBlank());
+            assertEquals("BUILDING",runtime.loadReportV2Status(statusId,"user-a",true).get("state"),
+                    "A status request must schedule a rebuild for an old-policy READY pointer.");
+            awaitLoadReportGroupPolicy(runtime,statusId);
+            assertEquals("READY",runtime.loadReportV2Status(statusId,"user-a",true).get("state"));
+            assertEquals(statusVerdict,ServerRuntime.JSON.readTree(statusCurrent.toFile()).path("verdictRecordSha256").asText());
+            for(String reportId:reportIds)assertEquals(2,reportAttempts.get(reportId).get());
+        } finally {
+            releaseRebuild.countDown();
         }
     }
 
@@ -747,12 +817,35 @@ class ArtifactLifecycleTest {
                 "; currentVerdict="+SutMetricsOfflineReportPublisher.verdictRecordSha256(id,runtime.config.dataDir.resolve("jobs").resolve(id)));
     }
 
+    private void awaitLoadReportGroupPolicy(ServerRuntime runtime,String id) throws Exception {
+        Path current=runtime.config.dataDir.resolve("jobs").resolve(id).resolve("load-report-publications/v2/current.json");
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+        do {
+            var pointer=ServerRuntime.JSON.readTree(current.toFile());
+            if("READY".equals(pointer.path("state").asText())
+                    &&SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY.equals(pointer.path("groupMetadataPolicy").asText()))return;
+            Thread.sleep(20);
+        } while(System.nanoTime()<deadline);
+        fail("Expected a READY report with the current Group metadata policy; pointer="+Files.readString(current));
+    }
+
+    private String simulatePrePolicyReadyPointer(Path current,String legacyPublicationId) throws Exception {
+        com.fasterxml.jackson.databind.node.ObjectNode pointer=(com.fasterxml.jackson.databind.node.ObjectNode)ServerRuntime.JSON.readTree(current.toFile());
+        String publicationId=pointer.path("publicationId").asText();
+        assertNotEquals(legacyPublicationId,publicationId);
+        Path snapshots=current.getParent().resolve("snapshots");
+        Files.move(snapshots.resolve(publicationId+".zip"),snapshots.resolve(legacyPublicationId+".zip"));
+        pointer.put("publicationId",legacyPublicationId);pointer.put("archiveName",legacyPublicationId+".zip");
+        pointer.remove("groupMetadataPolicy");
+        Files.write(current,ServerRuntime.JSON.writeValueAsBytes(pointer));
+        return pointer.path("verdictRecordSha256").asText();
+    }
+
     private Job publishReadyLoadReport(ServerRuntime runtime,String id,String externalEvaluationStatus) throws Exception {
         Job job=job(runtime,id,"PASS","load");
         Files.writeString(runtime.outputDirectoryForJob(id).resolve("native.txt"),"native evidence");
         runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"READY");
-        runtime.sutMetrics.writeSnapshot(id,Map.of("schemaVersion",SutMetricsService.SNAPSHOT_SCHEMA,
-                "snapshotId","snapshot-"+id,"queries",List.of()));
+        runtime.sutMetrics.writeSnapshot(id,emptySutMetricsSnapshot());
         if(externalEvaluationStatus!=null) {
             Path verdict=runtime.config.dataDir.resolve("jobs").resolve(id).resolve("load-verdict/v1/manifest.json");
             Files.createDirectories(verdict.getParent());
@@ -770,5 +863,21 @@ class ArtifactLifecycleTest {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);Map<String,Object> index;
         do {index=runtime.artifactIndex(id);if(expected.equals(index.get("archiveStatus")))return;Thread.sleep(10);}while(System.nanoTime()<deadline);
         fail("Expected "+expected+" but got "+index);
+    }
+
+    private static Map<String,Object> emptySutMetricsSnapshot() {
+        Map<String,Object> profile=Map.of("schemaVersion","att-sut-metrics-profile/v2","id","empty-test-profile",
+                "revision","a".repeat(64),"migration","native-v2");
+        Map<String,Object> snapshot=new LinkedHashMap<>();
+        snapshot.put("schemaVersion",SutMetricsService.SNAPSHOT_SCHEMA);
+        snapshot.put("snapshotId","b".repeat(64));
+        snapshot.put("createdAt",Instant.now().toString());
+        snapshot.put("profile",profile);
+        snapshot.put("metricSources",List.of());snapshot.put("groups",List.of());snapshot.put("bindings",List.of());
+        snapshot.put("fetchPlan",List.of());snapshot.put("expectedSubjects",List.of());
+        snapshot.put("collection",Map.of());snapshot.put("livePreview",Map.of());snapshot.put("provenance",List.of());
+        snapshot.put("queries",List.of());snapshot.put("sources",Map.of());snapshot.put("budgets",Map.of());
+        snapshot.put("executionPayloadSha256","c".repeat(64));
+        return snapshot;
     }
 }

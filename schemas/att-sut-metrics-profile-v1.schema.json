@@ -162,6 +162,18 @@
               "pattern": ";"
             }
           },
+          "metricName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z_:][A-Za-z0-9_:]*$"
+          },
+          "discriminator": {
+            "type": "object",
+            "maxProperties": 40,
+            "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+            "additionalProperties": { "type": "string", "maxLength": 512 }
+          },
           "call": {
             "type": "string",
             "minLength": 1,
@@ -219,6 +231,24 @@
                 "minLength": 1,
                 "maxLength": 128,
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+              },
+              "labels": {
+                "type": "object",
+                "maxProperties": 40,
+                "propertyNames": { "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                "additionalProperties": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
+              },
+              "allowedLabels": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 40,
+                "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+              },
+              "labelColumns": {
+                "type": "object",
+                "maxProperties": 40,
+                "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                "additionalProperties": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
               }
             },
             "allOf": [

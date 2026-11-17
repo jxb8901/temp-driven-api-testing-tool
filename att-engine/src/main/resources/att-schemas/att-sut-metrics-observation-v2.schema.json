@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:sut-metrics-observation:v2",
+  "title": "ATT normalized SUT metric observation v2",
+  "description": "One metric output for one target, label set, subject, and temporal window. Group membership is presentation metadata and is not part of identity.",
+  "type": "object",
+  "required": ["schemaVersion", "observationId", "identity", "metric", "data", "acquisition"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "att-sut-metrics-observation/v2" },
+    "observationId": { "$ref": "#/$defs/revision" },
+    "identity": {
+      "type": "object",
+      "required": ["metricId", "binding", "target", "labels", "subject", "window"],
+      "additionalProperties": false,
+      "properties": {
+        "metricId": { "$ref": "#/$defs/id" },
+        "binding": {
+          "type": "object",
+          "required": ["sourceId", "fetchId"],
+          "additionalProperties": false,
+          "properties": {
+            "sourceId": { "$ref": "#/$defs/id" },
+            "fetchId": { "$ref": "#/$defs/id" }
+          }
+        },
+        "target": {
+          "type": "object",
+          "required": ["id", "type"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "type": { "type": "string", "minLength": 1, "maxLength": 80 }
+          }
+        },
+        "labels": {
+          "type": "object",
+          "maxProperties": 40,
+          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+          "additionalProperties": { "type": "string", "maxLength": 512 }
+        },
+        "subject": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["scope"],
+              "additionalProperties": false,
+              "properties": {
+                "scope": { "enum": ["job", "workload", "mix"] },
+                "workloadId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
+                "mixId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" }
+              },
+              "allOf": [
+                { "if": { "properties": { "scope": { "const": "job" } } }, "then": { "not": { "anyOf": [{ "required": ["workloadId"] }, { "required": ["mixId"] }] } } },
+                { "if": { "properties": { "scope": { "const": "workload" } } }, "then": { "required": ["workloadId"], "not": { "required": ["mixId"] } } },
+                { "if": { "properties": { "scope": { "const": "mix" } } }, "then": { "required": ["workloadId", "mixId"] } }
+              ]
+            }
+          ]
+        },
+        "window": {
+          "type": "object",
+          "required": ["kind", "startAt", "endAt", "semantics"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "enum": ["sampled-time-series", "timed-snapshot", "window-aggregate"] },
+            "startAt": { "type": "string", "format": "date-time" },
+            "endAt": { "type": "string", "format": "date-time" },
+            "step": { "type": ["string", "null"], "maxLength": 16 },
+            "semantics": { "type": "string", "minLength": 1, "maxLength": 240 }
+          }
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "required": ["id", "name", "unit", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "unit": { "enum": ["percent", "bytes", "bytes_per_second", "seconds", "milliseconds", "count", "transactions", "ratio", "cores", "custom"] },
+        "kind": { "enum": ["gauge", "rate", "counter", "histogram"] }
+      }
+    },
+    "data": {
+      "type": "object",
+      "required": ["state", "freshness", "diagnostics"],
+      "additionalProperties": false,
+      "properties": {
+        "state": { "enum": ["AVAILABLE", "PARTIAL", "NO_DATA", "UNAVAILABLE", "NOT_EVALUATED"] },
+        "freshness": { "enum": ["FRESH", "STALE", "UNKNOWN"] },
+        "coverage": { "$ref": "#/$defs/coverage" },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["code", "message"],
+            "additionalProperties": false,
+            "properties": {
+              "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,79}$" },
+              "message": { "type": "string", "maxLength": 240 }
+            }
+          }
+        },
+        "series": {
+          "type": "array",
+          "maxItems": 250000,
+          "items": {
+            "type": "object",
+            "required": ["timestamp", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "timestamp": { "type": "string", "format": "date-time" },
+              "value": { "type": "number" }
+            }
+          }
+        },
+        "value": { "type": ["number", "null"] }
+      },
+      "oneOf": [
+        { "required": ["series"], "not": { "required": ["value"] } },
+        { "required": ["value"], "not": { "required": ["series"] } }
+      ]
+    },
+    "acquisition": {
+      "type": "object",
+      "required": ["invocationId", "source", "fetch", "execution"],
+      "additionalProperties": false,
+      "properties": {
+        "invocationId": { "$ref": "#/$defs/revision" },
+        "source": {
+          "type": "object",
+          "required": ["id", "revision", "connectionKind"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "revision": { "$ref": "#/$defs/revision" },
+            "connectionKind": { "enum": ["DATA_SOURCE", "DBHELPER", "PACKAGE_TOOL", "LEGACY"] }
+          }
+        },
+        "fetch": {
+          "type": "object",
+          "required": ["id", "revision"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/$defs/id" },
+            "revision": { "$ref": "#/$defs/revision" }
+          }
+        },
+        "execution": {
+          "type": "object",
+          "required": ["state", "requestCount", "diagnostics"],
+          "additionalProperties": false,
+          "properties": {
+            "state": { "enum": ["SUCCEEDED", "PARTIAL", "FAILED", "NOT_RUN"] },
+            "startedAt": { "type": ["string", "null"], "format": "date-time" },
+            "completedAt": { "type": ["string", "null"], "format": "date-time" },
+            "durationMs": { "type": "integer", "minimum": 0 },
+            "requestCount": { "type": "integer", "minimum": 0, "maximum": 32 },
+            "diagnostics": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 80 } }
+          }
+        },
+        "job": {
+          "type": "object",
+          "required": ["jobId", "snapshotId"],
+          "additionalProperties": false,
+          "properties": {
+            "jobId": { "type": "string", "pattern": "^J[A-F0-9]{16}$" },
+            "snapshotId": { "$ref": "#/$defs/revision" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
+    "revision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "coverage": {
+      "type": "object",
+      "required": ["sampleCount", "seriesCount", "gapCount", "windowStart", "windowEnd"],
+      "additionalProperties": false,
+      "properties": {
+        "sampleCount": { "type": "integer", "minimum": 0 },
+        "seriesCount": { "type": "integer", "minimum": 0 },
+        "gapCount": { "type": "integer", "minimum": 0 },
+        "firstSampleAt": { "type": ["string", "null"], "format": "date-time" },
+        "lastSampleAt": { "type": ["string", "null"], "format": "date-time" },
+        "windowStart": { "type": "string", "format": "date-time" },
+        "windowEnd": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

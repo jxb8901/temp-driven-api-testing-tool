@@ -1,6 +1,6 @@
 # ATT environment profile examples
 
-ATT uses `att-config/v2.13` profiles to select shared Helper and Testdata descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. Business Tools are owned by their Package under `packages/<id>/tools/`; they are not registered through global `tools` or `toolGroups` entries. The active DBHelper, MQHelper, HTTPHelper, SSHHelper, Package Tool Group and Testdata schemas are listed in [the active schema matrix](../../docs/reference/appendices/schema-matrix.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
+ATT uses `att-config/v2.14` profiles to select shared Helper and Testdata descriptor lists while keeping Template, Flow, Action and Tool IDs stable across environments. Business Tools are owned by their Package under `packages/<id>/tools/`; they are not registered through global `tools` or `toolGroups` entries. The active DBHelper, MQHelper, HTTPHelper, SSHHelper, Package Tool Group and Testdata schemas are listed in [the active schema matrix](../../docs/reference/appendices/schema-matrix.md). Older schemas are historical references under `schemas/history/`, not runtime compatibility contracts.
 
 ## Shared configuration and profile bindings
 
@@ -8,7 +8,7 @@ The package keeps common behavior in one `config/config.yaml`. Each profile may 
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 environment: SIT
 templates: {root: templates}
 testcase: {root: testcase}

@@ -220,7 +220,8 @@ final class ServerRuntime implements AutoCloseable {
                   LoadProgressPersistence loadProgressPersistence,Function<String,String> secretResolver) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
         this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;
-        try{this.sutMetrics=new SutMetricsService(config.dataDir,secretResolver,this::sutMetricsManifestPublished);}
+        try{this.sutMetrics=new SutMetricsService(config.dataDir,config.runtimeConfigPath,
+                ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),secretResolver,this::sutMetricsManifestPublished);}
         catch(Exception failed){store.close();throw failed;}
         this.sutMetrics.setBusinessCallExecutor(this::openBusinessCallSession);
         try{this.auth=new AuthService(config,store);}catch(Exception failed){sutMetrics.close();store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
@@ -671,7 +672,7 @@ final class ServerRuntime implements AutoCloseable {
                 input.set("inlineLoadScenario",JSON.valueToTree(draft==null?catalog.scenario:draft.scenario));input.put("expectedRevisionDigest",review.selectedRevision);
                 if(draft==null&&catalog.resourceId!=null)input.put("scenario",catalog.resourceId);
                 input.set("configurationProvenance",JSON.valueToTree(review.configuration));
-                Map<String,Object> sutSnapshot=draft==null?sutMetrics.snapshotForJob(id):draft.sutMetricsSnapshot;
+                Map<String,Object> sutSnapshot=draft==null?sutMetrics.snapshotForExecution(id):draft.sutMetricsSnapshot;
                 if(sutSnapshot!=null) {
                     sutMetrics.authorizeSnapshot(sutSnapshot,principal,sutAdminPrincipal(principal));
                     input.set("sutMetricsSnapshot",JSON.valueToTree(sutSnapshot));
@@ -748,7 +749,8 @@ final class ServerRuntime implements AutoCloseable {
             if(!serverIssuedDraft||!"load".equals(command)||!input.path("sutMetricsSnapshot").isObject())
                 throw new IllegalArgumentException("SUT Metrics snapshots are server-issued Job metadata.");
             submittedSutSnapshot=JSON.convertValue(input.path("sutMetricsSnapshot"),Map.class);
-            if(!SutMetricsService.SNAPSHOT_SCHEMA.equals(submittedSutSnapshot.get("schemaVersion")))
+            if(!SutMetricsService.SNAPSHOT_SCHEMA.equals(submittedSutSnapshot.get("schemaVersion"))
+                    &&!SutMetricsService.LEGACY_SNAPSHOT_SCHEMA.equals(submittedSutSnapshot.get("schemaVersion")))
                 throw new IllegalArgumentException("Unsupported SUT Metrics snapshot schema.");
         }
         if(serverIssuedDraft&&"load".equals(command)) {
@@ -1392,10 +1394,16 @@ final class ServerRuntime implements AutoCloseable {
     }
     Map<String,Object> sutMetricSources(String principal,boolean admin) { return sutMetrics.listSources(principal,admin); }
     Map<String,Object> sutMetricProfiles(String principal,boolean admin) { return sutMetrics.listProfiles(principal,admin); }
+    Map<String,Object> sutMetricSourcesV2(String principal,boolean admin) { return sutMetrics.listMetricSources(principal,admin); }
+    Map<String,Object> sutMetricGroups(String principal,boolean admin) { return sutMetrics.listGroups(principal,admin); }
     Map<String,Object> saveSutMetricSource(Map<String,Object> value) throws Exception { return sutMetrics.upsertSource(value); }
     Map<String,Object> saveSutMetricProfile(Map<String,Object> value) throws Exception { return sutMetrics.upsertProfile(value); }
+    Map<String,Object> saveSutMetricSourceV2(Map<String,Object> value) throws Exception { return sutMetrics.upsertMetricSource(value); }
+    Map<String,Object> saveSutMetricGroup(Map<String,Object> value) throws Exception { return sutMetrics.upsertGroup(value); }
     Map<String,Object> deleteSutMetricSource(String id) throws Exception { return sutMetrics.deleteSource(id); }
     Map<String,Object> deleteSutMetricProfile(String id) throws Exception { return sutMetrics.deleteProfile(id); }
+    Map<String,Object> deleteSutMetricSourceV2(String id) throws Exception { return sutMetrics.deleteMetricSource(id); }
+    Map<String,Object> deleteSutMetricGroup(String id) throws Exception { return sutMetrics.deleteGroup(id); }
     Map<String,Object> testSutMetricSource(String id) throws Exception { return sutMetrics.testSource(id); }
     Map<String,Object> previewSutMetrics(Map<String,Object> observability,String principal,boolean admin) {
         return sutMetrics.previewResolution(observability,principal,admin);
@@ -1424,7 +1432,7 @@ final class ServerRuntime implements AutoCloseable {
         response.put("state",page.get("manifest") instanceof Map<?,?> manifest?manifest.get("state"):"PENDING");
         response.put("jobId",id);response.put("snapshotId",snapshot.get("snapshotId"));
         response.put("livePreview",snapshot.get("livePreview"));response.put("collection",page.get("manifest"));
-        response.put("items",page.get("items"));response.put("nextOffset",page.get("nextOffset"));
+        response.put("groups",page.get("groups"));response.put("items",page.get("items"));response.put("nextOffset",page.get("nextOffset"));
         response.put("provisional",page.get("provisional"));
         response.put("thresholdEvaluation",thresholdEvaluationOrUnavailable(id,snapshot));
         Map<String,Object> result=resultRecord(id);
@@ -5546,11 +5554,16 @@ final class ServerRuntime implements AutoCloseable {
         if(pointer.isEmpty())return reportV2Status("PENDING",String.valueOf(collection.get("state")),null,null,null,null);
         String state=String.valueOf(pointer.getOrDefault("state","FAILED"));
         if("READY".equals(state)) {
-            try {
-                String currentVerdict=SutMetricsOfflineReportPublisher.verdictRecordSha256(id,config.dataDir.resolve("jobs").resolve(id));
-                if(!java.util.Objects.equals(currentVerdict,nullableText(pointer.get("verdictRecordSha256"))))loadVerdictPublished(id);
-            } catch(Exception invalidVerdict) {
-                java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine("Offline SUT report verdict metadata is unavailable");
+            if(!SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY.equals(pointer.get("groupMetadataPolicy"))) {
+                refreshOldPolicyLoadReportV2(id);
+                state="BUILDING";
+            } else {
+                try {
+                    String currentVerdict=SutMetricsOfflineReportPublisher.verdictRecordSha256(id,config.dataDir.resolve("jobs").resolve(id));
+                    if(!java.util.Objects.equals(currentVerdict,nullableText(pointer.get("verdictRecordSha256"))))loadVerdictPublished(id);
+                } catch(Exception invalidVerdict) {
+                    java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine("Offline SUT report verdict metadata is unavailable");
+                }
             }
         }
         String archiveName=nullableText(pointer.get("archiveName"));
@@ -5597,6 +5610,11 @@ final class ServerRuntime implements AutoCloseable {
             Map<String,Object> pointer=readLoadReportV2Pointer(id);
             String archiveName=nullableText(pointer.get("archiveName"));
             String expectedSha256=nullableText(pointer.get("archiveSha256"));
+            if("READY".equals(pointer.get("state"))
+                    &&!SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY.equals(pointer.get("groupMetadataPolicy"))) {
+                refreshOldPolicyLoadReportV2(id);
+                throw new ArchiveUnavailableException("BUILDING");
+            }
             if(!"READY".equals(pointer.get("state"))||archiveName==null||!archiveName.matches("[a-f0-9]{64}\\.zip")
                     ||expectedSha256==null||!expectedSha256.matches("[a-f0-9]{64}"))
                 throw new ArchiveUnavailableException(String.valueOf(pointer.getOrDefault("state","PENDING")));
@@ -5619,6 +5637,13 @@ final class ServerRuntime implements AutoCloseable {
     void refreshLoadReportV2(String id) {
         if(id==null||!JOB_ID.matcher(id).matches()||closing)return;
         scheduleLoadReportV2(id);
+    }
+
+    private void refreshOldPolicyLoadReportV2(String id) {
+        synchronized(loadReportV2ScheduleLock) {
+            if(pendingLoadReportV2Jobs.contains(id))return;
+            scheduleLoadReportV2(id);
+        }
     }
 
     private void sutMetricsManifestPublished(Path manifestPath) {
@@ -5693,6 +5718,7 @@ final class ServerRuntime implements AutoCloseable {
             pointer.put("nativeArchiveSha256",publication.nativeArchiveSha256());pointer.put("collectionState",publication.collectionState());
             pointer.put("externalEvaluationStatus",publication.externalEvaluationStatus());
             pointer.put("verdictRecordSha256",publication.verdictRecordSha256());
+            pointer.put("groupMetadataPolicy",SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY);
             pointer.put("retryCount",0);pointer.remove("nextRetryAt");
             if(publication.performanceVerdict()!=null)pointer.put("performanceVerdict",publication.performanceVerdict());
             pointer.put("updatedAt",clock.instant().toString());
@@ -5754,6 +5780,10 @@ final class ServerRuntime implements AutoCloseable {
                 pointer=readLoadReportV2Pointer(id);
                 String state=String.valueOf(pointer.getOrDefault("state","PENDING"));
                 if("READY".equals(state)) {
+                    if(!SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY.equals(pointer.get("groupMetadataPolicy"))) {
+                        refreshOldPolicyLoadReportV2(id);
+                        continue;
+                    }
                     String currentDigest=SutMetricsOfflineReportPublisher.verdictRecordSha256(id,config.dataDir.resolve("jobs").resolve(id));
                     String publishedDigest=nullableText(pointer.get("verdictRecordSha256"));
                     if(!java.util.Objects.equals(currentDigest,publishedDigest)) { refreshLoadReportV2(id); continue; }

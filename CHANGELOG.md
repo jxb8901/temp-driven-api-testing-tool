@@ -1,8 +1,11 @@
-# ATT 4.3.1 - planned (not released)
+# ATT 4.3.1 - release candidate (2026-11-16; not released)
 
-- Planned: fetch-centric Metric Sources with one acquisition mapped to multiple explicitly defined metric outputs (SQL wide rows and Prometheus labelled series), independent Logical Metric Groups and presentation-focused Profiles.
-- Planned: backward-compatible versioned observation/snapshot contracts, group-aware Studio/Reports and release validation; no dynamic Long Rows / Metric Name-value pivot in 4.3.1.
-- Do not tag or publish 4.3.1 until all linked issues and the full release gate are complete.
+- Add versioned Metric Source, Metric Group, flat Profile, normalized Observation v2, Job snapshot v2, and execution payload v2 contracts with bounded schema validation and v1 compatibility readers (#374).
+- Reuse one admitted acquisition for multiple explicitly mapped outputs from SQL/Package Tool wide rows or Prometheus labelled series; preserve per-output quality, labels, provenance, and time coverage (#375).
+- Resolve pinned logical Groups over observations without new source calls or implicit aggregation; enforce source, fetch, output, label, row, series, sample, and artifact budgets (#376).
+- Add Settings authoring and static previews, group-aware Job Details and Correlation views, and a self-contained offline report Group index while preserving sealed native artifacts (#377).
+- Keep historical v1 Job contracts readable and avoid rewriting old snapshots or reports. This release adds no Long Rows, dynamic metric-name pivot, or new threshold engine (#374–#377).
+- Release acceptance is in progress under #378. Do not tag or publish until the exact release candidate passes hosted CI and the complete package gate.
 
 # ATT 4.3.0 - release preparation (2026-11-16)
 

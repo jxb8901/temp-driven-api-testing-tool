@@ -74,9 +74,9 @@ actions:
 
 ## 選擇 environment profile
 
-`att-config/v2.13` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper 與 HTTPHelper lists；Package Testdata lists 由 `package.yaml` 管理。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](test-authoring.md) 見對應頁面。
+`att-config/v2.14` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper 與 HTTPHelper lists；Package Testdata lists 由 `package.yaml` 管理。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](test-authoring.md) 見對應頁面。
 
-ATT 使用一份 common `att-config/v2.13` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
+ATT 使用一份 common `att-config/v2.14` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -106,7 +106,7 @@ common config 保留 run/execution/report 與全局 DB/MQ/HTTP/SSH Helpers。Too
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 environment: SIT                 # default；--env 会覆盖
 templates: {root: templates}
 testcase: {root: testcase}
@@ -119,7 +119,7 @@ environments:
     mqhelpers: [config/mqhelpers/uat/payment.yaml]
 ```
 
-SIT 與 UAT Config 只保留共用 Helper/Environment 綁定；`invokePaymentApi` 與 `sample.getAcDate` 改由所選 Package 提供。升級至 4.2.10 時必須明確遷移舊式全局 Tools。
+SIT 與 UAT Config 只保留共用 Helper/Environment 綁定；`invokePaymentApi` 與 `sample.getAcDate` 改由所選 Package 提供。升級至目前的 ATT runtime 前，必須明確遷移舊式全局 Tools。
 
 SIT 與 UAT 的 DBHelper 都保持 `id: orders`，只改變 JDBC URL 等 physical connection details；MQHelper 都保持 `id: payment`，只改變 host、queue manager、port 和 channel。包含完整 descriptor、pool 和安全 evidence policy 的可復制例子見 [`examples/environments/README.md`](../../examples/environments/README.md)。
 
@@ -192,7 +192,7 @@ Repository `schemas/catalog.yaml` 是建立版本相符 ATT Engine JAR 內嵌 re
 以下 configuration example 與 field table 和英文版共用相同 contract；欄位名與 literal values 保留英文。
 
 ```yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -226,7 +226,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | 現行版本：`att-config/v2.13`；上一版 schema 仍受支援。本例採用現行 schema。 |
+| `schemaVersion` | required | 現行版本：`att-config/v2.14`；上一版 schema 仍受支援。本例採用現行 schema。 |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |

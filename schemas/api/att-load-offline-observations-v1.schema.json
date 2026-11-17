@@ -68,6 +68,11 @@
         "$ref": "#/$defs/query"
       }
     },
+    "groups": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/group" }
+    },
     "observations": {
       "type": "array",
       "maxItems": 256,
@@ -146,6 +151,68 @@
     }
   },
   "$defs": {
+    "labels": {
+      "type": "object",
+      "maxProperties": 40,
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+      "additionalProperties": { "type": "string", "maxLength": 512 }
+    },
+    "group": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "title", "order", "groupBy", "display"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "const": "att-sut-metrics-group/v1" },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "order": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "groupBy": { "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "type": "string", "maxLength": 64 } },
+        "display": { "enum": ["auto", "summary", "table", "chart"] }
+      }
+    },
+    "groupView": {
+      "type": "object",
+      "required": ["schemaVersion", "assignments", "unassigned", "diagnostics"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "const": "att-sut-metrics-group-view/v1" },
+        "assignments": {
+          "type": "array", "maxItems": 4096,
+          "items": { "type": "object", "required": ["observationId", "groupId", "labels", "groupBy"],
+            "properties": {
+              "observationId": { "type": "string", "maxLength": 64 }, "groupId": { "type": "string", "maxLength": 80 },
+              "title": { "type": "string", "maxLength": 120 }, "order": { "type": "integer" },
+              "display": { "type": "string", "maxLength": 16 }, "labels": { "$ref": "#/$defs/labels" },
+              "groupBy": { "$ref": "#/$defs/labels" },
+              "value": { "type": ["number", "null"] },
+              "status": { "enum": ["AVAILABLE", "PARTIAL", "NO_DATA", "UNAVAILABLE", "NOT_EVALUATED"] },
+              "freshness": { "enum": ["FRESH", "STALE", "UNKNOWN"] },
+              "observedAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "unassigned": {
+          "type": "array", "maxItems": 4096,
+          "items": { "type": "object", "required": ["observationId", "labels"],
+            "properties": {
+              "observationId": { "type": "string", "maxLength": 64 }, "metricId": { "type": "string", "maxLength": 80 },
+              "sourceId": { "type": "string", "maxLength": 120 }, "reason": { "type": "string", "maxLength": 40 },
+              "labels": { "$ref": "#/$defs/labels" }
+            }
+          }
+        },
+        "diagnostics": {
+          "type": "array", "maxItems": 4096,
+          "items": { "type": "object", "required": ["code", "observationId", "message"],
+            "properties": {
+              "code": { "type": "string", "maxLength": 64 }, "observationId": { "type": "string", "maxLength": 64 },
+              "groupId": { "type": "string", "maxLength": 80 }, "groupIds": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 80 } },
+              "label": { "type": "string", "maxLength": 64 }, "message": { "type": "string", "maxLength": 256 }
+            }
+          }
+        }
+      }
+    },
     "digest": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
@@ -414,6 +481,34 @@
                     "gapBefore": {
                       "type": "boolean"
                     }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "groupView": { "$ref": "#/$defs/groupView" },
+        "labeledValues": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "type": "object",
+            "required": ["labels", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "labels": { "$ref": "#/$defs/labels" },
+              "value": { "type": ["number", "null"] },
+              "state": { "enum": ["AVAILABLE", "PARTIAL", "NO_DATA", "UNAVAILABLE", "NOT_EVALUATED"] },
+              "diagnostics": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "type": "object",
+                  "required": ["code", "message"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,79}$" },
+                    "message": { "type": "string", "maxLength": 240 }
                   }
                 }
               }

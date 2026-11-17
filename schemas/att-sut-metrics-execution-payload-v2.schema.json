@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:sut-metrics-execution-payload:v2",
+  "title": "Private SUT Metrics execution payload",
+  "description": "Server-private payload paired by digest with an immutable Job snapshot. Never return this file through an API or report.",
+  "type": "object",
+  "required": ["schemaVersion", "jobId", "fetches", "sources"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "att-sut-metrics-execution-payload/v2" },
+    "jobId": { "type": "string", "pattern": "^J[A-F0-9]{16}$" },
+    "fetches": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "query": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "call": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "parameters": { "type": "object", "maxProperties": 32, "additionalProperties": { "type": ["string", "number", "boolean"] } }
+        },
+        "oneOf": [
+          { "required": ["query"], "not": { "required": ["call"] } },
+          { "required": ["call"], "not": { "required": ["query"] } }
+        ]
+      }
+    },
+    "sources": { "type": "object", "maxProperties": 64, "additionalProperties": { "type": "object" } }
+  }
+}

@@ -30,6 +30,12 @@ class RuntimeConfigurationValidatorTest {
         assertEquals(Arrays.asList("SIT","UAT"),profiles);
         JsonSchemaVerifier.verify(SchemaFiles.resolveVersion(temp,"att-validation/v1"),report.toMap());
         assertDoesNotThrow(()->SchemaFiles.historicalSchemaVersions(temp));
+        assertDoesNotThrow(() -> SchemaFiles.resolveVersion(temp, "att-sut-metrics-observation/v1"));
+        assertDoesNotThrow(() -> SchemaFiles.resolveVersion(temp, "att-sut-metrics-observation/v2"));
+        assertDoesNotThrow(() -> SchemaFiles.resolveVersion(temp, "att-sut-metrics-profile/v1"));
+        assertDoesNotThrow(() -> SchemaFiles.resolveVersion(temp, "att-sut-metrics-profile/v2"));
+        assertDoesNotThrow(() -> SchemaFiles.resolveVersion(temp, "att-sut-metrics-snapshot/v1"));
+        assertDoesNotThrow(() -> SchemaFiles.resolveVersion(temp, "att-sut-metrics-snapshot/v2"));
     }
 
     @Test void allProfileValidationReportsPartialWhenTheEnvironmentBoundIsReached() throws Exception {

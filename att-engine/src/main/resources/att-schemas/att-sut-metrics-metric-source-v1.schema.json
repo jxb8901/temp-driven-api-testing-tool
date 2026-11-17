@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:sut-metrics-metric-source:v1",
+  "title": "ATT SUT Metric Source acquisition and mapping definition",
+  "description": "A Metric Source defines one bounded acquisition over an existing connection. It does not register a Data Source, DBHelper, or Package Tool.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "name", "connection", "fetch", "mapping", "limits"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "att-sut-metrics-metric-source/v1" },
+    "id": { "$ref": "#/$defs/id" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "description": { "type": "string", "maxLength": 512 },
+    "revision": { "$ref": "#/$defs/revision" },
+    "connection": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["DATA_SOURCE", "DBHELPER", "PACKAGE_TOOL"] },
+        "id": { "$ref": "#/$defs/id" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "packageRevision": { "$ref": "#/$defs/revision" },
+        "runtimeConfigRevision": { "$ref": "#/$defs/revision" }
+      }
+    },
+    "fetch": {
+      "type": "object",
+      "required": ["id", "mode", "parameters"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "mode": { "enum": ["prometheus-range", "dbhelper-query", "package-tool"] },
+        "query": { "type": "string", "minLength": 1, "maxLength": 4096, "not": { "pattern": ";" } },
+        "call": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$" },
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        },
+        "sampling": { "enum": ["range", "afterDrain", "steadyWindow"] },
+        "window": { "enum": ["steady", "afterDrain"] },
+        "step": { "type": "string", "maxLength": 16 },
+        "sideEffectsAcknowledged": { "type": "boolean" }
+      },
+      "oneOf": [
+        {
+          "properties": { "mode": { "const": "prometheus-range" } },
+          "required": ["query", "sampling", "step"],
+          "not": { "required": ["call"] }
+        },
+        {
+          "properties": { "mode": { "const": "dbhelper-query" } },
+          "required": ["call", "sampling"],
+          "not": { "required": ["query"] }
+        },
+        {
+          "properties": { "mode": { "const": "package-tool" } },
+          "required": ["call", "sampling"],
+          "not": { "required": ["query"] }
+        }
+      ]
+    },
+    "mapping": {
+      "type": "object",
+      "required": ["outputs"],
+      "additionalProperties": false,
+      "properties": {
+        "labels": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["retain"],
+              "additionalProperties": false,
+              "properties": {
+                "retain": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "maxItems": 40,
+                  "items": { "type": "string", "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "maxProperties": 40,
+              "propertyNames": { "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+              "additionalProperties": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
+            }
+          ]
+        },
+        "allowedLabels": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 40,
+          "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+        },
+        "labelColumns": {
+          "type": "object",
+          "maxProperties": 40,
+          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+          "additionalProperties": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
+        },
+        "outputs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "unit", "kind"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+              "unit": { "enum": ["percent", "bytes", "bytes_per_second", "seconds", "milliseconds", "count", "transactions", "ratio", "cores", "custom"] },
+              "kind": { "enum": ["gauge", "rate", "counter", "histogram"] },
+              "column": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" },
+              "metricName": { "type": "string", "maxLength": 128 },
+              "discriminator": {
+                "type": "object",
+                "maxProperties": 16,
+                "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                "additionalProperties": { "type": "string", "maxLength": 128 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "required": ["maxRows", "maxSeries", "maxSamples", "maxArtifactBytes"],
+      "additionalProperties": false,
+      "properties": {
+        "maxRows": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "maxSeries": { "type": "integer", "minimum": 1, "maximum": 512 },
+        "maxSamples": { "type": "integer", "minimum": 1, "maximum": 250000 },
+        "maxArtifactBytes": { "type": "integer", "minimum": 1024, "maximum": 67108864 }
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$" },
+    "revision": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "fetch": { "properties": { "mode": { "const": "prometheus-range" } } } } },
+      "then": { "properties": { "connection": { "properties": { "kind": { "const": "DATA_SOURCE" } } } } }
+    },
+    {
+      "if": { "properties": { "fetch": { "properties": { "mode": { "const": "dbhelper-query" } } } } },
+      "then": { "properties": { "connection": { "properties": { "kind": { "const": "DBHELPER" } } } } }
+    },
+    {
+      "if": { "properties": { "fetch": { "properties": { "mode": { "const": "package-tool" } } } } },
+      "then": { "properties": { "connection": { "properties": { "kind": { "const": "PACKAGE_TOOL" } } } } }
+    },
+    {
+      "if": { "properties": { "fetch": { "properties": { "mode": { "enum": ["dbhelper-query", "package-tool"] } } } } },
+      "then": {
+        "properties": {
+          "mapping": {
+            "oneOf": [
+              { "required": ["labels"], "not": { "required": ["allowedLabels"] } },
+              { "required": ["allowedLabels"], "not": { "required": ["labels"] } }
+            ],
+            "properties": {
+              "labels": {
+                "type": "object",
+                "maxProperties": 40,
+                "propertyNames": { "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                "additionalProperties": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" },
+                "not": { "required": ["retain"] }
+              },
+              "outputs": { "items": { "required": ["column"] } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "fetch": { "properties": { "mode": { "const": "prometheus-range" } } } } },
+      "then": {
+        "properties": {
+          "mapping": {
+            "oneOf": [
+              { "required": ["labels"], "not": { "anyOf": [{ "required": ["allowedLabels"] }, { "required": ["labelColumns"] }] } },
+              { "required": ["allowedLabels"], "not": { "anyOf": [{ "required": ["labels"] }, { "required": ["labelColumns"] }] } }
+            ],
+            "properties": {
+              "labels": {
+                "type": "object",
+                "required": ["retain"],
+                "additionalProperties": false,
+                "properties": {
+                  "retain": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "maxItems": 40,
+                    "items": { "type": "string", "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+                  }
+                }
+              },
+              "outputs": { "items": { "not": { "required": ["column"] } } }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

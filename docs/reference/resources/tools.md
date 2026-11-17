@@ -221,7 +221,7 @@ Each `att-tool/v1` file defines one Package Tool. Global `tools` and `toolGroups
 
 An argument `type` declares the final resolved value contract for configured Tools: `string`, `integer`, `long`, `decimal`, `boolean`, `enum`, `bytes`, `map`, or `list`. Omitted `type` remains `any` for existing descriptors. Numeric and Boolean scalar types accept native values or trimmed numeric/`true`/`false` Strings; enum values must match one of `enumValues`; `bytes` accepts a byte array or converts a String to UTF-8. `string`, `map`, and `list` require that native value type. These checks run after the complete nested expression resolves, in validation when safely static and at runtime otherwise.
 
-## Package-local Tool Groups (ATT 4.2.10)
+## Package-local Tool Groups
 
 Standalone Tools use `tools/<id>.yaml` and `att-tool/v1`. Grouped Tools use a fixed `tools/<folder>/tool-group.yaml` manifest with **`att-tool-group/v3.0`**, which lists each `att-tool/v1` member explicitly (no recursive discovery):
 

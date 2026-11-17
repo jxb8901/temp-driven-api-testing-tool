@@ -1,8 +1,31 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { downsampleSegments, exclusiveObservedEnd, meanForLoadMetric, meanForSutMetric, missingIntervals, parseUtcInstant, selectLoadPoints, selectSutPoints, splitSeriesAtGaps } from './CorrelationPanel';
+import { downsampleSegments, exclusiveObservedEnd, meanForLoadMetric, meanForSutMetric, missingIntervals, parseUtcInstant, queriesEligibleForMetricGroup, selectLoadPoints, selectSutPoints, splitSeriesAtGaps } from './CorrelationPanel';
 
 describe('LOAD and SUT correlation series', () => {
+  it('selects every query with pinned observations for the chosen label group', () => {
+    const queries = [
+      { id: 'cpu', metricId: 'cpu', targetId: 'sut-1' },
+      { id: 'memory', metricId: 'memory', targetId: 'sut-1' },
+      { id: 'sessions', metricId: 'sessions', targetId: 'sut-1' },
+    ];
+    const items = [
+      { queryId: 'cpu', metricId: 'cpu', title: 'CPU', targetId: 'sut-1', unit: 'percent', groupView: { assignments: [
+        { observationId: 'cpu-app', groupId: 'app', labels: { role: 'app' } },
+        { observationId: 'cpu-db', groupId: 'db', labels: { role: 'db' } },
+      ] } },
+      { queryId: 'memory', metricId: 'memory', title: 'Memory', targetId: 'sut-1', unit: 'bytes', groupView: { assignments: [
+        { observationId: 'memory-app', groupId: 'app', labels: { role: 'app' } },
+      ] } },
+      { queryId: 'sessions', metricId: 'sessions', title: 'Sessions', targetId: 'sut-1', unit: 'count', groupView: { assignments: [
+        { observationId: 'sessions-db', groupId: 'db', labels: { role: 'db' } },
+      ] } },
+    ];
+
+    expect(queriesEligibleForMetricGroup(queries, items, 'app').map(query => query.id)).toEqual(['cpu', 'memory']);
+    expect(queriesEligibleForMetricGroup(queries, items, 'db').map(query => query.id)).toEqual(['cpu', 'sessions']);
+  });
+
   it('selects bins by actual phase overlap and preserves partial boundary bins without filling missing bins', () => {
     const points = selectLoadPoints([
       { windowStartEpochMs: 1500, durationMs: 1000, completedRate: 2 },

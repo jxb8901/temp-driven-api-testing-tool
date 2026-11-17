@@ -23,6 +23,11 @@ import type {
 import { normalizeSchedule, scheduleTransport } from './features/schedules/types';
 import type { ValidationRecord, ValidationRecordPage, ValidationReportData, ValidationRequest } from './features/validation/types';
 
+interface SutMetricCatalogResponse {
+  items: Array<Record<string, unknown>>;
+  configuration?: Record<string, unknown>;
+}
+
 export interface ServerJobStorageMetrics {
   enabled?: boolean;
   maxTotalBytes?: number | null;
@@ -287,10 +292,16 @@ export const api = {
   }> {
     return request('auth/capabilities', { signal });
   },
-  listSutMetricSources(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> }> {
+  listSutMetricSources(signal?: AbortSignal): Promise<SutMetricCatalogResponse> {
     return request('sut-metrics/sources', { signal });
   },
-  listSutMetricProfiles(signal?: AbortSignal): Promise<{ items: Array<Record<string, unknown>> }> {
+  listSutMetricAcquisitions(signal?: AbortSignal): Promise<SutMetricCatalogResponse> {
+    return request('sut-metrics/metric-sources', { signal });
+  },
+  listSutMetricGroups(signal?: AbortSignal): Promise<SutMetricCatalogResponse> {
+    return request('sut-metrics/groups', { signal });
+  },
+  listSutMetricProfiles(signal?: AbortSignal): Promise<SutMetricCatalogResponse> {
     return request('sut-metrics/profiles', { signal });
   },
   saveSutMetricSource(input: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -298,6 +309,18 @@ export const api = {
   },
   deleteSutMetricSource(id: string): Promise<Record<string, unknown>> {
     return request('admin/sut-metrics/sources/' + encodeURIComponent(id), { method: 'DELETE' });
+  },
+  saveSutMetricAcquisition(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/metric-sources', input);
+  },
+  deleteSutMetricAcquisition(id: string): Promise<Record<string, unknown>> {
+    return request('admin/sut-metrics/metric-sources/' + encodeURIComponent(id), { method: 'DELETE' });
+  },
+  saveSutMetricGroup(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return postJson('admin/sut-metrics/groups', input);
+  },
+  deleteSutMetricGroup(id: string): Promise<Record<string, unknown>> {
+    return request('admin/sut-metrics/groups/' + encodeURIComponent(id), { method: 'DELETE' });
   },
   testSutMetricSource(id: string): Promise<Record<string, unknown>> {
     return postJson('admin/sut-metrics/sources/' + encodeURIComponent(id) + '/test', {});

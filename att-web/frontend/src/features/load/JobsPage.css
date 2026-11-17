@@ -19,6 +19,10 @@
 .att-sut-metric-card > header { align-items: flex-start; display: flex; gap: 1rem; justify-content: space-between; }
 .att-sut-metric-card h3 { margin: 0; }
 .att-sut-metric-card header p, .att-sut-metric-coverage { color: var(--att-muted, #5f6873); font-size: .875rem; margin: .35rem 0 0; }
+.att-sut-metric-groups { border-left: 3px solid var(--att-accent, #356aa0); margin: .75rem 0; padding-left: .75rem; }
+.att-sut-metric-groups ul { margin: .25rem 0; padding-left: 1.25rem; }
+.att-sut-metric-groups li { overflow-wrap: anywhere; }
+.att-sut-metric-group-diagnostics { color: var(--att-muted, #5f6873); font-size: .85rem; }
 .att-sut-metric-query-status { border: 1px solid currentColor; border-radius: 1rem; font-size: .75rem; padding: .1rem .55rem; white-space: nowrap; }
 .att-sut-metric-query-status-ready { color: #14713b; }
 .att-sut-metric-query-status-no_data, .att-sut-metric-query-status-unavailable, .att-sut-metric-query-status-stale, .att-sut-metric-query-status-partial, .att-sut-metric-query-status-not_evaluated { color: #7a4e00; }
@@ -29,6 +33,16 @@
 .att-sut-metric-summary dd { font-weight: 600; margin: .15rem 0 0; }
 .att-sut-metric-chart { display: block; height: auto; margin-top: .75rem; max-height: 15rem; width: 100%; }
 .att-sut-metric-chart text { fill: currentColor; font-size: 10px; }
+.att-sut-metric-series-legend { display: flex; flex-wrap: wrap; gap: .25rem 1rem; list-style: none; margin: .5rem 0; padding: 0; }
+.att-sut-metric-series-legend li { align-items: center; display: flex; gap: .4rem; overflow-wrap: anywhere; }
+.att-sut-metric-line-key { border-top: 3px solid #146eb4; display: inline-block; height: 0; width: 1rem; }
+.att-sut-metric-line-key-1 { border-color: #c64e25; }.att-sut-metric-line-key-2 { border-color: #18844b; }
+.att-sut-metric-line-key-3 { border-color: #8b4bb5; }.att-sut-metric-line-key-4 { border-color: #a07a00; }
+.att-sut-metric-line-key-5 { border-color: #087e8b; }.att-sut-metric-line-key-6 { border-color: #ad3e76; }
+.att-sut-metric-line-key-7 { border-color: #616b78; }
+.att-sut-metric-series-summary { border-collapse: collapse; display: block; margin-top: .5rem; max-width: 100%; overflow-x: auto; }
+.att-sut-metric-series-summary th, .att-sut-metric-series-summary td { border-bottom: 1px solid var(--att-border, #ccd2d9); padding: .35rem .6rem; text-align: right; white-space: nowrap; }
+.att-sut-metric-series-summary th:first-child { text-align: left; }
 .att-sut-metric-grid { fill: none; stroke: var(--att-border, #ccd2d9); stroke-dasharray: 3 4; stroke-width: 1; }
 .att-sut-metric-line { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .att-sut-metric-line-0 { stroke: #146eb4; }

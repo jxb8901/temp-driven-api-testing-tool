@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "att-sut-metrics-metric-source/v1",
+  "id": "db-wide-row",
+  "name": "Database instance summary",
+  "description": "One bounded DBHelper query produces independent metrics for each returned instance and role.",
+  "connection": {
+    "kind": "DBHELPER",
+    "id": "orders",
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "fetch": {
+    "id": "instance-summary",
+    "mode": "dbhelper-query",
+    "call": "#{db.orders.query(sql='select instance, role, cpu_percent, memory_bytes, sessions from metric_summary')}",
+    "parameters": {},
+    "sampling": "afterDrain"
+  },
+  "mapping": {
+    "labels": {"instance": "INSTANCE", "role": "ROLE"},
+    "outputs": [
+      {"id": "cpu-percent", "title": "CPU utilisation", "unit": "percent", "kind": "gauge", "column": "CPU_PERCENT"},
+      {"id": "memory-bytes", "title": "Memory used", "unit": "bytes", "kind": "gauge", "column": "MEMORY_BYTES"},
+      {"id": "sessions", "title": "Active sessions", "unit": "count", "kind": "gauge", "column": "SESSIONS"}
+    ]
+  },
+  "limits": {"maxRows": 256, "maxSeries": 128, "maxSamples": 1, "maxArtifactBytes": 1048576}
+}
