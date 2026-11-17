@@ -5554,11 +5554,16 @@ final class ServerRuntime implements AutoCloseable {
         if(pointer.isEmpty())return reportV2Status("PENDING",String.valueOf(collection.get("state")),null,null,null,null);
         String state=String.valueOf(pointer.getOrDefault("state","FAILED"));
         if("READY".equals(state)) {
-            try {
-                String currentVerdict=SutMetricsOfflineReportPublisher.verdictRecordSha256(id,config.dataDir.resolve("jobs").resolve(id));
-                if(!java.util.Objects.equals(currentVerdict,nullableText(pointer.get("verdictRecordSha256"))))loadVerdictPublished(id);
-            } catch(Exception invalidVerdict) {
-                java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine("Offline SUT report verdict metadata is unavailable");
+            if(!SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY.equals(pointer.get("groupMetadataPolicy"))) {
+                refreshLoadReportV2(id);
+                state="BUILDING";
+            } else {
+                try {
+                    String currentVerdict=SutMetricsOfflineReportPublisher.verdictRecordSha256(id,config.dataDir.resolve("jobs").resolve(id));
+                    if(!java.util.Objects.equals(currentVerdict,nullableText(pointer.get("verdictRecordSha256"))))loadVerdictPublished(id);
+                } catch(Exception invalidVerdict) {
+                    java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine("Offline SUT report verdict metadata is unavailable");
+                }
             }
         }
         String archiveName=nullableText(pointer.get("archiveName"));
@@ -5605,6 +5610,11 @@ final class ServerRuntime implements AutoCloseable {
             Map<String,Object> pointer=readLoadReportV2Pointer(id);
             String archiveName=nullableText(pointer.get("archiveName"));
             String expectedSha256=nullableText(pointer.get("archiveSha256"));
+            if("READY".equals(pointer.get("state"))
+                    &&!SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY.equals(pointer.get("groupMetadataPolicy"))) {
+                refreshLoadReportV2(id);
+                throw new ArchiveUnavailableException("BUILDING");
+            }
             if(!"READY".equals(pointer.get("state"))||archiveName==null||!archiveName.matches("[a-f0-9]{64}\\.zip")
                     ||expectedSha256==null||!expectedSha256.matches("[a-f0-9]{64}"))
                 throw new ArchiveUnavailableException(String.valueOf(pointer.getOrDefault("state","PENDING")));
@@ -5701,6 +5711,7 @@ final class ServerRuntime implements AutoCloseable {
             pointer.put("nativeArchiveSha256",publication.nativeArchiveSha256());pointer.put("collectionState",publication.collectionState());
             pointer.put("externalEvaluationStatus",publication.externalEvaluationStatus());
             pointer.put("verdictRecordSha256",publication.verdictRecordSha256());
+            pointer.put("groupMetadataPolicy",SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY);
             pointer.put("retryCount",0);pointer.remove("nextRetryAt");
             if(publication.performanceVerdict()!=null)pointer.put("performanceVerdict",publication.performanceVerdict());
             pointer.put("updatedAt",clock.instant().toString());
@@ -5762,6 +5773,10 @@ final class ServerRuntime implements AutoCloseable {
                 pointer=readLoadReportV2Pointer(id);
                 String state=String.valueOf(pointer.getOrDefault("state","PENDING"));
                 if("READY".equals(state)) {
+                    if(!SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY.equals(pointer.get("groupMetadataPolicy"))) {
+                        refreshLoadReportV2(id);
+                        continue;
+                    }
                     String currentDigest=SutMetricsOfflineReportPublisher.verdictRecordSha256(id,config.dataDir.resolve("jobs").resolve(id));
                     String publishedDigest=nullableText(pointer.get("verdictRecordSha256"));
                     if(!java.util.Objects.equals(currentDigest,publishedDigest)) { refreshLoadReportV2(id); continue; }

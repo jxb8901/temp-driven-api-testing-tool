@@ -20,7 +20,7 @@ import java.util.Set;
 /** Builds an immutable, versioned offline report alongside the sealed native LOAD archive. */
 final class SutMetricsOfflineReportPublisher {
     static final String SCHEMA = "att-load-report-extension/v2";
-    private static final String GROUP_METADATA_POLICY = "safe-group-metadata/v1";
+    static final String GROUP_METADATA_POLICY = "safe-group-metadata/v1";
     private static final long MAX_VERDICT_RECORD_BYTES = 1024L * 1024L;
     private static final long MAX_VERDICT_EVIDENCE_BYTES = 8L * 1024L * 1024L;
 

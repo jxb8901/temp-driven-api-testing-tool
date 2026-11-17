@@ -187,6 +187,56 @@ class ArtifactLifecycleTest {
         }
     }
 
+    @Test void oldReadyLoadReportsRebuildForGroupPolicyBeforeStatusOrDownload() throws Exception {
+        String id="J0000000000000814";
+        java.util.concurrent.atomic.AtomicInteger reportAttempts=new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.CountDownLatch rebuildEntered=new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch releaseRebuild=new java.util.concurrent.CountDownLatch(1);
+        ServerRuntime.ArtifactPublisher publisher=(output,archive,validator)->{
+            if(archive.toString().contains("load-report-publications")&&reportAttempts.incrementAndGet()==2) {
+                rebuildEntered.countDown();
+                if(!releaseRebuild.await(10,TimeUnit.SECONDS))throw new java.io.IOException("test did not release report rebuild");
+            }
+            return ArtifactArchive.build(output,archive,validator);
+        };
+        try(ServerRuntime runtime=runtime(publisher,java.time.Clock.systemUTC())) {
+            publishReadyLoadReport(runtime,id,"MET");
+            Path current=runtime.config.dataDir.resolve("jobs").resolve(id).resolve("load-report-publications/v2/current.json");
+            String publishedVerdict=simulatePrePolicyReadyPointer(current,"f".repeat(64));
+            assertFalse(publishedVerdict.isBlank());
+
+            assertThrows(ServerRuntime.ArchiveUnavailableException.class,
+                    ()->runtime.openLoadReportV2Archive(id,"user-a",true),
+                    "A READY pointer from the pre-policy format must be blocked and scheduled for rebuild.");
+            assertTrue(rebuildEntered.await(5,TimeUnit.SECONDS),"The policy migration must schedule a replacement publication.");
+            assertEquals("BUILDING",runtime.loadReportV2Status(id,"user-a",true).get("state"));
+            assertThrows(ServerRuntime.ArchiveUnavailableException.class,
+                    ()->runtime.openLoadReportV2Archive(id,"user-a",true),
+                    "The previous archive stays unavailable while the replacement is being built.");
+
+            releaseRebuild.countDown();
+            awaitLoadReportGroupPolicy(runtime,id);
+            Map<String,Object> rebuilt=runtime.loadReportV2Status(id,"user-a",true);
+            assertEquals("READY",rebuilt.get("state"));
+            assertEquals(publishedVerdict,ServerRuntime.JSON.readTree(current.toFile()).path("verdictRecordSha256").asText(),
+                    "The regression keeps the verdict unchanged so the Group policy alone triggers publication.");
+
+            assertEquals(publishedVerdict,simulatePrePolicyReadyPointer(current,"e".repeat(64)));
+            runtime.store.loadReportRecoveryNeeded(id,true);
+            assertEquals(1,runtime.recoverLoadReportV2(),"Recovery must rebuild an old READY report even when its verdict digest is unchanged.");
+            awaitLoadReportGroupPolicy(runtime,id);
+
+            assertEquals(publishedVerdict,simulatePrePolicyReadyPointer(current,"d".repeat(64)));
+            assertEquals("BUILDING",runtime.loadReportV2Status(id,"user-a",true).get("state"),
+                    "A status request must schedule a rebuild for an old-policy READY pointer.");
+            awaitLoadReportGroupPolicy(runtime,id);
+            assertEquals("READY",runtime.loadReportV2Status(id,"user-a",true).get("state"));
+            assertEquals(4,reportAttempts.get());
+        } finally {
+            releaseRebuild.countDown();
+        }
+    }
+
     @Test void loadReportRecoveryUsesAResumableSixtyFourJobBatchAndDedicatedWriter() throws Exception {
         try(ServerRuntime runtime=runtime()) {
             java.lang.reflect.Field nativeField=ServerRuntime.class.getDeclaredField("artifactWriters");
@@ -745,6 +795,30 @@ class ArtifactLifecycleTest {
                 runtime.loadReportV2Status(id,"user-a",true)+"; pointer="+
                 Files.readString(runtime.config.dataDir.resolve("jobs").resolve(id).resolve("load-report-publications/v2/current.json"))+
                 "; currentVerdict="+SutMetricsOfflineReportPublisher.verdictRecordSha256(id,runtime.config.dataDir.resolve("jobs").resolve(id)));
+    }
+
+    private void awaitLoadReportGroupPolicy(ServerRuntime runtime,String id) throws Exception {
+        Path current=runtime.config.dataDir.resolve("jobs").resolve(id).resolve("load-report-publications/v2/current.json");
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
+        do {
+            var pointer=ServerRuntime.JSON.readTree(current.toFile());
+            if("READY".equals(pointer.path("state").asText())
+                    &&SutMetricsOfflineReportPublisher.GROUP_METADATA_POLICY.equals(pointer.path("groupMetadataPolicy").asText()))return;
+            Thread.sleep(20);
+        } while(System.nanoTime()<deadline);
+        fail("Expected a READY report with the current Group metadata policy; pointer="+Files.readString(current));
+    }
+
+    private String simulatePrePolicyReadyPointer(Path current,String legacyPublicationId) throws Exception {
+        com.fasterxml.jackson.databind.node.ObjectNode pointer=(com.fasterxml.jackson.databind.node.ObjectNode)ServerRuntime.JSON.readTree(current.toFile());
+        String publicationId=pointer.path("publicationId").asText();
+        assertNotEquals(legacyPublicationId,publicationId);
+        Path snapshots=current.getParent().resolve("snapshots");
+        Files.move(snapshots.resolve(publicationId+".zip"),snapshots.resolve(legacyPublicationId+".zip"));
+        pointer.put("publicationId",legacyPublicationId);pointer.put("archiveName",legacyPublicationId+".zip");
+        pointer.remove("groupMetadataPolicy");
+        Files.write(current,ServerRuntime.JSON.writeValueAsBytes(pointer));
+        return pointer.path("verdictRecordSha256").asText();
     }
 
     private Job publishReadyLoadReport(ServerRuntime runtime,String id,String externalEvaluationStatus) throws Exception {
