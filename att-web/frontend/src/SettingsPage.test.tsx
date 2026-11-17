@@ -201,7 +201,7 @@ describe('SettingsPage SUT Metrics profiles', () => {
       schemaVersion: 'att-sut-metrics-metric-source/v1', id: 'host-metrics', name: 'Host metrics',
       connection: { kind: 'DATA_SOURCE', id: 'prom-main', revision: 'b'.repeat(64) },
       fetch: { id: 'host-series', mode: 'prometheus-range', query: 'up', parameters: {}, sampling: 'range', step: '15s' },
-      mapping: { allowedLabels: ['instance'], outputs: [{ id: 'cpu', title: 'CPU', unit: 'percent', kind: 'gauge', metricName: 'up' }] },
+      mapping: { labels: { retain: ['instance'] }, outputs: [{ id: 'cpu', title: 'CPU', unit: 'percent', kind: 'gauge', metricName: 'up' }] },
       limits: { maxRows: 64, maxSeries: 16, maxSamples: 1000, maxArtifactBytes: 1048576 }, revision: 'a'.repeat(64),
     }] });
     await act(async () => {

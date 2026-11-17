@@ -38,6 +38,9 @@ class SutMetricsContractMigrationTest {
 
         Map<String, Object> metricSource = readMap(Path.of("examples/load/sut-metrics/v2/metric-source-db-wide-row.json"));
         Map<String, Object> mapping = map(metricSource.get("mapping"));
+        assertTrue(mapping.get("labels") instanceof Map<?, ?>,
+                "SQL labels are projected from explicit columns without a separate allowedLabels list.");
+        assertFalse(mapping.containsKey("allowedLabels"));
         mapping.put("longRows", true);
         assertInvalid("att-sut-metrics-metric-source-v1.schema.json", metricSource);
         mapping.remove("longRows");
@@ -46,6 +49,12 @@ class SutMetricsContractMigrationTest {
         mapping.remove("metricIdLabel");
         mapping.put("transform", "value * 100");
         assertInvalid("att-sut-metrics-metric-source-v1.schema.json", metricSource);
+
+        Map<String, Object> prometheusSource = readMap(Path.of("examples/load/sut-metrics/v2/metric-source-prometheus-multi-series.json"));
+        Map<String, Object> prometheusMapping = map(prometheusSource.get("mapping"));
+        @SuppressWarnings("unchecked") List<String> retained = (List<String>) map(prometheusMapping.get("labels")).get("retain");
+        retained.add("__name__");
+        assertInvalid("att-sut-metrics-metric-source-v1.schema.json", prometheusSource);
 
         Map<String, Object> observation = readMap(Path.of("examples/load/sut-metrics/v2/observation-sampled-series.json"));
         map(observation.get("identity")).put("groupId", "runtime");

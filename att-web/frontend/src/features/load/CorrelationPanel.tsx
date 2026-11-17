@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import type { LoadJobsApi, SutMetricItem, SutMetricPoint, SutMetricSeries, SutMetricsJobResponse } from './types';
+import type { LoadJobsApi, SutMetricItem, SutMetricPoint, SutMetricQueryMetadata, SutMetricSeries, SutMetricsJobResponse } from './types';
 import './CorrelationPanel.css';
 
 const SERIES_TARGET = 'metrics/windowMetrics/timeSeries/points';
@@ -85,6 +85,16 @@ function metricSeriesPoints(metrics: Record<string, unknown> | null): unknown[] 
   const windowMetrics = record(metrics?.windowMetrics);
   const timeSeries = record(windowMetrics?.timeSeries);
   return Array.isArray(timeSeries?.points) ? timeSeries.points : [];
+}
+
+export function queriesEligibleForMetricGroup(
+  queries: SutMetricQueryMetadata[], items: SutMetricItem[], groupId: string | null,
+): SutMetricQueryMetadata[] {
+  if (!groupId) return queries;
+  const assignedQueryIds = new Set(items
+    .filter(item => (item.groupView?.assignments || []).some(assignment => assignment.groupId === groupId))
+    .map(item => item.queryId || item.id).filter((id): id is string => Boolean(id)));
+  return queries.filter(query => query.metricGroupIds?.includes(groupId) || assignedQueryIds.has(query.id));
 }
 
 function phaseBoundaries(metrics: Record<string, unknown> | null): PhaseBoundary[] {
@@ -429,14 +439,11 @@ export const CorrelationPanel = memo(function CorrelationPanel({ api, jobId, act
   const targetOptions = [...new Set(queries.filter(query => !profileFilter || (query.profilePath || query.profile) === profileFilter).map(query => query.targetId).filter(Boolean))].sort();
   const metricOptions = [...new Map<string, string>(queries.filter(query => (!profileFilter || (query.profilePath || query.profile) === profileFilter)
     && (!targetFilter || query.targetId === targetFilter)).map(query => [query.metricId, query.title || query.metricId] as const)).entries()];
-  const filteredQueries = queries.filter(query => {
-    const matchesGroup = !selectedGroup
-      || (!selectedGroup.match?.metricIds?.length || selectedGroup.match.metricIds.includes(query.metricId))
-        && (!selectedGroup.match?.sourceIds?.length || selectedGroup.match.sourceIds.includes(query.metricSourceId || query.sourceId || ''));
+  const groupEligibleQueries = queriesEligibleForMetricGroup(queries, collection?.items || [], selectedGroup?.id || null);
+  const filteredQueries = groupEligibleQueries.filter(query => {
     return (!profileFilter || (query.profilePath || query.profile) === profileFilter)
       && (!targetFilter || query.targetId === targetFilter)
       && (!metricFilter || query.metricId === metricFilter)
-      && matchesGroup;
   });
   const selectedQuery = filteredQueries.find(query => query.id === queryFilter) || filteredQueries[0] || null;
   useEffect(() => { if (selectedQuery?.id !== queryFilter) setQueryFilter(selectedQuery?.id || ''); }, [selectedQuery?.id, queryFilter]);

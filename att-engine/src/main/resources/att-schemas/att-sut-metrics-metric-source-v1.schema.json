@@ -64,9 +64,32 @@
     },
     "mapping": {
       "type": "object",
-      "required": ["allowedLabels", "outputs"],
+      "required": ["outputs"],
       "additionalProperties": false,
       "properties": {
+        "labels": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["retain"],
+              "additionalProperties": false,
+              "properties": {
+                "retain": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "maxItems": 40,
+                  "items": { "type": "string", "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "maxProperties": 40,
+              "propertyNames": { "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+              "additionalProperties": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
+            }
+          ]
+        },
         "allowedLabels": {
           "type": "array",
           "uniqueItems": true,
@@ -136,11 +159,55 @@
     },
     {
       "if": { "properties": { "fetch": { "properties": { "mode": { "enum": ["dbhelper-query", "package-tool"] } } } } },
-      "then": { "properties": { "mapping": { "properties": { "outputs": { "items": { "required": ["column"] } } } } } }
+      "then": {
+        "properties": {
+          "mapping": {
+            "oneOf": [
+              { "required": ["labels"], "not": { "required": ["allowedLabels"] } },
+              { "required": ["allowedLabels"], "not": { "required": ["labels"] } }
+            ],
+            "properties": {
+              "labels": {
+                "type": "object",
+                "maxProperties": 40,
+                "propertyNames": { "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                "additionalProperties": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" },
+                "not": { "required": ["retain"] }
+              },
+              "outputs": { "items": { "required": ["column"] } }
+            }
+          }
+        }
+      }
     },
     {
       "if": { "properties": { "fetch": { "properties": { "mode": { "const": "prometheus-range" } } } } },
-      "then": { "properties": { "mapping": { "properties": { "outputs": { "items": { "not": { "required": ["column"] } } } } } } }
+      "then": {
+        "properties": {
+          "mapping": {
+            "oneOf": [
+              { "required": ["labels"], "not": { "anyOf": [{ "required": ["allowedLabels"] }, { "required": ["labelColumns"] }] } },
+              { "required": ["allowedLabels"], "not": { "anyOf": [{ "required": ["labels"] }, { "required": ["labelColumns"] }] } }
+            ],
+            "properties": {
+              "labels": {
+                "type": "object",
+                "required": ["retain"],
+                "additionalProperties": false,
+                "properties": {
+                  "retain": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "maxItems": 40,
+                    "items": { "type": "string", "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+                  }
+                }
+              },
+              "outputs": { "items": { "not": { "required": ["column"] } } }
+            }
+          }
+        }
+      }
     }
   ]
 }

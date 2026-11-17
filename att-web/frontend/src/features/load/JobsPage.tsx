@@ -60,6 +60,45 @@ const CHART_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, { hour: '2-digit
 const METRIC_NUMBER_FORMATTER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 });
 const CHART_NUMBER_FORMATTER = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 
+function sutMetricLabelsKey(labels?: Record<string, string>): string {
+  return JSON.stringify(Object.entries(labels || {}).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function filterSutMetricItemByGroup(item: SutMetricItem, groupId: string): SutMetricItem | null {
+  if (!item.groupView) return null;
+  const assignments = groupId === '__unassigned' ? [] : (item.groupView.assignments || [])
+    .filter(assignment => assignment.groupId === groupId);
+  const unassigned = groupId === '__unassigned' ? item.groupView.unassigned || [] : [];
+  const observationIds = new Set([
+    ...assignments.map(assignment => assignment.observationId),
+    ...unassigned.map(observation => observation.observationId).filter((id): id is string => Boolean(id)),
+  ]);
+  if (!observationIds.size) return null;
+  const labelsByObservationId = new Map((item.normalizedObservationsV2 || [])
+    .filter(observation => typeof observation.observationId === 'string')
+    .map(observation => [observation.observationId!, observation.identity?.labels || {}] as const));
+  const selectedLabelKeys = new Set<string>();
+  assignments.forEach(assignment => selectedLabelKeys.add(sutMetricLabelsKey(
+    labelsByObservationId.get(assignment.observationId) || assignment.labels)));
+  unassigned.forEach(observation => selectedLabelKeys.add(sutMetricLabelsKey(observation.labels)));
+  const normalizedObservationsV2 = (item.normalizedObservationsV2 || [])
+    .filter(observation => observation.observationId && observationIds.has(observation.observationId));
+  const groupView = {
+    ...item.groupView,
+    assignments,
+    unassigned,
+    diagnostics: (item.groupView.diagnostics || []).filter(diagnostic =>
+      !diagnostic.observationId || observationIds.has(diagnostic.observationId)),
+  };
+  return {
+    ...item,
+    series: (item.series || []).filter(series => selectedLabelKeys.has(sutMetricLabelsKey(series.labels))),
+    labeledValues: (item.labeledValues || []).filter(value => selectedLabelKeys.has(sutMetricLabelsKey(value.labels))),
+    normalizedObservationsV2,
+    groupView,
+  };
+}
+
 function displayValue(value: unknown): string {
   if (typeof value === 'string') return value;
   try { return JSON.stringify(value, null, 2); }
@@ -1235,16 +1274,18 @@ export const SutMetricsPanel = memo(function SutMetricsPanel({ api, jobId, activ
       .map(group => [group.groupId, group.title || group.groupId] as const)).entries()]
       .map(([id, title]) => ({ id, title }));
   const groupMetricIds = groupFilter ? new Set(items.filter(item => groupFilter === '__unassigned'
-    ? !(item.groupView?.assignments || []).length
+    ? (item.groupView?.unassigned || []).length > 0
     : (item.groupView?.assignments || []).some(assignment => assignment.groupId === groupFilter))
     .map(item => item.metricId)) : null;
   const metricOptions = [...new Map(queries.filter(query => !groupFilter || !items.length || groupMetricIds?.has(query.metricId))
     .map(query => [query.metricId, query.title || query.metricId] as const)).entries()];
-  const visibleItems = items.filter(item => (!sourceFilter || (item.sourceName || item.sourceId || '') === sourceFilter)
-    && (!metricFilter || item.metricId === metricFilter)
-    && (!groupFilter || (groupFilter === '__unassigned'
-      ? !(item.groupView?.assignments || []).length
-      : (item.groupView?.assignments || []).some(assignment => assignment.groupId === groupFilter))));
+  const visibleItems = items.flatMap(item => {
+    if ((sourceFilter && (item.sourceName || item.sourceId || '') !== sourceFilter)
+        || (metricFilter && item.metricId !== metricFilter)) return [];
+    if (!groupFilter) return [item];
+    const filtered = filterSutMetricItemByGroup(item, groupFilter);
+    return filtered ? [filtered] : [];
+  });
   const selectedRange = showLive ? liveRange : collectionRange;
   const rangeOptions = showLive
     ? [['5m', 'Last 5 minutes'], ['15m', 'Last 15 minutes'], ['30m', 'Last 30 minutes'], ['1h', 'Last hour'], ['4h', 'Last 4 hours']]
@@ -1360,6 +1401,7 @@ const SutMetricCard = memo(function SutMetricCard({ item, range, rangeStart, ran
   const firstVisible = chronologicalPoints[0]?.timestamp || coverage.firstSampleAt;
   const latestVisible = chronologicalPoints[chronologicalPoints.length - 1]?.timestamp || coverage.lastSampleAt;
   const businessValue = typeof item.value === 'number' && Number.isFinite(item.value);
+  const labeledValues = item.labeledValues || [];
   const status = item.queryStatus || (businessValue
     ? String((item.observation?.availability as Record<string, unknown> | undefined)?.freshness === 'STALE' ? 'STALE' : 'READY')
     : count ? 'READY' : String((item.observation?.availability as Record<string, unknown> | undefined)?.state || 'NO_DATA'));
@@ -1423,10 +1465,26 @@ const SutMetricCard = memo(function SutMetricCard({ item, range, rangeStart, ran
       {businessValue && item.observation?.kind === 'timed-snapshot' && <p role="note">This is one snapshot after LOAD drain. It does not represent steady-window coverage.</p>}
       {businessValue && item.observation?.kind === 'window-aggregate' && <p role="note">This value comes from an author-defined query over the recorded STEADY interval; a successful query does not prove exhaustive coverage.</p>}
     </>}
+    {labeledValues.length > 0 && <table className="att-sut-metric-labeled-values" aria-label="Labelled metric values">
+      <thead><tr><th>Labels</th><th>Value</th><th>Status</th><th>Observed at (UTC)</th></tr></thead>
+      <tbody>{labeledValues.map((value, index) => {
+        const labels = Object.entries(value.labels || {}).sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, label]) => key + '=' + label).join(', ');
+        const numericValue = typeof value.value === 'number' && Number.isFinite(value.value) ? value.value : null;
+        const rowDiagnostics = value.diagnostics || [];
+        return <tr key={sutMetricLabelsKey(value.labels) + '-' + index}>
+          <th scope="row">{labels || 'All instances'}</th>
+          <td>{numericValue === null ? 'No numeric value' : <>{METRIC_NUMBER_FORMATTER.format(numericValue)} {item.unit}</>}</td>
+          <td>{value.state || item.queryStatus || 'READY'}{rowDiagnostics.map((diagnostic, diagnosticIndex) =>
+            <small key={String(diagnostic.code || 'row') + '-' + diagnosticIndex}>{diagnostic.code}: {diagnostic.message}</small>)}</td>
+          <td>{typeof observedAt === 'string' ? utcTimestamp(observedAt) : 'Not reported'}</td>
+        </tr>;
+      })}</tbody>
+    </table>}
     {status === 'STALE' && <p role="status">The latest sample is older than the live freshness window.</p>}
-    {!count && !businessValue && status !== 'UNAVAILABLE' && status !== 'NOT_COLLECTED_LIVE' && <p role="status">No samples were returned for this metric and time window.</p>}
+    {!count && !businessValue && !labeledValues.length && status !== 'UNAVAILABLE' && status !== 'NOT_COLLECTED_LIVE' && <p role="status">No samples were returned for this metric and time window.</p>}
     {status === 'UNAVAILABLE' && <p role="status">This metric query is unavailable.</p>}
-    {status === 'NOT_EVALUATED' && !businessValue && <p role="status">This metric has no usable mapped value.</p>}
+    {status === 'NOT_EVALUATED' && !businessValue && !labeledValues.length && <p role="status">This metric has no usable mapped value.</p>}
     {observationDiagnostics.length > 0 && <details><summary>Metric quality diagnostics ({observationDiagnostics.length})</summary><ul>{observationDiagnostics.slice(0, 12).map((diagnostic, index) => <li key={`${String(diagnostic.code || 'issue')}-${index}`}>{String(diagnostic.code || 'Metric issue')}: {String(diagnostic.message || 'No additional detail.')}</li>)}</ul></details>}
     {paths.length > 0 && <svg className="att-sut-metric-chart" role="img" aria-label={`${item.title} for ${item.targetId}`} viewBox="0 0 820 220">
       <path d="M0 190 H800 M0 105 H800 M0 20 H800" className="att-sut-metric-grid" />

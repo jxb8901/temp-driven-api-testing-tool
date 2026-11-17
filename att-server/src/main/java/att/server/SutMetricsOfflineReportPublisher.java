@@ -218,6 +218,7 @@ final class SutMetricsOfflineReportPublisher {
                 Map<String, Object> metric = map(observation.get("metric")), source = map(observation.get("source"));
                 Map<String, Object> profile = map(observation.get("profile")), target = map(observation.get("target"));
                 Map<String, Object> quality = map(observation.get("quality"));
+                Map<String, Object> observationWindow = map(observation.get("window"));
                 html.append("<article id=\"sut-observation-").append(observationIndex).append("\"><h3>")
                         .append(escape(String.valueOf(metric.getOrDefault("name", metric.get("id"))))).append("</h3><dl>")
                         .append(row("Source", source.getOrDefault("name", source.get("id"))))
@@ -226,11 +227,19 @@ final class SutMetricsOfflineReportPublisher {
                         .append(row("Target", String.valueOf(target.getOrDefault("type", "target")) + " · " + String.valueOf(target.getOrDefault("id", "unknown"))))
                         .append(row("UTC window", windowText(observation.get("window"))));
                 if ("business-value".equals(observation.get("kind"))) {
-                    html.append(row("Observed value", String.valueOf(observation.get("value")) + " " + String.valueOf(metric.getOrDefault("unit", ""))))
-                            .append(row("Sampling", quality.get("sampling")))
+                    List<Map<String, Object>> labeledValues = maps(observation.get("labeledValues"));
+                    if (labeledValues.isEmpty())
+                        html.append(row("Observed value", String.valueOf(observation.get("value")) + " " + String.valueOf(metric.getOrDefault("unit", ""))));
+                    else html.append(row("Labelled values", labeledValues.size()));
+                    html.append(row("Sampling", quality.get("sampling")))
                             .append(row("Status", quality.get("status")))
                             .append(row("Call duration", quality.get("collectionDurationMs") + " ms"))
-                            .append("</dl><p class=\"muted\">")
+                            .append("</dl>");
+                    if (!labeledValues.isEmpty())
+                        html.append(renderLabeledValues(labeledValues, String.valueOf(metric.getOrDefault("unit", "")),
+                                String.valueOf(quality.getOrDefault("status", "UNKNOWN")),
+                                observationWindow.getOrDefault("observedAt", observationWindow.get("completedAt"))));
+                    html.append("<p class=\"muted\">")
                             .append("windowQuery".equals(quality.get("sampling"))
                                     ? "This author-defined query returned one value; completion does not prove exhaustive coverage."
                                     : "This is one server-collected snapshot after LOAD drain.")
@@ -269,8 +278,8 @@ final class SutMetricsOfflineReportPublisher {
         html.append("<h3>Metric Groups</h3><p class=\"muted\">Groups organize the pinned observations. They do not change identities, collection, or threshold results.</p>");
         for (Map<String, Object> group : ordered) {
             String groupId = String.valueOf(group.get("id"));
-            html.append("<h4>").append(escape(String.valueOf(group.getOrDefault("title", groupId))))
-                    .append("</h4><table><thead><tr><th>Instance</th><th>Metric</th><th>Unit / value</th><th>Status</th><th>Evidence</th></tr></thead><tbody>");
+        html.append("<h4>").append(escape(String.valueOf(group.getOrDefault("title", groupId))))
+                    .append("</h4><table><thead><tr><th>Instance</th><th>Metric</th><th>Unit / value</th><th>Status</th><th>Observed at</th><th>Evidence</th></tr></thead><tbody>");
             int rows = 0;
             for (int observationIndex = 0; observationIndex < observations.size(); observationIndex++) {
                 Map<String, Object> observation = observations.get(observationIndex);
@@ -283,20 +292,25 @@ final class SutMetricsOfflineReportPublisher {
                             .map(entry -> entry.getKey() + "=" + entry.getValue()).collect(java.util.stream.Collectors.joining(", "));
                     Map<String, Object> metric = map(observation.get("metric"));
                     Map<String, Object> quality = map(observation.get("quality"));
-                    Object value = observation.get("value");
+                    Object value = assignment.get("value");
                     String unitValue = value instanceof Number
                             ? String.valueOf(value) + " " + String.valueOf(metric.getOrDefault("unit", ""))
-                            : String.valueOf(metric.getOrDefault("unit", "unspecified")) + " · "
-                                + String.valueOf(observation.getOrDefault("sampleCount", 0)) + " samples";
+                            : assignment.containsKey("value")
+                                ? String.valueOf(metric.getOrDefault("unit", "unspecified")) + " · no numeric value"
+                                : String.valueOf(metric.getOrDefault("unit", "unspecified")) + " · "
+                                    + String.valueOf(observation.getOrDefault("sampleCount", 0)) + " samples";
+                    String status = String.valueOf(assignment.getOrDefault("status", quality.getOrDefault("status", "UNKNOWN")));
+                    String observedAt = String.valueOf(assignment.getOrDefault("observedAt", "Not reported"));
                     html.append("<tr><td>").append(escape(instance)).append("</td><td>")
                             .append(escape(String.valueOf(metric.getOrDefault("name", metric.get("id")))))
                             .append("</td><td>").append(escape(unitValue)).append("</td><td>")
-                            .append(escape(String.valueOf(quality.getOrDefault("status", "UNKNOWN"))))
+                            .append(escape(status)).append("</td><td>")
+                            .append(escape(observedAt))
                             .append("</td><td><a href=\"#sut-observation-").append(observationIndex)
                             .append("\">Open verified detail</a></td></tr>");
                 }
             }
-            if (rows == 0) html.append("<tr><td colspan=\"5\">No observations matched this pinned Metric Group.</td></tr>");
+            if (rows == 0) html.append("<tr><td colspan=\"6\">No observations matched this pinned Metric Group.</td></tr>");
             html.append("</tbody></table>");
         }
         html.append("<details><summary>Unassigned or ambiguous observations</summary>");
@@ -312,6 +326,26 @@ final class SutMetricsOfflineReportPublisher {
         }
         if (unassigned == 0) html.append("<p>No unassigned observations.</p>");
         html.append("</details><p class=\"muted\"><a href=\"#sut-observation-details\">Open all observation details</a></p>");
+    }
+
+    private static String renderLabeledValues(List<Map<String, Object>> values, String unit,
+                                              String defaultStatus, Object observedAt) {
+        String observed = observedAt == null ? "Not reported" : String.valueOf(observedAt);
+        StringBuilder html = new StringBuilder("<table aria-label=\"Labelled metric values\"><thead><tr><th>Labels</th><th>Value</th><th>Status</th><th>Observed at (UTC)</th></tr></thead><tbody>");
+        for (Map<String, Object> value : values) {
+            Map<String, Object> labels = map(value.get("labels"));
+            String labelText = labels.isEmpty() ? "All instances" : labels.entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .map(entry -> entry.getKey() + "=" + entry.getValue())
+                    .collect(java.util.stream.Collectors.joining(", "));
+            Object rawValue = value.get("value");
+            String renderedValue = rawValue instanceof Number number && Double.isFinite(number.doubleValue())
+                    ? String.valueOf(rawValue) + (unit.isBlank() ? "" : " " + unit) : "No numeric value";
+            html.append("<tr><td>").append(escape(labelText)).append("</td><td>").append(escape(renderedValue))
+                    .append("</td><td>").append(escape(String.valueOf(value.getOrDefault("state", defaultStatus))))
+                    .append("</td><td>").append(escape(observed)).append("</td></tr>");
+        }
+        return html.append("</tbody></table>").toString();
     }
 
     private static String renderChart(List<Map<String, Object>> series, String unit, String sampleResolution,

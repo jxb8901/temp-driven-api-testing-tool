@@ -83,8 +83,9 @@ final class SutMetricsService implements AutoCloseable {
                                       Set<String> duplicateSubjects, Set<String> ambiguousSubjects,
                                       Set<String> invalidSubjects, int unmatchedRowCount,
                                       String status, String failureCode) { }
-    private record BusinessMetricValue(double value, String mappingStatus, int unmatchedRowCount,
-                                       Map<String, String> labels) { }
+    private record BusinessMetricValue(Double value, String mappingStatus, int unmatchedRowCount,
+                                       Map<String, String> labels, String state,
+                                       String diagnosticCode, String diagnosticMessage) { }
     private static final class PrometheusOutputRoutingException extends Exception {
         private final String code;
         PrometheusOutputRoutingException(String code, String message) { super(message); this.code = code; }
@@ -1465,6 +1466,21 @@ final class SutMetricsService implements AutoCloseable {
     Map<String, Object> readCollectionPage(String jobId, int offset, int limit, String queryId,
                                           String targetId, String profilePath) throws Exception {
         Map<String, Object> manifest = collectionStatus(jobId);
+        Map<String, Set<String>> groupIdsByQuery = new LinkedHashMap<>();
+        for (Map<String, Object> file : listOfMaps(manifest.get("files"))) {
+            String fileQueryId = nullableText(file.get("queryId"));
+            if (fileQueryId != null)
+                groupIdsByQuery.computeIfAbsent(fileQueryId, ignored -> new LinkedHashSet<>())
+                        .addAll(listOfStrings(file.get("groupIds")));
+        }
+        List<Map<String, Object>> queryMetadata = new ArrayList<>();
+        for (Map<String, Object> query : listOfMaps(manifest.get("queries"))) {
+            Map<String, Object> enriched = new LinkedHashMap<>(query);
+            enriched.put("metricGroupIds", groupIdsByQuery.getOrDefault(String.valueOf(query.get("id")), Set.of())
+                    .stream().sorted().toList());
+            queryMetadata.add(enriched);
+        }
+        manifest.put("queries", queryMetadata);
         String state = String.valueOf(manifest.get("state"));
         Map<String, Object> progress = objectOrEmpty(manifest.get("collectionProgress"));
         boolean provisional = Set.of("PENDING", "COLLECTING").contains(state)
@@ -1535,15 +1551,27 @@ final class SutMetricsService implements AutoCloseable {
                                 "message", "The observation does not contain a label required by this group's groupBy rule."));
                     }
                 }
-                if (groupByComplete) assignments.add(fields("observationId", observationId, "groupId", group.get("id"),
+                if (groupByComplete) {
+                    Map<String, Object> data = objectOrEmpty(observation.get("data"));
+                    Map<String, Object> execution = objectOrEmpty(objectOrEmpty(observation.get("acquisition")).get("execution"));
+                    Map<String, Object> assignment = fields("observationId", observationId, "groupId", group.get("id"),
                             "title", group.get("title"), "order", group.get("order"), "display", group.get("display"),
-                        "labels", labels, "groupBy", groupedBy));
-                else unassigned.add(fields("observationId", observationId, "metricId", metricId, "sourceId", sourceId,
+                            "labels", labels, "groupBy", groupedBy, "status", data.get("state"),
+                            "freshness", data.get("freshness"), "observedAt", execution.get("completedAt"));
+                    if (data.containsKey("value")) assignment.put("value", data.get("value"));
+                    assignments.add(assignment);
+                } else unassigned.add(fields("observationId", observationId, "metricId", metricId, "sourceId", sourceId,
                         "labels", labels, "reason", "GROUP_BY_LABEL_MISSING"));
             }
         }
         return fields("schemaVersion", "att-sut-metrics-group-view/v1", "assignments", assignments,
                 "unassigned", unassigned, "diagnostics", diagnostics);
+    }
+
+    private List<String> metricGroupIds(Map<String, Object> sidecar, Map<String, Object> snapshot) {
+        return listOfMaps(groupView(sidecar, listOfMaps(snapshot.get("groups"))).get("assignments")).stream()
+                .map(assignment -> String.valueOf(assignment.get("groupId")))
+                .distinct().sorted().toList();
     }
 
     private static boolean groupMatches(Map<String, Object> group, String metricId, String sourceId,
@@ -1620,7 +1648,10 @@ final class SutMetricsService implements AutoCloseable {
                 List<Map<String, Object>> preview = chartPreview(series, MAX_REPORT_PREVIEW_POINTS, String.valueOf(collection.get("step")));
                 boolean businessCall = "business-call".equals(query.get("observationType"));
                 int businessValueCount = safeSeries.get("value") instanceof Number value
-                        && Double.isFinite(value.doubleValue()) ? 1 : 0;
+                        && Double.isFinite(value.doubleValue()) ? 1
+                        : (int) listOfMaps(safeSeries.get("labeledValues")).stream()
+                                .filter(row -> row.get("value") instanceof Number value
+                                        && Double.isFinite(value.doubleValue())).count();
                 Map<String, Object> normalizedObservation = objectOrEmpty(safeSeries.get("observation"));
                 Map<String, Object> normalizedWindow = objectOrEmpty(normalizedObservation.get("window"));
                 Map<String, Object> normalizedAvailability = objectOrEmpty(normalizedObservation.get("availability"));
@@ -1656,6 +1687,8 @@ final class SutMetricsService implements AutoCloseable {
                         "previewOmittedSeriesCount", Math.max(0, series.size() - preview.size()), "preview", preview);
                 if (businessCall) {
                     offlineObservation.put("value", safeSeries.get("value"));
+                    if (safeSeries.get("labeledValues") instanceof List<?> labeledValues)
+                        offlineObservation.put("labeledValues", labeledValues);
                     offlineObservation.put("scope", query.get("scope"));
                     offlineObservation.put("workloadId", query.get("workloadId"));
                     offlineObservation.put("mixId", query.get("mixId"));
@@ -1746,29 +1779,62 @@ final class SutMetricsService implements AutoCloseable {
                     if (label.matches("(?i).*(token|secret|password|credential|authorization|api[_-]?key).*")) labels.put(label, "[REDACTED]");
                     else if (value instanceof String text && text.length() <= 512 && !hasControl(text)) labels.put(label, text);
                 });
-                values.add(fields("labels", labels, "value", row.get("value")));
+                Map<String, Object> safeValue = fields("labels", labels, "value", row.get("value"));
+                String state = nullableText(row.get("state"));
+                if (state != null && Set.of("AVAILABLE", "PARTIAL", "NO_DATA", "UNAVAILABLE", "NOT_EVALUATED").contains(state))
+                    safeValue.put("state", state);
+                List<Map<String, Object>> diagnostics = listOfMaps(row.get("diagnostics")).stream()
+                        .filter(diagnostic -> diagnostic.get("code") instanceof String code
+                                && code.matches("[A-Z][A-Z0-9_]{0,79}")
+                                && diagnostic.get("message") instanceof String message
+                                && message.length() <= 240 && !hasControl(message))
+                        .limit(8).map(diagnostic -> fields("code", diagnostic.get("code"), "message", diagnostic.get("message")))
+                        .toList();
+                if (!diagnostics.isEmpty()) safeValue.put("diagnostics", diagnostics);
+                values.add(safeValue);
             }
             safe.put("labeledValues", values);
         }
         return safe;
     }
 
-    private static List<Map<String, Object>> applyMetricSourceLabelAllowlist(
-            List<Map<String, Object>> series, Map<String, Object> snapshot, Map<String, Object> query) {
+    private static List<Map<String, Object>> applyMetricSourceLabelMapping(
+            List<Map<String, Object>> series, Map<String, Object> snapshot, Map<String, Object> query)
+            throws PrometheusOutputRoutingException {
         String sourceId = metricSourceId(query);
         if (sourceId == null) return series;
         Map<String, Object> source = listOfMaps(snapshot.get("metricSources")).stream()
                 .filter(candidate -> sourceId.equals(candidate.get("id"))).findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("The pinned Metric Source was not found while applying its label allowlist."));
+                .orElseThrow(() -> new IllegalArgumentException("The pinned Metric Source was not found while applying its label mapping."));
         if (!(source.get("mapping") instanceof Map<?, ?>)) return series;
-        Set<String> allowedLabels = new HashSet<>(listOfStrings(objectOrEmpty(source.get("mapping")).get("allowedLabels")));
+        Map<String, Object> mapping = objectOrEmpty(source.get("mapping"));
+        Map<String, Object> labelMapping = objectOrEmpty(mapping.get("labels"));
+        List<String> retainedLabels = mapping.get("labels") instanceof Map<?, ?>
+                ? listOfStrings(labelMapping.get("retain"))
+                : listOfStrings(mapping.get("allowedLabels"));
         List<Map<String, Object>> filtered = new ArrayList<>(series.size());
+        Map<String, String> originalByProjectedIdentity = new LinkedHashMap<>();
         for (Map<String, Object> row : series) {
             Map<String, Object> copy = new LinkedHashMap<>(row);
             Map<String, Object> labels = new LinkedHashMap<>();
-            objectOrEmpty(row.get("labels")).forEach((label, value) -> {
-                if (allowedLabels.contains(label)) labels.put(label, value);
-            });
+            Map<String, Object> original = objectOrEmpty(row.get("labels"));
+            for (String label : retainedLabels) {
+                Object raw = original.get(label);
+                if (raw == null) continue;
+                if (!(raw instanceof String value) || value.isEmpty() || value.length() > 512 || hasControl(value))
+                    throw new PrometheusOutputRoutingException("METRIC_LABEL_VALUE_INVALID",
+                            "A retained Prometheus label has an empty, non-text, overlong, or invalid value.");
+                labels.put(label, value);
+            }
+            String projected = canonicalLabels(stringMap(labels));
+            String originalIdentity = canonicalLabels(stringMap(original));
+            String prior = originalByProjectedIdentity.putIfAbsent(projected, originalIdentity);
+            if (prior != null && !prior.equals(originalIdentity))
+                throw new PrometheusOutputRoutingException("METRIC_LABEL_RETENTION_COLLISION",
+                        "The configured label retention merges distinct Prometheus series. Retain another discriminator label.");
+            if (prior != null)
+                throw new PrometheusOutputRoutingException("METRIC_LABEL_DUPLICATE_SERIES",
+                        "Prometheus returned duplicate series with the same retained label identity.");
             copy.put("labels", labels);
             filtered.add(copy);
         }
@@ -2307,7 +2373,8 @@ final class SutMetricsService implements AutoCloseable {
                         List<BusinessMetricValue> metricValues = Boolean.TRUE.equals(query.get("multiOutput"))
                                 ? mappedBusinessMetricValues(query, mappedRows)
                                 : List.of(new BusinessMetricValue(numericMetricValue(rawValue, nullableText(query.get("valuePath"))),
-                                        "job".equals(query.get("scope")) ? "JOB_SHARED" : "USER_ATTRIBUTED", 0, Map.of()));
+                                        "job".equals(query.get("scope")) ? "JOB_SHARED" : "USER_ATTRIBUTED", 0, Map.of(),
+                                        "AVAILABLE", null, null));
                         String metricSource = metricSourceId(query);
                         long sourceSamples = metricSource == null ? 0L : metricSourceSampleCounts.getOrDefault(metricSource, 0L);
                         long sourceSeries = metricSource == null ? 0L : metricSourceSeriesCounts.getOrDefault(metricSource, 0L);
@@ -2351,7 +2418,7 @@ final class SutMetricsService implements AutoCloseable {
                         }
                     }
                     Map<String, Object> value = routePrometheusOutput(fetched, query, fetchMembers, start, end, stepSeconds);
-                    List<Map<String, Object>> series = applyMetricSourceLabelAllowlist(
+                List<Map<String, Object>> series = applyMetricSourceLabelMapping(
                             listOfMaps(value.get("series")), snapshot, query);
                     int sampleCount = ((Number) value.get("sampleCount")).intValue();
                     Map<String, Object> coverage = object(value.get("coverage"), "coverage");
@@ -2428,7 +2495,8 @@ final class SutMetricsService implements AutoCloseable {
                             "sourceId", query.get("sourceId"), "unit", query.get("unit"), "path", name,
                             "lengthBytes", bytes.length, "sha256", sha256(bytes), "sampleCount", sampleCount,
                             "seriesCount", series.size(), "observationCount", observationCount,
-                            "coverage", coverage, "queryStatus", queryStatus));
+                            "coverage", coverage, "queryStatus", queryStatus,
+                            "groupIds", metricGroupIds(sidecarV2, snapshot)));
                     diagnostics.addAll(queryDiagnostics.stream().map(diagnostic -> fields("queryId", query.get("id"),
                             "code", diagnostic.get("code"), "message", diagnostic.get("message"))).toList());
                 } catch (CollectionBudgetExceededException budget) {
@@ -2576,7 +2644,13 @@ final class SutMetricsService implements AutoCloseable {
         String rowsPath = String.valueOf(mapping.getOrDefault("rows", "rows"));
         String workloadColumn = nullableText(mapping.get("workloadColumn"));
         String mixColumn = nullableText(mapping.get("mixColumn"));
-        Map<String, Object> labelColumns = objectOrEmpty(mapping.get("labelColumns"));
+        boolean canonicalLabelMapping = mapping.get("labels") instanceof Map<?, ?>;
+        Map<String, Object> labelColumns = canonicalLabelMapping
+                ? objectOrEmpty(mapping.get("labels")) : objectOrEmpty(mapping.get("labelColumns"));
+        Set<String> legacyAllowedLabels = new HashSet<>(listOfStrings(mapping.get("allowedLabels")));
+        if (!canonicalLabelMapping && !labelColumns.isEmpty() && legacyAllowedLabels.isEmpty())
+            return new BusinessMappedRows(Map.of(), Set.of(), Set.of(), Set.of(), 0,
+                    "INVALID", "BUSINESS_MAPPING_INVALID");
         try {
             if (raw instanceof Map<?, ?> rawMap && !rawMap.containsKey("rows")
                     && "rows".equals(rowsPath) && workloadColumn == null && mixColumn == null
@@ -2620,6 +2694,8 @@ final class SutMetricsService implements AutoCloseable {
                 Map<String, Object> row;
                 try { row = object(rawMap, "business metric row"); }
                 catch (RuntimeException invalidRow) { unmatched++; continue; }
+                if (!canonicalLabelMapping && !legacyAllowedLabels.isEmpty()
+                        && !legacyAllowedLabels.containsAll(labelColumns.keySet())) { unmatched++; continue; }
                 Map<String, String> labels = businessLabels(row, labelColumns);
                 if (labels == null) { unmatched++; continue; }
                 if (!labels.isEmpty() && !labelIdentities.add(canonicalLabels(labels))) {
@@ -2665,6 +2741,8 @@ final class SutMetricsService implements AutoCloseable {
                 continue;
             }
             String key = String.valueOf(candidates.get(0).get("subjectKey"));
+            if (!canonicalLabelMapping && !legacyAllowedLabels.isEmpty()
+                    && !legacyAllowedLabels.containsAll(labelColumns.keySet())) { unmatched++; continue; }
             Map<String, String> labels = businessLabels(row, labelColumns);
             if (labels == null) { unmatched++; continue; }
             if (mapped.putIfAbsent(key, new ArrayList<>(List.of(new BusinessMappedRow(row, labels)))) != null) {
@@ -2734,15 +2812,25 @@ final class SutMetricsService implements AutoCloseable {
             throw new BusinessMetricOutputException("BUSINESS_MAPPING_SUBJECT_MISSING", "MISSING", unmatched,
                     "No result row maps to this expected metric, label set, and Workload/mix subject.");
         String column = String.valueOf(query.get("column"));
+        if (rows.stream().noneMatch(mapped -> mapped.row().containsKey(column)))
+            throw new BusinessMetricOutputException("BUSINESS_METRIC_VALUE_INVALID", "NOT_EVALUATED", unmatched,
+                    "The mapped output column is missing from every result row for this metric and subject.");
         String mappingStatus = nullableText(objectOrEmpty(query.get("mapping")).get("workloadColumn")) == null
                 ? mappedRows.status() : "MAPPED";
         List<BusinessMetricValue> values = new ArrayList<>();
         for (BusinessMappedRow mapped : rows) {
             Object rawValue = mapped.row().get(column);
-            if (!(rawValue instanceof Number number) || !Double.isFinite(number.doubleValue()))
-                throw new BusinessMetricOutputException("BUSINESS_METRIC_VALUE_INVALID", "INVALID_VALUE", unmatched,
-                        "The mapped output column is null, nonnumeric, or nonfinite.");
-            values.add(new BusinessMetricValue(number.doubleValue(), mappingStatus, unmatched, mapped.labels()));
+            if (rawValue instanceof Number number && Double.isFinite(number.doubleValue())) {
+                values.add(new BusinessMetricValue(number.doubleValue(), mappingStatus, unmatched, mapped.labels(),
+                        "AVAILABLE", null, null));
+            } else {
+                if (mapped.labels().isEmpty())
+                    throw new BusinessMetricOutputException("BUSINESS_METRIC_VALUE_INVALID", "NOT_EVALUATED", unmatched,
+                            "The mapped output value is null, nonnumeric, or nonfinite.");
+                values.add(new BusinessMetricValue(null, "PARTIAL", unmatched, mapped.labels(), "PARTIAL",
+                        "BUSINESS_METRIC_VALUE_INVALID",
+                        "This labelled row has a null, nonnumeric, or nonfinite mapped output value."));
+            }
         }
         return List.copyOf(values);
     }
@@ -2779,21 +2867,23 @@ final class SutMetricsService implements AutoCloseable {
                     "queryEnd", steadyEnd.toString(), "completedAt", collectedAt.toString(),
                     "semantics", "author-defined query; completion does not prove exhaustive interval coverage");
         }
-        String mappingStatus = metricValue.mappingStatus();
+        int invalidValueCount = (int) metricValues.stream().filter(value -> "PARTIAL".equals(value.state())).count();
+        int unmatchedRowCount = metricValues.stream().mapToInt(BusinessMetricValue::unmatchedRowCount).max().orElse(0);
+        String mappingStatus = invalidValueCount > 0 ? "PARTIAL" : metricValue.mappingStatus();
         String quality = "afterDrain".equals(sampling)
                 ? metricValues.size() > 1 || !metricValue.labels().isEmpty() ? "LABELED_SNAPSHOT" : "SINGLE_VALUE"
                 : "AUTHOR_DEFINED_WINDOW_QUERY";
-        List<Map<String, Object>> qualityDiagnostics = staleAfterDrain
-                ? List.of(fields("code", "BUSINESS_CALL_STALE_AFTER_DRAIN",
-                        "message", "The afterDrain business snapshot exceeded the configured freshness limit of "
-                                + freshnessLimitMs + " ms and is marked stale."))
-                : metricValue.unmatchedRowCount() > 0
-                    ? List.of(fields("code", "BUSINESS_MAPPING_UNMATCHED_ROWS",
-                            "message", "One or more returned rows could not be mapped to the declared labels or immutable LOAD subjects."))
-                    : List.of();
+        List<Map<String, Object>> qualityDiagnostics = new ArrayList<>();
+        if (staleAfterDrain) qualityDiagnostics.add(fields("code", "BUSINESS_CALL_STALE_AFTER_DRAIN",
+                "message", "The afterDrain business snapshot exceeded the configured freshness limit of "
+                        + freshnessLimitMs + " ms and is marked stale."));
+        if (invalidValueCount > 0) qualityDiagnostics.add(fields("code", "BUSINESS_METRIC_VALUE_INVALID",
+                "message", invalidValueCount + " mapped row(s) had an invalid output value; valid sibling rows remain available."));
+        if (unmatchedRowCount > 0) qualityDiagnostics.add(fields("code", "BUSINESS_MAPPING_UNMATCHED_ROWS",
+                "message", "One or more returned rows could not be mapped to the declared labels or immutable LOAD subjects."));
         String callGroupId = String.valueOf(query.getOrDefault("callGroupId", query.get("id")));
         int callCount = 1;
-        String queryStatus = staleAfterDrain ? "STALE" : metricValue.unmatchedRowCount() > 0 ? "PARTIAL" : "READY";
+        String queryStatus = staleAfterDrain ? "STALE" : invalidValueCount > 0 || unmatchedRowCount > 0 ? "PARTIAL" : "READY";
         Map<String, Object> observation = fields("schemaVersion", OBSERVATION_SCHEMA,
                 "kind", query.get("observationKind"), "effectiveBindingId", query.get("id"),
                 "source", fields("id", query.get("sourceId"), "name", query.get("sourceName"), "revision", query.get("sourceRevision")),
@@ -2802,10 +2892,10 @@ final class SutMetricsService implements AutoCloseable {
                 "metric", fields("id", query.get("metricId"), "name", query.get("title"), "category", query.get("category"),
                         "unit", query.get("unit"), "kind", query.get("kind")),
                 "window", observationWindow,
-                "availability", fields("state", "AVAILABLE",
+                "availability", fields("state", invalidValueCount > 0 ? "PARTIAL" : "AVAILABLE",
                         "freshness", staleAfterDrain ? "STALE" : "FRESH",
                         "quality", quality, "mappingStatus", mappingStatus,
-                        "unmatchedRowCount", metricValue.unmatchedRowCount(), "callCount", callCount,
+                        "unmatchedRowCount", unmatchedRowCount, "callCount", callCount,
                         "collectionDurationMs", callDurationMs, "diagnostics", qualityDiagnostics),
                 "provenance", fields("provider", "att-call", "sourceType", query.get("sourceType"),
                         "sourceName", query.get("callName"), "jobId", jobId,
@@ -2825,10 +2915,12 @@ final class SutMetricsService implements AutoCloseable {
                 "kind", query.get("kind"), "targetId", query.get("targetId"), "targetType", query.get("targetType"),
                 "scope", query.get("scope"), "workloadId", query.get("workloadId"), "mixId", query.get("mixId"),
                 "unit", query.get("unit"), "callCount", callCount, "mappingStatus", mappingStatus,
-                "unmatchedRowCount", metricValue.unmatchedRowCount(), "observation", observation);
+                "unmatchedRowCount", unmatchedRowCount, "observation", observation);
         if (metricValues.stream().anyMatch(value -> !value.labels().isEmpty())) {
             sidecar.put("labeledValues", metricValues.stream()
-                    .map(value -> fields("labels", value.labels(), "value", value.value())).toList());
+                    .map(value -> fields("labels", value.labels(), "value", value.value(), "state", value.state(),
+                            "diagnostics", value.diagnosticCode() == null ? List.of()
+                                    : List.of(fields("code", value.diagnosticCode(), "message", value.diagnosticMessage())))).toList());
         } else {
             sidecar.put("value", metricValue.value());
         }
@@ -2847,12 +2939,13 @@ final class SutMetricsService implements AutoCloseable {
                 "targetId", query.get("targetId"), "targetType", query.get("targetType"),
                 "scope", query.get("scope"), "workloadId", query.get("workloadId"), "mixId", query.get("mixId"),
                 "callGroupId", callGroupId, "callCount", callCount, "mappingStatus", mappingStatus,
-                "unmatchedRowCount", metricValue.unmatchedRowCount(),
+                "unmatchedRowCount", unmatchedRowCount,
                 "sourceId", query.get("sourceId"), "unit", query.get("unit"), "path", name,
                 "lengthBytes", bytes.length, "sha256", sha256(bytes), "sampleCount", 0, "seriesCount", metricValues.size(),
                 "observationCount", observationCount,
                 "valueCount", metricValues.size(), "observationKind", query.get("observationKind"),
-                "collectionDurationMs", callDurationMs, "queryStatus", queryStatus);
+                "collectionDurationMs", callDurationMs, "queryStatus", queryStatus,
+                "groupIds", metricGroupIds(sidecarV2, snapshot));
     }
 
     private Map<String, Object> withNormalizedObservationsV2(Map<String, Object> sidecar,
@@ -2956,7 +3049,8 @@ final class SutMetricsService implements AutoCloseable {
                 "observationCount", observationCount,
                 "valueCount", 0, "observationKind", query.get("observationKind"),
                 "collectionDurationMs", durationMs,
-                "queryStatus", failure instanceof BusinessMetricOutputException ? "NOT_EVALUATED" : "UNAVAILABLE");
+                "queryStatus", failure instanceof BusinessMetricOutputException ? "NOT_EVALUATED" : "UNAVAILABLE",
+                "groupIds", metricGroupIds(sidecarV2, snapshot));
     }
 
     private Map<String, Object> writeUnavailablePrometheusMetric(Path directory, int index,
@@ -3004,7 +3098,8 @@ final class SutMetricsService implements AutoCloseable {
                 "sourceId", query.get("sourceId"), "unit", query.get("unit"), "path", name,
                 "lengthBytes", bytes.length, "sha256", sha256(bytes), "sampleCount", 0, "seriesCount", 0,
                 "observationCount", observationCount,
-                "coverage", coverage, "queryStatus", "UNAVAILABLE");
+                "coverage", coverage, "queryStatus", "UNAVAILABLE",
+                "groupIds", metricGroupIds(sidecarV2, snapshot));
     }
 
     private Map<String, Object> collectPreview(Map<String, Object> snapshot, List<Map<String, Object>> queries,
@@ -3042,7 +3137,7 @@ final class SutMetricsService implements AutoCloseable {
                     }
                 }
                 collected = routePrometheusOutput(collected, query, members, start, end, stepSeconds);
-                List<Map<String, Object>> series = applyMetricSourceLabelAllowlist(
+                List<Map<String, Object>> series = applyMetricSourceLabelMapping(
                         listOfMaps(collected.get("series")), snapshot, query);
                 long querySamples = ((Number) collected.get("sampleCount")).longValue();
                 if (samples + querySamples > MAX_LIVE_PREVIEW_SAMPLES) throw new CollectionBudgetExceededException("The live preview sample budget was exceeded.");
@@ -3665,8 +3760,7 @@ final class SutMetricsService implements AutoCloseable {
                 if (nullableText(fetch.get("call")) == null || fetch.get("call").toString().contains("{{"))
                     throw new IllegalArgumentException("Business Metric Source calls must be fully resolved and cannot interpolate caller-supplied parameters.");
                 String sampling = "steadyWindow".equals(fetch.get("sampling")) ? "windowQuery" : String.valueOf(fetch.get("sampling"));
-                Map<String, Object> legacyMapping = fields("allowedLabels", mapping.get("allowedLabels"),
-                        "labelColumns", mapping.get("labelColumns"));
+                Map<String, Object> legacyMapping = fields("labels", mapping.get("labels"));
                 List<Map<String, Object>> legacyOutputs = new ArrayList<>();
                 for (Object rawOutput : outputs) {
                     Map<String, Object> output = object(rawOutput, "Metric Source output");
@@ -4053,13 +4147,43 @@ final class SutMetricsService implements AutoCloseable {
     private Map<String, Object> validateMetricSource(Map<String, Object> input) {
         verifyContractSchema("att-sut-metrics-metric-source/v1", input);
         Map<String, Object> result = new LinkedHashMap<>(input);
-        for (String label : listOfStrings(objectOrEmpty(result.get("mapping")).get("allowedLabels")))
-            if (isSensitiveMetricLabel(label))
-                throw new IllegalArgumentException("Metric Source mapping cannot retain sensitive label names.");
         String requestedRevision = nullableText(result.remove("revision"));
-        String revision = sha256Json(result);
-        if (requestedRevision != null && !requestedRevision.equals(revision))
+        String submittedRevision = sha256Json(result);
+        if (requestedRevision != null && !requestedRevision.equals(submittedRevision))
             throw new IllegalArgumentException("Metric Source revision does not match its acquisition and mapping definition.");
+        Map<String, Object> submittedMapping = object(result.get("mapping"), "Metric Source mapping");
+        String mode = String.valueOf(object(result.get("fetch"), "Metric Source fetch").get("mode"));
+        Map<String, Object> canonicalMapping = new LinkedHashMap<>(submittedMapping);
+        canonicalMapping.remove("allowedLabels");
+        canonicalMapping.remove("labelColumns");
+        Object rawLabels = submittedMapping.get("labels");
+        if ("prometheus-range".equals(mode)) {
+            List<String> retain = rawLabels instanceof Map<?, ?> labelMap
+                    ? checkedStrings(object(labelMap, "Metric Source labels").get("retain"), 40, 64, "mapping.labels.retain")
+                    : checkedStrings(submittedMapping.get("allowedLabels"), 40, 64, "mapping.allowedLabels");
+            for (String label : retain) validateMetricLabelName(label, "mapping.labels.retain");
+            canonicalMapping.put("labels", fields("retain", retain));
+        } else {
+            Map<String, Object> projection = rawLabels instanceof Map<?, ?>
+                    ? object(rawLabels, "Metric Source label projection")
+                    : objectOrEmpty(submittedMapping.get("labelColumns"));
+            List<String> legacyAllowed = checkedStrings(submittedMapping.get("allowedLabels"), 40, 64, "mapping.allowedLabels");
+            Map<String, Object> normalizedProjection = new java.util.TreeMap<>();
+            if (projection.size() > 40) throw new IllegalArgumentException("Metric Source label mappings may contain at most 40 labels.");
+            for (Map.Entry<String, Object> entry : projection.entrySet()) {
+                String label = entry.getKey();
+                String column = requiredText(fields("column", entry.getValue()), "column");
+                validateMetricLabelName(label, "mapping.labels key");
+                if (!rawLabelsPresent(rawLabels) && !legacyAllowed.isEmpty() && !legacyAllowed.contains(label))
+                    throw new IllegalArgumentException("Legacy mapping.labelColumns entries must be in mapping.allowedLabels.");
+                if (!column.matches("[A-Za-z_][A-Za-z0-9_]{0,127}") || isSensitiveMetricLabel(column))
+                    throw new IllegalArgumentException("Metric Source label columns must be explicit, bounded, and nonsensitive.");
+                normalizedProjection.put(label, column);
+            }
+            canonicalMapping.put("labels", new LinkedHashMap<>(normalizedProjection));
+        }
+        result.put("mapping", canonicalMapping);
+        String revision = sha256Json(result);
         result.put("revision", revision);
         String id = requiredText(result, "id");
         Map<String, Object> connection = object(result.get("connection"), "Metric Source connection");
@@ -4071,6 +4195,15 @@ final class SutMetricsService implements AutoCloseable {
                 throw new IllegalArgumentException("Metric Source connection revision is stale; reload the registered Data Source.");
         }
         return result;
+    }
+
+    private static boolean rawLabelsPresent(Object labels) {
+        return labels instanceof Map<?, ?>;
+    }
+
+    private static void validateMetricLabelName(String label, String field) {
+        if (!label.matches("[A-Za-z_][A-Za-z0-9_]{0,63}") || label.startsWith("__") || isSensitiveMetricLabel(label))
+            throw new IllegalArgumentException(field + " must use a bounded, nonreserved, nonsensitive label name.");
     }
 
     private Map<String, Object> validateGroup(Map<String, Object> input) {
@@ -4323,34 +4456,37 @@ final class SutMetricsService implements AutoCloseable {
         if (raw != null && !(raw instanceof Map<?, ?>))
             throw new IllegalArgumentException("Business metric mapping must be an object.");
         Map<String, Object> input = objectOrEmpty(raw);
-        rejectUnknown(input, Set.of("rows", "workloadColumn", "mixColumn", "allowedLabels", "labelColumns"), "business metric mapping");
+        rejectUnknown(input, Set.of("rows", "workloadColumn", "mixColumn", "labels", "allowedLabels", "labelColumns"), "business metric mapping");
         String rows = String.valueOf(input.getOrDefault("rows", "rows"));
         if (rows.length() > 256 || hasControl(rows)
                 || !rows.matches("[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[[0-9]{1,6}\\]){0,16}"))
             throw new IllegalArgumentException("Business metric mapping.rows must be a bounded object/list path.");
         String workloadColumn = nullableText(input.get("workloadColumn"));
         String mixColumn = nullableText(input.get("mixColumn"));
-        List<String> allowedLabels = checkedStrings(input.get("allowedLabels"), 40, 64, "mapping.allowedLabels");
-        Map<String, Object> rawLabelColumns = objectOrEmpty(input.get("labelColumns"));
-        if (rawLabelColumns.size() > 40) throw new IllegalArgumentException("mapping.labelColumns may contain at most 40 labels.");
-        Map<String, Object> labelColumns = new LinkedHashMap<>();
+        List<String> legacyAllowedLabels = checkedStrings(input.get("allowedLabels"), 40, 64, "mapping.allowedLabels");
+        boolean canonicalLabels = input.get("labels") instanceof Map<?, ?>;
+        Map<String, Object> rawLabelColumns = canonicalLabels
+                ? object(input.get("labels"), "business metric labels") : objectOrEmpty(input.get("labelColumns"));
+        if (rawLabelColumns.size() > 40) throw new IllegalArgumentException("Business metric labels may contain at most 40 mappings.");
+        Map<String, Object> labelColumns = new java.util.TreeMap<>();
         for (Map.Entry<String, Object> entry : rawLabelColumns.entrySet()) {
             String label = entry.getKey(), column = requiredText(fields("column", entry.getValue()), "column");
-            if (!label.matches("[A-Za-z_][A-Za-z0-9_]{0,63}") || !allowedLabels.contains(label)
-                    || !column.matches("[A-Za-z_][A-Za-z0-9_]{0,127}"))
-                throw new IllegalArgumentException("mapping.labelColumns must map each declared label to an allowed bounded column.");
+            validateMetricLabelName(label, "mapping.labels key");
+            if (!canonicalLabels && !legacyAllowedLabels.isEmpty() && !legacyAllowedLabels.contains(label))
+                throw new IllegalArgumentException("Legacy mapping.labelColumns entries must be in mapping.allowedLabels.");
+            if (!column.matches("[A-Za-z_][A-Za-z0-9_]{0,127}") || isSensitiveMetricLabel(column))
+                throw new IllegalArgumentException("mapping.labels must map labels to explicit bounded nonsensitive columns.");
             labelColumns.put(label, column);
         }
-        if (!labelColumns.isEmpty() && allowedLabels.isEmpty())
-            throw new IllegalArgumentException("mapping.labelColumns requires an explicit allowedLabels list.");
+        if (!canonicalLabels && !labelColumns.isEmpty() && legacyAllowedLabels.isEmpty())
+            throw new IllegalArgumentException("Legacy mapping.labelColumns requires a nonempty mapping.allowedLabels list.");
         for (String column : List.of(workloadColumn == null ? "" : workloadColumn, mixColumn == null ? "" : mixColumn))
             if (!column.isEmpty() && !column.matches("[A-Za-z_][A-Za-z0-9_]{0,127}"))
                 throw new IllegalArgumentException("Business metric mapping columns must be explicit bounded column names.");
         if (mixColumn != null && workloadColumn == null)
             throw new IllegalArgumentException("mapping.mixColumn requires mapping.workloadColumn.");
-        Map<String, Object> normalized = fields("rows", rows, "workloadColumn", workloadColumn, "mixColumn", mixColumn);
-        if (input.containsKey("allowedLabels")) normalized.put("allowedLabels", allowedLabels);
-        if (input.containsKey("labelColumns")) normalized.put("labelColumns", labelColumns);
+        Map<String, Object> normalized = fields("rows", rows, "workloadColumn", workloadColumn, "mixColumn", mixColumn,
+                "labels", new LinkedHashMap<>(labelColumns));
         return normalized;
     }
 

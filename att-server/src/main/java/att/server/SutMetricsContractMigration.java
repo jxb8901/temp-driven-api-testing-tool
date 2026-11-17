@@ -156,8 +156,15 @@ final class SutMetricsContractMigration {
                 Map<String, Object> metricSourceSummary = fields("id", metricSourceId, "revision", nativeSource.get("revision"),
                         "connectionKind", connection.get("kind"), "connectionId", connection.get("id"),
                         "fetchIds", sorted(fetchesByMetricSource.getOrDefault(metricSourceId, Set.of())));
-                metricSourceSummary.put("mapping", fields("allowedLabels",
-                        asMap(nativeSource.get("mapping")).getOrDefault("allowedLabels", List.of())));
+                Map<String, Object> nativeMapping = asMap(nativeSource.get("mapping"));
+                if (nativeMapping.get("labels") instanceof Map<?, ?> labels)
+                    metricSourceSummary.put("mapping", fields("labels", new LinkedHashMap<>(asMap(labels))));
+                else if (nativeMapping.containsKey("allowedLabels") || nativeMapping.containsKey("labelColumns")) {
+                    Map<String, Object> legacyMapping = new LinkedHashMap<>();
+                    if (nativeMapping.containsKey("allowedLabels")) legacyMapping.put("allowedLabels", nativeMapping.get("allowedLabels"));
+                    if (nativeMapping.containsKey("labelColumns")) legacyMapping.put("labelColumns", nativeMapping.get("labelColumns"));
+                    metricSourceSummary.put("mapping", legacyMapping);
+                }
                 if (nativeSource.get("limits") instanceof Map<?, ?> limits)
                     metricSourceSummary.put("limits", new LinkedHashMap<>(asMap(limits)));
                 metricSources.add(metricSourceSummary);
@@ -336,6 +343,13 @@ final class SutMetricsContractMigration {
                 identity.put("labels", safeLabels(labeled.get("labels")));
                 observation.put("identity", identity);
                 observation.put("observationId", digest(identity));
+                Map<String, Object> data = new LinkedHashMap<>(asMap(observation.get("data")));
+                String rowState = nullableText(labeled.get("state"));
+                if (rowState != null && Set.of("AVAILABLE", "PARTIAL", "NO_DATA", "UNAVAILABLE", "NOT_EVALUATED").contains(rowState))
+                    data.put("state", rowState);
+                List<Map<String, Object>> rowDiagnostics = list(labeled.get("diagnostics"));
+                if (!rowDiagnostics.isEmpty()) data.put("diagnostics", diagnostics(rowDiagnostics));
+                observation.put("data", data);
                 normalized.add(observation);
             }
             return List.copyOf(normalized);

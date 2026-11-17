@@ -16,8 +16,7 @@
     "sampling": "afterDrain"
   },
   "mapping": {
-    "allowedLabels": ["instance", "role"],
-    "labelColumns": {"instance": "INSTANCE", "role": "ROLE"},
+    "labels": {"instance": "INSTANCE", "role": "ROLE"},
     "outputs": [
       {"id": "cpu-percent", "title": "CPU utilisation", "unit": "percent", "kind": "gauge", "column": "CPU_PERCENT"},
       {"id": "memory-bytes", "title": "Memory used", "unit": "bytes", "kind": "gauge", "column": "MEMORY_BYTES"},

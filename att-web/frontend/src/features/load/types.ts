@@ -249,11 +249,12 @@ export interface SutMetricPoint { timestamp: string; timestampEpochMs: number; v
 export interface SutMetricSeries { labels: Record<string, string>; samples: SutMetricPoint[]; coverage?: Record<string, unknown> }
 export interface SutMetricGroupAssignment {
   observationId: string; groupId: string; title?: string; order?: number; display?: string;
-  groupBy?: Record<string, string>;
+  groupBy?: Record<string, string>; labels?: Record<string, string>;
+  value?: number | null; status?: string; freshness?: string; observedAt?: string;
 }
 export interface SutMetricGroupView {
   assignments?: SutMetricGroupAssignment[];
-  unassigned?: Array<{ observationId?: string; metricId?: string; sourceId?: string; reason?: string }>;
+  unassigned?: Array<{ observationId?: string; metricId?: string; sourceId?: string; reason?: string; labels?: Record<string, string> }>;
   diagnostics?: Array<{ code?: string; message?: string; observationId?: string; groupId?: string }>;
 }
 export interface SutMetricGroupDefinition {
@@ -265,6 +266,11 @@ export interface SutMetricQueryMetadata {
   id: string; profile?: string; profilePath?: string; sourceId?: string; metricSourceId?: string; sourceName?: string; kind?: string;
   targetId: string; targetType?: string; metricId: string; title?: string; category?: string; unit?: string;
   observationType?: string; observationKind?: string; sampling?: string; scope?: string; workloadId?: string; sourceType?: string;
+  metricGroupIds?: string[];
+}
+export interface SutMetricLabeledValue {
+  labels: Record<string, string>; value?: number | null; state?: string;
+  diagnostics?: Array<{ code?: string; message?: string }>;
 }
 export interface SutMetricItem {
   id?: string; queryId?: string; profile?: string; profilePath?: string; metricId: string; title: string; category?: string; targetId: string; targetType?: string; kind?: string;
@@ -273,7 +279,12 @@ export interface SutMetricItem {
   scope?: 'job' | 'workload' | 'mix'; workloadId?: string | null; mixId?: string | null;
   callGroupId?: string; callCount?: number; mappingStatus?: string; unmatchedRowCount?: number;
   groupView?: SutMetricGroupView;
-  normalizedObservationsV2?: Array<{ observationId?: string; identity?: { metricId?: string; binding?: { sourceId?: string }; labels?: Record<string, string> } }>;
+  labeledValues?: SutMetricLabeledValue[];
+  normalizedObservationsV2?: Array<{
+    observationId?: string;
+    identity?: { metricId?: string; binding?: { sourceId?: string }; labels?: Record<string, string> };
+    data?: { value?: number | null; state?: string; freshness?: string; diagnostics?: Array<{ code?: string; message?: string }> };
+  }>;
 }
 export interface SutMetricsManifest {
   schemaVersion?: string; state?: string; complete?: boolean; createdAt?: string; updatedAt?: string;

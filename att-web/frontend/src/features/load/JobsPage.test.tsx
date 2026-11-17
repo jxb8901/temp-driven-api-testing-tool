@@ -1066,37 +1066,60 @@ describe('JobsPage React feature', () => {
     expect(getMetrics).toHaveBeenCalledTimes(1);
   });
 
-  it('filters archived observations by pinned Metric Group and shows their instance labels', async () => {
-    const query = (id: string) => ({ id, profile: 'flat-host', profilePath: 'flat-host', sourceId: 'prom', metricSourceId: 'host-metrics',
-      targetId: 'sut-1', metricId: id, title: id.toUpperCase(), unit: 'count' });
+  it('shows all twelve wide-row values and filters each metric card to its pinned Group observations', async () => {
+    const query = (id: string, unit: string) => ({ id, profile: 'flat-host', profilePath: 'flat-host', sourceId: 'db', metricSourceId: 'wide-row',
+      targetId: 'sut-1', metricId: id, title: id.toUpperCase(), unit, metricGroupIds: ['app', 'db'] });
+    const instances = [
+      { instance: 'app-1', role: 'app' }, { instance: 'app-2', role: 'app' },
+      { instance: 'db-1', role: 'db' }, { instance: 'db-2', role: 'db' },
+    ];
+    const values: Record<string, { unit: string; values: number[] }> = {
+      cpu: { unit: 'percent', values: [11, 12, 21, 22] },
+      memory: { unit: 'bytes', values: [128, 256, 512, 1024] },
+      sessions: { unit: 'count', values: [3, 4, 5, 6] },
+    };
+    const outputs = Object.entries(values).map(([metricId, output]) => {
+      const item = query(metricId, output.unit);
+      const observations = instances.map(labels => ({ observationId: `${metricId}-${labels.instance}`,
+        identity: { metricId, labels } }));
+      return { ...item,
+        normalizedObservationsV2: observations,
+        labeledValues: instances.map((labels, index) => ({ labels, value: output.values[index], state: 'AVAILABLE' })),
+        groupView: { assignments: instances.map(labels => ({ observationId: `${metricId}-${labels.instance}`,
+          groupId: labels.role, title: labels.role === 'app' ? 'App Servers' : 'DB Servers', labels,
+          groupBy: { instance: labels.instance }, value: output.values[instances.indexOf(labels)], status: 'AVAILABLE' })) },
+        series: instances.map((labels, index) => ({ labels, samples: [{ timestamp: new Date().toISOString(), timestampEpochMs: Date.now(), value: output.values[index] }] })),
+      };
+    });
     const response: SutMetricsJobResponse = {
-      state: 'READY', collection: { state: 'READY', queries: [query('cpu'), query('sessions')] },
+      state: 'READY', collection: { state: 'READY', queries: outputs.map(item => query(item.metricId, item.unit)) },
       groups: [{ schemaVersion: 'att-sut-metrics-group/v1', id: 'app', title: 'App Servers', order: 1, display: 'table',
-        match: { labels: { role: 'app' } }, groupBy: ['instance'] }],
-      items: [
-        { ...query('cpu'), groupView: { assignments: [{ observationId: 'cpu-app-1', groupId: 'app', title: 'App Servers', groupBy: { instance: 'app-1' } }] },
-          normalizedObservationsV2: [{ observationId: 'cpu-app-1', identity: { metricId: 'cpu', labels: { instance: 'app-1', role: 'app' } } }],
-          series: [{ labels: { instance: 'app-1', role: 'app' }, samples: [{ timestamp: new Date().toISOString(), timestampEpochMs: Date.now(), value: 5 }] }] },
-        { ...query('sessions'), groupView: { assignments: [], unassigned: [{ metricId: 'sessions', reason: 'UNASSIGNED' }],
-          diagnostics: [{ code: 'METRIC_GROUP_UNASSIGNED', message: 'No group matched.' }] },
-          series: [{ labels: { instance: 'db-1', role: 'db' }, samples: [{ timestamp: new Date().toISOString(), timestampEpochMs: Date.now(), value: 2 }] }] },
-      ],
+        match: { labels: { role: 'app' } }, groupBy: ['instance'] },
+      { schemaVersion: 'att-sut-metrics-group/v1', id: 'db', title: 'DB Servers', order: 2, display: 'table',
+        match: { labels: { role: 'db' } }, groupBy: ['instance'] }],
+      items: outputs,
     };
     const api = makeApi({ getJobSutMetrics: vi.fn(async () => response) });
     await act(async () => root.render(<SutMetricsPanel api={api} jobId="JOB-204" activeLoad={false} hidden={false} />));
     await advance();
 
     const panel = host.querySelector('#job-panel-sutMetrics')!;
+    for (const expected of ['11 percent', '12 percent', '21 percent', '22 percent',
+      '128 bytes', '256 bytes', '512 bytes', '1,024 bytes', '3 count', '4 count', '5 count', '6 count'])
+      expect(panel.textContent).toContain(expected);
     const groupSelect = Array.from(panel.querySelectorAll('label')).find(label => label.textContent?.includes('Metric Group'))?.querySelector('select')!;
     await act(async () => {
       groupSelect.value = 'app';
       groupSelect.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    expect(panel.querySelectorAll('article.att-sut-metric-card')).toHaveLength(1);
+    expect(panel.querySelectorAll('article.att-sut-metric-card')).toHaveLength(3);
     expect(panel.textContent).toContain('App Servers');
     expect(panel.textContent).toContain('instance=app-1');
-    expect(panel.textContent).not.toContain('sessions');
-    expect(panel.querySelector('.att-sut-metric-series-summary')?.textContent).toContain('5 count');
+    expect(panel.textContent).not.toContain('instance=db-');
+    for (const expected of ['11 percent', '12 percent', '128 bytes', '256 bytes', '3 count', '4 count'])
+      expect(panel.textContent).toContain(expected);
+    for (const excluded of ['21 percent', '22 percent', '512 bytes', '1,024 bytes', '5 count', '6 count'])
+      expect(panel.textContent).not.toContain(excluded);
   });
 
   it('plots multiple SUT series on one timestamp scale and leaves scrape gaps visible', async () => {

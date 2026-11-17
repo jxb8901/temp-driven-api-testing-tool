@@ -24,7 +24,7 @@ const EMPTY_METRIC_SOURCE = {
   schemaVersion: 'att-sut-metrics-metric-source/v1', id: 'host-metrics', name: 'Host metrics',
   connection: { kind: 'DATA_SOURCE', id: 'prom-main', revision: '0'.repeat(64) },
   fetch: { id: 'host-series', mode: 'prometheus-range', query: 'up{instance="{{instance}}"}', parameters: {}, sampling: 'range', step: '30s' },
-  mapping: { allowedLabels: ['__name__', 'instance'], outputs: [
+  mapping: { labels: { retain: ['instance'] }, outputs: [
     { id: 'host_up', title: 'Host availability', unit: 'ratio', kind: 'gauge', metricName: 'up' },
   ] },
   limits: { maxRows: 64, maxSeries: 16, maxSamples: 10000, maxArtifactBytes: 1048576 },
@@ -400,8 +400,8 @@ function SutMetricsAdminPanel() {
     <section aria-labelledby="sut-metric-sources-title">
       <h3 id="sut-metric-sources-title">Metric Sources</h3>
       <p className="att-settings-help">{zh
-        ? 'Metric Source 只描述一次 Prometheus、DBHelper 或既有 Package Tool 擷取與明確輸出欄位；不會建立第二份連線註冊。預覽只解析設定，不會執行查詢或 Tool。'
-        : 'A Metric Source describes one Prometheus, DBHelper, or existing Package Tool acquisition with explicit outputs. It does not create another connection registry. Preview parses the definition and never runs a query or Tool.'}</p>
+        ? 'Metric Source 只描述一次 Prometheus、DBHelper 或既有 Package Tool 擷取與明確輸出欄位；不會建立第二份連線註冊。Prometheus 使用 mapping.labels.retain；SQL 類來源使用 mapping.labels 將輸出 label 對應至明確結果欄位。未映射欄位不會輸出。預覽只解析設定，不會執行查詢或 Tool。'
+        : 'A Metric Source describes one Prometheus, DBHelper, or existing Package Tool acquisition with explicit outputs. Use mapping.labels.retain for Prometheus, or map output labels to explicit SQL result columns with mapping.labels. Unmapped columns are not published. Preview parses the definition and never runs a query or Tool.'}</p>
       <ul className="att-sut-catalog-list">{metricSources.map(source => {
         const mapping = source.mapping && typeof source.mapping === 'object' ? source.mapping as Record<string, unknown> : {};
         const outputCount = Array.isArray(mapping.outputs) ? mapping.outputs.length : 0;

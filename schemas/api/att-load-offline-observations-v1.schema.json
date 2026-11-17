@@ -192,7 +192,11 @@
               "observationId": { "type": "string", "maxLength": 64 }, "groupId": { "type": "string", "maxLength": 80 },
               "title": { "type": "string", "maxLength": 120 }, "order": { "type": "integer" },
               "display": { "type": "string", "maxLength": 16 }, "labels": { "$ref": "#/$defs/labels" },
-              "groupBy": { "$ref": "#/$defs/labels" }
+              "groupBy": { "$ref": "#/$defs/labels" },
+              "value": { "type": ["number", "null"] },
+              "status": { "enum": ["AVAILABLE", "PARTIAL", "NO_DATA", "UNAVAILABLE", "NOT_EVALUATED"] },
+              "freshness": { "enum": ["FRESH", "STALE", "UNKNOWN"] },
+              "observedAt": { "type": "string", "format": "date-time" }
             }
           }
         },
@@ -493,6 +497,33 @@
           }
         },
         "groupView": { "$ref": "#/$defs/groupView" },
+        "labeledValues": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "type": "object",
+            "required": ["labels", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "labels": { "$ref": "#/$defs/labels" },
+              "value": { "type": ["number", "null"] },
+              "state": { "enum": ["AVAILABLE", "PARTIAL", "NO_DATA", "UNAVAILABLE", "NOT_EVALUATED"] },
+              "diagnostics": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "type": "object",
+                  "required": ["code", "message"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,79}$" },
+                    "message": { "type": "string", "maxLength": 240 }
+                  }
+                }
+              }
+            }
+          }
+        },
         "value": {
           "type": [
             "number",

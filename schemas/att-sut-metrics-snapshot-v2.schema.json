@@ -36,9 +36,28 @@
           "fetchIds": { "type": "array", "uniqueItems": true, "maxItems": 256, "items": { "type": "string", "maxLength": 120 } },
           "mapping": {
             "type": "object",
-            "required": ["allowedLabels"],
             "additionalProperties": false,
             "properties": {
+              "labels": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": ["retain"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "retain": {
+                        "type": "array", "uniqueItems": true, "maxItems": 40,
+                        "items": { "type": "string", "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object", "maxProperties": 40,
+                    "propertyNames": { "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                    "additionalProperties": { "type": "string", "maxLength": 128, "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
+                  }
+                ]
+              },
               "allowedLabels": {
                 "type": "array",
                 "uniqueItems": true,
@@ -186,6 +205,24 @@
               "rows": { "type": "string", "maxLength": 256 },
               "workloadColumn": { "type": ["string", "null"], "maxLength": 128 },
               "mixColumn": { "type": ["string", "null"], "maxLength": 128 },
+              "labels": {
+                "oneOf": [
+                  {
+                    "type": "object", "required": ["retain"], "additionalProperties": false,
+                    "properties": {
+                      "retain": {
+                        "type": "array", "uniqueItems": true, "maxItems": 40,
+                        "items": { "type": "string", "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object", "maxProperties": 40,
+                    "propertyNames": { "pattern": "^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+                    "additionalProperties": { "type": "string", "maxLength": 128, "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$" }
+                  }
+                ]
+              },
               "allowedLabels": {
                 "type": "array",
                 "uniqueItems": true,

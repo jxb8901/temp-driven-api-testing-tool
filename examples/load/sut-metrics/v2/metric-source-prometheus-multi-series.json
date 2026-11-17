@@ -16,7 +16,7 @@
     "step": "15s"
   },
   "mapping": {
-    "allowedLabels": ["__name__", "instance", "job", "mode"],
+    "labels": {"retain": ["instance", "job", "mode"]},
     "outputs": [
       {
         "id": "cpu-idle-seconds",
