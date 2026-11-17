@@ -72,9 +72,9 @@ Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXE
 
 ## Select an environment profile
 
-`att-config/v2.13` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper lists as a whole. Package Testdata lists belong to `package.yaml`. See the resource pages and [Testdata registry and input mapping](test-authoring.md) for each binding.
+`att-config/v2.14` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper lists as a whole. Package Testdata lists belong to `package.yaml`. See the resource pages and [Testdata registry and input mapping](test-authoring.md) for each binding.
 
-ATT selects an environment through one common `att-config/v2.13` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT selects an environment through one common `att-config/v2.14` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -104,7 +104,7 @@ The common config keeps run/execution/report settings and global DB/MQ/HTTP/SSH 
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 environment: SIT                 # default profile; --env overrides it
 templates: {root: templates}
 testcase: {root: testcase}
@@ -188,7 +188,7 @@ The repository `schemas/catalog.yaml` is build input for the active schema regis
 ## Set package-wide options
 
 ```yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -222,7 +222,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.13`; the previous schema remains compatible. The example uses the active schema. |
+| `schemaVersion` | required | Current: `att-config/v2.14`; the previous schema remains compatible. The example uses the active schema. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |

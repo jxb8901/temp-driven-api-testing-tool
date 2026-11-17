@@ -6,7 +6,7 @@
 |---|---|
 | 排程建立 | att-schedule/v2 |
 | RUN 定義 | att-execution/v1 |
-| Global configuration | att-config/v2.13 |
+| Global configuration | att-config/v2.14 |
 | Package Manifest | att-package/v1 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |

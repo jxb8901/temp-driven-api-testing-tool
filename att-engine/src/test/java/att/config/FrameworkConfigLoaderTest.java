@@ -4,6 +4,8 @@ package att.config;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.*;
+import java.util.List;
+import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FrameworkConfigLoaderTest {
@@ -39,6 +41,25 @@ class FrameworkConfigLoaderTest {
         FrameworkConfigLoader loader=new FrameworkConfigLoader();
         assertEquals("SIT",loader.load(config,tempDir,"sit").environment());
         assertThrows(IllegalArgumentException.class,()->loader.load(config,tempDir,"UAT"));
+    }
+
+    @Test void currentConfigLoadsStrictCentralSutMetricsDefinitionsAndKeepsV213Readable() throws Exception {
+        String valid = "schemaVersion: att-config/v2.14\n"
+                + "sutMetrics:\n  dataSources: []\n  metricSources: []\n  groups: []\n  profiles: []\n";
+        Path config = write("sut-metrics-config.yaml", valid);
+        Map<String, Object> sutMetrics = new FrameworkConfigLoader()
+                .loadSutMetricsConfiguration(config, tempDir, valid);
+        assertEquals(List.of(), sutMetrics.get("dataSources"));
+
+        String unknownNestedField = "schemaVersion: att-config/v2.14\n"
+                + "sutMetrics:\n  dataSources:\n    - {schemaVersion: att-sut-metrics-source/v1, id: prom, name: Prom, url: https://metrics.example, password: secret}\n"
+                + "  metricSources: []\n  groups: []\n  profiles: []\n";
+        assertThrows(IllegalArgumentException.class,
+                () -> new FrameworkConfigLoader().loadSutMetricsConfiguration(config, tempDir, unknownNestedField));
+
+        Path previous = write("previous-config.yaml", "schemaVersion: att-config/v2.13\nenvironment: SIT\n");
+        assertTrue(new FrameworkConfigLoader().loadSutMetricsConfiguration(previous, tempDir,
+                Files.readString(previous)).isEmpty());
     }
 
     @Test void loadsRunAndDebugIdentityFormatsFromCurrentConfigSchema() throws Exception {

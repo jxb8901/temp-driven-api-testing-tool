@@ -35,6 +35,7 @@ import java.util.stream.Stream;
 /** Resolves schemas only through the trusted registry shipped with ATT. */
 public final class SchemaFiles {
     private static final String RESOURCE_ROOT = "att-schemas/";
+    private static final String CACHE_LEASE_PREFIX = ".cache-use.lock";
     private static final int MAX_RETAINED_CACHE_VERSIONS = 2;
     private static final int MAX_SCHEMA_CATALOG_BYTES = 1024 * 1024;
     private static final int MAX_SCHEMA_REGISTRY_BYTES = 16 * 1024 * 1024;
@@ -286,7 +287,10 @@ public final class SchemaFiles {
                         throw new IOException("The trusted schema cache could not be verified after extraction");
                     }
                 }
-                Path leasePath = root.resolve(".cache-use.lock");
+                // Each classloader owns its own lease file. A shared fixed path
+                // causes OverlappingFileLockException when Tomcat loads ATT in
+                // multiple webapp classloaders inside one JVM.
+                Path leasePath = root.resolve(CACHE_LEASE_PREFIX + "-" + java.util.UUID.randomUUID().toString());
                 if (Files.isSymbolicLink(leasePath)) throw new IOException("The trusted schema cache lease is unsafe");
                 FileChannel leaseChannel = FileChannel.open(leasePath, StandardOpenOption.CREATE,
                         StandardOpenOption.READ, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
@@ -300,6 +304,7 @@ public final class SchemaFiles {
                 }
                 cacheLeaseChannel = leaseChannel;
                 cacheLease = lease;
+                pruneStaleCacheLeases(root, leasePath);
                 pruneOldCaches(cacheBase, root);
             }
             trustedRegistryDigest = fingerprint;
@@ -350,27 +355,75 @@ public final class SchemaFiles {
             return;
         }
         if (!Files.isDirectory(version, LinkOption.NOFOLLOW_LINKS)) return;
-        Path leasePath = version.resolve(".cache-use.lock");
+        List<Path> leasePaths = cacheLeasePaths(version);
         // Caches created before lease support cannot be proven idle; preserve them
         // rather than risk deleting a tree used by an older runtime process.
-        if (Files.isSymbolicLink(leasePath) || !Files.isRegularFile(leasePath, LinkOption.NOFOLLOW_LINKS)) return;
-        try (FileChannel channel = FileChannel.open(leasePath, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
-            FileLock lock;
-            try { lock = channel.tryLock(0L, Long.MAX_VALUE, false); }
-            catch (java.nio.channels.OverlappingFileLockException activeInThisJvm) { return; }
-            if (lock == null) return;
-            try {
-                try (Stream<Path> paths = Files.walk(version)) {
-                    for (Path path : paths.sorted(Comparator.reverseOrder()).toArray(Path[]::new)) {
-                        if (!path.equals(leasePath) && !path.equals(version)) Files.deleteIfExists(path);
-                    }
+        if (leasePaths.isEmpty()) return;
+        List<FileChannel> channels = new ArrayList<FileChannel>();
+        List<FileLock> locks = new ArrayList<FileLock>();
+        Set<Path> leasePathSet = new HashSet<Path>(leasePaths);
+        IOException cleanupFailure = null;
+        try {
+            for (Path leasePath : leasePaths) {
+                if (Files.isSymbolicLink(leasePath) || !Files.isRegularFile(leasePath, LinkOption.NOFOLLOW_LINKS)) return;
+                FileChannel channel = FileChannel.open(leasePath, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+                channels.add(channel);
+                FileLock lock;
+                try { lock = channel.tryLock(0L, Long.MAX_VALUE, false); }
+                catch (java.nio.channels.OverlappingFileLockException activeInThisJvm) { return; }
+                if (lock == null) return;
+                locks.add(lock);
+            }
+            try (Stream<Path> paths = Files.walk(version)) {
+                for (Path path : paths.sorted(Comparator.reverseOrder()).toArray(Path[]::new)) {
+                    if (!path.equals(version) && !leasePathSet.contains(path)) Files.deleteIfExists(path);
                 }
-            } finally {
-                lock.release();
+            }
+        } finally {
+            for (FileLock lock : locks) {
+                try { if (lock.isValid()) lock.release(); }
+                catch (IOException error) { if (cleanupFailure == null) cleanupFailure = error; }
+            }
+            for (FileChannel channel : channels) {
+                try { channel.close(); }
+                catch (IOException error) { if (cleanupFailure == null) cleanupFailure = error; }
             }
         }
-        Files.deleteIfExists(leasePath);
+        if (cleanupFailure != null) throw cleanupFailure;
+        for (Path leasePath : leasePaths) Files.deleteIfExists(leasePath);
         Files.deleteIfExists(version);
+    }
+
+    private static List<Path> cacheLeasePaths(Path version) throws IOException {
+        List<Path> leases = new ArrayList<Path>();
+        try (Stream<Path> paths = Files.list(version)) {
+            paths.filter(path -> {
+                String name = path.getFileName().toString();
+                return CACHE_LEASE_PREFIX.equals(name) || name.startsWith(CACHE_LEASE_PREFIX + "-");
+            }).forEach(leases::add);
+        }
+        return leases;
+    }
+
+    /** Removes lease files left by unloaded classloaders or crashed processes from the active cache. */
+    private static void pruneStaleCacheLeases(Path activeRoot, Path activeLease) {
+        List<Path> leases;
+        try { leases = cacheLeasePaths(activeRoot); }
+        catch (IOException ignored) { return; }
+        for (Path leasePath : leases) {
+            if (leasePath.equals(activeLease) || Files.isSymbolicLink(leasePath)
+                    || !Files.isRegularFile(leasePath, LinkOption.NOFOLLOW_LINKS)) continue;
+            try (FileChannel channel = FileChannel.open(leasePath, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
+                FileLock lock;
+                try { lock = channel.tryLock(0L, Long.MAX_VALUE, false); }
+                catch (java.nio.channels.OverlappingFileLockException activeInThisJvm) { continue; }
+                if (lock == null) continue;
+                try { Files.deleteIfExists(leasePath); }
+                finally { lock.release(); }
+            } catch (IOException ignored) {
+                // Keep an unsafe or busy lease; a later initialization retries cleanup.
+            }
+        }
     }
 
     /** Recovers an incomplete fingerprint directory while holding the cache-wide initialization lock. */
@@ -383,8 +436,7 @@ public final class SchemaFiles {
             Files.deleteIfExists(root);
             return;
         }
-        Path leasePath = root.resolve(".cache-use.lock");
-        if (!Files.exists(leasePath, LinkOption.NOFOLLOW_LINKS)) {
+        if (cacheLeasePaths(root).isEmpty()) {
             // No lease can exist until extraction verifies; under the global lock this is abandoned partial output.
             deleteTree(root);
             return;

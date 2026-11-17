@@ -297,7 +297,8 @@ public final class ApiServlet extends HttpServlet {
                     default -> throw new IllegalArgumentException("Unsupported SUT Metrics administration route.");
                 };
                 saved.put("requestId",requestId);json(res,201,saved);return;
-            } catch(SutMetricsService.CapacityException full){error(res,503,"ATT-SUT-METRICS-CAPACITY","SUT Metrics capacity is full; retry shortly",requestId);}
+            } catch(SutMetricsService.ReadOnlyCatalogException readOnly){error(res,409,"ATT-SUT-METRICS-CONFIG-READ-ONLY","SUT Metrics definitions are read-only here; update the selected Runtime Config source through the approved configuration change process",requestId);}
+              catch(SutMetricsService.CapacityException full){error(res,503,"ATT-SUT-METRICS-CAPACITY","SUT Metrics capacity is full; retry shortly",requestId);}
               catch(SutMetricsService.SutMetricsTimeoutException timeout){error(res,504,"ATT-SUT-METRICS-TIMEOUT","SUT Metrics source query timed out",requestId);}
               catch(SutMetricsRequestTooLargeException oversized){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","SUT Metrics request exceeds the configured size limit",requestId);}
               catch(IllegalArgumentException invalid){
@@ -502,7 +503,8 @@ public final class ApiServlet extends HttpServlet {
                         ?runtime.deleteSutMetricSourceV2(id):path.startsWith("/admin/sut-metrics/groups/")
                         ?runtime.deleteSutMetricGroup(id):runtime.deleteSutMetricProfile(id);
                 deleted.put("requestId",requestId);json(res,200,deleted);
-            } catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+            } catch(SutMetricsService.ReadOnlyCatalogException readOnly){error(res,409,"ATT-SUT-METRICS-CONFIG-READ-ONLY","SUT Metrics definitions are read-only here; update the selected Runtime Config source through the approved configuration change process",requestId);}
+              catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
               catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","SUT Metrics administration could not be completed",requestId);getServletContext().log("SUT Metrics deletion failed id="+requestId,failure);}
             return;
         }

@@ -144,6 +144,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [File arguments and case-log paths](#file-arguments-and-case-log-paths)
   - [Previous release Testdata migration](#previous-release-testdata-migration)
   - [Execution identity format migration](#execution-identity-format-migration)
+  - [att-config/v2.14: centralized SUT Metrics catalog](#att-configv214-centralized-sut-metrics-catalog)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
   - [Global configuration migration](#global-configuration-migration)
@@ -2439,11 +2440,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.13`. Current packages use config v2.13 and Tool Group v3.0. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
+Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.14`. Current packages use config v2.14 and Tool Group v3.0. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 environment: SIT
 environments:
   SIT:
@@ -2639,9 +2640,9 @@ Do not use this prefix to remove keys from user data. Keys in HTTP headers, `EXE
 
 ### Select an environment profile
 
-`att-config/v2.13` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper lists as a whole. Package Testdata lists belong to `package.yaml`. See the resource pages and [Testdata registry and input mapping](reference/test-authoring.md) for each binding.
+`att-config/v2.14` is the active profile contract. Profiles can replace configured DBHelper, MQHelper, SSHHelper and HTTPHelper lists as a whole. Package Testdata lists belong to `package.yaml`. See the resource pages and [Testdata registry and input mapping](reference/test-authoring.md) for each binding.
 
-ATT selects an environment through one common `att-config/v2.13` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
+ATT selects an environment through one common `att-config/v2.14` file. It does not select an environment by changing an Action or by adding an environment-specific Tool ID. Actions keep stable logical IDs across SIT, UAT, PREPROD, and production-like environments:
 
 ```text
 Actions -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -2671,7 +2672,7 @@ The common config keeps run/execution/report settings and global DB/MQ/HTTP/SSH 
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 environment: SIT                 # default profile; --env overrides it
 templates: {root: templates}
 testcase: {root: testcase}
@@ -2755,7 +2756,7 @@ The repository `schemas/catalog.yaml` is build input for the active schema regis
 ### Set package-wide options
 
 ```yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -2789,7 +2790,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | Current: `att-config/v2.13`; the previous schema remains compatible. The example uses the active schema. |
+| `schemaVersion` | required | Current: `att-config/v2.14`; the previous schema remains compatible. The example uses the active schema. |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -3302,7 +3303,7 @@ This page defines target, `--input`, `--set` and `--env` syntax in the option ma
 
 ### Complete option matrix
 
-`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.13` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
+`--config <file>` selects the base configuration. `--env <name>` selects one environment profile from an `att-config/v2.14` configuration and is valid for `run`, `validate`, `debug`, and `load`. `--help` prints help. `--case-id` is a compatibility synonym for `--case`. `--parallel` is the deprecated compatibility spelling for `--allow-parallel-runs`; prefer the latter. `--queue` and `--allow-parallel-runs` control process-level output-root concurrency, not Case workers. `--profile` writes performance diagnostics for `run` and `load`, and writes startup plus execution phase timings for a selected `debug` target.
 
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 
@@ -3738,7 +3739,7 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 |---|---|
 | Schedule creation | att-schedule/v2 |
 | RUN definition | att-execution/v1 |
-| Global configuration | att-config/v2.13 |
+| Global configuration | att-config/v2.14 |
 | Package Manifest | att-package/v1 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
@@ -3868,6 +3869,11 @@ For Load, migrate old single-target or v1.1 scenarios through the historical v1.
 The historical `att-load-profile/v1.0` policy file is migration-only: rewrite it as the current policy-only `att-load/v1.6` descriptor before use. It is not a current `load/load.yaml` example.
 
 Unsupported schema versions fail before execution and include migration guidance. ATT does not auto-upgrade package files or invoke external resources to build the diagnostic. See [Actions and Typed Values](reference/actions.md), [Runtime and Context Model](reference/runtime-context.md), [Load Mode](reference/execution-modes/load.md) and [Schema Matrix](reference/appendices/schema-matrix.md).
+
+### att-config/v2.14: centralized SUT Metrics catalog
+
+The current global config schema is `att-config/v2.14`. It adds bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays. These are authoritative in the selected server Runtime Config. Existing `att-config/v2.13` files remain compatible when they do not declare `sutMetrics`. To migrate `data/sut-metrics-catalog.json`, follow the explicit dry-run and apply workflow in the [SUT Metrics Runtime Config migration guide](guides/sut-metrics-config-migration.md). The tool validates a candidate, rejects duplicate IDs and conflicting definitions, and creates digest-named backups before applying.
+
 
 ### Historical schema migration
 

@@ -62,6 +62,31 @@ class ServerRuntimeJobReplayTest {
         Files.writeString(root.resolve("load/smoke.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 1s}\n");
         return new Fixture(root,server,libs);
     }
+    private Path writeSutMetricsConfig(Fixture fixture,List<Map<String,Object>> sources,List<Map<String,Object>> profiles) throws Exception {
+        Path config=fixture.root.getParent().resolve("unified-runtime/config/config.yaml");
+        StringBuilder text=new StringBuilder("schemaVersion: att-config/v2.14\nenvironment: SIT\nenvironments: {SIT: {}, UAT: {}}\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\nsutMetrics:\n");
+        appendYamlItems(text,"dataSources",sources);
+        appendYamlItems(text,"metricSources",List.of());
+        appendYamlItems(text,"groups",List.of());
+        appendYamlItems(text,"profiles",profiles);
+        Files.writeString(config,text.toString());
+        return config;
+    }
+    private static void appendYamlItems(StringBuilder text,String name,List<Map<String,Object>> items) throws Exception {
+        text.append("  ").append(name).append(":");
+        if(items.isEmpty()){text.append(" []\n");return;}
+        text.append('\n');
+        for(Map<String,Object> item:items)text.append("    - ").append(ServerRuntime.JSON.writeValueAsString(item)).append('\n');
+    }
+    private static Map<String,Object> simplePrometheusSource() {
+        return Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Local Prometheus",
+                "url","http://127.0.0.1:1","readers",List.of("alice"),"readRoles",List.of());
+    }
+    private static Map<String,Object> simpleProfile(String id,String name,String query) {
+        return Map.of("schemaVersion","att-sut-metrics-profile/v1","id",id,"name",name,"kind","base","category","app",
+                "metrics",List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query",query)));
+    }
     private static void users(ServerRuntime runtime) throws Exception {
         runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
         runtime.store.createAuthUser("bob","Bob","unused","USER","csrf");
@@ -735,15 +760,10 @@ class ServerRuntimeJobReplayTest {
         String scenario="schemaVersion: att-load/v1.9\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 1s}\n"
                 +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: profile-app\n      source: prom\n      targets: [{id: sut-1, type: app}]\n  collection: {mode: post-run, before: 1m, after: 1m, step: 30s}\n  livePreview: {enabled: false}\n";
         Files.writeString(fixture.root.resolve("load/smoke.yaml"),scenario);
+        Map<String,Object> profile=simpleProfile("profile-app","App","up");
+        writeSutMetricsConfig(fixture,List.of(simplePrometheusSource()),List.of(profile));
         try(ServerRuntime runtime=fixture.open()) {
             users(runtime);
-            runtime.saveSutMetricSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Local Prometheus",
-                    "url","http://127.0.0.1:1","readers",List.of("alice"),"readRoles",List.of()));
-            Map<String,Object> profile=Map.of("schemaVersion","att-sut-metrics-profile/v1","id","profile-app","name","App",
-                    "kind","base","category","app",
-                    "metrics",List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up")));
-            runtime.saveSutMetricProfile(profile);
-
             String original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/smoke.yaml")),"alice").get("jobId"));
             await(runtime,original);
             JsonNode retainedScenario=ServerRuntime.JSON.readTree(runtime.store.executionSpec(original).get("spec")).path("definition").path("scenario");
@@ -752,9 +772,6 @@ class ServerRuntimeJobReplayTest {
                     "The public Job snapshot must not expose the private executable query.");
             assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(original)).path("queries").get(0).path("query").asText());
 
-            Map<String,Object> changed=ServerRuntime.JSON.convertValue(profile,Map.class);
-            Map<String,Object> changedMetric=ServerRuntime.JSON.convertValue(((List<?>)changed.get("metrics")).get(0),Map.class);
-            changedMetric.put("query","down");changed.put("metrics",List.of(changedMetric));runtime.saveSutMetricProfile(changed);
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
             assertTrue(ServerRuntime.JSON.valueToTree(review.get("preview")).path("sutMetrics").path("items").get(0)
                     .path("queryPreview").isNull(),"A replay preview must not expose its private executable query.");
@@ -762,6 +779,22 @@ class ServerRuntimeJobReplayTest {
             Map<String,Object> rerun=runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("intentId",review.get("intentId"),"confirm",true)),"alice");
             String rerunId=String.valueOf(rerun.get("jobId"));
             assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(rerunId)).path("queries").get(0).path("query").asText());
+
+            Map<String,Object> changed=ServerRuntime.JSON.convertValue(profile,Map.class);
+            Map<String,Object> changedMetric=ServerRuntime.JSON.convertValue(((List<?>)changed.get("metrics")).get(0),Map.class);
+            changedMetric.put("query","down");changed.put("metrics",List.of(changedMetric));
+            writeSutMetricsConfig(fixture,List.of(simplePrometheusSource()),List.of(changed));
+            Map<String,Object> current=runtime.sutMetrics.resolveScenario(Map.of("schemaVersion","att-load-observability/v1",
+                    "collections",List.of(Map.of("profile","profile-app","source","prom",
+                            "targets",List.of(Map.of("id","sut-1","type","app")))),
+                    "collection",Map.of("mode","post-run","before","1m","after","1m","step","30s"),
+                    "livePreview",Map.of("enabled",false)),"alice",false);
+            assertEquals("down",ServerRuntime.JSON.valueToTree(current).path("queries").get(0).path("query").asText(),
+                    "A Runtime Config edit must hot-activate for new scenarios.");
+            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(original)).path("queries").get(0).path("query").asText(),
+                    "Editing Runtime Config must not rewrite the original Job evidence.");
+            assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(rerunId)).path("queries").get(0).path("query").asText(),
+                    "Editing Runtime Config must not rewrite the rerun's pinned Job evidence.");
         }
     }
     @Test void businessMetricCallsFailClosedWhenPinnedPackageOrRuntimeConfigChangesAfterAdmission() throws Exception {
@@ -770,21 +803,22 @@ class ServerRuntimeJobReplayTest {
                 +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: business-tool\n      scope: job\n  collection: {mode: post-run, before: 1m, after: 1s, step: 15s}\n  livePreview: {enabled: false}\n";
         Files.writeString(fixture.root.resolve("load/smoke.yaml"),scenario);
         Path changedPackageFile=fixture.root.resolve("templates/BAD/template.yaml");
+        Map<String,Object> businessProfile=Map.of("schemaVersion","att-sut-metrics-profile/v1","id","business-tool","name","Business Tool",
+                "kind","base","category","db","metrics",List.of(Map.of("id","tool-version","title","Tool version",
+                        "unit","count","kind","gauge","sampling","afterDrain","call","#{version()}","sideEffectsAcknowledged",true)));
+        Path runtimeConfig=writeSutMetricsConfig(fixture,List.of(),List.of(businessProfile));
         String originalTemplate=Files.readString(changedPackageFile);
-        String originalConfig=Files.readString(temp.resolve("unified-runtime/config/config.yaml"));
+        String originalConfig=Files.readString(runtimeConfig);
         try(ServerRuntime runtime=fixture.open()) {
             users(runtime);
-            runtime.saveSutMetricProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","business-tool","name","Business Tool",
-                    "kind","base","category","db","metrics",List.of(Map.of("id","tool-version","title","Tool version",
-                            "unit","count","kind","gauge","sampling","afterDrain","call","#{version()}","sideEffectsAcknowledged",true))));
             for(String revisionChange:List.of("runtime-config","package")) {
-                Files.writeString(temp.resolve("unified-runtime/config/config.yaml"),originalConfig);
+                Files.writeString(runtimeConfig,originalConfig);
                 Files.writeString(changedPackageFile,originalTemplate);
                 String id=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of(
                         "packageId","p","scenario","load/smoke.yaml")),"alice").get("jobId"));
                 awaitRunning(runtime,id);
                 if("runtime-config".equals(revisionChange))
-                    Files.writeString(temp.resolve("unified-runtime/config/config.yaml"),originalConfig+"# changed after LOAD admission\n");
+                    Files.writeString(runtimeConfig,originalConfig+"# changed after LOAD admission\n");
                 else Files.writeString(changedPackageFile,originalTemplate+"# changed after LOAD admission\n");
                 await(runtime,id);
                 Map<String,Object> manifest=awaitSutMetrics(runtime,id);
@@ -798,7 +832,7 @@ class ServerRuntimeJobReplayTest {
                 assertEquals(0,sidecar.get("callCount"));
             }
         } finally {
-            Files.writeString(temp.resolve("unified-runtime/config/config.yaml"),originalConfig);
+            Files.writeString(runtimeConfig,originalConfig);
             Files.writeString(changedPackageFile,originalTemplate);
         }
     }
@@ -807,18 +841,14 @@ class ServerRuntimeJobReplayTest {
         String scenario="schemaVersion: att-load/v1.9\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 1s}\n"
                 +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: profile-app\n      source: prom\n      targets: [{id: sut-1, type: app}]\n  collection: {mode: post-run, before: 1m, after: 1m, step: 30s}\n  livePreview: {enabled: false}\n";
         Files.writeString(fixture.root.resolve("load/smoke.yaml"),scenario);
+        Map<String,Object> profile=simpleProfile("profile-app","App","up");
+        writeSutMetricsConfig(fixture,List.of(simplePrometheusSource()),List.of(profile));
         ServerRuntimeTestSupport.MutableClock clock=new ServerRuntimeTestSupport.MutableClock(Instant.parse("2026-10-22T00:00:00Z"));
         try(ServerRuntime runtime=fixture.open(clock)) {
             users(runtime);
-            runtime.saveSutMetricSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Local Prometheus",
-                    "url","http://127.0.0.1:1","readers",List.of("alice"),"readRoles",List.of()));
-            Map<String,Object> profile=Map.of("schemaVersion","att-sut-metrics-profile/v1","id","profile-app","name","App",
-                    "kind","base","category","app",
-                    "metrics",List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up")));
-            runtime.saveSutMetricProfile(profile);
             LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name","SUT snapshot schedule",
                     "executionType","load","packageId","p","environment","SIT","scenario","load/smoke.yaml",
-                    "timezone","UTC","cron","0 2 * * *","enabled",false)),"alice");
+                    "timezone","UTC","cron","0 2 * * *","enabled",false,"packageChangePolicy","ignore")),"alice");
 
             Map<String,Object> firstOccurrence=runtime.triggerLoadSchedule(schedule.id,"alice");
             assertEquals("submitted",firstOccurrence.get("status"),firstOccurrence.toString());
@@ -828,7 +858,8 @@ class ServerRuntimeJobReplayTest {
 
             Map<String,Object> updatedProfile=ServerRuntime.JSON.convertValue(profile,Map.class);
             Map<String,Object> updatedMetric=ServerRuntime.JSON.convertValue(((List<?>)updatedProfile.get("metrics")).get(0),Map.class);
-            updatedMetric.put("query","down");updatedProfile.put("metrics",List.of(updatedMetric));runtime.saveSutMetricProfile(updatedProfile);
+            updatedMetric.put("query","down");updatedProfile.put("metrics",List.of(updatedMetric));
+            writeSutMetricsConfig(fixture,List.of(simplePrometheusSource()),List.of(updatedProfile));
             clock.advance(Duration.ofMinutes(runtime.config.scheduling.minimumIntervalMinutes+1L));
             Map<String,Object> secondOccurrence=runtime.triggerLoadSchedule(schedule.id,"alice");
             assertEquals("submitted",secondOccurrence.get("status"),secondOccurrence.toString());
@@ -850,11 +881,8 @@ class ServerRuntimeJobReplayTest {
     }
     @Test void sutMetricsCollectionLifecycleRecoversWhenTheServerRestarts() throws Exception {
         Fixture fixture=fixture();String pendingJob="J0000000000000083",collectingJob="J0000000000000084";
+        writeSutMetricsConfig(fixture,List.of(simplePrometheusSource()),List.of(simpleProfile("base","App","up")));
         try(ServerRuntime runtime=fixture.open()) {
-            runtime.sutMetrics.upsertSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Local Prometheus",
-                    "url","http://127.0.0.1:9090","readers",List.of("alice"),"readRoles",List.of()));
-            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","App",
-                    "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up"))));
             Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base","source","prom",
                             "targets",List.of(Map.of("id","sut-1","type","app")))),
                     "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"));

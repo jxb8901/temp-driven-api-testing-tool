@@ -28,6 +28,7 @@ import java.security.Principal;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -418,8 +419,44 @@ class ApiServletIntegratedLimitsTest {
     @Test void sutMetricsRoutesEnforceAdminWritesBoundBodiesAndFilterSourcesForReaders() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("sut-metrics-route-packages"));
         createPackage(packages.resolve("p"));
-        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"sut-metrics-route-data",DEFAULT_INSPECTION_TIMEOUT_MS,
-                null,workerLibraries("sut-metrics-route-libs"),true)) {
+        Path runtimeConfig=sharedRuntimeConfig();
+        List<Map<String,Object>> dataSources=List.of(
+                Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Local Prometheus",
+                        "url","http://127.0.0.1:9090","auth",Map.of("mode","BEARER","secretRef","PROM_TOKEN"),
+                        "readers",List.of("alice"),"readRoles",List.of(),"allowedTenants",List.of("tenant-a"),"defaultTenant","tenant-a"),
+                Map.of("schemaVersion","att-sut-metrics-source/v1","id","role-prom","name","Role-readable Prometheus",
+                        "url","http://127.0.0.1:9091","auth",Map.of("mode","NONE"),"readers",List.of(),
+                        "readRoles",List.of("USER"),"allowedTenants",List.of()));
+        List<Map<String,Object>> metricSources=List.of(
+                Map.of("schemaVersion","att-sut-metrics-metric-source/v1","id","private-prom-metrics","name","Private Prometheus metrics",
+                        "connection",Map.of("kind","DATA_SOURCE","id","prom"),
+                        "fetch",Map.of("id","prom-fetch","mode","prometheus-range","query","up{instance=\"sentinel_prometheus_query\"}",
+                                "parameters",Map.of("region","sentinel_prometheus_parameter"),"sampling","range","step","15s"),
+                        "mapping",Map.of("labels",Map.of("retain",List.of("instance")),
+                                "outputs",List.of(Map.of("id","prom-up","title","Prometheus up","unit","count","kind","gauge","metricName","up"))),
+                        "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576)),
+                Map.of("schemaVersion","att-sut-metrics-metric-source/v1","id","private-db-metrics","name","Private DB metrics",
+                        "connection",Map.of("kind","DBHELPER","id","orders"),
+                        "fetch",Map.of("id","db-fetch","mode","dbhelper-query",
+                                "call","#{db.orders.query(sql='select sentinel_dbhelper_sql from private_table')}",
+                                "parameters",Map.of("tenant","sentinel_dbhelper_parameter"),"sampling","afterDrain"),
+                        "mapping",Map.of("labels",Map.of("instance","sentinel_dbhelper_column"),
+                                "outputs",List.of(Map.of("id","db-count","title","DB count","unit","count","kind","gauge","column","COUNT_VALUE"))),
+                        "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576)),
+                Map.of("schemaVersion","att-sut-metrics-metric-source/v1","id","private-tool-metrics","name","Private tool metrics",
+                        "connection",Map.of("kind","PACKAGE_TOOL","id","private-tool"),
+                        "fetch",Map.of("id","tool-fetch","mode","package-tool",
+                                "call","#{tools.private.read(path='sentinel_package_tool_call')}",
+                                "parameters",Map.of("scope","sentinel_package_tool_parameter"),"sampling","afterDrain"),
+                        "mapping",Map.of("labels",Map.of("instance","sentinel_package_tool_column"),
+                                "outputs",List.of(Map.of("id","tool-count","title","Tool count","unit","count","kind","gauge","column","COUNT_VALUE"))),
+                        "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576)));
+        List<Map<String,Object>> profiles=List.of(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
+                "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
+                        "kind","gauge","query","up"))));
+        writeSutMetricsConfig(runtimeConfig,dataSources,metricSources,List.of(),profiles,true);
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"sut-metrics-route-data",DEFAULT_INSPECTION_TIMEOUT_MS,
+                null,workerLibraries("sut-metrics-route-libs"),true,ref->"PROM_TOKEN".equals(ref)?"api-test-token":null)) {
             ApiServlet servlet=servlet(runtime);
             String userRole=runtime.config.authorization.userRole;
             String adminRole=runtime.config.authorization.adminRole;
@@ -443,19 +480,16 @@ class ApiServletIntegratedLimitsTest {
             assertEquals("private, no-store",oversizedWrite.headers.get("Cache-Control"));
 
             Captured adminWrite=invokeAs(servlet,"POST","/admin/sut-metrics/sources",Collections.emptyMap(),source,"admin",Set.of(adminRole));
-            assertEquals(201,adminWrite.status,new String(adminWrite.body(),StandardCharsets.UTF_8));
+            assertEquals(409,adminWrite.status,new String(adminWrite.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-SUT-METRICS-CONFIG-READ-ONLY",ServerRuntime.JSON.readTree(adminWrite.body()).path("error").path("code").asText());
             byte[] invalidGroup=ServerRuntime.JSON.writeValueAsBytes(Map.of("schemaVersion","att-sut-metrics-group/v1",
                     "id","invalid-group","title","Invalid group","order",10,
                     "match",Map.of("metricIds",List.of("cpu")),"groupBy",List.of(17),"display","table"));
             Captured invalidGroupWrite=invokeAs(servlet,"POST","/admin/sut-metrics/groups",Collections.emptyMap(),
                     invalidGroup,"admin",Set.of(adminRole));
-            JsonNode fieldDiagnostic=ServerRuntime.JSON.readTree(invalidGroupWrite.body()).path("diagnostics").path(0);
-            assertEquals(400,invalidGroupWrite.status,new String(invalidGroupWrite.body(),StandardCharsets.UTF_8));
-            assertEquals("ATT-SUT-METRICS-INVALID-DEFINITION",ServerRuntime.JSON.readTree(invalidGroupWrite.body())
+            assertEquals(409,invalidGroupWrite.status,new String(invalidGroupWrite.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-SUT-METRICS-CONFIG-READ-ONLY",ServerRuntime.JSON.readTree(invalidGroupWrite.body())
                     .path("error").path("code").asText());
-            assertEquals("$.groupBy[0]",fieldDiagnostic.path("path").asText());
-            assertEquals("ATT-SUT-METRICS-FIELD-INVALID",fieldDiagnostic.path("code").asText());
-            assertFalse(fieldDiagnostic.path("keyword").asText().isBlank());
             Captured readerList=invokeAs(servlet,"GET","/sut-metrics/sources",Collections.emptyMap(),new byte[0],"alice",Set.of(userRole));
             JsonNode readerItem=ServerRuntime.JSON.readTree(readerList.body()).path("items").path(0);
             assertEquals(200,readerList.status);
@@ -469,7 +503,8 @@ class ApiServletIntegratedLimitsTest {
                     "name","Role-readable Prometheus","url","http://127.0.0.1:9091","auth",Map.of("mode","NONE"),
                     "readers",List.of(),"readRoles",List.of("USER"),"allowedTenants",List.of()));
             Captured roleWrite=invokeAs(servlet,"POST","/admin/sut-metrics/sources",Collections.emptyMap(),roleSource,"admin",Set.of(adminRole));
-            assertEquals(201,roleWrite.status,new String(roleWrite.body(),StandardCharsets.UTF_8));
+            assertEquals(409,roleWrite.status,new String(roleWrite.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-SUT-METRICS-CONFIG-READ-ONLY",ServerRuntime.JSON.readTree(roleWrite.body()).path("error").path("code").asText());
 
             Captured otherReader=invokeAs(servlet,"GET","/sut-metrics/sources",Collections.emptyMap(),new byte[0],"bob",Set.of(userRole));
             JsonNode roleItem=ServerRuntime.JSON.readTree(otherReader.body()).path("items").path(0);
@@ -481,38 +516,6 @@ class ApiServletIntegratedLimitsTest {
             assertEquals("http://127.0.0.1:9090",adminItem.path("url").asText());
             assertEquals("PROM_TOKEN",adminItem.path("auth").path("secretRef").asText());
 
-            runtime.sutMetrics.upsertMetricSource(Map.of("schemaVersion","att-sut-metrics-metric-source/v1",
-                    "id","private-prom-metrics","name","Private Prometheus metrics",
-                    "connection",Map.of("kind","DATA_SOURCE","id","prom","revision",readerItem.path("revision").asText()),
-                    "fetch",Map.of("id","prom-fetch","mode","prometheus-range",
-                            "query","up{instance=\"sentinel_prometheus_query\"}",
-                            "parameters",Map.of("region","sentinel_prometheus_parameter"),"sampling","range","step","15s"),
-                    "mapping",Map.of("allowedLabels",List.of("instance"),
-                            "outputs",List.of(Map.of("id","prom-up","title","Prometheus up","unit","count",
-                                    "kind","gauge","metricName","up"))),
-                    "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576)));
-            runtime.sutMetrics.upsertMetricSource(Map.of("schemaVersion","att-sut-metrics-metric-source/v1",
-                    "id","private-db-metrics","name","Private DB metrics",
-                    "connection",Map.of("kind","DBHELPER","id","orders","revision","a".repeat(64)),
-                    "fetch",Map.of("id","db-fetch","mode","dbhelper-query",
-                            "call","#{db.orders.query(sql='select sentinel_dbhelper_sql from private_table')}",
-                            "parameters",Map.of("tenant","sentinel_dbhelper_parameter"),"sampling","afterDrain"),
-                    "mapping",Map.of("allowedLabels",List.of("instance"),
-                            "labelColumns",Map.of("instance","sentinel_dbhelper_column"),
-                            "outputs",List.of(Map.of("id","db-count","title","DB count","unit","count",
-                                    "kind","gauge","column","COUNT_VALUE"))),
-                    "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576)));
-            runtime.sutMetrics.upsertMetricSource(Map.of("schemaVersion","att-sut-metrics-metric-source/v1",
-                    "id","private-tool-metrics","name","Private tool metrics",
-                    "connection",Map.of("kind","PACKAGE_TOOL","id","private-tool","revision","b".repeat(64)),
-                    "fetch",Map.of("id","tool-fetch","mode","package-tool",
-                            "call","#{tools.private.read(path='sentinel_package_tool_call')}",
-                            "parameters",Map.of("scope","sentinel_package_tool_parameter"),"sampling","afterDrain"),
-                    "mapping",Map.of("allowedLabels",List.of("instance"),
-                            "labelColumns",Map.of("instance","sentinel_package_tool_column"),
-                            "outputs",List.of(Map.of("id","tool-count","title","Tool count","unit","count",
-                                    "kind","gauge","column","COUNT_VALUE"))),
-                    "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576)));
             Captured readerMetricSources=invokeAs(servlet,"GET","/sut-metrics/metric-sources",Collections.emptyMap(),
                     new byte[0],"alice",Set.of(userRole));
             assertEquals(200,readerMetricSources.status,readerMetricSources.bodyText());
@@ -538,9 +541,6 @@ class ApiServletIntegratedLimitsTest {
             assertTrue(adminMetricSources.bodyText().contains("sentinel_dbhelper_sql"));
             assertTrue(adminMetricSources.bodyText().contains("sentinel_package_tool_call"));
 
-            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
-                    "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
-                            "kind","gauge","query","up"))));
             Map<String,Object> wrongTenant=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
                     "source","prom","tenant","tenant-b","targets",List.of(Map.of("id","sut-1","type","app")))),
                     "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"));
@@ -555,14 +555,13 @@ class ApiServletIntegratedLimitsTest {
     @Test void sutMetricsJobRouteRequiresJobOwnershipAndAuthorizedSourceReaders() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("sut-metrics-job-packages"));
         createPackage(packages.resolve("p"));
-        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"sut-metrics-job-data",DEFAULT_INSPECTION_TIMEOUT_MS,
+        Path runtimeConfig=writeSutMetricsConfig(sharedRuntimeConfig(),
+                List.of(prometheusSource("prom","Prometheus","http://127.0.0.1:9090",List.of("alice"),List.of(),
+                        List.of("tenant-a"),"tenant-a",Map.of(),Map.of())),List.of(),List.of(),
+                List.of(baseProfile("base","Base profile",List.of(Map.of("id","requests","title","Requests","unit","count",
+                        "kind","gauge","query","up")))),false);
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"sut-metrics-job-data",DEFAULT_INSPECTION_TIMEOUT_MS,
                 null,workerLibraries("sut-metrics-job-libs"),true)) {
-            runtime.sutMetrics.upsertSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Prometheus",
-                    "url","http://127.0.0.1:9090","readers",List.of("alice"),"readRoles",List.of(),"allowedTenants",List.of("tenant-a"),
-                    "defaultTenant","tenant-a"));
-            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
-                    "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
-                            "kind","gauge","query","up"))));
             Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
                     "source","prom","tenant","tenant-a","targets",List.of(Map.of("id","sut-1","type","app")))),
                     "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"),"livePreview",Map.of("enabled",true));
@@ -590,27 +589,37 @@ class ApiServletIntegratedLimitsTest {
         createPackage(packages.resolve("p"));
         String jobId = "J0000000000000811";
         try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0);
-             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-metrics-provisional-data",
+             ServerRuntime runtime = runtime(packages, writeSutMetricsConfig(sharedRuntimeConfig(),
+                     List.of(prometheusSource("prom","Prometheus",fixture.url(),List.of("alice"),List.of(),List.of(),null,Map.of(),Map.of())),
+                     List.of(
+                             Map.of("schemaVersion","att-sut-metrics-metric-source/v1","id","prom-metrics","name","Prometheus metrics",
+                                     "connection",Map.of("kind","DATA_SOURCE","id","prom"),
+                                     "fetch",Map.of("id","prom-fetch","mode","prometheus-range","query","up","parameters",Map.of(),"sampling","range","step","5m"),
+                                     "mapping",Map.of("labels",Map.of("retain",List.of("instance")),"outputs",List.of(Map.of(
+                                             "id","requests","title","Requests","unit","count","kind","gauge","metricName","up"))),
+                                     "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576)),
+                             Map.of("schemaVersion","att-sut-metrics-metric-source/v1","id","business-metrics","name","Business metrics",
+                                     "connection",Map.of("kind","DBHELPER","id","orders"),
+                                     "fetch",Map.of("id","business-fetch","mode","dbhelper-query",
+                                             "call","#{db.orders.query(sql='select count(*) as COUNT_VALUE from orders')}",
+                                             "parameters",Map.of(),"sampling","afterDrain"),
+                                     "mapping",Map.of("labels",Map.of(),"outputs",List.of(Map.of(
+                                             "id","count","title","Count","unit","count","kind","gauge","column","COUNT_VALUE"))),
+                                     "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576))),
+                     List.of(),List.of(
+                             flatProfile("base","Base",List.of("prom-metrics"),List.of(Map.of("type","target","id","sut-1"))),
+                             flatProfile("business","Business",List.of("business-metrics"),List.of())),true), "sut-metrics-provisional-data",
                      DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-metrics-provisional-libs"), true)) {
-            runtime.sutMetrics.upsertSource(Map.of("schemaVersion", "att-sut-metrics-source/v1", "id", "prom",
-                    "name", "Prometheus", "url", fixture.url(), "readers", List.of("alice"), "readRoles", List.of()));
-            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion", "att-sut-metrics-profile/v1", "id", "base",
-                    "name", "Base", "kind", "base", "category", "app", "metrics", List.of(Map.of(
-                            "id", "requests", "title", "Requests", "unit", "count", "kind", "gauge", "query", "up"))));
-            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion", "att-sut-metrics-profile/v1", "id", "business",
-                    "name", "Business", "kind", "base", "category", "db", "metrics", List.of(Map.of(
-                            "id", "count", "title", "Count", "unit", "count", "kind", "gauge",
-                            "call", "#{db.orders.scalar(sql='select count(*)')}"))));
             Map<String, Object> scenario = new java.util.LinkedHashMap<>();
             scenario.put("schemaVersion", "att-load-observability/v1");
             scenario.put("collections", List.of(
-                    Map.of("id", "prom-binding", "profile", "base", "source", "prom",
-                            "targets", List.of(Map.of("id", "sut-1", "type", "app"))),
+                    Map.of("id", "prom-binding", "profile", "base", "targetIds", List.of("sut-1")),
                     Map.of("id", "business-binding", "profile", "business")));
             scenario.put("collection", Map.of("mode", "post-run", "before", "1m", "after", "1h", "step", "5m"));
             scenario.put("livePreview", Map.of("enabled", false));
             scenario.put("thresholds", List.of(Map.of("id", "count-max", "profile", "business", "metric", "count", "max", 10.0)));
-            Map<String, Object> snapshot = runtime.sutMetrics.resolveScenario(scenario, "alice", false);
+            Map<String, Object> snapshot = runtime.sutMetrics.resolveScenario(scenario, "alice", false,
+                    businessCallContext(runtime,packages.resolve("p")));
             runtime.sutMetrics.setBusinessCallExecutor((ignoredJob, ignoredSnapshot) -> new SutMetricsService.BusinessCallSession() {
                 @Override public Object execute(Map<String, Object> query, Instant executionStartedAt,
                                                 Instant executionFinishedAt, Instant steadyStart,
@@ -652,7 +661,7 @@ class ApiServletIntegratedLimitsTest {
         createPackage(packages.resolve("p"));
         String jobId = "J0000000000000731";
         try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.1);
-             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-threshold-result-data",
+             ServerRuntime runtime = runtime(packages, writeTwoTargetRuntimeConfig(sharedRuntimeConfig(), fixture), "sut-threshold-result-data",
                      DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-threshold-result-libs"), true)) {
             Map<String, Object> snapshot = twoTargetThresholdSnapshot(runtime, fixture, true);
             seedLoadJob(runtime, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
@@ -683,7 +692,7 @@ class ApiServletIntegratedLimitsTest {
         createPackage(packages.resolve("p"));
         String jobId = "J0000000000000735";
         try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.0);
-             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-threshold-corrupt-result-data",
+             ServerRuntime runtime = runtime(packages, writeTwoTargetRuntimeConfig(sharedRuntimeConfig(), fixture), "sut-threshold-corrupt-result-data",
                      DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-threshold-corrupt-result-libs"), true)) {
             Map<String, Object> snapshot = twoTargetThresholdSnapshot(runtime, fixture, true);
             seedLoadJob(runtime, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
@@ -714,7 +723,7 @@ class ApiServletIntegratedLimitsTest {
         createPackage(packages.resolve("p"));
         String jobId = "J0000000000000736";
         try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.0);
-             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-threshold-corrupt-snapshot-data",
+             ServerRuntime runtime = runtime(packages, writeTwoTargetRuntimeConfig(sharedRuntimeConfig(), fixture), "sut-threshold-corrupt-snapshot-data",
                      DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-threshold-corrupt-snapshot-libs"), true)) {
             Map<String, Object> snapshot = twoTargetThresholdSnapshot(runtime, fixture, true);
             seedLoadJob(runtime, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
@@ -745,7 +754,7 @@ class ApiServletIntegratedLimitsTest {
         createPackage(packages.resolve("p"));
         String jobId = "J0000000000000737";
         try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.0);
-             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-threshold-corrupt-sut-metrics-data",
+             ServerRuntime runtime = runtime(packages, writeTwoTargetRuntimeConfig(sharedRuntimeConfig(), fixture), "sut-threshold-corrupt-sut-metrics-data",
                      DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-threshold-corrupt-sut-metrics-libs"), true)) {
             Map<String, Object> snapshot = twoTargetThresholdSnapshot(runtime, fixture, true);
             seedLoadJob(runtime, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
@@ -777,7 +786,7 @@ class ApiServletIntegratedLimitsTest {
         createPackage(packages.resolve("p"));
         String jobId = "J0000000000000732";
         try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.1, "sut-b");
-             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-threshold-missing-result-data",
+             ServerRuntime runtime = runtime(packages, writeTwoTargetRuntimeConfig(sharedRuntimeConfig(), fixture), "sut-threshold-missing-result-data",
                      DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-threshold-missing-result-libs"), true)) {
             Map<String, Object> snapshot = twoTargetThresholdSnapshot(runtime, fixture, true);
             seedLoadJob(runtime, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
@@ -805,7 +814,7 @@ class ApiServletIntegratedLimitsTest {
         createPackage(packages.resolve("p"));
         String jobId = "J0000000000000733";
         try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.1);
-             ServerRuntime runtime = runtime(packages, sharedRuntimeConfig(), "sut-threshold-optional-result-data",
+             ServerRuntime runtime = runtime(packages, writeTwoTargetRuntimeConfig(sharedRuntimeConfig(), fixture), "sut-threshold-optional-result-data",
                      DEFAULT_INSPECTION_TIMEOUT_MS, null, workerLibraries("sut-threshold-optional-result-libs"), true)) {
             Map<String, Object> snapshot = twoTargetThresholdSnapshot(runtime, fixture, false);
             seedLoadJob(runtime, jobId, "alice", snapshot, nativeLoadResult(jobId, "MET"));
@@ -837,6 +846,7 @@ class ApiServletIntegratedLimitsTest {
         String jobId = "J0000000000000734";
         Instant finishedAt = Instant.now().minusSeconds(180), startedAt = finishedAt.minusSeconds(30);
         try (ApiPrometheusFixture fixture = new ApiPrometheusFixture(0, 0, 90.0)) {
+            writeTwoTargetRuntimeConfig(runtimeConfig, fixture);
             ServerRuntime first = runtime(packages, runtimeConfig, dataName, DEFAULT_INSPECTION_TIMEOUT_MS, null, libs, true);
             CountDownLatch releaseEvaluators = null;
             try {
@@ -882,14 +892,12 @@ class ApiServletIntegratedLimitsTest {
         for(Map.Entry<String,Map<String,Object>> entry:cases.entrySet()) {
             String name=entry.getKey();boolean delay="timeout".equals(name);int responseBytes="response-limit".equals(name)?2048:0;
             try(ApiPrometheusFixture fixture=new ApiPrometheusFixture(delay?700:0,responseBytes);
-                ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"sut-metrics-live-api-"+name,DEFAULT_INSPECTION_TIMEOUT_MS,
+                ServerRuntime runtime=runtime(packages,writeSutMetricsConfig(sharedRuntimeConfig(),
+                        List.of(prometheusSource("prom","Prometheus",fixture.url(),List.of(),List.of("USER"),List.of("tenant-a"),"tenant-a",
+                                entry.getValue(),Map.of())),List.of(),List.of(),List.of(baseProfile("base","Base profile",
+                                List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up")))),false),
+                        "sut-metrics-live-api-"+name,DEFAULT_INSPECTION_TIMEOUT_MS,
                         null,workerLibraries("sut-metrics-live-api-"+name+"-libs"),true)) {
-                runtime.sutMetrics.upsertSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Prometheus",
-                        "url",fixture.url(),"readers",List.of(),"readRoles",List.of("USER"),"allowedTenants",List.of("tenant-a"),
-                        "defaultTenant","tenant-a","limits",entry.getValue()));
-                runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
-                        "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
-                                "kind","gauge","query","up"))));
                 Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
                         "source","prom","tenant","tenant-a","targets",List.of(Map.of("id","sut-1","type","app")))),
                         "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"),"livePreview",Map.of("enabled",true));
@@ -921,14 +929,13 @@ class ApiServletIntegratedLimitsTest {
         Path packages=Files.createDirectories(temp.resolve("sut-metrics-live-auth-packages"));
         createPackage(packages.resolve("p"));
         try(ApiPrometheusFixture fixture=new ApiPrometheusFixture(800,0);
-            ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"sut-metrics-live-auth-data",DEFAULT_INSPECTION_TIMEOUT_MS,
+            ServerRuntime runtime=runtime(packages,writeSutMetricsConfig(sharedRuntimeConfig(),
+                    List.of(prometheusSource("prom","Authenticated Prometheus",fixture.url(),List.of("alice"),List.of("USER"),
+                            List.of("tenant-a"),"tenant-a",Map.of(),Map.of("mode","BEARER","secretRef","PROM_TOKEN"))),
+                    List.of(),List.of(),List.of(baseProfile("base","Base profile",
+                            List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up")))),false),
+                    "sut-metrics-live-auth-data",DEFAULT_INSPECTION_TIMEOUT_MS,
                     null,workerLibraries("sut-metrics-live-auth-libs"),true,ref->"PROM_TOKEN".equals(ref)?"api-test-token":"wrong-ref")) {
-            runtime.sutMetrics.upsertSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Authenticated Prometheus",
-                    "url",fixture.url(),"auth",Map.of("mode","BEARER","secretRef","PROM_TOKEN"),"readers",List.of("alice"),
-                    "readRoles",List.of("USER"),"allowedTenants",List.of("tenant-a"),"defaultTenant","tenant-a"));
-            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
-                    "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
-                            "kind","gauge","query","up"))));
             Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
                     "source","prom","tenant","tenant-a","targets",List.of(Map.of("id","sut-1","type","app")))),
                     "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"),"livePreview",Map.of("enabled",true));
@@ -963,13 +970,13 @@ class ApiServletIntegratedLimitsTest {
         Path packages=Files.createDirectories(temp.resolve("sut-metrics-live-capacity-packages"));
         createPackage(packages.resolve("p"));
         try(ApiPrometheusFixture fixture=new ApiPrometheusFixture(10000,0);
-            ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"sut-metrics-live-capacity-data",DEFAULT_INSPECTION_TIMEOUT_MS,
+            ServerRuntime runtime=runtime(packages,writeSutMetricsConfig(sharedRuntimeConfig(),
+                    List.of(prometheusSource("prom","Prometheus",fixture.url(),List.of("alice"),List.of("USER"),List.of(),null,
+                            Map.of("requestTimeoutMs",60000),Map.of())),List.of(),List.of(),
+                    List.of(baseProfile("base","Base profile",List.of(Map.of("id","requests","title","Requests","unit","count",
+                            "kind","gauge","query","up")))),false),
+                    "sut-metrics-live-capacity-data",DEFAULT_INSPECTION_TIMEOUT_MS,
                     null,workerLibraries("sut-metrics-live-capacity-libs"),true,ref->null)) {
-            runtime.sutMetrics.upsertSource(Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Prometheus",
-                    "url",fixture.url(),"readers",List.of("alice"),"readRoles",List.of("USER"),"limits",Map.of("requestTimeoutMs",60000)));
-            runtime.sutMetrics.upsertProfile(Map.of("schemaVersion","att-sut-metrics-profile/v1","id","base","name","Base profile",
-                    "kind","base","category","app","metrics",List.of(Map.of("id","requests","title","Requests","unit","count",
-                            "kind","gauge","query","up"))));
             List<Map<String,Object>> targets=new java.util.ArrayList<>();
             for(int index=0;index<21;index++)targets.add(Map.of("id","sut-"+index,"type","app"));
             Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base",
@@ -1024,13 +1031,6 @@ class ApiServletIntegratedLimitsTest {
     }
 
     private Map<String, Object> twoTargetThresholdSnapshot(ServerRuntime runtime, ApiPrometheusFixture fixture, boolean required) throws Exception {
-        runtime.sutMetrics.upsertSource(Map.of("schemaVersion", "att-sut-metrics-source/v1", "id", "prom", "name", "Prometheus",
-                "url", fixture.url(), "readers", List.of("alice"), "readRoles", List.of()));
-        runtime.sutMetrics.upsertProfile(Map.of("schemaVersion", "att-sut-metrics-profile/v1", "id", "base", "name", "Base profile",
-                "kind", "base", "category", "app", "params", Map.of("instance", Map.of("type", "promLabelValue", "default", "sut-a")),
-                "parameters", Map.of("instance", "sut-a"), "overridableParams", List.of("instance"),
-                "metrics", List.of(Map.of("id", "cpu", "title", "CPU", "unit", "percent",
-                        "kind", "gauge", "query", "up{instance=\"{{instance}}\"}"))));
         Map<String, Object> scenario = Map.of("schemaVersion", "att-load-observability/v1",
                 "collections", List.of(Map.of("id", "primary", "profile", "base", "source", "prom",
                         "targets", List.of(
@@ -1291,6 +1291,80 @@ class ApiServletIntegratedLimitsTest {
         Path root=Files.createDirectories(temp.resolve("shared-runtime-config/config"));
         return Files.writeString(root.resolve("config.yaml"),"schemaVersion: att-config/v2.13\nenvironment: SIT\n"
                 +"environments:\n  SIT: {}\ntimeoutMs: 10000\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
+    }
+
+    private Path writeTwoTargetRuntimeConfig(Path config, ApiPrometheusFixture fixture) throws Exception {
+        Map<String,Object> profile=baseProfile("base","Base profile",List.of(Map.of("id","cpu","title","CPU","unit","percent",
+                "kind","gauge","query","up{instance=\"{{instance}}\"}")));
+        profile.put("params",Map.of("instance",Map.of("type","promLabelValue","default","sut-a")));
+        profile.put("parameters",Map.of("instance","sut-a"));
+        profile.put("overridableParams",List.of("instance"));
+        return writeSutMetricsConfig(config,
+                List.of(prometheusSource("prom","Prometheus",fixture.url(),List.of("alice"),List.of(),List.of(),null,Map.of(),Map.of())),
+                List.of(),List.of(),List.of(profile),false);
+    }
+
+    private Map<String,Object> prometheusSource(String id,String name,String url,List<String> readers,List<String> roles,
+                                                List<String> tenants,String defaultTenant,Map<String,Object> limits,
+                                                Map<String,Object> auth) {
+        Map<String,Object> source=new LinkedHashMap<>();
+        source.put("schemaVersion","att-sut-metrics-source/v1");source.put("id",id);source.put("name",name);source.put("url",url);
+        if(!auth.isEmpty())source.put("auth",auth);
+        source.put("readers",readers);source.put("readRoles",roles);source.put("allowedTenants",tenants);
+        if(defaultTenant!=null)source.put("defaultTenant",defaultTenant);
+        if(!limits.isEmpty())source.put("limits",limits);
+        return source;
+    }
+
+    private Map<String,Object> baseProfile(String id,String name,List<Map<String,Object>> metrics) {
+        return new LinkedHashMap<>(Map.of("schemaVersion","att-sut-metrics-profile/v1","id",id,"name",name,
+                "kind","base","category","app","metrics",metrics));
+    }
+
+    private Map<String,Object> flatProfile(String id,String name,List<String> metricSourceIds,List<Map<String,Object>> targets) {
+        return Map.of("schemaVersion","att-sut-metrics-profile/v2","id",id,"name",name,
+                "metricSourceIds",metricSourceIds,"groupIds",List.of(),
+                "allowedBindings",Map.of("environments",List.of("SIT"),"targets",targets,"tenants",List.of(),"parameters",Map.of()),
+                "budgets",Map.of("maxFetches",4,"maxObservations",512,"maxArtifactBytes",1048576));
+    }
+
+    private SutMetricsService.BusinessCallContext businessCallContext(ServerRuntime runtime,Path packageRoot) throws Exception {
+        byte[] configBytes=Files.readAllBytes(runtime.config.runtimeConfigPath);
+        byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(configBytes);
+        StringBuilder runtimeRevision=new StringBuilder(64);
+        for(byte value:digest)runtimeRevision.append(String.format(java.util.Locale.ROOT,"%02x",value&255));
+        Path configRoot=ServerConfig.runtimeConfigRoot(runtime.config.runtimeConfigPath);
+        att.config.FrameworkConfig framework=new att.config.FrameworkConfigLoader().load(
+                runtime.config.runtimeConfigPath,configRoot,packageRoot,"SIT");
+        return new SutMetricsService.BusinessCallContext("p",packageRoot,runtime.config.runtimeConfigPath,configRoot,"SIT",
+                "a".repeat(64),runtimeRevision.toString(),Set.of(),List.of(),framework);
+    }
+
+    private Path writeSutMetricsConfig(Path config,List<Map<String,Object>> sources,List<Map<String,Object>> metricSources,
+                                       List<Map<String,Object>> groups,List<Map<String,Object>> profiles,
+                                       boolean includeOrdersDbHelper) throws Exception {
+        Path configDirectory=config.getParent();
+        String environment=includeOrdersDbHelper?"    dbhelpers: [config/dbhelpers/sit/orders.yaml]\n":"    {}\n";
+        StringBuilder text=new StringBuilder("schemaVersion: att-config/v2.14\nenvironment: SIT\nenvironments:\n  SIT:\n")
+                .append(environment).append("  UAT: {}\ntimeoutMs: 10000\ntestcase: {root: testcase}\ntemplates: {root: templates}\nsutMetrics:\n");
+        appendYamlItems(text,"dataSources",sources);
+        appendYamlItems(text,"metricSources",metricSources);
+        appendYamlItems(text,"groups",groups);
+        appendYamlItems(text,"profiles",profiles);
+        Files.createDirectories(configDirectory);
+        if(includeOrdersDbHelper) {
+            Path helper=Files.createDirectories(configDirectory.resolve("dbhelpers/sit")).resolve("orders.yaml");
+            Files.writeString(helper,sharedDbHelper("SUT Metrics API test helper"));
+        }
+        return Files.writeString(config,text.toString());
+    }
+
+    private void appendYamlItems(StringBuilder text,String name,List<Map<String,Object>> items) throws Exception {
+        text.append("  ").append(name).append(":");
+        if(items.isEmpty()) {text.append(" []\n");return;}
+        text.append('\n');
+        for(Map<String,Object> item:items)
+            text.append("    - ").append(ServerRuntime.JSON.writeValueAsString(item)).append('\n');
     }
 
     private static String sharedDbHelper(String description) {

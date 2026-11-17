@@ -1,0 +1,82 @@
+schemaVersion: att-config/v2.14
+environment: SIT
+
+sutMetrics:
+  dataSources:
+    - schemaVersion: att-sut-metrics-source/v1
+      id: prometheus-prod
+      name: Production Prometheus
+      url: https://prometheus.example.invalid
+      apiPath: /api/v1/query_range
+      tls:
+        verify: true
+      auth:
+        mode: BEARER
+        secretRef: PROMETHEUS_TOKEN
+      readers: ["*"]
+      readRoles: [USER, ADMIN]
+      limits:
+        requestTimeoutMs: 15000
+        maxRangeSeconds: 86400
+        maxResponseBytes: 2097152
+        maxSamplesPerJob: 250000
+        maxSeriesPerJob: 128
+
+  metricSources:
+    - schemaVersion: att-sut-metrics-metric-source/v1
+      id: host-cpu
+      name: Host CPU
+      connection:
+        kind: DATA_SOURCE
+        id: prometheus-prod
+      fetch:
+        id: cpu-range
+        mode: prometheus-range
+        query: node_cpu_seconds_total{mode="idle"}
+        parameters: {}
+        sampling: range
+        step: 15s
+      mapping:
+        labels:
+          retain: [instance]
+        outputs:
+          - id: cpu-idle-seconds
+            title: CPU idle seconds
+            unit: seconds
+            kind: counter
+            metricName: node_cpu_seconds_total
+            discriminator:
+              mode: idle
+      limits:
+        maxRows: 1024
+        maxSeries: 128
+        maxSamples: 250000
+        maxArtifactBytes: 8388608
+
+  groups:
+    - schemaVersion: att-sut-metrics-group/v1
+      id: host-runtime
+      title: Host runtime
+      order: 10
+      match:
+        metricIds: [cpu-idle-seconds]
+      groupBy: [instance]
+      display: chart
+
+  profiles:
+    - schemaVersion: att-sut-metrics-profile/v2
+      id: host-observability
+      name: Host observability
+      metricSourceIds: [host-cpu]
+      groupIds: [host-runtime]
+      allowedBindings:
+        environments: [SIT]
+        targets:
+          - type: target
+            id: payments-api-01
+        tenants: []
+        parameters: {}
+      budgets:
+        maxFetches: 1
+        maxObservations: 512
+        maxArtifactBytes: 8388608

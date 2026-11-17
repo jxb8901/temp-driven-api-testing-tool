@@ -20,6 +20,20 @@ import java.util.Locale;
 
 /** Loads V2 global configuration. Excel and stages are intentionally rejected here. */
 public final class FrameworkConfigLoader {
+    public static final class SutMetricsRuntimeConfiguration {
+        private final Map<String, Object> definitions;
+        private final Map<String, FrameworkConfig> environments;
+
+        private SutMetricsRuntimeConfiguration(Map<String, Object> definitions,
+                                               Map<String, FrameworkConfig> environments) {
+            this.definitions = definitions;
+            this.environments = environments;
+        }
+
+        public Map<String, Object> definitions() { return definitions; }
+        public Map<String, FrameworkConfig> environments() { return environments; }
+    }
+
     public FrameworkConfig load(Path path) throws IOException {
         return load(path, projectRoot(path));
     }
@@ -82,6 +96,53 @@ public final class FrameworkConfigLoader {
                 .forDiscovery(references.requirements(), references.helperFailures());
     }
 
+    /** Loads and validates one bounded Runtime Config source and returns its declared SUT Metrics catalog. */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> loadSutMetricsConfiguration(Path path, Path runtimeConfigRoot, String source) throws IOException {
+        return loadSutMetricsRuntimeConfiguration(path, runtimeConfigRoot, source).definitions();
+    }
+
+    /** Validates the exact Runtime Config text and loads each declared Environment without resolving secrets. */
+    @SuppressWarnings("unchecked")
+    public SutMetricsRuntimeConfiguration loadSutMetricsRuntimeConfiguration(Path path, Path runtimeConfigRoot,
+                                                                            String source) throws IOException {
+        Object loaded = YamlSupport.parse(source);
+        if (!(loaded instanceof Map)) throw new IllegalArgumentException("Config must be a YAML map: " + path);
+        Map<?, ?> raw = (Map<?, ?>) loaded;
+        Object catalog = raw.get("sutMetrics");
+        Map<String, Object> definitions;
+        if (catalog == null) definitions = Collections.emptyMap();
+        else if (!(catalog instanceof Map)) throw new IllegalArgumentException("config.sutMetrics must be a mapping");
+        else definitions = new LinkedHashMap<>((Map<String, Object>) catalog);
+
+        Map<String, FrameworkConfig> environments = new LinkedHashMap<>();
+        Object configuredEnvironments = raw.get("environments");
+        if (configuredEnvironments instanceof Map && !((Map<?, ?>) configuredEnvironments).isEmpty()) {
+            Map<?, ?> profiles = (Map<?, ?>) configuredEnvironments;
+            boolean loadedEnvironment = false;
+            for (Object key : profiles.keySet()) {
+                if (SchemaSupport.isDisabledKey(key)) continue;
+                if (!(key instanceof String)) throw new IllegalArgumentException("config.environments keys must be strings");
+                String name = (String) key;
+                FrameworkConfig framework = loadInternal(path, runtimeConfigRoot, runtimeConfigRoot, name,
+                        loaded, true, EnvironmentReferences.discovery(), false);
+                environments.put(framework.environment().toLowerCase(Locale.ROOT), framework);
+                loadedEnvironment = true;
+            }
+            if (!loadedEnvironment) {
+                FrameworkConfig framework = loadInternal(path, runtimeConfigRoot, runtimeConfigRoot, null,
+                        loaded, true, EnvironmentReferences.discovery(), false);
+                environments.put(framework.environment().toLowerCase(Locale.ROOT), framework);
+            }
+        } else {
+            FrameworkConfig framework = loadInternal(path, runtimeConfigRoot, runtimeConfigRoot, null,
+                    loaded, true, EnvironmentReferences.discovery(), false);
+            environments.put(framework.environment().toLowerCase(Locale.ROOT), framework);
+        }
+        return new SutMetricsRuntimeConfiguration(Collections.unmodifiableMap(definitions),
+                Collections.unmodifiableMap(environments));
+    }
+
     private FrameworkConfig loadInternal(Path path, Path runtimeConfigRoot, Path packageRoot,
                                          String selectedEnvironment, Object parsed, boolean supplied, EnvironmentReferences references) throws IOException {
         return loadInternal(path, runtimeConfigRoot, packageRoot, selectedEnvironment, parsed, supplied, references, true);
@@ -112,15 +173,16 @@ public final class FrameworkConfigLoader {
             Map<?, ?> rawMap = (Map<?, ?>) loaded;
             String schemaVersion = String.valueOf(rawMap.get("schemaVersion"));
             boolean v210 = Version.CONFIG_SCHEMA.equals(schemaVersion)
-                    || Version.PREVIOUS_CONFIG_SCHEMA.equals(schemaVersion) || "att-config/v2.11".equals(schemaVersion);
+                    || Version.PREVIOUS_CONFIG_SCHEMA.equals(schemaVersion)
+                    || "att-config/v2.12".equals(schemaVersion) || "att-config/v2.11".equals(schemaVersion);
             if (!v210) {
                 runtimeConfigRoot = runtimeConfigRoot.toAbsolutePath().normalize();
                 Path declaredSchema = att.validation.SchemaFiles.resolveVersion(runtimeConfigRoot, schemaVersion);
-                Path currentSchema = schema(runtimeConfigRoot, "att-config-v2.13.schema.json");
+                Path currentSchema = schema(runtimeConfigRoot, "att-config-v2.14.schema.json");
                 att.validation.SchemaMigrationGuidance.verify(declaredSchema, currentSchema, rawMap,
                         schemaVersion, Version.CONFIG_SCHEMA);
                 throw new IllegalArgumentException("Unsupported config schemaVersion '" + schemaVersion
-                        + "'; ATT 4.1.0 supports " + Version.CONFIG_SCHEMA + " and " + Version.PREVIOUS_CONFIG_SCHEMA
+                        + "'; supported current config versions are " + Version.CONFIG_SCHEMA + " and " + Version.PREVIOUS_CONFIG_SCHEMA
                         + ". Migrate command Tool result.format to stdoutFormat and update referenced descriptors. See docs/reference/appendices/migrations.md.");
             }
             boolean v29 = v210;
@@ -133,16 +195,16 @@ public final class FrameworkConfigLoader {
             packageRoot = packageRoot.toAbsolutePath().normalize();
             String schemaName = v210 ? null : v29 ? "att-config-v2.9.schema.json" : v28 ? "att-config-v2.8.schema.json" : v27 ? "att-config-v2.7.schema.json" : v26 ? "att-config-v2.6.schema.json" : v25 ? "att-config-v2.5.schema.json" : v22 ? "att-config-v2.2.schema.json" : "att-config-v2.1.schema.json";
             Path schema = v210 ? (Version.CONFIG_SCHEMA.equals(schemaVersion)
-                    ? schema(runtimeConfigRoot, "att-config-v2.13.schema.json")
+                    ? schema(runtimeConfigRoot, "att-config-v2.14.schema.json")
                     : att.validation.SchemaFiles.resolveVersion(runtimeConfigRoot, schemaVersion))
                     : schema(runtimeConfigRoot, schemaName);
             rejectLegacyGlobalTools(rawMap);
             att.validation.SchemaMigrationGuidance.verify(schema,
-                    schema(runtimeConfigRoot, "att-config-v2.13.schema.json"), rawMap, schemaVersion, Version.CONFIG_SCHEMA);
+                    schema(runtimeConfigRoot, "att-config-v2.14.schema.json"), rawMap, schemaVersion, Version.CONFIG_SCHEMA);
             SchemaSupport.rejectUnknown(rawMap, "config", v28
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata", "ssh", "tools", "environments", "packagePolicy"}
                     : v29
-                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata", "ssh", "tools", "environments", "packagePolicy"}
+                    ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "httphelpers", "testdata", "ssh", "tools", "environments", "packagePolicy", "sutMetrics"}
                     : v27
                     ? new String[]{"schemaVersion", "outputDirectory", "environment", "timeoutMs", "templates", "testcase", "run", "execution", "report", "caseLog", "xml", "toolGroups", "dbhelpers", "mqhelpers", "sshhelpers", "ssh", "tools", "environments", "packagePolicy"}
                     : v26
@@ -162,7 +224,7 @@ public final class FrameworkConfigLoader {
             Map<String, Object> map = resolveEnvironment(rawMap, v29 || v28 || v27 || v26, v29 || v28 || v27,
                     v29 || v28, selector);
             att.validation.SchemaMigrationGuidance.verify(schema,
-                    schema(runtimeConfigRoot, "att-config-v2.13.schema.json"), map, schemaVersion, Version.CONFIG_SCHEMA);
+                    schema(runtimeConfigRoot, "att-config-v2.14.schema.json"), map, schemaVersion, Version.CONFIG_SCHEMA);
             rejectLegacyGlobalTools(map);
             validateGlobalMappings(map);
             Map<String, ToolConfig> tools = packageAware ? PackageToolRegistry.load(packageRoot)

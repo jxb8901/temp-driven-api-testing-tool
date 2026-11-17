@@ -145,6 +145,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [Previous release Testdata migration](#previous-release-testdata-migration)
   - [Execution identity format migration](#execution-identity-format-migration)
   - [Load mix migration](#load-mix-migration)
+  - [att-config/v2.14：集中管理 SUT Metrics catalog](#att-configv214集中管理-sut-metrics-catalog)
   - [Historical schema migration](#historical-schema-migration)
   - [Debug schema migration](#debug-schema-migration)
   - [Environment profile migration](#environment-profile-migration)
@@ -2355,11 +2356,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-在 `att-config/v2.13` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.13 與 Tool Group v3.0。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
+在 `att-config/v2.14` 的全域或 `environments.<NAME>.sshhelpers` 列出 descriptor 路徑。目前 package 使用 config v2.14 與 Tool Group v3.0。選定環境的清單會整組取代全域清單；省略則繼承。Tool group 所綁定的相同邏輯 ID 必須在每個選定 profile 內存在。SIT 可綁定一臺，UAT 綁定兩臺，Tool／Action 不必修改：
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 environment: SIT
 environments:
   SIT:
@@ -2556,9 +2557,9 @@ actions:
 
 ### 選擇 environment profile
 
-`att-config/v2.13` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper 與 HTTPHelper lists；Package Testdata lists 由 `package.yaml` 管理。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md) 見對應頁面。
+`att-config/v2.14` 是現行 profile 契約。Profile 可整組替換已配置的 DBHelper、MQHelper、SSHHelper 與 HTTPHelper lists；Package Testdata lists 由 `package.yaml` 管理。各 Helper 與 testdata descriptor 的設定方式及 [Testdata Registry 與 Input Mapping](reference.zh/test-authoring.md) 見對應頁面。
 
-ATT 使用一份 common `att-config/v2.13` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
+ATT 使用一份 common `att-config/v2.14` 加上 `environments` map 選擇環境；不通過修改 Action 或增加環境專用 Tool ID 來選擇環境。SIT、UAT、PREPROD 及 production-like 環境之間，Action 只保留穩定的 logical ID：
 
 ```text
 Action -> logical helper ID -> selected config -> physical descriptor -> endpoint
@@ -2588,7 +2589,7 @@ common config 保留 run/execution/report 與全局 DB/MQ/HTTP/SSH Helpers。Too
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 environment: SIT                 # default；--env 会覆盖
 templates: {root: templates}
 testcase: {root: testcase}
@@ -2674,7 +2675,7 @@ Repository `schemas/catalog.yaml` 是建立版本相符 ATT Engine JAR 內嵌 re
 以下 configuration example 與 field table 和英文版共用相同 contract；欄位名與 literal values 保留英文。
 
 ```yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 outputDirectory: output
 environment: SIT
 timeoutMs: 10000
@@ -2708,7 +2709,7 @@ environments:
 
 | Path | Required/default | Constraints |
 |---|---|---|
-| `schemaVersion` | required | 現行版本：`att-config/v2.13`；上一版 schema 仍受支援。本例採用現行 schema。 |
+| `schemaVersion` | required | 現行版本：`att-config/v2.14`；上一版 schema 仍受支援。本例採用現行 schema。 |
 | `outputDirectory` | `output` | Non-empty package-relative output root |
 | `environment` | `SIT` | Non-empty default profile name when `environments` is present; otherwise exposed metadata only |
 | `timeoutMs` | `10000` | Integer 1–3600000 milliseconds |
@@ -3168,7 +3169,7 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix�
 
 ### 完整 CLI option matrix
 
-`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.13` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
+`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.14` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
 
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 
@@ -3611,7 +3612,7 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 |---|---|
 | 排程建立 | att-schedule/v2 |
 | RUN 定義 | att-execution/v1 |
-| Global configuration | att-config/v2.13 |
+| Global configuration | att-config/v2.14 |
 | Package Manifest | att-package/v1 |
 | Testdata descriptor | att-testdata/v1.0 |
 | DBHelper | att-dbhelper/v2.6 |
@@ -3743,6 +3744,11 @@ Unsupported schema version 會在 execution 前失敗並提供 migration guidanc
 ### Load mix migration
 
 現有 `att-load/v1.5` 檔案仍相容。升級至 `att-load/v1.6` 後，可將 workload 的 `target` 改為 `mix`，設定 closed-user weighted target mix。每個 entry 需要唯一 `id`、正整數 `weight`，以及 Template、Flow 或 Tool target。現行 summary contract 為 `att-load-summary/v1.1`；v1.0 保留作歷史格式。
+
+### att-config/v2.14：集中管理 SUT Metrics catalog
+
+現行 global config schema 為 `att-config/v2.14`，新增有界的 `sutMetrics.dataSources`、`metricSources`、`groups` 和 `profiles` lists。所選 Server Runtime Config 是這些定義的唯一權威來源；沒有 `sutMetrics` 的既有 `att-config/v2.13` 檔案仍受支援。遷移 `data/sut-metrics-catalog.json` 請依照 [SUT Metrics Runtime Config migration guide](guides/sut-metrics-config-migration.zh.md) 執行明確的 dry-run 和 apply。遷移工具會驗證候選檔、拒絕重複 ID 或衝突定義，並在套用前建立以 digest 命名的備份。
+
 
 ### Historical schema migration
 

@@ -67,11 +67,11 @@ instances:
   - {id: app2, host: sit-app2.example, port: 2222}
 ```
 
-Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.13`. Current packages use config v2.13 and Tool Group v3.0. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
+Bind descriptor paths globally or in `environments.<NAME>.sshhelpers` of `att-config/v2.14`. Current packages use config v2.14 and Tool Group v3.0. The selected environment's list replaces the global list; omission inherits it. A group binding must resolve to the same logical ID in each selected profile. SIT can bind one host and UAT two without changing the Tool, Action, or Resource Helper call:
 
 ```yaml
 # config/config.yaml
-schemaVersion: att-config/v2.13
+schemaVersion: att-config/v2.14
 environment: SIT
 environments:
   SIT:

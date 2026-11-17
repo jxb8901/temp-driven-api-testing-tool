@@ -14,7 +14,7 @@
     "revision": { "$ref": "#/$defs/revision" },
     "connection": {
       "type": "object",
-      "required": ["kind", "id", "revision"],
+      "required": ["kind", "id"],
       "additionalProperties": false,
       "properties": {
         "kind": { "enum": ["DATA_SOURCE", "DBHELPER", "PACKAGE_TOOL"] },

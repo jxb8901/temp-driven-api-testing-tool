@@ -220,7 +220,8 @@ final class ServerRuntime implements AutoCloseable {
                   LoadProgressPersistence loadProgressPersistence,Function<String,String> secretResolver) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
         this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;
-        try{this.sutMetrics=new SutMetricsService(config.dataDir,secretResolver,this::sutMetricsManifestPublished);}
+        try{this.sutMetrics=new SutMetricsService(config.dataDir,config.runtimeConfigPath,
+                ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),secretResolver,this::sutMetricsManifestPublished);}
         catch(Exception failed){store.close();throw failed;}
         this.sutMetrics.setBusinessCallExecutor(this::openBusinessCallSession);
         try{this.auth=new AuthService(config,store);}catch(Exception failed){sutMetrics.close();store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
