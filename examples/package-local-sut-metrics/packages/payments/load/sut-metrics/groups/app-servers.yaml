@@ -1,0 +1,8 @@
+schemaVersion: att-sut-metrics-group/v1
+id: app-servers
+title: Application servers
+order: 10
+match:
+  metricIds: [cpu-utilization]
+groupBy: [instance]
+display: chart

@@ -42,9 +42,10 @@ public final class SutMetricsCatalogMigration {
         byte[] catalogBytes = boundedRead(catalog, MAX_CATALOG_BYTES, "legacy SUT Metrics catalog");
         Map<String, Object> configRoot = object(YamlSupport.parse(new String(configBytes, StandardCharsets.UTF_8)), "Runtime Config");
         String currentSchema = String.valueOf(configRoot.get("schemaVersion"));
-        if (!Set.of(Version.CONFIG_SCHEMA, Version.PREVIOUS_CONFIG_SCHEMA).contains(currentSchema))
-            throw new IllegalArgumentException("Migrate the Runtime Config to " + Version.PREVIOUS_CONFIG_SCHEMA
-                    + " or " + Version.CONFIG_SCHEMA + " before moving the legacy SUT Metrics catalog.");
+        if (!Version.PREVIOUS_CONFIG_SCHEMA.equals(currentSchema))
+            throw new IllegalArgumentException("This legacy catalog migration writes inline SUT Metrics definitions and requires Runtime Config "
+                    + Version.PREVIOUS_CONFIG_SCHEMA + ". For " + Version.CONFIG_SCHEMA
+                    + ", move definitions into their owning Packages using the Package-local SUT Metrics migration guide.");
 
         Map<String, Object> catalogRoot = ServerRuntime.JSON.readValue(catalogBytes, Map.class);
         Map<String, Object> migrated = fromLegacyCatalog(catalogRoot);
@@ -58,7 +59,10 @@ public final class SutMetricsCatalogMigration {
         }
 
         Map<String, Object> candidateRoot = new LinkedHashMap<>(configRoot);
-        candidateRoot.put("schemaVersion", Version.CONFIG_SCHEMA);
+        // Inline global Metric Sources, Groups, and Profiles belong to the previous
+        // Runtime Config contract. The current contract keeps only Data Source paths
+        // globally and assigns metric definitions to Packages.
+        candidateRoot.put("schemaVersion", Version.PREVIOUS_CONFIG_SCHEMA);
         candidateRoot.put("sutMetrics", migrated);
         byte[] candidateBytes = dumpYaml(candidateRoot);
         String candidateRevision = digest(candidateBytes);

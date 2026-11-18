@@ -10,11 +10,28 @@ import static org.junit.jupiter.api.Assertions.*;
 class PackageSourceRevisionTest {
     @TempDir Path root;
     private static final String SOURCE = "schemaVersion: att-package/v1\ntestdata: {descriptors: [testdata/base.yaml]}\n";
+    private static final String METRIC_INVENTORY = "schemaVersion: att-package/v2\nobservability:\n"
+            + "  metricSources: [load/sut-metrics/sources/host.yaml]\n"
+            + "  groups: [load/sut-metrics/groups/runtime.yaml]\n"
+            + "  profiles: [load/sut-metrics/profiles/default.yaml]\n";
+    private static final String METRIC_SOURCE = "schemaVersion: att-sut-metrics-metric-source/v1\n"
+            + "id: host-source\nname: Host metrics\nconnection: {kind: DATA_SOURCE, id: prometheus}\n"
+            + "fetch: {id: host-fetch, mode: prometheus-range, query: up, parameters: {}, sampling: range, step: 15s}\n"
+            + "mapping: {labels: {retain: [instance]}, outputs: [{id: up, title: Up, unit: count, kind: gauge, metricName: up}]}\n"
+            + "limits: {maxRows: 100, maxSeries: 10, maxSamples: 1000, maxArtifactBytes: 8192}\n";
+    private static final String METRIC_GROUP = "schemaVersion: att-sut-metrics-group/v1\n"
+            + "id: runtime\ntitle: Runtime\norder: 10\nmatch: {metricIds: [up]}\ngroupBy: [instance]\ndisplay: auto\n";
+    private static final String METRIC_PROFILE = "schemaVersion: att-sut-metrics-profile/v2\n"
+            + "id: default-profile\nname: Default\nmetricSourceIds: [host-source]\ngroupIds: [runtime]\n"
+            + "allowedBindings: {environments: [], targets: [], tenants: [], parameters: {}}\n";
     private Path write(String name,String text) throws Exception {
         Path file=root.resolve(name);Files.createDirectories(file.getParent());Files.write(file,text.getBytes("UTF-8"));return file;
     }
     private String capture(Path pkg,Path config) throws Exception {
-        return PackageSourceRevision.capture(pkg,config,PackageConfig.parse(pkg,SOURCE));
+        return capture(pkg, config, SOURCE);
+    }
+    private String capture(Path pkg, Path config, String source) throws Exception {
+        return PackageSourceRevision.capture(pkg, config, PackageConfig.parse(pkg, source));
     }
     @Test void tracksDeclaredDependenciesAndRootBindingsWithoutWalkingUnrelatedFiles() throws Exception {
         Path config=write("central/config/config.yaml","schemaVersion: att-config/v2.13\nenvironment: SIT\n"
@@ -104,5 +121,31 @@ class PackageSourceRevisionTest {
         Files.write(descriptor,"schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: second}]\n".getBytes("UTF-8"));
         assertNotEquals(withRoot,inspector.validateCandidate(SOURCE,null).get("validationRevision"));
         assertNotNull(first);assertFalse(Files.exists(pkg.resolve("package.yaml")));
+    }
+
+    @Test void candidateValidationRevisionHashesEveryListedMetricYamlButIgnoresUnlistedYaml() throws Exception {
+        Path config = write("central/config.yaml", "schemaVersion: att-config/v2.13\n");
+        Path pkg = Files.createDirectories(root.resolve("package"));
+        Path metricSource = write("package/load/sut-metrics/sources/host.yaml", METRIC_SOURCE);
+        Path group = write("package/load/sut-metrics/groups/runtime.yaml", METRIC_GROUP);
+        Path profile = write("package/load/sut-metrics/profiles/default.yaml", METRIC_PROFILE);
+        Path unlisted = write("package/load/sut-metrics/sources/unlisted.yaml", METRIC_SOURCE.replace("host-source", "unlisted-source"));
+        String baseline = capture(pkg, config, METRIC_INVENTORY);
+        Files.write(unlisted, METRIC_SOURCE.replace("host-source", "changed-unlisted-source").getBytes("UTF-8"));
+        assertEquals(baseline, capture(pkg, config, METRIC_INVENTORY));
+
+        Files.write(metricSource, METRIC_SOURCE.replace("Host metrics", "Changed metrics").getBytes("UTF-8"));
+        String sourceChanged = capture(pkg, config, METRIC_INVENTORY);
+        assertNotEquals(baseline, sourceChanged, "listed Metric Source bytes must be included");
+        Files.write(metricSource, METRIC_SOURCE.getBytes("UTF-8"));
+
+        Files.write(group, METRIC_GROUP.replace("Runtime", "Changed runtime").getBytes("UTF-8"));
+        String groupChanged = capture(pkg, config, METRIC_INVENTORY);
+        assertNotEquals(baseline, groupChanged, "listed Metric Group bytes must be included");
+        Files.write(group, METRIC_GROUP.getBytes("UTF-8"));
+
+        Files.write(profile, METRIC_PROFILE.replace("Default", "Changed default").getBytes("UTF-8"));
+        String profileChanged = capture(pkg, config, METRIC_INVENTORY);
+        assertNotEquals(baseline, profileChanged, "listed profile bytes must be included");
     }
 }

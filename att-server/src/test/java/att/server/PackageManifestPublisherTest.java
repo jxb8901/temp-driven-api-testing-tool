@@ -19,6 +19,7 @@ class PackageManifestPublisherTest {
     @TempDir Path temporary;
     private static final String SOURCE="schemaVersion: att-package/v1\ndefaultEnvironment: UAT\n";
     private static final String OLD="schemaVersion: att-package/v1\n";
+    private static final String RESOURCE="schemaVersion: att-sut-metrics-source/v1\nid: prom-main\nkind: PROMETHEUS\n";
     private static String sha(String text) throws Exception { return PackageManifestPublisher.digest(text.getBytes(StandardCharsets.UTF_8)); }
     private static final class MutableClock extends Clock {
         Instant now=Instant.parse("2026-10-25T00:00:00Z");
@@ -28,7 +29,11 @@ class PackageManifestPublisherTest {
     }
     private final MutableClock clock=new MutableClock();
     private final AtomicBoolean authorized=new AtomicBoolean(true);
+    private final AtomicBoolean resourceValid=new AtomicBoolean(true);
+    private final AtomicReference<String> resourceEnvironment=new AtomicReference<>();
+    private final AtomicReference<String> resourceActor=new AtomicReference<>();
     private final AtomicReference<String> dependencies=new AtomicReference<>("unchanged");
+    private final AtomicBoolean failBeforeManifestActivation=new AtomicBoolean();
     private final ArrayList<String> audits=new ArrayList<>();
     private Path root;
     private PackageManifestPublisher publisher(Map<String,Object> options) throws Exception {
@@ -38,6 +43,63 @@ class PackageManifestPublisherTest {
                 (id,source)->Map.of("valid",true,"manifestDigest",sha(source),"validationRevision",sha(source+dependencies.get()),
                         "environment","UAT","configurationIdentity",sha(source+"identity")),
                 (actor,action,id,detail)->audits.add(action));
+    }
+    private PackageManifestPublisher resourcePublisher(Map<String,Object> options) throws Exception {
+        root=Files.createDirectories(temporary.resolve("package")).toRealPath();
+        return new PackageManifestPublisher(temporary.resolve("private"),PackageConfigurationPolicy.load(options),clock,
+                (id,actor)->{if(!authorized.get()||!"owner".equals(id)||!"owner".equals(actor))throw new PackageManifestPublisher.Denied();return root;},
+                (id,source)->Map.of("valid",true,"manifestDigest",sha(source),"validationRevision",sha(source+dependencies.get()),
+                        "environment","UAT","configurationIdentity",sha(source+"identity")),
+                (id,actor,path,environment,source)->{
+                    resourceActor.set(actor);resourceEnvironment.set(environment);
+                    return Map.of("valid",resourceValid.get(),"resourceDigest",sha(source),
+                            "validationRevision",sha(id+"\n"+actor+"\n"+path+"\n"+environment+"\n"+source+dependencies.get()),
+                            "environment",environment==null?"UAT":environment,"configurationIdentity",sha(path+"identity"));
+                },
+                (actor,action,id,detail)->audits.add(action));
+    }
+    private PackageManifestPublisher resourceCreatePublisher(Map<String,Object> options,AtomicBoolean inertSeen) throws Exception {
+        root=Files.createDirectories(temporary.resolve("package")).toRealPath();
+        PackageManifestPublisher.ResourceValidator validator=new PackageManifestPublisher.ResourceValidator() {
+            public Map<String,Object> validate(String id,String actor,String path,String environment,String source) throws Exception {
+                return resourceValidation(id,actor,path,environment,source,null,null);
+            }
+            @Override public Map<String,Object> validateCandidate(String id,String actor,String path,String environment,
+                    String source,String candidateManifestSource,String expectedManifestDigest) throws Exception {
+                if(candidateManifestSource!=null) {
+                    assertEquals(expectedManifestDigest,sha(Files.readString(root.resolve("package.yaml"))));
+                    Path live=root.resolve(path);
+                    if(Files.exists(live)) {
+                        assertFalse(Files.readString(root.resolve("package.yaml")).contains(path),
+                                "The new resource must remain unlisted until package.yaml is replaced.");
+                        inertSeen.set(true);
+                    }
+                }
+                return resourceValidation(id,actor,path,environment,source,candidateManifestSource,expectedManifestDigest);
+            }
+            private Map<String,Object> resourceValidation(String id,String actor,String path,String environment,
+                    String source,String candidateManifestSource,String expectedManifestDigest) throws Exception {
+                resourceActor.set(actor);resourceEnvironment.set(environment);
+                Map<String,Object> result=new java.util.LinkedHashMap<>();
+                result.put("valid",resourceValid.get());result.put("resourceDigest",sha(source));
+                result.put("validationRevision",sha(id+"\n"+actor+"\n"+path+"\n"+environment+"\n"+source
+                        +String.valueOf(candidateManifestSource)+String.valueOf(expectedManifestDigest)+dependencies.get()));
+                result.put("environment",environment==null?"UAT":environment);
+                result.put("configurationIdentity",sha(path+"identity"));
+                if(candidateManifestSource!=null)
+                    result.put("candidateManifestDigest",sha(candidateManifestSource));
+                return result;
+            }
+        };
+        return new PackageManifestPublisher(temporary.resolve("private"),PackageConfigurationPolicy.load(options),clock,
+                (id,actor)->{if(!authorized.get()||!"owner".equals(id)||!"owner".equals(actor))throw new PackageManifestPublisher.Denied();return root;},
+                (id,source)->Map.of("valid",true,"manifestDigest",sha(source),"validationRevision",sha(source+dependencies.get()),
+                        "environment","UAT","configurationIdentity",sha(source+"identity")),
+                validator,(actor,action,id,detail)->{
+                    audits.add(action);
+                    if("PKG_SUT_MANIFEST_INTENT".equals(action)&&failBeforeManifestActivation.compareAndSet(true,false))
+                        throw new java.io.IOException("Injected failure before Package Manifest activation");
+                });
     }
     private String staged(PackageManifestPublisher publisher,String source,String before) throws Exception {
         return (String)publisher.stage("owner","owner",source,sha(before)).get("draftId");
@@ -61,6 +123,25 @@ class PackageManifestPublisherTest {
             assertEquals(OLD,Files.readString(root.resolve("package.yaml")));
             assertTrue(audits.contains("PACKAGE_MANIFEST_PUBLISH_INTENT"));
             try(var children=Files.list(root)){assertEquals(1,children.count());}
+        }
+    }
+    @Test void rollbackOfAbsentManifestStagesCurrentSchemaVersion() throws Exception {
+        try(var publisher=publisher(Map.of("sourceEditingEnabled",true))) {
+            String emptyDigest=sha("");
+            Path history=temporary.resolve("private/package-source-history").resolve(sha("owner"));
+            Files.createDirectories(history);
+            Files.writeString(history.resolve(emptyDigest+".yaml"),"");
+            Files.writeString(root.resolve("package.yaml"),"schemaVersion: att-package/v2\n");
+            String liveDigest=sha("schemaVersion: att-package/v2\n");
+
+            Map<String,Object> rollback=publisher.rollbackDraft("owner","owner",emptyDigest,liveDigest);
+            String id=(String)rollback.get("draftId");
+            assertEquals(true,rollback.get("resetToEmptyManifest"));
+            assertFalse(rollback.containsKey("source"),"Raw candidate Manifest text must stay private.");
+            publisher.validate("owner","owner",id);
+            publisher.review("owner","owner",id);
+            publisher.publish("owner","owner",id);
+            assertEquals("schemaVersion: att-package/v2\n",Files.readString(root.resolve("package.yaml")));
         }
     }
     @Test void historyUsesNewestModificationTimeThenDigestRatherThanFilenameOrder() throws Exception {
@@ -122,6 +203,186 @@ class PackageManifestPublisherTest {
             Files.createSymbolicLink(root.resolve("package.yaml"),outside);
             assertThrows(java.io.IOException.class,()->staged(publisher,SOURCE,OLD));
             assertEquals(OLD,Files.readString(outside));
+        }
+    }
+    @Test void resourceDraftRejectsTraversalAndSymlinkedParents() throws Exception {
+        try(var publisher=resourcePublisher(Map.of("sourceEditingEnabled",true))) {
+            assertThrows(IllegalArgumentException.class,()->publisher.stageResource("owner","owner",
+                    "load/sut-metrics/sources/../escaped.yaml",RESOURCE,sha("")));
+            Path outside=Files.createDirectories(temporary.resolve("outside"));
+            Path metrics=Files.createDirectories(root.resolve("load/sut-metrics"));
+            Files.createSymbolicLink(metrics.resolve("sources"),outside);
+            assertThrows(IllegalArgumentException.class,()->publisher.stageResource("owner","owner",
+                    "load/sut-metrics/sources/prom.yaml",RESOURCE,sha("")));
+            assertFalse(Files.exists(outside.resolve("prom.yaml")));
+        }
+    }
+    @Test void resourceDraftRequiresValidationAndReviewAndLeavesManifestInventoryUntouched() throws Exception {
+        try(var publisher=resourcePublisher(Map.of("sourceEditingEnabled",true))) {
+            Files.writeString(root.resolve("package.yaml"),"schemaVersion: att-package/v2\ndefaultEnvironment: UAT\n");
+            String path="load/sut-metrics/sources/prom.yaml";
+            String id=(String)publisher.stageResource("owner","owner",path,RESOURCE,sha("")).get("draftId");
+            assertThrows(IllegalArgumentException.class,()->publisher.publishResource("owner","owner",id));
+            Map<String,Object> validated=publisher.validateResource("owner","owner",id);
+            assertFalse(validated.toString().contains(RESOURCE));
+            assertThrows(IllegalArgumentException.class,()->publisher.publishResource("owner","owner",id));
+            publisher.reviewResource("owner","owner",id);
+            Map<String,Object> published=publisher.publishResource("owner","owner",id);
+            assertEquals(true,published.get("published"));
+            assertEquals(RESOURCE,Files.readString(root.resolve(path)));
+            assertTrue(Files.readString(root.resolve("package.yaml")).contains("defaultEnvironment: UAT"));
+            assertEquals(2,publisher.historyResource("owner","owner",path).size());
+            assertTrue(audits.contains("PKG_SUT_METRIC_PUBLISH_INTENT"));
+        }
+    }
+    @Test void createResourceWritesInertBytesBeforeActivatingCandidateManifestLast() throws Exception {
+        AtomicBoolean inertResourceObserved=new AtomicBoolean();
+        try(var publisher=resourceCreatePublisher(Map.of("sourceEditingEnabled",true),inertResourceObserved)) {
+            String path="load/sut-metrics/sources/created.yaml";
+            String oldManifest="schemaVersion: att-package/v2\n";
+            String candidateManifest=oldManifest+"observability:\n  metricSources: ["+path+"]\n";
+            Files.writeString(root.resolve("package.yaml"),oldManifest);
+            String oldManifestDigest=sha(oldManifest);
+            Map<String,Object> staged=publisher.stageResource("owner","owner",path,"UAT",RESOURCE,sha(""),
+                    candidateManifest,oldManifestDigest);
+            assertEquals("resource-then-manifest",staged.get("activationMode"));
+            assertEquals(oldManifestDigest,staged.get("expectedManifestDigest"));
+            assertEquals(false,staged.get("recoveredExistingResource"));
+            assertEquals(sha(RESOURCE),staged.get("candidateResourceDigest"));
+            String id=(String)staged.get("draftId");
+            assertFalse(Files.exists(root.resolve(path)));
+            Map<String,Object> validation=publisher.validateResource("owner","owner",id);
+            assertEquals(sha(candidateManifest),validation.get("candidateManifestDigest"));
+            assertFalse(Files.exists(root.resolve(path)));
+            publisher.reviewResource("owner","owner",id);
+
+            Map<String,Object> published=publisher.publishResource("owner","owner",id);
+            assertTrue(inertResourceObserved.get(),"Validation must observe the file while it is still unlisted/inert.");
+            assertEquals(true,published.get("published"));
+            assertEquals(sha(""),published.get("beforeResourceDigest"));
+            assertEquals(sha(RESOURCE),published.get("resourceDigest"));
+            assertEquals(oldManifestDigest,published.get("expectedManifestDigest"));
+            assertEquals(sha(candidateManifest),published.get("manifestDigest"));
+            assertEquals(RESOURCE,Files.readString(root.resolve(path)));
+            assertEquals(candidateManifest,Files.readString(root.resolve("package.yaml")));
+            assertEquals(2,publisher.historyResource("owner","owner",path).size());
+            assertEquals(2,publisher.history("owner","owner").size());
+            assertTrue(audits.contains("PKG_SUT_MANIFEST_INTENT"));
+        }
+    }
+    @Test void createdResourceRejectsIncompleteOrStaleManifestAndMissingSource() throws Exception {
+        AtomicBoolean inertSeen=new AtomicBoolean();
+        try(var publisher=resourceCreatePublisher(Map.of("sourceEditingEnabled",true),inertSeen)) {
+            String path="load/sut-metrics/groups/created.yaml";
+            String manifest="schemaVersion: att-package/v2\n";
+            Files.writeString(root.resolve("package.yaml"),manifest);
+            assertThrows(IllegalArgumentException.class,()->publisher.stageResource("owner","owner",path,"UAT",
+                    null,sha(""),manifest,sha(manifest)));
+            assertThrows(IllegalArgumentException.class,()->publisher.stageResource("owner","owner",path,"UAT",
+                    RESOURCE,sha(""),manifest,null));
+            assertThrows(PackageManifestPublisher.Conflict.class,()->publisher.stageResource("owner","owner",path,"UAT",
+                    RESOURCE,sha("wrong"),manifest,sha(manifest)));
+
+            String candidate=manifest+"observability:\n  groups: ["+path+"]\n";
+            String id=(String)publisher.stageResource("owner","owner",path,"UAT",RESOURCE,sha(""),candidate,sha(manifest)).get("draftId");
+            Files.writeString(root.resolve("package.yaml"),manifest+"metadata: {name: Concurrent edit}\n");
+            assertThrows(PackageManifestPublisher.Conflict.class,()->publisher.publishResource("owner","owner",id));
+            assertFalse(Files.exists(root.resolve(path)));
+            assertFalse(inertSeen.get());
+        }
+    }
+    @Test void createdResourceCanRecoverAndRetryWithAnAlreadyWrittenMatchingInertFile() throws Exception {
+        AtomicBoolean inertSeen=new AtomicBoolean();
+        try(var publisher=resourceCreatePublisher(Map.of("sourceEditingEnabled",true),inertSeen)) {
+            String path="load/sut-metrics/profiles/created.yaml";
+            String manifest="schemaVersion: att-package/v2\n";
+            String candidate=manifest+"observability:\n  profiles: ["+path+"]\n";
+            Files.writeString(root.resolve("package.yaml"),manifest);
+            String id=(String)publisher.stageResource("owner","owner",path,"UAT",RESOURCE,sha(""),candidate,sha(manifest)).get("draftId");
+            Path inert=root.resolve(path);Files.createDirectories(inert.getParent());Files.writeString(inert,RESOURCE);
+
+            publisher.validateResource("owner","owner",id);
+            publisher.reviewResource("owner","owner",id);
+            Map<String,Object> result=publisher.publishResource("owner","owner",id);
+            assertEquals(true,result.get("published"));
+            assertTrue(inertSeen.get());
+            assertEquals(candidate,Files.readString(root.resolve("package.yaml")));
+            assertEquals(RESOURCE,Files.readString(inert));
+        }
+    }
+    @Test void orphanedCreateCanBeRecoveredAfterRestartOnlyForMatchingContentAndManifest() throws Exception {
+        AtomicBoolean inertSeen=new AtomicBoolean();
+        String path="load/sut-metrics/profiles/recovered.yaml";
+        String manifest="schemaVersion: att-package/v2\n";
+        String candidate=manifest+"observability:\n  profiles: ["+path+"]\n";
+        root=Files.createDirectories(temporary.resolve("package")).toRealPath();
+        Files.writeString(root.resolve("package.yaml"),manifest);
+
+        try(var first=resourceCreatePublisher(Map.of("sourceEditingEnabled",true),inertSeen)) {
+            String draft=(String)first.stageResource("owner","owner",path,"UAT",RESOURCE,sha(""),candidate,sha(manifest)).get("draftId");
+            first.validateResource("owner","owner",draft);
+            first.reviewResource("owner","owner",draft);
+            failBeforeManifestActivation.set(true);
+            assertThrows(java.io.IOException.class,()->first.publishResource("owner","owner",draft));
+            assertEquals(RESOURCE,Files.readString(root.resolve(path)));
+            assertEquals(manifest,Files.readString(root.resolve("package.yaml")),"The failed transaction must leave the resource unlisted.");
+        }
+
+        try(var restarted=resourceCreatePublisher(Map.of("sourceEditingEnabled",true),inertSeen)) {
+            assertThrows(PackageManifestPublisher.Conflict.class,()->restarted.stageResource("owner","owner",path,"UAT",
+                    "different resource",sha(""),candidate,sha(manifest)));
+            Map<String,Object> staged=restarted.stageResource("owner","owner",path,"UAT",RESOURCE,sha(""),candidate,sha(manifest));
+            assertEquals(sha(RESOURCE),staged.get("expectedResourceDigest"),"Recovery is fenced to the orphan's exact digest.");
+            assertEquals(true,staged.get("recoveredExistingResource"));
+            assertEquals(sha(RESOURCE),staged.get("candidateResourceDigest"));
+            String draft=(String)staged.get("draftId");
+            restarted.validateResource("owner","owner",draft);
+            restarted.reviewResource("owner","owner",draft);
+            Map<String,Object> published=restarted.publishResource("owner","owner",draft);
+            assertEquals(true,published.get("published"));
+            assertEquals(candidate,Files.readString(root.resolve("package.yaml")));
+            assertEquals(RESOURCE,Files.readString(root.resolve(path)));
+        }
+    }
+    @Test void resourceDraftRetainsSelectedEnvironmentThroughValidationAndPublish() throws Exception {
+        try(var publisher=resourcePublisher(Map.of("sourceEditingEnabled",true))) {
+            String id=(String)publisher.stageResource("owner","owner","load/sut-metrics/profiles/sit.yaml","SIT",RESOURCE,sha("")).get("draftId");
+            Map<String,Object> validation=publisher.validateResource("owner","owner",id);
+            assertEquals("SIT",validation.get("environment"));
+            assertEquals("SIT",resourceEnvironment.get());
+            assertEquals("owner",resourceActor.get());
+            publisher.reviewResource("owner","owner",id);
+            Map<String,Object> result=publisher.publishResource("owner","owner",id);
+            assertEquals("SIT",result.get("environment"));
+            assertEquals("SIT",resourceEnvironment.get());
+            assertEquals("owner",resourceActor.get());
+        }
+    }
+    @Test void resourceValidationRejectsInvalidCandidateAndPublishRejectsStaleResourceRevision() throws Exception {
+        try(var publisher=resourcePublisher(Map.of("sourceEditingEnabled",true))) {
+            String path="load/sut-metrics/groups/smoke.yaml";
+            resourceValid.set(false);
+            String invalid=(String)publisher.stageResource("owner","owner",path,RESOURCE,sha("")).get("draftId");
+            assertThrows(IllegalArgumentException.class,()->publisher.validateResource("owner","owner",invalid));
+            assertFalse(Files.exists(root.resolve(path)));
+
+            resourceValid.set(true);
+            Path live=root.resolve(path);Files.createDirectories(live.getParent());Files.writeString(live,OLD);
+            String id=(String)publisher.stageResource("owner","owner",path,RESOURCE,sha(OLD)).get("draftId");
+            publisher.validateResource("owner","owner",id);publisher.reviewResource("owner","owner",id);
+            Files.writeString(live,"concurrent edit\n");
+            assertThrows(PackageManifestPublisher.Conflict.class,()->publisher.publishResource("owner","owner",id));
+            assertEquals("concurrent edit\n",Files.readString(live));
+        }
+    }
+    @Test void resourcePublishRejectsChangedPackageDefinitionRevisionWhenTargetIsUnchanged() throws Exception {
+        try(var publisher=resourcePublisher(Map.of("sourceEditingEnabled",true))) {
+            String path="load/sut-metrics/sources/prom.yaml";
+            String id=(String)publisher.stageResource("owner","owner",path,RESOURCE,sha("")).get("draftId");
+            publisher.validateResource("owner","owner",id);publisher.reviewResource("owner","owner",id);
+            dependencies.set("another package definition changed");
+            assertThrows(PackageManifestPublisher.Conflict.class,()->publisher.publishResource("owner","owner",id));
+            assertFalse(Files.exists(root.resolve(path)));
         }
     }
     @Test void appliesTrustedEnvironmentPolicyAfterResolution() {

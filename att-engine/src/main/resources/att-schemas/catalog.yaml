@@ -1,6 +1,7 @@
 schemaVersion: att-schema-catalog/v3.0
 schemas:
-  att-package/v1: att-package-v1.schema.json
+  att-package/v2: att-package-v2.schema.json
+  historicalPackageV1: history/att-package-v1.schema.json
   att-tool/v1: att-tool-v1.schema.json
   att-validation/v1: att-validation-v1.schema.json
   att-load-bindings/v1: att-load-bindings-v1.schema.json
@@ -47,7 +48,8 @@ schemas:
   att-config/v2.11: history/att-config-v2.11.schema.json
   att-config/v2.10: history/att-config-v2.10.schema.json
   att-config/v2.13: history/att-config-v2.13.schema.json
-  globalConfig: att-config-v2.14.schema.json
+  att-config/v2.14: history/att-config-v2.14.schema.json
+  globalConfig: att-config-v2.15.schema.json
   att-config/v2.12: history/att-config-v2.12.schema.json
   previousGlobalConfig: history/att-config-v2.8.schema.json
   previousGlobalConfigV27: history/att-config-v2.7.schema.json

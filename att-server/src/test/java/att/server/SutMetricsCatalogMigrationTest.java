@@ -15,7 +15,7 @@ class SutMetricsCatalogMigrationTest {
     @BeforeEach void installSchemas() throws Exception { TestSchemaInstaller.install(temp); }
 
     @Test void dryRunPreservesInputsAndWritesValidatedCandidateForAllDefinitionKinds() throws Exception {
-        Path config = writeConfig("schemaVersion: att-config/v2.13\nenvironment: prod\n");
+        Path config = writeConfig("schemaVersion: att-config/v2.14\nenvironment: prod\n");
         Path catalog = writeCatalog(legacyCatalog());
         Path candidate = temp.resolve("config/config.candidate.yaml");
         byte[] originalConfig = Files.readAllBytes(config);
@@ -46,7 +46,7 @@ class SutMetricsCatalogMigrationTest {
     }
 
     @Test void applyMakesVerifiedBackupsAndAnIdenticalSecondRunIsANoOp() throws Exception {
-        Path config = writeConfig("schemaVersion: att-config/v2.13\nenvironment: prod\n");
+        Path config = writeConfig("schemaVersion: att-config/v2.14\nenvironment: prod\n");
         Path catalog = writeCatalog(legacyCatalog());
         byte[] originalConfig = Files.readAllBytes(config);
         byte[] originalCatalog = Files.readAllBytes(catalog);
@@ -71,7 +71,7 @@ class SutMetricsCatalogMigrationTest {
     }
 
     @Test void duplicateIdsAndConflictingRuntimeDefinitionsFailWithoutWriting() throws Exception {
-        Path config = writeConfig("schemaVersion: att-config/v2.13\nenvironment: SIT\n");
+        Path config = writeConfig("schemaVersion: att-config/v2.14\nenvironment: SIT\n");
         Path duplicate = writeCatalog(legacyCatalog().replace("\"sources\":[", "\"sources\":[" + sourceJson() + ","));
         Path candidate = temp.resolve("config/duplicate-candidate.yaml");
         assertThrows(IllegalArgumentException.class, () -> SutMetricsCatalogMigration.migrate(config, duplicate, candidate, false));
@@ -80,6 +80,18 @@ class SutMetricsCatalogMigrationTest {
         Files.writeString(config, "schemaVersion: att-config/v2.14\nsutMetrics: {dataSources: [], metricSources: [], groups: [], profiles: []}\n");
         Path validCatalog = writeCatalog(legacyCatalog());
         assertThrows(IllegalStateException.class, () -> SutMetricsCatalogMigration.migrate(config, validCatalog, candidate, false));
+        assertFalse(Files.exists(candidate));
+    }
+
+    @Test void currentConfigRequiresPackageOwnershipMigrationInsteadOfInlineCatalogImport() throws Exception {
+        Path config = writeConfig("schemaVersion: att-config/v2.15\nenvironment: SIT\n");
+        Path catalog = writeCatalog(legacyCatalog());
+        Path candidate = temp.resolve("config/config.candidate.yaml");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> SutMetricsCatalogMigration.migrate(config, catalog, candidate, false));
+
+        assertTrue(error.getMessage().contains("Package-local SUT Metrics migration guide"));
         assertFalse(Files.exists(candidate));
     }
 

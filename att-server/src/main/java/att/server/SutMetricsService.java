@@ -268,9 +268,14 @@ final class SutMetricsService implements AutoCloseable {
         if (runtimeConfigPath == null) return;
         while (true) {
             String attemptedRevision = null;
+            String attemptedConfigDigest = null;
             try {
                 byte[] bytes = readRuntimeConfigBytes();
-                attemptedRevision = sha256(bytes);
+                attemptedConfigDigest = sha256(bytes);
+                att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration loaded =
+                        new att.config.FrameworkConfigLoader().loadSutMetricsRuntimeConfiguration(runtimeConfigPath,
+                                runtimeConfigRoot, new String(bytes, StandardCharsets.UTF_8));
+                attemptedRevision = loaded.overallRevision();
                 String revision = attemptedRevision;
                 synchronized (catalogLock) {
                     if (revision.equals(activeRuntimeConfigRevision)) {
@@ -281,14 +286,12 @@ final class SutMetricsService implements AutoCloseable {
                     }
                     if (revision.equals(rejectedRuntimeConfigRevision)) return;
                 }
-                att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration loaded = new att.config.FrameworkConfigLoader()
-                        .loadSutMetricsRuntimeConfiguration(runtimeConfigPath, runtimeConfigRoot,
-                                new String(bytes, StandardCharsets.UTF_8));
                 beforeRuntimeConfigActivation.accept(revision);
+                ConfiguredCatalog candidate = buildConfiguredCatalog(loaded);
                 synchronized (catalogLock) {
-                    // Validation is intentionally outside the catalog lock. Fence its result against
-                    // the on-disk revision at the serialized activation point so a stale successful
-                    // candidate cannot replace a newer revision that finished activating first.
+                    // Candidate construction, including resolving server secrets and checking all
+                    // cross-catalog references, happens before the serialized publish step. Fence
+                    // that complete result against the on-disk revision immediately before swap.
                     byte[] currentBytes;
                     try { currentBytes = readRuntimeConfigBytes(); }
                     catch (Exception unavailable) {
@@ -299,14 +302,15 @@ final class SutMetricsService implements AutoCloseable {
                         rejectedRuntimeConfigRevision = null;
                         return;
                     }
-                    if (!revision.equals(sha256(currentBytes))) continue;
+                    String currentRevision = loadRuntimeConfig(currentBytes).overallRevision();
+                    if (!revision.equals(currentRevision)) continue;
                     if (revision.equals(activeRuntimeConfigRevision)) {
                         rejectedRuntimeConfigRevision = null;
                         runtimeConfigDiagnosticCode = null;
                         runtimeConfigDiagnosticField = null;
                         return;
                     }
-                    activateConfiguredCatalog(loaded.definitions(), revision, loaded.environments());
+                    publishConfiguredCatalog(candidate);
                     activeRuntimeConfigRevision = revision;
                     rejectedRuntimeConfigRevision = null;
                     runtimeConfigDiagnosticCode = null;
@@ -329,7 +333,31 @@ final class SutMetricsService implements AutoCloseable {
                             rejectedRuntimeConfigRevision = null;
                             return;
                         }
-                        if (!attemptedRevision.equals(sha256(currentBytes))) continue;
+                        try {
+                            if (!attemptedRevision.equals(loadRuntimeConfig(currentBytes).overallRevision())) continue;
+                        } catch (Exception currentInvalid) {
+                            if (attemptedConfigDigest != null && !attemptedConfigDigest.equals(sha256(currentBytes))) continue;
+                        }
+                    } else if (attemptedConfigDigest != null) {
+                        byte[] currentBytes;
+                        try {
+                            currentBytes = readRuntimeConfigBytes();
+                        } catch (Exception unavailable) {
+                            if (activeRuntimeConfigRevision == null || startup)
+                                throw new IllegalStateException("The selected Runtime Config is unavailable.", unavailable);
+                            runtimeConfigDiagnosticCode = "SUT_METRICS_CONFIG_REJECTED";
+                            runtimeConfigDiagnosticField = safeConfigDiagnosticField(unavailable);
+                            rejectedRuntimeConfigRevision = null;
+                            return;
+                        }
+                        if (!attemptedConfigDigest.equals(sha256(currentBytes))) continue;
+                        // A descriptor may change while a load fails even when config.yaml stays
+                        // byte-for-byte identical. Retry once the current complete configuration
+                        // becomes readable instead of fencing only on the manifest bytes.
+                        try {
+                            loadRuntimeConfig(currentBytes);
+                            continue;
+                        } catch (Exception stillInvalid) { /* reject this exact current candidate */ }
                     }
                     if (attemptedRevision != null && attemptedRevision.equals(activeRuntimeConfigRevision)) {
                         rejectedRuntimeConfigRevision = null;
@@ -346,6 +374,12 @@ final class SutMetricsService implements AutoCloseable {
                 return;
             }
         }
+    }
+
+    private att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration loadRuntimeConfig(byte[] bytes)
+            throws java.io.IOException {
+        return new att.config.FrameworkConfigLoader().loadSutMetricsRuntimeConfiguration(runtimeConfigPath,
+                runtimeConfigRoot, new String(bytes, StandardCharsets.UTF_8));
     }
 
     private static String safeConfigDiagnosticField(Throwable failure) {
@@ -375,94 +409,559 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private byte[] readRuntimeConfigBytes() throws Exception {
-        if (!Files.isRegularFile(runtimeConfigPath) || !Files.isReadable(runtimeConfigPath))
+        return readRuntimeConfigBytes(runtimeConfigPath);
+    }
+
+    private byte[] readRuntimeConfigBytes(Path path) throws Exception {
+        if (path == null || !Files.isRegularFile(path) || !Files.isReadable(path))
             throw new IllegalArgumentException("The selected Runtime Config is unavailable.");
-        long size = Files.size(runtimeConfigPath);
+        long size = Files.size(path);
         if (size < 1 || size > MAX_RUNTIME_CONFIG_BYTES)
             throw new IllegalArgumentException("The selected Runtime Config exceeds the configured source limit.");
-        byte[] bytes = Files.readAllBytes(runtimeConfigPath);
+        byte[] bytes = Files.readAllBytes(path);
         if (bytes.length > MAX_RUNTIME_CONFIG_BYTES)
             throw new IllegalArgumentException("The selected Runtime Config exceeds the configured source limit.");
         return bytes;
     }
 
-    private void activateConfiguredCatalog(Map<String, Object> definitions, String configRevision,
-                                            Map<String, att.config.FrameworkConfig> environments) {
-        synchronized (catalogLock) {
-            Map<String, Map<String, Object>> priorSources = sources;
-            Map<String, Map<String, Object>> priorMetricSources = metricSources;
-            Map<String, Map<String, Object>> priorGroups = metricGroups;
-            Map<String, Map<String, Object>> priorProfiles = profiles;
-            try {
-                Map<String, Map<String, Object>> nextSources = new LinkedHashMap<>();
-                Map<String, Map<String, Object>> nextMetricSources = new LinkedHashMap<>();
-                Map<String, Map<String, Object>> nextGroups = new LinkedHashMap<>();
-                Map<String, Map<String, Object>> nextProfiles = new LinkedHashMap<>();
+    private ConfiguredCatalog buildConfiguredCatalog(
+            att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration loaded) {
+        Map<String, Object> definitions = loaded.definitions();
+        String configRevision = loaded.configSha256();
+        Map<String, att.config.FrameworkConfig> environments = loaded.environments();
+        Map<String, Map<String, Object>> nextSources = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> nextMetricSources = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> nextGroups = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> nextProfiles = new LinkedHashMap<>();
 
-                for (Map<String, Object> raw : listOfMaps(definitions.get("dataSources"))) {
-                    Map<String, Object> normalized = validateConfiguredSource(raw);
-                    normalized.remove("createdAt");
-                    normalized.put("revision", sha256Json(normalized));
-                    putUnique(nextSources, normalized, "Data Source");
-                }
-                sources = nextSources;
-
-                for (Map<String, Object> raw : listOfMaps(definitions.get("metricSources"))) {
-                    Map<String, Object> candidate = json.convertValue(raw, Map.class);
-                    Map<String, Object> connection = object(candidate.get("connection"), "Metric Source connection");
-                    String kind = String.valueOf(connection.get("kind"));
-                    if ("DATA_SOURCE".equals(kind)) {
-                        String dataSourceId = requiredText(connection, "id");
-                        Map<String, Object> dataSource = sources.get(dataSourceId);
-                        if (dataSource == null) throw new IllegalArgumentException("Metric Source references an unknown Data Source: " + dataSourceId + ".");
-                        deriveConnectionRevision(connection, "revision", dataSourceRevision(dataSource), "Data Source");
-                    } else if ("DBHELPER".equals(kind)) {
-                        deriveConnectionRevision(connection, "runtimeConfigRevision", configRevision, "Runtime Config");
-                    }
-                    candidate.put("connection", connection);
-                    Map<String, Object> normalized = validateMetricSource(candidate);
-                    putUnique(nextMetricSources, normalized, "Metric Source");
-                }
-                metricSources = nextMetricSources;
-
-                for (Map<String, Object> raw : listOfMaps(definitions.get("groups")))
-                    putUnique(nextGroups, validateGroup(raw), "Metric Group");
-                metricGroups = nextGroups;
-
-                List<Map<String, Object>> configuredProfiles = listOfMaps(definitions.get("profiles"));
-                // Composite v1 profiles refer to base profiles by ID. Validate all base/flat profiles
-                // first so the order of entries in hand-authored YAML does not affect resolution.
-                for (Map<String, Object> raw : configuredProfiles) {
-                    if (!isCompositeProfile(raw))
-                        putUnique(nextProfiles, validateProfile(raw), "Metrics Profile");
-                }
-                profiles = nextProfiles;
-                for (Map<String, Object> raw : configuredProfiles) {
-                    if (isCompositeProfile(raw))
-                        putUnique(nextProfiles, validateProfile(raw), "Metrics Profile");
-                }
-                // Keep API presentation order aligned with the source YAML after order-independent validation.
-                Map<String, Map<String, Object>> orderedProfiles = new LinkedHashMap<>();
-                for (Map<String, Object> raw : configuredProfiles) {
-                    String id = String.valueOf(raw.get("id"));
-                    Map<String, Object> validated = nextProfiles.get(id);
-                    if (validated != null) orderedProfiles.put(id, validated);
-                }
-                profiles = orderedProfiles;
-
-                validateProfileGraph();
-                validateProfileReferences();
-                validateConfiguredCatalogReferences();
-                validateConfiguredEnvironmentReferences(environments);
-                activeSutMetricsConfigured = !definitions.isEmpty();
-            } catch (RuntimeException invalid) {
-                sources = priorSources;
-                metricSources = priorMetricSources;
-                metricGroups = priorGroups;
-                profiles = priorProfiles;
-                throw invalid;
+        boolean firstEnvironment = true;
+        boolean hasConfiguredSources = false;
+        for (Map.Entry<String, List<Map<String, Object>>> environment : loaded.dataSourcesByEnvironment().entrySet()) {
+            Map<String, Map<String, Object>> environmentSources = new LinkedHashMap<>();
+            for (Map<String, Object> raw : environment.getValue()) {
+                Map<String, Object> normalized = validateConfiguredSource(raw);
+                normalized.remove("createdAt");
+                normalized.put("revision", sha256Json(normalized));
+                putUnique(environmentSources, normalized, "Data Source");
+            }
+            if (!environmentSources.isEmpty()) hasConfiguredSources = true;
+            // The historical process-wide catalog view remains tied to the first effective
+            // Environment. Each Environment is validated independently so a shared logical ID
+            // may legitimately name different host/credential descriptors across environments.
+            if (firstEnvironment) {
+                nextSources.putAll(environmentSources);
+                firstEnvironment = false;
             }
         }
+
+        for (Map<String, Object> raw : listOfMaps(definitions.get("metricSources"))) {
+            Map<String, Object> candidate = json.convertValue(raw, Map.class);
+            Map<String, Object> connection = object(candidate.get("connection"), "Metric Source connection");
+            String kind = String.valueOf(connection.get("kind"));
+            if ("DATA_SOURCE".equals(kind)) {
+                String dataSourceId = requiredText(connection, "id");
+                Map<String, Object> dataSource = nextSources.get(dataSourceId);
+                if (dataSource == null) throw new IllegalArgumentException("Metric Source references an unknown Data Source: " + dataSourceId + ".");
+                deriveConnectionRevision(connection, "revision", dataSourceRevision(dataSource), "Data Source");
+            } else if ("DBHELPER".equals(kind)) {
+                deriveConnectionRevision(connection, "runtimeConfigRevision", configRevision, "Runtime Config");
+            }
+            candidate.put("connection", connection);
+            Map<String, Object> normalized = validateMetricSource(candidate, nextSources);
+            putUnique(nextMetricSources, normalized, "Metric Source");
+        }
+
+        for (Map<String, Object> raw : listOfMaps(definitions.get("groups")))
+            putUnique(nextGroups, validateGroup(raw), "Metric Group");
+
+        List<Map<String, Object>> configuredProfiles = listOfMaps(definitions.get("profiles"));
+        // Composite v1 profiles refer to base profiles by ID. Validate all base/flat profiles
+        // first so the order of entries in hand-authored YAML does not affect resolution.
+        for (Map<String, Object> raw : configuredProfiles) {
+            if (!isCompositeProfile(raw))
+                putUnique(nextProfiles, validateProfile(raw, nextSources, nextProfiles), "Metrics Profile");
+        }
+        for (Map<String, Object> raw : configuredProfiles) {
+            if (isCompositeProfile(raw))
+                putUnique(nextProfiles, validateProfile(raw, nextSources, nextProfiles), "Metrics Profile");
+        }
+        // Keep API presentation order aligned with the source YAML after order-independent validation.
+        Map<String, Map<String, Object>> orderedProfiles = new LinkedHashMap<>();
+        for (Map<String, Object> raw : configuredProfiles) {
+            String id = String.valueOf(raw.get("id"));
+            Map<String, Object> validated = nextProfiles.get(id);
+            if (validated != null) orderedProfiles.put(id, validated);
+        }
+
+        validateProfileGraph(orderedProfiles);
+        validateProfileReferences(nextMetricSources, nextGroups, orderedProfiles);
+        validateConfiguredCatalogReferences(nextSources, nextMetricSources, nextGroups, orderedProfiles);
+        validateConfiguredEnvironmentReferences(environments, nextMetricSources, orderedProfiles);
+        return new ConfiguredCatalog(nextSources, nextMetricSources, nextGroups, orderedProfiles,
+                !definitions.isEmpty() || hasConfiguredSources);
+    }
+
+    private void publishConfiguredCatalog(ConfiguredCatalog candidate) {
+        sources = candidate.sources;
+        metricSources = candidate.metricSources;
+        metricGroups = candidate.groups;
+        profiles = candidate.profiles;
+        activeSutMetricsConfigured = candidate.configured;
+    }
+
+    private static final class ConfiguredCatalog {
+        private final Map<String, Map<String, Object>> sources, metricSources, groups, profiles;
+        private final boolean configured;
+        private ConfiguredCatalog(Map<String, Map<String, Object>> sources,
+                                  Map<String, Map<String, Object>> metricSources,
+                                  Map<String, Map<String, Object>> groups,
+                                  Map<String, Map<String, Object>> profiles,
+                                  boolean configured) {
+            this.sources = sources;
+            this.metricSources = metricSources;
+            this.groups = groups;
+            this.profiles = profiles;
+            this.configured = configured;
+        }
+    }
+
+    private static final class CatalogView {
+        private final Map<String, Map<String, Object>> sources, metricSources, groups, profiles;
+        private CatalogView(Map<String, Map<String, Object>> sources,
+                            Map<String, Map<String, Object>> metricSources,
+                            Map<String, Map<String, Object>> groups,
+                            Map<String, Map<String, Object>> profiles) {
+            this.sources = sources;
+            this.metricSources = metricSources;
+            this.groups = groups;
+            this.profiles = profiles;
+        }
+    }
+
+    private static final class PackageCatalog {
+        private final CatalogView view;
+        private final String packageId, environment, manifestDigest, packageRevision, runtimeConfigRevision,
+                runtimeConfigOverallRevision;
+        private final boolean packageOwned;
+        private final List<Map<String, Object>> resourceProvenance;
+        private final List<Map<String, Object>> visibleDataSources;
+        private PackageCatalog(CatalogView view, String packageId, String environment, String manifestDigest,
+                               String packageRevision, String runtimeConfigRevision,
+                               String runtimeConfigOverallRevision,
+                               boolean packageOwned,
+                               List<Map<String, Object>> resourceProvenance,
+                               List<Map<String, Object>> visibleDataSources) {
+            this.view = view;
+            this.packageId = packageId;
+            this.environment = environment;
+            this.manifestDigest = manifestDigest;
+            this.packageRevision = packageRevision;
+            this.runtimeConfigRevision = runtimeConfigRevision;
+            this.runtimeConfigOverallRevision = runtimeConfigOverallRevision;
+            this.packageOwned = packageOwned;
+            this.resourceProvenance = resourceProvenance;
+            this.visibleDataSources = visibleDataSources;
+        }
+    }
+
+    /** Resolves only the selected Package's explicit metric inventories and safe metadata. */
+    Map<String, Object> packageCatalog(Path packageRoot, String packageId, String environment,
+                                       String principal, boolean admin) {
+        refreshConfiguredCatalog(false);
+        PackageCatalog catalog = buildPackageCatalog(packageRoot, packageId, environment, principal, admin, null);
+        List<Map<String, Object>> metricSources = new ArrayList<>();
+        for (Map<String, Object> source : catalog.view.metricSources.values()) {
+            Map<String, Object> connection = objectOrEmpty(source.get("connection"));
+            Map<String, Object> fetch = objectOrEmpty(source.get("fetch"));
+            List<Map<String, Object>> outputs = new ArrayList<>();
+            for (Map<String, Object> output : listOfMaps(objectOrEmpty(source.get("mapping")).get("outputs")))
+                outputs.add(fields("id", output.get("id"), "title", output.get("title"),
+                        "unit", output.get("unit"), "kind", output.get("kind")));
+            metricSources.add(fields("id", source.get("id"), "name", source.get("name"),
+                    "revision", source.get("revision"),
+                    "connection", fields("kind", connection.get("kind"), "id", connection.get("id")),
+                    "fetch", fields("id", fetch.get("id"), "mode", fetch.get("mode"),
+                            "sampling", fetch.get("sampling"), "step", fetch.get("step")),
+                    "outputs", outputs, "limits", source.get("limits")));
+        }
+        List<Map<String, Object>> groups = new ArrayList<>();
+        for (Map<String, Object> group : catalog.view.groups.values())
+            groups.add(fields("id", group.get("id"), "title", group.get("title"),
+                    "order", group.get("order"), "groupBy", group.get("groupBy"), "display", group.get("display")));
+        List<Map<String, Object>> profiles = new ArrayList<>();
+        for (Map<String, Object> profile : catalog.view.profiles.values()) {
+            Map<String, Object> projection;
+            if ("att-sut-metrics-profile/v2".equals(profile.get("schemaVersion"))) {
+                projection = fields("schemaVersion", profile.get("schemaVersion"), "id", profile.get("id"), "name", profile.get("name"),
+                        "description", profile.get("description"), "metricSourceIds", profile.get("metricSourceIds"),
+                        "groupIds", profile.get("groupIds"), "allowedBindings", profile.get("allowedBindings"),
+                        "budgets", profile.get("budgets"));
+            } else {
+                // Preserve only the legacy Profile metadata needed to edit thresholds for an
+                // existing manually-authored binding. Query text and parameter values stay private.
+                projection = profileView(profile, false);
+            }
+            projection.put("packageOwned", catalog.packageOwned);
+            profiles.add(projection);
+        }
+        return fields("schemaVersion", "att-package-sut-metrics-catalog/v1",
+                "packageId", catalog.packageId, "environment", catalog.environment,
+                "manifestDigest", catalog.manifestDigest, "packageRevision", catalog.packageRevision,
+                "runtimeConfigRevision", catalog.runtimeConfigRevision,
+                "runtimeConfigOverallRevision", catalog.runtimeConfigOverallRevision,
+                "dataSources", catalog.visibleDataSources, "metricSources", metricSources,
+                "groups", groups, "profiles", profiles, "resourceProvenance", catalog.resourceProvenance);
+    }
+
+    /** Validates an explicitly inventoried Package Metric resource overlay without writing or executing it. */
+    Map<String, Object> validatePackageMetricResource(Path packageRoot, String packageId, String actor,
+                                                       String relativePath, String environment, String source) {
+        return validatePackageMetricResource(packageRoot, packageId, actor, relativePath, environment,
+                source, null, null);
+    }
+
+    Map<String, Object> validatePackageMetricResource(Path packageRoot, String packageId, String actor,
+                                                       String relativePath, String environment, String source,
+                                                       String candidateManifestSource, String expectedManifestDigest) {
+        if (runtimeConfigPath == null || runtimeConfigRoot == null)
+            throw new IllegalArgumentException("The selected Runtime Config is unavailable.");
+        try {
+            boolean manifestAddition = candidateManifestSource != null || expectedManifestDigest != null;
+            if (manifestAddition && (candidateManifestSource == null || expectedManifestDigest == null))
+                throw new IllegalArgumentException("A candidate Package Manifest and its expected digest must be supplied together.");
+            att.config.PackageConfig candidate = manifestAddition
+                    ? att.config.PackageConfig.loadWithCandidateManifestAndMetricResourceOverride(packageRoot,
+                            candidateManifestSource, relativePath, source, expectedManifestDigest)
+                    : att.config.PackageConfig.loadWithMetricResourceOverride(packageRoot, relativePath, source);
+            String selectedEnvironment = environment == null || environment.isBlank()
+                    ? candidate.defaultEnvironment() : environment.trim();
+            if (selectedEnvironment == null || selectedEnvironment.isBlank()) {
+                byte[] configBytes = readRuntimeConfigBytes(runtimeConfigPath);
+                att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration runtime =
+                        new att.config.FrameworkConfigLoader().loadSutMetricsRuntimeConfiguration(
+                                runtimeConfigPath, runtimeConfigRoot, new String(configBytes, StandardCharsets.UTF_8));
+                if (runtime.environments().isEmpty())
+                    throw new IllegalArgumentException("The selected Runtime Config has no Environment.");
+                selectedEnvironment = runtime.environments().keySet().iterator().next();
+            }
+            selectedEnvironment = selectedEnvironment.trim().toLowerCase(Locale.ROOT);
+
+            // Build twice around the dependency fingerprint. This fences catalog validation against
+            // concurrent package, Runtime Config, DBHelper, or Package Tool definition edits.
+            PackageCatalog first = buildPackageCatalog(packageRoot, packageId, selectedEnvironment,
+                    actor, false, null, candidate, relativePath, expectedManifestDigest);
+            String firstDependencies = packageMetricDependencyRevision(packageRoot, runtimeConfigPath,
+                    runtimeConfigRoot, selectedEnvironment, candidate);
+            PackageCatalog second = buildPackageCatalog(packageRoot, packageId, selectedEnvironment,
+                    actor, false, null, candidate, relativePath, expectedManifestDigest);
+            String secondDependencies = packageMetricDependencyRevision(packageRoot, runtimeConfigPath,
+                    runtimeConfigRoot, selectedEnvironment, candidate);
+            String firstRevision = packageMetricValidationRevision(packageId, candidate, first, firstDependencies,
+                    expectedManifestDigest);
+            String secondRevision = packageMetricValidationRevision(packageId, candidate, second, secondDependencies,
+                    expectedManifestDigest);
+            if (!firstRevision.equals(secondRevision))
+                throw new IllegalArgumentException("The Package or Runtime definitions changed during resource validation.");
+
+            String resourceDigest = packageMetricResourceDigest(candidate, relativePath);
+            Map<String, Object> identity = fields("packageId", packageId,
+                    "manifestDigest", candidate.digest(), "environment", selectedEnvironment,
+                    "runtimeConfigRevision", second.runtimeConfigRevision,
+                    "runtimeConfigOverallRevision", second.runtimeConfigOverallRevision,
+                    "resourcePath", relativePath, "resourceDigest", resourceDigest);
+            Map<String, Object> result = fields("valid", true, "resourceDigest", resourceDigest,
+                    "validationRevision", secondRevision, "environment", selectedEnvironment,
+                    "configurationIdentity", identity);
+            if (manifestAddition) {
+                result.put("candidateManifestDigest", candidate.digest());
+                identity.put("expectedManifestDigest", expectedManifestDigest);
+                identity.put("candidateManifestDigest", candidate.digest());
+            }
+            return result;
+        } catch (ServerRuntime.NotFoundException hidden) {
+            throw hidden;
+        } catch (RuntimeException failure) {
+            throw failure;
+        } catch (Exception invalid) {
+            throw new IllegalArgumentException("The Package SUT Metrics resource could not be validated.");
+        }
+    }
+
+    private String packageMetricValidationRevision(String packageId, att.config.PackageConfig packageConfig,
+                                                   PackageCatalog catalog, String dependencyRevision,
+                                                   String expectedManifestDigest) {
+        Map<String, Object> catalogDefinitions = fields("metricSources", catalog.view.metricSources,
+                "groups", catalog.view.groups, "profiles", catalog.view.profiles);
+        return sha256Json(fields("schemaVersion", "att-package-sut-metrics-validation/v1",
+                "packageId", packageId, "environment", catalog.environment,
+                "manifestDigest", packageConfig.digest(),
+                "expectedManifestDigest", expectedManifestDigest,
+                "inventoryDigest", packageInventoryDigest(packageConfig),
+                "resourceProvenance", catalog.resourceProvenance,
+                "runtimeConfigRevision", catalog.runtimeConfigRevision,
+                "runtimeConfigOverallRevision", catalog.runtimeConfigOverallRevision,
+                "packageMetricDependencies", dependencyRevision,
+                "catalogDigest", sha256Json(catalogDefinitions)));
+    }
+
+    private static String packageMetricResourceDigest(att.config.PackageConfig packageConfig, String relativePath) {
+        for (Map<String, att.config.PackageConfig.PackageMetricResource> resources : java.util.Arrays.asList(
+                packageConfig.metricSourceResources(), packageConfig.metricGroupResources(),
+                packageConfig.metricProfileResources())) {
+            for (att.config.PackageConfig.PackageMetricResource resource : resources.values())
+                if (relativePath.equals(resource.relativePath())) return resource.digest();
+        }
+        throw new IllegalArgumentException("The Package resource is not explicitly inventoried.");
+    }
+
+    private String packageMetricDependencyRevision(Path packageRoot, Path runtimePath, Path runtimeRoot,
+                                                   String environment, att.config.PackageConfig packageConfig) throws Exception {
+        Path packageBase = packageRoot.toAbsolutePath().normalize().toRealPath();
+        Path runtimeBase = runtimeRoot.toAbsolutePath().normalize().toRealPath();
+        att.config.FrameworkConfig framework = new att.config.FrameworkConfigLoader()
+                .loadDiscovery(runtimePath, runtimeRoot, packageBase, environment);
+        List<String> dependencies = new ArrayList<>();
+        for (att.config.PackageConfig.PackageMetricResource resource : packageConfig.metricSourceResources().values()) {
+            Map<String, Object> definition = resource.definition();
+            Map<String, Object> connection = objectOrEmpty(definition.get("connection"));
+            String kind = String.valueOf(connection.get("kind"));
+            String id = requiredText(connection, "id");
+            if ("DBHELPER".equals(kind)) {
+                att.config.DbHelperConfig helper = framework.dbHelper(id);
+                if (helper == null) throw new IllegalArgumentException("Metric Source references an unknown DBHelper in the selected Environment.");
+                dependencies.add("DBHELPER\u0000" + id + "\u0000"
+                        + dependencyFileRevision(runtimeBase, helper.sourceFile()));
+            } else if ("PACKAGE_TOOL".equals(kind)) {
+                att.config.ToolConfig tool = framework.tool(id);
+                if (tool == null) throw new IllegalArgumentException("Metric Source references an unknown Package Tool in the selected Package.");
+                dependencies.add("PACKAGE_TOOL\u0000" + id + "\u0000"
+                        + dependencyFileRevision(packageBase, tool.sourceFile()));
+                if (tool.grouped()) {
+                    Path groupManifest = packageBase.resolve("tools").resolve(tool.groupId())
+                            .resolve("tool-group.yaml").normalize();
+                    if (!groupManifest.startsWith(packageBase))
+                        throw new IllegalArgumentException("A referenced Package Tool group escapes its Package root.");
+                    if (Files.exists(groupManifest, LinkOption.NOFOLLOW_LINKS))
+                        dependencies.add("PACKAGE_TOOL_GROUP\u0000" + tool.groupId() + "\u0000"
+                                + dependencyFileRevision(packageBase, groupManifest));
+                }
+                for (Path script : att.config.PackageToolScripts.referenced(packageBase, tool))
+                    dependencies.add("PACKAGE_TOOL_SCRIPT\u0000" + id + "\u0000"
+                            + dependencyFileRevision(packageBase, script));
+            }
+        }
+        Collections.sort(dependencies);
+        return sha256(String.join("\n", dependencies).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String dependencyFileRevision(Path allowedRoot, Path sourceFile) throws Exception {
+        if (sourceFile == null) return "inline-definition";
+        Path root = allowedRoot.toRealPath();
+        Path file = sourceFile.isAbsolute() ? sourceFile : root.resolve(sourceFile);
+        Path canonicalFile = file.toRealPath();
+        if (!canonicalFile.startsWith(root) || !Files.isRegularFile(canonicalFile, LinkOption.NOFOLLOW_LINKS)
+                || Files.size(canonicalFile) > 8L * 1024L * 1024L)
+            throw new IllegalArgumentException("A referenced Package or Runtime definition is unavailable.");
+        return root.relativize(canonicalFile).toString().replace('\\', '/') + "\u0000" + sha256(canonicalFile);
+    }
+
+    private CatalogView globalCatalogView() {
+        synchronized (catalogLock) { return new CatalogView(sources, metricSources, metricGroups, profiles); }
+    }
+
+    private PackageCatalog buildPackageCatalog(Path packageRoot, String packageId, String environment,
+                                               String principal, boolean admin, BusinessCallContext callContext) {
+        return buildPackageCatalog(packageRoot, packageId, environment, principal, admin, callContext,
+                null, null, null);
+    }
+
+    private PackageCatalog buildPackageCatalog(Path packageRoot, String packageId, String environment,
+                                               String principal, boolean admin, BusinessCallContext callContext,
+                                               att.config.PackageConfig packageConfigOverride,
+                                               String metricResourceOverridePath,
+                                               String expectedCurrentManifestDigest) {
+        if (packageRoot == null || packageId == null || !packageId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}"))
+            throw new IllegalArgumentException("A valid selected Package is required.");
+        if (environment == null || environment.isBlank() || environment.length() > 128)
+            throw new IllegalArgumentException("A selected Runtime Config Environment is required.");
+        Path root = packageRoot.toAbsolutePath().normalize();
+        try {
+            if (Files.isSymbolicLink(root) || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS))
+                throw new IllegalArgumentException("The selected Package is unavailable.");
+            root = root.toRealPath();
+        } catch (java.io.IOException unavailable) {
+            throw new IllegalArgumentException("The selected Package is unavailable.");
+        }
+        if (callContext != null) {
+            Path contextRoot = callContext.packageRoot();
+            try { if (contextRoot != null) contextRoot = contextRoot.toRealPath(); }
+            catch (java.io.IOException unavailable) { contextRoot = null; }
+            if (!packageId.equals(callContext.packageId()) || contextRoot == null || !root.equals(contextRoot))
+                throw new IllegalArgumentException("The Package context does not match the selected Package.");
+        }
+        String selectedEnvironment = environment.trim().toLowerCase(Locale.ROOT);
+        if (callContext != null && (callContext.environment() == null
+                || !selectedEnvironment.equals(callContext.environment().trim().toLowerCase(Locale.ROOT))))
+            throw new IllegalArgumentException("The Package context does not match the selected Environment.");
+        Path selectedRuntimePath = callContext != null && callContext.runtimeConfigPath() != null
+                ? callContext.runtimeConfigPath().toAbsolutePath().normalize() : runtimeConfigPath;
+        Path selectedRuntimeRoot = callContext != null && callContext.runtimeConfigRoot() != null
+                ? callContext.runtimeConfigRoot().toAbsolutePath().normalize() : runtimeConfigRoot;
+        if (selectedRuntimePath == null || selectedRuntimeRoot == null)
+            throw new IllegalArgumentException("The selected Runtime Config is unavailable.");
+        try {
+            att.config.PackageConfig packageConfig = packageConfigOverride == null
+                    ? att.config.PackageConfig.load(root) : packageConfigOverride;
+            byte[] runtimeBytes = readRuntimeConfigBytes(selectedRuntimePath);
+            att.config.FrameworkConfigLoader loader = new att.config.FrameworkConfigLoader();
+            att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration runtime = loader
+                    .loadSutMetricsRuntimeConfiguration(selectedRuntimePath, selectedRuntimeRoot,
+                            new String(runtimeBytes, StandardCharsets.UTF_8));
+            String effectiveRevision = runtime.effectiveRevision(selectedEnvironment);
+            if (effectiveRevision == null)
+                throw new IllegalArgumentException("The selected Environment is not declared by the Runtime Config.");
+            if (callContext != null && callContext.runtimeConfigRevision() != null
+                    && !effectiveRevision.equals(callContext.runtimeConfigRevision()))
+                throw new IllegalArgumentException("The selected Runtime Config changed before SUT Metrics resolution.");
+            att.config.FrameworkConfig framework = callContext == null ? loader.loadDiscovery(selectedRuntimePath,
+                    selectedRuntimeRoot, root, environment.trim()) : callContext.frameworkConfig();
+            if (framework == null || !selectedEnvironment.equals(framework.environment().toLowerCase(Locale.ROOT)))
+                throw new IllegalArgumentException("The selected Package Environment is unavailable.");
+
+            Map<String, Map<String, Object>> selectedSources = new LinkedHashMap<>();
+            List<Map<String, Object>> rawSources = runtime.dataSourcesByEnvironment().get(selectedEnvironment);
+            if (rawSources == null) throw new IllegalArgumentException("The selected Environment has no SUT Metrics Data Sources.");
+            for (Map<String, Object> raw : rawSources) {
+                Map<String, Object> normalized = validateSource(raw, false);
+                enforceAllowedPrometheusUri(URI.create(String.valueOf(normalized.get("url"))));
+                normalized.remove("createdAt");
+                normalized.put("revision", sha256Json(normalized));
+                putUnique(selectedSources, normalized, "Data Source");
+            }
+            List<Map<String, Object>> visibleDataSources = new ArrayList<>();
+            for (Map<String, Object> source : selectedSources.values()) {
+                if (!admin && !sourceAllowed(source, principal, false)) continue;
+                visibleDataSources.add(fields("id", source.get("id"), "name", source.get("name"),
+                        "provider", source.get("provider"), "revision", dataSourceRevision(source),
+                        "allowedTenants", source.get("allowedTenants"), "defaultTenant", source.get("defaultTenant"),
+                        "limits", source.get("limits")));
+            }
+
+            Map<String, Map<String, Object>> selectedMetricSources = new LinkedHashMap<>();
+            Map<String, Map<String, Object>> selectedGroups = new LinkedHashMap<>();
+            Map<String, Map<String, Object>> selectedProfiles = new LinkedHashMap<>();
+            List<Map<String, Object>> resourceProvenance = new ArrayList<>();
+            appendPackageResourceProvenance(resourceProvenance, "metricSource", packageConfig.metricSourceResources());
+            appendPackageResourceProvenance(resourceProvenance, "group", packageConfig.metricGroupResources());
+            appendPackageResourceProvenance(resourceProvenance, "profile", packageConfig.metricProfileResources());
+            if (!att.Version.PACKAGE_SCHEMA.equals(packageConfig.schemaVersion())) {
+                // Pre-v2 Packages keep the historical global SUT Metrics registry. A v2
+                // Package, including an explicit-empty or omitted inventory, never falls back.
+                CatalogView legacy = globalCatalogView();
+                for (Map.Entry<String, Map<String, Object>> entry : legacy.metricSources.entrySet())
+                    if (admin || metricSourceReadable(entry.getValue(), principal, selectedSources))
+                        selectedMetricSources.put(entry.getKey(), entry.getValue());
+                selectedGroups.putAll(legacy.groups);
+                for (Map.Entry<String, Map<String, Object>> entry : legacy.profiles.entrySet())
+                    if (admin || profileReadable(entry.getValue(), principal, selectedMetricSources, selectedSources))
+                        selectedProfiles.put(entry.getKey(), entry.getValue());
+            } else if (packageConfig.hasMetricInventory()) {
+                for (att.config.PackageConfig.PackageMetricResource resource : packageConfig.metricSourceResources().values()) {
+                    Map<String, Object> raw = json.convertValue(resource.definition(), Map.class);
+                    Map<String, Object> connection = object(raw.get("connection"), "Metric Source connection");
+                    String kind = String.valueOf(connection.get("kind"));
+                    String id = requiredText(connection, "id");
+                    if ("DATA_SOURCE".equals(kind)) {
+                        Map<String, Object> dataSource = selectedSources.get(id);
+                        if (dataSource == null) throw new IllegalArgumentException("Metric Source references an unknown Data Source: " + id + ".");
+                        if (!sourceAllowed(dataSource, principal, admin)) throw new ServerRuntime.NotFoundException();
+                    } else if ("DBHELPER".equals(kind)) {
+                        if (framework.dbHelper(id) == null)
+                            throw new IllegalArgumentException("Metric Source references an unknown DBHelper in the selected Environment: " + id + ".");
+                    } else if ("PACKAGE_TOOL".equals(kind)) {
+                        if (framework.tool(id) == null)
+                            throw new IllegalArgumentException("Metric Source references an unknown Package Tool in the selected Package: " + id + ".");
+                    }
+                    Map<String, Object> normalized = validateMetricSource(raw, selectedSources, false);
+                    Map<String, Object> normalizedConnection = objectOrEmpty(normalized.get("connection"));
+                    if ("DATA_SOURCE".equals(kind)) {
+                        deriveConnectionRevision(normalizedConnection, "revision",
+                                dataSourceRevision(selectedSources.get(id)), "Data Source");
+                    } else {
+                        deriveConnectionRevision(normalizedConnection, "runtimeConfigRevision", effectiveRevision,
+                                "Runtime Config");
+                        if ("PACKAGE_TOOL".equals(kind) && callContext != null)
+                            deriveConnectionRevision(normalizedConnection, "packageRevision", callContext.packageRevision(), "Package");
+                    }
+                    normalized.put("connection", normalizedConnection);
+                    putUnique(selectedMetricSources, normalized, "Metric Source");
+                }
+                for (att.config.PackageConfig.PackageMetricResource resource : packageConfig.metricGroupResources().values())
+                    putUnique(selectedGroups, validateGroup(json.convertValue(resource.definition(), Map.class)), "Metric Group");
+                for (att.config.PackageConfig.PackageMetricResource resource : packageConfig.metricProfileResources().values())
+                    putUnique(selectedProfiles, validateProfile(json.convertValue(resource.definition(), Map.class),
+                            selectedSources, selectedProfiles), "Metrics Profile");
+                validateProfileGraph(selectedProfiles);
+                validateProfileReferences(selectedMetricSources, selectedGroups, selectedProfiles);
+                validateConfiguredCatalogReferences(selectedSources, selectedMetricSources, selectedGroups, selectedProfiles);
+                validateConfiguredEnvironmentReferences(runtime.environments(), selectedMetricSources, selectedProfiles);
+            }
+            String packageDigest = packageConfig.digest();
+            boolean packageOwned = att.Version.PACKAGE_SCHEMA.equals(packageConfig.schemaVersion());
+            att.config.PackageConfig packageCheck = att.config.PackageConfig.load(root);
+            String expectedManifest = expectedCurrentManifestDigest == null
+                    ? packageDigest : expectedCurrentManifestDigest;
+            if (!expectedManifest.equals(packageCheck.digest())
+                    || !packageInventoryDigest(packageConfig, metricResourceOverridePath)
+                    .equals(packageInventoryDigest(packageCheck, metricResourceOverridePath)))
+                throw new IllegalArgumentException("The selected Package changed during SUT Metrics resolution.");
+            byte[] currentRuntimeBytes = readRuntimeConfigBytes(selectedRuntimePath);
+            att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration currentRuntime = loader
+                    .loadSutMetricsRuntimeConfiguration(selectedRuntimePath, selectedRuntimeRoot,
+                            new String(currentRuntimeBytes, StandardCharsets.UTF_8));
+            if (!effectiveRevision.equals(currentRuntime.effectiveRevision(selectedEnvironment)))
+                throw new IllegalArgumentException("The selected Runtime Config changed during SUT Metrics resolution.");
+            String packageRevision = callContext == null ? null : callContext.packageRevision();
+            resourceProvenance.add(0, fields("kind", "package-catalog", "id", packageId,
+                    "path", "package.yaml", "sha256", packageDigest,
+                    "packageRevision", packageRevision, "runtimeConfigRevision", effectiveRevision,
+                    "environment", selectedEnvironment));
+            return new PackageCatalog(new CatalogView(selectedSources, selectedMetricSources, selectedGroups, selectedProfiles),
+                    packageId, selectedEnvironment, packageDigest, packageRevision, effectiveRevision,
+                    runtime.overallRevision(), packageOwned,
+                    List.copyOf(resourceProvenance), List.copyOf(visibleDataSources));
+        } catch (ServerRuntime.NotFoundException hidden) {
+            throw hidden;
+        } catch (Exception invalid) {
+            if (invalid instanceof IllegalArgumentException argument) throw argument;
+            throw new IllegalArgumentException("The selected Package SUT Metrics catalog could not be resolved.");
+        }
+    }
+
+    private static void appendPackageResourceProvenance(List<Map<String, Object>> output, String kind,
+            Map<String, att.config.PackageConfig.PackageMetricResource> resources) {
+        for (att.config.PackageConfig.PackageMetricResource resource : resources.values())
+            output.add(fields("kind", kind, "id", resource.id(), "path", resource.relativePath(),
+                    "sha256", resource.digest()));
+    }
+
+    private static String packageInventoryDigest(att.config.PackageConfig config) {
+        return packageInventoryDigest(config, null);
+    }
+
+    private static String packageInventoryDigest(att.config.PackageConfig config, String ignoredPath) {
+        List<String> entries = new ArrayList<>();
+        for (Map.Entry<String, att.config.PackageConfig.PackageMetricResource> entry : config.metricSourceResources().entrySet())
+            if (!entry.getValue().relativePath().equals(ignoredPath))
+                entries.add("source\u0000" + entry.getKey() + "\u0000" + entry.getValue().relativePath() + "\u0000" + entry.getValue().digest());
+        for (Map.Entry<String, att.config.PackageConfig.PackageMetricResource> entry : config.metricGroupResources().entrySet())
+            if (!entry.getValue().relativePath().equals(ignoredPath))
+                entries.add("group\u0000" + entry.getKey() + "\u0000" + entry.getValue().relativePath() + "\u0000" + entry.getValue().digest());
+        for (Map.Entry<String, att.config.PackageConfig.PackageMetricResource> entry : config.metricProfileResources().entrySet())
+            if (!entry.getValue().relativePath().equals(ignoredPath))
+                entries.add("profile\u0000" + entry.getKey() + "\u0000" + entry.getValue().relativePath() + "\u0000" + entry.getValue().digest());
+        Collections.sort(entries);
+        return sha256(String.join("\n", entries).getBytes(StandardCharsets.UTF_8));
     }
 
     private Map<String, Object> validateConfiguredSource(Map<String, Object> raw) {
@@ -495,10 +994,12 @@ final class SutMetricsService implements AutoCloseable {
                     "The server secret reference is unavailable.");
     }
 
-    private void validateConfiguredEnvironmentReferences(Map<String, att.config.FrameworkConfig> environments) {
+    private void validateConfiguredEnvironmentReferences(Map<String, att.config.FrameworkConfig> environments,
+                                                         Map<String, Map<String, Object>> configuredMetricSources,
+                                                         Map<String, Map<String, Object>> configuredProfiles) {
         Map<String, Set<String>> restrictedMetricSourceEnvironments = new LinkedHashMap<>();
         Set<String> unrestrictedMetricSources = new LinkedHashSet<>();
-        for (Map<String, Object> profile : profiles.values()) {
+        for (Map<String, Object> profile : configuredProfiles.values()) {
             if (!"att-sut-metrics-profile/v2".equals(profile.get("schemaVersion"))) continue;
             Map<String, Object> allowed = objectOrEmpty(profile.get("allowedBindings"));
             List<String> declaredEnvironments = listOfStrings(allowed.get("environments"));
@@ -517,7 +1018,7 @@ final class SutMetricsService implements AutoCloseable {
             }
         }
 
-        for (Map<String, Object> metricSource : metricSources.values()) {
+        for (Map<String, Object> metricSource : configuredMetricSources.values()) {
             Map<String, Object> connection = objectOrEmpty(metricSource.get("connection"));
             if (!"DBHELPER".equals(connection.get("kind"))) continue;
             String id = String.valueOf(connection.get("id"));
@@ -561,10 +1062,13 @@ final class SutMetricsService implements AutoCloseable {
             throw new IllegalArgumentException("SUT Metrics configuration contains a duplicate " + kind + " id.");
     }
 
-    private void validateConfiguredCatalogReferences() {
-        Set<String> validSourceIds = new HashSet<>(sources.keySet());
+    private void validateConfiguredCatalogReferences(Map<String, Map<String, Object>> configuredSources,
+                                                     Map<String, Map<String, Object>> configuredMetricSources,
+                                                     Map<String, Map<String, Object>> configuredGroups,
+                                                     Map<String, Map<String, Object>> configuredProfiles) {
+        Set<String> validSourceIds = new HashSet<>(configuredSources.keySet());
         Set<String> validMetricIds = new HashSet<>();
-        for (Map<String, Object> source : metricSources.values()) {
+        for (Map<String, Object> source : configuredMetricSources.values()) {
             Map<String, Object> connection = objectOrEmpty(source.get("connection"));
             String kind = String.valueOf(connection.get("kind"));
             String id = String.valueOf(connection.get("id"));
@@ -577,17 +1081,17 @@ final class SutMetricsService implements AutoCloseable {
             for (Map<String, Object> output : listOfMaps(objectOrEmpty(source.get("mapping")).get("outputs")))
                 validMetricIds.add(String.valueOf(output.get("id")));
         }
-        for (Map<String, Object> profile : profiles.values()) {
+        for (Map<String, Object> profile : configuredProfiles.values()) {
             if ("att-sut-metrics-profile/v2".equals(profile.get("schemaVersion"))) continue;
             for (Map<String, Object> metric : listOfMaps(profile.get("metrics")))
                 validMetricIds.add(String.valueOf(metric.get("id")));
             for (Map<String, Object> include : listOfMaps(profile.get("includes"))) {
                 String sourceId = nullableText(include.get("source"));
-                if (sourceId != null && !sources.containsKey(sourceId))
+                if (sourceId != null && !configuredSources.containsKey(sourceId))
                     throw new IllegalArgumentException("Metrics Profile references an unknown Data Source: " + sourceId + ".");
             }
         }
-        for (Map<String, Object> group : metricGroups.values()) {
+        for (Map<String, Object> group : configuredGroups.values()) {
             Map<String, Object> match = objectOrEmpty(group.get("match"));
             for (String sourceId : listOfStrings(match.get("sourceIds")))
                 if (!validSourceIds.contains(sourceId)) throw new IllegalArgumentException("Metric Group references an unknown source id: " + sourceId + ".");
@@ -846,6 +1350,32 @@ final class SutMetricsService implements AutoCloseable {
         return false;
     }
 
+    boolean scenarioRequiresBusinessCallContext(Map<String, Object> observability, Path packageRoot) {
+        if (packageRoot == null) return scenarioRequiresBusinessCallContext(observability);
+        try {
+            att.config.PackageConfig packageConfig = att.config.PackageConfig.load(packageRoot);
+            if (!packageConfig.present() || att.Version.PACKAGE_SCHEMA_V1.equals(packageConfig.schemaVersion()))
+                return scenarioRequiresBusinessCallContext(observability);
+            Object rawCollections = observability == null ? null : observability.get("collections");
+            if (!(rawCollections instanceof List<?> collectionList)) return false;
+            for (Object rawBinding : collectionList) {
+                if (!(rawBinding instanceof Map<?, ?> binding) || !(binding.get("profile") instanceof String profileId)) continue;
+                att.config.PackageConfig.PackageMetricResource profileResource = packageConfig.metricProfileResources().get(profileId);
+                if (profileResource == null) continue;
+                Map<String, Object> profile = profileResource.definition();
+                for (String sourceId : listOfStrings(profile.get("metricSourceIds"))) {
+                    att.config.PackageConfig.PackageMetricResource sourceResource = packageConfig.metricSourceResources().get(sourceId);
+                    if (sourceResource == null) continue;
+                    String kind = String.valueOf(objectOrEmpty(sourceResource.definition().get("connection")).get("kind"));
+                    if (Set.of("DBHELPER", "PACKAGE_TOOL").contains(kind)) return true;
+                }
+            }
+            return false;
+        } catch (java.io.IOException invalidPackage) {
+            throw new IllegalArgumentException("The selected Package SUT Metrics inventory is invalid.");
+        }
+    }
+
     private boolean profileRequiresBusinessCallContext(Map<String, Object> profile) {
         if (profile == null) return false;
         if ("att-sut-metrics-profile/v2".equals(profile.get("schemaVersion")))
@@ -862,6 +1392,27 @@ final class SutMetricsService implements AutoCloseable {
     Map<String, Object> resolveScenario(Map<String, Object> observability, String principal, boolean admin,
                                         BusinessCallContext callContext) {
         refreshConfiguredCatalog(false);
+        CatalogView activeCatalog = globalCatalogView();
+        PackageCatalog packageCatalog = null;
+        if (callContext != null && callContext.packageRoot() != null) {
+            try {
+                att.config.PackageConfig packageConfig = att.config.PackageConfig.load(callContext.packageRoot());
+                boolean legacyPackage = !packageConfig.present()
+                        || att.Version.PACKAGE_SCHEMA_V1.equals(packageConfig.schemaVersion());
+                if (!legacyPackage) {
+                    packageCatalog = buildPackageCatalog(callContext.packageRoot(), callContext.packageId(),
+                            callContext.environment(), principal, admin, callContext);
+                    activeCatalog = packageCatalog.view;
+                }
+            } catch (java.io.IOException invalidPackage) {
+                throw new IllegalArgumentException("The selected Package SUT Metrics inventory is invalid.");
+            }
+        }
+        return resolveScenarioWithCatalog(observability, principal, admin, callContext, activeCatalog, packageCatalog);
+    }
+
+    private Map<String, Object> resolveScenarioWithCatalog(Map<String, Object> observability, String principal,
+            boolean admin, BusinessCallContext callContext, CatalogView activeCatalog, PackageCatalog packageCatalog) {
         if (observability == null) return null;
         if (!OBSERVABILITY_SCHEMA.equals(observability.get("schemaVersion")))
             throw new IllegalArgumentException("observability.schemaVersion must be " + OBSERVABILITY_SCHEMA + ".");
@@ -900,7 +1451,7 @@ final class SutMetricsService implements AutoCloseable {
                     throw new IllegalArgumentException("Profile binding ids must be unique when explicitly supplied.");
                 if (explicitBindingId) explicitBindingIds.add(bindingId);
                 Set<String> selected = stringSet(binding.get("targetIds"), "targetIds");
-                Map<String, Object> selectedProfile = profiles.get(profileId);
+                Map<String, Object> selectedProfile = activeCatalog.profiles.get(profileId);
                 boolean flatProfile = selectedProfile != null
                         && "att-sut-metrics-profile/v2".equals(selectedProfile.get("schemaVersion"));
                 if (resolvingFlatProfiles != null && resolvingFlatProfiles.booleanValue() != flatProfile)
@@ -909,13 +1460,13 @@ final class SutMetricsService implements AutoCloseable {
                 if (flatProfile) {
                     resolvedFlatProfiles.add(selectedProfile);
                     for (String sourceId : listOfStrings(selectedProfile.get("metricSourceIds")))
-                        resolvedMetricSources.put(sourceId, metricSources.get(sourceId));
+                        resolvedMetricSources.put(sourceId, activeCatalog.metricSources.get(sourceId));
                     for (String groupId : listOfStrings(selectedProfile.get("groupIds")))
-                        resolvedGroups.put(groupId, metricGroups.get(groupId));
+                        resolvedGroups.put(groupId, activeCatalog.groups.get(groupId));
                 }
                 int before = expanded.size();
                 expand(profileId, binding, bindingId, profileId, expanded, provenance, principal, admin, selected,
-                        callContext);
+                        callContext, activeCatalog);
                 if (expanded.size() == before) throw new IllegalArgumentException("Profile binding " + profileId + " resolved to no metrics or targets.");
                 bindingIndex++;
             }
@@ -924,7 +1475,7 @@ final class SutMetricsService implements AutoCloseable {
                 if ("business-call".equals(query.get("observationType"))) {
                     hasBusinessCalls = true;
                 } else {
-                    Map<String, Object> source = sources.get(sourceId);
+                    Map<String, Object> source = activeCatalog.sources.get(sourceId);
                     if (source == null) throw new IllegalArgumentException("Data Source not found: " + sourceId + ".");
                     pinnedSources.putIfAbsent(sourceId, ServerRuntime.JSON.convertValue(source, Map.class));
                 }
@@ -977,7 +1528,12 @@ final class SutMetricsService implements AutoCloseable {
                 "defaultRange", String.valueOf(live.getOrDefault("defaultRange", "15m")));
         List<Map<String, Object>> thresholdRules = normalizeThresholdRules(observability.get("thresholds"), expanded);
         String snapshotDigest;
-        Map<String, Object> execution = hasBusinessCalls && callContext != null
+        Map<String, Object> execution = packageCatalog != null
+                ? fields("packageId", packageCatalog.packageId, "environment", packageCatalog.environment,
+                        "packageRevision", packageCatalog.packageRevision,
+                        "runtimeConfigRevision", packageCatalog.runtimeConfigRevision,
+                        "manifestDigest", packageCatalog.manifestDigest)
+                : hasBusinessCalls && callContext != null
                 ? fields("packageId", callContext.packageId(), "environment", callContext.environment(),
                         "packageRevision", callContext.packageRevision(), "runtimeConfigRevision", callContext.runtimeConfigRevision())
                 : Map.of();
@@ -1000,6 +1556,7 @@ final class SutMetricsService implements AutoCloseable {
                 throw new IllegalArgumentException("Resolved Metrics Profile exceeds its " + maxObservations + " observation budget.");
             snapshotBudgets.putAll(flatBudgets);
         }
+        if (packageCatalog != null) provenance.addAll(packageCatalog.resourceProvenance);
         try { snapshotDigest = sha256(json.writeValueAsBytes(fields("queries", expanded, "sources", pinnedSources,
                 "execution", execution, "collection", safeCollection, "livePreview", safeLive, "thresholds", thresholdRules,
                 "nativeProfile", nativeProfile, "nativeMetricSources", nativeSources, "groups", nativeGroups,
@@ -4035,12 +4592,12 @@ final class SutMetricsService implements AutoCloseable {
     private void expand(String profileId, Map<String, Object> binding, String bindingId, String profilePath,
                         List<Map<String, Object>> queries, List<Map<String, Object>> provenance,
                         String principal, boolean admin, Set<String> selectedTargets,
-                        BusinessCallContext callContext) {
-        Map<String, Object> profile = profiles.get(profileId);
+                        BusinessCallContext callContext, CatalogView activeCatalog) {
+        Map<String, Object> profile = activeCatalog.profiles.get(profileId);
         if (profile == null) throw new IllegalArgumentException("Metrics Profile reference not found: " + profileId + ".");
         if ("att-sut-metrics-profile/v2".equals(profile.get("schemaVersion"))) {
             expandFlatProfile(profile, binding, bindingId, profilePath, queries, provenance, principal, admin,
-                    selectedTargets, callContext);
+                    selectedTargets, callContext, activeCatalog);
             return;
         }
         Set<String> bindingTargets = stringSet(binding.get("targetIds"), "targetIds");
@@ -4062,15 +4619,15 @@ final class SutMetricsService implements AutoCloseable {
                 String childPath = profilePath + "/" + alias;
                 Map<String, Object> childBinding = new LinkedHashMap<>(include);
                 childBinding.remove("profile"); childBinding.remove("alias");
-                Map<String, Object> childProfile = profiles.get(child);
+                Map<String, Object> childProfile = activeCatalog.profiles.get(child);
                 if (childProfile == null || !"base".equals(childProfile.get("kind")))
                     throw new IllegalArgumentException("Composite profiles may include base profiles only.");
                 bindBase(childProfile, childBinding, bindingId, childPath, queries, provenance, principal, admin,
-                        effectiveTargets, callContext);
+                        effectiveTargets, callContext, activeCatalog);
             }
         } else {
             bindBase(profile, binding, bindingId, profilePath, queries, provenance, principal, admin,
-                    effectiveTargets, callContext);
+                    effectiveTargets, callContext, activeCatalog);
         }
         if (queries.size() > MAX_EXPANDED_QUERIES) throw new IllegalArgumentException("Resolved Metrics Profile exceeds the 256 query budget.");
     }
@@ -4078,7 +4635,8 @@ final class SutMetricsService implements AutoCloseable {
     private void expandFlatProfile(Map<String, Object> profile, Map<String, Object> binding, String bindingId,
                                    String profilePath, List<Map<String, Object>> queries,
                                    List<Map<String, Object>> provenance, String principal, boolean admin,
-                                   Set<String> selectedTargets, BusinessCallContext callContext) {
+                                   Set<String> selectedTargets, BusinessCallContext callContext,
+                                   CatalogView activeCatalog) {
         rejectUnknown(binding, Set.of("id", "profile", "targetIds", "tenant", "parameters", "scope", "workloadId"),
                 "flat Profile binding");
         Map<String, Object> allowed = objectOrEmpty(profile.get("allowedBindings"));
@@ -4108,7 +4666,7 @@ final class SutMetricsService implements AutoCloseable {
         String workloadId = nullableText(binding.get("workloadId"));
 
         for (String sourceId : listOfStrings(profile.get("metricSourceIds"))) {
-            Map<String, Object> metricSource = metricSources.get(sourceId);
+            Map<String, Object> metricSource = activeCatalog.metricSources.get(sourceId);
             if (metricSource == null) throw new IllegalArgumentException("Metric Source reference not found: " + sourceId + ".");
             Map<String, Object> connection = objectOrEmpty(metricSource.get("connection"));
             Map<String, Object> fetch = objectOrEmpty(metricSource.get("fetch"));
@@ -4122,7 +4680,7 @@ final class SutMetricsService implements AutoCloseable {
             String runtimeSourceId;
             if ("DATA_SOURCE".equals(connection.get("kind"))) {
                 runtimeSourceId = String.valueOf(connection.get("id"));
-                runtimeSource = sources.get(runtimeSourceId);
+                runtimeSource = activeCatalog.sources.get(runtimeSourceId);
                 if (runtimeSource == null) throw new IllegalArgumentException("Metric Source Data Source is no longer registered: " + runtimeSourceId + ".");
                 if (!sourceAllowed(runtimeSource, principal, admin)) throw new ServerRuntime.NotFoundException();
                 if (!dataSourceRevision(runtimeSource).equals(connection.get("revision")))
@@ -4267,7 +4825,7 @@ final class SutMetricsService implements AutoCloseable {
             }
             int firstQuery = queries.size();
             bindBase(ephemeral, childBinding, bindingId, profilePath, queries, provenance, principal, admin,
-                    selectedTargets, sourceCallContext);
+                    selectedTargets, sourceCallContext, activeCatalog);
             for (int index = firstQuery; index < queries.size(); index++) {
                 Map<String, Object> query = queries.get(index);
                 query.put("metricSourceId", sourceId);
@@ -4306,7 +4864,7 @@ final class SutMetricsService implements AutoCloseable {
     private void bindBase(Map<String, Object> profile, Map<String, Object> binding, String bindingId, String profilePath,
                           List<Map<String, Object>> queries, List<Map<String, Object>> provenance,
                           String principal, boolean admin, Set<String> selectedTargets,
-                          BusinessCallContext callContext) {
+                          BusinessCallContext callContext, CatalogView activeCatalog) {
         String profileId = String.valueOf(profile.get("id"));
         List<Map<String, Object>> metricDefinitions = listOfMaps(profile.get("metrics"));
         boolean containsCalls = metricDefinitions.stream().anyMatch(metric -> metric.containsKey("call"));
@@ -4411,7 +4969,7 @@ final class SutMetricsService implements AutoCloseable {
         }
         String sourceId = nullableText(binding.get("source"));
         if (sourceId == null) throw new IllegalArgumentException("A registered Data Source is required for profile " + profileId + ".");
-        Map<String, Object> source = sources.get(sourceId);
+        Map<String, Object> source = activeCatalog.sources.get(sourceId);
         if (source == null) throw new IllegalArgumentException("Registered Data Source not found: " + sourceId + ".");
         if (!sourceAllowed(source, principal, admin)) throw new ServerRuntime.NotFoundException();
         String tenant = nullableText(binding.get("tenant"));
@@ -4527,6 +5085,12 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private Map<String, Object> validateProfile(Map<String, Object> input) {
+        return validateProfile(input, sources, profiles);
+    }
+
+    private Map<String, Object> validateProfile(Map<String, Object> input,
+                                                Map<String, Map<String, Object>> configuredSources,
+                                                Map<String, Map<String, Object>> configuredProfiles) {
         if ("att-sut-metrics-profile/v2".equals(input.get("schemaVersion"))) return validateProfileV2(input);
         rejectUnknown(input, Set.of("schemaVersion", "id", "name", "description", "kind", "category", "params", "parameters",
                 "overridableParams", "metrics", "includes"), "Metrics Profile");
@@ -4553,7 +5117,7 @@ final class SutMetricsService implements AutoCloseable {
         } else {
             if (input.containsKey("metrics") || input.containsKey("params") || input.containsKey("parameters"))
                 throw new IllegalArgumentException("Composite profiles contain base-profile bindings only; source and targets belong on each include.");
-            List<Map<String, Object>> includes = validateIncludes(input.get("includes"));
+            List<Map<String, Object>> includes = validateIncludes(input.get("includes"), configuredSources, configuredProfiles);
             if (includes.isEmpty()) throw new IllegalArgumentException("Composite profiles require at least one include binding.");
             result.put("includes", includes);
         }
@@ -4578,6 +5142,17 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private Map<String, Object> validateMetricSource(Map<String, Object> input) {
+        return validateMetricSource(input, sources);
+    }
+
+    private Map<String, Object> validateMetricSource(Map<String, Object> input,
+                                                    Map<String, Map<String, Object>> configuredSources) {
+        return validateMetricSource(input, configuredSources, true);
+    }
+
+    private Map<String, Object> validateMetricSource(Map<String, Object> input,
+                                                    Map<String, Map<String, Object>> configuredSources,
+                                                    boolean requirePinnedConnectionRevision) {
         verifyContractSchema("att-sut-metrics-metric-source/v1", input);
         Map<String, Object> result = new LinkedHashMap<>(input);
         String requestedRevision = nullableText(result.remove("revision"));
@@ -4622,9 +5197,9 @@ final class SutMetricsService implements AutoCloseable {
         Map<String, Object> connection = object(result.get("connection"), "Metric Source connection");
         if ("DATA_SOURCE".equals(connection.get("kind"))) {
             String dataSourceId = requiredText(connection, "id");
-            Map<String, Object> dataSource = sources.get(dataSourceId);
+            Map<String, Object> dataSource = configuredSources.get(dataSourceId);
             if (dataSource == null) throw new IllegalArgumentException("Metric Source references an unknown Data Source: " + dataSourceId + ".");
-            if (!dataSourceRevision(dataSource).equals(connection.get("revision")))
+            if (requirePinnedConnectionRevision && !dataSourceRevision(dataSource).equals(connection.get("revision")))
                 throw new IllegalArgumentException("Metric Source connection revision is stale; reload the registered Data Source.");
         }
         return result;
@@ -4658,14 +5233,20 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private void validateProfileReferences() {
-        for (Map<String, Object> profile : profiles.values()) {
+        validateProfileReferences(metricSources, metricGroups, profiles);
+    }
+
+    private void validateProfileReferences(Map<String, Map<String, Object>> configuredMetricSources,
+                                           Map<String, Map<String, Object>> configuredGroups,
+                                           Map<String, Map<String, Object>> configuredProfiles) {
+        for (Map<String, Object> profile : configuredProfiles.values()) {
             if (!"att-sut-metrics-profile/v2".equals(profile.get("schemaVersion"))) continue;
             for (String id : listOfStrings(profile.get("metricSourceIds")))
-                if (!metricSources.containsKey(id)) throw new IllegalArgumentException("Flat Profile references an unknown Metric Source: " + id + ".");
+                if (!configuredMetricSources.containsKey(id)) throw new IllegalArgumentException("Flat Profile references an unknown Metric Source: " + id + ".");
             List<Map<String, Object>> selectedGroups = new ArrayList<>();
             for (String id : listOfStrings(profile.get("groupIds"))) {
-                if (!metricGroups.containsKey(id)) throw new IllegalArgumentException("Flat Profile references an unknown Metric Group: " + id + ".");
-                selectedGroups.add(metricGroups.get(id));
+                if (!configuredGroups.containsKey(id)) throw new IllegalArgumentException("Flat Profile references an unknown Metric Group: " + id + ".");
+                selectedGroups.add(configuredGroups.get(id));
             }
             validateGroupSelection(selectedGroups);
         }
@@ -4968,6 +5549,12 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private List<Map<String, Object>> validateIncludes(Object raw) {
+        return validateIncludes(raw, sources, profiles);
+    }
+
+    private List<Map<String, Object>> validateIncludes(Object raw,
+                                                       Map<String, Map<String, Object>> configuredSources,
+                                                       Map<String, Map<String, Object>> configuredProfiles) {
         if (!(raw instanceof List<?> list) || list.size() > 16) throw new IllegalArgumentException("Composite includes must contain at most 16 bindings.");
         List<Map<String, Object>> out = new ArrayList<>(); Set<String> aliases = new HashSet<>();
         for (int i = 0; i < list.size(); i++) {
@@ -4976,7 +5563,7 @@ final class SutMetricsService implements AutoCloseable {
             String child = requiredText(include, "profile");
             String alias = nullableText(include.get("alias"));
             if (alias == null) alias = child;
-            Map<String, Object> childProfile = profiles.get(child);
+            Map<String, Object> childProfile = configuredProfiles.get(child);
             if (childProfile == null || !"base".equals(childProfile.get("kind")))
                 throw new IllegalArgumentException("Composite profiles may include existing base profiles only.");
             if (!ID.matcher(alias).matches() || !aliases.add(alias)) throw new IllegalArgumentException("Composite profile include has a duplicate or invalid alias; repeated base profiles require distinct explicit aliases.");
@@ -4989,7 +5576,7 @@ final class SutMetricsService implements AutoCloseable {
             } else {
                 if (include.containsKey("scope") || include.containsKey("workloadId"))
                     throw new IllegalArgumentException("Prometheus composite includes use source and targets.");
-                String source = requiredText(include, "source"); if (!sources.containsKey(source)) throw new IllegalArgumentException("Composite profile source does not exist: " + source + ".");
+                String source = requiredText(include, "source"); if (!configuredSources.containsKey(source)) throw new IllegalArgumentException("Composite profile source does not exist: " + source + ".");
                 binding.put("targets", validateTargets(include.get("targets"), "includes.targets"));
                 if (include.containsKey("parameters")) object(include.get("parameters"), "includes.parameters");
             }
@@ -5013,13 +5600,17 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private void validateProfileGraph() {
-        if (profiles.size() > MAX_PROFILES) throw new IllegalArgumentException("Metrics Profile catalog exceeds 256 profiles.");
-        for (Map<String, Object> profile : profiles.values()) {
+        validateProfileGraph(profiles);
+    }
+
+    private void validateProfileGraph(Map<String, Map<String, Object>> configuredProfiles) {
+        if (configuredProfiles.size() > MAX_PROFILES) throw new IllegalArgumentException("Metrics Profile catalog exceeds 256 profiles.");
+        for (Map<String, Object> profile : configuredProfiles.values()) {
             if ("att-sut-metrics-profile/v2".equals(profile.get("schemaVersion"))) continue;
             if (!Set.of("base", "composite").contains(profile.get("kind")))
                 throw new IllegalArgumentException("Metrics Profile kind must be base or composite.");
             if ("composite".equals(profile.get("kind"))) for (Map<String, Object> include : listOfMaps(profile.get("includes"))) {
-                Map<String, Object> child = profiles.get(String.valueOf(include.get("profile")));
+                Map<String, Object> child = configuredProfiles.get(String.valueOf(include.get("profile")));
                 if (child == null || !"base".equals(child.get("kind")))
                     throw new IllegalArgumentException("Composite profiles may include existing base profiles only.");
             }
@@ -5034,6 +5625,21 @@ final class SutMetricsService implements AutoCloseable {
         }
         for (Map<String, Object> include : listOfMaps(profile.get("includes"))) {
             String source = nullableText(include.get("source")); if (source != null && !sourceAllowed(sources.get(source), principal)) return false;
+        }
+        return true;
+    }
+
+    private boolean profileReadable(Map<String, Object> profile, String principal,
+                                    Map<String, Map<String, Object>> visibleMetricSources,
+                                    Map<String, Map<String, Object>> visibleDataSources) {
+        if ("att-sut-metrics-profile/v2".equals(profile.get("schemaVersion"))) {
+            for (String id : listOfStrings(profile.get("metricSourceIds")))
+                if (!metricSourceReadable(visibleMetricSources.get(id), principal, visibleDataSources)) return false;
+            return true;
+        }
+        for (Map<String, Object> include : listOfMaps(profile.get("includes"))) {
+            String source = nullableText(include.get("source"));
+            if (source != null && !sourceAllowed(visibleDataSources.get(source), principal)) return false;
         }
         return true;
     }
@@ -5126,6 +5732,14 @@ final class SutMetricsService implements AutoCloseable {
         Map<String, Object> connection = objectOrEmpty(source.get("connection"));
         return !"DATA_SOURCE".equals(connection.get("kind"))
                 || sourceAllowed(sources.get(String.valueOf(connection.get("id"))), principal);
+    }
+
+    private boolean metricSourceReadable(Map<String, Object> source, String principal,
+                                         Map<String, Map<String, Object>> visibleDataSources) {
+        if (source == null) return false;
+        Map<String, Object> connection = objectOrEmpty(source.get("connection"));
+        return !"DATA_SOURCE".equals(connection.get("kind"))
+                || sourceAllowed(visibleDataSources.get(String.valueOf(connection.get("id"))), principal);
     }
 
     private boolean profileReferencesProfile(Map<String, Object> profile, String id) {

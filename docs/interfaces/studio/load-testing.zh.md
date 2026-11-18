@@ -48,7 +48,7 @@ Explorer 是 React 與 TypeScript 單頁 UI，於 `att-web` Maven resource 階�
 
 ## SUT Metrics 及離線 LOAD 報告
 
-SUT Metrics Data Source 由管理員在 Server 管理。Data Source 可直接使用 Prometheus，或使用固定一個 `grafanaDatasourceUid` 的 Grafana proxy；Grafana 請求只會使用固定 `/api/ds/query` route 及 Server 管理的 PromQL。請以 `ATT_SECRET_*` reference 配置 server-side service account token、已驗證 TLS、核准 host、permitted organization list 內明確的數值型 default organization ID，以及有界 request／sample 上限。Studio 不接受瀏覽器 URL、datasource UID、PromQL、token 或 proxy override。
+Global Runtime Config `att-config/v2.15` 透過 `sutMetrics.dataSources` 引用 `config/sut-metrics/` 下的 SUT Metrics Data Source 描述檔；Environment profile 可以整份取代描述檔清單。Data Source 可直接使用 Prometheus，或使用固定一個 `grafanaDatasourceUid` 的 Grafana proxy；Grafana 請求只會使用固定 `/api/ds/query` route 及 Server 管理的 PromQL。請以 `ATT_SECRET_*` reference 配置 server-side service account token、已驗證 TLS、核准 host、permitted organization list 內明確的數值型 default organization ID，以及有界 request／sample 上限。Settings 顯示全域 connection 資訊和存取政策。Studio 不接受瀏覽器 URL、datasource UID、PromQL、token 或 proxy override。
 
 LOAD Job 結束後，既有的有界 SUT Metrics collection 在完成驗證且有最終狀態時，會另行發佈版本化離線報告。已驗證報告的下載與 `artifacts.zip` 分開，不會重寫原生 archive 或其 manifest。報告包含 source-neutral observation metadata、有界圖表預覽、已驗證 series sidecar、coverage、gaps、execution status 及 LOAD phase windows。Business observation 亦會保留 Workload/mix identity、呼叫次數、mapping quality、未匹配 row 數，以及可用時的數值；raw result rows 不會發佈。Partial 或 unavailable collection state 會如實顯示。報告是靜態檔案，可離線使用，也不會發送即時請求。它不會評估 performance threshold，亦不會改變 Job result。若未來 verdict writer 提供獨立版本化 verdict record，報告可顯示該資料。此流程不會增加 continuous collector，專用的 **SUT Metrics** 與原生 **Metrics** tabs 仍保持獨立。
 
@@ -60,40 +60,45 @@ LOAD Job 結束後，既有的有界 SUT Metrics collection 在完成驗證且�
 
 ## SUT Metrics
 
-系統管理員應在所選 Server Runtime Config 的 `sutMetrics` 區塊（`att-config/v2.14`）定義 Data Source、Metric Source、Group 及 Profile。Settings 提供安全的 catalog read 和靜態 preview。定義在 admin API 中為唯讀：中央 Runtime Config writer 尚未支援前，mutation route 會回傳 HTTP 409 `ATT-SUT-METRICS-CONFIG-READ-ONLY`；請按核准的 Runtime Config 變更流程處理。本版本不會再加入另一套 editor 或 publisher。Base profile 管理 metric 定義及 typed parameters；composite 只可組合 base profile 一層，並為每個 include 提供 source 和 target binding。Scenario 直接選取 base profile 時，必須提供 source 和 targets；巢狀 composite 及 `extends` 均不支援。Data Source 儲存 endpoint、固定 query path、TLS、可選 secret reference、讀取者範圍、tenant allowlist 及 collection limits。Secret 值由 Server 環境變數 `ATT_SECRET_<NAME>` 提供，API 不會回傳 secret 值。
+Global Runtime Config `att-config/v2.15` 管理共用 Data Source 描述檔和存取政策。`sutMetrics.dataSources` 項目指向 `config/sut-metrics/` 下的版本化 YAML 檔；Environment profile 可以整份取代清單。既有 Runtime Config 保持相容；遷移至 Package 所有制時請使用 v2.15 描述檔格式。Settings 顯示目前全域 Data Source connection、reader policy、tenant 範圍和 limits；不在此建立 Package 的 Metric Sources、Groups 或 Profiles。
 
-4.3.1 contracts 新增 source-neutral **Metric Source**，在既有 Data Source、DBHelper 或 Package Tool connection 上定義一次有界 fetch，不會建立第二套 connection registry。Metric Source 固定 fetch、declared output metrics、label mapping 及 limits。Prometheus 使用 `mapping.labels.retain` 選擇輸出路由後保留的 labels；`metricName` 和 discriminator 會先用於 output routing，因此不必保留 `__name__`。若不同 Prometheus series 投影成相同 retained labels，collection 會回報 collision diagnostic。SQL 類 source 使用 `mapping.labels` 將每個公開 label 對應至明確結果欄位；只有映射欄位會成為 labels，不需要第二層 allowlist。Label 名稱有界，並拒絕保留或敏感名稱。SQL 類 source 可用一次查詢將 wide-row 結果映射成多個具名 output。Dynamic metric-name pivot、Long Rows、未知 labels、可執行 transforms 及巢狀 Profile inheritance 都會被拒絕。Flat Profile 選擇 Metric Sources 和 logical Groups，並限制 Job 可綁定的 environment、targets、tenants、parameters 及 collection budgets。其 `budgets` 可限制 `maxFetches`（1–256 次 logical fetch）、`maxObservations`（1–4,096 個 normalized observations）及 `maxArtifactBytes`（1 KiB–64 MiB）；所選 Profile limits 會固定到 Job snapshot，並在解析和 collection 階段執行。超出限制時會回報錯誤，不會寫入超出預算的 observation 或 artifact。Group matching 與 `groupBy` 只影響呈現，不會改變 observation identity，也不會觸發額外 fetch。
+使用 `att-package/v2` 的 Package 會在 `package.yaml` 的 `observability.metricSources`、`observability.groups` 和 `observability.profiles` 明確列出自己的 SUT Metrics 定義。每個路徑都指向 `load/sut-metrics/{sources,groups,profiles}/` 相符目錄內的一個版本化 YAML 定義。Package Metric Source 可引用全域 Data Source 邏輯 ID、所選 Environment 中既有的全域 DBHelper，或同一 Package 所有的 Package Tool；不允許跨 Package Tool。Package 檔案在不同 Environment 使用相同 Data Source 邏輯 ID，不會固定環境專屬 connection revision。v2 flat Profile 選擇 Metric Sources 和 Groups，並限制 Environment、target、tenant、parameter 和 collection budget。v2 inventory 不存在或為空，代表沒有 SUT Metrics；不會退回使用全域 metric 定義或其他 Package。ATT 不會掃描目錄尋找定義。
 
-Settings 提供 Metric Source、Metric Group 和 flat Profile 的安全靜態 preview。Metric Source preview 會描述 fetch 和 output mapping，不會執行 SQL、查詢 Prometheus，或呼叫 DBHelper／Package Tool。Group preview 會檢查 exact match rules，不會讀取或修改 Job observations。Flat Profile preview 會計算所選 source IDs 和 target bindings，不會呼叫 sources。Runtime Config 變更會先通過 schema 及 reference validation 才會啟用；無效候選設定會保留 last-known-good catalog。非管理者 read 只會顯示 ID、名稱、connection kind、輸出摘要與 limits；管理者可讀取完整定義。Group rules 可精確比對 source IDs、metric IDs 和 label values；同一 Profile 中重疊的規則會被拒絕。
+<!-- att-docs:historical -->
+舊版 `att-package/v1` Package 保留歷史全域 v1 Metric Source、Group 及 base/composite Profile 行為。這些 Profile 可包含 typed parameters 及 source/target binding；仍不支援巢狀 composite 和 `extends`。
+<!-- /att-docs:historical -->
 
-新 Job 會在不可變 v2 snapshot 固定 Profile 和 source revisions、redacted Fetch Plan、output mappings、expected subjects、Group rules 及 collection budgets。Executable query/call payload 另存於 Server 私有、以 digest 綁定的檔案。既有 v1 base/composite profiles 和歷史 v1 snapshots 會透過 deterministic adapter 繼續讀取；不會改寫歷史 snapshot 或封存的 LOAD artifacts。遇到不支援的舊格式會明確失敗。已發布的 v2 contract examples 位於 [`examples/load/sut-metrics/v2`](../../../examples/load/sut-metrics/v2/metric-source-db-wide-row.json)。
+v2 Package 的 LOAD 只會選取所選 Package 明確列出的 Profile。Profile 提供允許的 sources 和 targets；Scenario 不會選擇全域 Profile 或 connection。
 
-Metrics Profiles 表單可在獨立的 Business Metrics Profile 草擬 multi-output business call，讓 Prometheus Profile 維持只含 query。表單只產生供檢視的 JSON，不會發佈定義。可以輸入 DBHelper query 或 Package Tool call、result rows path、選填的 Workload／Mix ID 欄位，以及每個 output 的 metric ID、title、column、unit 和 kind。檢視 JSON 後，請按核准流程將變更放入 `sutMetrics.profiles`。`mixColumn` 必須與 `workloadColumn` 一起使用。不設定 `mixColumn` 時，結果對應 Workload scope；對 mixed Workload，query 或 Tool 每個 Workload 最多只能回傳一筆 workload-level result，ATT 不會將它複製至各 mix slot。若每列要對應特定 slot，請設定 `mixColumn`。Package Tool 仍須確認 side effects。表單只建立 Profile JSON，不會執行 call。
+LOAD Profile picker 只會為新 binding 提供 Package 自有的 v2 Profile。舊 v1 Package 已手動撰寫的 binding 仍可相容，其安全 Profile metadata 仍可用於 threshold 編輯。建立新 binding 前，請先把定義明確遷移至 Package 的 v2 inventory。
+
+Explorer 的 Package catalog 只列出明確納入 inventory 的定義，並顯示 Package、Runtime Config、manifest 及資源來源資訊。Package owner 可開啟已列出的 YAML 資源，透過 **Validate**、**Review** 和 **Publish** 草擬及發布修改。此編輯器處理既有 inventory 路徑；manifest 仍是登錄定義的依據。Catalog inspection 和 definition validation 會檢查 schema、references、reader permissions 和 limits，但不會執行 SQL、DBHelper query 或 Package Tool。Settings 的 Data Source **Test** 是另一項明確的獨立操作。
+
+v2 Metric Source 定義一次有界 fetch、輸出 metrics、label mapping 及 limits。Prometheus 使用 `mapping.labels.retain` 選擇 output routing 後保留的 labels；`metricName` 和 discriminator 會先用於 output routing，因此不必保留 `__name__`。SQL 類 source 使用 `mapping.labels` 將每個公開 label 對應至明確結果欄位；只有映射欄位會成為 labels。Label 名稱有界，並拒絕保留或敏感名稱。不同 Prometheus series 投影成相同 retained labels 時會產生 diagnostic。SQL 類 source 可用一次查詢將 wide-row 結果映射成多個具名 output。Dynamic metric-name pivot、Long Rows、未知 labels 和 executable transforms 不支援。Flat Profile 的 `budgets` 可限制 `maxFetches`（1–256 次 logical fetch）、`maxObservations`（1–4,096 個 normalized observations）及 `maxArtifactBytes`（1 KiB–64 MiB）；所選 limits 會固定於 Job snapshot，並在解析和 collection 階段執行。超出限制時會回報錯誤，不會寫入超出預算的 observation 或 artifact。Group rules 精確比對 source ID、metric ID 和 label value；同一 Profile 內重疊的規則會被拒絕。Group matching 和 `groupBy` 只影響呈現，不會改變 observation identity，也不會觸發額外 fetch。
+
+新 Job 會在不可變 v2 snapshot 固定 Profile 和 source revisions、redacted Fetch Plan、output mappings、expected subjects、Group rules 及 collection budgets。v2 Package snapshot 亦會保留所選 Package manifest/resource digests，以及 Runtime Config revision 和 Environment。Executable query/call payload 另存於 Server 私有、以 digest 綁定的檔案。歷史 v1 snapshots 會透過 deterministic adapter 繼續讀取；歷史 snapshots 和封存的 LOAD artifacts 不會改寫。遇到不支援的舊格式會明確失敗。Schema 層級的 v2 contract examples 位於 [`examples/load/sut-metrics/v2`](../../../examples/load/sut-metrics/v2/metric-source-db-wide-row.json)；完整的 4.3.1 Package 所有制結構請參閱 [Package-local SUT Metrics 範例](../../../examples/package-local-sut-metrics/README.md)及[遷移指南](../../guides/sut-metrics-config-migration.zh.md)。
 
 HTTPS Data Source host 必須與 Server 的 `ATT_SUT_METRICS_ALLOWED_HOSTS` 環境變數其中一項完全相同。設定值以逗號分隔，只接受完整 host name 或 IP address，不接受 wildcard 或 URL path。HTTP 只適用於本機開發時的 loopback Prometheus。Server 不跟隨 redirect，也不使用 proxy。請同時用部署網路 egress rules 限制 DNS 解析後的 destination IP。
 
-`att-load/v1.9` 可選擇在 root-level 加入 `observability`，將已登記的 profile 綁定至 LOAD scenario。Scenario 可選擇 base profile，並明確提供 source 及 target binding；也可選擇已在各 include 綁定來源和目標的 composite preset。直接 binding 不會繼承或合併其他 profile 的值。Scenario 不接受 Prometheus URL、credentials 或任意 PromQL。例如：
+`att-load/v1.9` 可選擇在 root-level 加入 `observability`，將 Profile 綁定至 LOAD scenario。在 Advanced Load 使用 **Package SUT Metrics Profile**，即可加入所選 Package 中符合 Environment 條件的 Profile。Scenario 只選用該 Profile ID；sources 和允許的 targets 來自 Package 定義。以下範例選用 Package-local 範例的 `basic` Profile。舊版 v1 Package 仍使用全域 base/composite Profile binding 規則。Scenario 不接受 Prometheus URL、credentials 或任意 PromQL。
 
 ~~~yaml
 observability:
   schemaVersion: att-load-observability/v1
   collections:
-    - id: platform
-      profile: profile-platform
-      source: prom-main
-      targets: [{id: app-1, type: app}]
+    - profile: basic
   collection: { mode: post-run, before: 5m, after: 2m, step: 30s }
   livePreview: { enabled: true, refreshInterval: 30s, defaultRange: 15m }
   thresholds:
     - id: cpu-steady-90
-      profile: platform
-      metric: cpu_utilization
+      profile: basic
+      metric: cpu-utilization
       max: 90
       unit: percent
       minimumCoverage: 0.95
 ~~~
 
-Rule 的 metric ID 和 unit 必須存在所選 base profile。Prometheus 規則使用實際 UTC `STEADY` phase，並對每個 source target 分別評估 sampled maximum，不會將 target 數值平均。最大值等於 90 時為 `MET`；任何有效 sample 高於 90，即使其他 sample 缺失，仍為 `NOT_MET`。缺少、過舊、partial 或 coverage 不足的資料會是 `NOT_EVALUATED`，除非已有有效 sample 證明超標。Prometheus 規則支援 `targets: all`，預設最低 coverage 為 95%。Business rule 會對每個 Job、Workload 或 mix subject 評估一個 numeric output，不使用 `minimumCoverage`。省略 `subjects` 或設定 `subjects: all` 會選擇所有 subject。若要明確選取 subject，請使用 `scope: job`、`scope: workload` 加 `workloadId`，或 `scope: mix` 加 `workloadId` 和 `mixId`。每個 selector 必須解析至一個不可變 identity。Business rule 亦支援 numeric `counter` output。兩種 rule 都只支援 `max` 和 `<=`。
+Rule 的 metric ID 和 unit 必須存在所選 Profile 的 declared outputs；Profile 可以來自 v2 Package inventory 或舊版 v1 全域 catalog。Prometheus 規則使用實際 UTC `STEADY` phase，並對每個 source target 分別評估 sampled maximum，不會將 target 數值平均。最大值等於 90 時為 `MET`；任何有效 sample 高於 90，即使其他 sample 缺失，仍為 `NOT_MET`。缺少、過舊、partial 或 coverage 不足的資料會是 `NOT_EVALUATED`，除非已有有效 sample 證明超標。Prometheus 規則支援 `targets: all`，預設最低 coverage 為 95%。Business rule 會對每個 Job、Workload 或 mix subject 評估一個 numeric output，不使用 `minimumCoverage`。省略 `subjects` 或設定 `subjects: all` 會選擇所有 subject。若要明確選取 subject，請使用 `scope: job`、`scope: workload` 加 `workloadId`，或 `scope: mix` 加 `workloadId` 和 `mixId`。每個 selector 必須解析至一個不可變 identity。Business rule 亦支援 numeric `counter` output。兩種 rule 都只支援 `max` 和 `<=`。
 
 Server 會將正規化規則、metric binding、revision 和 target 固定在每個 Job snapshot。Collection 完成後，有界的非同步 evaluator 會寫入 `jobs/<JOB_ID>/sut-metrics/threshold-evaluation.json`；Server 重啟後會恢復中斷或可重試的 evaluation。此版本化記錄獨立於 Worker result，不會修改 execution status 或 native LOAD threshold summary。已授權的 `GET /api/v1/jobs/{id}/result` 會加入 `performanceAcceptance`，回報 `executionStatus`、`nativeLoadThresholds`、`sutThresholds`、`externalEvaluationStatus` 及 combined `performanceVerdict`。Results 與 SUT Metrics 會顯示每個 target 的 peak、limit、sample count、coverage 及原因。Post-run evidence 尚未就緒時，external state 和 combined verdict 會保持 pending。
 
@@ -113,4 +118,4 @@ LOAD 到達 terminal 狀態且授權的 artifact archive 已就緒後，**Correl
 
 Provenance 欄位會分開標示 LOAD target 和所選 workload，以及 SUT source、target、profile、metric、unit、collection window、effective step、可用 instance 數量、所選 sample 數量、sample coverage、最新所選 sample 時間及其相對於 requested collection-window end 的差距。Manifest 更新時間會與 sample 時間分開標示。選取 workload 不代表共享主機 CPU、JVM、database 或 MQ 數值屬於該 workload。圖表只供時間上的對照；時間重疊不代表因果關係、判定或根因。
 
-完整的 Data Source、base、composite profile 及 scenario 範例位於 [`examples/load/sut-metrics/`](../../../examples/load/sut-metrics/)。使用 scenario 前，請先在 Settings 登記 Data Source 及 profiles，並將範例內的 Template target 換成 package 中可用的 target。
+可部署的 4.3.1 Package-local 結構位於 [Package-local SUT Metrics 範例](../../../examples/package-local-sut-metrics/README.md)；現有定義的移轉方式請參閱[遷移指南](../../guides/sut-metrics-config-migration.zh.md)。較舊的 [`examples/load/sut-metrics/`](../../../examples/load/sut-metrics/) 檔案展示全域 v1 定義及 binding 格式。

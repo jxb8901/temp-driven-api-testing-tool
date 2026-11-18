@@ -77,6 +77,61 @@ function asObject(value: unknown): JsonObject {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : {};
 }
 
+function definitionFromCatalogRow(value: Record<string, unknown>): Record<string, unknown> {
+  const definition = asObject(value.definition);
+  return Object.keys(definition).length ? { ...value, ...definition } : value;
+}
+
+function profileAllowsEnvironment(profile: Record<string, unknown>, environment: string): boolean {
+  const definition = definitionFromCatalogRow(profile);
+  const allowed = asObject(definition.allowedBindings);
+  const environments = Array.isArray(allowed.environments) ? allowed.environments.map(String) : [];
+  if (environments.length === 0) return true;
+  if (!environment) return false;
+  return environments.some(value => value.toLowerCase() === environment.toLowerCase());
+}
+
+type PackageProfileBindingIssue = { field: string; profileId: string; detail: string };
+
+function packageProfileBindingIssues(profiles: Array<Record<string, unknown>>, raw: string): PackageProfileBindingIssue[] {
+  let observability: JsonObject;
+  try { observability = parseObjectJson(raw || '{}', 'SUT Metrics observability'); }
+  catch { return []; }
+  const byId = new Map(profiles.map(profile => {
+    const definition = definitionFromCatalogRow(profile);
+    return [String(definition.id || ''), definition] as const;
+  }));
+  const collections = Array.isArray(observability.collections) ? observability.collections : [];
+  const issues: PackageProfileBindingIssue[] = [];
+  collections.forEach((value, index) => {
+    const binding = asObject(value);
+    const profileId = typeof binding.profile === 'string' ? binding.profile : '';
+    const profile = byId.get(profileId);
+    if (!profile || profile.packageOwned !== true || profile.schemaVersion !== 'att-sut-metrics-profile/v2') return;
+    const allowed = asObject(profile.allowedBindings);
+    const allowedTargets = Array.isArray(allowed.targets)
+      ? allowed.targets.map(target => String(asObject(target).id || '')).filter(Boolean)
+      : [];
+    const targetIds = Array.isArray(binding.targetIds) ? binding.targetIds.map(String) : [];
+    const targetField = `observability.collections[${index}].targetIds`;
+    if (allowedTargets.length && targetIds.length === 0)
+      issues.push({ field: targetField, profileId, detail: `Select at least one allowed target: ${allowedTargets.join(', ')}.` });
+    else if (targetIds.some(target => !allowedTargets.includes(target)))
+      issues.push({ field: targetField, profileId, detail: `Use only allowed targets: ${allowedTargets.join(', ')}.` });
+
+    const parameterDefinitions = asObject(allowed.parameters);
+    const parameters = asObject(binding.parameters);
+    for (const [name, definitionValue] of Object.entries(parameterDefinitions)) {
+      const definition = asObject(definitionValue);
+      const value = parameters[name];
+      if (definition.required === true && (value == null || typeof value === 'string' && !value.trim()))
+        issues.push({ field: `observability.collections[${index}].parameters.${name}`, profileId,
+          detail: `Required ${String(definition.type || 'parameter')} value is missing.` });
+    }
+  });
+  return issues;
+}
+
 function parseObjectJson(raw: string, label: string): JsonObject {
   let value: unknown;
   try { value = JSON.parse(raw || '{}'); }
@@ -92,11 +147,12 @@ type SutThresholdBindingChoice = {
   metrics: Record<string, unknown>[];
 };
 
-function sutThresholdBindingChoices(profiles: Array<Record<string, unknown>>, raw: string): SutThresholdBindingChoice[] {
+function sutThresholdBindingChoices(profiles: Array<Record<string, unknown>>, raw: string,
+                                    metricSources: Array<Record<string, unknown>> = [], environment = ''): SutThresholdBindingChoice[] {
   let observability: Record<string, unknown>;
   try { observability = parseObjectJson(raw || '{}', 'SUT Metrics observability'); }
   catch { return []; }
-  const profileById = new Map(profiles.map(profile => [String(profile.id), profile]));
+  const profileById = new Map(profiles.map(profile => [String(profile.id || asObject(profile.definition).id || ''), profile]));
   const aliases = new Set<string>();
   const duplicateAliases = new Set<string>();
   const choices: SutThresholdBindingChoice[] = [];
@@ -107,22 +163,45 @@ function sutThresholdBindingChoices(profiles: Array<Record<string, unknown>>, ra
     const profileId = typeof binding.profile === 'string' ? binding.profile : '';
     const profile = profileById.get(profileId);
     if (!profile) continue;
+    const schemaVersion = String(profile.schemaVersion || asObject(profile.definition).schemaVersion || '');
+    const flat = schemaVersion === 'att-sut-metrics-profile/v2';
+    const profileDefinition = Object.keys(asObject(profile.definition)).length ? asObject(profile.definition) : profile;
     const alias = typeof binding.id === 'string' ? binding.id : profileId;
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(alias)) continue;
     if (aliases.has(alias)) {
       duplicateAliases.add(alias);
       continue;
     }
-    if (profile.kind === 'base') {
+    if (flat) {
+      const allowed = asObject(profileDefinition.allowedBindings);
+      const allowedEnvironments = Array.isArray(allowed.environments) ? allowed.environments.map(String) : [];
+      const boundTargets = Array.isArray(binding.targetIds) ? binding.targetIds.map(String) : [];
+      const allowedTargets = Array.isArray(allowed.targets) ? allowed.targets.map(target => String(asObject(target).id || '')) : [];
+      if (environment && allowedEnvironments.length && !allowedEnvironments.some(item => item.toLowerCase() === environment.toLowerCase())) continue;
+      if (!boundTargets.length || !boundTargets.every(target => allowedTargets.includes(target))) continue;
+      const parameters = asObject(binding.parameters);
+      const definitions = asObject(allowed.parameters);
+      if (Object.entries(definitions).some(([key, value]) => asObject(value).required === true && parameters[key] == null)) continue;
+    } else if (profile.kind === 'base') {
       const targets = Array.isArray(binding.targets) ? binding.targets : [];
       if (typeof binding.source !== 'string' || !binding.source || !targets.length
         || !targets.every(target => typeof (target as Record<string, unknown> | null)?.id === 'string'
           && typeof (target as Record<string, unknown> | null)?.type === 'string')) continue;
     } else if (profile.kind !== 'composite' || !Array.isArray(profile.includes) || !profile.includes.length) continue;
-    const metricProfiles = profile.kind === 'base'
+    const metricProfiles = flat
+      ? []
+      : profile.kind === 'base'
       ? [profile]
       : (profile.includes as Array<Record<string, unknown>>).map(include => profileById.get(String(include.profile))).filter(Boolean) as Array<Record<string, unknown>>;
-    const candidates = metricProfiles.flatMap(metricProfile => {
+    const candidates = flat
+      ? (Array.isArray(profileDefinition.metricSourceIds) ? profileDefinition.metricSourceIds : []).flatMap(sourceId => {
+        const source = metricSources.find(row => String(row.id || asObject(row.definition).id) === String(sourceId));
+        const definition = Object.keys(asObject(source?.definition)).length ? asObject(source?.definition) : asObject(source);
+        const mapping = asObject(definition.mapping);
+        const outputs = Array.isArray(mapping.outputs) ? mapping.outputs : Array.isArray(definition.outputs) ? definition.outputs : [];
+        return outputs.filter((metric): metric is Record<string, unknown> => Boolean(metric && typeof metric === 'object' && !Array.isArray(metric)));
+      })
+      : metricProfiles.flatMap(metricProfile => {
       const rows = Array.isArray(metricProfile.metricCatalog) ? metricProfile.metricCatalog
         : Array.isArray(metricProfile.metrics) ? metricProfile.metrics : [];
       return rows.filter((metric): metric is Record<string, unknown> => Boolean(metric && typeof metric === 'object' && !Array.isArray(metric)));
@@ -132,7 +211,7 @@ function sutThresholdBindingChoices(profiles: Array<Record<string, unknown>>, ra
     const metrics = candidates.filter(metric => typeof metric.id === 'string' && counts.get(metric.id) === 1);
     if (!metrics.length) continue;
     aliases.add(alias);
-    choices.push({ alias, profileId, label: `${String(profile.name || profileId)} · ${alias}`, metrics });
+      choices.push({ alias, profileId, label: `${String(profile.name || profileDefinition.name || profileId)} · ${alias}`, metrics });
   }
   return choices.filter(choice => !duplicateAliases.has(choice.alias));
 }
@@ -360,6 +439,13 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const [workloads, setWorkloads] = useState<WorkloadDraft[]>([]);
   const [advanced, setAdvanced] = useState({ execution: '{}', testdata: '[]', thresholds: '{}', evidence: '{}', seed: '', observability: '{}' });
   const [sutMetricsProfiles, setSutMetricsProfiles] = useState<Array<Record<string, unknown>>>([]);
+  const [packageSutMetricSources, setPackageSutMetricSources] = useState<Array<Record<string, unknown>>>([]);
+  const [packageSutMetricsEnvironment, setPackageSutMetricsEnvironment] = useState('');
+  const [packageSutMetricsPackageScoped, setPackageSutMetricsPackageScoped] = useState(false);
+  const [packageSutMetricsState, setPackageSutMetricsState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [packageSutMetricsError, setPackageSutMetricsError] = useState('');
+  const [packageSutMetricProfileToAdd, setPackageSutMetricProfileToAdd] = useState('');
+  const [packageSutMetricProfileError, setPackageSutMetricProfileError] = useState('');
   const [sutThresholdProfile, setSutThresholdProfile] = useState('');
   const [sutThresholdMetric, setSutThresholdMetric] = useState('');
   const [sutThresholdMaximum, setSutThresholdMaximum] = useState('90');
@@ -400,13 +486,43 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const replayEnvironmentOrigin = useRef('');
   const replayPackageDefaultEnvironment = useRef('');
   useEffect(() => {
-    if (!api.listSutMetricProfiles) return;
     const controller = new AbortController();
-    api.listSutMetricProfiles(controller.signal).then(value => {
-      if (!controller.signal.aborted) setSutMetricsProfiles(value.items || []);
-    }).catch(() => { if (!controller.signal.aborted) setSutMetricsProfiles([]); });
+    setSutMetricsProfiles([]);
+    setPackageSutMetricSources([]);
+    setPackageSutMetricsEnvironment('');
+    setPackageSutMetricsPackageScoped(false);
+    setPackageSutMetricsError('');
+    setPackageSutMetricProfileError('');
+    setPackageSutMetricProfileToAdd('');
+    setSutThresholdProfile('');
+    setSutThresholdMetric('');
+    if (!selectedPackage) {
+      setPackageSutMetricsState('idle');
+      return () => controller.abort();
+    }
+    setPackageSutMetricsPackageScoped(true);
+    setPackageSutMetricsState('loading');
+    if (api.getPackageSutMetricsCatalog) {
+      api.getPackageSutMetricsCatalog(selectedPackage, selectedEnvironment || undefined, controller.signal).then(value => {
+        if (controller.signal.aborted) return;
+        setSutMetricsProfiles(value.profiles || []);
+        setPackageSutMetricSources(value.metricSources || []);
+        setPackageSutMetricsEnvironment(value.environment || '');
+        setPackageSutMetricsPackageScoped(true);
+        setPackageSutMetricsState('ready');
+      }).catch(() => {
+        if (controller.signal.aborted) return;
+        setSutMetricsProfiles([]);
+        setPackageSutMetricSources([]);
+        setPackageSutMetricsState('error');
+        setPackageSutMetricsError('Package SUT Metrics inventory could not be loaded. Refresh the Package or ask an administrator to check its Runtime Config and inventory.');
+      });
+    } else {
+      setPackageSutMetricsState('error');
+      setPackageSutMetricsError('Package SUT Metrics inventory is unavailable because this Server client does not support the Package catalog API.');
+    }
     return () => controller.abort();
-  }, [api]);
+  }, [api, selectedPackage, selectedEnvironment]);
   useEffect(()=>{
     const release=navigation.registerUnsavedChanges(Boolean((replaySourceJobId&&replayDirty)||(savedScenario&&savedDirty)),replaySourceJobId?'Edited Job replay settings':'Saved scenario edits');
     releaseReplayNavigationGuard.current=release;
@@ -548,6 +664,12 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
     setRequestError('');
     setRequestErrorCode('');
     setDiagnostics([]);
+    if (requiredPackageProfileIssues.length > 0) {
+      setDraft(null);
+      setDraftState('error');
+      setDraftMessage('Complete the required Package SUT Metrics binding fields before validating this scenario.');
+      return;
+    }
     let scenario: JsonObject;
     try { scenario = readScenario(); }
     catch (error) {
@@ -702,6 +824,46 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   function updateAdvanced<K extends keyof typeof advanced>(key: K, value: (typeof advanced)[K]) {
     markReplayDirty();setAdvanced(current => ({ ...current, [key]: value }));
   }
+  function addPackageSutMetricProfile() {
+    setPackageSutMetricProfileError('');
+    const profile = eligiblePackageSutMetricProfiles.find(row => String(row.id || '') === packageSutMetricProfileToAdd);
+    const profileId = String(profile?.id || '');
+    if (!profile || !profileId) { setPackageSutMetricProfileError('Choose a Package Metrics Profile first.'); return; }
+    if (!profileAllowsEnvironment(profile, packageSutMetricsEnvironment || selectedEnvironment)) {
+      setPackageSutMetricProfileError(`Profile ${profileId} does not allow Environment ${packageSutMetricsEnvironment || selectedEnvironment}.`);
+      return;
+    }
+    try {
+      const observability = parseObjectJson(advanced.observability || '{}', 'SUT Metrics observability');
+      const collections = Array.isArray(observability.collections) ? observability.collections.filter(value => value && typeof value === 'object' && !Array.isArray(value)) as Array<Record<string, unknown>> : [];
+      if (collections.some(value => String(value.profile || '') === profileId)) {
+        setPackageSutMetricProfileError(`Profile ${profileId} is already bound in this scenario.`);
+        return;
+      }
+      const aliases = new Set(collections.map(value => String(value.id || value.profile || '')));
+      let alias = profileId;
+      let suffix = 2;
+      while (aliases.has(alias)) {
+        const tail = `-${suffix++}`;
+        alias = `${profileId.slice(0, Math.max(1, 80 - tail.length))}${tail}`;
+      }
+      const profileDefinition = definitionFromCatalogRow(profile);
+      const allowedBindings = asObject(profileDefinition.allowedBindings);
+      const targetIds = Array.isArray(allowedBindings.targets)
+        ? allowedBindings.targets.map(value => String(asObject(value).id || '')).filter(Boolean)
+        : [];
+      const binding: Record<string, unknown> = { id: alias, profile: profileId };
+      if (targetIds.length) binding.targetIds = targetIds;
+      const parameterDefinitions = asObject(allowedBindings.parameters);
+      if (Object.keys(parameterDefinitions).length) binding.parameters = {};
+      collections.push(binding);
+      observability.schemaVersion = 'att-load-observability/v1';
+      observability.collections = collections;
+      updateAdvanced('observability', JSON.stringify(observability, null, 2));
+    } catch (failure) {
+      setPackageSutMetricProfileError(failure instanceof Error ? failure.message : 'Package SUT Metrics Profile could not be added.');
+    }
+  }
   function addSutThresholdRule() {
     setSutThresholdEditorError('');
     const bindingChoice = thresholdBindings.find(item => item.alias === sutThresholdProfile);
@@ -744,7 +906,17 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
 
   const preview = draft?.previewYaml || (draft?.preview ? JSON.stringify(draft.preview, null, 2) : '');
   const hasLiveDraft = Boolean(draft && Date.parse(draft.expiresAt) > Date.now());
-  const thresholdBindings = sutThresholdBindingChoices(sutMetricsProfiles, advanced.observability);
+  const packageSutMetricProfileRows = useMemo(() => sutMetricsProfiles.map(definitionFromCatalogRow), [sutMetricsProfiles]);
+  const effectiveMetricEnvironment = packageSutMetricsEnvironment || selectedEnvironment;
+  const packageOwnedMetricProfiles = useMemo(() => packageSutMetricProfileRows.filter(profile =>
+    profile.packageOwned === true && String(profile.schemaVersion || '') === 'att-sut-metrics-profile/v2'), [packageSutMetricProfileRows]);
+  const legacyMetricProfiles = useMemo(() => packageSutMetricProfileRows.filter(profile => profile.packageOwned !== true), [packageSutMetricProfileRows]);
+  const eligiblePackageSutMetricProfiles = useMemo(() => packageOwnedMetricProfiles.filter(profile =>
+    profileAllowsEnvironment(profile, effectiveMetricEnvironment)), [packageOwnedMetricProfiles, effectiveMetricEnvironment]);
+  const requiredPackageProfileIssues = useMemo(() => packageProfileBindingIssues(packageOwnedMetricProfiles, advanced.observability),
+    [packageOwnedMetricProfiles, advanced.observability]);
+  const thresholdBindings = sutThresholdBindingChoices(sutMetricsProfiles, advanced.observability,
+    packageSutMetricSources, effectiveMetricEnvironment);
   const selectedThresholdBinding = thresholdBindings.find(binding => binding.alias === sutThresholdProfile);
   const selectedThresholdMetrics = selectedThresholdBinding?.metrics || [];
   useEffect(() => {
@@ -884,6 +1056,34 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
             </label>
             <JsonObjectField label="Root execution defaults" value={advanced.execution} onChange={value => updateAdvanced('execution', value)} />
             <JsonArrayField label="Package-relative Testdata paths" value={advanced.testdata} onChange={value => updateAdvanced('testdata', value)} />
+            {packageSutMetricsPackageScoped && <fieldset className="att-sut-package-profile-picker">
+              <legend>Package SUT Metrics Profile</legend>
+              {packageSutMetricsState === 'loading' && <p role="status" aria-busy="true">Loading this Package's explicit SUT Metrics inventory…</p>}
+              {packageSutMetricsState === 'error' && <p role="alert" className="att-inline-error">{packageSutMetricsError}</p>}
+              {packageSutMetricsState === 'ready' && eligiblePackageSutMetricProfiles.length > 0 && <>
+                <label>Profile
+                  <select value={packageSutMetricProfileToAdd} onChange={event => setPackageSutMetricProfileToAdd(event.target.value)}>
+                    <option value="">Choose a Package Profile</option>
+                    {eligiblePackageSutMetricProfiles.map(profile => <option key={String(profile.id)} value={String(profile.id)}>{String(profile.name || profile.id)} · {String(profile.id)}</option>)}
+                  </select>
+                </label>
+                <button type="button" className="button button-quiet" onClick={addPackageSutMetricProfile} disabled={!packageSutMetricProfileToAdd}>Add Profile binding</button>
+                <p className="att-help">The binding uses this Package Profile and its allowed targets. Required targets and parameter values must be complete in the observability JSON before validation.</p>
+              </>}
+              {packageSutMetricsState === 'ready' && sutMetricsProfiles.length === 0 &&
+                <p className="att-help">This Package has no explicitly inventoried SUT Metrics Profiles for the selected Environment.</p>}
+              {packageSutMetricsState === 'ready' && eligiblePackageSutMetricProfiles.length === 0 && legacyMetricProfiles.length > 0 && packageOwnedMetricProfiles.length === 0 &&
+                <p className="att-help">Legacy global Profiles remain available to existing manual bindings and threshold rules. Migrate them into this Package's v2 inventory before creating new bindings.</p>}
+              {packageSutMetricsState === 'ready' && packageOwnedMetricProfiles.length > 0 && eligiblePackageSutMetricProfiles.length === 0 &&
+                <p className="att-help">No explicitly inventoried Package Profile allows Environment {effectiveMetricEnvironment || '(default)'}. The Package inventory is loaded from its declared SUT Metrics files.</p>}
+              {packageSutMetricProfileError && <p role="alert" className="att-inline-error">{packageSutMetricProfileError}</p>}
+              {requiredPackageProfileIssues.length > 0 && <div role="alert" className="att-inline-error">
+                <p>Complete these Package Profile fields before validating:</p>
+                <ul>{requiredPackageProfileIssues.map(issue => <li key={`${issue.field}:${issue.profileId}`}>
+                  <code>{issue.field}</code> ({issue.profileId}): {issue.detail}
+                </li>)}</ul>
+              </div>}
+            </fieldset>}
             <JsonObjectField label="SUT Metrics observability binding (att-load-observability/v1)" value={advanced.observability} onChange={value => updateAdvanced('observability', value)} />
           </div>
           {sutMetricsProfiles.length > 0 && <fieldset className="att-sut-threshold-editor">
@@ -909,7 +1109,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
             {sutThresholdEditorError && <p role="alert" className="att-inline-error">{sutThresholdEditorError}</p>}
           </fieldset>}
           <p className="att-help">Bind only registered Metrics Profile IDs. Prometheus URLs and credentials are configured by a Server administrator and cannot be submitted in a scenario.</p>
-          {sutMetricsProfiles.length > 0 && <details><summary>Profiles available to this account ({sutMetricsProfiles.length})</summary><ul>{sutMetricsProfiles.map(profile => <li key={String(profile.id)}><code>{String(profile.id)}</code> · {String(profile.kind)} / {String(profile.category)} · {String(profile.name || profile.id)}</li>)}</ul></details>}
+          {sutMetricsProfiles.length > 0 && <details><summary>Profiles visible to existing bindings or Package selection ({sutMetricsProfiles.length})</summary><ul>{packageSutMetricProfileRows.map(profile => <li key={String(profile.id)}><code>{String(profile.id)}</code> · {String(profile.schemaVersion || profile.kind || 'profile')} · {String(profile.name || profile.id)}{profile.packageOwned === true ? '' : ' · legacy/global (existing bindings only)'}</li>)}</ul></details>}
           {rawScenarioJson && <details><summary>Current complete scenario JSON</summary><CodeEditor value={rawScenarioJson} language="json" label="Complete scenario JSON" readOnly /></details>}
         </details>
       </section>
@@ -937,7 +1137,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         {draft && <p className="att-draft-expiry">Draft expires {new Date(draft.expiresAt).toLocaleString()}.</p>}
         {preview && <CodeEditor value={preview} language="yaml" label="Server-validated scenario preview" readOnly />}
         <div className="att-review-actions">
-          <button type="button" onClick={() => void validateScenario()} disabled={replayDraftLoading || !policy || (!inlineLoadEnabled&&!replaySourceJobId) || draftState === 'validating' || draftState === 'submitting'}>Validate scenario</button>
+          <button type="button" onClick={() => void validateScenario()} disabled={replayDraftLoading || !policy || (!inlineLoadEnabled&&!replaySourceJobId) || draftState === 'validating' || draftState === 'submitting' || requiredPackageProfileIssues.length > 0}>Validate scenario</button>
           {savedScenario&&<button type="button" onClick={() => setSaveOpen(true)} disabled={!hasLiveDraft || draftState !== 'valid'}>Save Scenario…</button>}
           {!replaySourceJobId&&!savedScenario&&<button type="button" onClick={() => draft?.draftId && onSchedule?.({ packageId: selectedPackage, environment: selectedEnvironment || undefined, draftId: draft.draftId, previewYaml: draft.previewYaml })}
             disabled={!schedulingEnabled || !draft?.draftId || draftState !== 'valid' || !onSchedule}

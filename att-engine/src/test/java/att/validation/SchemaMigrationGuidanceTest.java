@@ -46,7 +46,12 @@ class SchemaMigrationGuidanceTest {
         Path sourceCatalog=Paths.get("").toAbsolutePath().resolve("schemas/catalog.yaml");
         String catalog = new String(Files.readAllBytes(sourceCatalog), StandardCharsets.UTF_8);
         assertTrue(catalog.contains("history/att-flow-v3.0.schema.json"));
-        assertTrue(catalog.contains("globalConfig: att-config-v2.14.schema.json"));
+        assertTrue(catalog.contains("globalConfig: att-config-v2.15.schema.json"));
+        assertTrue(catalog.contains("att-config/v2.14: history/att-config-v2.14.schema.json"));
+        Path currentConfig = SchemaFiles.resolve(packageRoot, "att-config-v2.15.schema.json");
+        Path previousConfig = SchemaFiles.resolveVersion(packageRoot, "att-config/v2.14");
+        assertTrue(Files.isRegularFile(currentConfig));
+        assertTrue(previousConfig.endsWith(Paths.get("schemas/history/att-config-v2.14.schema.json")));
     }
 
     @Test void trustedSchemaCacheSupportsMultipleEngineClassLoadersInOneJvm() throws Exception {
@@ -79,7 +84,7 @@ class SchemaMigrationGuidanceTest {
         DiagnosticException error = assertThrows(DiagnosticException.class,
                 () -> new FrameworkConfigLoader().load(file, root));
         assertTrue(error.detail().contains("att-config/v2.7"));
-        assertTrue(error.detail().contains("att-config/v2.14"));
+        assertTrue(error.detail().contains("att-config/v2.15"));
         assertTrue(error.detail().contains("Upgrade schemaVersion"));
         assertTrue(error.detail().contains("Schema validation failed"));
         assertEquals("$ATT_PACKAGE_ROOT/config/config.yaml", error.file());
@@ -89,13 +94,13 @@ class SchemaMigrationGuidanceTest {
 
     @Test void unrelatedInvalidFieldsDoNotClaimVersionBumpIsEnough() throws Exception {
         Path oldSchema = root.resolve("schemas/history/att-config-v2.8.schema.json");
-        Path currentSchema = root.resolve("schemas/att-config-v2.14.schema.json");
+        Path currentSchema = root.resolve("schemas/att-config-v2.15.schema.json");
         Map<String, Object> descriptor = new LinkedHashMap<String, Object>();
         descriptor.put("schemaVersion", "att-config/v2.8");
         descriptor.put("timeoutMs", -1);
         SchemaMigrationGuidance.MigrationException error = assertThrows(SchemaMigrationGuidance.MigrationException.class,
                 () -> SchemaMigrationGuidance.verify(oldSchema, currentSchema, descriptor,
-                        "att-config/v2.8", "att-config/v2.14"));
+                        "att-config/v2.8", "att-config/v2.15"));
         assertTrue(error.getMessage().contains("timeoutMs"));
         assertFalse(error.getMessage().contains("Upgrade schemaVersion"));
         assertTrue(error.getMessage().contains("version change alone is not sufficient"));

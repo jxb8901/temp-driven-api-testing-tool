@@ -272,6 +272,74 @@ export interface ConfigurationComparisonQuery {
   includeAllFields?: boolean;
 }
 
+export interface PackageSutMetricsCatalog {
+  schemaVersion: 'att-package-sut-metrics-catalog/v1' | string;
+  packageId: string;
+  environment: string;
+  canEdit?: boolean;
+  manifestDigest?: string;
+  packageRevision?: string;
+  runtimeConfigRevision?: string;
+  resourceProvenance?: Array<Record<string, unknown>>;
+  metricSources: Array<Record<string, unknown>>;
+  groups: Array<Record<string, unknown>>;
+  profiles: Array<Record<string, unknown>>;
+}
+
+export type PackageSutMetricsResourceKind = 'source' | 'group' | 'profile';
+
+export interface PackageSutMetricsResource {
+  packageId: string;
+  kind: PackageSutMetricsResourceKind;
+  id: string;
+  path: string;
+  resourceDigest: string;
+  source: string;
+  canEdit: boolean;
+}
+
+export type PackageSutMetricsResourceDraftInput = {
+  resourcePath: string;
+  environment: string;
+  source: string;
+  expectedResourceDigest: string;
+} & ({ candidateManifestSource: string; expectedManifestDigest: string }
+  | { candidateManifestSource?: never; expectedManifestDigest?: never });
+
+export interface PackageSutMetricsDraftValidation {
+  valid?: boolean;
+  diagnostics?: Array<Record<string, unknown>>;
+  resourceDigest?: string;
+  candidateManifestDigest?: string;
+  validationRevision?: string;
+}
+
+export interface PackageSutMetricsDraft {
+  draftId: string;
+  packageId: string;
+  resourcePath: string;
+  expectedResourceDigest: string;
+  expectedManifestDigest?: string;
+  candidateManifestDigest?: string;
+  manifestDigest?: string;
+  beforeManifestDigest?: string;
+  beforeResourceDigest?: string;
+  recoveredExistingResource?: boolean;
+  candidateResourceDigest?: string;
+  validationRevision?: string;
+  configurationIdentity?: string;
+  activationMode?: 'resource-then-manifest';
+  expiresAt?: string;
+  state: 'draft' | 'validated' | 'reviewed' | string;
+  validation?: PackageSutMetricsDraftValidation;
+  published?: boolean;
+  refreshRequired?: boolean;
+  resourceDigest?: string;
+  environment?: string;
+}
+
+export type PackageSutMetricsDraftAction = 'validate' | 'review' | 'publish' | 'discard';
+
 /** Operation-level facade implemented by the shared same-origin API module. */
 export interface ExplorerApi {
   listResources(packageId: string, query: ResourceQuery, signal?: AbortSignal): Promise<ResourcePage>;
@@ -284,6 +352,14 @@ export interface ExplorerApi {
   listConfigurationFiles?(packageId: string, path?: string, query?: string, offset?: number, signal?: AbortSignal): Promise<ConfigurationFilePage>;
   getConfigurationFileSource?(packageId: string, path: string, origin?: string, signal?: AbortSignal, referenceId?: string): Promise<SourceProjection>;
   getTestdataRecords?(packageId: string, descriptorId: string, query: { environment?: string; offset?: number; limit?: number; previewGenerated?: boolean }, signal?: AbortSignal): Promise<TestdataRecordsResponse>;
+  getPackageSutMetricsCatalog?(packageId: string, environment?: string, signal?: AbortSignal): Promise<PackageSutMetricsCatalog>;
+  getPackageSutMetricsResource?(packageId: string, kind: PackageSutMetricsResourceKind, id: string, signal?: AbortSignal): Promise<PackageSutMetricsResource>;
+  createPackageSutMetricsDraft?(packageId: string, input: PackageSutMetricsResourceDraftInput, signal?: AbortSignal): Promise<PackageSutMetricsDraft>;
+  packageSutMetricsDraftAction?(packageId: string, draftId: string, action: PackageSutMetricsDraftAction, signal?: AbortSignal): Promise<PackageSutMetricsDraft>;
+  getPackageManifest?(packageId: string, view: 'source', environment?: string, signal?: AbortSignal): Promise<{
+    packageId: string; manifestDigest: string; present: boolean; canEdit: boolean;
+    available?: boolean; text?: string; redacted?: boolean;
+  }>;
   getDebugForm(identity: ResourceIdentity, environment?: string, signal?: AbortSignal): Promise<DebugFormResponse>;
   previewRun?(input: import('../run/RunPage').RunDefinition, signal?: AbortSignal): Promise<DraftResponse>;
   submitRun?(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob>;

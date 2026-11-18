@@ -1,0 +1,12 @@
+schemaVersion: att-config/v2.15
+environment: SIT
+
+sutMetrics:
+  dataSources:
+    - config/sut-metrics/prometheus-sit.yaml
+
+environments:
+  UAT:
+    sutMetrics:
+      dataSources:
+        - config/sut-metrics/prometheus-uat.yaml

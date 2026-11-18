@@ -40,7 +40,8 @@ public final class ApiServlet extends HttpServlet {
     @Override protected void service(HttpServletRequest req,HttpServletResponse res) throws ServletException,IOException {
         long requestStarted=System.nanoTime();
         long inspectionStarted=System.nanoTime();
-        boolean inspection=resourcePath(path(req))||configurationPath(path(req))||path(req).matches("/packages/[^/]+/load-catalog(?:/(?:source|validate|detail))?");
+        boolean inspection=resourcePath(path(req))||configurationPath(path(req))||path(req).matches("/packages/[^/]+/load-catalog(?:/(?:source|validate|detail))?")
+                ||path(req).matches("/packages/[^/]+/sut-metrics/(?:catalog|resource)");
         try { serviceRequest(req,res); }
         finally {
             runtime.recordApiRequest(res.getStatus(),System.nanoTime()-requestStarted);
@@ -60,6 +61,7 @@ public final class ApiServlet extends HttpServlet {
         String path=path(req);String requestId=requestId(req,res);
         if(path.equals("/sut-metrics/sources")||path.equals("/sut-metrics/profiles")
                 ||path.equals("/sut-metrics/metric-sources")||path.equals("/sut-metrics/groups")
+                ||path.matches("/packages/[^/]+/sut-metrics/(?:catalog|resource|drafts(?:/.*)?)")
                 ||path.matches("/jobs/[^/]+/sut-metrics(?:/.*)?")
                 ||path.matches("/jobs/[^/]+/load-report/v2/.*"))
             res.setHeader("Cache-Control","private, no-store");
@@ -124,6 +126,18 @@ public final class ApiServlet extends HttpServlet {
                     default -> runtime.sutMetricGroups(principal,admin);
                 };
                 response.put("requestId",requestId);json(res,200,response);return;
+            }
+            if(path.matches("/packages/[^/]+/sut-metrics/catalog")) {
+                boolean admin;
+                try {admin=systemAdminCapability(req,principal);}
+                catch(Exception unavailable){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return;}
+                if(!requireSutMetricsReadAccess(req,res,requestId,principal))return;
+                Map<String,Object> response=runtime.packageSutMetricsCatalog(segment(path,2),req.getParameter("environment"),principal,admin);
+                response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;
+            }
+            if(path.matches("/packages/[^/]+/sut-metrics/resource")) {
+                if(!requireSutMetricsReadAccess(req,res,requestId,principal))return;
+                packageSutMetricsResourceGet(req,res,path,requestId,principal);return;
             }
             if(!requireOperator(req,res,requestId))return;
             if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,principal);return;}
@@ -271,7 +285,8 @@ public final class ApiServlet extends HttpServlet {
     }
     @Override protected void doPost(HttpServletRequest req,HttpServletResponse res) throws IOException {
         String requestId=requestId(req,res),path=path(req);String authorizationPrincipal=principal(req);
-        if(path.startsWith("/admin/sut-metrics/")||"/sut-metrics/preview".equals(path))
+        if(path.startsWith("/admin/sut-metrics/")||"/sut-metrics/preview".equals(path)
+                ||path.matches("/packages/[^/]+/sut-metrics/drafts(?:/.*)?"))
             res.setHeader("Cache-Control","private, no-store");
         if(path.startsWith("/auth/")){authPost(req,res,path,requestId);return;}
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
@@ -334,6 +349,9 @@ public final class ApiServlet extends HttpServlet {
         if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,authorizationPrincipal);return;}
         if(path.matches("/packages/[^/]+/package-configuration/(?:drafts(?:/[^/]+/(?:validate|review|publish|discard))?|rollback)")) {
             manifestPost(req,res,path,requestId,authorizationPrincipal);return;
+        }
+        if(path.matches("/packages/[^/]+/sut-metrics/drafts(?:/[^/]+/(?:validate|review|publish|discard))?")) {
+            packageSutMetricsResourcePost(req,res,path,requestId,authorizationPrincipal);return;
         }
         if(path.matches("/jobs/[^/]+/artifacts/retry")){if(!checkOrigin(req,res,requestId,false))return;try{String id=segment(path,2);runtime.requireJobOwner(id,authorizationPrincipal);runtime.retryArtifactArchive(id);json(res,202,Map.of("archiveStatus","PENDING","requestId",requestId));return;}catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}catch(IllegalArgumentException invalid){error(res,409,"ATT-SERVER-ARCHIVE-NOT-READY",safeDetail(invalid),requestId);return;}catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The archive retry could not be scheduled",requestId);return;}}
         if("/jobs/delete".equals(path)||"/jobs/pin".equals(path)||path.matches("/jobs/[^/]+/(pin|delete)")) {
@@ -1083,6 +1101,66 @@ public final class ApiServlet extends HttpServlet {
     private static boolean parseOptionalBoolean(String raw,String name){if(raw==null||raw.isEmpty())return false;if("true".equalsIgnoreCase(raw))return true;if("false".equalsIgnoreCase(raw))return false;throw new IllegalArgumentException(name+" must be true or false");}
     private static String principalSearch(HttpServletRequest req){String value=req.getParameter("principal");if(value==null)return null;value=value.strip();if(value.codePointCount(0,value.length())>120)throw new IllegalArgumentException("principal search must be at most 120 characters");for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))throw new IllegalArgumentException("principal search contains an invalid character");return value.isEmpty()?null:value;}
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
+    private void packageSutMetricsResourceGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String actor) throws IOException {
+        try {
+            Map<String,Object> result=runtime.packageSutMetricsResource(segment(path,2),req.getParameter("kind"),req.getParameter("id"),actor);
+            result.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,result);
+        } catch(ServerRuntime.StaleCursorException stale){error(res,409,"ATT-PACKAGE-SUT-METRICS-STALE","Package SUT Metrics changed; refresh the inventory",requestId);}
+          catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","Package SUT Metrics resource was not found",requestId);}
+          catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+          catch(Exception failure){error(res,500,"ATT-PACKAGE-SUT-METRICS-FAILED","Package SUT Metrics resource could not be read",requestId);getServletContext().log("ATT Package SUT Metrics resource read failed id="+requestId,failure);}
+    }
+    private void packageSutMetricsResourcePost(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String actor) throws IOException {
+        res.setHeader("Cache-Control","private, no-store");
+        if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
+        if(!checkOrigin(req,res,requestId,false))return;
+        try {
+            JsonNode input=readSutMetricsBody(req);
+            if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
+            String packageId=segment(path,2);String[] parts=path.split("/");Map<String,Object> result;
+            if(parts.length==5) {
+                java.util.Iterator<String> fields=input.fieldNames();
+                while(fields.hasNext())if(!Set.of("resourcePath","environment","source","expectedResourceDigest",
+                        "candidateManifestSource","expectedManifestDigest").contains(fields.next()))
+                    throw new IllegalArgumentException("Unsupported Package SUT Metrics resource draft field");
+                if(!input.path("resourcePath").isTextual()||!input.path("source").isTextual()
+                        ||!input.path("expectedResourceDigest").isTextual())
+                    throw new IllegalArgumentException("resourcePath, source, and expectedResourceDigest are required");
+                boolean hasCandidateManifest=input.has("candidateManifestSource");
+                boolean hasExpectedManifestDigest=input.has("expectedManifestDigest");
+                if(hasCandidateManifest!=hasExpectedManifestDigest
+                        ||(hasCandidateManifest&&(!input.path("candidateManifestSource").isTextual()
+                        ||!input.path("expectedManifestDigest").isTextual())))
+                    throw new IllegalArgumentException("candidateManifestSource and expectedManifestDigest must be supplied together as strings");
+                String environment=null;
+                if(input.has("environment")&&!input.path("environment").isNull()) {
+                    if(!input.path("environment").isTextual())throw new IllegalArgumentException("environment must be a string");
+                    environment=input.path("environment").asText();
+                }
+                result=runtime.manifestPublisher.stageResource(packageId,actor,input.path("resourcePath").asText(),environment,
+                        input.path("source").asText(),input.path("expectedResourceDigest").asText(),
+                        hasCandidateManifest?input.path("candidateManifestSource").asText():null,
+                        hasExpectedManifestDigest?input.path("expectedManifestDigest").asText():null);
+            } else {
+                if(input.size()!=0)throw new IllegalArgumentException("Package SUT Metrics draft actions accept an empty object");
+                String id=parts[5];
+                result=switch(parts[6]) {
+                    case "validate" -> runtime.manifestPublisher.validateResource(packageId,actor,id);
+                    case "review" -> runtime.manifestPublisher.reviewResource(packageId,actor,id);
+                    case "publish" -> runtime.manifestPublisher.publishResource(packageId,actor,id);
+                    case "discard" -> {runtime.manifestPublisher.discardResource(packageId,actor,id);yield new LinkedHashMap<>(Map.of("discarded",true));}
+                    default -> throw new IllegalArgumentException("Unsupported Package SUT Metrics draft action");
+                };
+            }
+            result.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,parts.length==5?201:200,result);
+        } catch(SutMetricsRequestTooLargeException oversized){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Package SUT Metrics resource draft exceeds the request size limit",requestId);}
+          catch(PackageManifestPublisher.Denied denied){error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);}
+          catch(PackageManifestPublisher.Missing missing){error(res,404,"ATT-SERVER-NOT-FOUND","Package SUT Metrics draft was not found",requestId);}
+          catch(PackageManifestPublisher.Conflict conflict){error(res,409,"ATT-PACKAGE-SOURCE-CONFLICT","Package or configuration sources changed; validate a new draft",requestId);}
+          catch(PackageManifestPublisher.Capacity full){error(res,429,"ATT-PACKAGE-SOURCE-CAPACITY","Package draft capacity is full",requestId);}
+          catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+          catch(Exception failure){error(res,500,"ATT-PACKAGE-SUT-METRICS-FAILED","Package SUT Metrics draft could not be completed",requestId);getServletContext().log("ATT Package SUT Metrics draft failed id="+requestId,failure);}
+    }
     private void manifestGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String actor) throws IOException {
         String[] parts=path.split("/");String action=parts.length==4?"effective":parts[4];
         try {

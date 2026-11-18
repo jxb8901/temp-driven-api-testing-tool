@@ -1,0 +1,12 @@
+schemaVersion: att-package/v2
+metadata:
+  name: Payments LOAD Package
+  description: Package-local SUT Metrics migration example
+defaultEnvironment: SIT
+observability:
+  metricSources:
+    - load/sut-metrics/sources/app-runtime.yaml
+  groups:
+    - load/sut-metrics/groups/app-servers.yaml
+  profiles:
+    - load/sut-metrics/profiles/basic.yaml

@@ -1,4 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type UIEvent } from 'react';
+import { parseDocument } from 'yaml';
 import { AppShellContext } from '../../AppShell';
 import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
@@ -7,10 +8,22 @@ import { SourceViewer } from './SourceViewer';
 import { ActionInspector } from './ActionInspector';
 import { CodeEditor } from '../code/CodeEditor';
 import { TypedSidecarForm } from './TypedSidecarForm';
-import type { DebugDraftRequest, Diagnostic, DraftResponse, ExplorerApi, ExplorerPageProps, JsonObject, ResourceIdentity, ResourceReference, ResourceSortField, ResourceSummary } from './types';
+import type { DebugDraftRequest, Diagnostic, DraftResponse, ExplorerApi, ExplorerPageProps, JsonObject, PackageSutMetricsCatalog,
+  PackageSutMetricsDraft, PackageSutMetricsDraftAction, PackageSutMetricsResource, PackageSutMetricsResourceKind,
+  PackageSutMetricsResourceDraftInput, ResourceIdentity, ResourceReference, ResourceSortField, ResourceSummary } from './types';
 
 const MAX_DEFINITION_CHARACTERS = 100_000;
 const RESOURCE_PAGE_SIZE = 50;
+const EMPTY_PACKAGE_RESOURCE_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
+function createdPackageResourceIdentityMatches(draft: PackageSutMetricsDraft): boolean {
+  const candidateDigest = draft.candidateResourceDigest;
+  if (typeof draft.recoveredExistingResource !== 'boolean'
+    || typeof candidateDigest !== 'string' || !/^[a-f0-9]{64}$/i.test(candidateDigest)) return false;
+  return draft.recoveredExistingResource
+    ? draft.expectedResourceDigest !== EMPTY_PACKAGE_RESOURCE_SHA256 && draft.expectedResourceDigest === candidateDigest
+    : draft.expectedResourceDigest === EMPTY_PACKAGE_RESOURCE_SHA256;
+}
 
 interface ExplorerListSnapshot {
   query: string;
@@ -117,6 +130,667 @@ function ExplorerReference({ reference, onOpen, onOpenFile, sourceIdentity }: {
   const valid = Boolean(referenceType && ['case', 'template', 'flow', 'tool'].includes(referenceType) && reference.resourceId && reference.resolution !== 'unresolved');
   return <li>{valid ? <button type="button" onClick={() => onOpen({ type: referenceType!, resourceId: reference.resourceId!, tab: 'definition' })}>{label}</button> : <span>{label}</span>}
     <span>{reference.resolution === 'unresolved' ? 'Unresolved reference' : reference.type || reference.resolution || 'unresolved'}</span></li>;
+}
+
+function catalogRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function catalogText(value: unknown, fallback = ''): string {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 256) : fallback;
+}
+
+function packageRelativeCatalogPath(value: unknown): string {
+  if (typeof value !== 'string' || !value || value.length > 1024 || value.startsWith('/') || value.includes('\\')
+    || /^[a-z][a-z\d+.-]*:/i.test(value) || /[\u0000-\u001f\u007f]/.test(value)) return '—';
+  const parts = value.split('/');
+  return parts.some(part => !part || part === '.' || part === '..') ? '—' : value;
+}
+
+function packageCatalogResourceProvenance(value: unknown, index: number, zh: boolean) {
+  const item = catalogRecord(value);
+  const kindLabels: Record<string, string> = zh
+    ? { metricSource: '指標來源', group: '指標群組', profile: '指標設定檔', 'package-catalog': 'Package Manifest' }
+    : { metricSource: 'Metric Source', group: 'Metric Group', profile: 'Metrics Profile', 'package-catalog': 'Package Manifest' };
+  const kind = typeof item.kind === 'string' ? kindLabels[item.kind] || (zh ? `資源 ${index + 1}` : `Resource ${index + 1}`)
+    : (zh ? `資源 ${index + 1}` : `Resource ${index + 1}`);
+  const rawId = catalogText(item.id);
+  const id = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(rawId) ? rawId : '—';
+  const path = packageRelativeCatalogPath(item.path);
+  const digest = typeof item.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(item.sha256) ? item.sha256 : '—';
+  return { kind, id, path, digest };
+}
+
+function packageCatalogLabel(value: unknown, index: number): { id: string; name: string; kind: string; connection: string } {
+  const item = catalogRecord(value);
+  const id = catalogText(item.id || item.logicalId, `Definition ${index + 1}`);
+  const name = catalogText(item.name, id);
+  const kind = catalogText(item.kind || item.type);
+  const connection = catalogRecord(item.connection);
+  const connectionKind = catalogText(connection.kind);
+  const connectionId = catalogText(connection.id);
+  return { id, name, kind, connection: connectionKind && connectionId ? `${connectionKind} · ${connectionId}` : '' };
+}
+
+function packageSutMetricsResourceLabel(kind: PackageSutMetricsResourceKind, zh: boolean): string {
+  if (zh) return kind === 'source' ? '指標來源' : kind === 'group' ? '指標群組' : '指標設定檔';
+  return kind === 'source' ? 'Metric Source' : kind === 'group' ? 'Metric Group' : 'Metrics Profile';
+}
+
+function packageSutMetricsError(error: unknown, zh: boolean): string {
+  const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 0;
+  if (status === 401) return zh ? '登入工作階段已過期，請重新登入後再試。' : 'Your session expired. Sign in again before continuing.';
+  if (status === 403) return zh ? '目前帳戶沒有此 Package 資源的檢視或編輯權限。' : 'Your account cannot view or edit this Package resource.';
+  if (status === 404) return zh ? 'Package 資源或草稿已不存在。請重新載入目錄。' : 'The Package resource or draft is unavailable. Reload the catalog.';
+  if (status === 409) return zh ? 'Package 資源已變更。請捨棄草稿並重新載入資源。' : 'The Package resource changed. Discard the draft and reload the resource.';
+  if (status === 400 || status === 422)
+    return zh ? '伺服器拒絕此草稿操作。請檢查下方驗證診斷，捨棄草稿後再修正來源。' : 'The Server rejected this draft action. Review the validation details below, discard the draft, and edit the source.';
+  if (status === 429 || status === 503 || status === 504)
+    return zh ? 'Package SUT Metrics 暫時無法使用，請稍後重試。' : 'Package SUT Metrics is temporarily unavailable. Retry shortly.';
+  return zh ? 'Package SUT Metrics 請求失敗。請重新載入後再試。' : 'The Package SUT Metrics request failed. Reload and retry.';
+}
+
+function safePackageDiagnosticText(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 2048) return '';
+  return value.trim().replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\b(password|passwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]')
+    .replace(/\b([a-z][a-z\d+.-]*:\/\/)[^/@\s:]+:[^/@\s]+@/gi, '$1[REDACTED]@')
+    .replace(/(?:\/Users\/[^\s,;]+|\/home\/[^\s,;]+|[A-Za-z]:\\[^\s,;]+)/g, '[REDACTED_PATH]')
+    .slice(0, 512);
+}
+
+function packageSutMetricsDiagnostic(value: unknown, index: number): { key: string; text: string } {
+  const item = catalogRecord(value);
+  const code = safePackageDiagnosticText(item.code);
+  const text = safePackageDiagnosticText(item.summary || item.detail || item.message) || `Validation finding ${index + 1}`;
+  const rawField = safePackageDiagnosticText(item.field);
+  const rawPath = item.path === undefined ? '' : packageRelativeCatalogPath(item.path);
+  const field = rawField || (rawPath && rawPath !== '—' ? rawPath : '');
+  return { key: `${code}:${field}:${index}`, text: `${code ? `${code}: ` : ''}${field ? `${field} · ` : ''}${text}` };
+}
+
+function packageSutMetricsFailureDiagnostics(error: unknown): unknown[] {
+  const item = catalogRecord(error);
+  const diagnostics = Array.isArray(item.diagnostics) ? item.diagnostics.slice(0, 64) : [];
+  const detail = safePackageDiagnosticText(item.details) || safePackageDiagnosticText(item.message);
+  if (detail && !diagnostics.some(value => {
+    const diagnostic = catalogRecord(value);
+    return safePackageDiagnosticText(diagnostic.summary || diagnostic.detail || diagnostic.message) === detail;
+  })) diagnostics.unshift({ code: item.code, summary: detail });
+  return diagnostics;
+}
+
+function packageResourceInventoryKey(kind: PackageSutMetricsResourceKind): 'metricSources' | 'groups' | 'profiles' {
+  return kind === 'source' ? 'metricSources' : kind === 'group' ? 'groups' : 'profiles';
+}
+
+function packageSutMetricsStarter(kind: PackageSutMetricsResourceKind, id: string): string {
+  const lines = kind === 'source' ? [
+    'schemaVersion: att-sut-metrics-metric-source/v1', `id: ${id}`, 'name: New Metric Source',
+    'connection:', '  kind: DATA_SOURCE', '  id: replace_data_source', 'fetch:', '  id: default-fetch',
+    '  mode: prometheus-range', '  query: replace_metric_query', '  parameters: {}', '  sampling: range', '  step: 30s',
+    'mapping:', '  outputs:', '    - id: replace_metric', '      title: Replace metric', '      unit: count', '      kind: gauge',
+    'limits:', '  maxRows: 1024', '  maxSeries: 128', '  maxSamples: 250000', '  maxArtifactBytes: 8388608',
+  ] : kind === 'group' ? [
+    'schemaVersion: att-sut-metrics-group/v1', `id: ${id}`, 'title: New Metric Group', 'order: 10', 'match:',
+    '  metricIds:', '    - replace_metric', 'groupBy: []', 'display: auto',
+  ] : [
+    'schemaVersion: att-sut-metrics-profile/v2', `id: ${id}`, 'name: New Metrics Profile', 'metricSourceIds:',
+    '  - replace_metric_source', 'groupIds: []', 'allowedBindings:', '  environments: []', '  targets: []', '  tenants: []', '  parameters: {}',
+  ];
+  return lines.join('\n') + '\n';
+}
+
+function normalizedManifestValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalizedManifestValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, normalizedManifestValue(item)]));
+  }
+  return value;
+}
+
+function candidatePackageManifest(source: string, kind: PackageSutMetricsResourceKind, id: string, zh: boolean): { path: string; source: string } {
+  const fail = (english: string, chinese: string): never => { throw new Error(zh ? chinese : english); };
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(id))
+    fail('Use a resource ID with letters, numbers, dots, underscores, or hyphens (up to 80 characters).', '資源 ID 只能包含英文字母、數字、句點、底線或連字號，長度最多 80 個字元。');
+  if (new TextEncoder().encode(source).length > 262_144) fail('The Package Manifest exceeds the source size limit.', 'Package Manifest 超出來源大小限制。');
+  let document;
+  try { document = parseDocument(source, { uniqueKeys: true, strict: true }); }
+  catch { return fail('The Package Manifest source could not be parsed safely.', '無法安全解析 Package Manifest 來源。'); }
+  if (document.errors.length > 0) fail('The Package Manifest source is invalid YAML.', 'Package Manifest 來源不是有效的 YAML。');
+  let parsedManifest: unknown;
+  try { parsedManifest = document.toJS({ maxAliasCount: 32 }); }
+  catch { return fail('The Package Manifest source could not be parsed safely.', '無法安全解析 Package Manifest 來源。'); }
+  const root = catalogRecord(parsedManifest);
+  if (root.schemaVersion !== 'att-package/v2')
+    fail('Creating Package SUT Metrics resources requires migrating the Package inventory to att-package/v2 first.', '建立 Package SUT Metrics 資源前，必須先把 Package inventory 遷移至 att-package/v2。');
+  const pathKind = kind === 'source' ? 'sources' : kind === 'group' ? 'groups' : 'profiles';
+  const path = `load/sut-metrics/${pathKind}/${id}.yaml`;
+  let observability = root.observability;
+  if (observability === undefined) {
+    document.setIn(['observability'], {});
+    observability = {};
+  }
+  if (!observability || typeof observability !== 'object' || Array.isArray(observability))
+    fail('The Package SUT Metrics inventory has an invalid structure.', 'Package SUT Metrics inventory 結構無效。');
+  const inventory = observability as Record<string, unknown>;
+  const keys = ['metricSources', 'groups', 'profiles'] as const;
+  for (const key of keys) {
+    const entries = inventory[key];
+    if (entries !== undefined && (!Array.isArray(entries) || entries.some(item => typeof item !== 'string')))
+      fail('The Package SUT Metrics inventory has an invalid structure.', 'Package SUT Metrics inventory 結構無效。');
+    if (Array.isArray(entries) && entries.includes(path))
+      fail('This resource path is already listed in the Package inventory.', '此資源路徑已列在 Package inventory 中。');
+  }
+  const targetKey = packageResourceInventoryKey(kind);
+  const targetEntries = Array.isArray(inventory[targetKey]) ? inventory[targetKey] as string[] : [];
+  document.setIn(['observability', targetKey], [...targetEntries, path]);
+  const candidate = document.toString({ lineWidth: 100 });
+  let candidateDocument;
+  try { candidateDocument = parseDocument(candidate, { uniqueKeys: true, strict: true }); }
+  catch { return fail('The candidate Package Manifest could not be verified.', '無法驗證候選 Package Manifest。'); }
+  if (candidateDocument.errors.length > 0) fail('The candidate Package Manifest could not be verified.', '無法驗證候選 Package Manifest。');
+  let expected: Record<string, unknown>;
+  try { expected = JSON.parse(JSON.stringify(root)) as Record<string, unknown>; }
+  catch { return fail('The Package Manifest contains unsupported values.', 'Package Manifest 含有不支援的值。'); }
+  const expectedObservability = catalogRecord(expected.observability);
+  expected.observability = expectedObservability;
+  expectedObservability[targetKey] = [...targetEntries, path];
+  let parsedCandidate: unknown;
+  try { parsedCandidate = candidateDocument.toJS({ maxAliasCount: 32 }); }
+  catch { return fail('The candidate Package Manifest could not be verified.', '無法驗證候選 Package Manifest。'); }
+  if (JSON.stringify(normalizedManifestValue(parsedCandidate)) !== JSON.stringify(normalizedManifestValue(expected)))
+    fail('The candidate Package Manifest changes more than one inventory path.', '候選 Package Manifest 除新增一個 inventory 路徑外，還包含其他變更。');
+  if (new TextEncoder().encode(candidate).length > 262_144)
+    fail('The candidate Package Manifest exceeds the source size limit.', '候選 Package Manifest 超出來源大小限制。');
+  return { path, source: candidate };
+}
+
+interface NewPackageSutMetricsResource extends PackageSutMetricsResource {
+  candidateManifestSource: string;
+  expectedManifestDigest: string;
+}
+
+function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, locale, registerUnsavedChanges }: {
+  api: ExplorerApi;
+  packageId: string;
+  environment: string;
+  refreshKey: number;
+  locale: string;
+  registerUnsavedChanges: ExplorerPageProps['registerUnsavedChanges'];
+}) {
+  const zh = locale === 'zh-Hant';
+  const [catalog, setCatalog] = useState<PackageSutMetricsCatalog | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [requestVersion, setRequestVersion] = useState(0);
+  const [selection, setSelection] = useState<{ kind: PackageSutMetricsResourceKind; id: string } | null>(null);
+  const [resource, setResource] = useState<PackageSutMetricsResource | null>(null);
+  const [resourceSource, setResourceSource] = useState('');
+  const [baselineSource, setBaselineSource] = useState('');
+  const [newResource, setNewResource] = useState<NewPackageSutMetricsResource | null>(null);
+  const [newResourceSource, setNewResourceSource] = useState('');
+  const [newResourceKind, setNewResourceKind] = useState<PackageSutMetricsResourceKind>('source');
+  const [newResourceId, setNewResourceId] = useState('');
+  const [newResourceBusy, setNewResourceBusy] = useState(false);
+  const [newResourceError, setNewResourceError] = useState('');
+  const [resourceLoading, setResourceLoading] = useState(false);
+  const [resourceError, setResourceError] = useState('');
+  const [resourceVersion, setResourceVersion] = useState(0);
+  const [draft, setDraft] = useState<PackageSutMetricsDraft | null>(null);
+  const [draftBusy, setDraftBusy] = useState(false);
+  const [draftError, setDraftError] = useState('');
+  const [draftFailureDiagnostics, setDraftFailureDiagnostics] = useState<unknown[]>([]);
+  const [draftMessage, setDraftMessage] = useState('');
+  const [stale, setStale] = useState(false);
+  const activeResource = newResource || resource;
+  const activeSelection = newResource ? { kind: newResource.kind, id: newResource.id } : selection;
+  const activeSource = newResource ? newResourceSource : resourceSource;
+  const sourceDirty = !!newResource || (!!resource && resourceSource !== baselineSource);
+  const hasUnpublishedChanges = sourceDirty || !!draft;
+
+  useEffect(() => registerUnsavedChanges(hasUnpublishedChanges, 'unpublished Package SUT Metrics changes'),
+    [hasUnpublishedChanges, registerUnsavedChanges]);
+
+  useEffect(() => {
+    const load = api.getPackageSutMetricsCatalog;
+    if (!load) {
+      setCatalog(null);
+      setError(zh ? '此 Server client 不支援 Package SUT Metrics 目錄。' : 'This Server client does not support the Package SUT Metrics catalog.');
+      setLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setLoading(true);
+    setError('');
+    load(packageId, environment || undefined, controller.signal).then(value => {
+      if (!controller.signal.aborted) setCatalog(value);
+    }).catch(() => {
+      if (!controller.signal.aborted) {
+        setCatalog(null);
+        setError(zh ? '無法載入 Package SUT Metrics 目錄。請重試。' : 'The Package SUT Metrics catalog could not be loaded. Retry.');
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false);
+    });
+    return () => controller.abort();
+  }, [api, packageId, environment, refreshKey, requestVersion, zh]);
+
+  useEffect(() => {
+    setSelection(null); setResource(null); setResourceSource(''); setBaselineSource(''); setNewResource(null);
+    setNewResourceSource(''); setNewResourceError(''); setDraft(null);
+    setResourceError(''); setDraftError(''); setDraftFailureDiagnostics([]); setDraftMessage(''); setStale(false);
+  }, [packageId, environment]);
+
+  useEffect(() => {
+    if (!selection) {
+      setResource(null); setResourceSource(''); setBaselineSource(''); setResourceLoading(false);
+      return;
+    }
+    const load = api.getPackageSutMetricsResource;
+    if (!load) {
+      setResource(null); setResourceError(zh ? '此 Server client 不支援載入 Package 資源來源。' : 'This Server client does not support loading Package resource source.');
+      setResourceLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setResource(null); setResourceSource(''); setBaselineSource(''); setResourceLoading(true); setResourceError('');
+    setDraft(null); setDraftError(''); setDraftFailureDiagnostics([]); setDraftMessage(''); setStale(false);
+    load(packageId, selection.kind, selection.id, controller.signal).then(value => {
+      if (controller.signal.aborted) return;
+      const digestValid = typeof value.resourceDigest === 'string' && /^[a-f0-9]{64}$/i.test(value.resourceDigest);
+      const path = packageRelativeCatalogPath(value.path);
+      if (value.packageId !== packageId || value.kind !== selection.kind || value.id !== selection.id
+        || path === '—' || !digestValid || typeof value.source !== 'string' || typeof value.canEdit !== 'boolean') {
+        setResourceError(zh ? '伺服器傳回的 Package 資源來源資料不完整。請重新載入目錄。' : 'The Server returned incomplete Package resource source metadata. Reload the catalog.');
+        return;
+      }
+      const normalized = { ...value, path };
+      setResource(normalized); setResourceSource(value.source); setBaselineSource(value.source);
+    }).catch(failure => {
+      if (!controller.signal.aborted) {
+        setResource(null);
+        setResourceError(packageSutMetricsError(failure, zh));
+      }
+    }).finally(() => { if (!controller.signal.aborted) setResourceLoading(false); });
+    return () => controller.abort();
+  }, [api, packageId, selection?.kind, selection?.id, resourceVersion, zh]);
+
+  const sources = Array.isArray(catalog?.metricSources) ? catalog.metricSources.slice(0, 128) : [];
+  const groups = Array.isArray(catalog?.groups) ? catalog.groups.slice(0, 128) : [];
+  const profiles = Array.isArray(catalog?.profiles) ? catalog.profiles.slice(0, 128) : [];
+  const resourceProvenance = Array.isArray(catalog?.resourceProvenance) ? catalog.resourceProvenance.slice(0, 128) : [];
+  const total = sources.length + groups.length + profiles.length;
+  const returnedEnvironment = catalogText(catalog?.environment, environment || (zh ? '預設環境' : 'Default environment'));
+  const revisionLabel = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value) ? value : '—';
+  const catalogCanEdit = !loading && catalog?.canEdit === true;
+  const resourceEditable = catalogCanEdit && activeResource?.canEdit === true;
+  const resourceCanEdit = resourceEditable && !stale;
+  const editorWritable = resourceCanEdit && !draft && !draftBusy && !resourceLoading;
+  const selectionLocked = sourceDirty || !!draft || draftBusy || newResourceBusy;
+  const selectedEnvironment = catalogText(catalog?.environment, environment);
+  const resourceLabel = activeSelection ? packageSutMetricsResourceLabel(activeSelection.kind, zh) : '';
+  const validationDiagnostics = Array.isArray(draft?.validation?.diagnostics) ? draft.validation.diagnostics.slice(0, 64) : [];
+
+  const selectResource = (kind: PackageSutMetricsResourceKind, id: string) => {
+    if (selectionLocked) return;
+    setNewResource(null); setNewResourceSource(''); setNewResourceError('');
+    setSelection({ kind, id }); setResource(null); setResourceSource(''); setBaselineSource(''); setDraft(null);
+    setResourceError(''); setDraftError(''); setDraftMessage(''); setStale(false);
+  };
+
+  const prepareNewResource = async () => {
+    const id = newResourceId.trim();
+    if (!catalogCanEdit || !api.getPackageManifest || newResourceBusy || selectionLocked
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(id)) return;
+    const inventory = newResourceKind === 'source' ? sources : newResourceKind === 'group' ? groups : profiles;
+    if (inventory.some((item, index) => packageCatalogLabel(item, index).id === id)) {
+      setNewResourceError(zh ? '此 ID 已存在於 Package inventory。' : 'This ID already exists in the Package inventory.');
+      return;
+    }
+    const controller = new AbortController();
+    setNewResourceBusy(true); setNewResourceError(''); setDraftError(''); setDraftFailureDiagnostics([]);
+    try {
+      const manifest = await api.getPackageManifest(packageId, 'source', undefined, controller.signal);
+      if (manifest.packageId !== packageId || manifest.canEdit !== true) {
+        setNewResourceError(zh ? '建立資源需要此已註冊 Package 的來源編輯權限。' : 'Creating a resource requires source editing access for this registered Package.');
+        return;
+      }
+      if (!manifest.present || manifest.redacted || manifest.available !== true || typeof manifest.text !== 'string') {
+        setNewResourceError(zh
+          ? '建立資源前，請先提供可編輯的 att-package/v2 Manifest；缺少或受遮罩的來源需要先完成 Package inventory 遷移。'
+          : 'Provide an editable att-package/v2 Manifest before creating resources. A missing or redacted source requires Package inventory migration first.');
+        return;
+      }
+      if (!/^[a-f0-9]{64}$/i.test(manifest.manifestDigest)) {
+        setNewResourceError(zh ? 'Package Manifest revision 無效；請重新載入後再試。' : 'The Package Manifest revision is invalid. Reload and retry.');
+        return;
+      }
+      if (typeof catalog?.manifestDigest !== 'string' || !/^[a-f0-9]{64}$/i.test(catalog.manifestDigest)
+        || manifest.manifestDigest !== catalog.manifestDigest) {
+        setNewResourceError(zh ? 'Package Manifest 已在目錄載入後變更。請重新載入目錄再試。' : 'The Package Manifest changed after the catalog loaded. Reload the catalog and retry.');
+        return;
+      }
+      const candidate = candidatePackageManifest(manifest.text, newResourceKind, id, zh);
+      const starter = packageSutMetricsStarter(newResourceKind, id);
+      setSelection(null); setResource(null); setResourceSource(''); setBaselineSource('');
+      setDraft(null); setStale(false); setResourceError(''); setDraftError(''); setDraftMessage('');
+      setNewResource({
+        packageId, kind: newResourceKind, id, path: candidate.path, resourceDigest: EMPTY_PACKAGE_RESOURCE_SHA256,
+        source: starter, canEdit: true, candidateManifestSource: candidate.source, expectedManifestDigest: manifest.manifestDigest,
+      });
+      setNewResourceSource(starter);
+    } catch (failure) {
+      const message = failure instanceof Error ? failure.message : packageSutMetricsError(failure, zh);
+      setNewResourceError(message.slice(0, 512));
+    } finally { setNewResourceBusy(false); }
+  };
+
+  const cancelNewResource = () => {
+    if (draftBusy) return;
+    setNewResource(null); setNewResourceSource(''); setNewResourceError('');
+    setDraft(null); setDraftError(''); setDraftFailureDiagnostics([]); setDraftMessage(''); setStale(false);
+  };
+
+  const updateActiveSource = (value: string) => {
+    if (newResource) setNewResourceSource(value);
+    else setResourceSource(value);
+  };
+
+  const createDraft = async () => {
+    if (!activeResource || !editorWritable || !sourceDirty || !selectedEnvironment
+      || !/^[a-f0-9]{64}$/i.test(activeResource.resourceDigest) || !api.createPackageSutMetricsDraft) return;
+    if (new TextEncoder().encode(activeSource).length > 262_144) {
+      setDraftError(zh ? 'SUT Metrics 資源超出來源大小限制。' : 'The SUT Metrics resource exceeds the source size limit.');
+      return;
+    }
+    const controller = new AbortController();
+    setDraftBusy(true); setDraftError(''); setDraftFailureDiagnostics([]); setDraftMessage('');
+    try {
+      const input: PackageSutMetricsResourceDraftInput = newResource ? {
+        resourcePath: activeResource.path, environment: selectedEnvironment, source: activeSource,
+        expectedResourceDigest: activeResource.resourceDigest,
+        candidateManifestSource: newResource.candidateManifestSource, expectedManifestDigest: newResource.expectedManifestDigest,
+      } : {
+        resourcePath: activeResource.path, environment: selectedEnvironment, source: activeSource,
+        expectedResourceDigest: activeResource.resourceDigest,
+      };
+      const next = await api.createPackageSutMetricsDraft(packageId, input, controller.signal);
+      const newManifestMatches = !newResource || (next.expectedManifestDigest === newResource.expectedManifestDigest
+        && typeof next.candidateManifestDigest === 'string' && /^[a-f0-9]{64}$/i.test(next.candidateManifestDigest)
+        && next.activationMode === 'resource-then-manifest');
+      const resourceRevisionMatches = newResource
+        ? createdPackageResourceIdentityMatches(next)
+        : next.expectedResourceDigest === activeResource.resourceDigest;
+      if (next.packageId !== packageId || next.resourcePath !== activeResource.path
+        || !resourceRevisionMatches || !next.draftId || next.state !== 'draft' || !newManifestMatches) {
+        setStale(true);
+        if (next.packageId === packageId && next.draftId) setDraft(next);
+        setDraftError(zh ? '伺服器建立的草稿與目前資源不符，操作已停止。' : 'The Server draft does not match the selected resource. The action was stopped.');
+        return;
+      }
+      setDraft(next);
+      setDraftMessage(zh ? '草稿已建立；下一步請先驗證。' : 'Draft created. Validate it before review.');
+    } catch (failure) {
+      if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 409) setStale(true);
+      setDraftError(packageSutMetricsError(failure, zh));
+      setDraftFailureDiagnostics(packageSutMetricsFailureDiagnostics(failure));
+    } finally { setDraftBusy(false); }
+  };
+
+  const actOnDraft = async (action: PackageSutMetricsDraftAction) => {
+    if (!draft || !api.packageSutMetricsDraftAction || draftBusy || (stale && action !== 'discard')) return;
+    const state = draft.state.toLowerCase();
+    if (action === 'validate' && state !== 'draft') return;
+    if (action === 'review' && (state !== 'validated' || draft.validation?.valid !== true)) return;
+    if (action === 'publish' && (state !== 'reviewed' || !resourceCanEdit || catalog?.canEdit !== true)) return;
+    const controller = new AbortController();
+    setDraftBusy(true); setDraftError(''); setDraftFailureDiagnostics([]); setDraftMessage('');
+    try {
+      const next = await api.packageSutMetricsDraftAction(packageId, draft.draftId, action, controller.signal);
+      if (controller.signal.aborted) return;
+      if (action === 'publish') {
+        const publishedResource = activeResource;
+        const manifestIdentityMatches = !newResource || (draft.expectedManifestDigest === newResource.expectedManifestDigest
+          && draft.activationMode === 'resource-then-manifest' && typeof draft.candidateManifestDigest === 'string'
+          && /^[a-f0-9]{64}$/i.test(draft.candidateManifestDigest)
+          && next.activationMode === 'resource-then-manifest'
+          && next.expectedManifestDigest === newResource.expectedManifestDigest
+          && next.manifestDigest === draft.candidateManifestDigest
+          && next.candidateManifestDigest === draft.candidateManifestDigest
+          && next.beforeResourceDigest === draft.expectedResourceDigest
+          && createdPackageResourceIdentityMatches(draft)
+          && next.recoveredExistingResource === draft.recoveredExistingResource
+          && next.candidateResourceDigest === draft.candidateResourceDigest
+          && next.resourceDigest === draft.candidateResourceDigest
+          && draft.validation?.resourceDigest === draft.candidateResourceDigest);
+        const validatedResourceMatches = typeof draft.validation?.resourceDigest === 'string'
+          && /^[a-f0-9]{64}$/i.test(draft.validation.resourceDigest)
+          && draft.validation.resourceDigest === next.resourceDigest;
+        const configurationIdentity = safePackageDiagnosticText(next.configurationIdentity);
+        if (next.published !== true || !publishedResource || next.packageId !== packageId
+          || next.resourcePath !== publishedResource.path || next.refreshRequired !== true
+          || typeof next.resourceDigest !== 'string' || !/^[a-f0-9]{64}$/i.test(next.resourceDigest)
+          || next.environment !== selectedEnvironment || !configurationIdentity
+          || !manifestIdentityMatches || !validatedResourceMatches) {
+          setStale(true);
+          setDraftError(zh ? '伺服器尚未確認發布；草稿仍保留供檢查。' : 'The Server did not confirm publication. The draft remains available for review.');
+          return;
+        }
+        setDraft(null); setStale(false);
+        if (newResource) {
+          setSelection({ kind: newResource.kind, id: newResource.id });
+          setNewResource(null); setNewResourceSource('');
+        }
+        setDraftMessage(zh
+          ? `Package SUT Metrics 資源已發布（${next.environment}；設定身分 ${configurationIdentity}）；正在重新載入資源與目錄。`
+          : `Package SUT Metrics resource published (${next.environment}; configuration identity ${configurationIdentity}). Reloading the resource and catalog.`);
+        setRequestVersion(value => value + 1); setResourceVersion(value => value + 1);
+        return;
+      }
+      if (action === 'discard') {
+        setDraft(null); setDraftError(''); setDraftFailureDiagnostics([]); setDraftMessage(zh ? '草稿已捨棄；來源變更已保留，可繼續編輯。' : 'Draft discarded. Source edits were preserved and can be continued.');
+        if (stale) { setStale(false); setRequestVersion(value => value + 1); setResourceVersion(value => value + 1); }
+        return;
+      }
+      const expectedState = action === 'validate' ? 'validated' : 'reviewed';
+      const manifestActionMatches = !newResource || (next.expectedManifestDigest === newResource.expectedManifestDigest
+        && next.candidateManifestDigest === draft.candidateManifestDigest && next.activationMode === 'resource-then-manifest'
+        && createdPackageResourceIdentityMatches(next)
+        && next.recoveredExistingResource === draft.recoveredExistingResource
+        && next.candidateResourceDigest === draft.candidateResourceDigest
+        && (action !== 'review' || draft.validation?.resourceDigest === draft.candidateResourceDigest));
+      if (next.draftId !== draft.draftId || next.packageId !== packageId || next.resourcePath !== activeResource?.path
+        || next.expectedResourceDigest !== draft.expectedResourceDigest || next.state.toLowerCase() !== expectedState
+        || !manifestActionMatches) {
+        setStale(true);
+        setDraftError(zh ? '伺服器草稿狀態與預期不符，操作已停止。' : 'The Server draft state did not match the expected transition. The action was stopped.');
+        return;
+      }
+      if (action === 'validate' && next.validation?.valid === false) {
+        setDraft({ ...draft, ...next });
+        setDraftMessage(zh ? '驗證未通過；檢查診斷並捨棄草稿以修正來源。' : 'Validation failed. Review the diagnostics and discard the draft to edit the source.');
+        return;
+      }
+      if (action === 'validate' && (next.validation?.valid !== true
+        || typeof next.validation.resourceDigest !== 'string' || !/^[a-f0-9]{64}$/i.test(next.validation.resourceDigest)
+        || typeof next.validation.validationRevision !== 'string' || !/^[a-f0-9]{64}$/i.test(next.validation.validationRevision)
+        || (newResource && next.validation.resourceDigest !== draft.candidateResourceDigest)
+        || (newResource && next.validation.candidateManifestDigest !== draft.candidateManifestDigest))) {
+        setStale(true);
+        setDraft({ ...draft, ...next });
+        setDraftError(zh ? '伺服器未提供完整的草稿驗證 revision，操作已停止。' : 'The Server did not return complete draft validation revisions. The action was stopped.');
+        return;
+      }
+      setDraft({ ...draft, ...next });
+      setDraftMessage(action === 'validate'
+        ? (next.validation?.valid === true ? (zh ? '草稿驗證通過。' : 'Draft validation passed.') : (zh ? '驗證完成；請檢查診斷並修正來源。' : 'Validation completed. Review the diagnostics and update the source.'))
+        : (zh ? '草稿已完成 Review，可發布。' : 'Draft review is complete and it can be published.'));
+    } catch (failure) {
+      if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 409) setStale(true);
+      setDraftError(packageSutMetricsError(failure, zh));
+      setDraftFailureDiagnostics(packageSutMetricsFailureDiagnostics(failure));
+    } finally { setDraftBusy(false); }
+  };
+
+  return <details className="att-query-filter-panel att-package-sut-metrics" aria-label={zh ? 'Package SUT Metrics 目錄' : 'Package SUT Metrics catalog'}>
+    <summary>{zh ? 'Package SUT Metrics' : 'Package SUT Metrics'}{loading ? (zh ? ' · 載入中…' : ' · Loading…') : total ? ` · ${total}` : ''}</summary>
+    <section aria-label={zh ? 'Package SUT Metrics 目錄內容' : 'Package SUT Metrics catalog contents'}>
+      <p>{zh
+        ? `環境：${returnedEnvironment}。此處只顯示 Package inventory 明確列出的定義；本頁不會查詢 Metrics 來源。`
+        : `Environment: ${returnedEnvironment}. Only definitions explicitly listed in this Package inventory appear here. This view does not query metric sources.`}</p>
+      {loading && <p role="status" aria-busy="true">{zh ? '正在載入 Package inventory…' : 'Loading Package inventory…'}</p>}
+      {error && <p role="alert">{error} <button type="button" onClick={() => setRequestVersion(value => value + 1)}>{zh ? '重試' : 'Retry'}</button></p>}
+      {!loading && !error && catalog && total === 0 && <p role="status">{zh
+        ? '此 Package 沒有明確列出 SUT Metrics 定義。'
+        : 'This Package has no explicitly listed SUT Metrics definitions.'}</p>}
+      {!loading && !error && catalog && total > 0 && <div className="att-relation-columns att-package-sut-metrics-groups">
+        {([[zh ? '指標來源' : 'Metric Sources', 'source' as const, sources], [zh ? '邏輯群組' : 'Groups', 'group' as const, groups], [zh ? '設定檔' : 'Profiles', 'profile' as const, profiles]] as Array<[string, PackageSutMetricsResourceKind, unknown[]]>).map(([title, kind, values]) => (
+          <section className="att-source-file-references" key={title} aria-label={title}>
+            <h3>{title} <span>({values.length})</span></h3>
+            {values.length === 0 ? <p>{zh ? '無' : 'None'}</p> : <ul>{values.map((value, index) => {
+              const item = packageCatalogLabel(value, index);
+              return <li key={`${item.id}:${index}`}>
+                {catalogCanEdit ? <button type="button" aria-label={`${zh ? '檢視' : 'View'} ${packageSutMetricsResourceLabel(kind, zh)} ${item.id}`}
+                  aria-pressed={selection?.kind === kind && selection.id === item.id}
+                  disabled={selectionLocked || resourceLoading || draftBusy}
+                  onClick={() => selectResource(kind, item.id)}>
+                  <strong>{item.name}</strong> <code>{item.id}</code>
+                  {item.kind && <span> · {item.kind}</span>}
+                  {item.connection && <small>{zh ? '連線' : 'Connection'}: {item.connection}</small>}
+                </button> : <div className="att-package-sut-metrics-catalog-item">
+                  <strong>{item.name}</strong> <code>{item.id}</code>
+                  {item.kind && <span> · {item.kind}</span>}
+                  {item.connection && <small>{zh ? '連線' : 'Connection'}: {item.connection}</small>}
+                </div>}
+              </li>;
+            })}</ul>}
+          </section>
+        ))}
+      </div>}
+      {!loading && !error && catalog && <dl className="att-resource-meta att-package-sut-metrics-provenance">
+        <div><dt>{zh ? 'Manifest 摘要' : 'Manifest digest'}</dt><dd><code>{revisionLabel(catalog.manifestDigest)}</code></dd></div>
+        <div><dt>{zh ? 'Package revision' : 'Package revision'}</dt><dd><code>{revisionLabel(catalog.packageRevision)}</code></dd></div>
+        <div><dt>{zh ? 'Runtime Config revision' : 'Runtime Config revision'}</dt><dd><code>{revisionLabel(catalog.runtimeConfigRevision)}</code></dd></div>
+      </dl>}
+      {!loading && !error && catalog && resourceProvenance.length > 0 && <section className="att-source-file-references" aria-label={zh ? 'Package 資源來源資訊' : 'Package resource provenance'}>
+        <h3>{zh ? 'Package 資源來源資訊' : 'Package resource provenance'}</h3>
+        <ul>{resourceProvenance.map((value, index) => {
+          const item = packageCatalogResourceProvenance(value, index, zh);
+          return <li key={`${item.kind}:${item.id}:${index}`}>
+            <strong>{zh ? '類型' : 'Kind'}: {item.kind}</strong>
+            <span>{zh ? 'ID' : 'ID'}: <code>{item.id}</code></span>
+            <span>{zh ? 'Package 相對路徑' : 'Package-relative path'}: <code>{item.path}</code></span>
+            <span>SHA-256: <code>{item.digest}</code></span>
+          </li>;
+        })}</ul>
+      </section>}
+      {catalog && catalogCanEdit && <section className="att-source-file-references" aria-label={zh ? '建立 Package SUT Metrics 資源' : 'Create Package SUT Metrics resource'}>
+        <h3>{zh ? '新增資源' : 'New resource'}</h3>
+        <label>{zh ? '資源類型' : 'Resource kind'}
+          <select aria-label={zh ? '資源類型' : 'Resource kind'} value={newResourceKind} disabled={selectionLocked || newResourceBusy}
+            onChange={event => { setNewResourceKind(event.currentTarget.value as PackageSutMetricsResourceKind); setNewResourceError(''); }}>
+            <option value="source">{zh ? '指標來源' : 'Metric Source'}</option>
+            <option value="group">{zh ? '指標群組' : 'Metric Group'}</option>
+            <option value="profile">{zh ? '指標設定檔' : 'Metrics Profile'}</option>
+          </select>
+        </label>
+        <label>{zh ? '資源 ID' : 'Resource ID'}
+          <input aria-label={zh ? '資源 ID' : 'Resource ID'} value={newResourceId} maxLength={80}
+            disabled={selectionLocked || newResourceBusy}
+            onChange={event => { setNewResourceId(event.currentTarget.value); setNewResourceError(''); }} />
+        </label>
+        <button type="button" disabled={!api.getPackageManifest || !api.createPackageSutMetricsDraft || selectionLocked || newResourceBusy
+          || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(newResourceId.trim())}
+          onClick={() => void prepareNewResource()}>
+          {newResourceBusy ? (zh ? '載入 Package Manifest…' : 'Loading Package Manifest…') : (zh ? '準備新資源' : 'Prepare new resource')}
+        </button>
+        {newResourceError && <p role="alert">{newResourceError}</p>}
+        {!api.getPackageManifest && <p role="note">{zh ? '此 Server client 不支援讀取 Package Manifest。' : 'This Server client does not support reading the Package Manifest.'}</p>}
+      </section>}
+      {catalog && <section className="att-source-file-references" aria-label={zh ? 'Package SUT Metrics 資源編輯器' : 'Package SUT Metrics resource editor'}>
+        <h3>{zh ? 'SUT Metrics 資源' : 'SUT Metrics resource'}</h3>
+        {!activeSelection && <p>{zh ? '選取明確列出的 Metric Source、Group 或 Profile 以載入其來源。' : 'Select an explicitly listed Metric Source, Group, or Profile to load its source.'}</p>}
+        {resourceLoading && !newResource && <p role="status" aria-busy="true">{zh ? '正在載入選取的 Package 資源…' : 'Loading selected Package resource…'}</p>}
+        {resourceError && <p role="alert">{resourceError}
+          {selection && !resourceLoading && !draft && <button type="button" onClick={() => setResourceVersion(value => value + 1)}>{zh ? '重試載入來源' : 'Retry source load'}</button>}
+        </p>}
+        {activeResource && activeSelection && <>
+          <h4>{newResource ? (zh ? '新增' : 'New') : ''} {resourceLabel} · {activeResource.id}</h4>
+          <dl className="att-resource-meta">
+            <div><dt>{zh ? 'Package 路徑' : 'Package path'}</dt><dd><code>{activeResource.path}</code></dd></div>
+            <div><dt>{zh ? '資源摘要' : 'Resource digest'}</dt><dd><code>{activeResource.resourceDigest}</code></dd></div>
+            {newResource && <>
+              <div><dt>{zh ? '預期 Manifest 摘要' : 'Expected Manifest digest'}</dt><dd><code>{newResource.expectedManifestDigest}</code></dd></div>
+              <div><dt>{zh ? '候選 Manifest 路徑' : 'Candidate Manifest entry'}</dt><dd><code>{newResource.path}</code></dd></div>
+            </>}
+          </dl>
+          {catalogCanEdit && activeResource.canEdit !== true && <p role="note">{zh ? '此資源目前不可編輯。' : 'This resource is currently read only.'}</p>}
+          {stale && <p role="alert">{zh ? '資源 revision 已過期。請捨棄草稿並重新載入來源。' : 'The resource revision is stale. Discard the draft and reload its source.'}</p>}
+          <label>{zh ? `${resourceLabel} YAML` : `${resourceLabel} YAML`}
+            <textarea aria-label={`${resourceLabel} YAML`} value={activeSource} readOnly={!editorWritable}
+              onChange={event => updateActiveSource(event.currentTarget.value)} rows={16} maxLength={262144} spellCheck={false} />
+          </label>
+          {sourceDirty && !draft && <p role="status">{newResource
+            ? (zh ? '新資源尚未列入 Package inventory。建立草稿以驗證資源及候選 Manifest。' : 'This resource is not in the Package inventory yet. Create a draft to validate both the resource and candidate Manifest.')
+            : (zh ? '來源有尚未建立草稿的變更。建立草稿以進行驗證與發布。' : 'Source changes have not been staged. Create a draft to validate and publish them.')}</p>}
+          {sourceDirty && !draft && resourceEditable && <button type="button" disabled={draftBusy} onClick={() => {
+            if (newResource) cancelNewResource();
+            else {
+              setResourceSource(baselineSource); setDraftError(''); setDraftFailureDiagnostics([]);
+              if (stale) { setStale(false); setRequestVersion(value => value + 1); setResourceVersion(value => value + 1); }
+            }
+          }}>
+            {newResource ? (zh ? '取消新資源' : 'Cancel new resource') : (zh ? '捨棄來源變更' : 'Discard source edits')}
+          </button>}
+          {!draft && resourceEditable && <button type="button" disabled={!editorWritable || !sourceDirty || !selectedEnvironment
+            || !api.createPackageSutMetricsDraft} onClick={() => void createDraft()}>
+            {draftBusy ? (zh ? '建立草稿中…' : 'Creating draft…') : (zh ? '建立 SUT Metrics 草稿' : 'Create SUT Metrics draft')}
+          </button>}
+          {draftError && <p role="alert">{draftError}</p>}
+          {draftFailureDiagnostics.length > 0 && <ul aria-label={zh ? '草稿操作診斷' : 'Draft action diagnostics'}>
+            {draftFailureDiagnostics.map((value, index) => { const diagnostic = packageSutMetricsDiagnostic(value, index); return <li key={`failure:${diagnostic.key}`}>{diagnostic.text}</li>; })}
+          </ul>}
+          {draftMessage && <p role="status" aria-live="polite">{draftMessage}</p>}
+          {draft && <section aria-label={zh ? 'Package SUT Metrics 草稿發布 Review' : 'Package SUT Metrics draft publication review'}>
+            <h4>{zh ? '草稿狀態' : 'Draft state'}: {draft.state}</h4>
+            {draft.expiresAt && <p>{zh ? '到期時間' : 'Expires'}: {draft.expiresAt}</p>}
+            {draft.expectedManifestDigest && <dl className="att-resource-meta">
+              <div><dt>{zh ? '預期 Manifest 摘要' : 'Expected Manifest digest'}</dt><dd><code>{draft.expectedManifestDigest}</code></dd></div>
+              <div><dt>{zh ? '候選 Manifest 摘要' : 'Candidate Manifest digest'}</dt><dd><code>{revisionLabel(draft.candidateManifestDigest)}</code></dd></div>
+              <div><dt>{zh ? '啟用順序' : 'Activation mode'}</dt><dd><code>{draft.activationMode === 'resource-then-manifest' ? draft.activationMode : '—'}</code></dd></div>
+            </dl>}
+            {draft.validation && <p role="status">{draft.validation.valid === true
+              ? (zh ? '驗證通過。' : 'Validation passed.')
+              : (zh ? '驗證未通過。' : 'Validation did not pass.')}</p>}
+            {draft.validation?.resourceDigest && <p>{zh ? '候選資源摘要' : 'Validated resource digest'}: <code>{revisionLabel(draft.validation.resourceDigest)}</code></p>}
+            {draft.validation?.candidateManifestDigest && <p>{zh ? '驗證的候選 Manifest 摘要' : 'Validated candidate Manifest digest'}: <code>{revisionLabel(draft.validation.candidateManifestDigest)}</code></p>}
+            {draft.validation?.validationRevision && <p>{zh ? '驗證 revision' : 'Validation revision'}: <code>{revisionLabel(draft.validation.validationRevision)}</code></p>}
+            {validationDiagnostics.length > 0 && <ul aria-label={zh ? '驗證診斷' : 'Validation diagnostics'}>
+              {validationDiagnostics.map((value, index) => { const diagnostic = packageSutMetricsDiagnostic(value, index); return <li key={diagnostic.key}>{diagnostic.text}</li>; })}
+            </ul>}
+            {resourceEditable && <div className="att-explorer-detail-actions">
+              <button type="button" disabled={draftBusy || stale || draft.state.toLowerCase() !== 'draft'} onClick={() => void actOnDraft('validate')}>
+                {draftBusy ? (zh ? '處理中…' : 'Working…') : (zh ? '驗證草稿' : 'Validate draft')}
+              </button>
+              <button type="button" disabled={draftBusy || stale || draft.state.toLowerCase() !== 'validated' || draft.validation?.valid !== true}
+                onClick={() => void actOnDraft('review')}>{zh ? 'Review 草稿' : 'Review draft'}</button>
+              <button type="button" disabled={draftBusy || stale || catalog.canEdit !== true || draft.state.toLowerCase() !== 'reviewed'}
+                onClick={() => void actOnDraft('publish')}>{zh ? '發布草稿' : 'Publish draft'}</button>
+              <button type="button" disabled={draftBusy} onClick={() => void actOnDraft('discard')}>
+                {draft.validation?.valid === false || draftFailureDiagnostics.length > 0
+                  ? (zh ? '捨棄草稿並編輯來源' : 'Discard draft and edit source')
+                  : (zh ? '捨棄草稿' : 'Discard draft')}
+              </button>
+            </div>}
+            {!resourceEditable && <p role="note">{zh ? '繼續草稿需要此 Package 資源的來源編輯權限。' : 'Source editing access for this Package resource is required to continue this draft.'}</p>}
+          </section>}
+        </>}
+      </section>}
+    </section>
+  </details>;
 }
 
 export function ExplorerPage({ api, packageId, resourceRoute, environment,
@@ -487,6 +1161,9 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
       <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>{identity ? 'Resource details' : 'Package Explorer'}</h1>
         <p>{identity ? 'View the safe definition, source, and dependencies for this resource.' : 'Search, sort, and open resources. Choose an execution environment from the RUN or Quick LOAD editor.'}</p></div>
     </header>
+
+    <PackageSutMetricsPanel api={api} packageId={packageId} environment={environment} refreshKey={resourceRefresh + inspectionRefresh}
+      locale={locale} registerUnsavedChanges={registerUnsavedChanges} />
 
     <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}${identity ? '' : ' att-query-workspace'}`}>
       <aside className="att-explorer-navigation" aria-label="Resource navigation" hidden={Boolean(identity)}>

@@ -4,7 +4,9 @@ import type { JobReplay, JobReplayEditorDraft } from "./features/load/types";
 import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type MonitoringJobJournal, type MonitoringSnapshot, type PackageSummary, type ServerVersion } from './types';
 import type {
   AcceptedJob, ConfigurationComparisonQuery, ConfigurationFilePage, ConfigurationResponse, DebugDraftRequest, DraftResponse,
-  DebugFormResponse, EffectiveConfigurationQuery, ResourceDetail, ResourceIdentity, SourceProjection, TestdataRecordsResponse,
+  DebugFormResponse, EffectiveConfigurationQuery, PackageSutMetricsCatalog, PackageSutMetricsDraft,
+  PackageSutMetricsDraftAction, PackageSutMetricsResource, PackageSutMetricsResourceDraftInput,
+  PackageSutMetricsResourceKind, ResourceDetail, ResourceIdentity, SourceProjection, TestdataRecordsResponse,
   ResourcePage, ResourceQuery,
 } from './features/explorer/types';
 import type {
@@ -303,6 +305,22 @@ export const api = {
   },
   listSutMetricProfiles(signal?: AbortSignal): Promise<SutMetricCatalogResponse> {
     return request('sut-metrics/profiles', { signal });
+  },
+  getPackageSutMetricsCatalog(packageId: string, environment?: string, signal?: AbortSignal): Promise<PackageSutMetricsCatalog> {
+    return request('packages/' + encodeURIComponent(packageId) + '/sut-metrics/catalog' + queryString({ environment }), { signal });
+  },
+  getPackageSutMetricsResource(packageId: string, kind: PackageSutMetricsResourceKind, id: string, signal?: AbortSignal): Promise<PackageSutMetricsResource> {
+    return request('packages/' + encodeURIComponent(packageId) + '/sut-metrics/resource' + queryString({ kind, id }), { signal });
+  },
+  createPackageSutMetricsDraft(packageId: string, input: PackageSutMetricsResourceDraftInput, signal?: AbortSignal): Promise<PackageSutMetricsDraft> {
+    return postJson('packages/' + encodeURIComponent(packageId) + '/sut-metrics/drafts', input, signal);
+  },
+  async packageSutMetricsDraftAction(packageId: string, draftId: string, action: PackageSutMetricsDraftAction, signal?: AbortSignal): Promise<PackageSutMetricsDraft> {
+    const result = await postJson<PackageSutMetricsDraft>(
+      'packages/' + encodeURIComponent(packageId) + '/sut-metrics/drafts/' + encodeURIComponent(draftId) + '/' + action,
+      {}, signal);
+    if (action === 'publish' && result.published) inspectionCache.invalidatePackage(packageId);
+    return result;
   },
   saveSutMetricSource(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     return postJson('admin/sut-metrics/sources', input);

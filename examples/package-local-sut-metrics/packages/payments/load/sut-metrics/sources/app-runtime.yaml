@@ -1,0 +1,27 @@
+schemaVersion: att-sut-metrics-metric-source/v1
+id: app-runtime
+name: Application CPU utilization
+connection:
+  kind: DATA_SOURCE
+  id: prom-main
+fetch:
+  id: cpu-range
+  mode: prometheus-range
+  query: app_cpu_utilization_percent
+  parameters: {}
+  sampling: range
+  step: 30s
+mapping:
+  labels:
+    retain: [instance]
+  outputs:
+    - id: cpu-utilization
+      title: CPU utilization
+      unit: percent
+      kind: gauge
+      metricName: app_cpu_utilization_percent
+limits:
+  maxRows: 1024
+  maxSeries: 128
+  maxSamples: 250000
+  maxArtifactBytes: 8388608

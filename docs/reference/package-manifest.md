@@ -1,6 +1,6 @@
 # Package Manifest
 
-Use `<PACKAGE_ROOT>/package.yaml` to give one Package its own defaults, business roots, and Testdata inventory. The optional file uses `att-package/v1`, independently of Global Configuration. The matching Engine JAR supplies the authoritative schema.
+Use `<PACKAGE_ROOT>/package.yaml` to give one Package its own defaults, business roots, Testdata inventory, and SUT Metrics inventory. The optional file uses the current `att-package/v2` schema, independently of Global Configuration. The matching Engine JAR supplies the authoritative schema.
 
 A Package ID and its filesystem root come from trusted registration or the supported Local package selection. A Manifest never registers a Package, grants access, or supplies a privileged runtime configuration. Shared profiles, Tools, and DB/MQ/HTTP/SSH Helpers remain owned by Global Configuration.
 
@@ -9,7 +9,7 @@ A Package ID and its filesystem root come from trusted registration or the suppo
 This example selects an existing central profile and declares two Package-owned Testdata files. Create those descriptors before validating the Package.
 
 ```yaml
-schemaVersion: att-package/v1
+schemaVersion: att-package/v2
 metadata:
   name: Payments
   description: Payment regression resources
@@ -22,12 +22,22 @@ testdata:
   environments:
     UAT: [testdata/uat-accounts.yaml]
     PROD: []
+observability:
+  metricSources: []
+  groups: []
+  profiles: []
 defaults:
   timeoutMs: 15000
   report:
     columns: {result: Result, durationMs: Duration}
   xml: {namespaceMode: preserve}
 ```
+
+The `observability` paths are optional and list Package-owned Metric Sources, Groups, and Profiles under `load/sut-metrics/{sources,groups,profiles}/`. Empty inventories mean the Package has no SUT Metrics; they do not fall back to global definitions. See the [SUT Metrics migration guide](../guides/sut-metrics-config-migration.md) for complete descriptors and shared Data Source connections.
+
+<!-- att-docs:historical -->
+Existing `att-package/v1` Manifests remain in compatibility mode and keep their legacy global SUT Metrics behavior. New or edited manifests use v2.
+<!-- /att-docs:historical -->
 
 `SIT`, `UAT`, and `PROD` must exist in the central `environments` mapping. Omitting a profile's Testdata entry inherits `descriptors`. A present list replaces that inventory completely; `[]` clears it.
 
@@ -97,7 +107,7 @@ Source reading uses the existing source browsing policy and structured masking. 
 
 Manifest publication fingerprints the central Runtime Config, explicitly listed Tool/Helper descriptors across its declared profiles, every candidate Testdata descriptor layer, business root bindings, and the embedded Schema Registry. It checks the fingerprint before and after validation and again at publication. It does not scan unrelated business files, archives, or unreferenced central files. The validation dependency set is bounded to 10000 distinct descriptor paths and 256 MiB of file content; these are dependency limits, not a total Package size limit. Execution and Job revisions retain their separate business dependency checks.
 
-Edited source and pending drafts participate in Studio navigation protection. Refresh and view switching stay disabled until the source is staged or explicitly discarded. A conflict requires a fresh draft. Publication records an audit intent before replacement and a completion record afterward. History stays in private Server data; the API returns revision identifiers rather than raw historical source, ordered by stored modification time newest first with an ascending digest tie-breaker. **Stage rollback** creates another candidate that must pass the same validation and review gates. Restoring pre-Manifest defaults produces a canonical empty `att-package/v1` file, as shown in review.
+Edited source and pending drafts participate in Studio navigation protection. Refresh and view switching stay disabled until the source is staged or explicitly discarded. A conflict requires a fresh draft. Publication records an audit intent before replacement and a completion record afterward. History stays in private Server data; the API returns revision identifiers rather than raw historical source, ordered by stored modification time newest first with an ascending digest tie-breaker. **Stage rollback** creates another candidate that must pass the same validation and review gates. Restoring pre-Manifest defaults produces a canonical empty `att-package/v2` file, as shown in review.
 
 The trusted deployment policy is optional and defaults to editing disabled:
 

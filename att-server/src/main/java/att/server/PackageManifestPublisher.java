@@ -9,6 +9,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Instant;
@@ -24,19 +25,52 @@ final class PackageManifestPublisher implements AutoCloseable {
     static final int MAX_SOURCE_BYTES=262144;
     interface Access { Path root(String packageId,String actor) throws Exception; }
     interface Validator { Map<String,Object> validate(String packageId,String source) throws Exception; }
+    /**
+     * Validates a staged resource as the authenticated actor against the complete Package/Runtime definition state.
+     * Returns valid, resourceDigest (SHA-256 of candidate UTF-8 bytes), and a validationRevision
+     * that changes when any definition capable of affecting this candidate changes.
+     */
+    interface ResourceValidator {
+        Map<String,Object> validate(String packageId,String actor,String relativePath,String environment,String source) throws Exception;
+        default Map<String,Object> validateCandidate(String packageId,String actor,String relativePath,String environment,
+                                                     String source,String candidateManifestSource,
+                                                     String expectedManifestDigest) throws Exception {
+            if(candidateManifestSource!=null||expectedManifestDigest!=null)
+                throw new IllegalArgumentException("Candidate Package Manifest validation is unavailable");
+            return validate(packageId,actor,relativePath,environment,source);
+        }
+        default Map<String,Object> validate(String packageId,String relativePath,String environment,String source) throws Exception {
+            return validate(packageId,null,relativePath,environment,source);
+        }
+        default Map<String,Object> validate(String packageId,String relativePath,String source) throws Exception {
+            return validate(packageId,null,relativePath,null,source);
+        }
+    }
     interface Audit { void record(String actor,String action,String packageId,String detail) throws Exception; }
-    private record Draft(String id,String packageId,String actor,Path root,String source,String beforeDigest,
-                         Instant expires,Map<String,Object> validation,boolean reviewed) { }
+    private record Draft(String id,String packageId,String actor,Path root,String resourcePath,String environment,String source,String beforeDigest,
+                         String candidateManifestSource,String expectedManifestDigest,
+                         Instant expires,Map<String,Object> validation,boolean reviewed) {
+        private Draft(String id,String packageId,String actor,Path root,String resourcePath,String environment,String source,String beforeDigest,
+                      Instant expires,Map<String,Object> validation,boolean reviewed) {
+            this(id,packageId,actor,root,resourcePath,environment,source,beforeDigest,null,null,expires,validation,reviewed);
+        }
+    }
     private final PackageConfigurationPolicy policy;
     private final Path historyRoot;
     private final Clock clock;
     private final Access access;
     private final Validator validator;
+    private final ResourceValidator resourceValidator;
     private final Audit audit;
     private final Map<String,Draft> drafts=new LinkedHashMap<>();
 
     PackageManifestPublisher(Path data,PackageConfigurationPolicy policy,Clock clock,Access access,Validator validator,Audit audit) throws IOException {
-        this.policy=policy;this.clock=clock;this.access=access;this.validator=validator;this.audit=audit;
+        this(data,policy,clock,access,validator,null,audit);
+    }
+
+    PackageManifestPublisher(Path data,PackageConfigurationPolicy policy,Clock clock,Access access,Validator validator,
+                             ResourceValidator resourceValidator,Audit audit) throws IOException {
+        this.policy=policy;this.clock=clock;this.access=access;this.validator=validator;this.resourceValidator=resourceValidator;this.audit=audit;
         this.historyRoot=data.resolve("package-source-history");
         if(policy.sourceEditingEnabled)privateDirectory(historyRoot);
     }
@@ -49,33 +83,33 @@ final class PackageManifestPublisher implements AutoCloseable {
         if(!expectedDigest.equals(currentDigest(root)))throw new Conflict();
         if(drafts.size()>=policy.maxDrafts||drafts.values().stream().filter(d->d.actor.equals(actor)).count()>=policy.maxDraftsPerUser)
             throw new Capacity();
-        Draft draft=new Draft("M"+UUID.randomUUID().toString().replace("-","").toUpperCase(),packageId,actor,root,source,expectedDigest,
+        Draft draft=new Draft("M"+UUID.randomUUID().toString().replace("-","").toUpperCase(),packageId,actor,root,null,null,source,expectedDigest,
                 clock.instant().plusSeconds(policy.draftTtlSeconds),null,false);
         drafts.put(draft.id,draft);audit.record(actor,"PACKAGE_MANIFEST_STAGE",packageId,expectedDigest);
         return view(draft);
     }
 
     synchronized Map<String,Object> validate(String packageId,String actor,String id) throws Exception {
-        Draft old=draft(packageId,actor,id);unchanged(old);
+        Draft old=manifestDraft(packageId,actor,id);unchanged(old);
         Map<String,Object> validated=validator.validate(packageId,old.source);
         if(!Boolean.TRUE.equals(validated.get("valid")))throw new IllegalArgumentException("Manifest validation did not succeed");
         if(!digest(old.source.getBytes(StandardCharsets.UTF_8)).equals(validated.get("manifestDigest")))throw new Conflict();
         requireDigest(String.valueOf(validated.get("validationRevision")));
         unchanged(old);
-        Draft next=new Draft(old.id,old.packageId,old.actor,old.root,old.source,old.beforeDigest,old.expires,Map.copyOf(validated),false);
+        Draft next=new Draft(old.id,old.packageId,old.actor,old.root,null,null,old.source,old.beforeDigest,old.expires,Map.copyOf(validated),false);
         drafts.put(id,next);audit.record(actor,"PACKAGE_MANIFEST_VALIDATE",packageId,String.valueOf(validated.get("validationRevision")));
         return view(next);
     }
 
     synchronized Map<String,Object> review(String packageId,String actor,String id) throws Exception {
-        Draft old=draft(packageId,actor,id);unchanged(old);
+        Draft old=manifestDraft(packageId,actor,id);unchanged(old);
         if(old.validation==null)throw new IllegalArgumentException("Validate the Manifest draft before review");
-        Draft next=new Draft(old.id,old.packageId,old.actor,old.root,old.source,old.beforeDigest,old.expires,old.validation,true);
+        Draft next=new Draft(old.id,old.packageId,old.actor,old.root,null,null,old.source,old.beforeDigest,old.expires,old.validation,true);
         drafts.put(id,next);audit.record(actor,"PACKAGE_MANIFEST_REVIEW",packageId,id);return view(next);
     }
 
     synchronized Map<String,Object> publish(String packageId,String actor,String id) throws Exception {
-        Draft draft=draft(packageId,actor,id);unchanged(draft);
+        Draft draft=manifestDraft(packageId,actor,id);unchanged(draft);
         if(!draft.reviewed||draft.validation==null)throw new IllegalArgumentException("Validate and review the Manifest draft before publication");
         Map<String,Object> fresh=validator.validate(packageId,draft.source);
         if(!Boolean.TRUE.equals(fresh.get("valid"))||!draft.validation.get("validationRevision").equals(fresh.get("validationRevision")))throw new Conflict();
@@ -103,6 +137,244 @@ final class PackageManifestPublisher implements AutoCloseable {
         return result;
     }
 
+    synchronized Map<String,Object> stageResource(String packageId,String actor,String relativePath,String source,
+                                                  String expectedResourceDigest) throws Exception {
+        return stageResource(packageId,actor,relativePath,null,source,expectedResourceDigest);
+    }
+
+    synchronized Map<String,Object> stageResource(String packageId,String actor,String relativePath,String environment,String source,
+                                                  String expectedResourceDigest) throws Exception {
+        return stageResource(packageId,actor,relativePath,environment,source,expectedResourceDigest,null,null);
+    }
+
+    synchronized Map<String,Object> stageResource(String packageId,String actor,String relativePath,String environment,String source,
+                                                  String expectedResourceDigest,String candidateManifestSource,
+                                                  String expectedManifestDigest) throws Exception {
+        requireResourceValidator();
+        Path root=authorizedRoot(packageId,actor);expire();
+        String canonicalPath=resourceRelativePath(root,relativePath);
+        if(environment!=null&&!environment.matches("[A-Za-z][A-Za-z0-9_-]{0,63}"))
+            throw new IllegalArgumentException("Package resource Environment is invalid");
+        validateSource(source,"Package resource");requireDigest(expectedResourceDigest);
+        boolean manifestAddition=candidateManifestSource!=null||expectedManifestDigest!=null;
+        String beforeResourceDigest=expectedResourceDigest;
+        if(manifestAddition) {
+            if(candidateManifestSource==null||expectedManifestDigest==null)
+                throw new IllegalArgumentException("candidateManifestSource and expectedManifestDigest must be supplied together");
+            validateSource(candidateManifestSource,"Candidate Package Manifest");requireDigest(expectedManifestDigest);
+            if(!expectedManifestDigest.equals(currentDigest(root)))throw new Conflict();
+            String emptyDigest=digest(new byte[0]);
+            String candidateDigest=digest(source.getBytes(StandardCharsets.UTF_8));
+            if(!emptyDigest.equals(expectedResourceDigest))throw new Conflict();
+            Path target=resourcePath(root,canonicalPath);
+            boolean targetExists=Files.exists(target,LinkOption.NOFOLLOW_LINKS);
+            String currentResource=currentResourceDigest(root,canonicalPath);
+            if(targetExists) {
+                // A prior process may have written this exact inert file before failing to activate
+                // its inventory entry. Permit only that digest-fenced recovery case.
+                if(!candidateDigest.equals(currentResource))throw new Conflict();
+                beforeResourceDigest=currentResource;
+            } else {
+                if(!emptyDigest.equals(currentResource))throw new Conflict();
+                beforeResourceDigest=emptyDigest;
+            }
+        }
+        if(!manifestAddition&&!expectedResourceDigest.equals(currentResourceDigest(root,canonicalPath)))throw new Conflict();
+        enforceCapacity(actor);
+        Draft draft=new Draft("R"+UUID.randomUUID().toString().replace("-","").toUpperCase(),packageId,actor,root,
+                canonicalPath,environment,source,beforeResourceDigest,candidateManifestSource,expectedManifestDigest,
+                clock.instant().plusSeconds(policy.draftTtlSeconds),null,false);
+        drafts.put(draft.id,draft);audit.record(actor,"PKG_SUT_METRIC_RESOURCE_STAGE",packageId,canonicalPath+":"+expectedResourceDigest);
+        return view(draft);
+    }
+
+    synchronized Map<String,Object> validateResource(String packageId,String actor,String id) throws Exception {
+        Draft old=resourceDraft(packageId,actor,id);
+        if(old.candidateManifestSource==null)unchanged(old);
+        else unchangedForCreatedResource(old,digest(old.source.getBytes(StandardCharsets.UTF_8)));
+        Map<String,Object> validated=resourceValidator.validateCandidate(packageId,old.actor,old.resourcePath,old.environment,
+                old.source,old.candidateManifestSource,old.expectedManifestDigest);
+        if(!Boolean.TRUE.equals(validated.get("valid")))throw new IllegalArgumentException("Package resource validation did not succeed");
+        String candidateDigest=digest(old.source.getBytes(StandardCharsets.UTF_8));
+        if(!candidateDigest.equals(validated.get("resourceDigest")))throw new Conflict();
+        if(old.candidateManifestSource!=null) {
+            String candidateManifestDigest=digest(old.candidateManifestSource.getBytes(StandardCharsets.UTF_8));
+            if(!candidateManifestDigest.equals(validated.get("candidateManifestDigest")))throw new Conflict();
+        }
+        requireDigest(String.valueOf(validated.get("validationRevision")));
+        if(old.candidateManifestSource==null)unchanged(old);
+        else unchangedForCreatedResource(old,candidateDigest);
+        Draft next=new Draft(old.id,old.packageId,old.actor,old.root,old.resourcePath,old.environment,old.source,old.beforeDigest,
+                old.candidateManifestSource,old.expectedManifestDigest,old.expires,Map.copyOf(validated),false);
+        drafts.put(id,next);audit.record(actor,"PKG_SUT_METRIC_RESOURCE_VALIDATE",packageId,old.resourcePath+":"+validated.get("validationRevision"));
+        return view(next);
+    }
+
+    synchronized Map<String,Object> reviewResource(String packageId,String actor,String id) throws Exception {
+        Draft old=resourceDraft(packageId,actor,id);
+        if(old.candidateManifestSource==null)unchanged(old);
+        else unchangedForCreatedResource(old,digest(old.source.getBytes(StandardCharsets.UTF_8)));
+        if(old.validation==null)throw new IllegalArgumentException("Validate the Package resource draft before review");
+        Draft next=new Draft(old.id,old.packageId,old.actor,old.root,old.resourcePath,old.environment,old.source,old.beforeDigest,
+                old.candidateManifestSource,old.expectedManifestDigest,old.expires,old.validation,true);
+        drafts.put(id,next);audit.record(actor,"PKG_SUT_METRIC_RESOURCE_REVIEW",packageId,old.resourcePath+":"+id);
+        return view(next);
+    }
+
+    synchronized Map<String,Object> publishResource(String packageId,String actor,String id) throws Exception {
+        Draft draft=resourceDraft(packageId,actor,id);
+        if(draft.candidateManifestSource==null)unchanged(draft);
+        else unchangedForCreatedResource(draft,digest(draft.source.getBytes(StandardCharsets.UTF_8)));
+        if(!draft.reviewed||draft.validation==null)throw new IllegalArgumentException("Validate and review the Package resource draft before publication");
+        if(draft.candidateManifestSource!=null)return publishCreatedResource(draft,actor);
+        Map<String,Object> fresh=resourceValidator.validateCandidate(packageId,draft.actor,draft.resourcePath,draft.environment,
+                draft.source,null,null);
+        String candidateDigest=digest(draft.source.getBytes(StandardCharsets.UTF_8));
+        if(!Boolean.TRUE.equals(fresh.get("valid"))||!candidateDigest.equals(fresh.get("resourceDigest"))
+                ||!draft.validation.get("validationRevision").equals(fresh.get("validationRevision")))throw new Conflict();
+        unchanged(draft); // Recheck edit authorization, path safety and the live resource revision after validation.
+        Path root=authorizedRoot(packageId,actor);
+        Path live=resourcePath(root,draft.resourcePath);
+        createResourceParents(root,live.getParent());
+        live=resourcePath(root,draft.resourcePath);
+        byte[] before=readResourceOptional(root,draft.resourcePath);
+        if(!digest(before).equals(draft.beforeDigest))throw new Conflict();
+        byte[] after=draft.source.getBytes(StandardCharsets.UTF_8);
+        String afterDigest=digest(after);
+        Path history=resourceHistoryDirectory(packageId,draft.resourcePath);
+        saveHistory(history,draft.beforeDigest,before);
+        saveHistory(history,afterDigest,after);
+        pruneHistory(history,draft.beforeDigest,afterDigest);
+        audit.record(actor,"PKG_SUT_METRIC_PUBLISH_INTENT",packageId,draft.resourcePath+":"+draft.beforeDigest+" -> "+afterDigest);
+        // Fence all package/global dependencies again after preparation and immediately before replacement.
+        unchanged(draft);
+        Map<String,Object> commitValidation=resourceValidator.validate(packageId,draft.actor,draft.resourcePath,draft.environment,draft.source);
+        if(!Boolean.TRUE.equals(commitValidation.get("valid"))||!candidateDigest.equals(commitValidation.get("resourceDigest"))
+                ||!draft.validation.get("validationRevision").equals(commitValidation.get("validationRevision")))throw new Conflict();
+        unchanged(draft);
+        // Re-resolve immediately before replacement; an unreferenced candidate remains inactive because package.yaml is untouched.
+        live=resourcePath(root,draft.resourcePath);
+        atomicWrite(live,after);
+        drafts.remove(id);
+        boolean auditConfirmed=true;
+        try {audit.record(actor,"PKG_SUT_METRIC_RESOURCE_PUBLISH",packageId,draft.resourcePath+":"+draft.beforeDigest+" -> "+afterDigest);}
+        catch(Exception pending) {auditConfirmed=false;}
+        Map<String,Object> result=new LinkedHashMap<>();result.put("auditConfirmed",auditConfirmed);result.put("published",true);
+        result.put("packageId",packageId);result.put("resourcePath",draft.resourcePath);
+        result.put("beforeResourceDigest",draft.beforeDigest);result.put("resourceDigest",afterDigest);result.put("refreshRequired",true);
+        result.put("validationRevision",commitValidation.get("validationRevision"));
+        result.put("environment",commitValidation.get("environment"));result.put("configurationIdentity",commitValidation.get("configurationIdentity"));
+        return result;
+    }
+
+    private Map<String,Object> publishCreatedResource(Draft draft,String actor) throws Exception {
+        String resourceDigest=digest(draft.source.getBytes(StandardCharsets.UTF_8));
+        byte[] resourceBytes=draft.source.getBytes(StandardCharsets.UTF_8);
+        byte[] manifestBytes=draft.candidateManifestSource.getBytes(StandardCharsets.UTF_8);
+        String candidateManifestDigest=digest(manifestBytes);
+        unchangedForCreatedResource(draft,resourceDigest);
+        Path root=authorizedRoot(draft.packageId,actor);
+        Path liveResource=resourcePath(root,draft.resourcePath);
+        createResourceParents(root,liveResource.getParent());
+        liveResource=resourcePath(root,draft.resourcePath);
+        byte[] beforeResource=readResourceOptional(root,draft.resourcePath);
+        if(!draft.beforeDigest.equals(digest(beforeResource))
+                &&!resourceDigest.equals(digest(beforeResource)))throw new Conflict();
+        Path liveManifest=root.resolve("package.yaml");
+        byte[] beforeManifest=readOptional(liveManifest);
+        if(!draft.expectedManifestDigest.equals(digest(beforeManifest)))throw new Conflict();
+
+        Path resourceHistory=resourceHistoryDirectory(draft.packageId,draft.resourcePath);
+        Path manifestHistory=historyDirectory(draft.packageId);
+        saveHistory(resourceHistory,draft.beforeDigest,draft.beforeDigest.equals(digest(beforeResource))?beforeResource:new byte[0]);
+        saveHistory(resourceHistory,resourceDigest,resourceBytes);
+        saveHistory(manifestHistory,draft.expectedManifestDigest,beforeManifest);
+        saveHistory(manifestHistory,candidateManifestDigest,manifestBytes);
+        pruneHistory(resourceHistory,draft.beforeDigest,resourceDigest);
+        pruneHistory(manifestHistory,draft.expectedManifestDigest,candidateManifestDigest);
+
+        String intent=draft.resourcePath+":"+draft.beforeDigest+" -> "+resourceDigest
+                +"; package.yaml:"+draft.expectedManifestDigest+" -> "+candidateManifestDigest;
+        audit.record(actor,"PKG_SUT_METRIC_PUBLISH_INTENT",draft.packageId,intent);
+        Map<String,Object> beforeWrite=resourceValidator.validateCandidate(draft.packageId,draft.actor,draft.resourcePath,
+                draft.environment,draft.source,draft.candidateManifestSource,draft.expectedManifestDigest);
+        verifyCreatedResourceValidation(draft,beforeWrite,resourceDigest,candidateManifestDigest);
+        unchangedForCreatedResource(draft,resourceDigest);
+
+        byte[] currentResource=readResourceOptional(root,draft.resourcePath);
+        if(draft.beforeDigest.equals(digest(currentResource))) {
+            liveResource=resourcePath(root,draft.resourcePath);
+            atomicWrite(liveResource,resourceBytes);
+        } else if(!resourceDigest.equals(digest(currentResource)))throw new Conflict();
+
+        if(!draft.expectedManifestDigest.equals(currentDigest(root))
+                ||!resourceDigest.equals(currentResourceDigest(root,draft.resourcePath)))throw new Conflict();
+        Map<String,Object> commitValidation=resourceValidator.validateCandidate(draft.packageId,draft.actor,draft.resourcePath,
+                draft.environment,draft.source,draft.candidateManifestSource,draft.expectedManifestDigest);
+        verifyCreatedResourceValidation(draft,commitValidation,resourceDigest,candidateManifestDigest);
+        unchangedForCreatedResource(draft,resourceDigest);
+        audit.record(actor,"PKG_SUT_MANIFEST_INTENT",draft.packageId,intent);
+        // The resource stays unlisted until this last atomic replacement activates its inventory path.
+        Map<String,Object> finalValidation=resourceValidator.validateCandidate(draft.packageId,draft.actor,draft.resourcePath,
+                draft.environment,draft.source,draft.candidateManifestSource,draft.expectedManifestDigest);
+        verifyCreatedResourceValidation(draft,finalValidation,resourceDigest,candidateManifestDigest);
+        unchangedForCreatedResource(draft,resourceDigest);
+        if(!draft.expectedManifestDigest.equals(currentDigest(root)))throw new Conflict();
+        atomicWrite(root.resolve("package.yaml"),manifestBytes);
+        if(!candidateManifestDigest.equals(currentDigest(root)))throw new IOException("Candidate Package Manifest replacement could not be verified");
+
+        drafts.remove(draft.id);
+        boolean auditConfirmed=true;
+        try {audit.record(actor,"PKG_SUT_METRIC_RESOURCE_PUBLISH",draft.packageId,intent);}
+        catch(Exception pending) {auditConfirmed=false;}
+        Map<String,Object> result=new LinkedHashMap<>();
+        result.put("auditConfirmed",auditConfirmed);result.put("published",true);result.put("packageId",draft.packageId);
+        result.put("resourcePath",draft.resourcePath);result.put("beforeResourceDigest",draft.beforeDigest);
+        result.put("resourceDigest",resourceDigest);result.put("expectedManifestDigest",draft.expectedManifestDigest);
+        result.put("manifestDigest",candidateManifestDigest);result.put("candidateManifestDigest",candidateManifestDigest);
+        result.put("recoveredExistingResource",!digest(new byte[0]).equals(draft.beforeDigest));
+        result.put("candidateResourceDigest",resourceDigest);
+        result.put("refreshRequired",true);result.put("validationRevision",finalValidation.get("validationRevision"));
+        result.put("environment",finalValidation.get("environment"));
+        result.put("configurationIdentity",finalValidation.get("configurationIdentity"));
+        result.put("activationMode","resource-then-manifest");
+        return result;
+    }
+
+    private void verifyCreatedResourceValidation(Draft draft,Map<String,Object> validated,
+                                                 String resourceDigest,String candidateManifestDigest) {
+        if(!Boolean.TRUE.equals(validated.get("valid"))
+                ||!resourceDigest.equals(validated.get("resourceDigest"))
+                ||!candidateManifestDigest.equals(validated.get("candidateManifestDigest"))
+                ||!draft.validation.get("validationRevision").equals(validated.get("validationRevision")))
+            throw new Conflict();
+    }
+
+    private void unchangedForCreatedResource(Draft draft,String resourceDigest) throws Exception {
+        if(!draft.root.equals(authorizedRoot(draft.packageId,draft.actor)))throw new Conflict();
+        if(!draft.expectedManifestDigest.equals(currentDigest(draft.root)))throw new Conflict();
+        String currentResource=currentResourceDigest(draft.root,draft.resourcePath);
+        if(!draft.beforeDigest.equals(currentResource)&&!resourceDigest.equals(currentResource))throw new Conflict();
+    }
+
+    synchronized List<Map<String,Object>> historyResource(String packageId,String actor,String relativePath) throws Exception {
+        Path root=authorizedRoot(packageId,actor);String canonicalPath=resourceRelativePath(root,relativePath);
+        Path directory=resourceHistoryDirectory(packageId,canonicalPath);List<Map<String,Object>> result=new ArrayList<>();
+        try(var files=Files.list(directory)) {
+            for(Path file:files.filter(p->p.getFileName().toString().matches("[a-f0-9]{64}\\.yaml")).toList()) {
+                if(Files.isSymbolicLink(file)||!Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS))throw new IOException("Source history is unavailable");
+                result.add(Map.of("resourceDigest",file.getFileName().toString().substring(0,64),"modifiedAt",Files.getLastModifiedTime(file).toInstant().toString()));
+            }
+        }
+        result.sort(Comparator.<Map<String,Object>,Instant>comparing(item->Instant.parse((String)item.get("modifiedAt")))
+                .reversed().thenComparing(item->(String)item.get("resourceDigest")));
+        return result;
+    }
+
+    synchronized void discardResource(String packageId,String actor,String id) throws Exception {
+        Draft old=resourceDraft(packageId,actor,id);audit.record(actor,"PKG_SUT_METRIC_RESOURCE_DISCARD",packageId,old.resourcePath+":"+id);drafts.remove(id);
+    }
+
     synchronized List<Map<String,Object>> history(String packageId,String actor) throws Exception {
         authorizedRoot(packageId,actor);Path directory=historyDirectory(packageId);
         List<Map<String,Object>> result=new ArrayList<>();
@@ -126,15 +398,30 @@ final class PackageManifestPublisher implements AutoCloseable {
         // An absent optional Manifest has the same declared defaults as a canonical empty Manifest.
         // Keep publication an atomic file replacement, and expose this normalization in review.
         boolean reset=source.length==0;
-        Map<String,Object> result=stage(packageId,actor,reset?"schemaVersion: att-package/v1\n":new String(source,StandardCharsets.UTF_8),expectedDigest);
+        Map<String,Object> result=stage(packageId,actor,reset?"schemaVersion: att-package/v2\n":new String(source,StandardCharsets.UTF_8),expectedDigest);
         result.put("rollbackRevision",revision);result.put("resetToEmptyManifest",reset);
         audit.record(actor,"PACKAGE_MANIFEST_ROLLBACK_STAGE",packageId,revision);return result;
     }
 
-    synchronized void discard(String packageId,String actor,String id) throws Exception {draft(packageId,actor,id);audit.record(actor,"PACKAGE_MANIFEST_DISCARD",packageId,id);drafts.remove(id);}
+    synchronized void discard(String packageId,String actor,String id) throws Exception {manifestDraft(packageId,actor,id);audit.record(actor,"PACKAGE_MANIFEST_DISCARD",packageId,id);drafts.remove(id);}
     private Draft draft(String packageId,String actor,String id) throws Exception {
         authorizedRoot(packageId,actor);expire();Draft draft=drafts.get(id);
         if(draft==null||!draft.packageId.equals(packageId)||!draft.actor.equals(actor))throw new Missing();return draft;
+    }
+    private Draft manifestDraft(String packageId,String actor,String id) throws Exception {
+        Draft draft=draft(packageId,actor,id);if(draft.resourcePath!=null)throw new Missing();return draft;
+    }
+    private Draft resourceDraft(String packageId,String actor,String id) throws Exception {
+        Draft draft=draft(packageId,actor,id);if(draft.resourcePath==null)throw new Missing();return draft;
+    }
+    private void requireResourceValidator(){if(resourceValidator==null)throw new Denied();}
+    private static void validateSource(String source,String owner) {
+        if(source==null||source.getBytes(StandardCharsets.UTF_8).length>MAX_SOURCE_BYTES||source.indexOf('\0')>=0)
+            throw new IllegalArgumentException(owner+" exceeds the UTF-8 source limit or is unavailable");
+    }
+    private void enforceCapacity(String actor) {
+        if(drafts.size()>=policy.maxDrafts||drafts.values().stream().filter(d->d.actor.equals(actor)).count()>=policy.maxDraftsPerUser)
+            throw new Capacity();
     }
     private Path authorizedRoot(String packageId,String actor) throws Exception {
         if(!policy.sourceEditingEnabled)throw new Denied();
@@ -143,18 +430,111 @@ final class PackageManifestPublisher implements AutoCloseable {
         return root;
     }
     private void unchanged(Draft draft) throws Exception {
-        if(!draft.root.equals(authorizedRoot(draft.packageId,draft.actor))||!draft.beforeDigest.equals(currentDigest(draft.root)))throw new Conflict();
+        if(!draft.root.equals(authorizedRoot(draft.packageId,draft.actor)))throw new Conflict();
+        String current=draft.resourcePath==null?currentDigest(draft.root):currentResourceDigest(draft.root,draft.resourcePath);
+        if(!draft.beforeDigest.equals(current))throw new Conflict();
+        if(draft.expectedManifestDigest!=null&&!draft.expectedManifestDigest.equals(currentDigest(draft.root)))throw new Conflict();
     }
     private static String currentDigest(Path root) throws Exception {return digest(readOptional(root.resolve("package.yaml")));}
+    private static String currentResourceDigest(Path root,String relativePath) throws Exception {
+        return digest(readResourceOptional(root,relativePath));
+    }
+    private static String resourceRelativePath(Path root,String authoredPath) throws IOException {
+        if(authoredPath==null||authoredPath.length()>512)throw new IllegalArgumentException("Package resource path is invalid");
+        Path relative=att.core.IdentifierValidator.relativePath(authoredPath,"Package SUT Metrics resource path");
+        String normalized=relative.toString().replace('\\','/');
+        String[] parts=normalized.split("/",-1);
+        if(!normalized.equals(authoredPath)||parts.length<4||!"load".equals(parts[0])||!"sut-metrics".equals(parts[1])
+                ||!("sources".equals(parts[2])||"groups".equals(parts[2])||"profiles".equals(parts[2]))
+                ||!normalized.matches("load/sut-metrics/(?:sources|groups|profiles)/.+\\.ya?ml"))
+            throw new IllegalArgumentException("Package SUT Metrics resource path must be a YAML file under load/sut-metrics/{sources,groups,profiles}/");
+        Path canonicalRoot=root.toAbsolutePath().normalize();
+        if(!root.equals(root.toRealPath())||!canonicalRoot.equals(root.toRealPath()))throw new IllegalArgumentException("Package root is not canonical");
+        Path target=canonicalRoot.resolve(relative).normalize();
+        if(!target.startsWith(canonicalRoot))throw new IllegalArgumentException("Package resource path escapes its Package root");
+        for(Path current=target;current!=null&&current.startsWith(canonicalRoot);current=current.getParent()) {
+            if(Files.isSymbolicLink(current))throw new IllegalArgumentException("Package resource path contains a symbolic link");
+            if(!current.equals(target)&&Files.exists(current,LinkOption.NOFOLLOW_LINKS)
+                    &&!Files.isDirectory(current,LinkOption.NOFOLLOW_LINKS))
+                throw new IllegalArgumentException("Package resource path traverses a non-directory");
+            if(current.equals(canonicalRoot))break;
+        }
+        if(Files.exists(target,LinkOption.NOFOLLOW_LINKS)) {
+            if(!Files.isRegularFile(target,LinkOption.NOFOLLOW_LINKS))throw new IllegalArgumentException("Package resource path is not a regular file");
+            Path real=target.toRealPath();
+            if(!real.equals(target)||!real.startsWith(canonicalRoot))throw new IllegalArgumentException("Package resource path is unsafe");
+        }
+        return normalized;
+    }
+    private static Path resourcePath(Path root,String relativePath) throws IOException {
+        String normalized=resourceRelativePath(root,relativePath);
+        return root.resolve(att.core.IdentifierValidator.relativePath(normalized,"Package SUT Metrics resource path")).normalize();
+    }
+    private static byte[] readResourceOptional(Path root,String relativePath) throws IOException {
+        Path file=resourcePath(root,relativePath);
+        if(!Files.exists(file,LinkOption.NOFOLLOW_LINKS))return new byte[0];
+        byte[] first=readResourceOnce(root,relativePath,file);
+        byte[] second=readResourceOnce(root,relativePath,file);
+        if(!java.util.Arrays.equals(first,second))throw new IOException("Package resource changed while it was being read");
+        return first;
+    }
+    private static byte[] readResourceOnce(Path root,String relativePath,Path file) throws IOException {
+        resourcePath(root,relativePath);
+        BasicFileAttributes before=Files.readAttributes(file,BasicFileAttributes.class,LinkOption.NOFOLLOW_LINKS);
+        if(!before.isRegularFile()||before.size()>MAX_SOURCE_BYTES)throw new IOException("Package resource is unsafe or exceeds its limit");
+        ByteBuffer buffer=ByteBuffer.allocate(8192);java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream((int)before.size());long total=0;
+        try(FileChannel channel=FileChannel.open(file,StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS)) {
+            if(channel.size()!=before.size())throw new IOException("Package resource changed while it was opened");
+            int read;while((read=channel.read(buffer))>=0) {
+                if(read==0)continue;total+=read;if(total>MAX_SOURCE_BYTES)throw new IOException("Package resource exceeds its limit");
+                output.write(buffer.array(),0,read);buffer.clear();
+            }
+            if(channel.size()!=before.size()||total!=before.size())throw new IOException("Package resource changed while it was read");
+        }
+        BasicFileAttributes after=Files.readAttributes(file,BasicFileAttributes.class,LinkOption.NOFOLLOW_LINKS);
+        if(!after.isRegularFile()||after.size()!=before.size()||!after.lastModifiedTime().equals(before.lastModifiedTime())
+                ||(before.fileKey()!=null&&after.fileKey()!=null&&!before.fileKey().equals(after.fileKey())))
+            throw new IOException("Package resource changed while it was read");
+        resourcePath(root,relativePath);
+        return output.toByteArray();
+    }
+    private static void createResourceParents(Path root,Path parent) throws IOException {
+        Path canonicalRoot=root.toAbsolutePath().normalize();Path relative=canonicalRoot.relativize(parent.toAbsolutePath().normalize());Path current=canonicalRoot;
+        for(Path component:relative) {
+            current=current.resolve(component);
+            if(Files.exists(current,LinkOption.NOFOLLOW_LINKS)) {
+                if(Files.isSymbolicLink(current)||!Files.isDirectory(current,LinkOption.NOFOLLOW_LINKS))
+                    throw new IllegalArgumentException("Unsafe Package resource parent directory");
+            } else Files.createDirectory(current);
+            if(!current.toRealPath().equals(current)||!current.toRealPath().startsWith(canonicalRoot))
+                throw new IllegalArgumentException("Package resource parent escapes its Package root");
+        }
+    }
+    private Path resourceHistoryDirectory(String packageId,String relativePath) throws Exception {
+        Path resources=historyDirectory(packageId).resolve("resources");privateDirectory(resources);
+        Path directory=resources.resolve(digest(relativePath.getBytes(StandardCharsets.UTF_8)));privateDirectory(directory);return directory;
+    }
     private static byte[] readOptional(Path file) throws IOException {
         if(!Files.exists(file,LinkOption.NOFOLLOW_LINKS))return new byte[0];
         if(Files.isSymbolicLink(file)||!Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS)||!Files.isReadable(file)||Files.size(file)>MAX_SOURCE_BYTES)
             throw new IOException("Package Manifest source is unsafe or exceeds its limit");
         try(var input=Files.newInputStream(file)){byte[] value=input.readNBytes(MAX_SOURCE_BYTES+1);if(value.length>MAX_SOURCE_BYTES)throw new IOException("Manifest source exceeds its limit");return value;}
     }
-    private Map<String,Object> view(Draft draft) {
+    private Map<String,Object> view(Draft draft) throws Exception {
         Map<String,Object> result=new LinkedHashMap<>();result.put("draftId",draft.id);result.put("packageId",draft.packageId);
-        result.put("expectedManifestDigest",draft.beforeDigest);result.put("expiresAt",draft.expires.toString());
+        if(draft.resourcePath==null)result.put("expectedManifestDigest",draft.beforeDigest);
+        else {
+            result.put("resourcePath",draft.resourcePath);result.put("expectedResourceDigest",draft.beforeDigest);
+            if(draft.environment!=null)result.put("environment",draft.environment);
+            if(draft.candidateManifestSource!=null) {
+                result.put("activationMode","resource-then-manifest");
+                result.put("expectedManifestDigest",draft.expectedManifestDigest);
+                result.put("candidateManifestDigest",digest(draft.candidateManifestSource.getBytes(StandardCharsets.UTF_8)));
+                result.put("recoveredExistingResource",!digest(new byte[0]).equals(draft.beforeDigest));
+                result.put("candidateResourceDigest",digest(draft.source.getBytes(StandardCharsets.UTF_8)));
+            }
+        }
+        result.put("expiresAt",draft.expires.toString());
         result.put("state",draft.reviewed?"reviewed":draft.validation==null?"draft":"validated");
         if(draft.validation!=null)result.put("validation",draft.validation);
         return result; // Raw candidate source stays private and is never included in a response.
