@@ -1360,6 +1360,69 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void packageZipImportUsesOwnerAuthorizationAndStagesWithoutPublishing() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("package-zip-import-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"package-zip-import-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("package-zip-import-libs"))) {
+            addAuthoringUsers(runtime);ApiServlet servlet=servlet(runtime);
+            byte[] archive=packageZip("files/z-imported.txt","last\n","files/a-imported.txt","first\n");
+            byte[] runtimeConfigBefore=Files.readAllBytes(runtimeConfig);
+
+            Captured wrongType=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/import",
+                    Collections.emptyMap(),archive);
+            assertEquals(415,wrongType.status,new String(wrongType.body(),StandardCharsets.UTF_8));
+
+            Captured malformed=invokeAsContentType(servlet,"alice","POST","/packages/alice/change-sets/import",
+                    Collections.emptyMap(),new byte[]{1,2,3},"application/zip");
+            assertEquals(400,malformed.status,new String(malformed.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-PACKAGE-ZIP-INVALID",ServerRuntime.JSON.readTree(malformed.body())
+                    .path("error").path("code").asText());
+
+            Captured unauthorized=invokeAsContentType(servlet,"alice","POST","/packages/bob/change-sets/import",
+                    Collections.emptyMap(),new byte[]{1,2,3},"application/zip");
+            assertEquals(403,unauthorized.status,new String(unauthorized.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-PACKAGE-SOURCE-DENIED",ServerRuntime.JSON.readTree(unauthorized.body())
+                    .path("error").path("code").asText(),"Package ownership is checked before parsing an archive");
+
+            Captured imported=invokeAsContentType(servlet,"alice","POST","/packages/alice/change-sets/import",
+                    Collections.emptyMap(),archive,"application/zip");
+            assertEquals(201,imported.status,new String(imported.body(),StandardCharsets.UTF_8));
+            assertEquals("private, no-store",imported.headers.get("Cache-Control"));
+            JsonNode draft=ServerRuntime.JSON.readTree(imported.body());
+            assertEquals("draft",draft.path("state").asText());
+            assertEquals(2,draft.path("changedFiles").size());
+            assertEquals("create",draft.path("changedFiles").path(0).path("operation").asText());
+            assertEquals("files/a-imported.txt",draft.path("changedFiles").path(0).path("path").asText(),
+                    "ZIP entries should produce a deterministic path-sorted Change Set diff");
+            assertEquals("files/z-imported.txt",draft.path("changedFiles").path(1).path("path").asText());
+            String id=draft.path("changeSetId").asText();
+            assertArrayEquals(runtimeConfigBefore,Files.readAllBytes(runtimeConfig),
+                    "Package ZIP import must not modify the globally owned Runtime Config");
+            assertFalse(Files.exists(ownerPackage.resolve("files/a-imported.txt"))
+                            ||Files.exists(ownerPackage.resolve("files/z-imported.txt")),
+                    "Import creates an ordinary Change Set and must leave published Package files untouched");
+
+            for(String action:List.of("validate","review")) {
+                Captured response=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+id+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+                assertEquals(200,response.status,new String(response.body(),StandardCharsets.UTF_8));
+                assertFalse(Files.exists(ownerPackage.resolve("files/a-imported.txt"))
+                                ||Files.exists(ownerPackage.resolve("files/z-imported.txt")),
+                        "Validation and review must not publish imported files");
+                assertArrayEquals(runtimeConfigBefore,Files.readAllBytes(runtimeConfig),
+                        "Package Change Set gates must not modify the global Runtime Config");
+            }
+            Captured discarded=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+id+"/discard",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(200,discarded.status,new String(discarded.body(),StandardCharsets.UTF_8));
+            assertFalse(Files.exists(ownerPackage.resolve("files/a-imported.txt"))
+                    ||Files.exists(ownerPackage.resolve("files/z-imported.txt")));
+            assertArrayEquals(runtimeConfigBefore,Files.readAllBytes(runtimeConfig));
+        }
+    }
+
     private static JsonNode assertChangeSetSchema(com.networknt.schema.JsonSchema schema,Captured response,int status) throws Exception {
         assertEquals(status,response.status,new String(response.body(),StandardCharsets.UTF_8));
         assertEquals("private, no-store",response.headers.get("Cache-Control"));
@@ -1752,6 +1815,16 @@ class ApiServletIntegratedLimitsTest {
 
     private Captured invokeAs(ApiServlet servlet,String method,String path,Map<String,String> parameters,byte[] body,
                               String login,Set<String> roles,boolean admin) throws Exception {
+        return invokeAsContentType(servlet,method,path,parameters,body,login,roles,admin,"application/json");
+    }
+
+    private Captured invokeAsContentType(ApiServlet servlet,String login,String method,String path,
+                                         Map<String,String> parameters,byte[] body,String contentType) throws Exception {
+        return invokeAsContentType(servlet,method,path,parameters,body,login,null,false,contentType);
+    }
+
+    private Captured invokeAsContentType(ApiServlet servlet,String method,String path,Map<String,String> parameters,
+                                         byte[] body,String login,Set<String> roles,boolean admin,String contentType) throws Exception {
         ServletContext context=servlet.getServletContext();
         HttpServletRequest request=proxy(HttpServletRequest.class,(self,called,args)->{
             switch(called.getName()) {
@@ -1762,7 +1835,7 @@ class ApiServletIntegratedLimitsTest {
                 case "getContextPath": return "";
                 case "getParameter": return parameters.get(args[0]);
                 case "getHeader": return "X-Request-ID".equals(args[0])?"limits-test":null;
-                case "getContentType": return "application/json";
+                case "getContentType": return contentType;
                 case "getUserPrincipal": return login==null?null:(Principal)()->login;
                 case "isUserInRole": return roles!=null?roles.contains(args[0])
                         :admin?runtimeAdminRole(servlet,args[0]):runtimeRole(servlet,args[0]);
@@ -1780,6 +1853,18 @@ class ApiServletIntegratedLimitsTest {
         });
         servlet.service(request,httpResponse);
         return response;
+    }
+
+    private static byte[] packageZip(String... pathsAndContents) throws Exception {
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+        try(java.util.zip.ZipOutputStream zip=new java.util.zip.ZipOutputStream(bytes,StandardCharsets.UTF_8)) {
+            for(int index=0;index<pathsAndContents.length;index+=2) {
+                zip.putNextEntry(new java.util.zip.ZipEntry(pathsAndContents[index]));
+                zip.write(pathsAndContents[index+1].getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+        }
+        return bytes.toByteArray();
     }
 
     private boolean runtimeRole(ApiServlet servlet,Object role) {

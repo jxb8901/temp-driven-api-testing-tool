@@ -599,6 +599,11 @@ export const api = {
       operations,
     }, signal);
   },
+  stagePackageSourceArchive(packageId: string, archive: File, signal?: AbortSignal): Promise<SourceChangeSet> {
+    return request<SourceChangeSet>('packages/' + encodeURIComponent(packageId) + '/change-sets/import', {
+      method: 'POST', body: archive, headers: { 'Content-Type': 'application/zip' }, signal,
+    });
+  },
   async sourceChangeSetAction(domain: SourceDomain, scopeId: string, changeSetId: string,
     action: SourceChangeAction, signal?: AbortSignal, impactAcknowledgement?: SourceImpactAcknowledgement): Promise<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }> {
     const base = domain === 'PACKAGE_SOURCE'

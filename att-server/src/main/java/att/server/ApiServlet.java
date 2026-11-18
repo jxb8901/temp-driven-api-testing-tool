@@ -1299,6 +1299,10 @@ public final class ApiServlet extends HttpServlet {
 
     private void changeSetPostAuthorized(HttpServletRequest req,HttpServletResponse res,String path,String requestId,
                                          String actor,boolean systemSettingsWrite) throws IOException {
+        if(packageSourceImportPath(path)) {
+            packageSourceImportAuthorized(req,res,path,requestId,actor);
+            return;
+        }
         if(!isJson(req.getContentType())) {
             error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;
         }
@@ -1376,6 +1380,35 @@ public final class ApiServlet extends HttpServlet {
           catch(ChangeSetPublisher.ValidationRejected e){error(res,422,e.code,"Candidate source validation or publication gate rejected the Change Set",requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-CHANGESET-FAILED","Change Set action could not be completed",requestId);getServletContext().log("ATT Change Set failed id="+requestId,e);}
+    }
+
+    private void packageSourceImportAuthorized(HttpServletRequest req,HttpServletResponse res,String path,
+                                               String requestId,String actor) throws IOException {
+        if(!isPackageZip(req.getContentType())) {
+            error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/zip",requestId);return;
+        }
+        if(!checkOrigin(req,res,requestId,false))return;
+        try {
+            runtime.changeSetPublisher.requirePackageSourceEditor(segment(path,2),actor);
+            int limit=Math.min(runtime.config.maxRequestBytes,PackageSourceArchiveImport.MAX_ARCHIVE_BYTES);
+            byte[] archive=readBoundedBody(req.getInputStream(),limit);
+            if(archive.length>limit) {
+                error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Package ZIP exceeds the configured request size limit",requestId);return;
+            }
+            Map<String,Object> result=runtime.changeSetPublisher.stagePackageArchive(segment(path,2),actor,archive,requestId);
+            result.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,201,result);
+        } catch(ChangeSetPublisher.Denied denied) {
+            error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);
+        } catch(ChangeSetPublisher.Conflict conflict) {
+            error(res,409,conflict.code,"Package or registry source changed; retry the import against the current revision",requestId);
+        } catch(ChangeSetPublisher.Capacity full) {
+            error(res,429,"ATT-CHANGESET-CAPACITY","Change Set capacity is full",requestId);
+        } catch(IllegalArgumentException invalid) {
+            error(res,400,"ATT-PACKAGE-ZIP-INVALID",safeDetail(invalid),requestId);
+        } catch(Exception failure) {
+            error(res,500,"ATT-CHANGESET-FAILED","Package ZIP could not be staged",requestId);
+            getServletContext().log("ATT Package ZIP import failed id="+requestId,failure);
+        }
     }
 
     private static ChangeSetPublisher.OperationInput parseChangeOperation(JsonNode value) {
@@ -1509,12 +1542,14 @@ public final class ApiServlet extends HttpServlet {
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-PACKAGE-SOURCE-FAILED","Manifest action could not be completed",requestId);getServletContext().log("ATT Manifest action failed id="+requestId,e);}
     }
-    private static boolean packageChangeSetPath(String path){return path.matches("/packages/[^/]+/change-sets(?:/[^/]+/(?:validate|review|publish|discard|generate-snapshot))?");}
+    private static boolean packageChangeSetPath(String path){return path.matches("/packages/[^/]+/change-sets(?:/import|/[^/]+/(?:validate|review|publish|discard|generate-snapshot))?");}
+    private static boolean packageSourceImportPath(String path){return path.matches("/packages/[^/]+/change-sets/import");}
     private static boolean centralChangeSetPath(String path){return path.matches("/configuration/change-sets(?:/[^/]+/(?:validate|review|publish|discard))?");}
     private static boolean centralImpactPath(String path){return path.matches("/configuration/change-sets/[^/]+/impact");}
     private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/package-configuration(?:/.*)?")||path.matches("/packages/[^/]+/configuration(?:/.*)?")||path.matches("/configuration(?:/.*)?");}
     private static boolean loadPolicyPath(String path){return path.matches("/packages/[^/]+/load-policy");}
     private static boolean isJson(String value){if(value==null)return false;String[] parts=value.split(";",2);return "application/json".equalsIgnoreCase(parts[0].trim());}
+    private static boolean isPackageZip(String value){if(value==null)return false;String[] parts=value.split(";",2);String media=parts[0].trim();return "application/zip".equalsIgnoreCase(media)||"application/x-zip-compressed".equalsIgnoreCase(media);}
     private boolean checkOrigin(HttpServletRequest req,HttpServletResponse res,String requestId,boolean force)throws IOException {
         if(!force&&!runtime.config.security.checkCrossOrigin)return true;
         if(runtime.config.security.originPolicy.allows(req))return true;

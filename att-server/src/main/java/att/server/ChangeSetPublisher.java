@@ -446,6 +446,32 @@ final class ChangeSetPublisher implements AutoCloseable {
         } finally { sourceReadLock.unlock(); }
     }
 
+    synchronized Map<String,Object> stagePackageArchive(String packageId,String actor,byte[] archive,
+                                                        String requestId) throws Exception {
+        requirePackageSourceEditor(packageId,actor);
+        Map<String,byte[]> files=PackageSourceArchiveImport.parse(archive);
+        sourceReadLock.lock();
+        try {
+            Scope scope=authorizedScope(PACKAGE_SOURCE,packageId,actor,false);
+            RevisionState base=state(scope);
+            List<OperationInput> operations=new ArrayList<>();
+            List<String> paths=new ArrayList<>(files.keySet());
+            Collections.sort(paths);
+            for(String path:paths) {
+                String operation=base.packageIndex.hashes.containsKey(path)?"replace":"create";
+                operations.add(new OperationInput(operation,path,null,files.get(path)));
+            }
+            return stage(PACKAGE_SOURCE,packageId,actor,false,base.sourceRevision,base.registryRevision,
+                    operations,requestId);
+        } finally { sourceReadLock.unlock(); }
+    }
+
+    synchronized void requirePackageSourceEditor(String packageId,String actor) throws Exception {
+        sourceReadLock.lock();
+        try { authorizedScope(PACKAGE_SOURCE,packageId,actor,false); }
+        finally { sourceReadLock.unlock(); }
+    }
+
     synchronized Map<String, Object> validate(String domain, String scopeId, String actor, boolean systemSettingsWrite,
                                                String id) throws Exception {
         return validate(domain, scopeId, actor, systemSettingsWrite, id, null);

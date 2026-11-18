@@ -70,6 +70,31 @@ function centralImpact(decision: 'COMPATIBLE' | 'REQUIRES_REVIEW' | 'BLOCKED' = 
 }
 
 describe('SourceAuthoringWorkspace', () => {
+  it('stages a Package ZIP as a draft and keeps publication behind Validate, Review, and Publish', async () => {
+    const stagedArchive = vi.fn(async () => draft());
+    const api = {
+      getManagedPackageAuthoringSource: vi.fn(async () => source()),
+      stagePackageSourceArchive: stagedArchive,
+      sourceChangeSetAction: vi.fn(async () => draft('validated')),
+    } as unknown as ExplorerApi;
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await act(async () => root.render(<SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId: 'payments',
+      query: { kind: 'resource', resourceType: 'template', resourceId: 'checkout' }, label: 'Template source' }} />));
+    await settle();
+    expect(button('Import Package ZIP').disabled).toBe(false);
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="Import Package ZIP"]');
+    if (!input) throw new Error('Package ZIP input was not rendered.');
+    const archive = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'package.zip', { type: 'application/zip' });
+    Object.defineProperty(input, 'files', { configurable: true, value: [archive] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); await Promise.resolve(); });
+    await settle();
+    expect(stagedArchive).toHaveBeenCalledWith('payments', archive, expect.any(AbortSignal));
+    expect(host.textContent).toContain('Imported package.zip as draft cs-1');
+    expect(host.textContent).toContain('published source remains unchanged');
+    expect(button('Validate')).toBeDefined();
+    expect(button('Publish').disabled).toBe(true);
+  });
+
   it('shows shared-contract dependency paths, Action call sites, relationships and uncertainty', async () => {
     await act(async () => root.render(<ChangedFiles files={[{ operation: 'delete', path: 'templates/checkout/template.yaml', inboundReferences: [
       { schemaVersion: 'att-source-dependency/v1', kind: 'PACKAGE_RESOURCE', packageId: 'payments', environment: 'UAT',

@@ -353,6 +353,7 @@ export interface ExplorerApi {
   getCentralAuthoringSource?(path: string, signal?: AbortSignal): Promise<ManagedAuthoringSource>;
   stageSourceChangeSet?(domain: SourceDomain, scopeId: string, baseSourceRevision: string, registryRevision: string | undefined,
     operations: SourceOperation[], signal?: AbortSignal): Promise<SourceChangeSet>;
+  stagePackageSourceArchive?(packageId: string, archive: File, signal?: AbortSignal): Promise<SourceChangeSet>;
   sourceChangeSetAction?(domain: SourceDomain, scopeId: string, changeSetId: string, action: SourceChangeAction,
     signal?: AbortSignal, impactAcknowledgement?: SourceImpactAcknowledgement): Promise<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }>;
   generateTestcaseSnapshot?(packageId: string, changeSetId: string, input: SourceSnapshotRequest, signal?: AbortSignal): Promise<SourceChangeSet>;

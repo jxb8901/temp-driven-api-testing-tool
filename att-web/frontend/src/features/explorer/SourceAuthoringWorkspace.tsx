@@ -91,6 +91,7 @@ function safeLogicalPath(path: string): boolean {
 function isTextExtension(path: string): boolean {
   return /\.(yaml|yml|xml|json|csv|tsv|txt|sql|properties|md)$/i.test(path);
 }
+const MAX_PACKAGE_ZIP_BYTES = 16 * 1024 * 1024;
 function isBinaryWorkbook(path: string): boolean { return /\.(xlsx|xls)$/i.test(path); }
 function pathLabel(target: SourceAuthoringTarget, source?: ManagedAuthoringSource | null): string {
   if (source?.logicalPath) return source.logicalPath;
@@ -159,6 +160,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   const actionControllerRef = useRef<AbortController | null>(null);
   const impactControllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const packageZipInputRef = useRef<HTMLInputElement | null>(null);
   const previousTargetKeyRef = useRef(targetKey);
   const recoveryRequiredRef = useRef(false);
   const suspendedRef = useRef(false);
@@ -505,6 +507,36 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     }
   }
 
+  async function handlePackageZipImport(event: React.ChangeEvent<HTMLInputElement>) {
+    const archive = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!archive || !packageTarget) return;
+    if (archive.size > MAX_PACKAGE_ZIP_BYTES) {
+      setError('Package ZIP exceeds the 16 MiB compressed upload limit.'); return;
+    }
+    if (!api.stagePackageSourceArchive) {
+      setError('This Server does not provide Package ZIP import.'); return;
+    }
+    if (draft || pendingOperations.length || currentEditorHasUnqueuedChanges) {
+      setError('Publish, discard, or stage the current draft before importing another Package ZIP.'); return;
+    }
+    if (!window.confirm(`Import ${archive.name} as a private Package source draft? The ZIP will not change published files until validation, review, and publish.`)) return;
+    const controller = new AbortController();
+    actionControllerRef.current?.abort();
+    actionControllerRef.current = controller;
+    setBusy(true); setError(''); setStatus('Checking Package ZIP entries and staging the authorized files…');
+    try {
+      const staged = await api.stagePackageSourceArchive(packageTarget.packageId, archive, controller.signal);
+      if (controller.signal.aborted) return;
+      setDraft(staged); setPublished(null); setImpact(null); setDiagnostics([]); setMode('view');
+      setStatus(`Imported ${archive.name} as draft ${staged.changeSetId}. Published files are unchanged until Validate, Review, and Publish complete.`);
+    } catch (reason) {
+      if (!controller.signal.aborted) setError(failureText(reason, 'import Package ZIP'));
+    } finally {
+      if (actionControllerRef.current === controller) { actionControllerRef.current = null; setBusy(false); }
+    }
+  }
+
   function addPendingOperation(operation: SourceOperation): boolean {
     if (!safeLogicalPath(operation.path) || (operation.targetPath && !safeLogicalPath(operation.targetPath))) {
       setError('Use an in-package relative path without empty, dot, parent, or absolute path segments.'); return false;
@@ -631,6 +663,12 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
           {loading ? 'Loading…' : 'Reload source'}
         </button>
         <button type="button" className="button button-quiet" disabled title="Source history and restore are provided by the #256 history service when available.">History / Restore unavailable</button>
+        {packageTarget && access === 'authorized' && api.stagePackageSourceArchive && <>
+          <button type="button" className="button button-quiet" onClick={() => packageZipInputRef.current?.click()}
+            disabled={busy || loading || Boolean(draft) || pendingOperations.length > 0 || currentEditorHasUnqueuedChanges}>Import Package ZIP</button>
+          <input ref={packageZipInputRef} type="file" className="att-source-file-input" aria-label="Import Package ZIP"
+            accept=".zip,application/zip" onChange={event => void handlePackageZipImport(event)} />
+        </>}
       </div>
     </header>
 
