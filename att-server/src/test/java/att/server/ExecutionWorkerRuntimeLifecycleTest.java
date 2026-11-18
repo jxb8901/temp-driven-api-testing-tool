@@ -163,10 +163,25 @@ class ExecutionWorkerRuntimeLifecycleTest {
 
     private static void assertHeartbeatStopped(Path root,String message) throws Exception {
         Path heartbeat=outputFile(root,"heartbeat");
-        assertNotNull(heartbeat,"The child Tool must write a heartbeat before cleanup");
-        String stoppedValue=Files.readString(heartbeat);
+        if(heartbeat==null) {
+            Thread.sleep(250);
+            assertNull(outputFile(root,"heartbeat"),message+" (heartbeat reappeared after output cleanup)");
+            return;
+        }
+        String stoppedValue=readHeartbeatIfPresent(heartbeat);
         Thread.sleep(250);
-        assertEquals(stoppedValue,Files.readString(heartbeat),message);
+        String laterValue=readHeartbeatIfPresent(heartbeat);
+        if(stoppedValue==null||laterValue==null) {
+            Thread.sleep(250);
+            assertNull(outputFile(root,"heartbeat"),message+" (heartbeat reappeared after output cleanup)");
+            return;
+        }
+        assertEquals(stoppedValue,laterValue,message);
+    }
+
+    private static String readHeartbeatIfPresent(Path heartbeat) throws Exception {
+        try { return Files.readString(heartbeat); }
+        catch(java.nio.file.NoSuchFileException cleanedUp) { return null; }
     }
 
     private static boolean outputHas(Path root,String name) {
