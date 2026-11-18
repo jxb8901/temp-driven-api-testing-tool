@@ -1,6 +1,7 @@
 package att.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.catalina.core.StandardHost;
 import org.apache.catalina.realm.MemoryRealm;
 import org.apache.catalina.startup.Tomcat;
@@ -870,7 +871,7 @@ class ServerWarUiIT {
 
 
     @Test
-    void packagedWarReloadsDegradedHelperDiscoveryWithoutLeakingPrivateSources() throws Exception {
+    void packagedWarKeepsCentralConfigPinnedAcrossUnpublishedHelperMirrorEdits() throws Exception {
         Path war = Path.of(System.getProperty("att.server.war"));
         assertTrue(Files.isRegularFile(war), "Packaged server WAR must exist: " + war);
         Path localHome = createScheduledLocalRuntime();
@@ -913,7 +914,14 @@ class ServerWarUiIT {
             assertNotNull(baselineRevision);
             assertEquals(401, get(port, resourceRoute, null), "The Resource Catalog remains authenticated during reload.");
 
-            assertDegradedDiscoveryWithoutProcessSecrets(port, api, auth, packageRoot, localHome, baselineRevision);
+            JsonNode approvedSource = getJson(port, api + "/configuration/source?path=config/config.yaml", auth);
+            assertTrue(approvedSource.path("available").asBoolean(), approvedSource.toString());
+            String approvedConfig = approvedSource.path("text").asText();
+            JsonNode approvedEffective = getJson(port,
+                    api + "/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&limit=50", auth);
+
+            assertCentralConfigRemainsPinnedAcrossUnpublishedHelperMirrorEdits(
+                    port, api, auth, packageRoot, localHome, baselineRevision, approvedConfig, approvedEffective);
         } finally {
             if (tomcat != null) {
                 try { tomcat.stop(); } finally { tomcat.destroy(); }
@@ -1739,9 +1747,9 @@ class ServerWarUiIT {
         return asset.attr(attribute);
     }
 
-    private static void assertDegradedDiscoveryWithoutProcessSecrets(int port, String api, String auth,
-                                                                     Path packageRoot, Path localHome,
-                                                                     String baselineRevision) throws Exception {
+    private static void assertCentralConfigRemainsPinnedAcrossUnpublishedHelperMirrorEdits(
+            int port, String api, String auth, Path packageRoot, Path localHome, String baselineRevision,
+            String approvedConfig, JsonNode approvedEffective) throws Exception {
         String variable = "ATT_244_WAR_ABSENT_71F29BE6";
         assertNull(System.getenv(variable), "The fixture Environment variable must be absent from the process.");
         Files.writeString(localHome.resolve("config/db-discovery.yaml"),
@@ -1771,9 +1779,7 @@ class ServerWarUiIT {
             } finally {
                 response.disconnect();
             }
-            boolean helperDiagnosticsReady = resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE")
-                    && resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID");
-            if (!resources.path("items").isEmpty() && helperDiagnosticsReady) break;
+            if (!resources.path("items").isEmpty()) break;
             Thread.sleep(50);
         } while (System.nanoTime() < deadline);
 
@@ -1781,23 +1787,35 @@ class ServerWarUiIT {
         JsonNode item = resources.path("items").get(0);
         assertEquals("available", item.path("metadataState").asText(), item.toString());
         assertEquals("dependency-unresolved", item.path("executionReadiness").path("state").asText(), item.toString());
-        assertTrue(item.path("executionReadiness").toString().contains(variable), item.toString());
-        assertTrue(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"), resources.toString());
-        assertTrue(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"), resources.toString());
+        assertFalse(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"), resources.toString());
+        assertFalse(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"), resources.toString());
         assertNotEquals(baselineRevision, refreshedRevision,
-                "The running Server must invalidate its inspection cache after the helper configuration changes.");
+                "The Package resource catalog must refresh after the Package template is created.");
         assertFalse(resources.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
+        assertFalse(resources.toString().contains(variable));
         assertFalse(resources.toString().contains(localHome.toString()));
         assertFalse(resources.toString().contains(packageRoot.toString()));
         assertEquals(401, get(port, resourceRoute, null), "The refreshed Resource Catalog remains authenticated.");
 
+        JsonNode currentSource = getJson(port, api + "/configuration/source?path=config/config.yaml", auth);
+        assertTrue(currentSource.path("available").asBoolean(), currentSource.toString());
+        assertEquals(approvedConfig, currentSource.path("text").asText(),
+                "Direct edits to the deployment mirror remain unpublished and cannot replace the active central Config revision.");
+        assertFalse(currentSource.toString().contains(variable));
+        assertFalse(currentSource.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
+        assertFalse(currentSource.toString().contains(localHome.toString()));
+
         String effectiveRoute = api + "/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&limit=50";
         JsonNode effective = getJson(port, effectiveRoute, auth);
-        assertEquals("degraded", effective.path("state").asText(), effective.toString());
-        assertEquals("not-validated", effective.path("executionReadiness").asText());
-        assertTrue(effective.path("diagnostics").toString().contains(variable));
-        assertTrue(effective.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
-        assertTrue(effective.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"));
+        JsonNode approvedEffectiveWithoutRequestId = approvedEffective.deepCopy();
+        ((ObjectNode) approvedEffectiveWithoutRequestId).remove("requestId");
+        JsonNode effectiveWithoutRequestId = effective.deepCopy();
+        ((ObjectNode) effectiveWithoutRequestId).remove("requestId");
+        assertEquals(approvedEffectiveWithoutRequestId, effectiveWithoutRequestId,
+                "Package effective Config remains based on the approved central revision until the mirror edits are published.");
+        assertFalse(effective.toString().contains(variable));
+        assertFalse(effective.toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
+        assertFalse(effective.toString().contains("ATT-RESOURCE-HELPER-INVALID"));
         assertFalse(effective.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
         assertFalse(effective.toString().contains(localHome.toString()));
         assertFalse(effective.toString().contains(packageRoot.toString()));
