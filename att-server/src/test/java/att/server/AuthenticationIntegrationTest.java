@@ -201,8 +201,10 @@ class AuthenticationIntegrationTest {
                 assertEquals(404,sendWithCookie(client,port,"GET",rawPath,owner.cookie,null,null,null).statusCode(),
                         "The owner-only Package source route must withhold protected embedded scalar content");
                 Files.writeString(centralSource,embedded);
-                assertEquals(404,sendWithCookie(client,port,"GET",centralPath,admin.cookie,null,null,null).statusCode(),
-                        "The ADMIN-only Central source route must withhold protected embedded scalar content");
+                HttpResponse<String> centralMirrorEdit=sendWithCookie(client,port,"GET",centralPath,admin.cookie,null,null,null);
+                assertEquals(200,centralMirrorEdit.statusCode(),centralMirrorEdit.body());
+                assertEquals(centralText,ServerRuntime.JSON.readTree(centralMirrorEdit.body()).path("text").asText(),
+                        "Central authoring reads only the active approved revision, not direct deployment-mirror edits");
             }
             Files.writeString(pkg.resolve("package.yaml"),original);Files.writeString(centralSource,centralText);
             String candidate="schemaVersion: att-package/v1\ndefaultEnvironment: SIT\ndefaults: {timeoutMs: 12000}\n";

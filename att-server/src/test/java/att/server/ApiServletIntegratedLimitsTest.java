@@ -1636,6 +1636,23 @@ class ApiServletIntegratedLimitsTest {
         return new ServerRuntime(serverConfig,libs.toString(),launcher==null?ProcessBuilder::start:launcher);
     }
 
+    @Test void centralAuthoringSourceWithholdsProtectedEmbeddedScalarsFromActiveRevision() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("central-active-secret-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        String protectedSource=Files.readString(runtimeConfig)
+                +"x-authoring-secret-fixture: |\n  classification: secret\n  value: central-active-route-canary\n";
+        Files.writeString(runtimeConfig,protectedSource);
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"central-active-secret-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("central-active-secret-libs"))) {
+            addAuthoringUsers(runtime);
+            Captured central=invokeAs(servlet(runtime),"admin","GET","/configuration/authoring-source",
+                    Collections.singletonMap("path","config/config.yaml"),new byte[0]);
+            assertSafeSourceFailure(central,404,"ATT-SERVER-NOT-FOUND");
+            assertFalse(new String(central.body(),StandardCharsets.UTF_8).contains("central-active-route-canary"));
+        }
+    }
+
     private static void addAuthoringUsers(ServerRuntime runtime) throws Exception {
         runtime.auth.createUser("alice","Alice","alice source access password","USER");
         runtime.auth.createUser("admin","Admin","admin source access password","ADMIN");
