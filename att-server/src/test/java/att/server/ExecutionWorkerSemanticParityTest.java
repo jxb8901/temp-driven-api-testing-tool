@@ -179,7 +179,7 @@ class ExecutionWorkerSemanticParityTest {
                         +"actions:\n  hold: {type: tool, call: '#{hold()}'}\n");
         Files.writeString(Files.createDirectories(templates.resolve("TIMEOUT")).resolve("template.yaml"),
                 "schemaVersion: att-template/v3.6\nname: TIMEOUT\ndescription: Timeout parity fixture\n"
-                        +"actions:\n  hold: {type: tool, call: '#{hold()}', timeoutMs: 300}\n");
+                        +"actions:\n  hold: {type: tool, call: '#{hold()}', timeoutMs: 3000}\n");
         for(String template:List.of("HOLD","TIMEOUT"))
             Files.writeString(templates.resolve(template).resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
         Path runtimeConfig=temp.resolve("lifecycle-runtime/config/config.yaml");
