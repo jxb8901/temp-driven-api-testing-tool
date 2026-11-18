@@ -149,6 +149,44 @@ describe('LoadPage React feature', () => {
     expect(host.textContent).not.toContain('Must not be offered');
   });
 
+  it('marks required Package Profile parameters incomplete and blocks validation while preserving its allowed target', async () => {
+    const api = makeApi();
+    api.getPackageSutMetricsCatalog = vi.fn(async () => ({
+      schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'SIT',
+      metricSources: [{ id: 'host', name: 'Host source' }], groups: [], profiles: [{
+        schemaVersion: 'att-sut-metrics-profile/v2', packageOwned: true, id: 'required-profile', name: 'Instance Profile',
+        allowedBindings: { environments: ['SIT'], targets: [{ type: 'template', id: 'Payments.create' }], tenants: [],
+          parameters: { instance: { type: 'promLabelValue', required: true } } },
+      }],
+    }));
+    await act(async () => root.render(<NavigationGuardContext.Provider value={{navigate:vi.fn(),registerUnsavedChanges:vi.fn(()=>vi.fn())} as never}><LoadPage
+      api={api} packages={[{packageId:'payments',displayName:'Payments'}]} selectedPackage="payments" selectedEnvironment="SIT" environments={['SIT']} inlineLoadEnabled
+      onPackageChange={vi.fn()} onEnvironmentChange={vi.fn()} onJobAccepted={vi.fn()}
+    /></NavigationGuardContext.Provider>));
+    await flush();
+
+    const picker = host.querySelector<HTMLSelectElement>('.att-sut-package-profile-picker select')!;
+    await act(async () => { picker.value = 'required-profile'; picker.dispatchEvent(new Event('change', { bubbles: true })); });
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Add Profile binding')!);
+    await flush();
+
+    const observabilityField = () => [...host.querySelectorAll('.att-json-field')]
+      .find(item => item.querySelector(':scope > span')?.textContent?.startsWith('SUT Metrics observability binding'));
+    await vi.waitFor(() => expect(observabilityField()?.querySelector('.cm-content')).not.toBeNull());
+    const binding = JSON.parse(observabilityField()?.querySelector('.cm-content')?.textContent || '{}').collections[0];
+    expect(binding).toMatchObject({
+      profile: 'required-profile', targetIds: ['Payments.create'], parameters: {},
+    });
+    const incomplete = host.querySelector('[role="alert"]');
+    expect(incomplete?.textContent).toContain('observability.collections[0].parameters.instance');
+    expect(incomplete?.textContent).toContain('Required promLabelValue value is missing');
+
+    const validate = [...host.querySelectorAll('button')].find(button => button.textContent === 'Validate scenario') as HTMLButtonElement;
+    expect(validate.disabled).toBe(true);
+    await click(validate);
+    expect(api.createLoadDraft).not.toHaveBeenCalled();
+  });
+
   it('keeps legacy metrics available for existing bindings without offering new global Profile bindings', async () => {
     const api = makeApi();
     api.getPackageSutMetricsCatalog = vi.fn(async () => ({

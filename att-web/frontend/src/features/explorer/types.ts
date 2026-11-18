@@ -324,6 +324,8 @@ export interface PackageSutMetricsDraft {
   manifestDigest?: string;
   beforeManifestDigest?: string;
   beforeResourceDigest?: string;
+  recoveredExistingResource?: boolean;
+  candidateResourceDigest?: string;
   validationRevision?: string;
   configurationIdentity?: string;
   activationMode?: 'resource-then-manifest';

@@ -92,6 +92,17 @@ function apiWith(overrides: Partial<ExplorerApi>): ExplorerApi {
   return { ...fallback, ...overrides };
 }
 
+async function prepareNewMetricSource(api: ExplorerApi): Promise<HTMLDetailsElement> {
+  await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+    registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+  const panel = container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+  click(panel.querySelector('summary')!);
+  setValue(panel.querySelector<HTMLInputElement>('input[aria-label="Resource ID"]')!, 'new-health');
+  click(button('Prepare new resource'));
+  await settle();
+  return panel;
+}
+
 function resource(type: ResourceSummary['type'], resourceId: string, extra: Partial<ResourceSummary> = {}): ResourceSummary {
   return { type, resourceId, logicalId: resourceId, name: resourceId, state: 'ready', sourceAvailable: true, ...extra };
 }
@@ -522,18 +533,15 @@ describe('Explorer page integration', () => {
     expect(panel.textContent).toContain('d'.repeat(64));
     expect(panel.textContent).toContain('This view does not query metric sources.');
     expect(panel.textContent).not.toContain('must-not-render');
-    const selection = panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')!;
-    expect(selection).not.toBeNull();
-    click(selection);
-    await settle();
-    expect(getPackageSutMetricsResource).toHaveBeenCalledWith('payments', 'source', 'db-health', expect.any(AbortSignal));
-    expect(selection.getAttribute('aria-pressed')).toBe('true');
-    expect(panel.textContent).toContain('Your account cannot view or edit this Package resource.');
+    expect(panel.querySelector('.att-package-sut-metrics-catalog-item')?.textContent).toContain('Database health');
+    expect(panel.querySelector('.att-package-sut-metrics-catalog-item')?.textContent).toContain('db-health');
+    expect(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')).toBeNull();
+    expect(getPackageSutMetricsResource).not.toHaveBeenCalled();
     const mutationButtons = [...panel.querySelectorAll('button')].filter(item =>
       /create .*draft|validate draft|review draft|publish draft|discard draft/i.test(item.textContent || ''));
     expect(mutationButtons).toHaveLength(0);
     expect(panel.querySelector('textarea')).toBeNull();
-    expect(panel.textContent).not.toContain('source is available for viewing');
+    expect(panel.textContent).not.toContain('must-not-render');
   });
 
   it('states when no explicit Package SUT Metrics definitions are listed', async () => {
@@ -701,17 +709,21 @@ describe('Explorer page integration', () => {
       path: 'load/sut-metrics/sources/new-health.yaml', resourceDigest, source: 'schemaVersion: att-sut-metrics-metric-source/v1\nid: new-health\n', canEdit: true }));
     const createPackageSutMetricsDraft = vi.fn(async () => ({ draftId: 'D-NEW', packageId: 'payments',
       resourcePath: 'load/sut-metrics/sources/new-health.yaml', expectedResourceDigest: emptyResourceDigest,
+      recoveredExistingResource: false, candidateResourceDigest: resourceDigest,
       expectedManifestDigest: manifestDigest, candidateManifestDigest, activationMode: 'resource-then-manifest' as const, state: 'draft' as const }));
     const packageSutMetricsDraftAction = vi.fn(async (_packageId: string, _draftId: string, action: 'validate' | 'review' | 'publish' | 'discard') => {
       if (action === 'validate') return { draftId: 'D-NEW', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/new-health.yaml',
-        expectedResourceDigest: emptyResourceDigest, expectedManifestDigest: manifestDigest, candidateManifestDigest,
+        expectedResourceDigest: emptyResourceDigest, recoveredExistingResource: false, candidateResourceDigest: resourceDigest,
+        expectedManifestDigest: manifestDigest, candidateManifestDigest,
         activationMode: 'resource-then-manifest' as const, state: 'validated',
         validation: { valid: true, resourceDigest, candidateManifestDigest, validationRevision: '1'.repeat(64) } };
       if (action === 'review') return { draftId: 'D-NEW', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/new-health.yaml',
-        expectedResourceDigest: emptyResourceDigest, expectedManifestDigest: manifestDigest, candidateManifestDigest,
+        expectedResourceDigest: emptyResourceDigest, recoveredExistingResource: false, candidateResourceDigest: resourceDigest,
+        expectedManifestDigest: manifestDigest, candidateManifestDigest,
         activationMode: 'resource-then-manifest' as const, state: 'reviewed' };
       if (action === 'publish') return { draftId: 'D-NEW', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/new-health.yaml',
-        expectedResourceDigest: emptyResourceDigest, expectedManifestDigest: manifestDigest, candidateManifestDigest,
+        expectedResourceDigest: emptyResourceDigest, recoveredExistingResource: false, candidateResourceDigest: resourceDigest,
+        expectedManifestDigest: manifestDigest, candidateManifestDigest,
         activationMode: 'resource-then-manifest' as const, beforeResourceDigest: emptyResourceDigest,
         manifestDigest: candidateManifestDigest, state: 'reviewed', published: true, refreshRequired: true,
         resourceDigest, environment: 'UAT', configurationIdentity: 'config-revision-UAT' };
@@ -747,6 +759,120 @@ describe('Explorer page integration', () => {
     click(button('Validate draft')); await settle();
     click(button('Review draft')); await settle();
     click(button('Publish draft')); await settle(); await settle();
+    expect(packageSutMetricsDraftAction.mock.calls.map(call => call[2])).toEqual(['validate', 'review', 'publish']);
+    expect(getPackageSutMetricsCatalog).toHaveBeenCalledTimes(2);
+    expect(getPackageSutMetricsResource).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { label: 'a missing recovery flag', recoveredExistingResource: undefined },
+    { label: 'a recovery flag that contradicts the empty before digest', recoveredExistingResource: true },
+  ])('rejects a new resource draft with $label', async ({ recoveredExistingResource }) => {
+    const emptyResourceDigest = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    const manifestDigest = 'a'.repeat(64);
+    const candidateManifestDigest = 'b'.repeat(64);
+    const candidateResourceDigest = 'c'.repeat(64);
+    const manifestSource = 'schemaVersion: att-package/v2\nmetadata:\n  name: Payments\nobservability:\n  metricSources: []\n  groups: []\n  profiles: []\n';
+    const api = apiWith({
+      getPackageSutMetricsCatalog: vi.fn(async () => ({ schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments',
+        environment: 'UAT', manifestDigest, canEdit: true, metricSources: [], groups: [], profiles: [] })),
+      getPackageManifest: vi.fn(async () => ({ packageId: 'payments', manifestDigest, present: true, canEdit: true,
+        available: true, text: manifestSource, redacted: false })),
+      createPackageSutMetricsDraft: vi.fn(async () => ({ draftId: 'D-BAD-IDENTITY', packageId: 'payments',
+        resourcePath: 'load/sut-metrics/sources/new-health.yaml', expectedResourceDigest: emptyResourceDigest,
+        recoveredExistingResource, candidateResourceDigest, expectedManifestDigest: manifestDigest,
+        candidateManifestDigest, activationMode: 'resource-then-manifest' as const, state: 'draft' as const })),
+    });
+    const panel = await prepareNewMetricSource(api);
+
+    click(button('Create SUT Metrics draft')); await settle();
+
+    expect(panel.textContent).toContain('The Server draft does not match the selected resource. The action was stopped.');
+    expect(button('Validate draft').disabled).toBe(true);
+  });
+
+  it('rejects new-resource validation when the validated digest differs from the staged candidate', async () => {
+    const emptyResourceDigest = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    const manifestDigest = 'a'.repeat(64);
+    const candidateManifestDigest = 'b'.repeat(64);
+    const candidateResourceDigest = 'c'.repeat(64);
+    const differentResourceDigest = 'd'.repeat(64);
+    const manifestSource = 'schemaVersion: att-package/v2\nmetadata:\n  name: Payments\nobservability:\n  metricSources: []\n  groups: []\n  profiles: []\n';
+    const identity = { draftId: 'D-BAD-DIGEST', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/new-health.yaml',
+      expectedResourceDigest: emptyResourceDigest, recoveredExistingResource: false, candidateResourceDigest,
+      expectedManifestDigest: manifestDigest, candidateManifestDigest,
+      activationMode: 'resource-then-manifest' as const };
+    const api = apiWith({
+      getPackageSutMetricsCatalog: vi.fn(async () => ({ schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments',
+        environment: 'UAT', manifestDigest, canEdit: true, metricSources: [], groups: [], profiles: [] })),
+      getPackageManifest: vi.fn(async () => ({ packageId: 'payments', manifestDigest, present: true, canEdit: true,
+        available: true, text: manifestSource, redacted: false })),
+      createPackageSutMetricsDraft: vi.fn(async () => ({ ...identity, state: 'draft' as const })),
+      packageSutMetricsDraftAction: vi.fn(async (_packageId, _draftId, action) => action === 'validate'
+        ? { ...identity, state: 'validated', validation: { valid: true, resourceDigest: differentResourceDigest,
+          candidateManifestDigest, validationRevision: '1'.repeat(64) } }
+        : { ...identity, state: 'reviewed' }),
+    });
+    const panel = await prepareNewMetricSource(api);
+    click(button('Create SUT Metrics draft')); await settle();
+
+    click(button('Validate draft')); await settle();
+
+    expect(panel.textContent).toContain('The Server did not return complete draft validation revisions. The action was stopped.');
+    expect(button('Review draft').disabled).toBe(true);
+  });
+
+  it('recovers an already-written unlisted resource in Explorer after a publisher restart', async () => {
+    const manifestDigest = 'a'.repeat(64);
+    const candidateManifestDigest = 'b'.repeat(64);
+    const recoveredDigest = 'c'.repeat(64);
+    const manifestSource = 'schemaVersion: att-package/v2\nmetadata:\n  name: Payments\nobservability:\n  metricSources: []\n  groups: []\n  profiles: []\n';
+    const packageSource = 'schemaVersion: att-sut-metrics-metric-source/v1\nid: recovered-health\n';
+    const getPackageSutMetricsCatalog = vi.fn()
+      .mockResolvedValueOnce({ schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'UAT',
+        manifestDigest, canEdit: true, metricSources: [], groups: [], profiles: [] })
+      .mockResolvedValue({ schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'UAT',
+        manifestDigest: candidateManifestDigest, canEdit: true,
+        metricSources: [{ id: 'recovered-health', name: 'Recovered health' }], groups: [], profiles: [] });
+    const getPackageManifest = vi.fn(async () => ({ packageId: 'payments', manifestDigest, present: true, canEdit: true,
+      available: true, text: manifestSource, redacted: false }));
+    const getPackageSutMetricsResource = vi.fn(async () => ({ packageId: 'payments', kind: 'source' as const, id: 'recovered-health',
+      path: 'load/sut-metrics/sources/recovered-health.yaml', resourceDigest: recoveredDigest, source: packageSource, canEdit: true }));
+    const createPackageSutMetricsDraft = vi.fn(async () => ({ draftId: 'D-RECOVERED', packageId: 'payments',
+      resourcePath: 'load/sut-metrics/sources/recovered-health.yaml', expectedResourceDigest: recoveredDigest,
+      recoveredExistingResource: true, candidateResourceDigest: recoveredDigest,
+      expectedManifestDigest: manifestDigest, candidateManifestDigest, activationMode: 'resource-then-manifest' as const, state: 'draft' as const }));
+    const packageSutMetricsDraftAction = vi.fn(async (_packageId: string, _draftId: string, action: 'validate' | 'review' | 'publish' | 'discard') => {
+      const identity = { draftId: 'D-RECOVERED', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/recovered-health.yaml',
+        expectedResourceDigest: recoveredDigest, recoveredExistingResource: true, candidateResourceDigest: recoveredDigest,
+        expectedManifestDigest: manifestDigest, candidateManifestDigest, activationMode: 'resource-then-manifest' as const };
+      if (action === 'validate') return { ...identity, state: 'validated',
+        validation: { valid: true, resourceDigest: recoveredDigest, candidateManifestDigest, validationRevision: '1'.repeat(64) } };
+      if (action === 'review') return { ...identity, state: 'reviewed' };
+      if (action === 'publish') return { ...identity, beforeResourceDigest: recoveredDigest, resourceDigest: recoveredDigest,
+        manifestDigest: candidateManifestDigest, state: 'reviewed', published: true, refreshRequired: true,
+        environment: 'UAT', configurationIdentity: 'config-revision-UAT' };
+      return { ...identity, state: 'discarded' };
+    });
+    const api = Object.assign(apiWith({}), { getPackageSutMetricsCatalog, getPackageManifest, getPackageSutMetricsResource,
+      createPackageSutMetricsDraft, packageSutMetricsDraftAction });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+
+    const panel = container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    setValue(panel.querySelector<HTMLInputElement>('input[aria-label="Resource ID"]')!, 'recovered-health');
+    click(button('Prepare new resource')); await settle();
+    expect(panel.textContent).toContain('load/sut-metrics/sources/recovered-health.yaml');
+    setValue(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!, packageSource);
+
+    click(button('Create SUT Metrics draft')); await settle();
+    expect(panel.textContent).toContain('Draft created. Validate it before review.');
+    expect(panel.textContent).not.toContain('Server draft does not match');
+    click(button('Validate draft')); await settle();
+    click(button('Review draft')); await settle();
+    click(button('Publish draft')); await settle(); await settle();
+
     expect(packageSutMetricsDraftAction.mock.calls.map(call => call[2])).toEqual(['validate', 'review', 'publish']);
     expect(getPackageSutMetricsCatalog).toHaveBeenCalledTimes(2);
     expect(getPackageSutMetricsResource).toHaveBeenCalledTimes(1);

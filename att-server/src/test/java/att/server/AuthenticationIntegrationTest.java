@@ -187,6 +187,10 @@ class AuthenticationIntegrationTest {
             HttpResponse<String> activeCatalog=sendWithCookie(client,port,"GET",base+"/catalog?environment=SIT",owner.cookie,null,null,null);
             assertEquals(200,activeCatalog.statusCode(),activeCatalog.body());
             assertEquals("cpu",ServerRuntime.JSON.readTree(activeCatalog.body()).path("metricSources").path(0).path("id").asText());
+            HttpResponse<String> peerCatalog=sendWithCookie(client,port,"GET",base+"/catalog?environment=SIT",other.cookie,null,null,null);
+            assertEquals(200,peerCatalog.statusCode(),peerCatalog.body());
+            assertFalse(ServerRuntime.JSON.readTree(peerCatalog.body()).path("canEdit").asBoolean(),
+                    "A non-owner may read the safe catalog but must not receive source-edit access.");
             HttpResponse<String> rawSource=sendWithCookie(client,port,"GET",base+"/resource?kind=source&id=cpu",owner.cookie,null,null,null);
             assertEquals(200,rawSource.statusCode(),rawSource.body());
             assertEquals(resource,ServerRuntime.JSON.readTree(rawSource.body()).path("source").asText());

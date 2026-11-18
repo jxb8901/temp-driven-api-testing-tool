@@ -49,7 +49,13 @@ public final class PackageConfig {
     private final Map<String, String> reportColumns;
     private final Boolean yamlAnchors;
     private final Set<String> observabilityFields;
-    private final Map<String, PackageMetricResource> metricSourceResources, metricGroupResources, metricProfileResources;
+    private final Path root;
+    private final List<String> metricSourceInventory, metricGroupInventory, metricProfileInventory;
+    private final MetricResourceOverride metricResourceOverride;
+    private volatile Map<String, PackageMetricResource> metricSourceResources = Collections.emptyMap();
+    private volatile Map<String, PackageMetricResource> metricGroupResources = Collections.emptyMap();
+    private volatile Map<String, PackageMetricResource> metricProfileResources = Collections.emptyMap();
+    private volatile boolean metricResourcesLoaded;
 
     private PackageConfig(Path root, Map<?, ?> document, boolean present, String digest) throws Exception {
         this(root, document, present, digest, null);
@@ -57,6 +63,8 @@ public final class PackageConfig {
 
     private PackageConfig(Path root, Map<?, ?> document, boolean present, String digest,
                           MetricResourceOverride metricResourceOverride) throws Exception {
+        this.root = root.toAbsolutePath().normalize();
+        this.metricResourceOverride = metricResourceOverride;
         this.present = present;
         this.digest = digest;
         Object declaredSchemaVersion = document.get("schemaVersion");
@@ -85,12 +93,12 @@ public final class PackageConfig {
         for (String field : new String[] {"metricSources", "groups", "profiles"})
             if (observability.containsKey(field)) declaredObservabilityFields.add(field);
         this.observabilityFields = Collections.unmodifiableSet(declaredObservabilityFields);
-        this.metricSourceResources = metricResources(root, observability.get("metricSources"), "observability.metricSources",
-                "load/sut-metrics/sources/", 64, Collections.singleton("att-sut-metrics-metric-source/v1"), metricResourceOverride);
-        this.metricGroupResources = metricResources(root, observability.get("groups"), "observability.groups",
-                "load/sut-metrics/groups/", 256, Collections.singleton("att-sut-metrics-group/v1"), metricResourceOverride);
-        this.metricProfileResources = metricResources(root, observability.get("profiles"), "observability.profiles",
-                "load/sut-metrics/profiles/", 256, Collections.singleton("att-sut-metrics-profile/v2"), metricResourceOverride);
+        this.metricSourceInventory = metricInventoryPaths(root, observability.get("metricSources"), "observability.metricSources",
+                "load/sut-metrics/sources/", 64);
+        this.metricGroupInventory = metricInventoryPaths(root, observability.get("groups"), "observability.groups",
+                "load/sut-metrics/groups/", 256);
+        this.metricProfileInventory = metricInventoryPaths(root, observability.get("profiles"), "observability.profiles",
+                "load/sut-metrics/profiles/", 256);
         Map<?, ?> defaults = section(document, "defaults");
         this.timeoutMs = number(defaults, "timeoutMs");
         Map<?, ?> execution = section(defaults, "execution");
@@ -198,7 +206,9 @@ public final class PackageConfig {
                 throw invalid(FILE_NAME, "manifest-changed-during-resource-validation");
             String manifestSource = decodeUtf8(manifestBytes, FILE_NAME);
             MetricResourceOverride override = new MetricResourceOverride(normalizedPath, source, false);
-            return parse(root, manifestSource, current.digest(), override);
+            PackageConfig candidate = parse(root, manifestSource, current.digest(), override);
+            candidate.ensureMetricResourcesLoaded();
+            return candidate;
         } catch (PackageConfigException invalid) { throw invalid; }
         catch (Exception unavailable) {
             if (unavailable instanceof IOException) throw (IOException) unavailable;
@@ -245,6 +255,7 @@ public final class PackageConfig {
             PackageConfig candidate = parse(root, candidateManifestSource, sha256(candidateManifestBytes), override);
             if (!onlyAddsMetricResourcePath(current, candidate, root, normalizedPath))
                 throw invalid(FILE_NAME, "candidate-manifest-may-only-add-this-resource-to-its-inventory");
+            candidate.ensureMetricResourcesLoaded();
             byte[] currentManifestBytes = readManifestBytes(root);
             if (!expectedCurrentManifestDigest.equals(sha256(currentManifestBytes)))
                 throw invalid(FILE_NAME, "manifest-changed-during-resource-validation");
@@ -344,8 +355,8 @@ public final class PackageConfig {
     }
 
     private static boolean containsMetricResourcePath(PackageConfig config, String path) {
-        return java.util.stream.Stream.of(config.metricSourceResources(), config.metricGroupResources(), config.metricProfileResources())
-                .flatMap(resources -> resources.values().stream()).anyMatch(resource -> path.equals(resource.relativePath()));
+        return config.metricSourceInventory.contains(path) || config.metricGroupInventory.contains(path)
+                || config.metricProfileInventory.contains(path);
     }
 
     private static final class MetricResourceOverride {
@@ -421,6 +432,57 @@ public final class PackageConfig {
             result.put(id, new PackageMetricResource(id, logicalPath, file, definition, loaded.digest));
         }
         return Collections.unmodifiableMap(result);
+    }
+
+    /** Validates inventory declarations without opening LOAD-only Metrics YAML files. */
+    private static List<String> metricInventoryPaths(Path root, Object raw, String field,
+                                                     String requiredPrefix, int maxItems) throws IOException {
+        if (raw == null) return Collections.emptyList();
+        if (!(raw instanceof List<?>)) throw invalid(field, "expected-path-list");
+        List<?> authoredPaths = (List<?>) raw;
+        if (authoredPaths.size() > maxItems) throw invalid(field, "item-limit");
+        List<String> paths = new ArrayList<String>();
+        Set<String> unique = new HashSet<String>();
+        for (int index = 0; index < authoredPaths.size(); index++) {
+            Object item = authoredPaths.get(index);
+            String pathField = field + "[" + index + "]";
+            if (!(item instanceof String)) throw invalid(pathField, "expected-path");
+            String authoredPath = (String) item;
+            String normalized;
+            try { normalized = canonicalMetricResourcePath(root, authoredPath); }
+            catch (Exception unsafe) { throw invalid(pathField, "unsafe-or-noncanonical-package-path"); }
+            if (!normalized.startsWith(requiredPrefix) || normalized.length() <= requiredPrefix.length())
+                throw invalid(pathField, "path-must-be-under-" + requiredPrefix);
+            if (!unique.add(normalized)) throw invalid(pathField, "duplicate-package-file");
+            paths.add(normalized);
+        }
+        return Collections.unmodifiableList(paths);
+    }
+
+    private void ensureMetricResourcesLoaded() {
+        if (metricResourcesLoaded) return;
+        synchronized (this) {
+            if (metricResourcesLoaded) return;
+            try {
+                Map<String, PackageMetricResource> sources = metricResources(root, metricSourceInventory,
+                        "observability.metricSources", "load/sut-metrics/sources/", 64,
+                        Collections.singleton("att-sut-metrics-metric-source/v1"), metricResourceOverride);
+                Map<String, PackageMetricResource> groups = metricResources(root, metricGroupInventory,
+                        "observability.groups", "load/sut-metrics/groups/", 256,
+                        Collections.singleton("att-sut-metrics-group/v1"), metricResourceOverride);
+                Map<String, PackageMetricResource> profiles = metricResources(root, metricProfileInventory,
+                        "observability.profiles", "load/sut-metrics/profiles/", 256,
+                        Collections.singleton("att-sut-metrics-profile/v2"), metricResourceOverride);
+                metricSourceResources = sources;
+                metricGroupResources = groups;
+                metricProfileResources = profiles;
+                metricResourcesLoaded = true;
+            } catch (PackageConfigException invalid) {
+                throw invalid;
+            } catch (Exception unavailable) {
+                throw invalid("observability", "resource-validation-unavailable-or-invalid");
+            }
+        }
     }
 
     private static MetricDefinition readMetricDefinition(Path file, Path schemaRoot, String field,
@@ -556,11 +618,11 @@ public final class PackageConfig {
     public Path testcaseRoot() { return testcaseRoot; }
     public List<Path> descriptors(String environment) { List<Path> selected = environmentDescriptors.get(environment.toLowerCase(Locale.ROOT)); return selected == null ? descriptors : selected; }
     /** Explicit Package-owned SUT Metric Sources, keyed by their schema-validated resource IDs. */
-    public Map<String, PackageMetricResource> metricSourceResources() { return metricSourceResources; }
+    public Map<String, PackageMetricResource> metricSourceResources() { ensureMetricResourcesLoaded(); return metricSourceResources; }
     /** Explicit Package-owned SUT Metric Groups, keyed by their schema-validated resource IDs. */
-    public Map<String, PackageMetricResource> metricGroupResources() { return metricGroupResources; }
+    public Map<String, PackageMetricResource> metricGroupResources() { ensureMetricResourcesLoaded(); return metricGroupResources; }
     /** Explicit Package-owned flat/legacy SUT Metrics Profiles, keyed by their schema-validated resource IDs. */
-    public Map<String, PackageMetricResource> metricProfileResources() { return metricProfileResources; }
+    public Map<String, PackageMetricResource> metricProfileResources() { ensureMetricResourcesLoaded(); return metricProfileResources; }
     /** Whether the Package explicitly declares SUT Metrics inventory, including empty inventories. */
     public boolean hasMetricInventory() { return !observabilityFields.isEmpty(); }
     public List<List<Path>> descriptorLayers() {
@@ -592,9 +654,9 @@ public final class PackageConfig {
         if (!environments.isEmpty()) testdata.put("environments", environments); out.put("testdata", testdata);
         if (!observabilityFields.isEmpty()) {
             Map<String, Object> observability = new LinkedHashMap<String, Object>();
-            if (observabilityFields.contains("metricSources")) observability.put("metricSources", logicalPaths(metricSourceResources));
-            if (observabilityFields.contains("groups")) observability.put("groups", logicalPaths(metricGroupResources));
-            if (observabilityFields.contains("profiles")) observability.put("profiles", logicalPaths(metricProfileResources));
+            if (observabilityFields.contains("metricSources")) observability.put("metricSources", metricSourceInventory);
+            if (observabilityFields.contains("groups")) observability.put("groups", metricGroupInventory);
+            if (observabilityFields.contains("profiles")) observability.put("profiles", metricProfileInventory);
             out.put("observability", observability);
         }
         Map<String, Object> defaults = new LinkedHashMap<String, Object>();

@@ -162,7 +162,7 @@ class PackageConfigurationTest {
                 () -> PackageConfig.parse(pkg, "schemaVersion: att-package/v1\nobservability: {metricSources: []}\n"));
     }
 
-    @Test void metricInventoryRejectsWrongSubtreesMissingFilesInvalidDefinitionsAndDuplicateIds() throws Exception {
+    @Test void metricInventoryRejectsWrongSubtreesMissingFilesInvalidDefinitionsAndDuplicateIdsOnLoad() throws Exception {
         Path pkg = root.resolve("packages/invalid-inventory");
         write(pkg.resolve("load/sut-metrics/sources/host.yaml"), METRIC_SOURCE);
         write(pkg.resolve("load/sut-metrics/sources/host-copy.yaml"), METRIC_SOURCE);
@@ -171,19 +171,39 @@ class PackageConfigurationTest {
         assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
                 "schemaVersion: att-package/v2\nobservability: {metricSources: [load/sut-metrics/groups/runtime.yaml]}\n"));
         assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
-                "schemaVersion: att-package/v2\nobservability: {metricSources: [load/sut-metrics/sources/missing.yaml]}\n"));
+                "schemaVersion: att-package/v2\nobservability: {metricSources: [load/sut-metrics/sources/missing.yaml]}\n").metricSourceResources());
         assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
-                "schemaVersion: att-package/v2\nobservability: {profiles: [load/sut-metrics/profiles/legacy-composite.yaml]}\n"));
+                "schemaVersion: att-package/v2\nobservability: {profiles: [load/sut-metrics/profiles/legacy-composite.yaml]}\n").metricProfileResources());
         assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
                 "schemaVersion: att-package/v2\nobservability: {metricSources: [../outside.yaml]}\n"));
         assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
-                "schemaVersion: att-package/v2\nobservability:\n  metricSources: [load/sut-metrics/sources/host.yaml, load/sut-metrics/sources/host-copy.yaml]\n"));
+                "schemaVersion: att-package/v2\nobservability:\n  metricSources: [load/sut-metrics/sources/host.yaml, load/sut-metrics/sources/host-copy.yaml]\n").metricSourceResources());
         Files.createSymbolicLink(pkg.resolve("load/sut-metrics/sources/alias.yaml"), pkg.resolve("load/sut-metrics/sources/host.yaml"));
         assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
-                "schemaVersion: att-package/v2\nobservability:\n  metricSources: [load/sut-metrics/sources/host.yaml, load/sut-metrics/sources/alias.yaml]\n"));
+                "schemaVersion: att-package/v2\nobservability:\n  metricSources: [load/sut-metrics/sources/host.yaml, load/sut-metrics/sources/alias.yaml]\n").metricSourceResources());
         Files.createSymbolicLink(pkg.resolve("load/sut-metrics/sources/cross-kind.yaml"), pkg.resolve("load/sut-metrics/groups/runtime.yaml"));
         assertThrows(IllegalArgumentException.class, () -> PackageConfig.parse(pkg,
-                "schemaVersion: att-package/v2\nobservability: {metricSources: [load/sut-metrics/sources/cross-kind.yaml]}\n"));
+                "schemaVersion: att-package/v2\nobservability: {metricSources: [load/sut-metrics/sources/cross-kind.yaml]}\n").metricSourceResources());
+    }
+
+    @Test void malformedOrMissingLoadMetricsDoNotBreakUnrelatedRuntimeConfiguration() throws Exception {
+        Path pkg = root.resolve("packages/broken-metrics");
+        String resourcePath = "load/sut-metrics/sources/host.yaml";
+        write(pkg.resolve("package.yaml"), "schemaVersion: att-package/v2\nobservability: {metricSources: [" + resourcePath + "]}\n");
+        Path metricSource = write(pkg.resolve(resourcePath), "schemaVersion: [broken\n");
+        Path config = global("");
+
+        FrameworkConfig ordinaryRun = load(config, pkg, "SIT");
+        assertEquals("SIT", ordinaryRun.environment());
+        PackageConfig metricsSelection = PackageConfig.load(pkg);
+        IllegalArgumentException malformed = assertThrows(IllegalArgumentException.class, metricsSelection::metricSourceResources);
+        assertTrue(malformed.getMessage().contains("invalid-yaml"), String.valueOf(malformed));
+
+        Files.delete(metricSource);
+        PackageConfig missingSelection = PackageConfig.load(pkg);
+        IllegalArgumentException missing = assertThrows(IllegalArgumentException.class, missingSelection::metricSourceResources);
+        assertTrue(missing.getMessage().contains("missing-or-unsafe-package-file"), String.valueOf(missing));
+        assertEquals("SIT", load(config, pkg, "SIT").environment(), "Ordinary RUN/DEBUG config remains independent of LOAD-only definitions.");
     }
 
     @Test void candidateMetricResourceOverrideIsBoundedAndDoesNotWriteLivePackageFiles() throws Exception {

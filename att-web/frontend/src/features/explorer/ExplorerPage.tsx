@@ -16,6 +16,15 @@ const MAX_DEFINITION_CHARACTERS = 100_000;
 const RESOURCE_PAGE_SIZE = 50;
 const EMPTY_PACKAGE_RESOURCE_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
+function createdPackageResourceIdentityMatches(draft: PackageSutMetricsDraft): boolean {
+  const candidateDigest = draft.candidateResourceDigest;
+  if (typeof draft.recoveredExistingResource !== 'boolean'
+    || typeof candidateDigest !== 'string' || !/^[a-f0-9]{64}$/i.test(candidateDigest)) return false;
+  return draft.recoveredExistingResource
+    ? draft.expectedResourceDigest !== EMPTY_PACKAGE_RESOURCE_SHA256 && draft.expectedResourceDigest === candidateDigest
+    : draft.expectedResourceDigest === EMPTY_PACKAGE_RESOURCE_SHA256;
+}
+
 interface ExplorerListSnapshot {
   query: string;
   typeFilter: ResourceSummary['type'] | 'all';
@@ -512,8 +521,11 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
       const newManifestMatches = !newResource || (next.expectedManifestDigest === newResource.expectedManifestDigest
         && typeof next.candidateManifestDigest === 'string' && /^[a-f0-9]{64}$/i.test(next.candidateManifestDigest)
         && next.activationMode === 'resource-then-manifest');
+      const resourceRevisionMatches = newResource
+        ? createdPackageResourceIdentityMatches(next)
+        : next.expectedResourceDigest === activeResource.resourceDigest;
       if (next.packageId !== packageId || next.resourcePath !== activeResource.path
-        || next.expectedResourceDigest !== activeResource.resourceDigest || !next.draftId || next.state !== 'draft' || !newManifestMatches) {
+        || !resourceRevisionMatches || !next.draftId || next.state !== 'draft' || !newManifestMatches) {
         setStale(true);
         if (next.packageId === packageId && next.draftId) setDraft(next);
         setDraftError(zh ? '伺服器建立的草稿與目前資源不符，操作已停止。' : 'The Server draft does not match the selected resource. The action was stopped.');
@@ -548,7 +560,12 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
           && next.expectedManifestDigest === newResource.expectedManifestDigest
           && next.manifestDigest === draft.candidateManifestDigest
           && next.candidateManifestDigest === draft.candidateManifestDigest
-          && next.beforeResourceDigest === publishedResource?.resourceDigest);
+          && next.beforeResourceDigest === draft.expectedResourceDigest
+          && createdPackageResourceIdentityMatches(draft)
+          && next.recoveredExistingResource === draft.recoveredExistingResource
+          && next.candidateResourceDigest === draft.candidateResourceDigest
+          && next.resourceDigest === draft.candidateResourceDigest
+          && draft.validation?.resourceDigest === draft.candidateResourceDigest);
         const validatedResourceMatches = typeof draft.validation?.resourceDigest === 'string'
           && /^[a-f0-9]{64}$/i.test(draft.validation.resourceDigest)
           && draft.validation.resourceDigest === next.resourceDigest;
@@ -580,7 +597,11 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
       }
       const expectedState = action === 'validate' ? 'validated' : 'reviewed';
       const manifestActionMatches = !newResource || (next.expectedManifestDigest === newResource.expectedManifestDigest
-        && next.candidateManifestDigest === draft.candidateManifestDigest && next.activationMode === 'resource-then-manifest');
+        && next.candidateManifestDigest === draft.candidateManifestDigest && next.activationMode === 'resource-then-manifest'
+        && createdPackageResourceIdentityMatches(next)
+        && next.recoveredExistingResource === draft.recoveredExistingResource
+        && next.candidateResourceDigest === draft.candidateResourceDigest
+        && (action !== 'review' || draft.validation?.resourceDigest === draft.candidateResourceDigest));
       if (next.draftId !== draft.draftId || next.packageId !== packageId || next.resourcePath !== activeResource?.path
         || next.expectedResourceDigest !== draft.expectedResourceDigest || next.state.toLowerCase() !== expectedState
         || !manifestActionMatches) {
@@ -596,6 +617,7 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
       if (action === 'validate' && (next.validation?.valid !== true
         || typeof next.validation.resourceDigest !== 'string' || !/^[a-f0-9]{64}$/i.test(next.validation.resourceDigest)
         || typeof next.validation.validationRevision !== 'string' || !/^[a-f0-9]{64}$/i.test(next.validation.validationRevision)
+        || (newResource && next.validation.resourceDigest !== draft.candidateResourceDigest)
         || (newResource && next.validation.candidateManifestDigest !== draft.candidateManifestDigest))) {
         setStale(true);
         setDraft({ ...draft, ...next });
@@ -631,14 +653,18 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
             {values.length === 0 ? <p>{zh ? '無' : 'None'}</p> : <ul>{values.map((value, index) => {
               const item = packageCatalogLabel(value, index);
               return <li key={`${item.id}:${index}`}>
-                <button type="button" aria-label={`${zh ? '檢視' : 'View'} ${packageSutMetricsResourceLabel(kind, zh)} ${item.id}`}
+                {catalogCanEdit ? <button type="button" aria-label={`${zh ? '檢視' : 'View'} ${packageSutMetricsResourceLabel(kind, zh)} ${item.id}`}
                   aria-pressed={selection?.kind === kind && selection.id === item.id}
                   disabled={selectionLocked || resourceLoading || draftBusy}
                   onClick={() => selectResource(kind, item.id)}>
                   <strong>{item.name}</strong> <code>{item.id}</code>
                   {item.kind && <span> · {item.kind}</span>}
                   {item.connection && <small>{zh ? '連線' : 'Connection'}: {item.connection}</small>}
-                </button>
+                </button> : <div className="att-package-sut-metrics-catalog-item">
+                  <strong>{item.name}</strong> <code>{item.id}</code>
+                  {item.kind && <span> · {item.kind}</span>}
+                  {item.connection && <small>{zh ? '連線' : 'Connection'}: {item.connection}</small>}
+                </div>}
               </li>;
             })}</ul>}
           </section>

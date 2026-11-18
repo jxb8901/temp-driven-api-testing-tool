@@ -91,6 +91,47 @@ function profileAllowsEnvironment(profile: Record<string, unknown>, environment:
   return environments.some(value => value.toLowerCase() === environment.toLowerCase());
 }
 
+type PackageProfileBindingIssue = { field: string; profileId: string; detail: string };
+
+function packageProfileBindingIssues(profiles: Array<Record<string, unknown>>, raw: string): PackageProfileBindingIssue[] {
+  let observability: JsonObject;
+  try { observability = parseObjectJson(raw || '{}', 'SUT Metrics observability'); }
+  catch { return []; }
+  const byId = new Map(profiles.map(profile => {
+    const definition = definitionFromCatalogRow(profile);
+    return [String(definition.id || ''), definition] as const;
+  }));
+  const collections = Array.isArray(observability.collections) ? observability.collections : [];
+  const issues: PackageProfileBindingIssue[] = [];
+  collections.forEach((value, index) => {
+    const binding = asObject(value);
+    const profileId = typeof binding.profile === 'string' ? binding.profile : '';
+    const profile = byId.get(profileId);
+    if (!profile || profile.packageOwned !== true || profile.schemaVersion !== 'att-sut-metrics-profile/v2') return;
+    const allowed = asObject(profile.allowedBindings);
+    const allowedTargets = Array.isArray(allowed.targets)
+      ? allowed.targets.map(target => String(asObject(target).id || '')).filter(Boolean)
+      : [];
+    const targetIds = Array.isArray(binding.targetIds) ? binding.targetIds.map(String) : [];
+    const targetField = `observability.collections[${index}].targetIds`;
+    if (allowedTargets.length && targetIds.length === 0)
+      issues.push({ field: targetField, profileId, detail: `Select at least one allowed target: ${allowedTargets.join(', ')}.` });
+    else if (targetIds.some(target => !allowedTargets.includes(target)))
+      issues.push({ field: targetField, profileId, detail: `Use only allowed targets: ${allowedTargets.join(', ')}.` });
+
+    const parameterDefinitions = asObject(allowed.parameters);
+    const parameters = asObject(binding.parameters);
+    for (const [name, definitionValue] of Object.entries(parameterDefinitions)) {
+      const definition = asObject(definitionValue);
+      const value = parameters[name];
+      if (definition.required === true && (value == null || typeof value === 'string' && !value.trim()))
+        issues.push({ field: `observability.collections[${index}].parameters.${name}`, profileId,
+          detail: `Required ${String(definition.type || 'parameter')} value is missing.` });
+    }
+  });
+  return issues;
+}
+
 function parseObjectJson(raw: string, label: string): JsonObject {
   let value: unknown;
   try { value = JSON.parse(raw || '{}'); }
@@ -623,6 +664,12 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
     setRequestError('');
     setRequestErrorCode('');
     setDiagnostics([]);
+    if (requiredPackageProfileIssues.length > 0) {
+      setDraft(null);
+      setDraftState('error');
+      setDraftMessage('Complete the required Package SUT Metrics binding fields before validating this scenario.');
+      return;
+    }
     let scenario: JsonObject;
     try { scenario = readScenario(); }
     catch (error) {
@@ -866,6 +913,8 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
   const legacyMetricProfiles = useMemo(() => packageSutMetricProfileRows.filter(profile => profile.packageOwned !== true), [packageSutMetricProfileRows]);
   const eligiblePackageSutMetricProfiles = useMemo(() => packageOwnedMetricProfiles.filter(profile =>
     profileAllowsEnvironment(profile, effectiveMetricEnvironment)), [packageOwnedMetricProfiles, effectiveMetricEnvironment]);
+  const requiredPackageProfileIssues = useMemo(() => packageProfileBindingIssues(packageOwnedMetricProfiles, advanced.observability),
+    [packageOwnedMetricProfiles, advanced.observability]);
   const thresholdBindings = sutThresholdBindingChoices(sutMetricsProfiles, advanced.observability,
     packageSutMetricSources, effectiveMetricEnvironment);
   const selectedThresholdBinding = thresholdBindings.find(binding => binding.alias === sutThresholdProfile);
@@ -1019,7 +1068,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
                   </select>
                 </label>
                 <button type="button" className="button button-quiet" onClick={addPackageSutMetricProfile} disabled={!packageSutMetricProfileToAdd}>Add Profile binding</button>
-                <p className="att-help">The binding uses the selected Package Profile and its allowed targets. Set any required parameter values in the observability JSON, then validate the scenario.</p>
+                <p className="att-help">The binding uses this Package Profile and its allowed targets. Required targets and parameter values must be complete in the observability JSON before validation.</p>
               </>}
               {packageSutMetricsState === 'ready' && sutMetricsProfiles.length === 0 &&
                 <p className="att-help">This Package has no explicitly inventoried SUT Metrics Profiles for the selected Environment.</p>}
@@ -1028,6 +1077,12 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
               {packageSutMetricsState === 'ready' && packageOwnedMetricProfiles.length > 0 && eligiblePackageSutMetricProfiles.length === 0 &&
                 <p className="att-help">No explicitly inventoried Package Profile allows Environment {effectiveMetricEnvironment || '(default)'}. The Package inventory is loaded from its declared SUT Metrics files.</p>}
               {packageSutMetricProfileError && <p role="alert" className="att-inline-error">{packageSutMetricProfileError}</p>}
+              {requiredPackageProfileIssues.length > 0 && <div role="alert" className="att-inline-error">
+                <p>Complete these Package Profile fields before validating:</p>
+                <ul>{requiredPackageProfileIssues.map(issue => <li key={`${issue.field}:${issue.profileId}`}>
+                  <code>{issue.field}</code> ({issue.profileId}): {issue.detail}
+                </li>)}</ul>
+              </div>}
             </fieldset>}
             <JsonObjectField label="SUT Metrics observability binding (att-load-observability/v1)" value={advanced.observability} onChange={value => updateAdvanced('observability', value)} />
           </div>
@@ -1082,7 +1137,7 @@ export function LoadPage(props: LoadFeatureProps): React.JSX.Element {
         {draft && <p className="att-draft-expiry">Draft expires {new Date(draft.expiresAt).toLocaleString()}.</p>}
         {preview && <CodeEditor value={preview} language="yaml" label="Server-validated scenario preview" readOnly />}
         <div className="att-review-actions">
-          <button type="button" onClick={() => void validateScenario()} disabled={replayDraftLoading || !policy || (!inlineLoadEnabled&&!replaySourceJobId) || draftState === 'validating' || draftState === 'submitting'}>Validate scenario</button>
+          <button type="button" onClick={() => void validateScenario()} disabled={replayDraftLoading || !policy || (!inlineLoadEnabled&&!replaySourceJobId) || draftState === 'validating' || draftState === 'submitting' || requiredPackageProfileIssues.length > 0}>Validate scenario</button>
           {savedScenario&&<button type="button" onClick={() => setSaveOpen(true)} disabled={!hasLiveDraft || draftState !== 'valid'}>Save Scenario…</button>}
           {!replaySourceJobId&&!savedScenario&&<button type="button" onClick={() => draft?.draftId && onSchedule?.({ packageId: selectedPackage, environment: selectedEnvironment || undefined, draftId: draft.draftId, previewYaml: draft.previewYaml })}
             disabled={!schedulingEnabled || !draft?.draftId || draftState !== 'valid' || !onSchedule}

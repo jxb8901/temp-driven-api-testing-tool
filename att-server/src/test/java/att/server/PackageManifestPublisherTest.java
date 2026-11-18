@@ -33,6 +33,7 @@ class PackageManifestPublisherTest {
     private final AtomicReference<String> resourceEnvironment=new AtomicReference<>();
     private final AtomicReference<String> resourceActor=new AtomicReference<>();
     private final AtomicReference<String> dependencies=new AtomicReference<>("unchanged");
+    private final AtomicBoolean failBeforeManifestActivation=new AtomicBoolean();
     private final ArrayList<String> audits=new ArrayList<>();
     private Path root;
     private PackageManifestPublisher publisher(Map<String,Object> options) throws Exception {
@@ -94,7 +95,11 @@ class PackageManifestPublisherTest {
                 (id,actor)->{if(!authorized.get()||!"owner".equals(id)||!"owner".equals(actor))throw new PackageManifestPublisher.Denied();return root;},
                 (id,source)->Map.of("valid",true,"manifestDigest",sha(source),"validationRevision",sha(source+dependencies.get()),
                         "environment","UAT","configurationIdentity",sha(source+"identity")),
-                validator,(actor,action,id,detail)->audits.add(action));
+                validator,(actor,action,id,detail)->{
+                    audits.add(action);
+                    if("PKG_SUT_MANIFEST_INTENT".equals(action)&&failBeforeManifestActivation.compareAndSet(true,false))
+                        throw new java.io.IOException("Injected failure before Package Manifest activation");
+                });
     }
     private String staged(PackageManifestPublisher publisher,String source,String before) throws Exception {
         return (String)publisher.stage("owner","owner",source,sha(before)).get("draftId");
@@ -242,6 +247,8 @@ class PackageManifestPublisherTest {
                     candidateManifest,oldManifestDigest);
             assertEquals("resource-then-manifest",staged.get("activationMode"));
             assertEquals(oldManifestDigest,staged.get("expectedManifestDigest"));
+            assertEquals(false,staged.get("recoveredExistingResource"));
+            assertEquals(sha(RESOURCE),staged.get("candidateResourceDigest"));
             String id=(String)staged.get("draftId");
             assertFalse(Files.exists(root.resolve(path)));
             Map<String,Object> validation=publisher.validateResource("owner","owner",id);
@@ -301,6 +308,40 @@ class PackageManifestPublisherTest {
             assertTrue(inertSeen.get());
             assertEquals(candidate,Files.readString(root.resolve("package.yaml")));
             assertEquals(RESOURCE,Files.readString(inert));
+        }
+    }
+    @Test void orphanedCreateCanBeRecoveredAfterRestartOnlyForMatchingContentAndManifest() throws Exception {
+        AtomicBoolean inertSeen=new AtomicBoolean();
+        String path="load/sut-metrics/profiles/recovered.yaml";
+        String manifest="schemaVersion: att-package/v2\n";
+        String candidate=manifest+"observability:\n  profiles: ["+path+"]\n";
+        root=Files.createDirectories(temporary.resolve("package")).toRealPath();
+        Files.writeString(root.resolve("package.yaml"),manifest);
+
+        try(var first=resourceCreatePublisher(Map.of("sourceEditingEnabled",true),inertSeen)) {
+            String draft=(String)first.stageResource("owner","owner",path,"UAT",RESOURCE,sha(""),candidate,sha(manifest)).get("draftId");
+            first.validateResource("owner","owner",draft);
+            first.reviewResource("owner","owner",draft);
+            failBeforeManifestActivation.set(true);
+            assertThrows(java.io.IOException.class,()->first.publishResource("owner","owner",draft));
+            assertEquals(RESOURCE,Files.readString(root.resolve(path)));
+            assertEquals(manifest,Files.readString(root.resolve("package.yaml")),"The failed transaction must leave the resource unlisted.");
+        }
+
+        try(var restarted=resourceCreatePublisher(Map.of("sourceEditingEnabled",true),inertSeen)) {
+            assertThrows(PackageManifestPublisher.Conflict.class,()->restarted.stageResource("owner","owner",path,"UAT",
+                    "different resource",sha(""),candidate,sha(manifest)));
+            Map<String,Object> staged=restarted.stageResource("owner","owner",path,"UAT",RESOURCE,sha(""),candidate,sha(manifest));
+            assertEquals(sha(RESOURCE),staged.get("expectedResourceDigest"),"Recovery is fenced to the orphan's exact digest.");
+            assertEquals(true,staged.get("recoveredExistingResource"));
+            assertEquals(sha(RESOURCE),staged.get("candidateResourceDigest"));
+            String draft=(String)staged.get("draftId");
+            restarted.validateResource("owner","owner",draft);
+            restarted.reviewResource("owner","owner",draft);
+            Map<String,Object> published=restarted.publishResource("owner","owner",draft);
+            assertEquals(true,published.get("published"));
+            assertEquals(candidate,Files.readString(root.resolve("package.yaml")));
+            assertEquals(RESOURCE,Files.readString(root.resolve(path)));
         }
     }
     @Test void resourceDraftRetainsSelectedEnvironmentThroughValidationAndPublish() throws Exception {

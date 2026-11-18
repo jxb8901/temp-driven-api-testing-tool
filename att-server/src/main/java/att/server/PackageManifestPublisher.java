@@ -157,18 +157,32 @@ final class PackageManifestPublisher implements AutoCloseable {
             throw new IllegalArgumentException("Package resource Environment is invalid");
         validateSource(source,"Package resource");requireDigest(expectedResourceDigest);
         boolean manifestAddition=candidateManifestSource!=null||expectedManifestDigest!=null;
+        String beforeResourceDigest=expectedResourceDigest;
         if(manifestAddition) {
             if(candidateManifestSource==null||expectedManifestDigest==null)
                 throw new IllegalArgumentException("candidateManifestSource and expectedManifestDigest must be supplied together");
             validateSource(candidateManifestSource,"Candidate Package Manifest");requireDigest(expectedManifestDigest);
             if(!expectedManifestDigest.equals(currentDigest(root)))throw new Conflict();
-            if(!digest(new byte[0]).equals(expectedResourceDigest)
-                    ||Files.exists(resourcePath(root,canonicalPath),LinkOption.NOFOLLOW_LINKS))throw new Conflict();
+            String emptyDigest=digest(new byte[0]);
+            String candidateDigest=digest(source.getBytes(StandardCharsets.UTF_8));
+            if(!emptyDigest.equals(expectedResourceDigest))throw new Conflict();
+            Path target=resourcePath(root,canonicalPath);
+            boolean targetExists=Files.exists(target,LinkOption.NOFOLLOW_LINKS);
+            String currentResource=currentResourceDigest(root,canonicalPath);
+            if(targetExists) {
+                // A prior process may have written this exact inert file before failing to activate
+                // its inventory entry. Permit only that digest-fenced recovery case.
+                if(!candidateDigest.equals(currentResource))throw new Conflict();
+                beforeResourceDigest=currentResource;
+            } else {
+                if(!emptyDigest.equals(currentResource))throw new Conflict();
+                beforeResourceDigest=emptyDigest;
+            }
         }
-        if(!expectedResourceDigest.equals(currentResourceDigest(root,canonicalPath)))throw new Conflict();
+        if(!manifestAddition&&!expectedResourceDigest.equals(currentResourceDigest(root,canonicalPath)))throw new Conflict();
         enforceCapacity(actor);
         Draft draft=new Draft("R"+UUID.randomUUID().toString().replace("-","").toUpperCase(),packageId,actor,root,
-                canonicalPath,environment,source,expectedResourceDigest,candidateManifestSource,expectedManifestDigest,
+                canonicalPath,environment,source,beforeResourceDigest,candidateManifestSource,expectedManifestDigest,
                 clock.instant().plusSeconds(policy.draftTtlSeconds),null,false);
         drafts.put(draft.id,draft);audit.record(actor,"PKG_SUT_METRIC_RESOURCE_STAGE",packageId,canonicalPath+":"+expectedResourceDigest);
         return view(draft);
@@ -318,6 +332,8 @@ final class PackageManifestPublisher implements AutoCloseable {
         result.put("resourcePath",draft.resourcePath);result.put("beforeResourceDigest",draft.beforeDigest);
         result.put("resourceDigest",resourceDigest);result.put("expectedManifestDigest",draft.expectedManifestDigest);
         result.put("manifestDigest",candidateManifestDigest);result.put("candidateManifestDigest",candidateManifestDigest);
+        result.put("recoveredExistingResource",!digest(new byte[0]).equals(draft.beforeDigest));
+        result.put("candidateResourceDigest",resourceDigest);
         result.put("refreshRequired",true);result.put("validationRevision",finalValidation.get("validationRevision"));
         result.put("environment",finalValidation.get("environment"));
         result.put("configurationIdentity",finalValidation.get("configurationIdentity"));
@@ -514,6 +530,8 @@ final class PackageManifestPublisher implements AutoCloseable {
                 result.put("activationMode","resource-then-manifest");
                 result.put("expectedManifestDigest",draft.expectedManifestDigest);
                 result.put("candidateManifestDigest",digest(draft.candidateManifestSource.getBytes(StandardCharsets.UTF_8)));
+                result.put("recoveredExistingResource",!digest(new byte[0]).equals(draft.beforeDigest));
+                result.put("candidateResourceDigest",digest(draft.source.getBytes(StandardCharsets.UTF_8)));
             }
         }
         result.put("expiresAt",draft.expires.toString());
