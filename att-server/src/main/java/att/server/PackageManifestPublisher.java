@@ -165,7 +165,8 @@ final class PackageManifestPublisher implements AutoCloseable {
                 unchanged(draft);
                 Path current=authorizedRoot(packageId,actor);
                 if(!commitRoot.equals(current))throw new Conflict();
-            },requestId,List.of("package.yaml"),"PACKAGE_MANIFEST_PUBLISH",audit::recordCommitted);
+            },requestId,List.of("package.yaml"),"PACKAGE_MANIFEST_PUBLISH",
+                    String.valueOf(fresh.get("validationRevision")), "NOT_APPLICABLE", audit::recordCommitted);
         } catch(SourceFileTransaction.RevisionConflict changed) {
             throw new Conflict();
         }
@@ -306,7 +307,8 @@ final class PackageManifestPublisher implements AutoCloseable {
                         ||!draft.validation.get("validationRevision").equals(commitValidation.get("validationRevision")))
                     throw new Conflict();
                 unchanged(draft);
-            },null,List.of(draft.resourcePath),"PKG_SUT_METRIC_RESOURCE_PUBLISH",audit::recordCommitted);
+            },null,List.of(draft.resourcePath),"PKG_SUT_METRIC_RESOURCE_PUBLISH",
+                    String.valueOf(draft.validation.get("validationRevision")), "NOT_APPLICABLE", audit::recordCommitted);
         } catch(SourceFileTransaction.RevisionConflict changed) {
             throw new Conflict();
         }
@@ -369,7 +371,8 @@ final class PackageManifestPublisher implements AutoCloseable {
                             draft.expectedManifestDigest);
                     verifyCreatedResourceValidation(draft,latest,resourceDigest,candidateManifestDigest);
                     unchangedForCreatedResource(draft,resourceDigest);
-                },null,List.of(draft.resourcePath),"PKG_SUT_METRIC_RESOURCE_PREPARE",audit::recordCommitted);
+                },null,List.of(draft.resourcePath),"PKG_SUT_METRIC_RESOURCE_PREPARE",
+                        String.valueOf(beforeWrite.get("validationRevision")), "NOT_APPLICABLE", audit::recordCommitted);
                 resourceAuditConfirmed=resourceCommit.auditConfirmed;
             } catch(SourceFileTransaction.RevisionConflict changed) {
                 throw new Conflict();
@@ -408,7 +411,8 @@ final class PackageManifestPublisher implements AutoCloseable {
                         draft.expectedManifestDigest);
                 verifyCreatedResourceValidation(draft,latest,resourceDigest,candidateManifestDigest);
                 unchangedForCreatedResource(draft,resourceDigest);
-            },null,List.of("package.yaml"),"PKG_SUT_METRIC_RESOURCE_PUBLISH",audit::recordCommitted);
+            },null,List.of("package.yaml"),"PKG_SUT_METRIC_RESOURCE_PUBLISH",
+                    String.valueOf(finalValidation.get("validationRevision")), "NOT_APPLICABLE", audit::recordCommitted);
         } catch(SourceFileTransaction.RevisionConflict changed) {
             throw new Conflict();
         }

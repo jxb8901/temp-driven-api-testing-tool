@@ -709,7 +709,9 @@ final class ChangeSetPublisher implements AutoCloseable {
                         if(!java.util.Objects.equals(approvedRevision,freshRevision))
                             throw new Conflict("ATT-CONFIG-IMPACT-STALE");
                     }
-                },requestId,new ArrayList<>(draft.changes.keySet()),"SOURCE_CHANGE_SET_PUBLISH",audit::recordCommitted);
+                },requestId,new ArrayList<>(draft.changes.keySet()),"SOURCE_CHANGE_SET_PUBLISH",
+                        draft.validationRevision,
+                        CENTRAL_RUNTIME_CONFIG.equals(domain) ? "PENDING" : "NOT_APPLICABLE", audit::recordCommitted);
                 committed = true;
                 auditConfirmed=commitResult.auditConfirmed;
             } catch (SourceFileTransaction.RevisionConflict changed) {

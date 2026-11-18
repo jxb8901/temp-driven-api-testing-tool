@@ -80,6 +80,50 @@ class RuntimeLifecycleTest {
         } finally {first.close();second.close();}
         try(JobStore reopened=new JobStore(config)){assertEquals("Persisted",reopened.schedule("S1").name);}
     }
+    @Test void sourcePublicationAuditMigrationPersistsSnapshotAndValidationMetadata() throws Exception {
+        ServerConfig config=config();
+        Files.createDirectories(config.dataDir.resolve("db"));
+        String url="jdbc:h2:file:"+config.dataDir.resolve("db/att-server").toString().replace('\\','/')
+                +";DB_CLOSE_ON_EXIT=FALSE;AUTO_SERVER=FALSE;WRITE_DELAY=0";
+        DriverManager.registerDriver(org.h2.Driver.load());
+        try(java.sql.Connection connection=DriverManager.getConnection(url,"sa","");java.sql.Statement statement=connection.createStatement()) {
+            statement.execute("CREATE TABLE source_publication_audit (transaction_id VARCHAR(40) PRIMARY KEY, principal VARCHAR(256) NOT NULL, action VARCHAR(32) NOT NULL, domain VARCHAR(64) NOT NULL, scope_id VARCHAR(128) NOT NULL, outcome VARCHAR(32) NOT NULL, before_revision VARCHAR(64) NOT NULL, after_revision VARCHAR(64) NOT NULL, request_id VARCHAR(128), resources_json CLOB NOT NULL, created_at VARCHAR(40) NOT NULL)");
+            statement.execute("INSERT INTO source_publication_audit VALUES('T00000000000000000000000000000000','old-owner','OLD_PUBLISH','PACKAGE_SOURCE','p','COMMITTED','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',NULL,'[]','2026-01-01T00:00:00Z')");
+        }
+
+        SourceFileTransaction.AuditRecord record=new SourceFileTransaction.AuditRecord(
+                "T11111111111111111111111111111111","alice",ChangeSetPublisher.PACKAGE_SOURCE,"p",
+                "SOURCE_CHANGE_SET_PUBLISH","COMMITTED",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","request-256",
+                List.of("load/sut-metrics/sources/runtime.yaml"),
+                "R00000000000000000000000000000000","R11111111111111111111111111111111",
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "NOT_APPLICABLE","2026-11-18T12:34:56Z");
+        try(JobStore store=new JobStore(config)) {store.persistSourcePublicationAudit(record);}
+        DriverManager.registerDriver(org.h2.Driver.load());
+
+        try(java.sql.Connection connection=DriverManager.getConnection(url,"sa","");
+            java.sql.PreparedStatement query=connection.prepareStatement("SELECT before_snapshot_id,after_snapshot_id,validation_revision,activation_status,created_at FROM source_publication_audit WHERE transaction_id=?")) {
+            query.setString(1,record.transactionId);
+            try(java.sql.ResultSet row=query.executeQuery()) {
+                assertTrue(row.next());
+                assertEquals(record.beforeSnapshotId,row.getString(1));
+                assertEquals(record.afterSnapshotId,row.getString(2));
+                assertEquals(record.validationRevision,row.getString(3));
+                assertEquals("NOT_APPLICABLE",row.getString(4));
+                assertEquals(record.createdAt,row.getString(5));
+            }
+            try(java.sql.PreparedStatement old=connection.prepareStatement("SELECT before_snapshot_id,after_snapshot_id,validation_revision,activation_status FROM source_publication_audit WHERE transaction_id=?")) {
+                old.setString(1,"T00000000000000000000000000000000");
+                try(java.sql.ResultSet row=old.executeQuery()) {
+                    assertTrue(row.next());
+                    assertNull(row.getString(1));assertNull(row.getString(2));assertNull(row.getString(3));
+                    assertEquals("UNKNOWN",row.getString(4));
+                }
+            }
+        }
+    }
     @Test void corruptRecoveredJournalDoesNotBlockStartupAndReleasesResources() throws Exception {
         ServerConfig config=config();
         Files.createDirectories(config.dataDir.resolve("jobs"));

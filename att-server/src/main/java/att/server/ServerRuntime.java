@@ -341,6 +341,7 @@ final class ServerRuntime implements AutoCloseable {
                                 domain+" "+scopeId+" "+detail);
                     }
                     @Override public void recordCommitted(SourceFileTransaction.AuditRecord record) throws Exception {
+                        SourceFileTransaction.AuditRecord durableRecord=record;
                         if(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(record.domain)) {
                             att.server.api.source.SourceManagementContracts.RevisionIdentity before=
                                     att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
@@ -359,8 +360,11 @@ final class ServerRuntime implements AutoCloseable {
                                             new att.server.api.source.SourceManagementContracts.RevisionSet(null,null,null,null,
                                                     after,null,null,null,null),record.resources);
                             configActivationCoordinator.committed(event);
+                            att.server.api.source.SourceManagementContracts.ActivationStatus status=
+                                    configActivationCoordinator.activationStatus(record.scopeId);
+                            if(status!=null&&status.state!=null)durableRecord=record.withActivationStatus(status.state.name());
                         }
-                        store.persistSourcePublicationAudit(record);
+                        store.persistSourcePublicationAudit(durableRecord);
                     }
                 },
                 sourceFileTransaction,

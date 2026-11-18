@@ -14,6 +14,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
@@ -40,13 +41,44 @@ final class SourceFileTransaction {
     static final class AuditRecord {
         final String transactionId, actor, domain, scopeId, action, outcome;
         final String beforeRevision, afterRevision, requestId;
+        final String beforeSnapshotId, afterSnapshotId, validationRevision, activationStatus, createdAt;
         final List<String> resources;
         AuditRecord(String transactionId, String actor, String domain, String scopeId, String action, String outcome,
                     String beforeRevision, String afterRevision, String requestId, List<String> resources) {
+            this(transactionId, actor, domain, scopeId, action, outcome, beforeRevision, afterRevision, requestId,
+                    resources, null, null, null, defaultActivationStatus(domain), "UNKNOWN");
+        }
+        AuditRecord(String transactionId, String actor, String domain, String scopeId, String action, String outcome,
+                    String beforeRevision, String afterRevision, String requestId, List<String> resources,
+                    String beforeSnapshotId, String afterSnapshotId, String validationRevision,
+                    String activationStatus, String createdAt) {
             this.transactionId = transactionId; this.actor = actor; this.domain = domain; this.scopeId = scopeId;
             this.action = action; this.outcome = outcome; this.beforeRevision = beforeRevision;
             this.afterRevision = afterRevision; this.requestId = requestId;
-            this.resources = Collections.unmodifiableList(new ArrayList<String>(resources));
+            this.beforeSnapshotId = beforeSnapshotId; this.afterSnapshotId = afterSnapshotId;
+            this.validationRevision = validationRevision;
+            this.activationStatus = validActivationStatus(activationStatus);
+            this.createdAt = createdAt == null ? "UNKNOWN" : createdAt;
+            if (resources != null && resources.size() > 64)
+                throw new IllegalArgumentException("Source publication audit exceeds its resource limit");
+            List<String> orderedResources = new ArrayList<String>(resources == null
+                    ? Collections.<String>emptyList() : resources);
+            Collections.sort(orderedResources);
+            this.resources = Collections.unmodifiableList(orderedResources);
+        }
+        AuditRecord withActivationStatus(String status) {
+            return new AuditRecord(transactionId, actor, domain, scopeId, action, outcome,
+                    beforeRevision, afterRevision, requestId, resources, beforeSnapshotId, afterSnapshotId,
+                    validationRevision, status, createdAt);
+        }
+        private static String defaultActivationStatus(String domain) {
+            return ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(domain) ? "PENDING" : "NOT_APPLICABLE";
+        }
+        private static String validActivationStatus(String value) {
+            if ("ACTIVE".equals(value) || "PENDING".equals(value) || "FAILED".equals(value)
+                    || "UNAVAILABLE".equals(value) || "NOT_APPLICABLE".equals(value) || "UNKNOWN".equals(value))
+                return value;
+            throw new IllegalArgumentException("Invalid source activation status");
         }
     }
 
@@ -80,7 +112,8 @@ final class SourceFileTransaction {
     }
 
     private static final String JOURNAL_VERSION = "att-source-transaction-v1";
-    private static final String REVISION_JOURNAL_VERSION = "att-source-revision-transaction-v2";
+    private static final String LEGACY_REVISION_JOURNAL_VERSION = "att-source-revision-transaction-v2";
+    private static final String REVISION_JOURNAL_VERSION = "att-source-revision-transaction-v3";
     static final long MAX_FILE_BYTES = 16L * 1024L * 1024L;
     static final long MAX_BACKUP_BYTES = 64L * 1024L * 1024L;
     private final Path transactionRoot;
@@ -161,7 +194,17 @@ final class SourceFileTransaction {
     CommitResult commitWithAudit(String domain, String scopeId, Path root, String actor, String beforeRevision,
                                  String afterRevision, Map<String, Write> writes, RevisionCheck revisionCheck,
                                  String requestId, List<String> resources, String action, CommitAudit audit) throws Exception {
+        return commitWithAudit(domain, scopeId, root, actor, beforeRevision, afterRevision, writes, revisionCheck,
+                requestId, resources, action, null, AuditRecord.defaultActivationStatus(domain), audit);
+    }
+
+    CommitResult commitWithAudit(String domain, String scopeId, Path root, String actor, String beforeRevision,
+                                 String afterRevision, Map<String, Write> writes, RevisionCheck revisionCheck,
+                                 String requestId, List<String> resources, String action, String validationRevision,
+                                 String activationStatus, CommitAudit audit) throws Exception {
         if (writes == null || writes.isEmpty()) throw new IllegalArgumentException("A non-empty source change set is required");
+        if (validationRevision != null && !isDigest(validationRevision))
+            throw new IllegalArgumentException("Invalid source validation revision");
         if (revisions.registeredRoot(domain, scopeId) == null) registerRoot(domain, scopeId, root);
         Path sourceRoot = revisions.registeredRoot(domain, scopeId);
         if (sourceRoot == null) throw new IOException("Source revision root is unavailable");
@@ -184,7 +227,9 @@ final class SourceFileTransaction {
             afterId = "R" + UUID.randomUUID().toString().replace("-", "").toUpperCase(java.util.Locale.ROOT);
             AuditRecord record = new AuditRecord(transactionId, actor, domain, scopeId,
                     action == null ? auditAction(domain) : action, "COMMITTED", beforeRevision, afterRevision, requestId,
-                    resources == null ? Collections.emptyList() : resources);
+                    resources == null ? Collections.emptyList() : resources, beforeId, afterId, validationRevision,
+                    activationStatus == null ? AuditRecord.defaultActivationStatus(domain) : activationStatus,
+                    Instant.now().toString());
             if (faultInjector != null) faultInjector.beforeJournal();
             writeRevisionJournal(transaction, sourceRoot, beforeId, afterId, null, record);
             journalReady = true;
@@ -255,7 +300,8 @@ final class SourceFileTransaction {
                     continue;
                 }
                 String firstLine = Files.readAllLines(journal, StandardCharsets.UTF_8).stream().findFirst().orElse("");
-                if (firstLine.startsWith(REVISION_JOURNAL_VERSION + "\t")) {
+                if (firstLine.startsWith(REVISION_JOURNAL_VERSION + "\t")
+                        || firstLine.startsWith(LEGACY_REVISION_JOURNAL_VERSION + "\t")) {
                     recoverRevisionTransaction(entry, trustedRoots, audit);
                 } else {
                     recoverLegacyTransaction(entry, trustedRoots, audit);
@@ -412,7 +458,9 @@ final class SourceFileTransaction {
                 .append('\t').append(encoded(record.afterRevision)).append('\t').append(encoded(beforeId))
                 .append('\t').append(encoded(afterId)).append('\t')
                 .append(afterTreeDigest == null ? "-" : afterTreeDigest).append('\t')
-                .append(record.requestId == null ? "-" : encoded(record.requestId)).append('\n');
+                .append(record.requestId == null ? "-" : encoded(record.requestId)).append('\t')
+                .append(record.validationRevision == null ? "-" : encoded(record.validationRevision)).append('\t')
+                .append(encoded(record.activationStatus)).append('\t').append(encoded(record.createdAt)).append('\n');
         for (String resource : record.resources) value.append("R\t").append(encoded(resource)).append('\n');
         writeForcedAtomically(transaction.resolve("journal"), value.toString().getBytes(StandardCharsets.UTF_8));
     }
@@ -423,17 +471,30 @@ final class SourceFileTransaction {
         List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
         if (lines.isEmpty()) throw new IOException("Source transaction journal is invalid");
         String[] fields = lines.get(0).split("\\t", -1);
-        if (fields.length != 13 || !REVISION_JOURNAL_VERSION.equals(fields[0]))
+        boolean legacy = LEGACY_REVISION_JOURNAL_VERSION.equals(fields[0]);
+        if (legacy ? fields.length != 13 : fields.length != 16 || !REVISION_JOURNAL_VERSION.equals(fields[0]))
             throw new IOException("Source transaction journal is invalid");
         String transactionId = decoded(fields[1]);
         String beforeId = decoded(fields[9]), afterId = decoded(fields[10]);
         String treeDigest = "-".equals(fields[11]) ? null : fields[11];
         String requestId = "-".equals(fields[12]) ? null : decoded(fields[12]);
+        String validationRevision = legacy || "-".equals(fields[13]) ? null : decoded(fields[13]);
+        String domain = decoded(fields[2]);
+        String activationStatus = legacy ? AuditRecord.defaultActivationStatus(domain) : decoded(fields[14]);
+        String createdAt = legacy ? "UNKNOWN" : decoded(fields[15]);
         if (!transactionId.matches("T[A-F0-9]{32}") || !beforeId.matches("R[A-F0-9]{32}")
                 || !afterId.matches("R[A-F0-9]{32}") || treeDigest != null && !isDigest(treeDigest))
             throw new IOException("Source transaction journal is invalid");
         String beforeRevision = decoded(fields[7]), afterRevision = decoded(fields[8]);
-        if (!isDigest(beforeRevision) || !isDigest(afterRevision)) throw new IOException("Source transaction journal is invalid");
+        if (!isDigest(beforeRevision) || !isDigest(afterRevision)
+                || validationRevision != null && !isDigest(validationRevision))
+            throw new IOException("Source transaction journal is invalid");
+        try {
+            if (!"UNKNOWN".equals(createdAt)) Instant.parse(createdAt);
+            AuditRecord.validActivationStatus(activationStatus);
+        } catch (RuntimeException invalidMetadata) {
+            throw new IOException("Source transaction journal is invalid");
+        }
         List<String> resources = new ArrayList<>();
         for (int index = 1; index < lines.size(); index++) {
             String[] resource = lines.get(index).split("\\t", -1);
@@ -441,9 +502,10 @@ final class SourceFileTransaction {
                 throw new IOException("Source transaction journal is invalid");
             resources.add(safeRelative(decoded(resource[1])));
         }
-        return new RevisionJournal(transactionId, decoded(fields[2]), decoded(fields[3]),
+        return new RevisionJournal(transactionId, domain, decoded(fields[3]),
                 canonicalRoot(java.nio.file.Paths.get(decoded(fields[4]))), decoded(fields[5]), decoded(fields[6]),
-                beforeRevision, afterRevision, beforeId, afterId, treeDigest, requestId, resources);
+                beforeRevision, afterRevision, beforeId, afterId, treeDigest, requestId, validationRevision,
+                activationStatus, createdAt, resources);
     }
 
     private static boolean validRevisionCommitMarker(Path marker, String transactionId, String revision) throws IOException {
@@ -788,21 +850,24 @@ final class SourceFileTransaction {
 
     private static final class RevisionJournal {
         final String transactionId, domain, scopeId, actor, action, beforeRevision, afterRevision;
-        final String beforeId, afterId, afterTreeDigest, requestId;
+        final String beforeId, afterId, afterTreeDigest, requestId, validationRevision, activationStatus, createdAt;
         final Path sourceRoot;
         final List<String> resources;
         RevisionJournal(String transactionId, String domain, String scopeId, Path sourceRoot, String actor,
                         String action, String beforeRevision, String afterRevision, String beforeId, String afterId,
-                        String afterTreeDigest, String requestId, List<String> resources) {
+                        String afterTreeDigest, String requestId, String validationRevision, String activationStatus,
+                        String createdAt, List<String> resources) {
             this.transactionId = transactionId; this.domain = domain; this.scopeId = scopeId;
             this.sourceRoot = sourceRoot; this.actor = actor; this.action = action;
             this.beforeRevision = beforeRevision; this.afterRevision = afterRevision; this.beforeId = beforeId;
             this.afterId = afterId; this.afterTreeDigest = afterTreeDigest; this.requestId = requestId;
+            this.validationRevision = validationRevision; this.activationStatus = activationStatus; this.createdAt = createdAt;
             this.resources = Collections.unmodifiableList(new ArrayList<>(resources));
         }
         AuditRecord record(String outcome) {
             return new AuditRecord(transactionId, actor, domain, scopeId, action, outcome,
-                    beforeRevision, afterRevision, requestId, resources);
+                    beforeRevision, afterRevision, requestId, resources, beforeId, afterId, validationRevision,
+                    activationStatus, createdAt);
         }
     }
 }

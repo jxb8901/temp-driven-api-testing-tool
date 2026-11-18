@@ -420,9 +420,11 @@ class SourceFileTransactionTest {
         Path data = Files.createDirectories(temp.resolve("data"));
         SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
         Path active = transaction.pin(PACKAGE, SCOPE, root);
+        String validationRevision = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
         SourceFileTransaction.CommitResult committed = transaction.commitWithAudit(PACKAGE, SCOPE, active, "alice",
                 BEFORE_REVISION, AFTER_REVISION, writes("old-a", "old-b", "new-a", "new-b"), () -> { },
-                "request-252", List.of("templates/a.yaml", "templates/b.yaml"), "SOURCE_CHANGE_SET_PUBLISH",
+                "request-252", List.of("templates/b.yaml", "templates/a.yaml"), "SOURCE_CHANGE_SET_PUBLISH",
+                validationRevision, "NOT_APPLICABLE",
                 record -> { throw new java.io.IOException("injected durable audit failure"); });
         assertEquals(AFTER_REVISION, committed.revision);
         assertFalse(committed.auditConfirmed);
@@ -441,6 +443,12 @@ class SourceFileTransactionTest {
         assertEquals(BEFORE_REVISION, record.beforeRevision);
         assertEquals(AFTER_REVISION, record.afterRevision);
         assertEquals("request-252", record.requestId);
+        assertTrue(record.beforeSnapshotId.matches("R[A-F0-9]{32}"));
+        assertTrue(record.afterSnapshotId.matches("R[A-F0-9]{32}"));
+        assertTrue(Files.isDirectory(transaction.revisionRoot(PACKAGE, SCOPE, root, record.afterSnapshotId)));
+        assertEquals(validationRevision, record.validationRevision);
+        assertEquals("NOT_APPLICABLE", record.activationStatus);
+        assertDoesNotThrow(() -> java.time.Instant.parse(record.createdAt));
         assertEquals("COMMITTED", record.outcome);
     }
 
@@ -463,7 +471,46 @@ class SourceFileTransactionTest {
         assertEquals("COMMITTED", recovered.get().outcome);
         assertEquals("request-after-switch", recovered.get().requestId);
         assertEquals(AFTER_REVISION, recovered.get().afterRevision);
+        assertTrue(recovered.get().beforeSnapshotId.matches("R[A-F0-9]{32}"));
+        assertTrue(recovered.get().afterSnapshotId.matches("R[A-F0-9]{32}"));
+        assertEquals("NOT_APPLICABLE", recovered.get().activationStatus);
+        assertDoesNotThrow(() -> java.time.Instant.parse(recovered.get().createdAt));
         assertPair(transaction.pin(PACKAGE, SCOPE, root), "new-a", "new-b");
+    }
+
+    @Test void recoversExistingRevisionJournalV2WithoutInventingMissingMetadata() throws Exception {
+        Path root = initialTree();
+        Path data = Files.createDirectories(temp.resolve("data"));
+        SourceFileTransaction.FaultInjector afterSwitch = new SourceFileTransaction.FaultInjector() {
+            @Override public void afterApply(int appliedCount) { }
+            @Override public void afterPointerSwitch() throws java.io.IOException { throw new SourceFileTransaction.SimulatedCrash(); }
+        };
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier(), afterSwitch);
+        Path active = transaction.pin(PACKAGE, SCOPE, root);
+        assertThrows(SourceFileTransaction.SimulatedCrash.class, () -> transaction.commitWithAudit(PACKAGE, SCOPE,
+                active, "alice", BEFORE_REVISION, AFTER_REVISION, writes("old-a", "old-b", "new-a", "new-b"),
+                () -> { }, "request-v2", List.of("templates/a.yaml"), "SOURCE_CHANGE_SET_PUBLISH",
+                record -> fail("audit must be replayed on recovery")));
+
+        Path transactionDirectory;
+        try (java.util.stream.Stream<Path> entries = Files.list(data.resolve("source-transactions"))) {
+            transactionDirectory = entries.findFirst().orElseThrow();
+        }
+        Path journal = transactionDirectory.resolve("journal");
+        List<String> lines = new java.util.ArrayList<>(Files.readAllLines(journal, StandardCharsets.UTF_8));
+        String[] header = lines.get(0).split("\\t", -1);
+        assertEquals(16, header.length);
+        header[0] = "att-source-revision-transaction-v2";
+        lines.set(0, String.join("\t", java.util.Arrays.copyOf(header, 13)));
+        Files.write(journal, lines, StandardCharsets.UTF_8);
+
+        AtomicReference<SourceFileTransaction.AuditRecord> recovered = new AtomicReference<>();
+        assertEquals(1, transaction.recover(Map.of(PACKAGE + ":" + SCOPE, root), recovered::set));
+        assertTrue(recovered.get().beforeSnapshotId.matches("R[A-F0-9]{32}"));
+        assertTrue(recovered.get().afterSnapshotId.matches("R[A-F0-9]{32}"));
+        assertNull(recovered.get().validationRevision);
+        assertEquals("NOT_APPLICABLE", recovered.get().activationStatus);
+        assertEquals("UNKNOWN", recovered.get().createdAt);
     }
 
     private Path initialTree() throws Exception {
