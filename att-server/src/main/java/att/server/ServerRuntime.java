@@ -1129,6 +1129,7 @@ final class ServerRuntime implements AutoCloseable {
                     JobSourceClosureStore.SourceSnapshot workerSnapshot=jobSourceClosures.snapshotForOwner(JobSourceClosureStore.JOB_OWNER_PREFIX+id);
                     request.sourceSnapshotArchivePath=workerSnapshot.archivePath.toString();
                     request.sourceSnapshotArchiveSha256=workerSnapshot.archiveSha256;
+                    request.sourceSnapshotDirectory=workerSnapshot.directory.toString();
                     request.sourceSnapshotConfigPath=workerSnapshot.configRelativePath;
                 } catch(Exception staleSource) {
                     throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Package or Config source revision is unavailable. Validate the execution again.");
@@ -1243,7 +1244,10 @@ final class ServerRuntime implements AutoCloseable {
                         verifyAcceptedCentralSource(job.acceptedCentralSourceRoot,job.acceptedCentralTreeDigest);
                     }
                     job.request.outputDirectory=jobPath.resolve("output").toRealPath().toString();
-                    if(warmRevision!=null) {
+                    // Accepted source closures must enter a cold OS-sandboxed Worker. READY
+                    // prewarmed JVMs were started before the snapshot was known, so they cannot
+                    // safely inherit the required read-only mount/policy.
+                    if(warmRevision!=null&&job.sourceLeaseId==null) {
                         Path selectedRoot=executionPackageRoot(job.packageId);
                         if(selectedRoot==null||!selectedRoot.equals(approvedRoot)) {
                             warmRevision=null;job.prewarmFallbackReason="registry_changed";
@@ -1255,7 +1259,9 @@ final class ServerRuntime implements AutoCloseable {
                         }
                     }
                     ProcessBuilder coldBuilder=warm==null?workerBuilder(false,job.packageId,
-                            job.sourceLeaseId==null?approvedRoot:config.dataDir):null;
+                            job.sourceLeaseId==null?approvedRoot:config.dataDir,
+                            job.request.sourceSnapshotDirectory,job.request.sourceSnapshotArchivePath,
+                            job.request.outputDirectory):null;
                     job.workerSpawnStartedNanos=System.nanoTime();
                     process=warm==null?startWorkerProcess(coldBuilder):warm.process;
                     job.workerSpawnedNanos=System.nanoTime();job.process=process;job.processFence=warm==null?new WorkerProcessFence(process):warm.fence;
@@ -1365,13 +1371,32 @@ final class ServerRuntime implements AutoCloseable {
         return workerBuilder(prewarm,packageId,executionPackageRoot(packageId));
     }
     private ProcessBuilder workerBuilder(boolean prewarm,String packageId,Path packageRoot) {
+        return workerBuilder(prewarm,packageId,packageRoot,null,null,null);
+    }
+    private ProcessBuilder workerBuilder(boolean prewarm,String packageId,Path packageRoot,
+                                         String sourceSnapshotDirectory,String sourceSnapshotArchivePath,
+                                         String outputDirectory) {
         List<String> command=new ArrayList<>();command.add(config.javaExecutable.toString());
         if(config.workerHeapInitialMb>0)command.add("-Xms"+config.workerHeapInitialMb+"m");
         if(config.workerHeapMaxMb>0)command.add("-Xmx"+config.workerHeapMaxMb+"m");
         command.add("-cp");command.add(String.join(java.io.File.pathSeparator,workerClasspath()));command.add("att.worker.WorkerMain");
         if(prewarm)command.add("--prewarmed-one-shot");
         if(packageRoot==null)throw new NotFoundException();
-        return new ProcessBuilder(command).directory(packageRoot.toFile());
+        if(sourceSnapshotDirectory!=null) {
+            if(prewarm||sourceSnapshotArchivePath==null||outputDirectory==null)
+                throw new IllegalStateException("An accepted source snapshot requires a cold, isolated Worker");
+            try {
+                command=att.exec.SourceSnapshotIsolation.wrap(command,Path.of(sourceSnapshotDirectory),
+                        Path.of(sourceSnapshotArchivePath),Path.of(outputDirectory));
+            } catch(java.io.IOException unavailable) {
+                throw new IllegalStateException("Accepted source execution is unavailable because OS-enforced Worker isolation could not be established",unavailable);
+            }
+        }
+        ProcessBuilder builder=new ProcessBuilder(command).directory(packageRoot.toFile());
+        if(sourceSnapshotDirectory!=null&&System.getProperty("os.name","").toLowerCase(java.util.Locale.ROOT).contains("linux")) {
+            builder.environment().put("TMPDIR","/tmp");builder.environment().put("TMP","/tmp");builder.environment().put("TEMP","/tmp");
+        }
+        return builder;
     }
     private boolean environmentFitsPrewarm() {
         // JVM bootstrap options cannot be applied after READY. Keep those

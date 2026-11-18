@@ -21,6 +21,8 @@ public class WorkerRequest {
     public String sourceSnapshotArchivePath;
     /** SHA-256 of the complete source snapshot archive; Worker verifies before extraction. */
     public String sourceSnapshotArchiveSha256;
+    /** Server-materialized immutable source tree, mounted read-only for the entire Worker process tree. */
+    public String sourceSnapshotDirectory;
     /** Config path relative to the Config root inside sourceSnapshotArchivePath. */
     public String sourceSnapshotConfigPath;
     public String environment;

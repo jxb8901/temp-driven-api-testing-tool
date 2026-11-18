@@ -91,6 +91,7 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
     static final class SourceSnapshot {
         final String leaseId;
         final RevisionSet revisions;
+        final Path directory;
         final Path packageRoot;
         final Path configRoot;
         final Path workerConfigPath;
@@ -101,10 +102,10 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
         final List<String> logicalPaths;
         final byte[] compiledFilePlans;
 
-        SourceSnapshot(String leaseId, RevisionSet revisions, Path packageRoot, Path configRoot, Path workerConfigPath,
+        SourceSnapshot(String leaseId, RevisionSet revisions, Path directory, Path packageRoot, Path configRoot, Path workerConfigPath,
                        Path archivePath, String archiveSha256, String configRelativePath,
                        List<Map<String,Object>> dependencies, List<String> logicalPaths, byte[] compiledFilePlans) {
-            this.leaseId=leaseId;this.revisions=revisions;this.packageRoot=packageRoot;
+            this.leaseId=leaseId;this.revisions=revisions;this.directory=directory;this.packageRoot=packageRoot;
             this.configRoot=configRoot;this.workerConfigPath=workerConfigPath;
             this.archivePath=archivePath;this.archiveSha256=archiveSha256;this.configRelativePath=configRelativePath;
             this.dependencies=List.copyOf(dependencies==null?List.of():dependencies);
@@ -309,7 +310,7 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
             Path workerConfig=record.configPath==null?null:configRoot.resolve(record.configPath).normalize();
             if(workerConfig==null||!workerConfig.startsWith(configRoot)||!Files.isRegularFile(workerConfig,LinkOption.NOFOLLOW_LINKS)
                     ||Files.isSymbolicLink(workerConfig))throw new StaleSourceException();
-            return new SourceSnapshot(record.id,revisions,packageRoot,configRoot,workerConfig,
+            return new SourceSnapshot(record.id,revisions,root,packageRoot,configRoot,workerConfig,
                     Path.of(record.snapshotArchivePath),record.snapshotArchiveSha256,record.configPath,
                     record.dependencies,record.logicalPaths,readCompiledFilePlans(record));
         }

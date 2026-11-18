@@ -19,6 +19,10 @@ Keep Package registration, Package source, execution revision, Change Set, Manif
 
 `VersionedSourceBytes` is the only contract that carries authored bytes. It binds the bytes to a source revision, logical path, and verified SHA-256. A revision digest by itself does not grant byte access. Leases remain pinned to one immutable revision after a newer revision is published; a stale acquisition fails with `ATT-SOURCE-REVISION-STALE`.
 
+Accepted source bytes stay immutable while a Worker runs through an OS-enforced process boundary. The Server materializes the verified Package and Config trees, then launches a cold Worker with those trees and the accepted archive protected from writes. macOS uses `/usr/bin/sandbox-exec`; Linux uses `bwrap` with a read-only root and read-only source binds, while the Job output directory and `/tmp` remain writable. Worker subprocesses inherit the boundary. Source-pinned Jobs never use a prewarmed Worker. The Worker marker only rejects an accidentally unwrapped launch; it is not the security boundary. `WatchService`, tree digests, and filesystem modes remain integrity checks or diagnostics, not write prevention.
+
+Runtime requirements are fail-closed: macOS must provide `/usr/bin/sandbox-exec`; Linux must provide `bwrap` on `PATH` and allow its user namespace setup. CI installs `bubblewrap` on Linux runners. If the OS boundary cannot be created, the Server records a Worker failure before Engine or Tool execution; unsupported platforms do not fall back to chmod, watchers, or an ordinary Worker. Operators should put Tool-generated files under the Job output directory or `/tmp`; source snapshot paths are read-only for the full process tree.
+
 Package IDs scope dependency identity. Two Packages may use the same local resource or Testdata ID without sharing a binding. `EffectiveResolution` reports Engine precedence and known direct or transitive references; it does not decide cross-Package impact.
 
 ## Availability and publication boundaries

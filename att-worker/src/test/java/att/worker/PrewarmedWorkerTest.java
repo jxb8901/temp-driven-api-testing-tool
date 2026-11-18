@@ -1,6 +1,7 @@
 package att.worker;
 
 import att.server.api.internal.WorkerProtocol;
+import att.exec.SourceSnapshotIsolation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -46,8 +47,9 @@ class PrewarmedWorkerTest {
     @Test void coldWorkerUsesTheAcceptedSnapshotAfterTheOwnerMutatesItsSourceTree() throws Exception {
         Path root=fixture();SourceArchive accepted=sourceArchive(root);
         Map<String,Object> request=request(root,"debug");attachSnapshot(request,accepted);
+        org.junit.jupiter.api.Assumptions.assumeTrue(osSandboxAvailable(accepted,root.resolve("output")),"OS-enforced Worker sandbox unavailable in this host");
         Files.write(root.resolve("templates/ENV/debug.yaml"),"not: [valid\n".getBytes(StandardCharsets.UTF_8));
-        Process process=startCold(root);
+        Process process=startCold(root,accepted);
         try {
             String output=assign(process,mapper.writeValueAsString(request));
             assertEquals(0,process.exitValue(),output);
@@ -57,7 +59,7 @@ class PrewarmedWorkerTest {
         } finally {process.destroyForcibly();}
     }
 
-    @Test void prewarmedWorkerUsesTheAcceptedSnapshotAfterItsOwnerMutatesPackageAndConfig() throws Exception {
+    @Test void prewarmedWorkerRejectsSourceSnapshotsBecauseItCannotInheritTheReadOnlyBoundary() throws Exception {
         Path root=fixture();SourceArchive accepted=sourceArchive(root);
         Process process=start(root);
         try {
@@ -67,10 +69,9 @@ class PrewarmedWorkerTest {
             Files.write(root.resolve("templates/ENV/debug.yaml"),"not: [valid\n".getBytes(StandardCharsets.UTF_8));
             Files.write(root.resolve("config/config.yaml"),"schemaVersion: invalid\n".getBytes(StandardCharsets.UTF_8));
             String output=assign(process,mapper.writeValueAsString(request));
-            assertEquals(0,process.exitValue(),output);
-            assertTrue(output.contains("\"status\":\"PASS\""),output);
-            assertTrue(Files.exists(root.resolve("business-started")),output);
-            assertEquals("env-ok",new String(Files.readAllBytes(root.resolve("business-started")),StandardCharsets.UTF_8));
+            assertNotEquals(0,process.exitValue(),output);
+            assertTrue(output.contains("WORKER_SOURCE_SNAPSHOT_INVALID"),output);
+            assertFalse(Files.exists(root.resolve("business-started")),output);
         } finally {process.destroyForcibly();}
     }
 
@@ -94,8 +95,9 @@ class PrewarmedWorkerTest {
     @Test void workerRejectsSnapshotWhoseExecutionIdentityDiffersFromTheRequest() throws Exception {
         Path root=fixture();SourceArchive accepted=sourceArchive(root);
         Map<String,Object> request=request(root,"debug");attachSnapshot(request,accepted);
+        org.junit.jupiter.api.Assumptions.assumeTrue(osSandboxAvailable(accepted,root.resolve("output")),"OS-enforced Worker sandbox unavailable in this host");
         request.put("expectedExecutionRevisionDigest",String.join("",java.util.Collections.nCopies(64,"0")));
-        Process process=startCold(root);
+        Process process=startCold(root,accepted);
         try {
             String output=assign(process,mapper.writeValueAsString(request));
             assertNotEquals(0,process.exitValue(),output);
@@ -105,48 +107,74 @@ class PrewarmedWorkerTest {
 
     @Test void packageLocalExecutableToolSurvivesColdAndWarmRunDebugAndLoadSnapshots() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"Package-local shell executable requires POSIX permissions");
-        for(String command:Arrays.asList("debug","run"))for(Boolean warm:Arrays.asList(Boolean.FALSE,Boolean.TRUE))
-            verifyPackageLocalExecutableTool(command,warm.booleanValue());
-        verifyPackageLocalExecutableTool("load",false);
+        Path probe=fixture(temp.resolve("sandbox-probe-"+UUID.randomUUID()));SourceArchive source=sourceArchive(probe);
+        org.junit.jupiter.api.Assumptions.assumeTrue(osSandboxAvailable(source,probe.resolve("output")),"OS-enforced Worker sandbox unavailable in this host");
+        for(String command:Arrays.asList("debug","run","load"))verifyPackageLocalExecutableTool(command,false);
+    }
+
+    @Test void sameOwnerToolCannotChangeAcceptedSourceOrPerformItsFollowUpSideEffect() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"The OS source sandbox is not available on Windows");
+        Path root=fixture(temp.resolve("sandbox-mutation-package-"+UUID.randomUUID()));
+        Files.createDirectories(root.resolve("files"));
+        Files.write(root.resolve("files/watched.txt"),"accepted-value\n".getBytes(StandardCharsets.UTF_8));
+        Path sideEffect=root.resolve("output/side-effect.marker");
+        String script="#!/bin/sh\nset -e\ntool_dir=$(CDPATH= cd \"$(dirname \"$0\")\" && pwd)\n"
+                +"source=\"$tool_dir/../files/watched.txt\"\n"
+                +"chmod u+w \"$source\"\n"
+                +"printf 'mutated-value\\n' > \"$source\"\n"
+                +"touch \"$1\"\n";
+        fixtureWithLocalTool(root,sideEffect,script);
+        SourceArchive accepted=sourceArchive(root);
+        Map<String,Object> request=request(root,"debug");attachSnapshot(request,accepted);
+        Files.createDirectories(Paths.get(String.valueOf(request.get("outputDirectory"))));
+        boolean sandboxAvailable=osSandboxAvailable(accepted,root.resolve("output"));
+        Process process;
+        try { process=startCold(root,accepted); }
+        catch(java.io.IOException unavailable) {
+            assertFalse(sandboxAvailable,"An available OS sandbox must launch the Worker process");
+            assertFalse(Files.exists(sideEffect),"The Tool must not run without OS isolation");
+            assertEquals("accepted-value",Files.readString(accepted.packageRoot.resolve("files/watched.txt")).trim());
+            return;
+        }
+        try {
+            String output=assign(process,mapper.writeValueAsString(request));
+            assertFalse(Files.exists(sideEffect),"The Tool must stop before its follow-up side effect");
+            assertEquals("accepted-value",Files.readString(accepted.packageRoot.resolve("files/watched.txt")).trim(),
+                    "Accepted source bytes must remain unchanged");
+            if(sandboxAvailable) {
+                assertTrue(output.contains("Operation not permitted")||output.contains("Permission denied"),output);
+                assertTrue(output.contains("exitCode: 1"),output);
+            }
+            else assertNotEquals(0,process.exitValue(),"Unavailable OS isolation must fail before Worker execution");
+        } finally {process.destroyForcibly();}
     }
 
     @Test void workerRejectsAStagedSourceMutationBetweenReadsDuringExecution() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"The mutation fixture uses a POSIX package-local executable");
-        Path started=temp.resolve("mutation-tool-started.marker"),release=temp.resolve("mutation-tool-release.marker");
-        Path firstRead=temp.resolve("mutation-first-read.marker"),secondRead=temp.resolve("mutation-second-read.marker");
-        Path secondReadDone=temp.resolve("mutation-second-read-done.marker"),finish=temp.resolve("mutation-tool-finish.marker");
+        Path root=fixture(temp.resolve("mutation-package-"+UUID.randomUUID()));
+        Path outputDirectory=root.resolve("output");Files.createDirectories(outputDirectory);
+        Path started=outputDirectory.resolve("mutation-tool-started.marker"),release=outputDirectory.resolve("mutation-tool-release.marker");
+        Path firstRead=outputDirectory.resolve("mutation-first-read.marker"),secondRead=outputDirectory.resolve("mutation-second-read.marker");
+        Path secondReadDone=outputDirectory.resolve("mutation-second-read-done.marker"),finish=outputDirectory.resolve("mutation-tool-finish.marker");
         String script="#!/bin/sh\nset -e\ntool_dir=$(CDPATH= cd \"$(dirname \"$0\")\" && pwd)\n"
                 +"cat \"$tool_dir/../files/watched.txt\" > \"$3\"\ntouch \"$1\"\n"
                 +"while [ ! -e \"$2\" ]; do sleep 0.01; done\n"
                 +"cat \"$tool_dir/../files/watched.txt\" > \"$4\"\ntouch \"$5\"\n"
                 +"while [ ! -e \"$6\" ]; do sleep 0.01; done\nprintf 'race-tool-ok\\n'\n";
-        Path root=fixtureWithLocalTool(started,script,release.toString(),firstRead.toString(),secondRead.toString(),
+        fixtureWithLocalTool(root,started,script,release.toString(),firstRead.toString(),secondRead.toString(),
                 secondReadDone.toString(),finish.toString());
         Files.createDirectories(root.resolve("files"));Files.write(root.resolve("files/watched.txt"),"accepted-value\n".getBytes(StandardCharsets.UTF_8));
         SourceArchive accepted=sourceArchive(root);Map<String,Object> request=request(root,"debug");attachSnapshot(request,accepted);
-        Process process=startCold(root);
+        org.junit.jupiter.api.Assumptions.assumeTrue(osSandboxAvailable(accepted,outputDirectory),"OS-enforced Worker sandbox unavailable in this host");
+        Process process=startCold(root,accepted);
         try {
             CompletableFuture<String> output=CompletableFuture.supplyAsync(()->{
                 try{return assign(process,mapper.writeValueAsString(request));}
                 catch(Exception failure){throw new CompletionException(failure);}
             });
             awaitFile(started,process,"Package-local Tool did not start");
-            Path stagedPackage=null;
-            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
-            while(System.nanoTime()<deadline&&stagedPackage==null) {
-                try(java.util.stream.Stream<Path> directories=Files.list(temp)) {
-                    stagedPackage=directories.filter(path->path.getFileName().toString().startsWith("att-source-snapshot-"))
-                            .map(path->Files.isRegularFile(path.resolve("a-source/files/watched.txt"),LinkOption.NOFOLLOW_LINKS)
-                                    ?path.resolve("a-source/files/watched.txt"):path.resolve("z-source/files/watched.txt"))
-                            .filter(path->Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)).findFirst().orElse(null);
-                }
-                if(stagedPackage==null)Thread.sleep(20L);
-            }
-            assertNotNull(stagedPackage,"the Worker must be executing from its private source snapshot");
-            Path protectedSource=stagedPackage;
+            Path protectedSource=accepted.packageRoot.resolve("files/watched.txt");
             assertEquals("accepted-value",new String(Files.readAllBytes(firstRead),StandardCharsets.UTF_8).trim());
-            assertFalse(Files.isWritable(protectedSource),"staged source files are frozen for the Worker lifetime");
-            assertThrows(java.io.IOException.class,()->Files.write(protectedSource,"direct-write".getBytes(StandardCharsets.UTF_8)));
 
             java.util.Set<PosixFilePermission> permissions=Files.getPosixFilePermissions(protectedSource,LinkOption.NOFOLLOW_LINKS);
             permissions.add(PosixFilePermission.OWNER_WRITE);Files.setPosixFilePermissions(protectedSource,permissions);
@@ -166,15 +194,17 @@ class PrewarmedWorkerTest {
 
     @Test void workerRejectsAStagedSourceMutationDuringLoadBeforeTheNextRead() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"The mutation fixture uses a POSIX package-local executable");
-        Path started=temp.resolve("load-mutation-tool-started.marker"),release=temp.resolve("load-mutation-tool-release.marker");
-        Path firstRead=temp.resolve("load-mutation-first-read.marker"),secondRead=temp.resolve("load-mutation-second-read.marker");
-        Path secondReadDone=temp.resolve("load-mutation-second-read-done.marker"),finish=temp.resolve("load-mutation-tool-finish.marker");
+        Path root=fixture(temp.resolve("load-mutation-package-"+UUID.randomUUID()));
+        Path outputDirectory=root.resolve("output");Files.createDirectories(outputDirectory);
+        Path started=outputDirectory.resolve("load-mutation-tool-started.marker"),release=outputDirectory.resolve("load-mutation-tool-release.marker");
+        Path firstRead=outputDirectory.resolve("load-mutation-first-read.marker"),secondRead=outputDirectory.resolve("load-mutation-second-read.marker");
+        Path secondReadDone=outputDirectory.resolve("load-mutation-second-read-done.marker"),finish=outputDirectory.resolve("load-mutation-tool-finish.marker");
         String script="#!/bin/sh\nset -e\ntool_dir=$(CDPATH= cd \"$(dirname \"$0\")\" && pwd)\n"
                 +"cat \"$tool_dir/../files/watched.txt\" > \"$3\"\ntouch \"$1\"\n"
                 +"while [ ! -e \"$2\" ]; do sleep 0.01; done\n"
                 +"cat \"$tool_dir/../files/watched.txt\" > \"$4\"\ntouch \"$5\"\n"
                 +"while [ ! -e \"$6\" ]; do sleep 0.01; done\nprintf 'load-race-tool-ok\\n'\n";
-        Path root=fixtureWithLocalTool(started,script,release.toString(),firstRead.toString(),secondRead.toString(),
+        fixtureWithLocalTool(root,started,script,release.toString(),firstRead.toString(),secondRead.toString(),
                 secondReadDone.toString(),finish.toString());
         Files.createDirectories(root.resolve("files"));Files.write(root.resolve("files/watched.txt"),"accepted-value\n".getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("load/scenario.yaml"),("schemaVersion: att-load/v1.6\nworkloads:\n"
@@ -182,24 +212,15 @@ class PrewarmedWorkerTest {
                 +"    load: {users: 1, duration: 10s}\n    execution: {thinkTime: 100ms}\n").getBytes(StandardCharsets.UTF_8));
         SourceArchive accepted=sourceArchive(root);Map<String,Object> request=request(root,"load");
         request.put("scenario","load/scenario.yaml");attachSnapshot(request,accepted);
-        Process process=startCold(root);
+        org.junit.jupiter.api.Assumptions.assumeTrue(osSandboxAvailable(accepted,outputDirectory),"OS-enforced Worker sandbox unavailable in this host");
+        Process process=startCold(root,accepted);
         try {
             CompletableFuture<String> output=CompletableFuture.supplyAsync(()->{
                 try{return assign(process,mapper.writeValueAsString(request));}
                 catch(Exception failure){throw new CompletionException(failure);}
             });
             awaitFile(started,process,"Package-local Tool did not start during LOAD");
-            Path stagedFile=null;long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
-            while(System.nanoTime()<deadline&&stagedFile==null) {
-                try(java.util.stream.Stream<Path> directories=Files.list(temp)) {
-                    stagedFile=directories.filter(path->path.getFileName().toString().startsWith("att-source-snapshot-"))
-                            .map(path->Files.isRegularFile(path.resolve("a-source/files/watched.txt"),LinkOption.NOFOLLOW_LINKS)
-                                    ?path.resolve("a-source/files/watched.txt"):path.resolve("z-source/files/watched.txt"))
-                            .filter(path->Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)).findFirst().orElse(null);
-                }
-                if(stagedFile==null)Thread.sleep(20L);
-            }
-            assertNotNull(stagedFile,"The LOAD Worker must read from its private source snapshot");
+            Path stagedFile=accepted.packageRoot.resolve("files/watched.txt");
             assertEquals("accepted-value",new String(Files.readAllBytes(firstRead),StandardCharsets.UTF_8).trim());
             java.util.Set<PosixFilePermission> permissions=Files.getPosixFilePermissions(stagedFile,LinkOption.NOFOLLOW_LINKS);
             permissions.add(PosixFilePermission.OWNER_WRITE);Files.setPosixFilePermissions(stagedFile,permissions);
@@ -220,7 +241,9 @@ class PrewarmedWorkerTest {
 
     private void verifyPackageLocalExecutableTool(String command,boolean warm) throws Exception {
         Path marker=temp.resolve("package-tool-"+command+"-"+(warm?"warm":"cold")+".marker");
-        Path root=fixtureWithLocalTool(marker,"#!/bin/sh\nprintf 'package-tool-ok\\n' > \"$1\"\n");
+        Path root=fixture(temp.resolve("package-tool-"+command+"-"+(warm?"warm":"cold")+"-"+UUID.randomUUID()));
+        marker=root.resolve("output/package-tool.marker");
+        fixtureWithLocalTool(root,marker,"#!/bin/sh\nprintf 'package-tool-ok\\n' > \"$1\"\n");
         SourceArchive accepted=sourceArchive(root);
         assertTrue(Files.isExecutable(accepted.packageRoot.resolve("tools/local-tool.sh")),"the archive input retains executable metadata");
         Map<String,Object> request=request(root,command);
@@ -228,7 +251,7 @@ class PrewarmedWorkerTest {
             request.remove("target");request.put("scenario","load/scenario.yaml");request.put("runId","snapshot-load");
         }
         attachSnapshot(request,accepted);
-        Process process=warm?start(root):startCold(root);
+        Process process=startCold(root,accepted);
         try {
             if(warm) {
                 ready(process);
@@ -286,6 +309,10 @@ class PrewarmedWorkerTest {
     }
     private Path fixtureWithLocalTool(Path marker,String script,String... additionalArguments) throws Exception {
         Path root=fixture(temp.resolve("package-"+UUID.randomUUID()));Path tools=Files.createDirectories(root.resolve("tools"));
+        return fixtureWithLocalTool(root,marker,script,additionalArguments);
+    }
+    private Path fixtureWithLocalTool(Path root,Path marker,String script,String... additionalArguments) throws Exception {
+        Path tools=Files.createDirectories(root.resolve("tools"));
         Path executable=tools.resolve("local-tool.sh");Files.write(executable,script.getBytes(StandardCharsets.UTF_8));
         Files.setPosixFilePermissions(executable,java.util.EnumSet.of(PosixFilePermission.OWNER_READ,
                 PosixFilePermission.OWNER_WRITE,PosixFilePermission.OWNER_EXECUTE));
@@ -321,6 +348,34 @@ class PrewarmedWorkerTest {
         Path error=temp.resolve(UUID.randomUUID()+".stderr");builder.redirectError(error.toFile());
         Process process=builder.start();errors.put(process,error);return process;
     }
+    private Process startCold(Path root,SourceArchive source) throws Exception {
+        Path output=root.resolve("output");Files.createDirectories(output);
+        List<String> command=new ArrayList<String>(Arrays.asList(
+                Paths.get(System.getProperty("java.home"),"bin","java").toString(),
+                "-Djava.io.tmpdir="+temp.toAbsolutePath(),
+                "-cp",System.getProperty("java.class.path"),WorkerMain.class.getName()));
+        command=new ArrayList<String>(SourceSnapshotIsolation.wrap(command,source.directory,source.archive,output));
+        ProcessBuilder builder=new ProcessBuilder(command);
+        builder.directory(root.toFile());builder.environment().put("LEASE_MARKER","assigned");
+        if(System.getProperty("os.name","").toLowerCase(Locale.ROOT).contains("linux"))builder.environment().put("TMPDIR","/tmp");
+        Path error=temp.resolve(UUID.randomUUID()+".stderr");builder.redirectError(error.toFile());
+        Process process=builder.start();errors.put(process,error);return process;
+    }
+    private boolean osSandboxAvailable(SourceArchive source,Path output) throws Exception {
+        Files.createDirectories(output);
+        List<String> command=new ArrayList<String>(Arrays.asList(
+                Paths.get(System.getProperty("java.home"),"bin","java").toString(),
+                "-Djava.io.tmpdir="+temp.toAbsolutePath(),"-version"));
+        List<String> isolated;
+        try { isolated=SourceSnapshotIsolation.wrap(command,source.directory,source.archive,output); }
+        catch(java.io.IOException unavailable) { return false; }
+        ProcessBuilder builder=new ProcessBuilder(isolated);
+        if(System.getProperty("os.name","").toLowerCase(Locale.ROOT).contains("linux"))builder.environment().put("TMPDIR","/tmp");
+        builder.redirectError(ProcessBuilder.Redirect.DISCARD);
+        Process process=builder.start();
+        if(!process.waitFor(10,TimeUnit.SECONDS)){process.destroyForcibly();return false;}
+        return process.exitValue()==0;
+    }
     private JsonNode ready(Process process) throws Exception {
         CompletableFuture<String> frame=CompletableFuture.supplyAsync(()->{
             try {WorkerProtocol.Frame value=WorkerProtocol.read(process.getInputStream(),8192);return value==null?"{}":value.text();}
@@ -344,15 +399,17 @@ class PrewarmedWorkerTest {
     }
 
     private static final class SourceArchive {
-        final Path archive;final String sha256;final Path packageRoot;final Path configRoot;final String executionRevisionDigest;
-        SourceArchive(Path archive,String sha256,Path packageRoot,Path configRoot,String executionRevisionDigest){
+        final Path archive;final String sha256;final Path directory;final Path packageRoot;final Path configRoot;final String executionRevisionDigest;
+        SourceArchive(Path archive,String sha256,Path directory,Path packageRoot,Path configRoot,String executionRevisionDigest){
             this.archive=archive;this.sha256=sha256;this.packageRoot=packageRoot;this.configRoot=configRoot;
+            this.directory=directory;
             this.executionRevisionDigest=executionRevisionDigest;
         }
     }
     private SourceArchive sourceArchive(Path root) throws Exception {
-        Path packageRoot=Files.createDirectories(temp.resolve("snapshot-package-"+UUID.randomUUID()));
-        Path configRoot=Files.createDirectories(temp.resolve("snapshot-config-"+UUID.randomUUID()));
+        Path directory=Files.createDirectories(temp.resolve("worker-source-"+UUID.randomUUID()));
+        Path packageRoot=Files.createDirectories(directory.resolve("package"));
+        Path configRoot=Files.createDirectories(directory.resolve("config"));
         try(java.util.stream.Stream<Path> entries=Files.walk(root)) {
             for(Path source:(Iterable<Path>)entries::iterator)if(Files.isRegularFile(source,LinkOption.NOFOLLOW_LINKS)) {
                 Path relative=root.relativize(source);
@@ -384,10 +441,11 @@ class PrewarmedWorkerTest {
             zip.putNextEntry(new ZipEntry("file-plans.bin"));zip.write(compiledPlans);zip.closeEntry();
             zip.putNextEntry(new ZipEntry("manifest.json"));zip.write(mapper.writeValueAsBytes(manifest));zip.closeEntry();
         }
-        return new SourceArchive(archive,digestFile(archive),packageRoot,configRoot,executionRevisionDigest);
+        return new SourceArchive(archive,digestFile(archive),directory,packageRoot,configRoot,executionRevisionDigest);
     }
     private void attachSnapshot(Map<String,Object> request,SourceArchive archive) throws Exception {
         request.put("sourceSnapshotArchivePath",archive.archive.toAbsolutePath().toString());
+        request.put("sourceSnapshotDirectory",archive.directory.toAbsolutePath().toString());
         request.put("sourceSnapshotArchiveSha256",archive.sha256);request.put("sourceSnapshotConfigPath","config/config.yaml");
         request.put("expectedExecutionRevisionDigest",archive.executionRevisionDigest);
     }
@@ -451,7 +509,11 @@ class PrewarmedWorkerTest {
         }
     }
     private String assign(Process process,String request) throws Exception {
-        process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));process.getOutputStream().close();
+        try {
+            process.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));process.getOutputStream().close();
+        } catch(java.io.IOException unavailable) {
+            if(process.isAlive())throw unavailable;
+        }
         CompletableFuture<String> output=CompletableFuture.supplyAsync(()->{
             try {java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();byte[] buffer=new byte[8192];int count;
                 while((count=process.getInputStream().read(buffer))!=-1)bytes.write(buffer,0,count);
