@@ -47,7 +47,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Linux Worker source sandbox
-        run: sudo apt-get update && sudo apt-get install --yes bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes apparmor-profiles bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces by default.
+          # Load Ubuntu's scoped profile for bwrap instead of disabling that host-wide restriction.
+          sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          bwrap --die-with-parent --new-session --unshare-user --unshare-pid --disable-userns --cap-drop ALL --ro-bind / / --dev /dev --proc /proc -- /bin/true
 
       - name: Set up Java 8
         uses: actions/setup-java@v4
@@ -121,7 +128,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Linux Worker source sandbox
-        run: sudo apt-get update && sudo apt-get install --yes bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes apparmor-profiles bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces by default.
+          # Load Ubuntu's scoped profile for bwrap instead of disabling that host-wide restriction.
+          sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          bwrap --die-with-parent --new-session --unshare-user --unshare-pid --disable-userns --cap-drop ALL --ro-bind / / --dev /dev --proc /proc -- /bin/true
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -175,7 +189,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Linux Worker source sandbox
-        run: sudo apt-get update && sudo apt-get install --yes bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes apparmor-profiles bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces by default.
+          # Load Ubuntu's scoped profile for bwrap instead of disabling that host-wide restriction.
+          sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          bwrap --die-with-parent --new-session --unshare-user --unshare-pid --disable-userns --cap-drop ALL --ro-bind / / --dev /dev --proc /proc -- /bin/true
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -221,7 +242,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Linux Worker source sandbox
-        run: sudo apt-get update && sudo apt-get install --yes bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes apparmor-profiles bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces by default.
+          # Load Ubuntu's scoped profile for bwrap instead of disabling that host-wide restriction.
+          sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          bwrap --die-with-parent --new-session --unshare-user --unshare-pid --disable-userns --cap-drop ALL --ro-bind / / --dev /dev --proc /proc -- /bin/true
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -315,6 +343,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Linux Worker source sandbox
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes apparmor-profiles bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces by default.
+          # Load Ubuntu's scoped profile for bwrap instead of disabling that host-wide restriction.
+          sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          bwrap --die-with-parent --new-session --unshare-user --unshare-pid --disable-userns --cap-drop ALL --ro-bind / / --dev /dev --proc /proc -- /bin/true
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
