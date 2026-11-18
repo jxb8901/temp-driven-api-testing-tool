@@ -489,10 +489,18 @@ async function main() {
 
     await page.goto(`${origin}/tools/att/ui/index.html#/jobs`);
     await page.getByRole('heading', { name: 'Jobs', level: 1, exact: true }).waitFor();
+    const jobResults = page.locator('.att-query-results-panel[aria-label="Job results"]');
+    await jobResults.waitFor();
+    await page.waitForFunction(() => document.querySelector(
+      '.att-query-results-panel[aria-label="Job results"] .att-jobs-toolbar [role="status"]'
+    )?.textContent?.startsWith('Showing '));
     assert.equal(await page.locator('.att-query-filter-panel[aria-label="Job filters"]').count(), 1,
       'Jobs must use the shared query filter panel');
-    assert.equal(await page.locator('.att-query-results-panel[aria-label="Job results"] .att-data-table').count(), 1,
-      'Jobs must use the shared results and data-table contract');
+    assert.equal(await jobResults.getByRole('alert').count(), 0, 'The Jobs results request must succeed');
+    const jobTableCount = await jobResults.locator('.att-data-table').count();
+    const jobEmptyStateCount = await jobResults.locator('.att-empty-state').count();
+    assert.equal(jobTableCount + jobEmptyStateCount, 1,
+      'Jobs results must render a shared data table for rows or an explicit empty state for zero rows');
     await page.getByRole('button', { name: 'Clear filters' }).click();
     await page.getByRole('button', { name: 'Refresh jobs' }).click();
 
