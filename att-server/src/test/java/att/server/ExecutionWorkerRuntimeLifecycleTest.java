@@ -26,6 +26,7 @@ class ExecutionWorkerRuntimeLifecycleTest {
         Path tools=Files.createDirectories(pkg.resolve("tools"));
         Path holdScript=tools.resolve("hold.sh");
         Files.writeString(holdScript,"#!/bin/sh\n"
+                +"printf '0\\n' > \"$ATT_CASE_OUTPUT_DIR/heartbeat\"\n"
                 +"touch \"$ATT_CASE_OUTPUT_DIR/started\"\n"
                 +"count=0\nwhile :; do count=$((count+1)); printf '%s\\n' \"$count\" > \"$ATT_CASE_OUTPUT_DIR/heartbeat\"; sleep 0.02; done\n");
         holdScript.toFile().setExecutable(true);

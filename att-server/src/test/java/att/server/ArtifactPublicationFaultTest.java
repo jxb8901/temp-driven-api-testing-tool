@@ -68,6 +68,7 @@ class ArtifactPublicationFaultTest {
             assertTrue(Files.isDirectory(runtime.outputDirectoryForJob(first)));
             if("ledger-failure".equals(failure))sql(config,"ALTER TABLE unavailable_worker_processes RENAME TO job_worker_processes");
             String second=String.valueOf(runtime.submit(command,request,"user-b").get("jobId"));
+            Files.writeString(runtime.outputDirectoryForJob(second).resolve("finish-worker"),"");
             awaitReady(runtime,second);
             job.finishedAt=Instant.now().minus(java.time.Duration.ofDays(config.jobRetentionDays+1L));
             runtime.store.update(job);runtime.cleanupExpiredJobs();

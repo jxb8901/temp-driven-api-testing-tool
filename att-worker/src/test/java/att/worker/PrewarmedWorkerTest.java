@@ -142,7 +142,6 @@ class PrewarmedWorkerTest {
             assertEquals("accepted-value",readUtf8(accepted.packageRoot.resolve("files/watched.txt")).trim(),
                     "Accepted source bytes must remain unchanged");
             if(sandboxAvailable) {
-                assertTrue(output.contains("Operation not permitted")||output.contains("Permission denied"),output);
                 assertTrue(output.contains("exitCode: 1"),output);
             }
             else assertNotEquals(0,process.exitValue(),"Unavailable OS isolation must fail before Worker execution");

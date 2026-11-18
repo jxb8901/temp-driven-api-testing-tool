@@ -137,7 +137,8 @@ class ServerWarUiIT {
                 +"  - id: one-shot-control\n    target: {type: template, id: PARITY}\n"
                 +"    load: {users: 1, duration: 1s}\n");
         Path holdScript=Files.createDirectories(pkg.resolve("tools")).resolve("hold.sh");
-        Files.writeString(holdScript,"#!/bin/sh\ntouch \"$ATT_CASE_OUTPUT_DIR/started\"\n"
+        Files.writeString(holdScript,"#!/bin/sh\nprintf '0\\n' > \"$ATT_CASE_OUTPUT_DIR/heartbeat\"\n"
+                +"touch \"$ATT_CASE_OUTPUT_DIR/started\"\n"
                 +"count=0\nwhile :; do count=$((count+1)); printf '%s\\n' \"$count\" > \"$ATT_CASE_OUTPUT_DIR/heartbeat\"; sleep 0.02; done\n");
         holdScript.toFile().setExecutable(true);
         Files.createDirectories(pkg.resolve("testcase"));

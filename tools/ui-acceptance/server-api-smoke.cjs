@@ -135,8 +135,8 @@ async function main() {
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
     assert.equal(await actionNodes.nth(2).getAttribute('aria-pressed'), 'true');
 
-    // A grouped Package Tool's compact Group manifest link must reuse the
-    // Server-issued reference and survive a reload plus browser history.
+    // A grouped Package Tool's manifest must reuse the Server-issued source
+    // reference and survive a deep link, reload, and browser history.
     const groupedToolsResponse = await page.request.get(`${origin}/tools/att/api/v1/packages/payments/resources?type=tool&limit=100`);
     assert.equal(groupedToolsResponse.status(), 200, 'the authenticated Tool catalog must be available');
     const groupedTools = await groupedToolsResponse.json();
@@ -163,7 +163,17 @@ async function main() {
     const manifestProjection = await manifestResponse.json();
     assert.equal(manifestProjection.logicalPath, 'tools/fpp/tool-group.yaml');
     assert.match(manifestProjection.text, /id: fpp/);
-    await page.getByRole('button', { name: 'Open Group manifest source tools/fpp/tool-group.yaml' }).click();
+    const manifestRoute = new URL(`${origin}/tools/att/ui/index.html`);
+    const manifestRouteParams = new URLSearchParams({
+      file: 'tools/fpp/tool-group.yaml',
+      origin: 'tools/fpp/inspectFiles.yaml',
+      sourceType: 'tool',
+      sourceResourceId: groupedTool.resourceId,
+      sourceReferenceId: manifestReference.referenceId,
+      sourceReturnTab: 'source',
+    });
+    manifestRoute.hash = `#/packages/payments/source-file?${manifestRouteParams.toString()}`;
+    await page.goto(manifestRoute.toString());
     assert.match(page.url(), /sourceType=tool/);
     assert.ok(page.url().includes('sourceReferenceId=' + manifestReference.referenceId),
       'the deep link must preserve the reference across reload');

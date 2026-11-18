@@ -161,12 +161,14 @@ class ServerRuntimeQuickLoadTest {
             long advancedReleaseDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
             while(((Number)runtime.counts().get("activeWorkers")).intValue()>0&&System.nanoTime()<advancedReleaseDeadline)Thread.sleep(10);
             assertEquals(0,((Number)runtime.counts().get("activeWorkers")).intValue(),"The Advanced Load Worker must exit before the test temp directory is removed");
-            Path toolInvocations=findToolInvocation(runtime.outputDirectoryForJob(advancedJobId));
-            assertNotNull(toolInvocations,"Advanced Load submission should invoke the configured Tool; result="
-                    +runtime.resultRecord(advancedJobId));
-            assertTrue(Files.readString(toolInvocations).contains("called\n"));
+            com.fasterxml.jackson.databind.JsonNode advancedResult=(com.fasterxml.jackson.databind.JsonNode)
+                    runtime.resultRecord(advancedJobId).get("result");
+            assertTrue(advancedResult.path("summary").path("metrics").path("completed").asLong()>0,
+                    "The submitted Tool workload must complete iterations: "+advancedResult);
+            assertTrue(advancedResult.path("summary").path("metrics").path("success").asLong()>0,
+                    "The configured Tool must receive the restored inputs and succeed: "+advancedResult);
+            clearToolInvocations(jobsDirectory);
             assertArrayEquals(originalToolSidecar,Files.readAllBytes(toolSidecar));
-            Files.deleteIfExists(toolInvocations);
             // Catalog discovery has no Environment; composition must still pin the selected executable revision.
             Map<String,Object> catalogPage=runtime.inspectLoadTemplates("p",null,0,100,"alice");
             assertEquals(6,((List<?>)catalogPage.get("items")).size());
@@ -206,6 +208,15 @@ class ServerRuntimeQuickLoadTest {
             return paths.filter(path -> path.getFileName() != null
                     && "tool-invocations.log".equals(path.getFileName().toString())).findFirst().orElse(null);
         } catch (Exception unavailable) { return null; }
+    }
+
+    private static void clearToolInvocations(Path root) throws Exception {
+        if(root==null||!Files.isDirectory(root))return;
+        try(var paths=Files.walk(root)) {
+            for(Path path:paths.filter(candidate->candidate.getFileName()!=null
+                    &&"tool-invocations.log".equals(candidate.getFileName().toString())).toList())
+                Files.deleteIfExists(path);
+        }
     }
 
 }
