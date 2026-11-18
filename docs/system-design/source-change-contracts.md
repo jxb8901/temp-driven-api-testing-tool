@@ -15,7 +15,7 @@ The shared Java contract is `att-source-management/v1` in `att-server-api`. It d
 
 ## Revision and data rules
 
-Keep Package registration, Package business source, Change Set, Manifest, Config source, effective Config, Environment, Engine schema, and Schedule snapshot identities separate. Do not serialize authored source, descriptor values, credentials, or workbook cells inside revision or dependency projections.
+Keep Package registration, Package source, execution revision, Change Set, Manifest, Config source, effective Config, Environment, Engine schema, and Schedule snapshot identities separate. `BUSINESS_SOURCE` remains a compatibility alias for `PACKAGE_SOURCE`; new impact freshness reports use `PACKAGE_SOURCE`. Effective execution comparisons use `EXECUTION_REVISION`. Do not serialize authored source, descriptor values, credentials, or workbook cells inside revision or dependency projections.
 
 `VersionedSourceBytes` is the only contract that carries authored bytes. It binds the bytes to a source revision, logical path, and verified SHA-256. A revision digest by itself does not grant byte access. Leases remain pinned to one immutable revision after a newer revision is published; a stale acquisition fails with `ATT-SOURCE-REVISION-STALE`.
 

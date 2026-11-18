@@ -646,7 +646,7 @@ public final class SourceManagementContracts {
             this.baseConfig = requireKind(baseConfig, RevisionKind.CONFIG_SOURCE, "baseConfig");
             this.candidateConfig = requireKind(candidateConfig, RevisionKind.CONFIG_SOURCE, "candidateConfig");
             this.packageRegistry = requireKind(packageRegistry, RevisionKind.PACKAGE_REGISTRATION, "packageRegistry");
-            this.packageSources = identities(packageSources, RevisionKind.BUSINESS_SOURCE);
+            this.packageSources = identities(packageSources, RevisionKind.PACKAGE_SOURCE, RevisionKind.BUSINESS_SOURCE);
             this.manifests = identities(manifests, RevisionKind.PACKAGE_MANIFEST);
             this.engineSchema = requireKind(engineSchema, RevisionKind.ENGINE_SCHEMA, "engineSchema");
             this.scheduleSnapshots = identities(scheduleSnapshots, RevisionKind.SCHEDULE_SNAPSHOT);
@@ -748,6 +748,21 @@ public final class SourceManagementContracts {
     private static List<RevisionIdentity> identities(List<RevisionIdentity> values, RevisionKind expected) {
         List<RevisionIdentity> result = new ArrayList<RevisionIdentity>();
         if (values != null) for (RevisionIdentity value : values) result.add(requireKind(value, expected, "identity"));
+        return Collections.unmodifiableList(result);
+    }
+
+    private static List<RevisionIdentity> identities(List<RevisionIdentity> values, RevisionKind expected,
+                                                      RevisionKind legacyAlias) {
+        List<RevisionIdentity> result = new ArrayList<RevisionIdentity>();
+        if (values != null) for (RevisionIdentity value : values) {
+            if (value == null) {
+                result.add(null);
+                continue;
+            }
+            if (value.kind != expected && value.kind != legacyAlias)
+                throw new IllegalArgumentException("identity must be " + expected + " or " + legacyAlias);
+            result.add(value);
+        }
         return Collections.unmodifiableList(result);
     }
 
