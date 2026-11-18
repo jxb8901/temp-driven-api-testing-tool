@@ -569,8 +569,11 @@ async function main() {
     // Reload to exercise the fresh 401 response rather than cached inspection data.
     await page.reload();
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
-    await page.getByRole('tab', { name: 'Visual' }).focus();
-    await page.keyboard.press('ArrowRight');
+    await page.getByRole('tab', { name: 'Visual', exact: true }).click();
+    const unauthorizedSource = page.waitForResponse(response =>
+      response.url().endsWith('/resources/template/checkout/source') && response.status() === 401);
+    await page.getByRole('tab', { name: 'Source', exact: true }).click();
+    await unauthorizedSource;
     await page.getByText('Your session has expired. Sign in again, then refresh safe source.').waitFor();
     assert.equal(await page.locator('body').innerText().then(text => text.includes('canary-401-secret')), false, 'auth errors must not expose response bodies');
     assert.deepEqual(pageErrors, [], 'Explorer interactions should not produce uncaught browser errors');

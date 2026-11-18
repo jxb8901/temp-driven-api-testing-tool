@@ -33,6 +33,7 @@
         <dependency><groupId>jakarta.servlet</groupId><artifactId>jakarta.servlet-api</artifactId><version>${jakarta.servlet.version}</version><scope>provided</scope></dependency>
         <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
         <dependency><groupId>org.apache.tomcat.embed</groupId><artifactId>tomcat-embed-core</artifactId><version>${tomcat.test.version}</version><scope>test</scope></dependency>
+        <dependency><groupId>org.apache.tomcat.embed</groupId><artifactId>tomcat-embed-jasper</artifactId><version>${tomcat.test.version}</version><scope>test</scope></dependency>
     </dependencies>
     <build>
         <resources><resource><directory>src/main/resources</directory><filtering>true</filtering></resource></resources>
