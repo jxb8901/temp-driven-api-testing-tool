@@ -6,7 +6,7 @@ async function main() {
   const fixture = await startFixture();
   let browser;
   let source = 'schemaVersion: att-package/v1\ndefaultEnvironment: SIT\n';
-  let digest = 'a'.repeat(64), draft, conflict = false, masked = false;
+  let digest = 'a'.repeat(64), draft, conflict = false, masked = false, unavailable = false;
   const actions = [], errors = [];
   const projection = () => ({ packageId: 'payments', present: true, canEdit: true, manifestDigest: digest,
     environment: source.includes('UAT') ? 'UAT' : 'SIT', environmentOrigin: 'package',
@@ -18,6 +18,14 @@ async function main() {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     await selectFixture(context, fixture.origin, 'loaded');
     const page = await context.newPage();page.on('pageerror', error => errors.push(error.message));
+    await page.route('**/api/v1/packages/payments/authoring-source**', async route => {
+      const request = route.request(), url = new URL(request.url());
+      assert.equal(request.method(), 'GET');assert.equal(url.searchParams.get('type'), 'manifest');
+      const send = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+      if (unavailable || masked) return send({ error: { code: 'ATT-SERVER-NOT-FOUND', summary: 'API resource was not found' } }, 404);
+      return send({ available: true, present: true, logicalPath: 'package.yaml', format: 'yaml', text: source,
+        sourceEtag: `"sha256:${digest}"`, revision: digest, requestId: 'manifest-fixture-request' });
+    });
     await page.route('**/api/v1/packages/payments/package-configuration/**', async route => {
       const request = route.request(), url = new URL(request.url());
       const action = url.pathname.split('/package-configuration/')[1];
@@ -76,9 +84,13 @@ async function main() {
     await workspace.getByRole('alert').filter({ hasText: 'Sources changed after validation' }).waitFor();
     assert.equal(await workspace.getByRole('button', { name: 'Discard Manifest draft' }).isVisible(), true);
     await workspace.getByRole('button', { name: 'Discard Manifest draft' }).click();
-    masked = true;await workspace.getByRole('button', { name: 'Refresh Package Configuration' }).click();
+    unavailable = true;await workspace.getByRole('button', { name: 'Refresh Package Configuration' }).click();
+    await workspace.getByText('Complete authoring source is unavailable. The safe inspection source remains read only.', { exact: true }).waitFor();
+    assert.equal(await create.isDisabled(), true);assert.equal(await workspace.locator('.cm-content[contenteditable="true"]').count(), 0);
+    unavailable = false;masked = true;await workspace.getByRole('button', { name: 'Refresh Package Configuration' }).click();
     await workspace.getByText('Some source values are masked.', { exact: false }).waitFor();assert.equal(await create.isDisabled(), true);
-    assert.deepEqual(errors, []);console.log('Package Manifest browser workflow passed: views, gated publish, refresh, conflict, masking, mobile layout.');
+    assert.equal(await workspace.locator('.cm-content[contenteditable="true"]').count(), 0);
+    assert.deepEqual(errors, []);console.log('Package Manifest browser workflow passed: views, gated publish, refresh, conflict, unavailable/protected source, masking, mobile layout.');
   } finally { if (browser) await browser.close();await stopFixture(fixture); }
 }
 main().catch(error => { console.error(error);process.exitCode = 1; });

@@ -14,13 +14,15 @@ final class ExecutionWorkerPool implements AutoCloseable {
     @FunctionalInterface interface Builders { ProcessBuilder create(String packageId) throws Exception; }
     @FunctionalInterface interface Starter { Process start(ProcessBuilder builder) throws Exception; }
     @FunctionalInterface interface Fingerprint { String current() throws Exception; }
+    @FunctionalInterface interface Roots { Path current(String packageId) throws Exception; }
     static final class Lease {
         final Process process;
         final WorkerProcessFence fence;
+        final Path root;
         final long startedNanos,spawnedNanos,readyNanos;
         final Path marker;
         Lease(Idle idle) {
-            process=idle.process;fence=idle.fence;marker=idle.marker;
+            process=idle.process;fence=idle.fence;root=idle.root;marker=idle.marker;
             startedNanos=idle.startedNanos;spawnedNanos=idle.spawnedNanos;readyNanos=idle.readyNanos;
         }
         void transferred() throws Exception { Files.deleteIfExists(marker); }
@@ -58,6 +60,7 @@ final class ExecutionWorkerPool implements AutoCloseable {
     private final Builders builders;
     private final Starter starter;
     private final Fingerprint fingerprint;
+    private final Roots roots;
     private final String schemaDigest;
     private final Path registry;
     private final List<Idle> owned=new ArrayList<>();
@@ -70,7 +73,10 @@ final class ExecutionWorkerPool implements AutoCloseable {
     private long retryAfter;
 
     ExecutionWorkerPool(ServerConfig config,Builders builders,Starter starter,Fingerprint fingerprint,String digest) throws Exception {
-        this.config=config;this.builders=builders;this.starter=starter;this.fingerprint=fingerprint;this.schemaDigest=digest;
+        this(config,builders,starter,fingerprint,digest,id->config.packages.get(id));
+    }
+    ExecutionWorkerPool(ServerConfig config,Builders builders,Starter starter,Fingerprint fingerprint,String digest,Roots roots) throws Exception {
+        this.config=config;this.builders=builders;this.starter=starter;this.fingerprint=fingerprint;this.schemaDigest=digest;this.roots=roots;
         registry=config.dataDir.resolve("prewarm");Files.createDirectories(registry);
         if(Files.isSymbolicLink(registry)||!registry.toRealPath().equals(registry))throw new IllegalArgumentException("Invalid private prewarm registry");
         recoverIdleProcesses();
@@ -96,7 +102,7 @@ final class ExecutionWorkerPool implements AutoCloseable {
                     ||System.nanoTime()-idle.readyNanos>TimeUnit.MILLISECONDS.toNanos(config.executionPool.idleTimeoutMs)) {
                 idle.retired=true;continue;
             }
-            try { if(!idle.root.equals(config.packages.get(packageId).toRealPath())) {idle.retired=true;continue;} }
+            try { if(!idle.root.equals(roots.current(packageId).toRealPath())) {idle.retired=true;continue;} }
             catch(Exception changed) {idle.retired=true;continue;}
             iterator.remove();leases.incrementAndGet();return new Lease(idle);
         }
@@ -108,7 +114,10 @@ final class ExecutionWorkerPool implements AutoCloseable {
     synchronized boolean hasReadyCapacity(String packageId) {
         if(closed||!config.executionPool.enabled||!config.executionPool.packageIds.contains(packageId))return false;
         long now=System.nanoTime(),idleLimit=TimeUnit.MILLISECONDS.toNanos(config.executionPool.idleTimeoutMs);
-        boolean available=owned.stream().anyMatch(idle->idle.packageId.equals(packageId)&&!idle.retired
+        Path currentRoot;
+        try { currentRoot=roots.current(packageId).toRealPath(); }
+        catch(Exception unavailable) { demandedPackages.add(packageId);fallbacks.incrementAndGet();return false; }
+        boolean available=owned.stream().anyMatch(idle->idle.packageId.equals(packageId)&&idle.root.equals(currentRoot)&&!idle.retired
                 &&idle.readyNanos!=0&&now-idle.readyNanos<=idleLimit&&idle.fence!=null&&idle.fence.verified()
                 &&idle.fence.identities().size()==1&&idle.process!=null&&idle.process.isAlive());
         if(available)demandedPackages.remove(packageId);
@@ -125,7 +134,11 @@ final class ExecutionWorkerPool implements AutoCloseable {
                 for(Iterator<Idle> it=owned.iterator();it.hasNext();) {
                     Idle idle=it.next();
                     if(idle.fence!=null)idle.fence.observe();
+                    boolean samePackageRevision;
+                    try { samePackageRevision=idle.root.equals(roots.current(idle.packageId).toRealPath()); }
+                    catch(Exception unavailable) { samePackageRevision=false; }
                     if(idle.process!=null&&(!idle.fence.verified()||idle.fence.identities().size()!=1||!idle.process.isAlive()||!idle.fingerprint.equals(current)
+                            ||!samePackageRevision
                             ||(idle.readyNanos!=0&&System.nanoTime()-idle.readyNanos>TimeUnit.MILLISECONDS.toNanos(config.executionPool.idleTimeoutMs)))) idle.retired=true;
                     if(idle.retired&&stop(idle))it.remove();
                 }
@@ -135,7 +148,7 @@ final class ExecutionWorkerPool implements AutoCloseable {
                     if(owned.size()>=config.executionPool.minIdle)return;
                     id=config.executionPool.packageIds.get(nextPackage++%config.executionPool.packageIds.size());
                 }
-                create=new Idle(id,current,config.packages.get(id).toRealPath(),registry.resolve(UUID.randomUUID()+".json"));
+                create=new Idle(id,current,roots.current(id).toRealPath(),registry.resolve(UUID.randomUUID()+".json"));
                 owned.add(create);
             }
             start(create);

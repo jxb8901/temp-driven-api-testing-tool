@@ -160,6 +160,12 @@ class WorkerProtocolFailureTest {
     private Job job(ServerRuntime runtime,String command)throws Exception {
         Path directory=Files.createDirectories(runtime.config.dataDir.resolve("jobs/J1234567890ABCDEF"));
         Job job=new Job("J1234567890ABCDEF",command,"p","ci",new WorkerRequest(),new JobEvents(directory.resolve("events.jsonl"),100));
+        Path packageSnapshot=runtime.executionPackageRoot("p");
+        Path centralSnapshot=runtime.executionCentralSourceRoot();
+        job.request.packageRoot=packageSnapshot.toString();
+        job.acceptedPackageTreeDigest=SourceRevisionStore.treeDigest(ChangeSetPublisher.PACKAGE_SOURCE,packageSnapshot);
+        job.acceptedCentralSourceRoot=centralSnapshot;
+        job.acceptedCentralTreeDigest=SourceRevisionStore.treeDigest(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,centralSnapshot);
         job.status="RUNNING";runtime.store.insert(job,"{}");return job;
     }
     private ServerRuntime runtime()throws Exception {

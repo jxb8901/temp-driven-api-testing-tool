@@ -109,7 +109,17 @@ class ServerRuntimeInspectionTest {
         Path packageRoot=Path.of("").toRealPath().resolve("packages/default");
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name"," ").toLowerCase().contains("win")?"java.exe":"java");
         Path configFile=temp.resolve("configuration-inspection-server.yaml");
-        Path sharedRuntimeConfig=Path.of("config/config.yaml").toRealPath();
+        Path sourceConfig=Path.of("config").toRealPath();
+        Path isolatedRuntime=Files.createDirectories(temp.resolve("configuration-inspection-runtime"));
+        Path isolatedConfig=isolatedRuntime.resolve("config");
+        try(var paths=Files.walk(sourceConfig)) {
+            for(Path source:(Iterable<Path>)paths::iterator) {
+                Path destination=isolatedConfig.resolve(sourceConfig.relativize(source));
+                if(Files.isDirectory(source))Files.createDirectories(destination);
+                else {Files.createDirectories(destination.getParent());Files.copy(source,destination);}
+            }
+        }
+        Path sharedRuntimeConfig=isolatedConfig.resolve("config.yaml");
         Files.writeString(configFile,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(sharedRuntimeConfig)+"\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("configuration-inspection-data"))+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(packageRoot)+"\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"\n");
         ServerConfig config=ServerConfig.load(configFile);Path libs=Files.createDirectory(temp.resolve("configuration-inspection-WEB-INF-lib"));
         ServerRuntimeTestSupport.addModuleJar(libs,"att-worker",Path.of("att-worker/target/classes"));ServerRuntimeTestSupport.addModuleJar(libs,"att-engine",Path.of("att-engine/target/classes"));

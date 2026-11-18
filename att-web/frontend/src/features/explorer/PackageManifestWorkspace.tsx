@@ -46,8 +46,19 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
     setBusy(true);setError('');setProjection(null);
     const load = async () => {
       const declared = await api.getPackageManifest(packageId, 'declared', undefined, controller.signal);
-      const result = view === 'source' && !declared.present ? { ...declared, available: true, text: 'schemaVersion: att-package/v1\n', redacted: false }
+      let result: ManifestProjection = view === 'source' && !declared.present ? { ...declared, available: true, text: 'schemaVersion: att-package/v1\n', redacted: false }
         : view === 'declared' ? declared : await api.getPackageManifest(packageId, view, environment || undefined, controller.signal);
+      if (view === 'source' && result.canEdit) {
+        try {
+          const authoring = await api.getPackageAuthoringSource(packageId, controller.signal);
+          if (!authoring.available || !authoring.sourceEtag || !/^[a-f0-9]{64}$/.test(authoring.revision)) throw new Error('Authoring source metadata is unavailable');
+          result = { ...result, available: true, present: authoring.present, text: authoring.text,
+            manifestDigest: authoring.revision, sourceEtag: authoring.sourceEtag, redacted: false, authoringSourceUnavailable: false };
+        } catch (failure) {
+          if (controller.signal.aborted) return;
+          result = { ...result, canEdit: false, authoringSourceUnavailable: true };
+        }
+      }
       if (controller.signal.aborted) return;
       setProjection(result);if (view === 'source') {setSource(result.text || '');setBaseline(result.text || '');}
     };
@@ -64,7 +75,7 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
     finally { if (!controller.signal.aborted && current === epoch.current) setBusy(false); }
   };
   const canWrite = !!projection?.canEdit;
-  const editable = canWrite && view === 'source' && !!projection?.available && !projection?.redacted && !draft && !busy;
+  const editable = canWrite && view === 'source' && !!projection?.available && !!projection?.sourceEtag && !projection?.redacted && !draft && !busy;
   const fields = draft?.validation?.fields || projection?.fields;
   return <section className="att-manifest-workspace" aria-label="Package Configuration">
     <header><h2>Package Configuration · {packageId}</h2>
@@ -87,6 +98,7 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
       {projection.diagnostics?.map((text, index) => <p key={index}>{text}</p>)}
       {view === 'source' && <>
         {!projection.available && <p>Source unavailable under the current source browsing policy.</p>}
+        {projection.authoringSourceUnavailable && <p>Complete authoring source is unavailable. The safe inspection source remains read only.</p>}
         {projection.redacted && <p>Some source values are masked. This projection is read only to preserve protected values.</p>}
         <CodeEditor value={source} language="yaml" label="Package Manifest source" readOnly={!editable} maxCharacters={262144} onChange={setSource} />
         {source !== baseline && !draft && <p>Unpublished Manifest changes. Create a draft or <button type="button" disabled={busy} onClick={() => {setSource(baseline);setError('');}}>Discard source changes</button> before refreshing or switching views.</p>}

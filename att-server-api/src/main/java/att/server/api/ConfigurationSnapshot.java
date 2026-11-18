@@ -5,14 +5,16 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Arrays;
 
-/** Bounded, value-free configuration evidence accepted across the Worker boundary. */
+/** Bounded, value-free configuration evidence accepted across the Worker boundary.
+ * {@code executionRevisionDigest} is canonical; {@code packageRevision} remains its compatibility alias.
+ */
 public final class ConfigurationSnapshot {
     private ConfigurationSnapshot() { }
     public static Map<String,Object> copy(Map<?,?> source) {
         if(source == null) throw new IllegalArgumentException("Configuration evidence is required");
         Map<String,Object> result=new LinkedHashMap<String,Object>();
         for(String key:Arrays.asList("configurationIdentity","manifestDigest","globalDigest","schemaRegistryDigest",
-                "packageRevision","approvedConfigurationIdentity")) {
+                "executionRevisionDigest","packageRevision","approvedConfigurationIdentity")) {
             Object value=source.get(key);
             if(value != null) {
                 if(!(value instanceof String)||!((String)value).matches("[a-f0-9]{64}")) throw invalid();
@@ -42,6 +44,10 @@ public final class ConfigurationSnapshot {
         }
         for(String required:Arrays.asList("environment","configurationIdentity","manifestDigest","globalDigest","schemaRegistryDigest","engineVersion","engineRevision"))
             if(!result.containsKey(required)) throw invalid();
+        Object executionRevision=result.get("executionRevisionDigest"),legacyPackageRevision=result.get("packageRevision");
+        if(executionRevision!=null&&legacyPackageRevision!=null&&!executionRevision.equals(legacyPackageRevision))throw invalid();
+        if(executionRevision==null&&legacyPackageRevision!=null)result.put("executionRevisionDigest",legacyPackageRevision);
+        if(legacyPackageRevision==null&&executionRevision!=null)result.put("packageRevision",executionRevision);
         return Collections.unmodifiableMap(result);
     }
     private static boolean origin(Object value) {

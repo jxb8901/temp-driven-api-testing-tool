@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.locks.Lock;
 
 /** One bounded, revision-checked source workflow for the canonical Package Manifest. */
 final class PackageManifestPublisher implements AutoCloseable {
@@ -46,16 +47,25 @@ final class PackageManifestPublisher implements AutoCloseable {
             return validate(packageId,null,relativePath,null,source);
         }
     }
-    interface Audit { void record(String actor,String action,String packageId,String detail) throws Exception; }
+    interface Audit {
+        void record(String actor,String action,String packageId,String detail) throws Exception;
+        default void recordCommitted(SourceFileTransaction.AuditRecord record) throws Exception {
+            record(record.actor,record.action,record.scopeId,"transactionId="+record.transactionId
+                    +" before="+record.beforeRevision+" after="+record.afterRevision+" outcome="+record.outcome
+                    +" requestId="+String.valueOf(record.requestId)+" resources="+String.join(",",record.resources));
+        }
+    }
     private record Draft(String id,String packageId,String actor,Path root,String resourcePath,String environment,String source,String beforeDigest,
+                         String packageSourceRevision,String candidatePackageSourceRevision,
                          String candidateManifestSource,String expectedManifestDigest,
                          Instant expires,Map<String,Object> validation,boolean reviewed) {
         private Draft(String id,String packageId,String actor,Path root,String resourcePath,String environment,String source,String beforeDigest,
                       Instant expires,Map<String,Object> validation,boolean reviewed) {
-            this(id,packageId,actor,root,resourcePath,environment,source,beforeDigest,null,null,expires,validation,reviewed);
+            this(id,packageId,actor,root,resourcePath,environment,source,beforeDigest,null,null,null,null,expires,validation,reviewed);
         }
     }
     private final PackageConfigurationPolicy policy;
+    private final SourceFileTransaction sourceTransaction;
     private final Path historyRoot;
     private final Clock clock;
     private final Access access;
@@ -65,12 +75,25 @@ final class PackageManifestPublisher implements AutoCloseable {
     private final Map<String,Draft> drafts=new LinkedHashMap<>();
 
     PackageManifestPublisher(Path data,PackageConfigurationPolicy policy,Clock clock,Access access,Validator validator,Audit audit) throws IOException {
-        this(data,policy,clock,access,validator,null,audit);
+        this(data,policy,clock,access,validator,null,audit,new SourceFileTransaction(data,new SourcePublicationBarrier()));
     }
 
     PackageManifestPublisher(Path data,PackageConfigurationPolicy policy,Clock clock,Access access,Validator validator,
                              ResourceValidator resourceValidator,Audit audit) throws IOException {
-        this.policy=policy;this.clock=clock;this.access=access;this.validator=validator;this.resourceValidator=resourceValidator;this.audit=audit;
+        this(data,policy,clock,access,validator,resourceValidator,audit,new SourceFileTransaction(data,new SourcePublicationBarrier()));
+    }
+
+    PackageManifestPublisher(Path data,PackageConfigurationPolicy policy,Clock clock,Access access,Validator validator,Audit audit,
+                             SourceFileTransaction sourceTransaction) throws IOException {
+        this(data,policy,clock,access,validator,null,audit,sourceTransaction);
+    }
+
+    PackageManifestPublisher(Path data,PackageConfigurationPolicy policy,Clock clock,Access access,Validator validator,
+                             ResourceValidator resourceValidator,Audit audit,SourceFileTransaction sourceTransaction) throws IOException {
+        this.policy=policy;this.clock=clock;this.access=access;this.validator=validator;
+        this.resourceValidator=resourceValidator;this.audit=audit;
+        if(sourceTransaction==null)throw new IllegalArgumentException("A source transaction is required");
+        this.sourceTransaction=sourceTransaction;
         this.historyRoot=data.resolve("package-source-history");
         if(policy.sourceEditingEnabled)privateDirectory(historyRoot);
     }
@@ -109,6 +132,9 @@ final class PackageManifestPublisher implements AutoCloseable {
     }
 
     synchronized Map<String,Object> publish(String packageId,String actor,String id) throws Exception {
+        return publish(packageId,actor,id,null);
+    }
+    synchronized Map<String,Object> publish(String packageId,String actor,String id,String requestId) throws Exception {
         Draft draft=manifestDraft(packageId,actor,id);unchanged(draft);
         if(!draft.reviewed||draft.validation==null)throw new IllegalArgumentException("Validate and review the Manifest draft before publication");
         Map<String,Object> fresh=validator.validate(packageId,draft.source);
@@ -126,11 +152,25 @@ final class PackageManifestPublisher implements AutoCloseable {
         pruneHistory(history,draft.beforeDigest,afterDigest);
         // Auditing before replacement makes an accepted publication recoverable even if the process exits after rename.
         audit.record(actor,"PACKAGE_MANIFEST_PUBLISH_INTENT",packageId,draft.beforeDigest+" -> "+afterDigest);
-        atomicWrite(live,after);
+        unchanged(draft); // Recheck role, registered canonical root, and source immediately before the commit.
+        Path commitRoot=authorizedRoot(packageId,actor);
+        if(!root.equals(commitRoot)||!live.equals(commitRoot.resolve("package.yaml")))throw new Conflict();
+        boolean manifestExists=Files.exists(commitRoot.resolve("package.yaml"),LinkOption.NOFOLLOW_LINKS);
+        Map<String,SourceFileTransaction.Write> writes=new LinkedHashMap<>();
+        writes.put("package.yaml",new SourceFileTransaction.Write("package.yaml",after,manifestExists?draft.beforeDigest:null));
+        SourceFileTransaction.CommitResult commitResult;
+        try {
+            commitResult=sourceTransaction.commitWithAudit("PACKAGE_SOURCE",packageId,commitRoot,actor,draft.beforeDigest,
+                    afterDigest,writes,()->{
+                unchanged(draft);
+                Path current=authorizedRoot(packageId,actor);
+                if(!commitRoot.equals(current))throw new Conflict();
+            },requestId,List.of("package.yaml"),"PACKAGE_MANIFEST_PUBLISH",audit::recordCommitted);
+        } catch(SourceFileTransaction.RevisionConflict changed) {
+            throw new Conflict();
+        }
         drafts.remove(id);
-        boolean auditConfirmed=true;
-        try {audit.record(actor,"PACKAGE_MANIFEST_PUBLISH",packageId,draft.beforeDigest+" -> "+afterDigest);}
-        catch(Exception pending) {auditConfirmed=false;} // The durable intent records the committed revision; never report a completed rename as a failed publication.
+        boolean auditConfirmed=commitResult.auditConfirmed;
         Map<String,Object> result=new LinkedHashMap<>();result.put("auditConfirmed",auditConfirmed);result.put("published",true);result.put("packageId",packageId);
         result.put("beforeDigest",draft.beforeDigest);result.put("manifestDigest",afterDigest);result.put("refreshRequired",true);
         result.put("environment",fresh.get("environment"));result.put("configurationIdentity",fresh.get("configurationIdentity"));
@@ -181,8 +221,11 @@ final class PackageManifestPublisher implements AutoCloseable {
         }
         if(!manifestAddition&&!expectedResourceDigest.equals(currentResourceDigest(root,canonicalPath)))throw new Conflict();
         enforceCapacity(actor);
+        String packageSourceRevision=currentPackageSourceRevision(root);
+        String candidatePackageSourceRevision=packageSourceRevision(root,canonicalPath,source.getBytes(StandardCharsets.UTF_8));
         Draft draft=new Draft("R"+UUID.randomUUID().toString().replace("-","").toUpperCase(),packageId,actor,root,
-                canonicalPath,environment,source,beforeResourceDigest,candidateManifestSource,expectedManifestDigest,
+                canonicalPath,environment,source,beforeResourceDigest,packageSourceRevision,candidatePackageSourceRevision,
+                candidateManifestSource,expectedManifestDigest,
                 clock.instant().plusSeconds(policy.draftTtlSeconds),null,false);
         drafts.put(draft.id,draft);audit.record(actor,"PKG_SUT_METRIC_RESOURCE_STAGE",packageId,canonicalPath+":"+expectedResourceDigest);
         return view(draft);
@@ -205,7 +248,8 @@ final class PackageManifestPublisher implements AutoCloseable {
         if(old.candidateManifestSource==null)unchanged(old);
         else unchangedForCreatedResource(old,candidateDigest);
         Draft next=new Draft(old.id,old.packageId,old.actor,old.root,old.resourcePath,old.environment,old.source,old.beforeDigest,
-                old.candidateManifestSource,old.expectedManifestDigest,old.expires,Map.copyOf(validated),false);
+                old.packageSourceRevision,old.candidatePackageSourceRevision,old.candidateManifestSource,
+                old.expectedManifestDigest,old.expires,Map.copyOf(validated),false);
         drafts.put(id,next);audit.record(actor,"PKG_SUT_METRIC_RESOURCE_VALIDATE",packageId,old.resourcePath+":"+validated.get("validationRevision"));
         return view(next);
     }
@@ -216,7 +260,8 @@ final class PackageManifestPublisher implements AutoCloseable {
         else unchangedForCreatedResource(old,digest(old.source.getBytes(StandardCharsets.UTF_8)));
         if(old.validation==null)throw new IllegalArgumentException("Validate the Package resource draft before review");
         Draft next=new Draft(old.id,old.packageId,old.actor,old.root,old.resourcePath,old.environment,old.source,old.beforeDigest,
-                old.candidateManifestSource,old.expectedManifestDigest,old.expires,old.validation,true);
+                old.packageSourceRevision,old.candidatePackageSourceRevision,old.candidateManifestSource,
+                old.expectedManifestDigest,old.expires,old.validation,true);
         drafts.put(id,next);audit.record(actor,"PKG_SUT_METRIC_RESOURCE_REVIEW",packageId,old.resourcePath+":"+id);
         return view(next);
     }
@@ -235,8 +280,6 @@ final class PackageManifestPublisher implements AutoCloseable {
         unchanged(draft); // Recheck edit authorization, path safety and the live resource revision after validation.
         Path root=authorizedRoot(packageId,actor);
         Path live=resourcePath(root,draft.resourcePath);
-        createResourceParents(root,live.getParent());
-        live=resourcePath(root,draft.resourcePath);
         byte[] before=readResourceOptional(root,draft.resourcePath);
         if(!digest(before).equals(draft.beforeDigest))throw new Conflict();
         byte[] after=draft.source.getBytes(StandardCharsets.UTF_8);
@@ -246,24 +289,33 @@ final class PackageManifestPublisher implements AutoCloseable {
         saveHistory(history,afterDigest,after);
         pruneHistory(history,draft.beforeDigest,afterDigest);
         audit.record(actor,"PKG_SUT_METRIC_PUBLISH_INTENT",packageId,draft.resourcePath+":"+draft.beforeDigest+" -> "+afterDigest);
-        // Fence all package/global dependencies again after preparation and immediately before replacement.
-        unchanged(draft);
-        Map<String,Object> commitValidation=resourceValidator.validate(packageId,draft.actor,draft.resourcePath,draft.environment,draft.source);
-        if(!Boolean.TRUE.equals(commitValidation.get("valid"))||!candidateDigest.equals(commitValidation.get("resourceDigest"))
-                ||!draft.validation.get("validationRevision").equals(commitValidation.get("validationRevision")))throw new Conflict();
-        unchanged(draft);
-        // Re-resolve immediately before replacement; an unreferenced candidate remains inactive because package.yaml is untouched.
-        live=resourcePath(root,draft.resourcePath);
-        atomicWrite(live,after);
+        Map<String,SourceFileTransaction.Write> writes=new LinkedHashMap<>();
+        boolean resourceExists=Files.exists(live,LinkOption.NOFOLLOW_LINKS);
+        writes.put(draft.resourcePath,new SourceFileTransaction.Write(draft.resourcePath,after,
+                resourceExists?draft.beforeDigest:null));
+        SourceFileTransaction.CommitResult commitResult;
+        try {
+            commitResult=sourceTransaction.commitWithAudit(ChangeSetPublisher.PACKAGE_SOURCE,packageId,root,actor,
+                    draft.packageSourceRevision,draft.candidatePackageSourceRevision,writes,()->{
+                if(!root.equals(authorizedRoot(packageId,actor)))throw new Conflict();
+                unchanged(draft);
+                Map<String,Object> commitValidation=resourceValidator.validateCandidate(packageId,draft.actor,
+                        draft.resourcePath,draft.environment,draft.source,null,null);
+                if(!Boolean.TRUE.equals(commitValidation.get("valid"))
+                        ||!candidateDigest.equals(commitValidation.get("resourceDigest"))
+                        ||!draft.validation.get("validationRevision").equals(commitValidation.get("validationRevision")))
+                    throw new Conflict();
+                unchanged(draft);
+            },null,List.of(draft.resourcePath),"PKG_SUT_METRIC_RESOURCE_PUBLISH",audit::recordCommitted);
+        } catch(SourceFileTransaction.RevisionConflict changed) {
+            throw new Conflict();
+        }
         drafts.remove(id);
-        boolean auditConfirmed=true;
-        try {audit.record(actor,"PKG_SUT_METRIC_RESOURCE_PUBLISH",packageId,draft.resourcePath+":"+draft.beforeDigest+" -> "+afterDigest);}
-        catch(Exception pending) {auditConfirmed=false;}
-        Map<String,Object> result=new LinkedHashMap<>();result.put("auditConfirmed",auditConfirmed);result.put("published",true);
+        Map<String,Object> result=new LinkedHashMap<>();result.put("auditConfirmed",commitResult.auditConfirmed);result.put("published",true);
         result.put("packageId",packageId);result.put("resourcePath",draft.resourcePath);
         result.put("beforeResourceDigest",draft.beforeDigest);result.put("resourceDigest",afterDigest);result.put("refreshRequired",true);
-        result.put("validationRevision",commitValidation.get("validationRevision"));
-        result.put("environment",commitValidation.get("environment"));result.put("configurationIdentity",commitValidation.get("configurationIdentity"));
+        result.put("validationRevision",fresh.get("validationRevision"));
+        result.put("environment",fresh.get("environment"));result.put("configurationIdentity",fresh.get("configurationIdentity"));
         return result;
     }
 
@@ -275,8 +327,6 @@ final class PackageManifestPublisher implements AutoCloseable {
         unchangedForCreatedResource(draft,resourceDigest);
         Path root=authorizedRoot(draft.packageId,actor);
         Path liveResource=resourcePath(root,draft.resourcePath);
-        createResourceParents(root,liveResource.getParent());
-        liveResource=resourcePath(root,draft.resourcePath);
         byte[] beforeResource=readResourceOptional(root,draft.resourcePath);
         if(!draft.beforeDigest.equals(digest(beforeResource))
                 &&!resourceDigest.equals(digest(beforeResource)))throw new Conflict();
@@ -302,9 +352,28 @@ final class PackageManifestPublisher implements AutoCloseable {
         unchangedForCreatedResource(draft,resourceDigest);
 
         byte[] currentResource=readResourceOptional(root,draft.resourcePath);
+        boolean resourceAuditConfirmed=true;
         if(draft.beforeDigest.equals(digest(currentResource))) {
-            liveResource=resourcePath(root,draft.resourcePath);
-            atomicWrite(liveResource,resourceBytes);
+            boolean resourceExists=Files.exists(liveResource,LinkOption.NOFOLLOW_LINKS);
+            Map<String,SourceFileTransaction.Write> resourceWrites=new LinkedHashMap<>();
+            resourceWrites.put(draft.resourcePath,new SourceFileTransaction.Write(draft.resourcePath,resourceBytes,
+                    resourceExists?draft.beforeDigest:null));
+            try {
+                SourceFileTransaction.CommitResult resourceCommit=sourceTransaction.commitWithAudit(
+                        ChangeSetPublisher.PACKAGE_SOURCE,draft.packageId,root,actor,draft.packageSourceRevision,
+                        draft.candidatePackageSourceRevision,resourceWrites,()->{
+                    if(!root.equals(authorizedRoot(draft.packageId,actor)))throw new Conflict();
+                    unchangedForCreatedResource(draft,resourceDigest);
+                    Map<String,Object> latest=resourceValidator.validateCandidate(draft.packageId,draft.actor,
+                            draft.resourcePath,draft.environment,draft.source,draft.candidateManifestSource,
+                            draft.expectedManifestDigest);
+                    verifyCreatedResourceValidation(draft,latest,resourceDigest,candidateManifestDigest);
+                    unchangedForCreatedResource(draft,resourceDigest);
+                },null,List.of(draft.resourcePath),"PKG_SUT_METRIC_RESOURCE_PREPARE",audit::recordCommitted);
+                resourceAuditConfirmed=resourceCommit.auditConfirmed;
+            } catch(SourceFileTransaction.RevisionConflict changed) {
+                throw new Conflict();
+            }
         } else if(!resourceDigest.equals(digest(currentResource)))throw new Conflict();
 
         if(!draft.expectedManifestDigest.equals(currentDigest(root))
@@ -320,15 +389,31 @@ final class PackageManifestPublisher implements AutoCloseable {
         verifyCreatedResourceValidation(draft,finalValidation,resourceDigest,candidateManifestDigest);
         unchangedForCreatedResource(draft,resourceDigest);
         if(!draft.expectedManifestDigest.equals(currentDigest(root)))throw new Conflict();
-        atomicWrite(root.resolve("package.yaml"),manifestBytes);
-        if(!candidateManifestDigest.equals(currentDigest(root)))throw new IOException("Candidate Package Manifest replacement could not be verified");
+        boolean manifestExists=Files.exists(root.resolve("package.yaml"),LinkOption.NOFOLLOW_LINKS);
+        Map<String,SourceFileTransaction.Write> manifestWrites=new LinkedHashMap<>();
+        manifestWrites.put("package.yaml",new SourceFileTransaction.Write("package.yaml",manifestBytes,
+                manifestExists?draft.expectedManifestDigest:null));
+        SourceFileTransaction.CommitResult manifestCommit;
+        try {
+            manifestCommit=sourceTransaction.commitWithAudit(ChangeSetPublisher.PACKAGE_SOURCE,draft.packageId,root,actor,
+                    draft.expectedManifestDigest,candidateManifestDigest,manifestWrites,()->{
+                if(!root.equals(authorizedRoot(draft.packageId,actor)))throw new Conflict();
+                unchangedForCreatedResource(draft,resourceDigest);
+                if(!draft.expectedManifestDigest.equals(currentDigest(root)))throw new Conflict();
+                Map<String,Object> latest=resourceValidator.validateCandidate(draft.packageId,draft.actor,
+                        draft.resourcePath,draft.environment,draft.source,draft.candidateManifestSource,
+                        draft.expectedManifestDigest);
+                verifyCreatedResourceValidation(draft,latest,resourceDigest,candidateManifestDigest);
+                unchangedForCreatedResource(draft,resourceDigest);
+            },null,List.of("package.yaml"),"PKG_SUT_METRIC_RESOURCE_PUBLISH",audit::recordCommitted);
+        } catch(SourceFileTransaction.RevisionConflict changed) {
+            throw new Conflict();
+        }
 
         drafts.remove(draft.id);
-        boolean auditConfirmed=true;
-        try {audit.record(actor,"PKG_SUT_METRIC_RESOURCE_PUBLISH",draft.packageId,intent);}
-        catch(Exception pending) {auditConfirmed=false;}
         Map<String,Object> result=new LinkedHashMap<>();
-        result.put("auditConfirmed",auditConfirmed);result.put("published",true);result.put("packageId",draft.packageId);
+        result.put("auditConfirmed",resourceAuditConfirmed&&manifestCommit.auditConfirmed);
+        result.put("published",true);result.put("packageId",draft.packageId);
         result.put("resourcePath",draft.resourcePath);result.put("beforeResourceDigest",draft.beforeDigest);
         result.put("resourceDigest",resourceDigest);result.put("expectedManifestDigest",draft.expectedManifestDigest);
         result.put("manifestDigest",candidateManifestDigest);result.put("candidateManifestDigest",candidateManifestDigest);
@@ -355,6 +440,10 @@ final class PackageManifestPublisher implements AutoCloseable {
         if(!draft.expectedManifestDigest.equals(currentDigest(draft.root)))throw new Conflict();
         String currentResource=currentResourceDigest(draft.root,draft.resourcePath);
         if(!draft.beforeDigest.equals(currentResource)&&!resourceDigest.equals(currentResource))throw new Conflict();
+        String expectedPackageRevision=resourceDigest.equals(currentResource)
+                ?draft.candidatePackageSourceRevision:draft.packageSourceRevision;
+        if(expectedPackageRevision==null||!expectedPackageRevision.equals(currentPackageSourceRevision(draft.root)))
+            throw new Conflict();
     }
 
     synchronized List<Map<String,Object>> historyResource(String packageId,String actor,String relativePath) throws Exception {
@@ -433,11 +522,23 @@ final class PackageManifestPublisher implements AutoCloseable {
         if(!draft.root.equals(authorizedRoot(draft.packageId,draft.actor)))throw new Conflict();
         String current=draft.resourcePath==null?currentDigest(draft.root):currentResourceDigest(draft.root,draft.resourcePath);
         if(!draft.beforeDigest.equals(current))throw new Conflict();
+        if(draft.packageSourceRevision!=null
+                &&!draft.packageSourceRevision.equals(currentPackageSourceRevision(draft.root)))throw new Conflict();
         if(draft.expectedManifestDigest!=null&&!draft.expectedManifestDigest.equals(currentDigest(draft.root)))throw new Conflict();
     }
-    private static String currentDigest(Path root) throws Exception {return digest(readOptional(root.resolve("package.yaml")));}
-    private static String currentResourceDigest(Path root,String relativePath) throws Exception {
+    private String currentDigest(Path root) throws Exception {return digest(readOptional(root.resolve("package.yaml")));}
+    private String currentResourceDigest(Path root,String relativePath) throws Exception {
         return digest(readResourceOptional(root,relativePath));
+    }
+    private String currentPackageSourceRevision(Path root) throws IOException {
+        Lock read=sourceTransaction.readLock();read.lock();
+        try {return att.server.api.source.PackageSourceRevision.digest(root);}
+        finally {read.unlock();}
+    }
+    private String packageSourceRevision(Path root,String relativePath,byte[] bytes) throws IOException {
+        Lock read=sourceTransaction.readLock();read.lock();
+        try {return att.server.api.source.PackageSourceRevision.digest(root,Map.of(relativePath,bytes));}
+        finally {read.unlock();}
     }
     private static String resourceRelativePath(Path root,String authoredPath) throws IOException {
         if(authoredPath==null||authoredPath.length()>512)throw new IllegalArgumentException("Package resource path is invalid");
@@ -470,13 +571,16 @@ final class PackageManifestPublisher implements AutoCloseable {
         String normalized=resourceRelativePath(root,relativePath);
         return root.resolve(att.core.IdentifierValidator.relativePath(normalized,"Package SUT Metrics resource path")).normalize();
     }
-    private static byte[] readResourceOptional(Path root,String relativePath) throws IOException {
-        Path file=resourcePath(root,relativePath);
-        if(!Files.exists(file,LinkOption.NOFOLLOW_LINKS))return new byte[0];
-        byte[] first=readResourceOnce(root,relativePath,file);
-        byte[] second=readResourceOnce(root,relativePath,file);
-        if(!java.util.Arrays.equals(first,second))throw new IOException("Package resource changed while it was being read");
-        return first;
+    private byte[] readResourceOptional(Path root,String relativePath) throws IOException {
+        Lock read=sourceTransaction.readLock();read.lock();
+        try {
+            Path file=resourcePath(root,relativePath);
+            if(!Files.exists(file,LinkOption.NOFOLLOW_LINKS))return new byte[0];
+            byte[] first=readResourceOnce(root,relativePath,file);
+            byte[] second=readResourceOnce(root,relativePath,file);
+            if(!java.util.Arrays.equals(first,second))throw new IOException("Package resource changed while it was being read");
+            return first;
+        } finally {read.unlock();}
     }
     private static byte[] readResourceOnce(Path root,String relativePath,Path file) throws IOException {
         resourcePath(root,relativePath);
@@ -498,27 +602,18 @@ final class PackageManifestPublisher implements AutoCloseable {
         resourcePath(root,relativePath);
         return output.toByteArray();
     }
-    private static void createResourceParents(Path root,Path parent) throws IOException {
-        Path canonicalRoot=root.toAbsolutePath().normalize();Path relative=canonicalRoot.relativize(parent.toAbsolutePath().normalize());Path current=canonicalRoot;
-        for(Path component:relative) {
-            current=current.resolve(component);
-            if(Files.exists(current,LinkOption.NOFOLLOW_LINKS)) {
-                if(Files.isSymbolicLink(current)||!Files.isDirectory(current,LinkOption.NOFOLLOW_LINKS))
-                    throw new IllegalArgumentException("Unsafe Package resource parent directory");
-            } else Files.createDirectory(current);
-            if(!current.toRealPath().equals(current)||!current.toRealPath().startsWith(canonicalRoot))
-                throw new IllegalArgumentException("Package resource parent escapes its Package root");
-        }
-    }
     private Path resourceHistoryDirectory(String packageId,String relativePath) throws Exception {
         Path resources=historyDirectory(packageId).resolve("resources");privateDirectory(resources);
         Path directory=resources.resolve(digest(relativePath.getBytes(StandardCharsets.UTF_8)));privateDirectory(directory);return directory;
     }
-    private static byte[] readOptional(Path file) throws IOException {
-        if(!Files.exists(file,LinkOption.NOFOLLOW_LINKS))return new byte[0];
-        if(Files.isSymbolicLink(file)||!Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS)||!Files.isReadable(file)||Files.size(file)>MAX_SOURCE_BYTES)
-            throw new IOException("Package Manifest source is unsafe or exceeds its limit");
-        try(var input=Files.newInputStream(file)){byte[] value=input.readNBytes(MAX_SOURCE_BYTES+1);if(value.length>MAX_SOURCE_BYTES)throw new IOException("Manifest source exceeds its limit");return value;}
+    private byte[] readOptional(Path file) throws IOException {
+        Lock read=sourceTransaction.readLock();read.lock();
+        try {
+            if(!Files.exists(file,LinkOption.NOFOLLOW_LINKS))return new byte[0];
+            if(Files.isSymbolicLink(file)||!Files.isRegularFile(file,LinkOption.NOFOLLOW_LINKS)||!Files.isReadable(file)||Files.size(file)>MAX_SOURCE_BYTES)
+                throw new IOException("Package Manifest source is unsafe or exceeds its limit");
+            try(var input=Files.newInputStream(file)){byte[] value=input.readNBytes(MAX_SOURCE_BYTES+1);if(value.length>MAX_SOURCE_BYTES)throw new IOException("Manifest source exceeds its limit");return value;}
+        } finally {read.unlock();}
     }
     private Map<String,Object> view(Draft draft) throws Exception {
         Map<String,Object> result=new LinkedHashMap<>();result.put("draftId",draft.id);result.put("packageId",draft.packageId);
@@ -569,7 +664,8 @@ final class PackageManifestPublisher implements AutoCloseable {
     }
     static String digest(byte[] bytes) throws Exception {return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}
     private static void requireDigest(String value){if(value==null||!value.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("A valid expected Manifest digest is required");}
-    @Override public synchronized void close(){drafts.clear();}
+    synchronized void invalidateDrafts(){drafts.clear();}
+    @Override public synchronized void close(){invalidateDrafts();}
     static final class Conflict extends RuntimeException { }
     static final class Denied extends RuntimeException { }
     static final class Missing extends RuntimeException { }

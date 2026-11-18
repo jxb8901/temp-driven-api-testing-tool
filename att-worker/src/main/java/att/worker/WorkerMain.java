@@ -47,6 +47,7 @@ public final class WorkerMain {
     private att.load.LoadConsoleSampler loadSampler;
     private String loadSummaryLine;
     private volatile boolean shutdownCancellationRequested;
+    private WorkerSourceSnapshot sourceSnapshot;
     private WorkerMain(PrintStream protocol) { this.protocol=protocol; }
     public static void main(String[] args) throws Exception {
         // Trusted evidence retains original diagnostics. Protocol secrets are protected
@@ -104,7 +105,8 @@ public final class WorkerMain {
                 return fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
             }
         }
-        return executeRequest(input);
+        try { return executeRequest(input); }
+        finally { closeSourceSnapshot(); }
     }
 
     private void executeInspectionDaemon() throws Exception {
@@ -124,7 +126,8 @@ public final class WorkerMain {
                     fail("WORKER_REQUEST_INVALID","Unable to parse Worker request JSON");
                     continue;
                 }
-                executeRequest(input);
+                try { executeRequest(input); }
+                finally { closeSourceSnapshot(); }
             }
         } finally {
             closeResourceInspectors();
@@ -139,8 +142,22 @@ public final class WorkerMain {
         if(input.hasNonNull("jobId")) jobId=input.get("jobId").asText();
         WorkerRequest request;
         emit(WorkerEvent.Type.STATUS,fields("status","RUNNING"));
-        try { request=mapper.treeToValue(input,WorkerRequest.class); if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes; }
+        try {
+            request=mapper.treeToValue(input,WorkerRequest.class);
+            request.normalizeExpectedExecutionRevisionDigest();
+            if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes;
+        }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
+        try {
+            sourceSnapshot=WorkerSourceSnapshot.stage(request);
+            if(sourceSnapshot!=null) {
+                request.packageRoot=sourceSnapshot.packageRoot.toAbsolutePath().normalize().toString();
+                request.config=sourceSnapshot.configPath.toAbsolutePath().normalize().toString();
+                sourceSnapshot.guardExecution(Thread.currentThread());
+            }
+        } catch(Exception invalidSnapshot) {
+            return fail("WORKER_SOURCE_SNAPSHOT_INVALID","The accepted source snapshot is unavailable or failed integrity verification");
+        }
         currentCommand=request.command;
         try { consoleOptions=att.console.ExecutionConsoleFormatter.Options.published(
                 request.liveOutputMaxEntryChars==null?4000:request.liveOutputMaxEntryChars,
@@ -152,9 +169,12 @@ public final class WorkerMain {
         if(prewarmed) {
             if(!("run".equals(request.command)||"debug".equals(request.command)))
                 return fail("WORKER_REQUEST_INVALID","Prewarmed Workers accept only one RUN/DEBUG Job");
-            if(request.packageRoot==null||!Paths.get(request.packageRoot).toRealPath().equals(Paths.get("").toRealPath()))
+            if(sourceSnapshot!=null) {
+                if(!java.util.Objects.equals(request.registeredPackageId,sourceSnapshot.packageId))
+                    return fail("WORKER_REQUEST_INVALID","Prewarmed Worker Package affinity mismatch");
+            } else if(request.packageRoot==null||!Paths.get(request.packageRoot).toRealPath().equals(Paths.get("").toRealPath()))
                 return fail("WORKER_REQUEST_INVALID","Prewarmed Worker package affinity mismatch");
-            if(request.expectedRevisionDigest==null)
+            if(request.expectedExecutionRevisionDigest==null)
                 return fail("WORKER_REQUEST_INVALID","Prewarmed execution requires an immutable package revision");
             try { att.security.ExecutionEnvironment.assign(request.executionEnvironment); }
             catch(IllegalArgumentException|IllegalStateException invalid) {
@@ -198,6 +218,7 @@ public final class WorkerMain {
                     throw new PackageResourceInspector.StaleResourceCursorException();
             }
             OperationResult result=dispatch(request);
+            if(sourceSnapshot!=null)sourceSnapshot.verifyUnchanged();
             Map<String,Object> serialized=result instanceof att.api.LoadResult && "load".equals(request.command)
                     ? ((att.api.LoadResult)result).toWorkerMap() : result.toMap();
             if(configuration!=null) {
@@ -221,21 +242,27 @@ public final class WorkerMain {
             }
             recordInspectionAggregate(request,processingStarted,buildsBefore,loadsBefore,bytesBefore);
             Map<String,Object> payload=new LinkedHashMap<String,Object>(); payload.put("status",result.status()); payload.put("exitCode",result.exitCode()); payload.put("durationMs",result.durationMs()); payload.put("result",serialized);
+            if(sourceSnapshot!=null)sourceSnapshot.verifyUnchanged();
             emitResult(payload);
             return result.exitCode();
         } catch(Exception error) {
+            if(sourceSnapshot!=null&&sourceSnapshot.changedDuringExecution())
+                error=new WorkerSourceSnapshot.SourceChangedException();
             if(inspectionDaemon)InspectionMetrics.JVM.record(PROCESSING,System.nanoTime()-processingStarted);
             recordInspectionAggregate(request,processingStarted,buildsBefore,loadsBefore,bytesBefore);
             String code="WORKER_EXECUTION_FAILED", message=error.getMessage();
             int exit=3; String status="ERROR";
-            if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
+            if(error instanceof WorkerSourceSnapshot.SourceChangedException) {
+                code="WORKER_SOURCE_SNAPSHOT_CHANGED";message=error.getMessage();
+            }
+            else if(error instanceof att.validation.DiagnosticException) { code=((att.validation.DiagnosticException)error).code(); message=((att.validation.DiagnosticException)error).getMessage(); }
             else if(error instanceof PackageResourceInspector.ResourceNotFoundException) { code="ATT-RESOURCE-NOT-FOUND"; message="Package resource was not found"; }
             else if(error instanceof PackageResourceInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package resource response exceeded the configured limit"; }
             else if(error instanceof PackageResourceInspector.ResourceLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package resource inspection exceeded a configured scan limit"; }
             else if(error instanceof PackageResourceInspector.InvalidResourceRootException) { code="ATT-RESOURCE-ROOT-INVALID"; message="A configured Package resource root is invalid or unavailable"; exit=2; status="INVALID"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException
                     &&("run".equals(request.command)||"debug".equals(request.command)||"load".equals(request.command))
-                    &&request.expectedRevisionDigest!=null) { code="ATT-SERVER-DRAFT-STALE"; message="Package content changed after preview; rebuild the draft"; exit=2; status="INVALID"; }
+                    &&request.expectedExecutionRevisionDigest!=null) { code="ATT-SERVER-DRAFT-STALE"; message="Package content changed after preview; rebuild the draft"; exit=2; status="INVALID"; }
             else if(error instanceof PackageResourceInspector.StaleResourceCursorException) { code="ATT-RESOURCE-CURSOR-STALE"; message="The package resources changed; refresh the Explorer"; }
             else if(error instanceof PackageConfigurationInspector.ResponseTooLargeException) { code="ATT-RESOURCE-RESPONSE-TOO-LARGE"; message="Package configuration response exceeded the configured limit"; }
             else if(error instanceof PackageConfigurationInspector.ConfigurationLimitException) { code="ATT-RESOURCE-LIMIT"; message="Package configuration inspection exceeded a configured limit"; }
@@ -320,20 +347,24 @@ public final class WorkerMain {
             }
         } catch(Exception ignored) { /* Closing stdin ends the optional control channel. */ }
     }
+    private void closeSourceSnapshot() {
+        WorkerSourceSnapshot snapshot=sourceSnapshot;sourceSnapshot=null;
+        if(snapshot!=null)snapshot.close();
+    }
     private OperationResult dispatch(WorkerRequest r) throws Exception {
         if(r.packageRoot==null||r.packageRoot.trim().isEmpty()) throw new IllegalArgumentException("packageRoot is required");
         Path root=Paths.get(r.packageRoot).toAbsolutePath().normalize();
         Path config=path(r.config); Path output=path(r.outputDirectory);
         executionOutput=output==null?null:(output.isAbsolute()?output:root.resolve(output)).normalize();
         AttService service=new DefaultAttService();
-        if("run".equals(r.command)&&r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
+        if("run".equals(r.command)&&r.expectedExecutionRevisionDigest!=null) verifyRevision(root,config,r);
         if("run".equals(r.command)&&r.target!=null) {
             Map<String,Object> t=requiredTarget(r);
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),false,event -> emitRunExecution(event,r.diagnosticMode),r.debugId,r.overrides,false,null,r.inlineDebugInput));
         }
         if("run".equals(r.command)) return service.run(new RunRequest(root,config,r.environment,output,r.runId,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),bool(r.rerunFailed),bool(r.dryRun),bool(r.failFast),null,"reject",false,event -> emitRunExecution(event,r.diagnosticMode)));
         if("debug".equals(r.command)) { Map<String,Object> t=requiredTarget(r);
-            if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
+            if(r.expectedExecutionRevisionDigest!=null) verifyRevision(root,config,r);
             return service.debug(new DebugRequest(root,config,r.environment,output,r.runId,text(t,"type"),text(t,"id"),path(r.debugInput),bool(r.unsafeFailureDetails),event -> emitExecution(event),r.debugId,r.overrides,false,null,r.inlineDebugInput)); }
         if("load".equals(r.command)) { Map<String,Object> t=r.target==null?Collections.<String,Object>emptyMap():r.target; Map<String,String> l=r.load==null?Collections.<String,String>emptyMap():r.load;
             final CheckpointProjection checkpoints = new CheckpointProjection(executionOutput, r.runId);
@@ -366,7 +397,7 @@ public final class WorkerMain {
             att.api.OperationResult loadResult;
             try {
             if(r.inlineLoadScenario!=null) {
-                if(r.expectedRevisionDigest!=null) verifyRevision(root,config,r);
+                if(r.expectedExecutionRevisionDigest!=null) verifyRevision(root,config,r);
                 att.load.LoadScenario parsed=new att.load.LoadScenarioLoader(root).loadInline(r.inlineLoadScenario);
                 loadResult=service.load(new LoadRequest(root,config,r.environment,output,r.runId,null,null,null,
                         null,null,null,null,null,null,null,null,null,r.overrides,observer,parsed,false));
@@ -374,16 +405,58 @@ public final class WorkerMain {
             } finally { checkpoints.close(); }
             loadSummaryLine=loadSampler.finish(loadResult.status());
             return loadResult; }
-        if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),bool(r.all),r.validationScope));
+        if("validate".equals(r.command)) return service.validate(new ValidateRequest(root,config,r.environment,
+                output,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),set(r.tags),set(r.excludeTags),
+                bool(r.all),r.validationScope));
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
             if("cli-validation".equals(r.inspectionAction)) return validateVNext(r,root,config);
+            if("authoring-source".equals(r.inspectionAction)) {
+                int maxSourceBytes=r.maxSourceBytes==null?65536:r.maxSourceBytes;
+                int maxResponseBytes=r.maxResponseBytes==null?262144:r.maxResponseBytes;
+                Map<String,Object> source;
+                switch(String.valueOf(r.authoringSourceKind)) {
+                    case "resource":
+                        source=resourceInspector(root,config,r).inspectAuthoringResourceSource(r.authoringResourceType,r.inspectionResourceId);
+                        break;
+                    case "file":
+                        source=resourceInspector(root,config,r).inspectAuthoringSourceFile(
+                                r.authoringResourceType,r.inspectionResourceId,r.inspectionReferenceId,r.inspectionOrigin);
+                        break;
+                    case "load":
+                        source=resourceInspector(root,config,r).inspectAuthoringLoadSource(r.inspectionPath);
+                        break;
+                    case "manifest":
+                        source=resourceInspector(root,config,r).inspectAuthoringManifestSource();
+                        break;
+                    case "testdata":
+                        source=new PackageConfigurationInspector(root,config,maxResponseBytes,
+                                !Boolean.FALSE.equals(r.redactionEnabled),r.sensitivePaths,r.sensitiveFieldPatterns)
+                                .forPackageTestdata().inspectAuthoringTestdataSource(r.inspectionResourceId,r.inspectionEnvironment,maxSourceBytes);
+                        break;
+                    case "testcase":
+                        source=resourceInspector(root,config,r).inspectAuthoringTestcaseSource(
+                                r.inspectionResourceId,r.authoringSourceSelector);
+                        break;
+                    case "central":
+                        source=new PackageConfigurationInspector(root,config,maxResponseBytes,
+                                !Boolean.FALSE.equals(r.redactionEnabled),r.sensitivePaths,r.sensitiveFieldPatterns)
+                                .forSharedRuntime().inspectAuthoringSharedSource(r.inspectionPath,maxSourceBytes);
+                        break;
+                    default:
+                        throw new PackageResourceInspector.ResourceNotFoundException();
+                }
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",source));
+            }
             if ("package-configuration".equals(r.inspectionType)) {
                 att.resource.PackageManifestInspector manifest = new att.resource.PackageManifestInspector(root, config, !Boolean.FALSE.equals(r.redactionEnabled), r.sensitivePaths, r.sensitiveFieldPatterns);
                 Map<String,Object> inspected = "validate".equals(r.inspectionAction)
                         ? manifest.validateCandidate(r.packageManifestSource, r.environment)
                         : "source".equals(r.inspectionAction) ? resourceInspector(root, config, r).inspectPackageFileSource("package.yaml", null)
                         : manifest.inspect(r.inspectionAction, r.environment);
+                if("resolve".equals(r.inspectionAction))
+                    inspected.put("packageRevision",resourceInspector(root,config,r).executionRevisionDigest());
                 if("source".equals(r.inspectionAction)) {
                     Map<String,Object> metadata=manifest.inspect("declared",r.environment);
                     inspected.put("manifestDigest",metadata.get("manifestDigest"));inspected.put("present",metadata.get("present"));
@@ -449,9 +522,12 @@ public final class WorkerMain {
                 return new OperationResult(null,"PASS",0,0,validated.diagnostics(),Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
             if("revision".equals(r.inspectionAction)) {
-                inspector.verifyRevision(r.expectedRevisionDigest);
+                Map<String,String> revisions=inspector.sourceRevisionDigests(r.expectedExecutionRevisionDigest);
+                Map<String,Object> result=new LinkedHashMap<String,Object>();
+                result.put("revisionDigest",revisions.get("executionRevisionDigest"));
+                result.putAll(revisions);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
-                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",Collections.<String,Object>singletonMap("revisionDigest",inspector.executionRevisionDigest())));
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",result));
             }
             if("validation-revision".equals(r.inspectionAction)) {
                 String revision=inspector.validationSourceRevisionDigest(r.registeredPackageId!=null);
@@ -463,7 +539,7 @@ public final class WorkerMain {
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspector.prewarmEligibility()));
             }
             if("debug-form".equals(r.inspectionAction)) {
-                Map<String,Object> inspected=inspector.inspectDebugForm(r.inspectionType,r.inspectionResourceId,r.expectedRevisionDigest);
+                Map<String,Object> inspected=inspector.inspectDebugForm(r.inspectionType,r.inspectionResourceId,r.expectedExecutionRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
@@ -474,7 +550,7 @@ public final class WorkerMain {
             }
             if("quick-load-form".equals(r.inspectionAction)) {
                 Map<String,Object> inspected=inspector.inspectQuickLoadForm(r.inspectionType,r.inspectionResourceId,
-                        r.loadModel,r.expectedRevisionDigest);
+                        r.loadModel,r.expectedExecutionRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
@@ -506,12 +582,12 @@ public final class WorkerMain {
             }
             if("load-catalog".equals(r.inspectionAction)) {
                 Map<String,Object> inspected=inspector.inspectLoadCatalog(r.inspectionQuery,
-                        r.inspectionOffset==null?0:r.inspectionOffset,r.inspectionLimit==null?50:r.inspectionLimit,r.expectedRevisionDigest);
+                        r.inspectionOffset==null?0:r.inspectionOffset,r.inspectionLimit==null?50:r.inspectionLimit,r.expectedExecutionRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
             if("load-detail".equals(r.inspectionAction)) {
-                Map<String,Object> inspected=inspector.inspectLoadCatalogDetail(r.inspectionPath,r.expectedRevisionDigest);
+                Map<String,Object> inspected=inspector.inspectLoadCatalogDetail(r.inspectionPath,r.expectedExecutionRevisionDigest);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
@@ -524,7 +600,7 @@ public final class WorkerMain {
                     r.inspectionResourceId, r.inspectionQuery,
                     r.inspectionOffset == null ? 0 : r.inspectionOffset,
                     r.inspectionLimit == null ? 50 : r.inspectionLimit,
-                    r.expectedRevisionDigest,r.inspectionOrigin,
+                    r.expectedExecutionRevisionDigest,r.inspectionOrigin,
                     r.inspectionSort == null ? "name" : r.inspectionSort,
                     r.inspectionDirection == null ? "asc" : r.inspectionDirection);
             return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
@@ -750,8 +826,13 @@ public final class WorkerMain {
                 request.maxResponseBytes==null?262144:request.maxResponseBytes,true,
                 sourceBrowsingEnabled,policy,request.sourceDenyGlobs,redactionEnabled,
                 request.sensitivePaths,request.sensitiveFieldPatterns)) {
-            if(prewarmed)inspector.verifyPrewarmRevision(request.expectedRevisionDigest);
-            else inspector.verifyRevision(request.expectedRevisionDigest);
+            boolean archiveBound=sourceSnapshot!=null
+                    &&sourceSnapshot.verifyExecutionRevision(request.expectedExecutionRevisionDigest);
+            if(archiveBound) {
+                if(prewarmed&&!Boolean.TRUE.equals(inspector.prewarmEligibility().get("eligible")))
+                    throw new IllegalArgumentException("Package requires a cold Worker environment");
+            } else if(prewarmed)inspector.verifyPrewarmRevision(request.expectedExecutionRevisionDigest);
+            else inspector.verifyRevision(request.expectedExecutionRevisionDigest);
         }
     }
 

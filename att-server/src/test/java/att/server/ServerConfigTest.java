@@ -8,6 +8,17 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ServerConfigTest {
+    @Test void centralConfigurationSourceAuthoringIsAnIndependentOptIn() throws Exception {
+        Path pkg=Files.createDirectories(temp.resolve("central-config-package")),file=temp.resolve("central-config-server.yaml");
+        String tail="workers: {}\npackages:\n  allowedRoots: ["+yaml(pkg)+"]\n  entries: {p: "+yaml(pkg)+"}\n";
+        Files.writeString(file,"server:\n  dataDir: "+yaml(temp.resolve("central-config-data"))+"\n"+tail);
+        assertFalse(ServerConfig.load(file).centralConfigurationEditingEnabled);
+        Files.writeString(file,"server:\n  dataDir: "+yaml(temp.resolve("central-config-data"))+"\n  centralConfigurationEditingEnabled: true\n"+tail);
+        assertTrue(ServerConfig.load(file).centralConfigurationEditingEnabled);
+        Files.writeString(file,"server:\n  dataDir: "+yaml(temp.resolve("central-config-data"))+"\n  centralConfigurationEditingEnabled: 'true'\n"+tail);
+        assertThrows(IllegalArgumentException.class,()->ServerConfig.load(file));
+    }
+
     @Test void eventJournalByteBudgetDefaultsAndRejectsOutOfRangeValues() throws Exception {
         Path pkg=Files.createDirectories(temp.resolve("journal-package")),file=temp.resolve("journal-config.yaml");
         String head="server:\n  dataDir: "+yaml(temp.resolve("journal-data"))+"\n";

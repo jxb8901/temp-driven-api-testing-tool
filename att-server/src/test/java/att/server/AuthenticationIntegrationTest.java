@@ -9,6 +9,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.Files;
@@ -44,15 +48,74 @@ class AuthenticationIntegrationTest {
         restore(previousServerConfig);
     }
 
+    @Test void trustedPackageRegistryHotReloadsWhileTomcatServesAndRetainsLastKnownGood() throws Exception {
+        previousAttHome=System.getProperty("att.home");Path home=createLocalRuntime();System.setProperty("att.home",home.toString());
+        Path packages=Files.createDirectories(temp.resolve("registry-packages"));
+        Path first=Files.createDirectory(packages.resolve("first"));
+        Path second=Files.createDirectory(packages.resolve("second"));
+        Path repointed=Files.createDirectory(packages.resolve("repointed"));
+        Files.createDirectory(packages.resolve("unregistered"));
+        Path config=Files.writeString(temp.resolve("registry-server.yaml"),registryServerYaml(temp.resolve("registry-data"),packages,Map.of("alpha",first)));
+        System.setProperty("att.server.config",config.toString());
+        Path users=Files.writeString(temp.resolve("registry-users.xml"),"<tomcat-users></tomcat-users>");
+        Tomcat tomcat=start(users,appDirectory("registry-hot-reload"),true);
+        try {
+            int port=tomcat.getConnector().getLocalPort();
+            JsonNode initial=waitForRegistry(port,node->node.path("status").asText().equals("Ready")&&node.path("packages").size()==1);
+            long initialGeneration=initial.path("generation").asLong();String initialRevision=initial.path("revision").asText();
+            assertEquals(List.of("alpha"),registryIds(initial));
+            assertTrue(getJson(port,"/att/api/v1/packages",null).toString().contains("alpha"));
+
+            Files.writeString(config,registryServerYaml(temp.resolve("registry-data"),packages,Map.of("alpha",first,"beta",second)));
+            JsonNode added=waitForRegistry(port,node->node.path("status").asText().equals("Ready")&&registryIds(node).equals(List.of("alpha","beta")));
+            assertEquals(initialGeneration+1,added.path("generation").asLong());
+            assertNotEquals(initialRevision,added.path("revision").asText());
+            assertEquals(200,get(port,"/att/api/v1/health",null),"Tomcat continues serving throughout registry reload");
+            assertEquals(404,get(port,"/att/api/v1/packages/unregistered",null),"An unregistered directory remains invisible");
+
+            Path candidate=temp.resolve("registry-server.next.yaml");
+            Files.writeString(candidate,registryServerYaml(temp.resolve("registry-data"),packages,Map.of("alpha",repointed)));
+            Files.move(candidate,config,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
+            JsonNode changed=waitForRegistry(port,node->node.path("status").asText().equals("Ready")&&registryIds(node).equals(List.of("alpha"))
+                    &&node.path("generation").asLong()==initialGeneration+2);
+            assertNotEquals(added.path("revision").asText(),changed.path("revision").asText());
+
+            String lastKnownGood=changed.path("revision").asText();
+            Files.writeString(config,"server: [partial");
+            JsonNode invalid=waitForRegistry(port,node->node.path("status").asText().equals("Invalid"));
+            assertEquals(lastKnownGood,invalid.path("revision").asText());
+            assertEquals(List.of("alpha"),registryIds(invalid));
+            assertFalse(invalid.toString().contains(temp.toString()),"Registry status must not leak server paths");
+            assertEquals(200,get(port,"/att/api/v1/health",null));
+        } finally {tomcat.stop();tomcat.destroy();restore(previousServerConfig);}
+    }
+
     @Test void packageManifestHttpPublicationEnforcesCsrfOwnerRevocationAndConflict() throws Exception {
         previousAttHome=System.getProperty("att.home");Path home=createLocalRuntime();System.setProperty("att.home",home.toString());
         Path packages=Files.createDirectories(temp.resolve("manifest-packages"));Path pkg=Files.createDirectories(packages.resolve("business-folder"));
-        Files.createDirectories(pkg.resolve("templates"));Files.createDirectories(pkg.resolve("testcase"));
-        String original="schemaVersion: att-package/v1\ndefaultEnvironment: SIT\n";
+        Path adminPackage=Files.createDirectories(packages.resolve("admin-business"));
+        Files.createDirectories(pkg.resolve("templates/TARGET"));Files.createDirectories(pkg.resolve("testcase"));
+        Files.createDirectories(adminPackage.resolve("templates"));Files.createDirectories(adminPackage.resolve("testcase"));
+        Files.writeString(pkg.resolve("templates/TARGET/template.yaml"),"schemaVersion: att-template/v3.6\nname: TARGET\n"
+                +"description: owner Testcase source fixture\nactions: {note: {type: log, message: safe}}\n");
+        String sidecar="schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n  sheet: Cases\n  caseId: Case ID\n  tags: Tags\n  dataColumns: payload=Payload\n"
+                +"stages:\n  - key: invoke\n    template: Template\n    dataColumns: request=Request\n";
+        Files.writeString(pkg.resolve("testcase/cases.yaml"),sidecar);
+        try(Workbook workbook=new XSSFWorkbook();OutputStream output=Files.newOutputStream(pkg.resolve("testcase/cases.xlsx"))) {
+            Sheet sheet=workbook.createSheet("Cases");Row header=sheet.createRow(0);
+            String[] columns={"Case ID","Tags","Payload","Template","Request"};
+            for(int index=0;index<columns.length;index++)header.createCell(index).setCellValue(columns[index]);
+            Row row=sheet.createRow(1);row.createCell(0).setCellValue("CASE_1");row.createCell(1).setCellValue("smoke");
+            row.createCell(2).setCellValue("safe");row.createCell(3).setCellValue("TARGET");row.createCell(4).setCellValue("safe");
+            workbook.write(output);
+        }
+        String original="# keep this comment and authored ordering\nschemaVersion: att-package/v1\ndefaultEnvironment: SIT\n";
         Files.writeString(pkg.resolve("package.yaml"),original);
+        Files.writeString(adminPackage.resolve("package.yaml"),original);
         Path data=temp.resolve("manifest-data");Path config=Files.writeString(temp.resolve("manifest-server.yaml"),
-                "server:\n  dataDir: "+yaml(data)+"\n  auth: {mode: local}\n  security: {checkCrossOrigin: true}\n"
-                +"  packageConfiguration: {sourceEditingEnabled: true}\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {owner: "+yaml(pkg)+"}\n");
+                "server:\n  dataDir: "+yaml(data)+"\n  auth: {mode: local}\n  centralConfigurationEditingEnabled: true\n  security: {checkCrossOrigin: true}\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\n  inspection: {redaction: {sensitiveFieldPatterns: [\"^opaqueConfigValue$\"]}}\n"
+                +"workers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {owner: "+yaml(pkg)+", admin: "+yaml(adminPackage)+"}\n");
         System.setProperty("att.server.config",config.toString());
         Path users=Files.writeString(temp.resolve("manifest-users.xml"),"<tomcat-users></tomcat-users>");
         Tomcat tomcat=start(users,appDirectory("manifest-http"));
@@ -72,6 +135,65 @@ class AuthenticationIntegrationTest {
             HttpResponse<String> source=sendWithCookie(client,port,"GET",base+"/source",owner.cookie,null,null,null);
             assertEquals(200,source.statusCode(),source.body());
             String digest=ServerRuntime.JSON.readTree(source.body()).path("manifestDigest").asText();assertTrue(digest.matches("[a-f0-9]{64}"));
+            String rawPath="/att/api/v1/packages/owner/authoring-source?type=manifest";
+            HttpResponse<String> raw=sendWithCookie(client,port,"GET",rawPath,owner.cookie,null,null,null);
+            assertEquals(200,raw.statusCode(),raw.body());assertEquals(original,ServerRuntime.JSON.readTree(raw.body()).path("text").asText());
+            assertEquals(ServerRuntime.JSON.readTree(raw.body()).path("sourceEtag").asText(),raw.headers().firstValue("ETag").orElseThrow());
+            assertEquals("private, no-store",raw.headers().firstValue("Cache-Control").orElseThrow());
+            HttpResponse<String> caseList=sendWithCookie(client,port,"GET","/att/api/v1/packages/owner/resources?type=case",owner.cookie,null,null,null);
+            assertEquals(200,caseList.statusCode(),caseList.body());
+            JsonNode caseItems=ServerRuntime.JSON.readTree(caseList.body()).path("items");String caseResourceId=null;
+            for(JsonNode item:caseItems)if("ready".equals(item.path("state").asText()))caseResourceId=item.path("resourceId").asText();
+            assertNotNull(caseResourceId,caseList.body());
+            String testcaseSourcePath="/att/api/v1/packages/owner/authoring-source?type=testcase&resourceId="
+                    +caseResourceId+"&selector=sidecar";
+            HttpResponse<String> testcaseSource=sendWithCookie(client,port,"GET",testcaseSourcePath,owner.cookie,null,null,null);
+            assertEquals(200,testcaseSource.statusCode(),testcaseSource.body());
+            assertEquals(sidecar,ServerRuntime.JSON.readTree(testcaseSource.body()).path("text").asText());
+            assertEquals(ServerRuntime.JSON.readTree(testcaseSource.body()).path("sourceEtag").asText(),
+                    testcaseSource.headers().firstValue("ETag").orElseThrow());
+            assertEquals(404,sendWithCookie(client,port,"GET",testcaseSourcePath+"&path=testcase%2Fother.yaml",
+                    owner.cookie,null,null,null).statusCode(),"The Testcase selector does not accept caller-supplied paths");
+            assertEquals(403,sendWithCookie(client,port,"GET",rawPath,other.cookie,null,null,null).statusCode());
+            assertEquals(403,sendWithCookie(client,port,"GET",rawPath,admin.cookie,null,null,null).statusCode(),"ADMIN does not receive Package USER or owner access");
+            assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/packages/admin/authoring-source?type=manifest",admin.cookie,null,null,null).statusCode(),
+                    "A matching ADMIN login remains outside Package USER owner permissions");
+            assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",admin.cookie,origin,admin.csrf,"{}").statusCode(),
+                    "A local ADMIN does not acquire RUN permission from being active");
+            assertEquals(403,sendWithCookie(client,port,"POST","/att/api/v1/jobs/load",admin.cookie,origin,admin.csrf,"{}").statusCode(),
+                    "A local ADMIN does not acquire LOAD permission from being active");
+            assertEquals(202,sendWithCookie(client,port,"POST","/att/api/v1/jobs/run",other.cookie,origin,other.csrf,
+                    "{\"packageId\":\"owner\",\"all\":true}").statusCode(),
+                    "Another active USER retains operational RUN rights for the registered Package");
+            assertEquals(401,send(client,port,"GET",rawPath,null,null,null).statusCode());
+            assertEquals(404,sendWithCookie(client,port,"GET",rawPath+"&redacted=false",owner.cookie,null,null,null).statusCode());
+            assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/configuration/declared",admin.cookie,null,null,null).statusCode(),
+                    "ADMIN may inspect the safe Central Runtime Config projection");
+            assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/configuration/authoring-source?path=config%2Fconfig.yaml",owner.cookie,null,null,null).statusCode(),
+                    "Package owners do not receive Central Runtime Config authoring access");
+            String centralPath="/att/api/v1/configuration/authoring-source?path=config%2Fconfig.yaml";
+            Path centralSource=home.resolve("config/config.yaml");String centralText=Files.readString(centralSource);
+            HttpResponse<String> central=sendWithCookie(client,port,"GET",centralPath,admin.cookie,null,null,null);
+            assertEquals(200,central.statusCode(),central.body());
+            assertEquals(centralText,ServerRuntime.JSON.readTree(central.body()).path("text").asText());
+            assertEquals("private, no-store",central.headers().firstValue("Cache-Control").orElseThrow());
+            List<String> embeddedProtectedRecords=List.of(
+                    "schemaVersion: att-package/v1\npayload: |\n  classification: secret\n  value: route-block-canary\n",
+                    "schemaVersion: att-package/v1\npayload: >\n  classification: secret\n  value: route-folded-canary\n",
+                    "schemaVersion: att-package/v1\npayload: |\n  <payload>{&quot;classification&quot;:&quot;secret&quot;,&quot;value&quot;:&quot;route-xml-text-canary&quot;}</payload>\n",
+                    "schemaVersion: att-package/v1\npayload: |\n  <payload value=\"{&quot;classification&quot;:&quot;secret&quot;,&quot;value&quot;:&quot;route-xml-attribute-canary&quot;}\"/>\n",
+                    "schemaVersion: att-package/v1\npayload: |\n  <payload><![CDATA[{\"classification\":\"secret\",\"value\":\"route-xml-cdata-canary\"}]]></payload>\n",
+                    "schemaVersion: att-package/v1\npayload: |\n  records:\n    opaqueConfigValue: route-configured-canary\n",
+                    "schemaVersion: att-package/v1\npayload: \"{\\\"classification\\\":\\\"secret\\\",\\\"value\\\":\\\"route-escaped-canary\\\"}\"\n");
+            for(String embedded:embeddedProtectedRecords) {
+                Files.writeString(pkg.resolve("package.yaml"),embedded);
+                assertEquals(404,sendWithCookie(client,port,"GET",rawPath,owner.cookie,null,null,null).statusCode(),
+                        "The owner-only Package source route must withhold protected embedded scalar content");
+                Files.writeString(centralSource,embedded);
+                assertEquals(404,sendWithCookie(client,port,"GET",centralPath,admin.cookie,null,null,null).statusCode(),
+                        "The ADMIN-only Central source route must withhold protected embedded scalar content");
+            }
+            Files.writeString(pkg.resolve("package.yaml"),original);Files.writeString(centralSource,centralText);
             String candidate="schemaVersion: att-package/v1\ndefaultEnvironment: SIT\ndefaults: {timeoutMs: 12000}\n";
             String body=ServerRuntime.JSON.writeValueAsString(Map.of("source",candidate,"expectedManifestDigest",digest));
             assertEquals(403,sendWithCookie(client,port,"POST",base+"/drafts",owner.cookie,origin,null,body).statusCode());
@@ -347,7 +469,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,userMonitoring.statusCode(),userMonitoring.body());
             JsonNode monitoring=ServerRuntime.JSON.readTree(userMonitoring.body());
             assertEquals("att-monitoring/v1",monitoring.path("schemaVersion").asText());
-            assertEquals("4.3.1",monitoring.path("health").path("version").asText());
+            assertEquals("4.4.0",monitoring.path("health").path("version").asText());
             assertTrue(monitoring.path("workers").path("maxConcurrent").isIntegralNumber());
             assertTrue(monitoring.path("workers").path("activeLoadJobs").isIntegralNumber());
             assertTrue(monitoring.path("http").path("successfulRequests").isIntegralNumber());
@@ -694,7 +816,17 @@ class AuthenticationIntegrationTest {
             assertEquals(200,request(port,null));assertEquals(200,get(port,"/att/ui/index.html",null));
             assertEquals(200,get(port,"/att/ui/app.js",null));
             assertEquals(200,get(port,"/att/api/v1/health",null));
-            assertEquals("4.3.1",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            assertEquals("4.4.0",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            JsonNode registry=getJson(port,"/att/api/v1/registry",null);
+            assertEquals("att-package-registry/v1",registry.path("schemaVersion").asText());
+            assertEquals("Ready",registry.path("status").asText());
+            assertTrue(registry.path("generation").asLong()>0);
+            assertFalse(registry.toString().contains(temp.toString()),"Registry responses expose logical IDs only");
+            JsonNode scope=getJson(port,"/att/api/v1/packages/debug/scope",null);
+            assertEquals("att-source-scope/v1",scope.path("schemaVersion").asText());
+            for(String revision:List.of("registryRevision","packageSourceRevision","packageManifestRevision","centralConfigSourceRevision",
+                    "activeEffectiveConfigRevision","embeddedEngineSchemaRevision"))assertTrue(scope.path(revision).asText().matches("[a-f0-9]{64}"),revision);
+            assertFalse(scope.toString().contains(temp.toString()),"Source scope responses must not reveal paths");
             assertEquals("debug",getJson(port,"/att/api/v1/packages/debug",null).path("packageId").asText());
             JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",null);
             String resourceId=resources.path("items").get(0).path("resourceId").asText();
@@ -1041,6 +1173,22 @@ class AuthenticationIntegrationTest {
         HttpURLConnection connection=(HttpURLConnection)new URL("http://127.0.0.1:"+port+uri).openConnection();connection.setConnectTimeout(5000);connection.setReadTimeout(30000);
         if(authorization!=null)connection.setRequestProperty("Authorization",authorization);
         assertEquals(200,connection.getResponseCode());try{return ServerRuntime.JSON.readTree(connection.getInputStream());}finally{connection.disconnect();}
+    }
+    private String registryServerYaml(Path data,Path allowedRoot,Map<String,Path> entries) {
+        StringBuilder yaml=new StringBuilder("server:\n  dataDir: ").append(yaml(data)).append("\n  authenticationRequired: false\n")
+                .append("  authorization:\n    allowAnonymousOperations: true\nworkers: {}\npackages:\n  allowedRoots:\n    - ")
+                .append(yaml(allowedRoot)).append("\n  entries:\n");
+        new java.util.TreeMap<>(entries).forEach((id,path)->yaml.append("    ").append(id).append(": ").append(yaml(path)).append('\n'));
+        return yaml.toString();
+    }
+    private static List<String> registryIds(JsonNode registry) {
+        List<String> result=new ArrayList<>();for(JsonNode item:registry.path("packages"))result.add(item.path("packageId").asText());return result;
+    }
+    private static JsonNode waitForRegistry(int port,java.util.function.Predicate<JsonNode> condition)throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(8);JsonNode registry=getJson(port,"/att/api/v1/registry",null);
+        while(!condition.test(registry)&&System.nanoTime()<deadline) {Thread.sleep(100);registry=getJson(port,"/att/api/v1/registry",null);}
+        assertTrue(condition.test(registry),"Registry did not converge before timeout: "+registry);
+        return registry;
     }
     private static JsonNode postJson(int port,String uri,String authorization,JsonNode body)throws Exception {
         return postJson(port,uri,authorization,body,201);

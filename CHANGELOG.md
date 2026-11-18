@@ -43,6 +43,12 @@
 
 # Changelog
 
+# ATT 4.3.0 - 2026-11-06
+
+- Add hot-reloaded, deployment-controlled Package registration with atomic candidate validation, last-known-good retention, sanitized status, and content-addressable registry revisions (#250).
+- Expose read-only registry and source-scope contracts with separate Package, Manifest, Central Runtime Config, effective Config, and Engine schema revision identities; bind Package drafts and approvals to the registry revision.
+- Add shared Package and ADMIN Change Sets with bounded drafts, revision-fenced validation and review, File-resource-safe moves, journaled atomic publication and recovery, and fail-closed validator and Config pre-commit hooks (#252).
+
 # ATT 4.2.9 - 2026-11-05
 
 - Allow operational users to rerun shared Jobs while keeping replay drafts private and preserving execution checks.

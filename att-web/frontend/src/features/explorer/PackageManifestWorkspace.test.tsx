@@ -12,6 +12,7 @@ let root: Root;
 beforeEach(() => { host = document.createElement('div');document.body.append(host);root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount());host.remove(); });
 const digest = 'a'.repeat(64);
+const authoringText = '# keep comments and ordering\nschemaVersion: att-package/v1\n\ndefaultEnvironment: SIT\n';
 function fixture(masked = false): PackageManifestApi {
   const projection: ManifestProjection = { packageId: 'owner', present: true, manifestDigest: digest, canEdit: true,
     environment: 'SIT', environmentOrigin: 'package', declared: { schemaVersion: 'att-package/v1' }, available: true,
@@ -20,6 +21,11 @@ function fixture(masked = false): PackageManifestApi {
   const draft: ManifestDraft = { draftId: 'M123', packageId: 'owner', expectedManifestDigest: digest, expiresAt: '2026-10-25T01:00:00Z', state: 'draft' };
   return {
     getPackageManifest: vi.fn(async () => projection),
+    getPackageAuthoringSource: vi.fn(async () => {
+      if (masked) throw { status: 404 };
+      return { available: true, present: true, logicalPath: 'package.yaml', format: 'yaml', text: authoringText,
+        sourceEtag: `\"sha256:${digest}\"`, revision: digest };
+    }),
     stagePackageManifest: vi.fn(async () => draft),
     manifestDraftAction: vi.fn(async (_packageId: string, _id: string, action: 'validate' | 'review' | 'discard'): Promise<ManifestDraft> => ({ ...draft, state: action === 'review' ? 'reviewed' : 'validated', validation: projection })),
     publishPackageManifest: vi.fn(async () => ({ published: true, manifestDigest: 'b'.repeat(64), auditConfirmed: true })),
@@ -41,7 +47,8 @@ describe('Package Manifest publication', () => {
     await click('Source');
     expect((host.querySelector('textarea') as HTMLTextAreaElement).readOnly).toBe(false);
     await click('Create Manifest draft');
-    expect(api.stagePackageManifest).toHaveBeenCalledWith('owner', 'schemaVersion: att-package/v1\n', digest, expect.any(AbortSignal));
+    expect(api.getPackageAuthoringSource).toHaveBeenCalledWith('owner', expect.any(AbortSignal));
+    expect(api.stagePackageManifest).toHaveBeenCalledWith('owner', authoringText, digest, expect.any(AbortSignal));
     expect(button('Publish reviewed Manifest').disabled).toBe(true);expect(button('Review validated Manifest').disabled).toBe(true);
     await click('Validate Manifest draft');
     expect(button('Publish reviewed Manifest').disabled).toBe(true);
@@ -73,6 +80,12 @@ describe('Package Manifest publication', () => {
     expect(button('Create Manifest draft').disabled).toBe(true);
     expect(host.textContent).toContain('read only to preserve protected values');
     await click('Create Manifest draft');expect(api.stagePackageManifest).not.toHaveBeenCalled();
+  });
+  it('uses the same lossless authoring source for View and Edit', async () => {
+    const api=fixture();await render(api);await click('Source');
+    const editor=host.querySelector('textarea') as HTMLTextAreaElement;
+    expect(editor.value).toBe(authoringText);expect(editor.readOnly).toBe(false);
+    expect(api.getPackageAuthoringSource).toHaveBeenCalledTimes(1);
   });
   it('retains a reviewed draft on revision conflict and requires an explicit discard', async () => {
     const api = fixture();api.publishPackageManifest = vi.fn(async () => { throw { status: 409 }; });

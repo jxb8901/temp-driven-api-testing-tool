@@ -8,6 +8,7 @@ from documentation_contracts import (active_schemas, stale_claims,
                                      editorial_source_files, standalone_markdown,
                                      standalone_page_errors)
 from build_reference_manual import rebase_headings, assembly_heading_offset
+from verify_documentation import schema_contract_corpus
 
 VERSION = "4.1.0"
 CATALOG = """schemaVersion: att-schema-catalog/v3.0
@@ -44,6 +45,10 @@ class DocumentationContractsTest(unittest.TestCase):
     def test_current_schemas_pass(self):
         self.assertEqual([], stale_claims("ATT 4.1.0; att-load/v1.6; config v2.12; att-testdata/v1.0",
                                           self.active, VERSION))
+
+    def test_server_api_schema_contracts_are_included_in_documentation_gate(self):
+        corpus = schema_contract_corpus()
+        self.assertIn('"$id": "https://att.example/schemas/att-source-management/v1"', corpus)
 
     def test_load_time_series_retention_contract_matches_current_metrics(self):
         root = Path(__file__).resolve().parents[1]

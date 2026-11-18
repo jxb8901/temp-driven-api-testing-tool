@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 PACKAGE_ROOT = ROOT / "packages" / "default"
 SCHEMAS = ROOT / "schemas"
+API_SCHEMA_ROOT = ROOT / "att-server-api" / "src" / "main" / "resources" / "schemas"
 MANIFEST = DOCS / "reference-manifest.txt"
 LANDING = DOCS / "README.md"
 HISTORY_INDEX = DOCS / "history" / "README.md"
@@ -38,6 +39,13 @@ def fail(message):
 
 def read(path):
     return path.read_text(encoding="utf-8")
+
+
+def schema_contract_corpus():
+    roots = (SCHEMAS, API_SCHEMA_ROOT)
+    return "\n".join(read(path) for root in roots if root.is_dir()
+                     for path in root.rglob("*") if path.is_file()
+                     and path.suffix.lower() in (".json", ".xsd", ".yaml", ".yml"))
 
 
 def product_version():
@@ -349,9 +357,7 @@ def check_schema_references():
             tokens.update(re.findall(r"\batt-[a-z0-9-]+/v[0-9]+(?:\.[0-9]+)*\b",
                                      read(path), re.I))
 
-    schema_corpus = "\n".join(read(path) for path in SCHEMAS.rglob("*")
-                                if path.is_file() and path.suffix.lower() in
-                                (".json", ".xsd", ".yaml", ".yml"))
+    schema_corpus = schema_contract_corpus()
     catalog_path = SCHEMAS / "catalog.yaml"
     registered = active_schemas(read(catalog_path)) if catalog_path.is_file() else {}
     registered_tokens = {name + "/v" + version for name, versions in registered.items() for version in versions}
