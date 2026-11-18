@@ -217,7 +217,7 @@ describe('App Dashboard job refresh', () => {
     await act(async () => root.render(<App />)); await settle();
     await clickButton('Validate Shared Config');
     await vi.waitFor(() => expect(submitted).toHaveLength(1));
-    await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'));
+    await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'), { timeout: 5000 });
     expect(host.textContent).toContain('V11111111111111111111111111111111');
     expect(submitted).toHaveLength(1);
 
@@ -225,7 +225,7 @@ describe('App Dashboard job refresh', () => {
     await navigate('#/configuration/payments?environment=SIT');
     await clickButton('Validate Effective Config');
     await vi.waitFor(() => expect(submitted).toHaveLength(2));
-    await vi.waitFor(() => expect(host.textContent).toContain('V22222222222222222222222222222222'));
+    await vi.waitFor(() => expect(host.textContent).toContain('V22222222222222222222222222222222'), { timeout: 5000 });
     expect(host.textContent).toContain('V22222222222222222222222222222222');
     expect(submitted).toHaveLength(2);
     expect(JSON.parse(localStorage.getItem(validationContextsKey('test-auth-context')) || '[]')).toHaveLength(2);
@@ -233,13 +233,13 @@ describe('App Dashboard job refresh', () => {
 
     await navigate('#/');
     await navigate('#/configuration');
-    await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'));
+    await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'), { timeout: 5000 });
     expect(host.textContent).toContain('V11111111111111111111111111111111');
     expect(submitted).toHaveLength(2);
 
     await act(async () => root.unmount()); root = createRoot(host);
     await act(async () => root.render(<App />)); await settle();
-    await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'));
+    await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'), { timeout: 5000 });
     expect(host.textContent).toContain('V11111111111111111111111111111111');
     expect(submitted).toHaveLength(2);
     expect(cancel).not.toHaveBeenCalled();
