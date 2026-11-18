@@ -126,6 +126,61 @@ class ChangeSetPublisherTest {
         } finally {publisher.close();}
     }
 
+    @Test void centralHistoryRestoreIsAdminOnlyAndPublishesOnlyAsANewValidatedChangeSet() throws Exception {
+        ChangeSetPublisher publisher=publisher(acceptingValidator(),allowingGate());
+        try {
+            String initial=Files.readString(activeCentralRoot().resolve("config/config.yaml"));
+            String changed="schemaVersion: att-config/v2.13\nname: central-history-candidate\n";
+            Map<String,Object> first=stageCentral(publisher,List.of(ChangeSetPublisher.OperationInput.replace(
+                    "config/config.yaml",bytes(changed))));
+            String firstId=String.valueOf(first.get("changeSetId"));
+            validateReview(publisher,firstId,ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"admin",true);
+            publisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,
+                    "admin",true,firstId);
+            int gateCallsAfterFirstPublication=gateCalls.get();
+
+            @SuppressWarnings("unchecked") List<Map<String,Object>> rows=(List<Map<String,Object>>)publisher.sourceHistory(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"admin",true,0,20).get("items");
+            Map<String,Object> published=rows.get(0);
+            String beforeSnapshot=String.valueOf(published.get("beforeSnapshotId"));
+            String afterSnapshot=String.valueOf(published.get("afterSnapshotId"));
+            Map<String,Object> diff=publisher.sourceHistoryDiff(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"admin",true,beforeSnapshot,afterSnapshot,
+                    "config/config.yaml",0,20);
+            @SuppressWarnings("unchecked") Map<String,Object> item=(Map<String,Object>)((List<?>)diff.get("items")).get(0);
+            assertEquals(initial,item.get("beforeContent"));
+            assertEquals(changed,item.get("afterContent"));
+            assertThrows(ChangeSetPublisher.Denied.class,()->publisher.sourceHistory(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"owner",false,0,20));
+            assertThrows(ChangeSetPublisher.Denied.class,()->publisher.stageRestore(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"owner",false,
+                    beforeSnapshot,String.valueOf(published.get("afterRevision")),null,"unauthorized-restore"));
+
+            Map<String,String> current=publisher.currentRevisions(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"admin",true);
+            Map<String,Object> restore=publisher.stageRestore(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"admin",true,beforeSnapshot,
+                    current.get("baseSourceRevision"),null,"central-restore-request");
+            String restoreId=String.valueOf(restore.get("changeSetId"));
+            assertNotEquals(firstId,restoreId);
+            assertEquals(beforeSnapshot,restore.get("restoredFromSnapshotId"));
+            assertEquals(changed,Files.readString(activeCentralRoot().resolve("config/config.yaml")),
+                    "Staging a history restore must not rewind the active Config in place");
+            validateReview(publisher,restoreId,ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"admin",true);
+            publisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,
+                    "admin",true,restoreId);
+            assertEquals(initial,Files.readString(activeCentralRoot().resolve("config/config.yaml")));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> restoredRows=(List<Map<String,Object>>)publisher.sourceHistory(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"admin",true,0,20).get("items");
+            assertEquals("SOURCE_RESTORE_PUBLISH",restoredRows.get(0).get("action"));
+            assertEquals(beforeSnapshot,restoredRows.get(0).get("restoredFromSnapshotId"));
+            assertTrue(gateCalls.get()>gateCallsAfterFirstPublication,
+                    "The restored candidate must pass fresh validation, review, and publication gate checks");
+        } finally {publisher.close();}
+    }
+
     @Test void expiredPrivateChangeSetDraftsAreReclaimedWithoutAnotherStageRequest() throws Exception {
         MutableClock clock=new MutableClock(Instant.parse("2026-11-18T00:00:00Z"));
         ChangeSetPublisher publisher=publisher(clock,1,1,acceptingValidator(),allowingGate(),null);

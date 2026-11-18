@@ -77,6 +77,26 @@ class ConfigActivationCoordinatorTest {
         assertEquals(1, invalidations.get());
     }
 
+    @Test void postPublicationInvalidationFailureIsReportedSoThePublisherCanRollBack() {
+        RevisionIdentity before = revision("a");
+        RevisionIdentity after = revision("b");
+        ConfigActivationCoordinator coordinator = new ConfigActivationCoordinator(new Guard(before) {
+            @Override public void afterPublication(String revision) throws Exception {
+                throw new IllegalStateException("cache invalidation failed");
+            }
+        });
+        coordinator.seed(SCOPE, before);
+        coordinator.committed(event(before, after));
+
+        assertFalse(coordinator.afterPublication(after.revision));
+
+        ActivationStatus status = coordinator.recordedStatus(SCOPE);
+        assertEquals(ActivationState.FAILED, status.state);
+        assertEquals(after.revision, status.publishedRevision.revision);
+        assertEquals(after.revision, status.activeRevision.revision);
+        assertEquals("ATT-CONFIG-ACTIVATION-INVALIDATION-FAILED", status.failureCode);
+    }
+
     @Test void claimedActivationWithoutLiveGuardReadbackMustFailClosed() {
         RevisionIdentity before = revision("a");
         RevisionIdentity after = revision("b");
@@ -132,11 +152,62 @@ class ConfigActivationCoordinatorTest {
         restarted.seed(SCOPE, revision("c"));
 
         ActivationStatus status = restarted.activationStatus(SCOPE);
-        assertEquals(ActivationState.UNAVAILABLE, status.state);
-        assertEquals(revision("c").revision, status.publishedRevision.revision);
-        assertEquals(after.revision, status.activeRevision.revision,
-                "the journal retains the last verified revision for repair after a crash");
-        assertNotEquals(ActivationState.ACTIVE, status.state);
+        assertEquals(ActivationState.FAILED, status.state);
+        assertEquals(after.revision, status.publishedRevision.revision);
+        assertEquals(revision("c").revision, status.activeRevision.revision,
+                "an unexpected active pointer is reported accurately but remains unverified");
+        assertEquals("ATT-CONFIG-ACTIVATION-STATE-UNVERIFIED", status.failureCode);
+    }
+
+    @Test void restartPreservesFailedActivationWhenEitherLastKnownGoodOrFailedCandidateIsActive() throws Exception {
+        Path journal = temp.resolve("failed-config-activation-status.json");
+        RevisionIdentity before = revision("a");
+        RevisionIdentity after = revision("b");
+        Guard firstGuard = new Guard(before) {
+            @Override public ActivationStatus activate(PublicationEvent event) {
+                observed = new ActivationStatus(SCOPE, event.after.configSource, event.before.configSource,
+                        ActivationState.FAILED, "ATT-CONFIG-ACTIVATION-FAILED");
+                return observed;
+            }
+        };
+        ConfigActivationCoordinator publishing = ConfigActivationCoordinator.fileBacked(firstGuard, journal);
+        publishing.seed(SCOPE, before);
+        publishing.committed(event(before, after));
+
+        Guard rolledBackGuard = new Guard(before);
+        ConfigActivationCoordinator rolledBack = ConfigActivationCoordinator.fileBacked(rolledBackGuard, journal);
+        rolledBack.seed(SCOPE, before);
+        ActivationStatus rolledBackStatus = rolledBack.activationStatus(SCOPE);
+        assertEquals(ActivationState.FAILED, rolledBackStatus.state);
+        assertEquals(after.revision, rolledBackStatus.publishedRevision.revision);
+        assertEquals(before.revision, rolledBackStatus.activeRevision.revision);
+
+        Guard rollbackFailedGuard = new Guard(after);
+        ConfigActivationCoordinator rollbackFailed = ConfigActivationCoordinator.fileBacked(rollbackFailedGuard, journal);
+        rollbackFailed.seed(SCOPE, after);
+        ActivationStatus rollbackFailedStatus = rollbackFailed.activationStatus(SCOPE);
+        assertEquals(ActivationState.FAILED, rollbackFailedStatus.state,
+                "A candidate left active after a failed rollback must not be promoted to ACTIVE on restart.");
+        assertEquals(after.revision, rollbackFailedStatus.publishedRevision.revision);
+        assertEquals(after.revision, rollbackFailedStatus.activeRevision.revision);
+    }
+
+    @Test void restartDoesNotPromoteAnUnexpectedActivePointerAfterAPreviouslyVerifiedRevision() throws Exception {
+        Path journal = temp.resolve("unexpected-config-pointer-status.json");
+        RevisionIdentity verified = revision("a");
+        RevisionIdentity unexpected = revision("c");
+        ConfigActivationCoordinator first = ConfigActivationCoordinator.fileBacked(new Guard(verified), journal);
+        first.seed(SCOPE, verified);
+
+        ConfigActivationCoordinator restarted = ConfigActivationCoordinator.fileBacked(new Guard(unexpected), journal);
+        restarted.seed(SCOPE, unexpected);
+        ActivationStatus status = restarted.activationStatus(SCOPE);
+
+        assertEquals(ActivationState.FAILED, status.state);
+        assertEquals("ATT-CONFIG-ACTIVATION-STATE-UNVERIFIED", status.failureCode);
+        assertEquals(verified.revision, status.publishedRevision.revision);
+        assertEquals(unexpected.revision, status.activeRevision.revision,
+                "The reported pointer must show the unexpected active revision while keeping it unapproved.");
     }
 
     private static PublicationEvent event(RevisionIdentity before, RevisionIdentity after) {
@@ -151,7 +222,7 @@ class ConfigActivationCoordinatorTest {
     }
 
     private static class Guard implements ConfigActivationCoordinator.RuntimeGuard {
-        private volatile ActivationStatus observed;
+        volatile ActivationStatus observed;
         Guard() { }
         Guard(RevisionIdentity initialActive) {
             observed = new ActivationStatus(SCOPE, initialActive, initialActive, ActivationState.ACTIVE, null);

@@ -320,6 +320,7 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
       else navigation.navigate({ kind: 'configuration', packageId, environment, filePath: path, fileOrigin: origin, tab: 'source' });
     }}
     onOpenTestdata={onOpenTestdata}
+    onOpenPackageConfiguration={onOpenPackageConfiguration}
     canManagePackageSource={canManagePackageSource}
   /></>;
 }

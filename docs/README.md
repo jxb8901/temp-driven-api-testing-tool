@@ -35,6 +35,7 @@ The Quick Start is a current 4.3.1 workflow. Snapshot generation is explicit aut
 | Run a Template, Flow or Tool with diagnostics | [Debug Reference](reference/execution-modes/debug.md) |
 | Configure DB and MQ helpers | [DBHelper Reference](reference/resources/dbhelper.md) · [MQHelper Reference](reference/resources/mqhelper.md) |
 | Validate configuration or a Package | [Validation guide](guides/validate.md) · [Validation Reference](reference/validation-diagnostics.md) |
+| Edit and publish Package or shared Runtime Config source | [Studio source authoring guide](interfaces/studio/source-authoring.md) · [繁體中文指南](interfaces/studio/source-authoring.zh.md) |
 | Use ATT expressions and Context | [Expressions Reference](reference/expressions.md) · [Runtime Context Reference](reference/runtime-context.md) |
 | Choose one of the six LOAD modes | [Load model](concepts/load-model.md) · [Load Reference](reference/execution-modes/load.md) |
 | Run a Load test | [Load testing guide](guides/load-testing.md) |

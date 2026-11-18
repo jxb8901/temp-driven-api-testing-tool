@@ -10,5 +10,9 @@
 .att-package-file-list small { color: var(--muted, #667085); }
 .att-package-file-list ul { margin: 0.15rem 0 0; padding-left: 1.25rem; }
 .att-package-file-list li span { color: var(--muted, #667085); }
+.att-package-file-catalog .att-file-catalog-reference { min-height: 2rem; padding: 0; border: 0; background: transparent; color: var(--att-color-primary, #0866c6); text-align: left; text-decoration: underline; }
+.att-file-catalog-coverage { padding: .65rem .8rem; border-inline-start: 3px solid var(--att-color-primary, #0866c6); background: color-mix(in srgb, var(--att-color-primary, #0866c6) 7%, var(--att-color-surface, #fff)); }
+.att-file-index-provenance { color: var(--muted, #667085); overflow-wrap: anywhere; }
+.att-file-index-provenance code { display: block; margin-block-start: .3rem; }
 .att-file-catalog-empty { color: var(--muted, #667085); }
 @media (max-width: 700px) { .att-package-file-list > li { flex-direction: column; } }

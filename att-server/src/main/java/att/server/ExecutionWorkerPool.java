@@ -125,6 +125,17 @@ final class ExecutionWorkerPool implements AutoCloseable {
         return available;
     }
 
+    /** Retire only idle Workers whose Package Config revision changed. */
+    synchronized void retirePackages(Set<String> packageIds) {
+        if (packageIds == null || packageIds.isEmpty()) return;
+        for (Iterator<Idle> iterator = owned.iterator(); iterator.hasNext();) {
+            Idle idle = iterator.next();
+            if (!packageIds.contains(idle.packageId)) continue;
+            idle.retired = true;
+            if (stop(idle)) iterator.remove();
+        }
+    }
+
     private void maintain() {
         Idle create=null;
         try {

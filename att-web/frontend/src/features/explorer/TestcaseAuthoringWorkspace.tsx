@@ -4,6 +4,8 @@ import { AppShellContext } from '../../AppShell';
 import type { ExplorerApi } from './types';
 import type { ManagedAuthoringSource, SourceChangeSet, SourceOperation, SourcePublishResult, SourceSnapshotRequest } from './sourceManagement';
 import { ChangedFiles } from './SourceAuthoringWorkspace';
+import { AuthoringWorkflow, type AuthoringStepState } from './AuthoringWorkflow';
+import { useAccessibleConfirmation } from './useAccessibleConfirmation';
 import './source-authoring.css';
 
 function safePath(path: string): boolean {
@@ -46,6 +48,7 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
   registerUnsavedChanges?: (isDirty: boolean, description?: string) => () => void;
 }) {
   const workspace = useContext(AppShellContext);
+  const { confirm: confirmAction, dialog: confirmationDialog } = useAccessibleConfirmation();
   const [revision, setRevision] = useState<Pick<ManagedAuthoringSource, 'sourceEtag' | 'baseSourceRevision' | 'registryRevision'> | null>(null);
   const [draft, setDraft] = useState<SourceChangeSet | null>(null);
   const [snapshotRequest, setSnapshotRequest] = useState<SourceSnapshotRequest | null>(null);
@@ -73,6 +76,23 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
     ? sourcePath : !sourcePath && /\.xml$/i.test(newXmlPath) && safePath(newXmlPath) ? newXmlPath : '';
   const draftStale = Boolean(draft && revision && (draft.baseSourceRevision !== revision.baseSourceRevision
     || draft.registryRevision !== revision.registryRevision));
+  const workflowCurrent = published ? 'publish' : snapshotRequest ? 'snapshot' : draft
+    ? draft.state === 'reviewed' ? 'publish' : draft.state === 'validated' ? 'review' : 'validate'
+    : newXmlPath ? 'upload' : 'view';
+  const workflowIds = ['view', 'upload', 'snapshot', 'validate', 'review', 'publish'];
+  const workflowLabels = workspace?.uiLocale === 'zh-Hant'
+    ? ['檢視', '上傳工作簿與 sidecar', '產生快照', '驗證草稿', '檢閱差異', '發布']
+    : ['View', 'Upload workbook + sidecar', 'Generate snapshot', 'Validate draft', 'Review diff', 'Publish'];
+  const workflowIndex = workflowIds.indexOf(workflowCurrent);
+  const workflowSteps = workflowIds.map((id, index) => {
+    let state: AuthoringStepState = published || index < workflowIndex ? 'complete'
+      : index === workflowIndex ? 'current' : 'upcoming';
+    const reason = workspace?.uiLocale === 'zh-Hant'
+      ? 'Package 或註冊 revision 已變更；請捨棄草稿並以上一版來源重新上傳。'
+      : 'The Package or registration revision changed; discard and upload against the latest source.';
+    if (draftStale && index >= workflowIndex && !published) state = 'blocked';
+    return { id, label: workflowLabels[index], state, reason };
+  });
 
   useEffect(() => {
     revisionControllerRef.current?.abort();
@@ -119,9 +139,9 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
     return registerUnsavedChanges(isDirty, 'Testcase workbook source draft');
   }, [registerUnsavedChanges, isDirty]);
   useEffect(() => {
-    workspace?.setWorkspaceEditorLock?.(access === 'ready' || Boolean(draft || busy));
+    workspace?.setWorkspaceEditorLock?.(isDirty);
     return () => workspace?.setWorkspaceEditorLock?.(false);
-  }, [workspace?.setWorkspaceEditorLock, access, draft, busy]);
+  }, [workspace?.setWorkspaceEditorLock, isDirty]);
 
   useEffect(() => {
     const suspendPrivilegedDisplay = () => {
@@ -203,7 +223,9 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
       const snapshot: SourceSnapshotRequest = { expectedSourceRevision: revision?.baseSourceRevision || '', workbookPath, expectedWorkbookHash, expectedSidecarHash };
       if (!snapshot.expectedSourceRevision) { setError('The Package source revision is unavailable. Reload before uploading.'); return; }
       if (uploadController.signal.aborted) return;
-      if (!window.confirm(`Stage ${workbookPath} and ${sidecarPath} together? This does not generate or publish the Testcase snapshot.`)) return;
+      if (!await confirmAction({ title: 'Stage paired Testcase files?',
+        message: `Stage workbook ${workbookPath} and sidecar ${sidecarPath} together. This does not generate or publish the XML snapshot.`,
+        confirmLabel: workspace?.uiLocale === 'zh-Hant' ? '建立上傳草稿' : 'Stage upload draft' })) return;
       if (uploadController.signal.aborted) return;
       await stage([
         { operation: workbookOperation, path: workbookPath, contentBase64: base64(workbookBytes) },
@@ -219,7 +241,9 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
   async function generateSnapshot() {
     if (!draft || !revision || !snapshotRequest || !api.generateTestcaseSnapshot) { setError('Upload the workbook and matching sidecar together before generating the snapshot.'); return; }
     if (draftStale) { setError('The Testcase draft uses an older Package or registration revision. Discard it and upload against the current revision.'); return; }
-    if (!window.confirm(`Generate the Testcase snapshot from ${snapshotRequest.workbookPath}? It remains a draft until validated, reviewed, and published.`)) return;
+    if (!await confirmAction({ title: 'Generate Testcase snapshot?',
+      message: `Generate the XML snapshot from ${snapshotRequest.workbookPath}. It remains in the draft until validation, review, and publication.`,
+      confirmLabel: 'Generate snapshot' })) return;
     await withBusy('generate the Testcase snapshot', async signal => {
       const result = await api.generateTestcaseSnapshot!(packageId, draft.changeSetId, snapshotRequest, signal);
       if (signal.aborted) return;
@@ -232,8 +256,11 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
     if (!draft || !api.sourceChangeSetAction) { setError('The Change Set action API is unavailable.'); return; }
     if (draftStale && action !== 'discard') { setError('The Testcase draft uses an older Package or registration revision. Discard it and upload against the current revision.'); return; }
     if (action === 'validate' && snapshotRequest) { setError('Generate the Testcase snapshot before validating this workbook change.'); return; }
-    if (action === 'publish' && !window.confirm(`Publish the reviewed Testcase source draft for ${targetXmlPath}?`)) return;
-    if (action === 'discard' && !window.confirm(`Discard draft ${draft.changeSetId}? Its staged files and snapshot will be removed.`)) return;
+    if (action === 'publish' && !await confirmAction({ title: 'Publish reviewed Testcase source?',
+      message: `Publish the reviewed workbook, sidecar, and generated snapshot for ${targetXmlPath}.`, confirmLabel: 'Publish Testcase' })) return;
+    if (action === 'discard' && !await confirmAction({ title: 'Discard Testcase draft?',
+      message: `Discard draft ${draft.changeSetId} and remove its staged files and snapshot. Published source remains unchanged.`,
+      confirmLabel: 'Discard draft', destructive: true })) return;
     await withBusy(`${action} the Testcase source draft`, async signal => {
       const result = await api.sourceChangeSetAction!('PACKAGE_SOURCE', packageId, draft.changeSetId, action, signal);
       if (signal.aborted) return;
@@ -241,7 +268,7 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
         const publication = result as SourcePublishResult;
         setPublished(publication); setDraft(null); setSnapshotRequest(null);
         recoveryRequiredRef.current = false; setRecoveryPending(false);
-        setStatus(`Published Testcase source revision ${publication.revision}.`);
+        setStatus('Testcase workbook, sidecar, and generated snapshot were published together.');
         setRefreshKey(value => value + 1);
       } else if (action === 'discard') {
         setDraft(null); setSnapshotRequest(null); recoveryRequiredRef.current = false; setRecoveryPending(false); setSuspended(false); suspendedRef.current = false;
@@ -252,6 +279,7 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
 
   const locked = access !== 'ready' || !targetXmlPath;
   if (suspended) return <section className="att-source-authoring att-testcase-authoring" aria-label="Testcase reauthorization">
+    {confirmationDialog}
     <h2>Testcase workspace hidden while away</h2>
     {access === 'loading' && <p role="status" aria-busy="true">Rechecking Package source permission before showing draft details.</p>}
     {access === 'unavailable' && <><p role="alert">{error || 'Testcase source reauthorization failed. Retry before resuming.'}</p>
@@ -259,35 +287,51 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
     {access === 'ready' && recoveryPending && revision && <>
       <p role="status">Permission was rechecked. Resume the in-memory upload and draft, or discard recovered work.</p>
       <button type="button" onClick={() => { recoveryRequiredRef.current = false; suspendedRef.current = false; setRecoveryPending(false); setSuspended(false); }} disabled={busy}>Resume work</button>
-      <button type="button" onClick={() => {
+      <button type="button" onClick={async () => {
         if (draft) { void act('discard'); return; }
-        if (!window.confirm('Discard the recovered Testcase upload path?')) return;
+        if (!await confirmAction({ title: 'Discard recovered Testcase path?',
+          message: 'Remove the recovered new XML path. No Package source will be published.',
+          confirmLabel: 'Discard path', destructive: true })) return;
         setNewXmlPath(''); recoveryRequiredRef.current = false; suspendedRef.current = false; setRecoveryPending(false); setSuspended(false);
       }} disabled={busy}>Discard recovered work</button>
     </>}
   </section>;
   return <section className="att-source-authoring att-testcase-authoring" aria-label="Testcase workbook authoring">
+    {confirmationDialog}
     <header className="att-source-authoring-heading"><div><p className="eyebrow">PACKAGE_SOURCE · {packageId} · TESTCASE</p>
       <h2>Testcase workbook and snapshot</h2>
       <p>Upload the workbook and sidecar as one draft, then explicitly generate the XML snapshot before validation.</p></div>
-      {onBack && <button type="button" className="button button-quiet" onClick={() => {
-        if (!sourcePath && newXmlPath && !window.confirm('Discard this new Testcase path and return to resources?')) return;
+      {onBack && <button type="button" className="button button-quiet" onClick={async () => {
+        if (!sourcePath && newXmlPath && !await confirmAction({ title: 'Discard new Testcase path?',
+          message: 'Leave this editor and remove the local XML path. The Package source remains unchanged.',
+          confirmLabel: 'Discard path', destructive: true })) return;
         onBack();
       }} disabled={busy || Boolean(draft)}>Back to resources</button>}
-      <button type="button" className="button button-quiet" onClick={() => {
-        if (isDirty && !window.confirm('Reloading discards this local Testcase draft context. Continue?')) return;
+      <button type="button" className="button button-quiet" onClick={async () => {
+        if (isDirty && !await confirmAction({ title: 'Discard local Testcase work?',
+          message: 'Reloading removes the local XML path and current upload context. Server drafts remain available.',
+          confirmLabel: 'Discard and reload', destructive: true })) return;
         setDraft(null); setSnapshotRequest(null); setNewXmlPath(''); setRefreshKey(value => value + 1);
       }} disabled={busy || access === 'loading' || Boolean(draft)}>Reload revision</button>
     </header>
+    <AuthoringWorkflow label={workspace?.uiLocale === 'zh-Hant' ? 'Testcase 來源發布工作流程' : 'Testcase source publication workflow'} steps={workflowSteps} />
     {access === 'loading' && <p role="status" aria-busy="true">Loading owner-only Package source revisions…</p>}
     {access === 'denied' && <p className="att-source-authoring-note" role="status">Testcase editing requires Package owner permission. Safe Testcase inspection remains available above.</p>}
     {access === 'unavailable' && <p className="att-error" role="alert">{error || 'Testcase authoring is unavailable.'}</p>}
     {access === 'ready' && revision && <>
-      <div className="att-source-revision-strip" aria-label="Testcase revision details">
-        <span>Package source ETag <code>{revision.sourceEtag}</code></span>
-        <span>Base source revision <code>{revision.baseSourceRevision}</code></span>
-        <span>Package registration revision <code>{revision.registryRevision}</code></span>
+      <div className="att-source-revision-strip" aria-label="Testcase publication status">
+        <span><strong>{draft ? 'Draft staged' : published ? 'Testcase snapshot published' : 'Published Testcase source'}</strong></span>
         {targetXmlPath && <span>Testcase path <code>{targetXmlPath}</code></span>}
+        {draft && <span>Published workbook, sidecar, and XML snapshot are unchanged.</span>}
+        <details aria-label="Advanced Testcase revision provenance">
+          <summary>Advanced revision provenance</summary>
+          <dl>
+            <div><dt>Package source ETag</dt><dd><code>{revision.sourceEtag}</code></dd></div>
+            <div><dt>Base source revision</dt><dd><code>{revision.baseSourceRevision}</code></dd></div>
+            <div><dt>Package registration revision</dt><dd><code>{revision.registryRevision}</code></dd></div>
+            {published && <div><dt>Published revision</dt><dd><code>{published.revision}</code></dd></div>}
+          </dl>
+        </details>
       </div>
       {draftStale && <p className="att-error" role="alert">This draft uses an older Package source or registration revision. It can be discarded, but cannot be generated, validated, reviewed or published.</p>}
       {!sourcePath && <label>New Testcase XML path<input aria-label="New Testcase XML path" value={newXmlPath}
@@ -320,7 +364,7 @@ export function TestcaseAuthoringWorkspace({ api, packageId, sourcePath, onBack,
           <button type="button" onClick={() => void act('discard')} disabled={busy}>Discard Draft</button>
         </div>
       </section>}
-      {published && <p role="status">Last published Testcase revision: <code>{published.revision}</code></p>}
+      {published && <p role="status">Testcase workbook, sidecar, and generated snapshot were published together.</p>}
     </>}
   </section>;
 }

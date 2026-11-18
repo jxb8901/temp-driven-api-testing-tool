@@ -2,6 +2,7 @@ package att.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import att.server.api.WorkerRequest;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -132,6 +133,10 @@ class ExecutionWorkerSemanticParityTest {
             Map<String,Object> runAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
                     Map.of("packageId","p","draftId",runDraft.get("draftId"))),"alice","alice");
             String runId=String.valueOf(runAccepted.get("jobId"));
+            Job runJob=runtime.jobs.get(runId);
+            assertEquals(WorkerRequest.SOURCE_SNAPSHOT_PROTOCOL,runJob.request.protocolVersion,
+                    "Published source-pinned RUNs require a Worker that understands the snapshot contract");
+            assertNotNull(runJob.request.sourceSnapshotArchiveSha256);
             Map<String,Object> runResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,runId);
             assertEquals("PASS",((Map<?,?>)runResult.get("job")).get("status"),runResult.toString());
             assertEquals("cold",workerDispatch(runResult),"A source-pinned RUN must use the isolated cold Worker after publication");
@@ -145,6 +150,10 @@ class ExecutionWorkerSemanticParityTest {
             Map<String,Object> debugAccepted=runtime.submitDebugDraft(ServerRuntime.JSON.valueToTree(
                     Map.of("packageId","p","draftId",debugDraft.get("draftId"))),"alice");
             String debugId=String.valueOf(debugAccepted.get("jobId"));
+            Job debugJob=runtime.jobs.get(debugId);
+            assertEquals(WorkerRequest.SOURCE_SNAPSHOT_PROTOCOL,debugJob.request.protocolVersion,
+                    "Published source-pinned DEBUGs require a Worker that understands the snapshot contract");
+            assertNotNull(debugJob.request.sourceSnapshotArchiveSha256);
             Map<String,Object> debugResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,debugId);
             assertEquals("PASS",((Map<?,?>)debugResult.get("job")).get("status"),debugResult.toString());
             assertEquals("cold",workerDispatch(debugResult),"A source-pinned DEBUG must use the isolated cold Worker after publication");

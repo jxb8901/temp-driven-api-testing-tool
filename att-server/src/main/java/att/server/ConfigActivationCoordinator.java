@@ -34,6 +34,8 @@ final class ConfigActivationCoordinator implements PublicationLifecycleHook {
         ActivationStatus activate(PublicationEvent event) throws Exception;
         void invalidate(InvalidationScope scope) throws Exception;
         ActivationStatus status(String scopeId);
+        default void afterPublication(String revision) throws Exception { }
+        default void recordStatus(ActivationStatus status) { }
     }
 
     interface StatusStore {
@@ -82,6 +84,38 @@ final class ConfigActivationCoordinator implements PublicationLifecycleHook {
         }
 
         ActivationStatus observed = guardStatus(scopeId);
+        if (persisted != null && persisted.state == ActivationState.ACTIVE
+                && !same(persisted.publishedRevision, publishedRevision)) {
+            ActivationStatus changedPointer = new ActivationStatus(scopeId, persisted.publishedRevision,
+                    observed != null && observed.activeRevision != null ? observed.activeRevision : publishedRevision,
+                    ActivationState.FAILED, "ATT-CONFIG-ACTIVATION-STATE-UNVERIFIED");
+            if (runtimeGuard != null) runtimeGuard.recordStatus(changedPointer);
+            store(changedPointer);
+            return;
+        }
+        if (persisted != null && persisted.state == ActivationState.FAILED) {
+            boolean recoveredLastKnownGood = same(persisted.activeRevision, publishedRevision)
+                    && verifiedActive(observed, scopeId, publishedRevision);
+            boolean failedCandidateStillActive = same(persisted.publishedRevision, publishedRevision)
+                    && observed != null && same(observed.activeRevision, publishedRevision);
+            if (recoveredLastKnownGood || failedCandidateStillActive) {
+                // Do not turn a previously failed activation into ACTIVE during restart.
+                // The active pointer may prove that rollback succeeded (A is active) or
+                // that rollback failed (B is still active); both states must remain visible
+                // as failed until an explicit, newly reviewed publication recovers them.
+                ActivationStatus recovered = new ActivationStatus(scopeId, persisted.publishedRevision,
+                        publishedRevision, ActivationState.FAILED, persisted.failureCode);
+                if (runtimeGuard != null) runtimeGuard.recordStatus(recovered);
+                store(recovered);
+                return;
+            }
+            ActivationStatus unverifiedFailure = new ActivationStatus(scopeId, persisted.publishedRevision,
+                    persisted.activeRevision, ActivationState.FAILED,
+                    "ATT-CONFIG-ACTIVATION-STATE-UNVERIFIED");
+            if (runtimeGuard != null) runtimeGuard.recordStatus(unverifiedFailure);
+            store(unverifiedFailure);
+            return;
+        }
         if (verifiedActive(observed, scopeId, publishedRevision)) {
             store(observed);
             return;
@@ -100,7 +134,9 @@ final class ConfigActivationCoordinator implements PublicationLifecycleHook {
     @Override public void committed(PublicationEvent event) {
         if (event == null || event.domain != Domain.CENTRAL_RUNTIME_CONFIG) return;
         String scopeId = event.scopeId;
-        ActivationStatus previous = activationStatus(scopeId);
+        // Keep the pre-publication coordinator snapshot. Calling activationStatus here
+        // would re-read the pointer after the transaction switched it to the candidate.
+        ActivationStatus previous = statuses.get(scopeId);
         RevisionIdentity lastKnownGood = previous == null ? null : previous.activeRevision;
         RevisionIdentity published = event.after.configSource;
         if (!canActivateOnline()) {
@@ -147,11 +183,65 @@ final class ConfigActivationCoordinator implements PublicationLifecycleHook {
         catch (Exception ignored) { /* Targeted cache invalidation is retried by the owning runtime guard. */ }
     }
 
+    /** Run deferred cache/Worker retirement while the caller still holds the admission fence. */
+    boolean afterPublication(String revision) {
+        if (revision == null) return false;
+        ActivationStatus current = statuses.get(CENTRAL_SCOPE);
+        if (!canActivateOnline()) {
+            if (current != null && current.publishedRevision != null) {
+                store(new ActivationStatus(CENTRAL_SCOPE, current.publishedRevision, current.activeRevision,
+                        ActivationState.FAILED, "ATT-CONFIG-RUNTIME-GUARD-UNAVAILABLE"));
+            }
+            return false;
+        }
+        current = activationStatus(CENTRAL_SCOPE);
+        if (current == null || !verifiedActive(current, CENTRAL_SCOPE, current.publishedRevision)
+                || !revision.equals(current.publishedRevision.revision)) {
+            if (current != null && current.publishedRevision != null) {
+                store(new ActivationStatus(CENTRAL_SCOPE, current.publishedRevision, current.activeRevision,
+                        ActivationState.FAILED, "ATT-CONFIG-ACTIVATION-STATE-UNVERIFIED"));
+            }
+            return false;
+        }
+        try {
+            runtimeGuard.afterPublication(revision);
+            return true;
+        }
+        catch (Exception failure) {
+            ActivationStatus failed = new ActivationStatus(CENTRAL_SCOPE, current.publishedRevision,
+                    current.activeRevision, ActivationState.FAILED, "ATT-CONFIG-ACTIVATION-INVALIDATION-FAILED");
+            runtimeGuard.recordStatus(failed);
+            store(failed);
+            return false;
+        }
+    }
+
+    void recordStatus(ActivationStatus status) {
+        if (status == null) return;
+        if (runtimeGuard != null) runtimeGuard.recordStatus(status);
+        store(status);
+    }
+
+    ActivationStatus recordedStatus(String scopeId) {
+        return scopeId == null ? null : statuses.get(scopeId);
+    }
+
     @Override public ActivationStatus activationStatus(String scopeId) {
         if (scopeId == null || scopeId.isBlank()) return null;
         ActivationStatus local = statuses.get(scopeId);
         ActivationStatus external = guardStatus(scopeId);
         RevisionIdentity expectedPublished = local == null ? null : local.publishedRevision;
+        if (local != null && local.state == ActivationState.FAILED && external != null
+                && same(local.publishedRevision, external.publishedRevision)
+                && same(local.publishedRevision, external.activeRevision)) {
+            // An ACTIVE-looking read-back of the failed candidate does not make it
+            // successful after restart or after a failed rollback.
+            ActivationStatus stillFailed = new ActivationStatus(scopeId, local.publishedRevision,
+                    external.activeRevision, ActivationState.FAILED,
+                    local.failureCode == null ? "ATT-CONFIG-ACTIVATION-STATE-UNVERIFIED" : local.failureCode);
+            store(stillFailed);
+            return stillFailed;
+        }
         if (verifiedActive(external, scopeId, expectedPublished)) {
             store(external);
             return external;
@@ -160,8 +250,9 @@ final class ConfigActivationCoordinator implements PublicationLifecycleHook {
             if (local != null && local.state != ActivationState.ACTIVE
                     && expectedPublished != null && external.publishedRevision != null
                     && !same(expectedPublished, external.publishedRevision)) return local;
-            RevisionIdentity published = expectedPublished == null ? external.publishedRevision : expectedPublished;
-            RevisionIdentity lastKnownGood = local == null ? external.activeRevision : local.activeRevision;
+            RevisionIdentity published = external.publishedRevision == null ? expectedPublished : external.publishedRevision;
+            RevisionIdentity lastKnownGood = external.activeRevision == null
+                    ? local == null ? null : local.activeRevision : external.activeRevision;
             ActivationState state = external.state == ActivationState.ACTIVE
                     ? ActivationState.FAILED : external.state;
             String failure = external.failureCode == null

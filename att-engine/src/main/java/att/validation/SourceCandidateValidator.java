@@ -464,6 +464,9 @@ public final class SourceCandidateValidator {
                 if (logical.startsWith("load/templates/")) templates.add(file);
                 continue;
             }
+            // Package-owned SUT Metrics definitions are validated through the explicit
+            // Package Manifest inventory. They are YAML, but they are not LOAD scenarios.
+            if (logical.startsWith("load/sut-metrics/")) continue;
             LoadScenario scenario = loader.load(file);
             if (scenario.policyOnly() || !scenario.hasWorkloads()) {
                 dependencies.add(new DependencyReference(DependencyKind.LOAD_OVERLAY, packageId, environment,

@@ -31,6 +31,7 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import org.junit.jupiter.api.io.TempDir;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Collections;
 import java.util.Map;
@@ -361,6 +362,25 @@ class WorkerMainTest {
         JsonNode result=mapper.readTree(lines[lines.length-1]);
         assertTrue(result.path("workerMetrics").path("heapMaxBytes").asLong()>0,result.toString());
         assertTrue(result.path("workerMetrics").path("sampleCount").asLong()>0,result.toString());
+    }
+
+    @Test void sourceSnapshotProtocolRequiresSnapshotAndRejectsV1Downgrade() throws Exception {
+        Map<String,String> requests=new LinkedHashMap<String,String>();
+        requests.put("att-worker/v2 without snapshot","{\"protocolVersion\":\"att-worker/v2\",\"jobId\":\"J-snapshot-v2\",\"command\":\"run\",\"packageRoot\":\".\"}");
+        requests.put("v1 snapshot downgrade","{\"protocolVersion\":\"att-worker/v1\",\"jobId\":\"J-snapshot-v1\",\"command\":\"run\",\"packageRoot\":\".\",\"sourceSnapshotArchivePath\":\"unused.zip\"}");
+        for(Map.Entry<String,String> entry:requests.entrySet()) {
+            Process process=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin","java").toString(),"-cp",
+                    System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
+            process.getOutputStream().write(entry.getValue().getBytes(StandardCharsets.UTF_8));process.getOutputStream().close();
+            String stdout=read(process.getInputStream());String stderr=read(process.getErrorStream());
+            assertEquals(2,process.waitFor(),entry.getKey()+"\n"+stderr);
+            String[] lines=stdout.trim().split("\\R");assertEquals(3,lines.length,entry.getKey()+"\n"+stdout);
+            JsonNode diagnostic=mapper.readTree(lines[1]);
+            assertEquals("DIAGNOSTIC",diagnostic.path("type").asText(),entry.getKey());
+            assertEquals("J-snapshot-"+(entry.getKey().startsWith("v1")?"v1":"v2"),diagnostic.path("jobId").asText(),entry.getKey());
+            assertEquals(entry.getKey().startsWith("v1")?"WORKER_SOURCE_SNAPSHOT_PROTOCOL_REQUIRED":"WORKER_SOURCE_SNAPSHOT_INVALID",
+                    diagnostic.path("code").asText(),entry.getKey()+"\n"+stdout);
+        }
     }
 
     @Test void oversizedCaseLogDoesNotLoseMissingJdbcDriverError() throws Exception {

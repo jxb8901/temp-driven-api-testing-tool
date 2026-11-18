@@ -485,6 +485,7 @@ class PrewarmedWorkerTest {
         return new SourceArchive(archive,digestFile(archive),directory,packageRoot,configRoot,executionRevisionDigest);
     }
     private void attachSnapshot(Map<String,Object> request,SourceArchive archive) throws Exception {
+        request.put("protocolVersion","att-worker/v2");
         request.put("sourceSnapshotArchivePath",archive.archive.toAbsolutePath().toString());
         request.put("sourceSnapshotDirectory",archive.directory.toAbsolutePath().toString());
         request.put("sourceSnapshotArchiveSha256",archive.sha256);request.put("sourceSnapshotConfigPath","config/config.yaml");

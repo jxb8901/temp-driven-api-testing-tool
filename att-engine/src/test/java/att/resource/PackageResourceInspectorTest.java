@@ -306,6 +306,20 @@ class PackageResourceInspectorTest {
         assertTrue(String.valueOf(file.get("referenceId")).matches("[0-9a-f]{64}"));
         @SuppressWarnings("unchecked") List<Map<String,Object>> callSites=(List<Map<String,Object>>)file.get("callSites");
         assertEquals(Arrays.asList("sendCT001Confirm","retryConfirm"),callSites.stream().map(site->String.valueOf(site.get("actionId"))).collect(Collectors.toList()));
+        String revision=String.valueOf(detail.get("revisionDigest"));
+        @SuppressWarnings("unchecked") Map<String,Object> filePage=inspector.inspect("file-index",null,null,"CT001",0,25,revision);
+        assertEquals(revision,filePage.get("packageRevision"));
+        assertEquals(1,filePage.get("total"));
+        assertEquals("COMPLETE",((Map<?,?>)filePage.get("coverage")).get("state"),filePage.toString());
+        @SuppressWarnings("unchecked") Map<String,Object> indexedFile=((List<Map<String,Object>>)filePage.get("items")).get(0);
+        assertEquals("templates/FORMAT/CT001_Confirm.xml",indexedFile.get("path"));
+        @SuppressWarnings("unchecked") Map<String,Object> indexedUse=((List<Map<String,Object>>)indexedFile.get("uses")).get(0);
+        assertEquals(resourceId,indexedUse.get("resourceId"));
+        assertEquals(Arrays.asList("sendCT001Confirm","retryConfirm"),
+                ((List<Map<String,Object>>)indexedUse.get("callSites")).stream()
+                        .map(site->String.valueOf(site.get("actionId"))).collect(Collectors.toList()));
+        assertThrows(PackageResourceInspector.StaleResourceCursorException.class,
+                ()->inspector.inspect("file-index",null,null,null,0,25,"stale-revision"));
         Map<String,Object> opened=inspector.inspect("source-file","template",resourceId,String.valueOf(file.get("referenceId")),0,1,null,
                 String.valueOf(file.get("originPath")));
         assertEquals(referenced.getFileName().toString(),Paths.get(String.valueOf(opened.get("logicalPath"))).getFileName().toString());

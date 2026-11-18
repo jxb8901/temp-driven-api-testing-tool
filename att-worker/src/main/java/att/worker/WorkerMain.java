@@ -26,7 +26,8 @@ import java.util.Map;
 
 /** Typed Engine process adapter with a one-request job mode and a bounded inspection daemon mode. */
 public final class WorkerMain {
-    private static final String PROTOCOL="att-worker/v1";
+    private static final String PROTOCOL=WorkerRequest.PROTOCOL_V1;
+    private static final String SOURCE_SNAPSHOT_PROTOCOL=WorkerRequest.SOURCE_SNAPSHOT_PROTOCOL;
     private final ObjectMapper mapper=new ObjectMapper();
     private final WorkerResourceTelemetry resourceTelemetry=new WorkerResourceTelemetry();
     private final PrintStream protocol;
@@ -148,6 +149,14 @@ public final class WorkerMain {
             if(request.maxResponseBytes!=null)inspectionResponseLimit=request.maxResponseBytes;
         }
         catch(Exception error) { return fail("WORKER_REQUEST_INVALID","Unable to decode Worker request"); }
+        boolean snapshotFields=request.sourceSnapshotArchivePath!=null||request.sourceSnapshotArchiveSha256!=null
+                ||request.sourceSnapshotConfigPath!=null||request.sourceSnapshotDirectory!=null;
+        if(!PROTOCOL.equals(request.protocolVersion)&&!SOURCE_SNAPSHOT_PROTOCOL.equals(request.protocolVersion))
+            return fail("WORKER_PROTOCOL_UNSUPPORTED","Unsupported protocolVersion; expected "+PROTOCOL+" or "+SOURCE_SNAPSHOT_PROTOCOL);
+        if(SOURCE_SNAPSHOT_PROTOCOL.equals(request.protocolVersion)&&!snapshotFields)
+            return fail("WORKER_SOURCE_SNAPSHOT_INVALID",SOURCE_SNAPSHOT_PROTOCOL+" requires a complete accepted source snapshot request");
+        if(PROTOCOL.equals(request.protocolVersion)&&snapshotFields)
+            return fail("WORKER_SOURCE_SNAPSHOT_PROTOCOL_REQUIRED","Accepted source snapshots require protocolVersion "+SOURCE_SNAPSHOT_PROTOCOL);
         try {
             sourceSnapshot=WorkerSourceSnapshot.stage(request);
             if(sourceSnapshot!=null) {
@@ -164,7 +173,6 @@ public final class WorkerMain {
                 request.liveOutputMaxEntryLines==null?40:request.liveOutputMaxEntryLines); }
         catch(IllegalArgumentException error) { return fail("WORKER_REQUEST_INVALID",error.getMessage()); }
         inspectionRequest="inspect".equals(request.command);
-        if(!PROTOCOL.equals(request.protocolVersion)) return fail("WORKER_PROTOCOL_UNSUPPORTED","Unsupported protocolVersion; expected "+PROTOCOL);
         if(inspectionDaemon&&!("inspect".equals(request.command))) return fail("WORKER_REQUEST_INVALID","Inspection Workers accept only inspect requests");
         if(prewarmed) {
             if(!("run".equals(request.command)||"debug".equals(request.command)))

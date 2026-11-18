@@ -838,14 +838,27 @@ final class JobStore implements AutoCloseable {
         try(Connection c=connect()) {
             c.setAutoCommit(false);
             try {
-                try(PreparedStatement p=c.prepareStatement("INSERT INTO source_publication_audit(transaction_id,principal,action,domain,scope_id,outcome,before_revision,after_revision,request_id,resources_json,created_at,before_snapshot_id,after_snapshot_id,validation_revision,activation_status,restored_from_snapshot_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
-                    p.setString(1,record.transactionId);p.setString(2,bounded(record.actor,256));p.setString(3,record.action);
-                    p.setString(4,record.domain);p.setString(5,record.scopeId);p.setString(6,record.outcome);
-                    p.setString(7,record.beforeRevision);p.setString(8,record.afterRevision);p.setString(9,record.requestId);
-                    p.setString(10,resources);p.setString(11,record.createdAt);p.setString(12,record.beforeSnapshotId);
-                    p.setString(13,record.afterSnapshotId);p.setString(14,record.validationRevision);
-                    p.setString(15,record.activationStatus);p.setString(16,record.restoredFromSnapshotId);p.executeUpdate();
+                String existingOutcome=null;
+                try(PreparedStatement p=c.prepareStatement("SELECT outcome FROM source_publication_audit WHERE transaction_id=?")) {
+                    p.setString(1,record.transactionId);try(ResultSet r=p.executeQuery()){if(r.next())existingOutcome=r.getString(1);}
                 }
+                boolean shouldWriteAudit=existingOutcome==null;
+                if(existingOutcome==null) {
+                    insertSourcePublicationAudit(c,record,resources);
+                } else if(("ROLLED_BACK".equals(record.outcome)&&!"ROLLED_BACK".equals(existingOutcome))
+                        ||("FAILED".equals(record.outcome)&&"COMMITTED".equals(existingOutcome))) {
+                    try(PreparedStatement p=c.prepareStatement("UPDATE source_publication_audit SET outcome=?,activation_status=? WHERE transaction_id=?")) {
+                        p.setString(1,record.outcome);p.setString(2,record.activationStatus);p.setString(3,record.transactionId);
+                        if(p.executeUpdate()!=1)throw new java.sql.SQLException("Source publication audit row changed during activation update");
+                    }
+                    shouldWriteAudit=true;
+                } else {
+                    // Replays of the same durable outcome are idempotent. A stale COMMITTED
+                    // replay must never overwrite a later rollback or activation failure.
+                    c.commit();
+                    return;
+                }
+                if(!shouldWriteAudit)throw new java.sql.SQLException("Source publication audit outcome is inconsistent");
                 try(PreparedStatement p=c.prepareStatement("INSERT INTO audit(principal,action,job_id,package_id,created_at,outcome,detail) VALUES(?,?,NULL,?,?,?,?)")) {
                     p.setString(1,bounded(record.actor,256));p.setString(2,record.action);
                     p.setString(3,ChangeSetPublisher.PACKAGE_SOURCE.equals(record.domain)?record.scopeId:null);
@@ -854,8 +867,28 @@ final class JobStore implements AutoCloseable {
                 c.commit();
             } catch(Exception failure) {
                 try { c.rollback(); } catch(Exception ignored) { }
-                if(sourcePublicationAuditExists(record.transactionId))return;
+                if(sourcePublicationAuditMatches(record))return;
                 throw failure;
+            }
+        }
+    }
+    private static void insertSourcePublicationAudit(Connection c,SourceFileTransaction.AuditRecord record,
+                                                      String resources) throws Exception {
+        try(PreparedStatement p=c.prepareStatement("INSERT INTO source_publication_audit(transaction_id,principal,action,domain,scope_id,outcome,before_revision,after_revision,request_id,resources_json,created_at,before_snapshot_id,after_snapshot_id,validation_revision,activation_status,restored_from_snapshot_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
+            p.setString(1,record.transactionId);p.setString(2,bounded(record.actor,256));p.setString(3,record.action);
+            p.setString(4,record.domain);p.setString(5,record.scopeId);p.setString(6,record.outcome);
+            p.setString(7,record.beforeRevision);p.setString(8,record.afterRevision);p.setString(9,record.requestId);
+            p.setString(10,resources);p.setString(11,record.createdAt);p.setString(12,record.beforeSnapshotId);
+            p.setString(13,record.afterSnapshotId);p.setString(14,record.validationRevision);
+            p.setString(15,record.activationStatus);p.setString(16,record.restoredFromSnapshotId);p.executeUpdate();
+        }
+    }
+    private boolean sourcePublicationAuditMatches(SourceFileTransaction.AuditRecord record) throws Exception {
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement(
+                "SELECT outcome,activation_status FROM source_publication_audit WHERE transaction_id=?")) {
+            p.setString(1,record.transactionId);
+            try(ResultSet r=p.executeQuery()) {
+                return r.next()&&record.outcome.equals(r.getString(1))&&record.activationStatus.equals(r.getString(2));
             }
         }
     }

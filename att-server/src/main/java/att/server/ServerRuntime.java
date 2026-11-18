@@ -29,6 +29,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.util.Base64;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -108,6 +109,7 @@ final class ServerRuntime implements AutoCloseable {
     private final JobSourceClosureStore jobSourceClosures;
     private final SourcePublicationLifecycle sourcePublicationLifecycle;
     private final ConcurrentHashMap<String,String> observedSourceRevisionIds=new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String,SourceFileTransaction.AuditRecord> pendingConfigActivationAudits=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String,ScheduleSourceOverride> scheduledSourceOverrides=new ConcurrentHashMap<>();
     final JobStore store;
     private volatile List<LoadSchedule> impactScheduleSnapshot;
@@ -159,6 +161,13 @@ final class ServerRuntime implements AutoCloseable {
     private final AtomicLong queueCapacityRejections=new AtomicLong();
     private final AtomicLong archiveFailures=new AtomicLong();
     private final AtomicLong archiveRetries=new AtomicLong();
+    private final AtomicLong sourceHistoryCleanupAttempts=new AtomicLong();
+    private final AtomicLong sourceHistoryCleanupSuccesses=new AtomicLong();
+    private final AtomicLong sourceHistoryCleanupFailuresSinceStart=new AtomicLong();
+    private final AtomicLong sourceHistoryRevisionsRemoved=new AtomicLong();
+    private final ConcurrentHashMap<String,Map<String,Object>> sourceHistoryRetentionScopes=new ConcurrentHashMap<>();
+    private volatile String sourceHistoryLastSuccessAt;
+    private volatile String sourceHistoryLastFailureAt;
     private final Semaphore loadSlots,admissionSlots;
     private final Semaphore inspectionTaskSlots;
     private final Semaphore validationAdmissionSlots;
@@ -240,11 +249,7 @@ final class ServerRuntime implements AutoCloseable {
                   LoadProgressPersistence loadProgressPersistence,Function<String,String> secretResolver) throws Exception {
         if(Runtime.version().feature()<17)throw new IllegalStateException("ATT Server requires Java 17 or later; detected Java "+Runtime.version().feature());
         this.config=config;this.artifactPublisher=java.util.Objects.requireNonNull(artifactPublisher);this.workerLibs=workerLibs==null?null:Paths.get(workerLibs).toAbsolutePath().normalize();this.workerSchemaRegistryDigest=WorkerRuntimeClasspath.schemaRegistryDigestIfPresent(this.workerLibs);this.processLauncher=processLauncher;this.clock=java.util.Objects.requireNonNull(clock);this.store=new JobStore(config);this.loadProgressPersistence=loadProgressPersistence==null?this.store::updateLoadProgress:loadProgressPersistence;
-        try{this.sutMetrics=new SutMetricsService(config.dataDir,config.runtimeConfigPath,
-                ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),secretResolver,this::sutMetricsManifestPublished);}
-        catch(Exception failed){store.close();throw failed;}
-        this.sutMetrics.setBusinessCallExecutor(this::openBusinessCallSession);
-        try{this.auth=new AuthService(config,store);}catch(Exception failed){sutMetrics.close();store.close();throw failed;}this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
+        this.loadSlots=new Semaphore(config.maxConcurrentLoad,true);this.admissionSlots=new Semaphore(config.maxConcurrent+config.queuedLimit,true);
         sourcePublicationBarrier=new SourcePublicationBarrier();
         sourceFileTransaction=new SourceFileTransaction(config.dataDir,sourcePublicationBarrier);
         Map<String,Path> sourceRecoveryRoots=new LinkedHashMap<String,Path>();
@@ -261,9 +266,16 @@ final class ServerRuntime implements AutoCloseable {
             observedSourceRevisionIds.put(sourceRevisionKey(ChangeSetPublisher.PACKAGE_SOURCE,entry.getKey()),
                     immutableSourceRevisionId(ChangeSetPublisher.PACKAGE_SOURCE,entry.getKey(),entry.getValue(),snapshot));
         }
-        Path centralSnapshot=sourceFileTransaction.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,centralRoot);
+        Path centralSnapshot=sourceFileTransaction.activeRevisionRoot(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                ChangeSetPublisher.CENTRAL_SCOPE_ID,centralRoot);
         observedSourceRevisionIds.put(sourceRevisionKey(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID),
                 immutableSourceRevisionId(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,centralRoot,centralSnapshot));
+        try {
+            this.sutMetrics=new SutMetricsService(config.dataDir,runtimeConfigSnapshotPath(centralRoot,centralSnapshot),
+                    centralSnapshot,secretResolver,this::sutMetricsManifestPublished);
+        } catch(Exception failed) { store.close();throw failed; }
+        this.sutMetrics.setBusinessCallExecutor(this::openBusinessCallSession);
+        try{this.auth=new AuthService(config,store);}catch(Exception failed){sutMetrics.close();store.close();throw failed;}
         jobSourceClosures=new JobSourceClosureStore(config.dataDir);
         sourcePublicationLifecycle=new SourcePublicationLifecycle(this::invalidateSourceScope);
         packageRegistry=new PackageRegistry(config,clock,
@@ -296,8 +308,120 @@ final class ServerRuntime implements AutoCloseable {
                     }
                 },sourceFileTransaction);
         ChangeSetCandidateValidator sourceCandidateValidator=new ChangeSetCandidateValidator(this.workerLibs,config.workerLibraryDirs);
-        configActivationCoordinator=ConfigActivationCoordinator.fileBackedUnavailable(
-                config.dataDir.resolve("config-activation-status.json"));
+        configActivationCoordinator=ConfigActivationCoordinator.fileBacked(new ConfigActivationCoordinator.RuntimeGuard() {
+            private volatile att.server.api.source.SourceManagementContracts.ActivationStatus observed;
+            private final ConcurrentHashMap<String,ConfigImpactAnalyzer.ActivationPlan> pendingPlans=new ConcurrentHashMap<>();
+
+            @Override public boolean available() {
+                if(packageRegistry==null||configImpactAnalyzer==null||sourceFileTransaction==null)return false;
+                if(!Files.isDirectory(centralRoot,java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                        ||Files.isSymbolicLink(centralRoot))return false;
+                var current=observed;
+                if(current==null||current.state!=att.server.api.source.SourceManagementContracts.ActivationState.FAILED)
+                    return true;
+                if(current.publishedRevision==null||current.activeRevision==null
+                        ||current.publishedRevision.revision.equals(current.activeRevision.revision))return false;
+                try {
+                    String live=changeSetPublisher.centralSourceRevision(centralSourceRoot(),workerSchemaRegistryDigest);
+                    return current.activeRevision.revision.equals(live);
+                } catch(Exception unavailable) { return false; }
+            }
+
+            @Override public att.server.api.source.SourceManagementContracts.ActivationStatus activate(
+                    att.server.api.source.SourceManagementContracts.PublicationEvent event) {
+                var published=event==null||event.after==null?null:event.after.configSource;
+                var lastKnownGood=event==null||event.before==null?null:event.before.configSource;
+                if(event==null||event.domain!=att.server.api.source.SourceManagementContracts.Domain.CENTRAL_RUNTIME_CONFIG
+                        ||!ChangeSetPublisher.CENTRAL_SCOPE_ID.equals(event.scopeId)||published==null) {
+                    var failed=new att.server.api.source.SourceManagementContracts.ActivationStatus(
+                            ChangeSetPublisher.CENTRAL_SCOPE_ID,published,lastKnownGood,
+                            att.server.api.source.SourceManagementContracts.ActivationState.FAILED,
+                            "ATT-CONFIG-ACTIVATION-EVENT-INVALID");
+                    observed=failed;return failed;
+                }
+                try {
+                    ConfigImpactAnalyzer.ActivationPlan plan=configImpactAnalyzer.takeActivationPlan(published.revision);
+                    if(plan==null)throw new IllegalStateException("Approved Config impact plan is unavailable");
+                    Path activeRoot=centralSourceRoot();
+                    String activeRevision=changeSetPublisher.centralSourceRevision(activeRoot,workerSchemaRegistryDigest);
+                    if(!published.revision.equals(activeRevision))
+                        throw new IllegalStateException("Active Config source does not match the approved publication");
+                    String activeId=activeRoot.getFileName()==null?null:activeRoot.getFileName().toString();
+                    if(activeId==null||!activeId.matches("R[A-F0-9]{32}"))
+                        throw new IllegalStateException("Active Config source identity is unavailable");
+                    sourceFileTransaction.exportActiveToConfiguredRoot(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                            ChangeSetPublisher.CENTRAL_SCOPE_ID,centralRoot,activeId);
+                    if(!published.revision.equals(changeSetPublisher.centralSourceRevision(activeRoot,workerSchemaRegistryDigest)))
+                        throw new IllegalStateException("Configured Config export changed the approved active revision");
+                    sutMetrics.activateRuntimeConfigSnapshot(runtimeConfigSnapshotPath(centralRoot,activeRoot),activeRoot);
+                    pendingPlans.put(published.revision,plan);
+                    var active=new att.server.api.source.SourceManagementContracts.ActivationStatus(
+                            event.scopeId,published,published,
+                            att.server.api.source.SourceManagementContracts.ActivationState.ACTIVE,null);
+                    observed=active;
+                    return active;
+                } catch(Exception unavailable) {
+                    var failed=new att.server.api.source.SourceManagementContracts.ActivationStatus(
+                            event.scopeId,published,lastKnownGood,
+                            att.server.api.source.SourceManagementContracts.ActivationState.FAILED,
+                            "ATT-CONFIG-ACTIVATION-FAILED");
+                    observed=failed;
+                    return failed;
+                }
+            }
+
+            @Override public void invalidate(att.server.api.source.SourceManagementContracts.InvalidationScope scope) {
+                if(scope!=null&&scope.packageId!=null)invalidateEffectiveConfiguration(scope.packageId,scope.environment);
+            }
+
+            @Override public att.server.api.source.SourceManagementContracts.ActivationStatus status(String scopeId) {
+                if(!ChangeSetPublisher.CENTRAL_SCOPE_ID.equals(scopeId)||!available())return null;
+                try {
+                    Path activeRoot=centralSourceRoot();
+                    String activeRevision=changeSetPublisher.centralSourceRevision(activeRoot,workerSchemaRegistryDigest);
+                    var activeIdentity=att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                            att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE,scopeId,activeRevision);
+                    var current=observed;
+                    if(current!=null&&current.state!=att.server.api.source.SourceManagementContracts.ActivationState.ACTIVE) {
+                        var reconciled=new att.server.api.source.SourceManagementContracts.ActivationStatus(scopeId,
+                                current.publishedRevision,activeIdentity,current.state,current.failureCode);
+                        observed=reconciled;
+                        return reconciled;
+                    }
+                    if(current!=null) {
+                        if(current.publishedRevision!=null&&current.publishedRevision.revision.equals(activeRevision))return current;
+                        var unverified=new att.server.api.source.SourceManagementContracts.ActivationStatus(scopeId,
+                                current.publishedRevision,activeIdentity,
+                                att.server.api.source.SourceManagementContracts.ActivationState.FAILED,
+                                "ATT-CONFIG-ACTIVATION-STATE-UNVERIFIED");
+                        observed=unverified;
+                        return unverified;
+                    }
+                    var active=new att.server.api.source.SourceManagementContracts.ActivationStatus(
+                            scopeId,activeIdentity,activeIdentity,
+                            att.server.api.source.SourceManagementContracts.ActivationState.ACTIVE,null);
+                    observed=active;
+                    return active;
+                } catch(Exception unavailable) { return null; }
+            }
+
+            @Override public void afterPublication(String revision) {
+                ConfigImpactAnalyzer.ActivationPlan plan=pendingPlans.remove(revision);
+                if(plan==null||!revision.equals(plan.revision))
+                    throw new IllegalStateException("Approved Config impact plan was lost before activation completed");
+                Set<String> affectedPackages=new java.util.TreeSet<>();
+                for(var affected:plan.affectedPackages)affectedPackages.add(affected.packageId);
+                if(executionWorkers==null&&!affectedPackages.isEmpty())
+                    throw new IllegalStateException("Execution Worker pool is unavailable for Config activation");
+                if(executionWorkers!=null)executionWorkers.retirePackages(affectedPackages);
+                for(var affected:plan.affectedPackages)
+                    invalidateEffectiveConfiguration(affected.packageId,affected.environment);
+            }
+
+            @Override public void recordStatus(att.server.api.source.SourceManagementContracts.ActivationStatus status) {
+                if(status!=null&&ChangeSetPublisher.CENTRAL_SCOPE_ID.equals(status.scopeId))observed=status;
+            }
+        },config.dataDir.resolve("config-activation-status.json"));
         configImpactAnalyzer=new ConfigImpactAnalyzer(new ConfigImpactAnalyzer.Inventory() {
             @Override public PackageRegistry.Snapshot registry() { return packageRegistry.snapshot(); }
             @Override public List<LoadSchedule> schedules() throws Exception {
@@ -365,8 +489,52 @@ final class ServerRuntime implements AutoCloseable {
                                                     after,null,null,null,null),record.resources);
                             configActivationCoordinator.committed(event);
                             att.server.api.source.SourceManagementContracts.ActivationStatus status=
-                                    configActivationCoordinator.activationStatus(record.scopeId);
-                            if(status!=null&&status.state!=null)durableRecord=record.withActivationStatus(status.state.name());
+                                    configActivationCoordinator.recordedStatus(record.scopeId);
+                            if(status==null||status.state!=att.server.api.source.SourceManagementContracts.ActivationState.ACTIVE) {
+                                String state=status==null?"FAILED":status.state.name();
+                                Exception rollbackFailure=null;
+                                try {
+                                    sourceFileTransaction.rollbackActivation(record,
+                                            "UNAVAILABLE".equals(state)?"UNAVAILABLE":"FAILED");
+                                    Path restoredRoot=sourceFileTransaction.activeRevisionRoot(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                                            record.scopeId,centralRoot);
+                                    sutMetrics.activateRuntimeConfigSnapshot(runtimeConfigSnapshotPath(centralRoot,restoredRoot),restoredRoot);
+                                } catch(Exception failure) {
+                                    rollbackFailure=failure;
+                                }
+                                if(rollbackFailure!=null) {
+                                    durableRecord=record.withOutcome("FAILED").withActivationStatus("FAILED");
+                                    var failedActive=before;
+                                    try {
+                                        Path currentRoot=sourceFileTransaction.activeRevisionRoot(
+                                                ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,record.scopeId,centralRoot);
+                                        String currentRevision=changeSetPublisher.centralSourceRevision(currentRoot,workerSchemaRegistryDigest);
+                                        var activeIdentity=att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                                                att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE,
+                                                record.scopeId,currentRevision);
+                                        failedActive=activeIdentity;
+                                    } catch(Exception statusFailure) { rollbackFailure.addSuppressed(statusFailure); }
+                                    configActivationCoordinator.recordStatus(new att.server.api.source.SourceManagementContracts.ActivationStatus(
+                                            record.scopeId,after,failedActive,
+                                            att.server.api.source.SourceManagementContracts.ActivationState.FAILED,
+                                            "ATT-CONFIG-LAST-KNOWN-GOOD-RESTORE-FAILED"));
+                                    try { store.persistSourcePublicationAudit(durableRecord); }
+                                    catch(Exception auditFailure) {
+                                        rollbackFailure.addSuppressed(auditFailure);
+                                        throw new SourceFileTransaction.ActivationRollbackAuditPending(auditFailure);
+                                    }
+                                    throw new ChangeSetPublisher.ValidationRejected("ATT-CONFIG-ACTIVATION-FAILED");
+                                }
+                                durableRecord=record.withOutcome("ROLLED_BACK").withActivationStatus(state);
+                                try { store.persistSourcePublicationAudit(durableRecord); }
+                                catch(Exception auditFailure) {
+                                    // Keep the rollback journal so startup recovery can replay the durable audit.
+                                    throw new SourceFileTransaction.ActivationRollbackAuditPending(auditFailure);
+                                }
+                                throw new ChangeSetPublisher.ValidationRejected("ATT-CONFIG-ACTIVATION-FAILED");
+                            }
+                            durableRecord=record.withActivationStatus(status.state.name());
+                            pendingConfigActivationAudits.put(record.afterRevision,durableRecord);
                         }
                         store.persistSourcePublicationAudit(durableRecord);
                     }
@@ -924,6 +1092,7 @@ final class ServerRuntime implements AutoCloseable {
         sourcePublicationBarrier.readLock().lock();
         try {
         if(closing)throw new QueueFullException("Server is shutting down");
+        ensureRuntimeConfigDispatchable();
         long requestReceivedNanos=System.nanoTime();
         if(!List.of("run","debug","load","validate").contains(command))throw new IllegalArgumentException("Unsupported job command");
         String packageId=required(input,"packageId");
@@ -1141,6 +1310,7 @@ final class ServerRuntime implements AutoCloseable {
                     request.sourceSnapshotArchiveSha256=workerSnapshot.archiveSha256;
                     request.sourceSnapshotDirectory=workerSnapshot.directory.toString();
                     request.sourceSnapshotConfigPath=workerSnapshot.configRelativePath;
+                    request.protocolVersion=WorkerRequest.SOURCE_SNAPSHOT_PROTOCOL;
                 } catch(Exception staleSource) {
                     throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Package or Config source revision is unavailable. Validate the execution again.");
                 }
@@ -1803,9 +1973,11 @@ final class ServerRuntime implements AutoCloseable {
     Map<String,Object> packageSutMetricsCatalog(String packageId,String environment,String principal,boolean admin) throws Exception {
         Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         String selectedEnvironment=environment;
-        if(selectedEnvironment==null||selectedEnvironment.isBlank())
-            selectedEnvironment=new att.config.FrameworkConfigLoader().loadDiscovery(config.runtimeConfigPath,
-                    ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),root,null).environment();
+        if(selectedEnvironment==null||selectedEnvironment.isBlank()) {
+            Path activeConfigRoot=centralSourceRoot();
+            selectedEnvironment=new att.config.FrameworkConfigLoader().loadDiscovery(
+                    activeConfigRoot.resolve("config/config.yaml"),activeConfigRoot,root,null).environment();
+        }
         Map<String,Object> catalog=sutMetrics.packageCatalog(root,packageId,selectedEnvironment,principal,admin);
         catalog.put("canEdit",canEditPackageSource(packageId,principal));
         return catalog;
@@ -2523,16 +2695,52 @@ final class ServerRuntime implements AutoCloseable {
         }
         return Collections.unmodifiableMap(result);
     }
-    private Path centralSourceRoot() {
+    Path centralSourceRoot() {
         Path configured=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toAbsolutePath().normalize();
         try {
             Path canonical=configured.toRealPath();
-            Path snapshot=sourceFileTransaction.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+            Path snapshot=sourceFileTransaction.activeRevisionRoot(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
                     ChangeSetPublisher.CENTRAL_SCOPE_ID,canonical);
             observeSourceRevision(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,canonical,snapshot);
             return snapshot;
         }
         catch(Exception unavailable) { throw new IllegalStateException("Central source revision is unavailable",unavailable); }
+    }
+
+    private Path runtimeConfigSnapshotPath(Path configuredRoot,Path snapshotRoot) throws IOException {
+        Path root=configuredRoot.toAbsolutePath().normalize().toRealPath();
+        Path configured=config.runtimeConfigPath.toAbsolutePath().normalize().toRealPath();
+        if(!configured.startsWith(root)||configured.equals(root))
+            throw new IOException("Runtime Config path is outside its registered source root");
+        Path snapshot=snapshotRoot.toAbsolutePath().normalize();
+        // Central Config snapshots normalize the selected deployment file to this
+        // stable Worker/runtime path, even when the configured mirror uses a custom name.
+        Path selected=snapshot.resolve("config/config.yaml").normalize();
+        if(!selected.startsWith(snapshot)||Files.isSymbolicLink(selected)
+                ||!Files.isRegularFile(selected,java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Runtime Config snapshot file is unavailable");
+        return selected;
+    }
+
+    private void ensureRuntimeConfigDispatchable() throws Exception {
+        att.server.api.source.SourceManagementContracts.ActivationStatus status=
+                configActivationCoordinator.activationStatus(ChangeSetPublisher.CENTRAL_SCOPE_ID);
+        if(status==null)throw new JobConflictException("ATT-CONFIG-ACTIVATION-STATUS-UNAVAILABLE",
+                "New Jobs are paused because the active Runtime Config revision cannot be verified.");
+        boolean active=status.state==att.server.api.source.SourceManagementContracts.ActivationState.ACTIVE
+                &&status.publishedRevision!=null&&status.activeRevision!=null
+                &&status.publishedRevision.revision.equals(status.activeRevision.revision);
+        boolean verifiedLastKnownGood=status.state==att.server.api.source.SourceManagementContracts.ActivationState.FAILED
+                &&"ATT-CONFIG-ACTIVATION-FAILED".equals(status.failureCode)
+                &&status.publishedRevision!=null&&status.activeRevision!=null
+                &&!status.publishedRevision.revision.equals(status.activeRevision.revision);
+        if(!active&&!verifiedLastKnownGood)throw new JobConflictException("ATT-CONFIG-ACTIVATION-FAILED",
+                "New Jobs are paused because the active Runtime Config could not be verified. Repair Config activation before retrying.");
+        var lastKnownGood=status.activeRevision;
+        String current=changeSetPublisher.centralSourceRevision(centralSourceRoot(),workerSchemaRegistryDigest);
+        if(!lastKnownGood.revision.equals(current))
+            throw new JobConflictException("ATT-CONFIG-ACTIVATION-FAILED",
+                    "New Jobs are paused because the verified last-known-good Runtime Config is no longer active.");
     }
     private void observeSourceRevision(String domain,String scopeId,Path configuredRoot,Path snapshot) throws Exception {
         String key=sourceRevisionKey(domain,scopeId);
@@ -2592,7 +2800,10 @@ final class ServerRuntime implements AutoCloseable {
                 root=sourceFileTransaction.pin(domain,scopeId,configured);
             } else {
                 configured=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toAbsolutePath().normalize().toRealPath();
-                root=sourceFileTransaction.pin(domain,scopeId,configured);
+                // A Central Config publication has already switched the approved pointer.
+                // Reading the active revision here must not import a later edit to the
+                // deployment mirror as an implicitly published revision.
+                root=sourceFileTransaction.activeRevisionRoot(domain,scopeId,configured);
             }
             String after=immutableSourceRevisionId(domain,scopeId,configured,root);
             observedSourceRevisionIds.put(key,after);
@@ -2684,10 +2895,63 @@ final class ServerRuntime implements AutoCloseable {
             att.server.api.source.SourceManagementContracts.ImpactAcknowledgement acknowledgement) throws Exception {
         // New Job admission and Worker startup use readLock; publishing must hold the
         // exclusive writeLock through the source switch and activation handoff.
-        return ConfigImpactPublicationFence.runPublication(admissionLifecycle.writeLock(),
-                ()->packageRegistry.snapshot().packages,sourceFileTransaction,store,()->
-                withImpactScheduleSnapshot(()->changeSetPublisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
-                        ChangeSetPublisher.CENTRAL_SCOPE_ID,actor,true,changeSetId,requestId,acknowledgement)));
+        admissionLifecycle.writeLock().lock();
+        try {
+            Map<String,Object> publication=ConfigImpactPublicationFence.runPublication(admissionLifecycle.writeLock(),
+                    ()->packageRegistry.snapshot().packages,sourceFileTransaction,store,()->
+                    withImpactScheduleSnapshot(()->changeSetPublisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                            ChangeSetPublisher.CENTRAL_SCOPE_ID,actor,true,changeSetId,requestId,acknowledgement)));
+            Object revision=publication.get("revision");
+            if(revision instanceof String text) {
+                boolean activationCompleted=configActivationCoordinator.afterPublication(text);
+                SourceFileTransaction.AuditRecord record=pendingConfigActivationAudits.remove(text);
+                if(record!=null&&!activationCompleted)
+                    rollbackPostPublicationConfigActivation(record,
+                            configActivationCoordinator.recordedStatus(ChangeSetPublisher.CENTRAL_SCOPE_ID));
+            }
+            return publication;
+        } finally { admissionLifecycle.writeLock().unlock(); }
+    }
+
+    private void rollbackPostPublicationConfigActivation(SourceFileTransaction.AuditRecord record,
+            att.server.api.source.SourceManagementContracts.ActivationStatus failedStatus) {
+        String failureCode=failedStatus==null||failedStatus.failureCode==null
+                ?"ATT-CONFIG-ACTIVATION-INVALIDATION-FAILED":failedStatus.failureCode;
+        RevisionIdentity published=RevisionIdentity.of(RevisionKind.CONFIG_SOURCE,record.scopeId,record.afterRevision);
+        RevisionIdentity lastKnownGood=RevisionIdentity.of(RevisionKind.CONFIG_SOURCE,record.scopeId,record.beforeRevision);
+        try {
+            Path centralRoot=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toAbsolutePath().normalize().toRealPath();
+            sourceFileTransaction.rollbackActivation(record,"FAILED");
+            Path restoredRoot=sourceFileTransaction.activeRevisionRoot(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    record.scopeId,centralRoot);
+            sutMetrics.activateRuntimeConfigSnapshot(runtimeConfigSnapshotPath(centralRoot,restoredRoot),restoredRoot);
+            store.persistSourcePublicationAudit(record.withOutcome("ROLLED_BACK").withActivationStatus("FAILED"));
+            sourceFileTransaction.completeActivationRollback(record);
+            configActivationCoordinator.recordStatus(new att.server.api.source.SourceManagementContracts.ActivationStatus(
+                    record.scopeId,published,lastKnownGood,
+                    att.server.api.source.SourceManagementContracts.ActivationState.FAILED,failureCode));
+            throw new ChangeSetPublisher.ValidationRejected(failureCode);
+        } catch(ChangeSetPublisher.ValidationRejected rejected) {
+            throw rejected;
+        } catch(Exception failure) {
+            try { store.persistSourcePublicationAudit(record.withOutcome("FAILED").withActivationStatus("FAILED")); }
+            catch(Exception auditFailure) { failure.addSuppressed(auditFailure); }
+            RevisionIdentity active=lastKnownGood;
+            try {
+                Path centralRoot=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toAbsolutePath().normalize().toRealPath();
+                Path currentRoot=sourceFileTransaction.activeRevisionRoot(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                        record.scopeId,centralRoot);
+                String currentRevision=changeSetPublisher.centralSourceRevision(currentRoot,workerSchemaRegistryDigest);
+                active=RevisionIdentity.of(RevisionKind.CONFIG_SOURCE,record.scopeId,currentRevision);
+            } catch(Exception statusFailure) { failure.addSuppressed(statusFailure); }
+            String restoreFailure="ATT-CONFIG-LAST-KNOWN-GOOD-RESTORE-FAILED";
+            configActivationCoordinator.recordStatus(new att.server.api.source.SourceManagementContracts.ActivationStatus(
+                    record.scopeId,published,active,
+                    att.server.api.source.SourceManagementContracts.ActivationState.FAILED,restoreFailure));
+            ChangeSetPublisher.ValidationRejected rejected=new ChangeSetPublisher.ValidationRejected(restoreFailure);
+            rejected.addSuppressed(failure);
+            throw rejected;
+        }
     }
     private <T> T withImpactScheduleSnapshot(java.util.concurrent.Callable<T> operation) throws Exception {
         List<LoadSchedule> previous=impactScheduleSnapshot;
@@ -2751,7 +3015,7 @@ final class ServerRuntime implements AutoCloseable {
         if(!config.inspection.enabled)throw new NotFoundException();
         if(principal==null||principal.isBlank())throw new IllegalArgumentException("A server-resolved request identity is required");
         Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
-        if(!List.of("list","detail","source","source-file").contains(action))throw new IllegalArgumentException("Unsupported inspection action");
+        if(!List.of("list","detail","source","source-file","file-index").contains(action))throw new IllegalArgumentException("Unsupported inspection action");
         if(type!=null&&!List.of("case","template","flow","tool").contains(type))throw new IllegalArgumentException("Unsupported resource type");
         String normalizedSort=sort==null||sort.isBlank()?"name":sort;
         String normalizedDirection=direction==null||direction.isBlank()?"asc":direction;
@@ -2764,7 +3028,8 @@ final class ServerRuntime implements AutoCloseable {
         String normalizedQuery=query==null?"":query.trim();if(normalizedQuery.length()>200||containsControl(normalizedQuery))throw new IllegalArgumentException("query must contain at most 200 printable characters");
         int limit=requestedLimit==0?RESOURCE_DEFAULT_PAGE_SIZE:requestedLimit;
         if(limit<1||limit>RESOURCE_MAX_PAGE_SIZE)throw new IllegalArgumentException("limit must be between 1 and 100");
-        Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,type,normalizedQuery,normalizedSort,normalizedDirection,principal);
+        String cursorType="file-index".equals(action)?"files":type;
+        Cursor prior=cursor==null||cursor.isEmpty()?null:decodeCursor(cursor,packageId,cursorType,normalizedQuery,normalizedSort,normalizedDirection,principal);
         WorkerRequest request=inspectionRequest(packageId,root,null);
         request.inspectionAction=action;request.inspectionType=type;request.inspectionResourceId=resourceId;request.inspectionQuery=normalizedQuery;request.inspectionOffset=prior==null?0:prior.offset;request.inspectionLimit=limit;
         request.inspectionOrigin=sourceOriginPath;
@@ -2773,9 +3038,9 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Object> result=executeInspection(root,request);
         Object revision=result.remove("revisionDigest");
         if(revision instanceof String)result.put("_cacheRevision",inspectionCacheToken(List.of(packageId,principal,revision,sourcePublicationLifecycle.generation(packageId,null))));
-        if("list".equals(action)) {
+        if("list".equals(action)||"file-index".equals(action)) {
             Object next=result.remove("nextOffset");
-            if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,type,normalizedQuery,normalizedSort,normalizedDirection,((Number)next).intValue(),(String)revision,principal));
+            if(next instanceof Number&&revision instanceof String)result.put("nextCursor",encodeCursor(packageId,cursorType,normalizedQuery,normalizedSort,normalizedDirection,((Number)next).intValue(),(String)revision,principal));
             else result.put("nextCursor",null);
         }
         return result;
@@ -3581,16 +3846,18 @@ final class ServerRuntime implements AutoCloseable {
             pinnedRevision=(String)current;
         }
         String pinnedRuntimeRevision=runtimeConfigRevision(environment);
+        Path runtimeRoot=centralSourceRoot();
+        Path runtimePath=runtimeRoot.resolve("config/config.yaml");
         att.config.FrameworkConfigLoader loader=new att.config.FrameworkConfigLoader();
         boolean requiresBusinessCalls=sutMetrics.scenarioRequiresBusinessCallContext(observability,root);
         att.config.FrameworkConfig frameworkConfig=requiresBusinessCalls
-                ?loader.load(config.runtimeConfigPath,ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),root,environment)
-                :loader.loadDiscovery(config.runtimeConfigPath,ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),root,environment);
+                ?loader.load(runtimePath,runtimeRoot,root,environment)
+                :loader.loadDiscovery(runtimePath,runtimeRoot,root,environment);
         if(requiresBusinessCalls)frameworkConfig.requireExecutionConfig();
         if(!pinnedRuntimeRevision.equals(runtimeConfigRevision(environment)))
             throw new IllegalStateException("The shared Runtime Config changed while business metrics were being admitted.");
-        return new SutMetricsService.BusinessCallContext(packageId,root,config.runtimeConfigPath,
-                ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),environment,pinnedRevision,
+        return new SutMetricsService.BusinessCallContext(packageId,root,runtimePath,
+                runtimeRoot,environment,pinnedRevision,
                 pinnedRuntimeRevision,workloadSubjects==null?Set.of():workloadSubjects.stream()
                         .map(SutMetricsService.WorkloadSubject::workloadId).collect(java.util.stream.Collectors.toUnmodifiableSet()),
                 workloadSubjects==null?List.of():List.copyOf(workloadSubjects),frameworkConfig);
@@ -3608,11 +3875,12 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     private String runtimeConfigRevision(String environment) throws Exception {
-        String source=Files.readString(config.runtimeConfigPath,StandardCharsets.UTF_8);
+        Path runtimeRoot=centralSourceRoot();
+        Path runtimePath=runtimeRoot.resolve("config/config.yaml");
+        String source=Files.readString(runtimePath,StandardCharsets.UTF_8);
         att.config.FrameworkConfigLoader loader=new att.config.FrameworkConfigLoader();
         att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration snapshot=loader
-                .loadSutMetricsRuntimeConfiguration(config.runtimeConfigPath,
-                        ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),source);
+                .loadSutMetricsRuntimeConfiguration(runtimePath,runtimeRoot,source);
         String revision=snapshot.effectiveRevision(environment);
         if(revision==null)throw new IllegalStateException("The selected Environment is not declared by the shared Runtime Config.");
         return revision;
@@ -3631,8 +3899,10 @@ final class ServerRuntime implements AutoCloseable {
         if(!runtimeRevision.equals(runtimeConfigRevision(environment)))
             throw new IllegalStateException("The shared Runtime Config changed after LOAD admission; business metrics were not executed.");
         verifyPackageRevision(packageId,environment,packageRevision);
-        att.config.FrameworkConfig frameworkConfig=new att.config.FrameworkConfigLoader().load(config.runtimeConfigPath,
-                ServerConfig.runtimeConfigRoot(config.runtimeConfigPath),root,environment);
+        Path runtimeRoot=centralSourceRoot();
+        Path runtimePath=runtimeRoot.resolve("config/config.yaml");
+        att.config.FrameworkConfig frameworkConfig=new att.config.FrameworkConfigLoader().load(runtimePath,
+                runtimeRoot,root,environment);
         frameworkConfig.requireExecutionConfig();
         if(!runtimeRevision.equals(runtimeConfigRevision(environment)))
             throw new IllegalStateException("The shared Runtime Config changed while business metric execution was being prepared.");
@@ -4008,7 +4278,7 @@ final class ServerRuntime implements AutoCloseable {
     String captureValidationSourceRevision(ValidationPlan plan) {
         if(plan==null||plan.all)return null;
         try {
-            Path root=plan.packageId==null?ServerConfig.runtimeConfigRoot(config.runtimeConfigPath):packageRoot(plan.packageId);
+            Path root=plan.packageId==null?centralSourceRoot():packageRoot(plan.packageId);
             if(root==null)return null;
             if(plan.packageId!=null)validatePackageRoot(root);
             WorkerRequest request=inspectionRequest(plan.packageId,root,plan.environment);
@@ -4093,7 +4363,7 @@ final class ServerRuntime implements AutoCloseable {
 
     private String resolveValidationEnvironment(String packageId,String requestedEnvironment) throws Exception {
         if(requestedEnvironment!=null)return requestedEnvironment;
-        Path root=packageId==null?ServerConfig.runtimeConfigRoot(config.runtimeConfigPath):packageRoot(packageId);
+        Path root=packageId==null?centralSourceRoot():packageRoot(packageId);
         if(root==null)return null;
         try {
             Object value=resolveExecutionConfiguration(packageId,root,null).get("environment");
@@ -4397,26 +4667,62 @@ final class ServerRuntime implements AutoCloseable {
         Map<String,Path> packages=packageRegistry.snapshot().packages;
         for(Map.Entry<String,Path> entry:packages.entrySet())
             cleanupSourceHistoryScope(ChangeSetPublisher.PACKAGE_SOURCE,entry.getKey(),entry.getValue());
+        Set<String> activePackageScopes=new HashSet<>();
+        for(String packageId:packages.keySet())activePackageScopes.add(ChangeSetPublisher.PACKAGE_SOURCE+":"+packageId);
+        sourceHistoryRetentionScopes.keySet().removeIf(key->key.startsWith(ChangeSetPublisher.PACKAGE_SOURCE+":")
+                &&!activePackageScopes.contains(key));
         try {
             Path central=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toRealPath();
             cleanupSourceHistoryScope(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
                     ChangeSetPublisher.CENTRAL_SCOPE_ID,central);
         } catch(Exception unavailable) {
+            recordSourceHistoryCleanupFailure(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID);
             java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Central source history cleanup will retry");
         }
     }
     private void cleanupSourceHistoryScope(String domain,String scopeId,Path root) {
+        sourceHistoryCleanupAttempts.incrementAndGet();
         java.util.concurrent.locks.Lock publicationLock=sourcePublicationBarrier.writeLock();
-        if(!publicationLock.tryLock())return;
+        if(!publicationLock.tryLock()) {
+            updateSourceHistoryScopeMetric(domain,scopeId,"DEFERRED",false,0,0,0,0);
+            return;
+        }
         try(SourceRevisionStore.WriterLock ignored=sourceFileTransaction.lock(domain,scopeId,root)) {
             Set<String> retainedLeases=jobSourceClosures.retainedSourceRevisionIds(domain,scopeId);
-            Set<String> retained=new LinkedHashSet<>(store.pruneSourcePublicationHistory(
-                    domain,scopeId,ChangeSetPublisher.MAX_HISTORY_RECORDS));
+            Set<String> retainedHistory=store.pruneSourcePublicationHistory(
+                    domain,scopeId,ChangeSetPublisher.MAX_HISTORY_RECORDS);
+            Set<String> retained=new LinkedHashSet<>(retainedHistory);
             retained.addAll(retainedLeases);
-            sourceFileTransaction.pruneUnreferencedRevisions(domain,scopeId,root,retained);
+            int removed=sourceFileTransaction.pruneUnreferencedRevisions(domain,scopeId,root,retained);
+            sourceHistoryCleanupSuccesses.incrementAndGet();
+            sourceHistoryRevisionsRemoved.addAndGet(removed);
+            sourceHistoryLastSuccessAt=clock.instant().toString();
+            updateSourceHistoryScopeMetric(domain,scopeId,"OK",true,retainedHistory.size(),
+                    retainedLeases.size(),retained.size(),removed);
         } catch(Exception failure) {
+            recordSourceHistoryCleanupFailure(domain,scopeId,true);
             java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Source history cleanup will retry");
         } finally { publicationLock.unlock(); }
+    }
+    private void recordSourceHistoryCleanupFailure(String domain,String scopeId) {
+        recordSourceHistoryCleanupFailure(domain,scopeId,false);
+    }
+    private void recordSourceHistoryCleanupFailure(String domain,String scopeId,boolean attemptAlreadyCounted) {
+        if(!attemptAlreadyCounted)sourceHistoryCleanupAttempts.incrementAndGet();
+        sourceHistoryCleanupFailuresSinceStart.incrementAndGet();
+        sourceHistoryLastFailureAt=clock.instant().toString();
+        updateSourceHistoryScopeMetric(domain,scopeId,"FAILED",false,0,0,0,0);
+    }
+    private void updateSourceHistoryScopeMetric(String domain,String scopeId,String state,boolean inventoryAvailable,
+                                                int historySnapshots,int pinnedSnapshots,int retainedSnapshots,int removedSnapshots) {
+        Map<String,Object> scope=new LinkedHashMap<>();
+        scope.put("domain",domain);scope.put("scopeId",scopeId);scope.put("state",state);
+        scope.put("inventoryAvailable",inventoryAvailable);scope.put("historySnapshots",historySnapshots);
+        scope.put("pinnedJobScheduleSnapshots",pinnedSnapshots);scope.put("retainedSnapshots",retainedSnapshots);
+        scope.put("removedSnapshots",removedSnapshots);scope.put("historyTransactionLimit",ChangeSetPublisher.MAX_HISTORY_RECORDS);
+        if("FAILED".equals(state))scope.put("alertCode","ATT-SOURCE-HISTORY-CLEANUP-FAILED");
+        sourceHistoryRetentionScopes.put(domain+":"+scopeId,Map.copyOf(scope));
     }
     private static void requireObject(JsonNode value,String message) {if(value==null||!value.isObject())throw new IllegalArgumentException(message);}
     private static void requireOnlyFields(JsonNode object,String... allowed) {
@@ -6687,7 +6993,36 @@ final class ServerRuntime implements AutoCloseable {
         return result;
     }
     Map<String,Object> executionPoolStatistics() { return executionWorkers==null?Map.of("enabled",false):executionWorkers.metrics(); }
-    Map<String,Object> counts() throws Exception {Map<String,Object> m=new LinkedHashMap<>();for(String s:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))m.put(s.toLowerCase(),store.count(s));m.put("inspection",inspectionStatistics());m.put("executionPool",executionPoolStatistics());m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}m.put("jobStorage",jobStorageSnapshot());m.put("eventJournal",eventJournalStatistics());return m;}
+    Map<String,Object> counts() throws Exception {
+        Map<String,Object> m=new LinkedHashMap<>();
+        for(String state:List.of("QUEUED","PREPARING","RUNNING","PASS","FAIL","ERROR","INVALID","CANCELLED"))
+            m.put(state.toLowerCase(),store.count(state));
+        m.put("inspection",inspectionStatistics());m.put("executionPool",executionPoolStatistics());
+        m.put("queueDepth",workers.getQueue().size());m.put("activeWorkers",workers.getActiveCount());
+        m.put("completedSinceStart",completed.get());m.put("loadSchedulingEnabled",config.scheduling.enabled);
+        if(config.scheduling.enabled){m.put("loadSchedules",store.scheduleCount());m.put("activeScheduledLoads",store.activeScheduledCount(null));m.put("loadScheduleMetrics",store.scheduleMetrics());}
+        m.put("jobStorage",jobStorageSnapshot());m.put("eventJournal",eventJournalStatistics());
+        m.put("sourceHistoryRetention",sourceHistoryRetentionMetrics());
+        return m;
+    }
+    private Map<String,Object> sourceHistoryRetentionMetrics() {
+        Map<String,Map<String,Object>> ordered=new java.util.TreeMap<>(sourceHistoryRetentionScopes);
+        List<Map<String,Object>> scopes=new ArrayList<>(ordered.values());
+        boolean failed=scopes.stream().anyMatch(scope->"FAILED".equals(scope.get("state")));
+        boolean deferred=scopes.stream().anyMatch(scope->"DEFERRED".equals(scope.get("state")));
+        Map<String,Object> result=new LinkedHashMap<>();
+        result.put("state",scopes.isEmpty()?"UNKNOWN":failed?"DEGRADED":deferred?"DEFERRED":"OK");
+        result.put("cleanupAttemptsSinceStart",sourceHistoryCleanupAttempts.get());
+        result.put("cleanupSuccessesSinceStart",sourceHistoryCleanupSuccesses.get());
+        result.put("cleanupFailuresSinceStart",sourceHistoryCleanupFailuresSinceStart.get());
+        result.put("removedSnapshotsSinceStart",sourceHistoryRevisionsRemoved.get());
+        result.put("historyTransactionLimit",ChangeSetPublisher.MAX_HISTORY_RECORDS);
+        if(sourceHistoryLastSuccessAt!=null)result.put("lastSuccessAt",sourceHistoryLastSuccessAt);
+        if(sourceHistoryLastFailureAt!=null)result.put("lastFailureAt",sourceHistoryLastFailureAt);
+        if(failed)result.put("alertCode","ATT-SOURCE-HISTORY-CLEANUP-FAILED");
+        result.put("scopes",scopes);
+        return result;
+    }
     MonitoringSnapshot monitoringSnapshot(String requestId) throws Exception {
         long now=System.nanoTime();MonitoringSnapshot cached=cachedMonitoringSnapshot;
         if(cached!=null&&now-cachedMonitoringSnapshotAtNanos<MONITORING_SNAPSHOT_CACHE_NANOS)return monitoringRequest(cached,requestId);

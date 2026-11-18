@@ -1,12 +1,14 @@
-# ATT Worker protocol v1
+# ATT Worker protocol v1 及 accepted-source v2
 
 `att-worker` 是 ATT Server 使用的內部 process adapter。一般 Worker process 會從 stdin 讀取一個 JSON request，直接呼叫 typed `AttService` operation，然後以 JSON Lines 寫入 stdout 並退出。Inspection daemon 僅供讀取，會拒絕 execution command。選用的 [one-shot prewarm handshake](execution-prewarm.zh.md) 在同一個 execution request 前執行，不允許跨 Job 重用 JVM。
 
 ## Request
 
-Request 是 JSON object。`protocolVersion` 必須為 `att-worker/v1`；不支援的版本會先回傳 `DIAGNOSTIC`，再回傳 `INVALID` `RESULT`。空白、格式錯誤、截斷或多份 JSON 文件都使用相同的終端 event 順序拒絕。`jobId` 是 Worker orchestration event 的識別碼，與 operation result 中 ATT 的 `executionId` 分開。`command` 可為 `run`、`debug`、`load`、`validate` 或 `snapshot`。`packageRoot` 必填，並會獨立於 process working directory 傳入 Engine。`expectedExecutionRevisionDigest` 是 canonical execution-bound Package identity；`expectedRevisionDigest` 保留為相容 alias，供 rolling upgrade 使用。兩者同時出現時必須相同。
+Request 是 JSON object。一般 request 使用 `protocolVersion: att-worker/v1`。Server 接受且固定至不可變來源 closure 的 Job 使用 `att-worker/v2`；此版本邊界會令舊版 v1 Worker 拒絕 request，避免忽略快照欄位。V2 必須帶齊下述四個內部來源快照欄位。不支援的版本會先回傳 `DIAGNOSTIC`，再回傳 `INVALID` `RESULT`。空白、格式錯誤、截斷或多份 JSON 文件都使用相同的終端 event 順序拒絕。`jobId` 是 Worker orchestration event 的識別碼，與 operation result 中 ATT 的 `executionId` 分開。`command` 可為 `run`、`debug`、`load`、`validate` 或 `snapshot`。`packageRoot` 必填，並會獨立於 process working directory 傳入 Engine。`expectedExecutionRevisionDigest` 是 canonical execution-bound Package identity；`expectedRevisionDigest` 保留為相容 alias，供 rolling upgrade 使用。兩者同時出現時必須相同。
 
 常用選填欄位包括 `config`、`environment`、`outputDirectory` 和 `runId`。相對 config、suite、scenario 及 output 路徑均以指定的 package root 為基準。`target` 為 Debug 或不含 scenario 的 Load 提供 `type` 和 `id`。`suites`、`suiteDirectory`、`caseIds`、`tags`、`excludeTags` 及 `all` 用於選取 Run、Validate 或 Snapshot 的輸入。`load` 可包含 `users`、`arrivalRate`、`duration` 和 `maxConcurrent` 等 policy override；`overrides` 使用 ATT 接受的安全 value syntax 傳遞 typed input、argument 及 variable 指派。
+
+Server 接受的 Job 亦會以完整一組內部欄位傳入 `sourceSnapshotArchivePath`、`sourceSnapshotArchiveSha256`、`sourceSnapshotDirectory` 和 `sourceSnapshotConfigPath`。Worker 會先檢查 archive digest、manifest 版本和 Package identity、execution revision、Config path、materialized tree digest、已聲明的 dependencies 及 compiled File-expression plans，然後才 dispatch。Server 會在 OS 強制的唯讀來源邊界內冷啟動這些 Worker；欄位不完整、檢查失敗或無法建立邊界都會拒絕執行。呼叫端不得自行建立這些內部欄位。Server 啟動時要求 Local Worker bundle 的產品版本相符；Server build identity 已知時，Git commit 亦須相符。Server 與 Worker 使用不同 build version 不受支援，並會 fail closed。
 
 ## Events
 

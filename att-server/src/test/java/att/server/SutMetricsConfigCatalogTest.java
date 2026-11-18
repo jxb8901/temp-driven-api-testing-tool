@@ -73,6 +73,46 @@ class SutMetricsConfigCatalogTest {
                 "Production config-backed mode must neither consult nor overwrite the former JSON catalog.");
     }
 
+    @Test void activatedRuntimeConfigSnapshotSwitchesLiveCatalogAndKeepsLastKnownGoodOnReject() throws Exception {
+        Path configured = configPath();
+        writeConfig(configured, "Snapshot A");
+        Path snapshotA = temp.resolve("active-A");
+        Path configA = snapshotA.resolve("config/config.yaml");
+        Files.createDirectories(configA.getParent());
+        Files.copy(configured, configA);
+
+        Path snapshotB = temp.resolve("active-B");
+        Path configB = snapshotB.resolve("config/config.yaml");
+        Files.createDirectories(configB.getParent());
+        Files.writeString(configB, configText("Snapshot B"));
+
+        Path invalidSnapshot = temp.resolve("invalid-C");
+        Path invalidConfig = invalidSnapshot.resolve("config/config.yaml");
+        Files.createDirectories(invalidConfig.getParent());
+        Files.writeString(invalidConfig, configText("Snapshot C")
+                .replace("name: Snapshot C", "name: Snapshot C\n      password: must-not-activate"));
+
+        try (SutMetricsService service = new SutMetricsService(temp.resolve("snapshot-switch-data"),
+                Set.of("prometheus.example.invalid"), ignored -> "test-secret", ignored -> { }, ignored -> { },
+                configA, snapshotA)) {
+            assertEquals("Snapshot A", source(service).get("name"));
+
+            writeConfig(configured, "Unapproved external edit");
+            assertEquals("Snapshot A", source(service).get("name"),
+                    "An edit to the configured mirror must not replace the pointer-selected immutable revision.");
+
+            service.activateRuntimeConfigSnapshot(configB, snapshotB);
+            assertEquals("Snapshot B", source(service).get("name"),
+                    "The live catalog must follow a published snapshot without recreating the service.");
+            String activeRevision = String.valueOf(configuration(service).get("revision"));
+
+            assertThrows(Exception.class, () -> service.activateRuntimeConfigSnapshot(invalidConfig, invalidSnapshot));
+            assertEquals("Snapshot B", source(service).get("name"));
+            assertEquals(activeRevision, configuration(service).get("revision"),
+                    "A rejected activation must retain the previously active SUT Metrics catalog.");
+        }
+    }
+
     @Test void documentedV214RuntimeConfigExampleLoadsAsACompleteCatalog() throws Exception {
         Path config = configPath();
         Files.copy(Paths.get("examples/history/config/sut-metrics-v2.14.yaml"), config,

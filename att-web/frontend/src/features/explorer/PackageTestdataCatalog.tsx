@@ -3,7 +3,9 @@ import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
 import type { ConfigurationEntry, ExplorerApi, JsonValue, ResourceReference, TestdataRecordsResponse } from './types';
 import { CodeEditor } from '../code/CodeEditor';
-import { SourceAuthoringWorkspace } from './SourceAuthoringWorkspace';
+import { parseDocument, stringify } from 'yaml';
+import { SourceAuthoringWorkspace, type SourceAuthoringInitialCandidate } from './SourceAuthoringWorkspace';
+import type { SourceOperation } from './sourceManagement';
 import './package-testdata.css';
 
 function errorText(error: unknown, action: string): string {
@@ -102,6 +104,18 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [creatingDescriptor, setCreatingDescriptor] = useState(false);
   const [creatorDirty, setCreatorDirty] = useState(false);
+  const [newDescriptorId, setNewDescriptorId] = useState('newTestdata');
+  const [descriptorFormat, setDescriptorFormat] = useState<'records' | 'generated'>('records');
+  const [descriptorRecords, setDescriptorRecords] = useState('[\n  { "id": "A-100" }\n]');
+  const [generatedRecord, setGeneratedRecord] = useState('{\n  "id": "A-%{seq}"\n}');
+  const [generatedFrom, setGeneratedFrom] = useState('1');
+  const [generatedTo, setGeneratedTo] = useState('10');
+  const [generatedNumberFormat, setGeneratedNumberFormat] = useState('%04d');
+  const [selectionStrategy, setSelectionStrategy] = useState<'sequential' | 'roundRobin' | 'random'>('sequential');
+  const [selectionExhaustion, setSelectionExhaustion] = useState<'error' | 'recycle' | 'stop'>('error');
+  const [descriptorError, setDescriptorError] = useState('');
+  const [preparingDescriptor, setPreparingDescriptor] = useState(false);
+  const [preparedCandidate, setPreparedCandidate] = useState<SourceAuthoringInitialCandidate | null>(null);
   const catalogQuery = routeLookupQuery || catalogSearch.trim();
   const catalogQueryKey = JSON.stringify([packageId, environment, catalogQuery, inspectionRefresh, refreshKey]);
   const catalogQueryKeyRef = useRef(catalogQueryKey);
@@ -300,6 +314,62 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
     }
   }
 
+  async function prepareTestdataCandidate() {
+    const id = newDescriptorId.trim();
+    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) { setDescriptorError('Use a Testdata ID that starts with a letter and contains only letters, numbers, _ or -.'); return; }
+    if (entries.some(item => item.id === id)) { setDescriptorError(`Testdata ID ${id} already appears in the selected Environment.`); return; }
+    if (!api.getManagedPackageAuthoringSource) { setDescriptorError('This Server does not provide revision-fenced Package source authoring.'); return; }
+    let records: unknown;
+    try {
+      records = JSON.parse(descriptorFormat === 'records' ? descriptorRecords : generatedRecord);
+      if (descriptorFormat === 'records' && (!Array.isArray(records) || records.length < 1))
+        throw new Error('Inline records must be a JSON array with at least one record.');
+      if (descriptorFormat === 'generated' && (!records || typeof records !== 'object' || Array.isArray(records)))
+        throw new Error('The generated record template must be a JSON object.');
+    } catch (failure) {
+      setDescriptorError(failure instanceof Error ? failure.message : 'Enter valid JSON for the Testdata records.'); return;
+    }
+    const descriptorPath = `testdata/${id}.yaml`;
+    const from = Number(generatedFrom), to = Number(generatedTo);
+    if (descriptorFormat === 'generated' && (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from > to
+        || to - from > 999_999 || !/^%d$|^%0[1-9][0-9]?d$/.test(generatedNumberFormat))) {
+      setDescriptorError('Generated sequence bounds must be integers, span at most 1,000,000 records, and use a supported numeric format.'); return;
+    }
+    const controller = new AbortController(); setPreparingDescriptor(true); setDescriptorError('');
+    try {
+      const source = await api.getManagedPackageAuthoringSource(packageId, { kind: 'manifest' }, controller.signal);
+      if (!source.available || !source.text || !source.baseSourceRevision || !source.sourceEtag)
+        throw new Error('The editable Package Manifest and its current source revision are unavailable.');
+      const manifest = parseDocument(source.text, { uniqueKeys: true });
+      if (manifest.errors.length) throw new Error('The Package Manifest has YAML errors. Fix the Manifest before creating Testdata.');
+      if (manifest.get('schemaVersion') !== 'att-package/v2')
+        throw new Error('Guided Testdata creation requires an editable att-package/v2 Manifest.');
+      const manifestValue = manifest.toJS() as { testdata?: { descriptors?: unknown } };
+      const inventoryValue = manifestValue.testdata?.descriptors;
+      const inventory = inventoryValue ?? [];
+      if (!Array.isArray(inventory) || inventory.some(path => typeof path !== 'string'))
+        throw new Error('Package Manifest testdata.descriptors must be a list of relative source paths.');
+      if (inventory.includes(descriptorPath)) throw new Error(`Package Manifest already lists ${descriptorPath}.`);
+      manifest.setIn(['testdata', 'descriptors'], [...inventory, descriptorPath]);
+      const descriptor: Record<string, unknown> = {
+        schemaVersion: 'att-testdata/v1.0', id,
+        records: descriptorFormat === 'records' ? records : {
+          generate: { seq: { from, to, ...(generatedNumberFormat ? { format: generatedNumberFormat } : {}) } },
+          record: records,
+        },
+        selection: { strategy: selectionStrategy, exhaustion: selectionExhaustion },
+      };
+      const operations: SourceOperation[] = [
+        { operation: 'create', path: descriptorPath, content: stringify(descriptor) },
+        { operation: 'replace', path: 'package.yaml', content: manifest.toString() },
+      ];
+      setPreparedCandidate({ key: `${id}:${source.baseSourceRevision}:${Date.now()}`,
+        baseSourceRevision: source.baseSourceRevision, registryRevision: source.registryRevision, operations });
+    } catch (failure) {
+      setDescriptorError(failure instanceof Error ? failure.message : 'Could not prepare the atomic Testdata candidate.');
+    } finally { setPreparingDescriptor(false); }
+  }
+
   const records = response?.records || [];
   const columns = useMemo(() => [...new Set(records.flatMap(record => record.value && typeof record.value === 'object' && !Array.isArray(record.value) ? Object.keys(record.value) : ['value']))], [records]);
   if (error && !selectedId) return <section className="att-testdata-workspace"><h2>Testdata</h2><p className="att-error" role="alert">{error}<button type="button" onClick={onRefresh}>Retry</button></p></section>;
@@ -324,12 +394,50 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
       </nav>
       <div className="att-testdata-detail">
     {canManagePackageSource && creatingDescriptor && <section className="att-testdata-create" aria-label="Create Testdata descriptor">
-      <header><div><h3>New Testdata descriptor</h3><p>Update the Package Manifest and create the descriptor file in one candidate before staging.</p></div>
-        <button type="button" onClick={() => setCreatingDescriptor(false)} disabled={creatorDirty}
+      <header><div><h3>New Testdata descriptor</h3><p>Choose a record format and selection policy. The descriptor and Package inventory will be staged together.</p></div>
+        <button type="button" onClick={() => { setCreatingDescriptor(false); setPreparedCandidate(null); setDescriptorError(''); }} disabled={creatorDirty}
           title={creatorDirty ? 'Stage or discard the local editor work and draft before closing.' : undefined}>Close creator</button></header>
-      <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
+      {!preparedCandidate && <form className="att-testdata-create-form" onSubmit={event => { event.preventDefault(); void prepareTestdataCandidate(); }}>
+        <p role="note">Selected Environment: <strong>{environment || defaultEnvironment || 'Package default'}</strong>. This creates a Package-owned descriptor and adds its path to the shared Package inventory.</p>
+        <label>Testdata ID<input aria-label="New Testdata ID" value={newDescriptorId} maxLength={80}
+          onChange={event => setNewDescriptorId(event.currentTarget.value)} /></label>
+        <label>Record format<select aria-label="Testdata record format" value={descriptorFormat}
+          onChange={event => setDescriptorFormat(event.currentTarget.value as 'records' | 'generated')}>
+          <option value="records">Literal JSON records</option><option value="generated">Generated sequence</option>
+        </select></label>
+        {descriptorFormat === 'records' ? <label>Record source: JSON array<textarea aria-label="Testdata JSON records"
+          value={descriptorRecords} rows={8} spellCheck={false} onChange={event => setDescriptorRecords(event.currentTarget.value)} /></label> : <>
+          <fieldset><legend>Generated sequence</legend>
+            <label>First sequence number<input aria-label="Generated sequence start" type="number" value={generatedFrom}
+              onChange={event => setGeneratedFrom(event.currentTarget.value)} /></label>
+            <label>Last sequence number<input aria-label="Generated sequence end" type="number" value={generatedTo}
+              onChange={event => setGeneratedTo(event.currentTarget.value)} /></label>
+            <label>Number format<input aria-label="Generated number format" value={generatedNumberFormat} maxLength={8}
+              onChange={event => setGeneratedNumberFormat(event.currentTarget.value)} /></label>
+          </fieldset>
+          <label>Generated record template: JSON object<textarea aria-label="Generated Testdata record template"
+            value={generatedRecord} rows={8} spellCheck={false} onChange={event => setGeneratedRecord(event.currentTarget.value)} /></label>
+        </>}
+        <fieldset><legend>Record selection</legend>
+          <label>Strategy<select aria-label="Testdata selection strategy" value={selectionStrategy}
+            onChange={event => setSelectionStrategy(event.currentTarget.value as typeof selectionStrategy)}>
+            <option value="sequential">Sequential</option><option value="roundRobin">Round robin</option><option value="random">Random</option>
+          </select></label>
+          <label>When records are exhausted<select aria-label="Testdata exhaustion policy" value={selectionExhaustion}
+            onChange={event => setSelectionExhaustion(event.currentTarget.value as typeof selectionExhaustion)}>
+            <option value="error">Error</option><option value="recycle">Recycle</option><option value="stop">Stop Load workload</option>
+          </select></label>
+        </fieldset>
+        {descriptorError && <p role="alert">{descriptorError}</p>}
+        <button type="submit" disabled={preparingDescriptor || !newDescriptorId.trim()}>
+          {preparingDescriptor ? 'Preparing candidate…' : 'Prepare atomic candidate'}
+        </button>
+      </form>}
+      {preparedCandidate && <p role="status">Prepared one candidate containing <code>testdata/{newDescriptorId.trim()}.yaml</code> and <code>package.yaml</code>. Edit the Manifest in Advanced mode if needed, then Stage, Validate, Review, and Publish both files together.</p>}
+      {preparedCandidate && <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
         query: { kind: 'manifest' }, label: 'Testdata descriptor and Package registration', allowFileOperations: true }}
-        registerUnsavedChanges={registerUnsavedChanges} onDirtyChange={setCreatorDirty} onPublished={() => setCreatingDescriptor(false)} />
+        initialCandidate={preparedCandidate} registerUnsavedChanges={registerUnsavedChanges} onDirtyChange={setCreatorDirty}
+        onPublished={() => { setCreatingDescriptor(false); setPreparedCandidate(null); setCreatorDirty(false); }} />}
     </section>}
     {selectedEntry ? <>
       <dl className="att-testdata-meta"><div><dt>Descriptor</dt><dd>{selectedEntry.id}</dd></div><div><dt>Source</dt><dd>{selectedEntry.source ? <span title="Package-local descriptor, not a shared Configuration source">{packageId}: {selectedEntry.source}</span> : 'Not provided'}</dd></div>

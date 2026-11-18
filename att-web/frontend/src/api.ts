@@ -5,7 +5,7 @@ import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type Lo
 import type {
   AcceptedJob, ConfigurationComparisonQuery, ConfigurationFilePage, ConfigurationResponse, DebugDraftRequest, DraftResponse,
   DebugFormResponse, EffectiveConfigurationQuery, PackageSutMetricsCatalog, PackageSutMetricsDraft,
-  PackageSutMetricsDraftAction, PackageSutMetricsResource, PackageSutMetricsResourceDraftInput,
+  PackageFileIndexPage, PackageSutMetricsDraftAction, PackageSutMetricsResource, PackageSutMetricsResourceDraftInput,
   PackageSutMetricsResourceKind, ResourceDetail, ResourceIdentity, SourceProjection, TestdataRecordsResponse,
   ResourcePage, ResourceQuery,
 } from './features/explorer/types';
@@ -32,6 +32,7 @@ interface SutMetricCatalogResponse {
 import type {
   ManagedAuthoringSource, PackageAuthoringSourceQuery, SourceChangeAction, SourceChangeSet,
   SourceDomain, SourceImpactReport, SourceImpactAcknowledgement, SourceOperation, SourcePublishResult, SourceSnapshotRequest,
+  SourceHistoryDiffResponse, SourceHistoryResponse,
 } from './features/explorer/sourceManagement';
 
 export interface ServerJobStorageMetrics {
@@ -559,6 +560,11 @@ export const api = {
       direction: query.direction,
     }), { signal });
   },
+  listPackageFileIndex(packageId: string, query: { query?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<PackageFileIndexPage> {
+    return request<PackageFileIndexPage>('packages/' + encodeURIComponent(packageId) + '/resources/files' + queryString({
+      query: query.query, cursor: query.cursor, limit: query.limit,
+    }), { signal });
+  },
   getResource(identity: ResourceIdentity, signal?: AbortSignal): Promise<ResourceDetail> {
     return request<ResourceDetail>(resourcePath(identity), { signal });
   },
@@ -617,6 +623,29 @@ export const api = {
       else inspectionCache.clear();
     }
     return result;
+  },
+  getSourceHistory(domain: SourceDomain, scopeId: string, offset = 0, limit = 20, signal?: AbortSignal): Promise<SourceHistoryResponse> {
+    const base = domain === 'PACKAGE_SOURCE'
+      ? 'packages/' + encodeURIComponent(scopeId) + '/source-history'
+      : 'configuration/source-history';
+    return request<SourceHistoryResponse>(base + queryString({ offset, limit }), { signal, cache: 'no-store' });
+  },
+  getSourceHistoryDiff(domain: SourceDomain, scopeId: string, beforeSnapshotId: string, afterSnapshotId: string,
+    path?: string, signal?: AbortSignal): Promise<SourceHistoryDiffResponse> {
+    const base = domain === 'PACKAGE_SOURCE'
+      ? 'packages/' + encodeURIComponent(scopeId) + '/source-history/diff'
+      : 'configuration/source-history/diff';
+    return request<SourceHistoryDiffResponse>(base + queryString({ beforeSnapshotId, afterSnapshotId, path }), { signal, cache: 'no-store' });
+  },
+  stageSourceRestore(domain: SourceDomain, scopeId: string, snapshotId: string, expectedSourceRevision: string,
+    registryRevision?: string, signal?: AbortSignal): Promise<SourceChangeSet> {
+    const path = domain === 'PACKAGE_SOURCE'
+      ? 'packages/' + encodeURIComponent(scopeId) + '/source-history/restore'
+      : 'configuration/source-history/restore';
+    return postJson<SourceChangeSet>(path, {
+      snapshotId, expectedSourceRevision,
+      ...(domain === 'PACKAGE_SOURCE' && registryRevision ? { registryRevision } : {}),
+    }, signal);
   },
   generateTestcaseSnapshot(packageId: string, changeSetId: string, input: SourceSnapshotRequest,
     signal?: AbortSignal): Promise<SourceChangeSet> {

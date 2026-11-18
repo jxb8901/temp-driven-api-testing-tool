@@ -54,7 +54,12 @@ async function render(node: ReactNode) {
 }
 
 async function settle() {
-  await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+    const confirm = container.querySelector<HTMLButtonElement>('.att-confirm-actions button:last-child');
+    if (!confirm) break;
+    await act(async () => { confirm.click(); await Promise.resolve(); });
+  }
 }
 
 function button(name: string): HTMLButtonElement {
@@ -72,9 +77,7 @@ function setValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectEl
   });
 }
 
-function click(element: HTMLElement) {
-  act(() => element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
-}
+function click(element: HTMLElement) { act(() => element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))); }
 
 function apiWith(overrides: Partial<ExplorerApi>): ExplorerApi {
   const fallback = {
@@ -108,6 +111,29 @@ function resource(type: ResourceSummary['type'], resourceId: string, extra: Part
 }
 
 describe('Explorer source viewer', () => {
+  it('groups Package support sources separately from executable resources with direct navigation', async () => {
+    const onOpenTestdata = vi.fn();
+    const onOpenPackageConfiguration = vi.fn();
+    await render(<ExplorerPage api={apiWith({})} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}}
+      onOpenTestdata={onOpenTestdata} onOpenPackageConfiguration={onOpenPackageConfiguration} />);
+
+    const support = container.querySelector<HTMLElement>('.att-explorer-supporting-sources')!;
+    expect(support.hidden).toBe(true);
+    click(button('Supporting sources'));
+    expect(support.hidden).toBe(false);
+    expect(support.textContent).toContain('File catalog');
+    expect(support.querySelector('.att-package-sut-metrics')).not.toBeNull();
+    click(button('Testdata'));
+    click(button('Package manifest'));
+    expect(onOpenTestdata).toHaveBeenCalledOnce();
+    expect(onOpenPackageConfiguration).toHaveBeenCalledOnce();
+
+    click(button('Executable resources'));
+    expect(support.hidden).toBe(true);
+    expect(container.querySelector<HTMLElement>('.att-explorer-executable-resources')?.hidden).toBe(false);
+  });
+
   it('distinguishes browseable metadata from unresolved execution dependencies', async () => {
     const target = resource('template', 'dependent', {
       metadataState: 'available',
@@ -212,6 +238,42 @@ describe('Explorer source viewer', () => {
 
     click(button('Run Test Cases…'));
     expect(onRunBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires accessible confirmation before running a Test Case', async () => {
+    const selected = resource('case', 'payments.C1', { provenance: { suite: 'suites/payments.yaml' } });
+    const runCase = vi.fn(async () => ({ jobId: 'job-case-1' }));
+    const api = apiWith({
+      listResources: vi.fn(async () => ({ items: [selected], total: 1, nextCursor: null })),
+      getResource: vi.fn(async () => ({ resource: selected, definition: {} })),
+      runCase,
+    });
+    const onJobAccepted = vi.fn();
+    const nativeConfirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await render(<ExplorerPage api={api} packageId="payments"
+      resourceRoute={{ type: 'case', resourceId: 'payments.C1' }} environment="SIT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={onJobAccepted} />);
+
+    click(button('Run selected case'));
+    const dialog = container.querySelector<HTMLElement>('[role="alertdialog"][aria-modal="true"]');
+    expect(dialog?.getAttribute('aria-labelledby')).toBeTruthy();
+    expect(dialog?.getAttribute('aria-describedby')).toBeTruthy();
+    expect(dialog?.textContent).toContain('Run Test Case payments.C1 now?');
+    click(button('Cancel'));
+    await settle();
+    expect(runCase).not.toHaveBeenCalled();
+    expect(onJobAccepted).not.toHaveBeenCalled();
+
+    click(button('Run selected case'));
+    const confirm = container.querySelector<HTMLButtonElement>('.att-confirm-actions button:last-child');
+    expect(confirm?.textContent).toBe('Run now');
+    click(confirm!);
+    await settle();
+    expect(runCase).toHaveBeenCalledWith(expect.objectContaining({
+      packageId: 'payments', suite: 'suites/payments.yaml', caseId: 'payments.C1', environment: 'SIT',
+    }));
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    expect(onJobAccepted).toHaveBeenCalledWith('job-case-1');
   });
 
   it('virtualizes a multi-thousand-line safe projection, refreshes repeatedly, and copies only displayed text', async () => {
@@ -559,6 +621,8 @@ describe('Explorer page integration', () => {
     expect(panel.textContent).toContain('This Package has no explicitly listed SUT Metrics definitions.');
     expect(panel.textContent).toContain('Manifest digest');
     expect(panel.textContent).not.toContain('global profile');
+    const advanced = [...panel.querySelectorAll('details')].find(item => item.querySelector('summary')?.textContent?.includes('Advanced revision provenance'));
+    expect(advanced?.open).toBe(false);
   });
 
   it('registers Package SUT Metrics source edits with the navigation guard and clears them on discard', async () => {
@@ -579,11 +643,14 @@ describe('Explorer page integration', () => {
     click(panel.querySelector('summary')!);
     click(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')!);
     await settle();
+    expect(panel.querySelector('[aria-label="SUT Metrics source publication workflow"]')).not.toBeNull();
+    expect(panel.querySelector('.att-code-editor')).not.toBeNull();
     const editor = panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!;
     setValue(editor, 'enabled: false\n');
     expect(registerUnsavedChanges).toHaveBeenCalledWith(true, 'unpublished Package SUT Metrics changes');
 
     click(button('Discard source edits'));
+    await settle();
     expect((panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]'))?.value).toBe('enabled: true\n');
     expect(registerUnsavedChanges).toHaveBeenCalledWith(false, 'unpublished Package SUT Metrics changes');
   });
@@ -679,7 +746,8 @@ describe('Explorer page integration', () => {
     expect(panel.textContent).not.toContain('top-secret');
     expect(panel.textContent).not.toContain('private-value');
     expect(panel.textContent).not.toContain('/Users/worker');
-    expect(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')?.readOnly).toBe(true);
+    expect(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')).toBeNull();
+    expect(panel.querySelector('.att-code-editor pre')?.textContent).toBe('enabled: false\n');
     expect(panel.textContent).toContain('Discard draft and edit source');
 
     click(button('Discard draft and edit source')); await settle();
@@ -688,6 +756,7 @@ describe('Explorer page integration', () => {
     expect(editor.value).toBe('enabled: false\n');
     expect(registerUnsavedChanges).toHaveBeenCalledWith(true, 'unpublished Package SUT Metrics changes');
     click(button('Discard source edits'));
+    await settle();
     expect(registerUnsavedChanges).toHaveBeenCalledWith(false, 'unpublished Package SUT Metrics changes');
   });
 
@@ -950,7 +1019,7 @@ describe('Explorer page integration', () => {
       onEnvironmentChange: () => {}, onJobAccepted: () => {},
     };
     await render(<ExplorerPage {...props} />);
-    const search = container.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const search = container.querySelector<HTMLInputElement>('.att-query-filter-panel input[type="search"]')!;
     setValue(search, 'payment flow');
     await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
     click([...container.querySelectorAll<HTMLElement>('[role="radio"]')].find(item => item.textContent === 'Flows')!);
@@ -969,7 +1038,7 @@ describe('Explorer page integration', () => {
     await render(<ExplorerPage {...props} resourceRoute={{ type: 'flow', resourceId: 'flow-1' }} />);
     await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 250)); });
 
-    expect(container.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('payment flow');
+    expect(container.querySelector<HTMLInputElement>('.att-query-filter-panel input[type="search"]')?.value).toBe('payment flow');
     expect([...container.querySelectorAll<HTMLElement>('[role="radio"]')].find(item => item.textContent === 'Flows')?.getAttribute('aria-checked')).toBe('true');
     expect(container.querySelector('.att-explorer-sort')?.textContent).toContain('↓');
     expect(listResources.mock.calls.slice(callsBeforeReturn).map(call => call[1])).toEqual([
@@ -1072,7 +1141,6 @@ describe('Explorer page integration', () => {
     await settle();
 
     setValue(container.querySelector<HTMLInputElement>('input[maxlength="120"]')!, 'anonymous-run-42');
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     click(button('Run Now'));
     await settle();
     expect(submitDebug).toHaveBeenCalledWith(expect.objectContaining({ packageId: 'payments', principal: 'anonymous-run-42' }));

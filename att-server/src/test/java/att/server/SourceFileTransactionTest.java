@@ -104,11 +104,14 @@ class SourceFileTransactionTest {
         String domain = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG;
         Path root = Files.createDirectories(temp.resolve("att-home-central")).toRealPath();
         Path config = Files.createDirectories(root.resolve("config"));
-        Files.writeString(config.resolve("config.yaml"), "schemaVersion: att-config/v2.12\nenvironment: SIT\n"
-                + "dbhelpers: [config/custom/dependencies/db-discovery.yaml]\n");
+        Files.writeString(config.resolve("config.yaml"), "schemaVersion: att-config/v2.15\nenvironment: SIT\n"
+                + "dbhelpers: [config/custom/dependencies/db-discovery.yaml]\n"
+                + "sutMetrics: {dataSources: [config/sut-metrics/prometheus.yaml]}\n");
         Files.writeString(config.resolve("source-references.yaml"), "payload: '&{config/tools/echo.sh}'\n");
         Path nestedHelper = Files.createDirectories(config.resolve("custom/dependencies")).resolve("db-discovery.yaml");
         Files.writeString(nestedHelper, "schemaVersion: att-dbhelper/v2.6\nid: orders\nconnection: {url: 'jdbc:unused'}\n");
+        Path metricSources = Files.createDirectories(config.resolve("sut-metrics"));
+        Files.writeString(metricSources.resolve("prometheus.yaml"), "schemaVersion: att-sut-metrics-source/v1\nid: prom\nname: Prometheus\nurl: http://127.0.0.1:9090\n");
         Files.writeString(config.resolve("not-referenced.yaml"), "not part of the current Config dependency closure\n");
         Path tools = Files.createDirectories(config.resolve("tools"));
         Files.writeString(tools.resolve("echo.yaml"), "schemaVersion: att-tool/v1\ncommand: [echo]\n");
@@ -130,6 +133,8 @@ class SourceFileTransactionTest {
         assertTrue(Files.exists(firstPin.resolve("config/tools/echo.sh")));
         assertTrue(Files.exists(firstPin.resolve("config/custom/dependencies/db-discovery.yaml")),
                 "Direct Helper paths named by Config are part of the immutable candidate closure");
+        assertTrue(Files.exists(firstPin.resolve("config/sut-metrics/prometheus.yaml")),
+                "Runtime Config v2.15 Data Source descriptors are part of the immutable central snapshot");
         assertFalse(Files.exists(firstPin.resolve("config/not-referenced.yaml")),
                 "Unreferenced Config-root files are not captured");
         assertFalse(ChangeSetPublisher.centralPath("config/source-references.yaml"),
@@ -155,10 +160,11 @@ class SourceFileTransactionTest {
         assertFalse(outputWriter.isAlive());
         assertEquals(firstPin, afterUnrelatedChanges, "unrelated ATT_HOME writes must not create Config revisions");
 
-        byte[] replacement = bytes("schemaVersion: att-config/v2.12\nenvironment: UAT\n");
+        byte[] replacement = bytes("schemaVersion: att-config/v2.15\nenvironment: UAT\n");
         Map<String, SourceFileTransaction.Write> writes = new LinkedHashMap<>();
         writes.put("config/config.yaml", new SourceFileTransaction.Write("config/config.yaml", replacement,
-                digest(bytes("schemaVersion: att-config/v2.12\nenvironment: SIT\ndbhelpers: [config/custom/dependencies/db-discovery.yaml]\n"))));
+                digest(bytes("schemaVersion: att-config/v2.15\nenvironment: SIT\ndbhelpers: [config/custom/dependencies/db-discovery.yaml]\n"
+                        + "sutMetrics: {dataSources: [config/sut-metrics/prometheus.yaml]}\n"))));
         transaction.commit(domain, "central", afterUnrelatedChanges, "admin", BEFORE_REVISION,
                 AFTER_REVISION, writes, () -> { });
 
@@ -166,7 +172,7 @@ class SourceFileTransactionTest {
         assertTrue(Files.readString(outputMarker).startsWith("concurrent runtime output "));
         assertEquals("not an authorable central descriptor", Files.readString(unrelatedConfig.resolve("private.json")));
         assertEquals(replacement.length, Files.size(config.resolve("config.yaml")));
-        assertEquals("schemaVersion: att-config/v2.12\nenvironment: UAT\n", Files.readString(config.resolve("config.yaml")));
+        assertEquals("schemaVersion: att-config/v2.15\nenvironment: UAT\n", Files.readString(config.resolve("config.yaml")));
         assertFalse(Files.exists(transaction.pin(domain, "central", root).resolve("config/custom/dependencies/db-discovery.yaml")),
                 "Removed Helper references are retired from the next immutable central revision");
     }
@@ -196,6 +202,184 @@ class SourceFileTransactionTest {
         assertEquals(new String(replacement, StandardCharsets.UTF_8), Files.readString(configured));
         assertFalse(Files.exists(root.resolve("config/config.yaml")), "The stable revision path must map back to the configured filename");
         assertEquals("unrelated", Files.readString(root.resolve("node_modules/.bin/yaml")));
+    }
+
+    @Test void centralExecutionPinDoesNotPromoteExternalMirrorEditsIntoTheActiveRevision() throws Exception {
+        String domain = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG;
+        String scope = ChangeSetPublisher.CENTRAL_SCOPE_ID;
+        Path root = Files.createDirectories(temp.resolve("central-external-edit-home")).toRealPath();
+        Path configured = Files.createDirectories(root.resolve("config")).resolve("config.yaml");
+        Files.writeString(configured, "schemaVersion: att-config/v2.12\nenvironment: SIT\n", StandardCharsets.UTF_8);
+        Path data = Files.createDirectories(temp.resolve("central-external-edit-data"));
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
+        transaction.registerRoot(domain, scope, root, configured);
+        Path published = transaction.pin(domain, scope, root);
+        Files.writeString(configured, "schemaVersion: att-config/v2.12\nenvironment: UAT\n", StandardCharsets.UTF_8);
+
+        Path active = transaction.activeRevisionRoot(domain, scope, root);
+        Path execution = transaction.executionPin(domain, scope, root);
+
+        assertEquals(published, active, "An external mirror edit must not move the published pointer.");
+        assertEquals("schemaVersion: att-config/v2.12\nenvironment: SIT\n",
+                Files.readString(execution.resolve("config/config.yaml")),
+                "New Worker closures must use the approved immutable Config revision.");
+        assertEquals("schemaVersion: att-config/v2.12\nenvironment: UAT\n", Files.readString(configured),
+                "The external mirror edit remains visible to deployment tooling until explicitly reviewed.");
+    }
+
+    @Test void activationRollbackCrashRecoversTheLastKnownGoodPointerAndConfiguredMirror() throws Exception {
+        String domain = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG;
+        String scope = ChangeSetPublisher.CENTRAL_SCOPE_ID;
+        Path root = Files.createDirectories(temp.resolve("activation-rollback-home")).toRealPath();
+        Path configured = Files.createDirectories(root.resolve("config")).resolve("config.yaml");
+        String before = "schemaVersion: att-config/v2.12\nenvironment: SIT\n";
+        String after = "schemaVersion: att-config/v2.12\nenvironment: UAT\n";
+        Files.writeString(configured, before, StandardCharsets.UTF_8);
+        Path data = Files.createDirectories(temp.resolve("activation-rollback-data"));
+        SourceFileTransaction.FaultInjector crashDuringRollback = new SourceFileTransaction.FaultInjector() {
+            @Override public void afterApply(int appliedCount) { }
+            @Override public void afterActivationRollbackPointerSwitch() throws java.io.IOException {
+                throw new SourceFileTransaction.SimulatedCrash();
+            }
+        };
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier(), crashDuringRollback);
+        transaction.registerRoot(domain, scope, root, configured);
+        Path activeBefore = transaction.pin(domain, scope, root);
+        String beforeId = activeBefore.getFileName().toString();
+        Map<String, SourceFileTransaction.Write> writes = Map.of("config/config.yaml",
+                new SourceFileTransaction.Write("config/config.yaml", bytes(after), digest(bytes(before))));
+
+        assertThrows(ChangeSetPublisher.ValidationRejected.class, () -> transaction.commitWithAudit(domain, scope,
+                activeBefore, "admin", BEFORE_REVISION, AFTER_REVISION, writes, () -> { },
+                "request-activation-rollback", List.of("config/config.yaml"), "CONFIG_CHANGE_SET_PUBLISH", record -> {
+                    try { transaction.rollbackActivation(record, "FAILED"); }
+                    catch (SourceFileTransaction.SimulatedCrash interrupted) {
+                        throw new ChangeSetPublisher.ValidationRejected("ATT-CONFIG-ACTIVATION-FAILED");
+                    }
+                }));
+
+        Path switchedBack = transaction.activeRevisionRoot(domain, scope, root);
+        assertEquals(beforeId, switchedBack.getFileName().toString());
+        assertEquals(after, Files.readString(configured), "The injected crash occurs before the mirror export step.");
+
+        AtomicReference<SourceFileTransaction.AuditRecord> recovered = new AtomicReference<>();
+        assertEquals(1, transaction.recover(Map.of(domain + ":" + scope, root), recovered::set));
+        assertEquals("ROLLED_BACK", recovered.get().outcome);
+        assertEquals(beforeId, transaction.activeRevisionRoot(domain, scope, root).getFileName().toString());
+        assertEquals(before, Files.readString(configured));
+        assertEquals(0, transaction.recover(Map.of(domain + ":" + scope, root), ignored -> fail("rollback audit replayed twice")));
+    }
+
+    @Test void activationRollbackIntentRecoversWhenTheProcessStopsBeforePointerSwitch() throws Exception {
+        String domain = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG;
+        String scope = ChangeSetPublisher.CENTRAL_SCOPE_ID;
+        Path root = Files.createDirectories(temp.resolve("activation-rollback-before-switch-home")).toRealPath();
+        Path configured = Files.createDirectories(root.resolve("config")).resolve("config.yaml");
+        String before = "schemaVersion: att-config/v2.12\nenvironment: SIT\n";
+        String after = "schemaVersion: att-config/v2.12\nenvironment: UAT\n";
+        Files.writeString(configured, before, StandardCharsets.UTF_8);
+        Path data = Files.createDirectories(temp.resolve("activation-rollback-before-switch-data"));
+        SourceFileTransaction.FaultInjector crashBeforeSwitch = new SourceFileTransaction.FaultInjector() {
+            @Override public void afterApply(int appliedCount) { }
+            @Override public void beforeActivationRollbackPointerSwitch() throws java.io.IOException {
+                throw new SourceFileTransaction.SimulatedCrash();
+            }
+        };
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier(), crashBeforeSwitch);
+        transaction.registerRoot(domain, scope, root, configured);
+        Path activeBefore = transaction.pin(domain, scope, root);
+        String beforeId = activeBefore.getFileName().toString();
+        Map<String, SourceFileTransaction.Write> writes = Map.of("config/config.yaml",
+                new SourceFileTransaction.Write("config/config.yaml", bytes(after), digest(bytes(before))));
+
+        assertThrows(ChangeSetPublisher.ValidationRejected.class, () -> transaction.commitWithAudit(domain, scope,
+                activeBefore, "admin", BEFORE_REVISION, AFTER_REVISION, writes, () -> { },
+                "request-activation-rollback-before-switch", List.of("config/config.yaml"),
+                "CONFIG_CHANGE_SET_PUBLISH", record -> {
+                    try { transaction.rollbackActivation(record, "FAILED"); }
+                    catch (SourceFileTransaction.SimulatedCrash interrupted) {
+                        throw new ChangeSetPublisher.ValidationRejected("ATT-CONFIG-ACTIVATION-FAILED");
+                    }
+                }));
+        assertEquals(after, Files.readString(configured));
+        assertNotEquals(beforeId, transaction.activeRevisionRoot(domain, scope, root).getFileName().toString());
+
+        AtomicReference<SourceFileTransaction.AuditRecord> recovered = new AtomicReference<>();
+        assertEquals(1, transaction.recover(Map.of(domain + ":" + scope, root), recovered::set));
+        assertEquals("ROLLED_BACK", recovered.get().outcome);
+        assertEquals(beforeId, transaction.activeRevisionRoot(domain, scope, root).getFileName().toString());
+        assertEquals(before, Files.readString(configured));
+    }
+
+    @Test void failedActivationRollbackDeletesTheCandidateAndRestoresTheConfiguredMirror() throws Exception {
+        String domain = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG;
+        String scope = ChangeSetPublisher.CENTRAL_SCOPE_ID;
+        Path root = Files.createDirectories(temp.resolve("activation-rollback-success-home")).toRealPath();
+        Path configured = Files.createDirectories(root.resolve("config")).resolve("config.yaml");
+        String before = "schemaVersion: att-config/v2.12\nenvironment: SIT\n";
+        String after = "schemaVersion: att-config/v2.12\nenvironment: UAT\n";
+        Files.writeString(configured, before, StandardCharsets.UTF_8);
+        Path data = Files.createDirectories(temp.resolve("activation-rollback-success-data"));
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
+        transaction.registerRoot(domain, scope, root, configured);
+        Path activeBefore = transaction.pin(domain, scope, root);
+        String beforeId = activeBefore.getFileName().toString();
+        AtomicReference<String> candidateId = new AtomicReference<>();
+        Map<String, SourceFileTransaction.Write> writes = Map.of("config/config.yaml",
+                new SourceFileTransaction.Write("config/config.yaml", bytes(after), digest(bytes(before))));
+
+        assertThrows(ChangeSetPublisher.ValidationRejected.class, () -> transaction.commitWithAudit(domain, scope,
+                activeBefore, "admin", BEFORE_REVISION, AFTER_REVISION, writes, () -> { },
+                "request-activation-rollback-success", List.of("config/config.yaml"), "CONFIG_CHANGE_SET_PUBLISH", record -> {
+                    candidateId.set(record.afterSnapshotId);
+                    transaction.rollbackActivation(record, "FAILED");
+                    throw new ChangeSetPublisher.ValidationRejected("ATT-CONFIG-ACTIVATION-FAILED");
+                }));
+
+        assertEquals(beforeId, transaction.activeRevisionRoot(domain, scope, root).getFileName().toString());
+        assertEquals(before, Files.readString(configured));
+        assertNotNull(candidateId.get());
+        assertThrows(java.io.IOException.class, () -> transaction.revisionRoot(domain, scope, root, candidateId.get()),
+                "A fully audited rollback must reclaim the unpublished candidate revision.");
+        assertEquals(0, transaction.recover(Map.of(domain + ":" + scope, root), ignored -> fail("completed rollback remained journaled")));
+    }
+
+    @Test void committedConfigCanRollBackAfterItsPublicationJournalWasCleaned() throws Exception {
+        String domain = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG;
+        String scope = ChangeSetPublisher.CENTRAL_SCOPE_ID;
+        Path root = Files.createDirectories(temp.resolve("post-commit-rollback-home")).toRealPath();
+        Path configured = Files.createDirectories(root.resolve("config")).resolve("config.yaml");
+        String before = "schemaVersion: att-config/v2.12\nenvironment: SIT\n";
+        String after = "schemaVersion: att-config/v2.12\nenvironment: UAT\n";
+        Files.writeString(configured, before, StandardCharsets.UTF_8);
+        Path data = Files.createDirectories(temp.resolve("post-commit-rollback-data"));
+        SourceFileTransaction transaction = new SourceFileTransaction(data, new SourcePublicationBarrier());
+        transaction.registerRoot(domain, scope, root, configured);
+        Path activeBefore = transaction.pin(domain, scope, root);
+        String beforeId = activeBefore.getFileName().toString();
+        AtomicReference<SourceFileTransaction.AuditRecord> committed = new AtomicReference<>();
+        Map<String, SourceFileTransaction.Write> writes = Map.of("config/config.yaml",
+                new SourceFileTransaction.Write("config/config.yaml", bytes(after), digest(bytes(before))));
+
+        transaction.commitWithAudit(domain, scope, activeBefore, "admin", BEFORE_REVISION, AFTER_REVISION, writes,
+                () -> { }, "request-post-commit-rollback", List.of("config/config.yaml"),
+                "CONFIG_CHANGE_SET_PUBLISH", record -> committed.set(record));
+
+        assertNotNull(committed.get());
+        assertEquals(after, Files.readString(configured));
+        assertEquals(committed.get().afterSnapshotId,
+                transaction.activeRevisionRoot(domain, scope, root).getFileName().toString());
+        transaction.rollbackActivation(committed.get(), "FAILED");
+        assertEquals(beforeId, transaction.activeRevisionRoot(domain, scope, root).getFileName().toString());
+        assertEquals(before, Files.readString(configured));
+        assertTrue(Files.exists(transaction.revisionRoot(domain, scope, root, committed.get().afterSnapshotId)),
+                "The rejected candidate stays available until its rollback audit is durable.");
+
+        transaction.completeActivationRollback(committed.get());
+
+        assertThrows(java.io.IOException.class,
+                () -> transaction.revisionRoot(domain, scope, root, committed.get().afterSnapshotId));
+        assertEquals(0, transaction.recover(Map.of(domain + ":" + scope, root), ignored -> fail("completed rollback remained journaled")));
     }
 
     @Test void executionSnapshotKeepsBothReadsOnTheAcceptedBytesWhenSameOwnerMutatesPinnedRevision() throws Exception {
@@ -531,7 +715,7 @@ class SourceFileTransactionTest {
         Path journal = transactionDirectory.resolve("journal");
         List<String> lines = new java.util.ArrayList<>(Files.readAllLines(journal, StandardCharsets.UTF_8));
         String[] header = lines.get(0).split("\\t", -1);
-        assertEquals(17, header.length);
+        assertEquals(18, header.length);
         header[0] = "att-source-revision-transaction-v2";
         lines.set(0, String.join("\t", java.util.Arrays.copyOf(header, 13)));
         Files.write(journal, lines, StandardCharsets.UTF_8);

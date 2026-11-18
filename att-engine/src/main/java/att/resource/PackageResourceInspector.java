@@ -79,6 +79,7 @@ public final class PackageResourceInspector implements AutoCloseable {
     public static final int DEFAULT_PAGE_SIZE = 50;
     private static final int MAX_INLINE_BACK_REFERENCES = 100;
     private static final int MAX_SOURCE_REFERENCES = 100;
+    private static final int MAX_PACKAGE_FILE_INDEX_ENTRIES = 20000;
     private static final int MAX_NESTED_SOURCE_DEPTH = 8;
     private static final int MAX_NESTED_SOURCE_FILES = 256;
     private static final int MAX_RESOURCES = 20000;
@@ -432,7 +433,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                                        String query, int offset, int limit, String expectedRevisionDigest,
                                        String sourceOriginPath, String sort, String direction) throws Exception {
         if (!("list".equals(action) || "detail".equals(action) || "source".equals(action)
-                || "source-file".equals(action)))
+                || "source-file".equals(action) || "file-index".equals(action)))
             throw new IllegalArgumentException("Unsupported inspection action");
         if (offset < 0) throw new IllegalArgumentException("offset must be non-negative");
         if (limit < 1 || limit > MAX_PAGE_SIZE) throw new IllegalArgumentException("limit must be between 1 and 100");
@@ -444,12 +445,230 @@ public final class PackageResourceInspector implements AutoCloseable {
         if (expectedRevisionDigest != null && !expectedRevisionDigest.equals(index.revisionDigest))
             throw new StaleResourceCursorException();
         if ("list".equals(action)) return page(index, type, query, offset, limit, sort, direction);
+        if ("file-index".equals(action)) return fileIndex(index, query, offset, limit);
         if (resourceId == null || resourceId.length() > 512) throw new IllegalArgumentException("resourceId is invalid");
         Resource resource = index.byId.get(resourceId);
         if (resource == null || type != null && !type.equals(resource.type)) throw new ResourceNotFoundException();
         if ("source".equals(action)) return source(index, resource);
         if ("source-file".equals(action)) return sourceFile(index, resource, query, sourceOriginPath);
         return detail(index, resource);
+    }
+
+    /** Builds a Package-wide, revision-fenced index from the same safe references used by source inspection. */
+    private Map<String, Object> fileIndex(Index index, String query, int offset, int limit) {
+        final String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        FileIndexSnapshot snapshot = fileIndexSnapshot(index);
+        List<Map<String, Object>> matches = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> file : snapshot.items)
+            if (needle.isEmpty() || fileIndexMatches(file, needle)) matches.add(file);
+        int start = Math.min(offset, matches.size());
+        int end = Math.min(start + limit, matches.size());
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("items", new ArrayList<Map<String, Object>>(matches.subList(start, end)));
+        result.put("total", Integer.valueOf(matches.size()));
+        result.put("nextOffset", end < matches.size() ? Integer.valueOf(end) : null);
+        result.put("packageRevision", index.revisionDigest);
+        result.put("coverage", new LinkedHashMap<String, Object>(snapshot.coverage));
+        result.put("revisionDigest", index.revisionDigest);
+        return result;
+    }
+
+    private FileIndexSnapshot fileIndexSnapshot(Index index) {
+        FileIndexSnapshot snapshot = index.packageFileIndex;
+        if (snapshot != null) return snapshot;
+        synchronized (index) {
+            snapshot = index.packageFileIndex;
+            if (snapshot == null) index.packageFileIndex = snapshot = buildFileIndexSnapshot(index);
+        }
+        return snapshot;
+    }
+
+    private FileIndexSnapshot buildFileIndexSnapshot(Index index) {
+        Map<String, PackageFileIndexEntry> entries = new TreeMap<String, PackageFileIndexEntry>();
+        Set<String> incompleteResources = new HashSet<String>();
+        int resourcesScanned = 0;
+        int truncatedReferenceSets = 0;
+        boolean filesTruncated = false;
+        for (Resource resource : index.ordered) {
+            if (!("template".equals(resource.type) || "flow".equals(resource.type))) continue;
+            resourcesScanned++;
+            if (!"ready".equals(resource.state) || resource.yamlSource == null || !sourceAllowed(resource)) {
+                incompleteResources.add(resource.resourceId);
+                continue;
+            }
+            Map<String, Object> projection = source(index, resource);
+            if (!Boolean.TRUE.equals(projection.get("available"))) {
+                incompleteResources.add(resource.resourceId);
+                continue;
+            }
+            if (Boolean.TRUE.equals(projection.get("fileReferencesUnavailable"))) incompleteResources.add(resource.resourceId);
+            if (Boolean.TRUE.equals(projection.get("fileReferencesTruncated")) || resource.fileDependenciesTruncated) {
+                incompleteResources.add(resource.resourceId);
+                truncatedReferenceSets++;
+            }
+            String originPath = projection.get("logicalPath") instanceof String ? (String) projection.get("logicalPath") : null;
+            Map<String, Object> safeResource = projection.get("resource") instanceof Map
+                    ? castMap(projection.get("resource")) : Collections.<String, Object>emptyMap();
+            String label = stringValue(safeResource.get("logicalId"));
+            if (label == null || label.isEmpty()) label = stringValue(safeResource.get("name"));
+            if (label == null || label.isEmpty()) label = resource.resourceId;
+
+            Object rawReferences = projection.get("fileReferences");
+            if (rawReferences instanceof List) for (Object rawReference : (List<?>) rawReferences) {
+                if (!(rawReference instanceof Map)) { incompleteResources.add(resource.resourceId); continue; }
+                Map<String, Object> reference = castMap(rawReference);
+                String path = stringValue(reference.get("logicalPath"));
+                String referenceId = stringValue(reference.get("referenceId"));
+                if (!safeFileIndexPath(path) || referenceId == null || !referenceId.matches("[0-9a-f]{64}")) {
+                    incompleteResources.add(resource.resourceId);
+                    continue;
+                }
+                PackageFileIndexEntry entry = entries.get(path);
+                if (entry == null) {
+                    if (entries.size() >= MAX_PACKAGE_FILE_INDEX_ENTRIES) { filesTruncated = true; continue; }
+                    entry = new PackageFileIndexEntry(path); entries.put(path, entry);
+                }
+                PackageFileIndexUse use = entry.use(resource, label, referenceId, originPath, true, null, "resolved");
+            }
+
+            for (Map<String, Object> dependency : resource.fileDependencies) {
+                String path = stringValue(dependency.get("logicalId"));
+                if (!safeFileIndexPath(path)) {
+                    incompleteResources.add(resource.resourceId);
+                    continue;
+                }
+                PackageFileIndexEntry entry = entries.get(path);
+                if (entry == null) {
+                    if (entries.size() >= MAX_PACKAGE_FILE_INDEX_ENTRIES) { filesTruncated = true; continue; }
+                    entry = new PackageFileIndexEntry(path); entries.put(path, entry);
+                }
+                String referenceId = stringValue(dependency.get("referenceId"));
+                boolean available = Boolean.TRUE.equals(dependency.get("available"))
+                        && referenceId != null && referenceId.matches("[0-9a-f]{64}");
+                PackageFileIndexUse use = entry.use(resource, label, available ? referenceId : null,
+                        stringValue(dependency.get("originPath")), available,
+                        stringValue(dependency.get("reason")), stringValue(dependency.get("resolution")));
+                Object rawCallSites = dependency.get("callSites");
+                if (rawCallSites instanceof List) for (Object callSite : (List<?>) rawCallSites)
+                    if (callSite instanceof Map) use.addCallSite(castMap(callSite));
+            }
+        }
+
+        List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
+        for (PackageFileIndexEntry entry : entries.values()) {
+            items.add(entry.toMap());
+        }
+        Map<String, Object> coverage = new LinkedHashMap<String, Object>();
+        boolean complete = incompleteResources.isEmpty() && !filesTruncated;
+        coverage.put("state", complete ? "COMPLETE" : "PARTIAL");
+        coverage.put("complete", Boolean.valueOf(complete));
+        coverage.put("resourcesScanned", Integer.valueOf(resourcesScanned));
+        coverage.put("resourcesIncomplete", Integer.valueOf(incompleteResources.size()));
+        coverage.put("referenceSetsTruncated", Integer.valueOf(truncatedReferenceSets));
+        coverage.put("filesTruncated", Boolean.valueOf(filesTruncated));
+        return new FileIndexSnapshot(items, coverage);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> castMap(Object value) { return (Map<String, Object>) value; }
+
+    private static boolean safeFileIndexPath(String path) {
+        if (path == null || path.isEmpty() || path.length() > 512 || path.startsWith("/")
+                || path.indexOf('\\') >= 0 || containsControl(path)) return false;
+        String[] parts = path.split("/", -1);
+        for (String part : parts) if (part.isEmpty() || ".".equals(part) || "..".equals(part)) return false;
+        return true;
+    }
+
+    private static boolean fileIndexMatches(Map<String, Object> file, String needle) {
+        StringBuilder searchable = new StringBuilder(String.valueOf(file.get("path"))).append(' ');
+        Object rawUses = file.get("uses");
+        if (rawUses instanceof List) for (Object rawUse : (List<?>) rawUses) if (rawUse instanceof Map) {
+            Map<?, ?> use = (Map<?, ?>) rawUse;
+            searchable.append(use.get("label")).append(' ').append(use.get("type")).append(' ')
+                    .append(use.get("resourceId")).append(' ').append(use.get("reason")).append(' ');
+            Object rawCallSites = use.get("callSites");
+            if (rawCallSites instanceof List) for (Object rawCallSite : (List<?>) rawCallSites)
+                if (rawCallSite instanceof Map) searchable.append(((Map<?, ?>) rawCallSite).get("actionId")).append(' ');
+        }
+        return searchable.toString().toLowerCase(Locale.ROOT).contains(needle);
+    }
+
+    private static final class PackageFileIndexEntry {
+        final String path;
+        final Map<String, PackageFileIndexUse> uses = new LinkedHashMap<String, PackageFileIndexUse>();
+        PackageFileIndexEntry(String path) { this.path = path; }
+        PackageFileIndexUse use(Resource resource, String label, String referenceId, String originPath,
+                                boolean available, String reason, String resolution) {
+            String key = resource.type + ":" + resource.resourceId;
+            PackageFileIndexUse use = uses.get(key);
+            if (use == null) {
+                use = new PackageFileIndexUse(resource.type, resource.resourceId, label, referenceId,
+                        originPath, available, reason, resolution);
+                uses.put(key, use);
+            } else use.merge(referenceId, originPath, available, reason, resolution);
+            return use;
+        }
+        Map<String, Object> toMap() {
+            Map<String, Object> value = new LinkedHashMap<String, Object>();
+            value.put("path", path);
+            List<Map<String, Object>> projectedUses = new ArrayList<Map<String, Object>>();
+            boolean available = false;
+            String reason = null;
+            for (PackageFileIndexUse use : uses.values()) {
+                projectedUses.add(use.toMap());
+                available |= use.available;
+                if (reason == null && use.reason != null) reason = use.reason;
+            }
+            value.put("uses", projectedUses);
+            value.put("available", Boolean.valueOf(available));
+            if (!available && reason != null) value.put("reason", reason);
+            return value;
+        }
+    }
+
+    private static final class FileIndexSnapshot {
+        final List<Map<String, Object>> items;
+        final Map<String, Object> coverage;
+        FileIndexSnapshot(List<Map<String, Object>> items, Map<String, Object> coverage) {
+            this.items = Collections.unmodifiableList(new ArrayList<Map<String, Object>>(items));
+            this.coverage = Collections.unmodifiableMap(new LinkedHashMap<String, Object>(coverage));
+        }
+    }
+
+    private static final class PackageFileIndexUse {
+        final String type, resourceId, label;
+        String referenceId, originPath, reason, resolution;
+        boolean available;
+        final Map<String, Map<String, Object>> callSites = new LinkedHashMap<String, Map<String, Object>>();
+        PackageFileIndexUse(String type, String resourceId, String label, String referenceId, String originPath,
+                            boolean available, String reason, String resolution) {
+            this.type = type; this.resourceId = resourceId; this.label = label; this.referenceId = referenceId;
+            this.originPath = originPath; this.available = available; this.reason = reason; this.resolution = resolution;
+        }
+        void merge(String nextReferenceId, String nextOriginPath, boolean nextAvailable, String nextReason, String nextResolution) {
+            if (referenceId == null) referenceId = nextReferenceId;
+            if (originPath == null) originPath = nextOriginPath;
+            if (nextAvailable) { available = true; reason = null; }
+            else if (!available && reason == null) reason = nextReason;
+            if (resolution == null) resolution = nextResolution;
+        }
+        void addCallSite(Map<String, Object> callSite) {
+            Object rawActionId = callSite.get("actionId");
+            String key = rawActionId == null ? callSite.toString() : String.valueOf(rawActionId);
+            callSites.put(key, new LinkedHashMap<String, Object>(callSite));
+        }
+        Map<String, Object> toMap() {
+            Map<String, Object> value = new LinkedHashMap<String, Object>();
+            value.put("type", type); value.put("resourceId", resourceId); value.put("label", label);
+            if (referenceId != null) value.put("referenceId", referenceId);
+            if (originPath != null) value.put("originPath", originPath);
+            value.put("available", Boolean.valueOf(available));
+            if (reason != null) value.put("reason", reason);
+            if (resolution != null) value.put("resolution", resolution);
+            value.put("callSites", new ArrayList<Map<String, Object>>(callSites.values()));
+            return value;
+        }
     }
 
     private Map<String, Object> page(Index index, String type, String query, int offset, int limit, String sort, String direction) {
@@ -3629,6 +3848,7 @@ public final class PackageResourceInspector implements AutoCloseable {
         String revisionDigest,validationSourceRevisionDigest,packageManifestDigest;
         FileStamp configStamp;
         boolean prewarmCompatible;
+        volatile FileIndexSnapshot packageFileIndex;
 
         void add(Resource resource) {
             Resource prior = byId.put(resource.resourceId, resource);

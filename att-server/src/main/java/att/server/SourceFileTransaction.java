@@ -22,6 +22,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.locks.Lock;
@@ -29,6 +30,12 @@ import java.util.concurrent.TimeUnit;
 
 /** Durable, recoverable multi-file replacement used by Manifest and Change Set publication. */
 final class SourceFileTransaction {
+    static final class ActivationRollbackAuditPending extends IOException {
+        ActivationRollbackAuditPending(Throwable cause) {
+            super("Central Config rollback audit is pending recovery", cause);
+        }
+    }
+
     interface RevisionCheck { void verify() throws Exception; }
     interface RecoveryAudit { void record(AuditRecord record) throws Exception; }
     interface CommitAudit { void record(AuditRecord record) throws Exception; }
@@ -36,6 +43,8 @@ final class SourceFileTransaction {
         void afterApply(int appliedCount) throws IOException;
         default void beforeJournal() throws IOException { }
         default void afterPointerSwitch() throws IOException { }
+        default void beforeActivationRollbackPointerSwitch() throws IOException { }
+        default void afterActivationRollbackPointerSwitch() throws IOException { }
     }
 
     static final class AuditRecord {
@@ -81,6 +90,11 @@ final class SourceFileTransaction {
                     beforeRevision, afterRevision, requestId, resources, beforeSnapshotId, afterSnapshotId,
                     validationRevision, status, createdAt,restoredFromSnapshotId);
         }
+        AuditRecord withOutcome(String nextOutcome) {
+            return new AuditRecord(transactionId, actor, domain, scopeId, action, nextOutcome,
+                    beforeRevision, afterRevision, requestId, resources, beforeSnapshotId, afterSnapshotId,
+                    validationRevision, activationStatus, createdAt,restoredFromSnapshotId);
+        }
         private static String defaultActivationStatus(String domain) {
             return ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(domain) ? "PENDING" : "NOT_APPLICABLE";
         }
@@ -123,8 +137,9 @@ final class SourceFileTransaction {
 
     private static final String JOURNAL_VERSION = "att-source-transaction-v1";
     private static final String LEGACY_REVISION_JOURNAL_VERSION = "att-source-revision-transaction-v2";
-    private static final String PREVIOUS_REVISION_JOURNAL_VERSION = "att-source-revision-transaction-v3";
-    private static final String REVISION_JOURNAL_VERSION = "att-source-revision-transaction-v4";
+    private static final String OLDER_REVISION_JOURNAL_VERSION = "att-source-revision-transaction-v3";
+    private static final String PREVIOUS_REVISION_JOURNAL_VERSION = "att-source-revision-transaction-v4";
+    private static final String REVISION_JOURNAL_VERSION = "att-source-revision-transaction-v5";
     static final long MAX_FILE_BYTES = 16L * 1024L * 1024L;
     static final long MAX_BACKUP_BYTES = 64L * 1024L * 1024L;
     private final Path transactionRoot;
@@ -180,10 +195,109 @@ final class SourceFileTransaction {
     }
 
     Path pin(String domain, String scopeId, Path root) throws Exception { return revisions.pin(domain, scopeId, root).root; }
+    /** Returns the pointer-selected immutable revision without importing the configured mirror. */
+    Path activeRevisionRoot(String domain, String scopeId, Path root) throws Exception {
+        return revisions.readActive(domain, scopeId, root).root;
+    }
     Path executionPin(String domain, String scopeId, Path root) throws Exception { return revisions.executionPin(domain, scopeId, root); }
 
     Path revisionRoot(String domain,String scopeId,Path root,String revisionId) throws Exception {
         return revisions.revisionRoot(domain,scopeId,root,revisionId);
+    }
+
+    void exportActiveToConfiguredRoot(String domain,String scopeId,Path root,String revisionId) throws Exception {
+        revisions.exportActiveToConfiguredRoot(domain,scopeId,root,revisionId);
+    }
+
+    /** Restore the last-known-good pointer when a committed central Config cannot activate. */
+    void rollbackActivation(AuditRecord record, String activationStatus) throws Exception {
+        if (record == null || !ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(record.domain)
+                || record.beforeSnapshotId == null || record.afterSnapshotId == null
+                || !Set.of("FAILED", "UNAVAILABLE").contains(activationStatus))
+            throw new IOException("Central Config activation rollback request is invalid");
+        Path sourceRoot = revisions.registeredRoot(record.domain, record.scopeId);
+        if (sourceRoot == null) throw new IOException("Central Config source root is unavailable");
+        if (revisions.writerLockHeld(record.domain, record.scopeId, sourceRoot)) {
+            rollbackActivationLocked(record, activationStatus, sourceRoot);
+            return;
+        }
+        try (SourceRevisionStore.WriterLock ignored = revisions.lock(record.domain, record.scopeId, sourceRoot)) {
+            rollbackActivationLocked(record, activationStatus, sourceRoot);
+        }
+    }
+
+    private void rollbackActivationLocked(AuditRecord record, String activationStatus, Path sourceRoot) throws Exception {
+        SourceRevisionStore.Revision active = revisions.readActive(record.domain, record.scopeId, sourceRoot);
+        if (!active.id.equals(record.afterSnapshotId)
+                && !active.id.equals(record.beforeSnapshotId))
+            throw new IOException("Central Config active revision changed during activation rollback");
+        if (active.transactionId != null && !record.transactionId.equals(active.transactionId))
+            throw new IOException("Central Config transaction changed during activation rollback");
+
+        Path transaction = transactionRoot.resolve(record.transactionId);
+        Path journalPath = transaction.resolve("journal");
+        Path afterRoot = revisions.revisionRoot(record.domain, record.scopeId, sourceRoot, record.afterSnapshotId);
+        String afterTreeDigest = SourceRevisionStore.treeDigest(record.domain, afterRoot);
+        AuditRecord rollbackRecord = record.withOutcome("ROLLED_BACK").withActivationStatus(activationStatus);
+        if (!Files.isRegularFile(journalPath, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(journalPath)) {
+            if (!active.id.equals(record.afterSnapshotId) || active.transactionId != null)
+                throw new IOException("Central Config activation journal is unavailable");
+            if (Files.exists(transaction, LinkOption.NOFOLLOW_LINKS))
+                throw new IOException("Central Config activation journal path is occupied");
+            privateDirectory(transaction);
+            writeRevisionJournal(transaction, sourceRoot, record.beforeSnapshotId, record.afterSnapshotId,
+                    afterTreeDigest, rollbackRecord);
+            writeForcedAtomically(transaction.resolve("COMMITTED"),
+                    (record.transactionId + "\n" + record.afterRevision + "\n").getBytes(StandardCharsets.UTF_8));
+        } else {
+            RevisionJournal journal = readRevisionJournal(journalPath);
+            if (!record.transactionId.equals(journal.transactionId)
+                    || !record.beforeSnapshotId.equals(journal.beforeId)
+                    || !record.afterSnapshotId.equals(journal.afterId))
+                throw new IOException("Central Config activation journal changed during rollback");
+        }
+        writeRevisionJournal(transaction, sourceRoot, record.beforeSnapshotId, record.afterSnapshotId,
+                afterTreeDigest, rollbackRecord);
+
+        if (active.id.equals(record.afterSnapshotId)) {
+            if (faultInjector != null) faultInjector.beforeActivationRollbackPointerSwitch();
+            revisions.switchTo(record.domain, record.scopeId, sourceRoot, record.beforeSnapshotId,
+                    record.beforeRevision, record.transactionId);
+            if (faultInjector != null) faultInjector.afterActivationRollbackPointerSwitch();
+        }
+        revisions.exportActiveToConfiguredRoot(record.domain, record.scopeId, sourceRoot, record.beforeSnapshotId);
+        SourceRevisionStore.Revision restored = revisions.readActive(record.domain, record.scopeId, sourceRoot);
+        if (!record.beforeSnapshotId.equals(restored.id)
+                || !java.util.Objects.equals(record.beforeRevision, restored.sourceRevision))
+            throw new IOException("Central Config last-known-good revision failed read-back");
+        if (record.transactionId.equals(restored.transactionId))
+            revisions.clearTransactionId(record.domain, record.scopeId, sourceRoot,
+                    record.beforeSnapshotId, record.transactionId);
+    }
+
+    /** Finalizes a rollback only after its ROLLED_BACK audit row is durable. */
+    void completeActivationRollback(AuditRecord record) throws Exception {
+        if (record == null || !ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(record.domain)
+                || record.beforeSnapshotId == null || record.afterSnapshotId == null)
+            throw new IOException("Central Config activation rollback finalization is invalid");
+        Path sourceRoot = revisions.registeredRoot(record.domain, record.scopeId);
+        if (sourceRoot == null) throw new IOException("Central Config source root is unavailable");
+        if (revisions.writerLockHeld(record.domain, record.scopeId, sourceRoot)) {
+            completeActivationRollbackLocked(record, sourceRoot);
+            return;
+        }
+        try (SourceRevisionStore.WriterLock ignored = revisions.lock(record.domain, record.scopeId, sourceRoot)) {
+            completeActivationRollbackLocked(record, sourceRoot);
+        }
+    }
+
+    private void completeActivationRollbackLocked(AuditRecord record, Path sourceRoot) throws Exception {
+        SourceRevisionStore.Revision active = revisions.readActive(record.domain, record.scopeId, sourceRoot);
+        if (!record.beforeSnapshotId.equals(active.id) || active.transactionId != null)
+            throw new IOException("Central Config rollback is not durably active");
+        revisions.deleteRevision(record.domain, record.scopeId, sourceRoot, record.afterSnapshotId);
+        Path transaction = transactionRoot.resolve(record.transactionId);
+        if (Files.exists(transaction, LinkOption.NOFOLLOW_LINKS)) cleanupRevisionTransaction(transaction);
     }
 
     SourceRevisionStore.WriterLock lock(String domain,String scopeId,Path root) throws Exception {
@@ -276,7 +390,11 @@ final class SourceFileTransaction {
             boolean auditConfirmed = true;
             if (audit != null) {
                 try { audit.record(record); }
-                catch (Exception auditFailure) { auditConfirmed = false; }
+                catch (Exception auditFailure) {
+                    if (auditFailure instanceof ChangeSetPublisher.ValidationRejected
+                            || auditFailure instanceof ActivationRollbackAuditPending) throw auditFailure;
+                    auditConfirmed = false;
+                }
             }
             if (auditConfirmed) {
                 writeForcedAtomically(transaction.resolve("AUDITED"), (transactionId + "\n").getBytes(StandardCharsets.UTF_8));
@@ -288,6 +406,22 @@ final class SourceFileTransaction {
             throw interrupted;
         } catch (Exception failure) {
             if (pointerSwitched) {
+                if (failure instanceof ActivationRollbackAuditPending pending) {
+                    ChangeSetPublisher.ValidationRejected rejected =
+                            new ChangeSetPublisher.ValidationRejected("ATT-CONFIG-ACTIVATION-FAILED");
+                    rejected.addSuppressed(pending);
+                    throw rejected;
+                }
+                if (failure instanceof ChangeSetPublisher.ValidationRejected) {
+                    try {
+                        SourceRevisionStore.Revision active = revisions.readActive(domain, scopeId, sourceRoot);
+                        if (beforeId != null && beforeId.equals(active.id) && active.transactionId == null) {
+                            if (afterId != null) revisions.deleteRevision(domain, scopeId, sourceRoot, afterId);
+                            cleanupRevisionTransaction(transaction);
+                        }
+                    } catch (Exception cleanupFailure) { failure.addSuppressed(cleanupFailure); }
+                    throw failure;
+                }
                 // The complete revision is already active. Keep the journal for startup audit replay.
                 return new CommitResult(afterRevision, false);
             }
@@ -329,6 +463,7 @@ final class SourceFileTransaction {
                 String firstLine = Files.readAllLines(journal, StandardCharsets.UTF_8).stream().findFirst().orElse("");
                 if (firstLine.startsWith(REVISION_JOURNAL_VERSION + "\t")
                         || firstLine.startsWith(PREVIOUS_REVISION_JOURNAL_VERSION + "\t")
+                        || firstLine.startsWith(OLDER_REVISION_JOURNAL_VERSION + "\t")
                         || firstLine.startsWith(LEGACY_REVISION_JOURNAL_VERSION + "\t")) {
                     recoverRevisionTransaction(entry, trustedRoots, audit);
                 } else {
@@ -373,8 +508,33 @@ final class SourceFileTransaction {
         registerRoot(parsed.domain, parsed.scopeId, parsed.sourceRoot);
         SourceRevisionStore.Revision active = revisions.readActive(parsed.domain, parsed.scopeId, parsed.sourceRoot);
         boolean markedCommitted = validRevisionCommitMarker(transaction.resolve("COMMITTED"), parsed.transactionId, parsed.afterRevision);
-        boolean activeCommit = parsed.transactionId.equals(active.transactionId);
-        boolean committed = markedCommitted || activeCommit;
+        boolean activeAfter = parsed.afterId.equals(active.id);
+        boolean activeBefore = parsed.beforeId.equals(active.id);
+        boolean activeCommit = activeAfter && parsed.transactionId.equals(active.transactionId);
+        boolean committed = activeAfter && (markedCommitted || activeCommit);
+        if ("ROLLED_BACK".equals(parsed.outcome)) {
+            if (parsed.afterTreeDigest == null || !revisions.revisionTreeMatches(parsed.domain, parsed.scopeId,
+                    parsed.sourceRoot, parsed.afterId, parsed.afterTreeDigest))
+                throw new IOException("Rejected source revision failed its rollback integrity check");
+            if (activeAfter) {
+                if (active.transactionId != null && !parsed.transactionId.equals(active.transactionId))
+                    throw new IOException("Active source transaction changed during activation recovery");
+                revisions.switchTo(parsed.domain, parsed.scopeId, parsed.sourceRoot, parsed.beforeId,
+                        parsed.beforeRevision, parsed.transactionId);
+                active = revisions.readActive(parsed.domain, parsed.scopeId, parsed.sourceRoot);
+                activeBefore = parsed.beforeId.equals(active.id);
+            }
+            if (!activeBefore || active.transactionId != null && !parsed.transactionId.equals(active.transactionId))
+                throw new IOException("Last-known-good source revision cannot be recovered");
+            revisions.exportActiveToConfiguredRoot(parsed.domain, parsed.scopeId, parsed.sourceRoot, parsed.beforeId);
+            if (parsed.transactionId.equals(active.transactionId))
+                revisions.clearTransactionId(parsed.domain, parsed.scopeId, parsed.sourceRoot,
+                        parsed.beforeId, parsed.transactionId);
+            revisions.deleteRevision(parsed.domain, parsed.scopeId, parsed.sourceRoot, parsed.afterId);
+            if (audit != null) audit.record(parsed.record("ROLLED_BACK"));
+            cleanupRevisionTransaction(transaction);
+            return;
+        }
         if (committed) {
             if (parsed.afterTreeDigest == null || !revisions.revisionTreeMatches(parsed.domain, parsed.scopeId,
                     parsed.sourceRoot, parsed.afterId, parsed.afterTreeDigest))
@@ -387,8 +547,16 @@ final class SourceFileTransaction {
             cleanupRevisionTransaction(transaction);
             return;
         }
-        if (!parsed.beforeId.equals(active.id))
+        if (!activeBefore || (active.transactionId != null
+                && !parsed.transactionId.equals(active.transactionId)))
             throw new IOException("Active source revision cannot be reconciled with its transaction journal");
+        // The active pointer is still at the last-known-good revision. This also
+        // recovers a crash during online activation rollback, even if COMMITTED
+        // was already durably written for the candidate revision.
+        revisions.exportActiveToConfiguredRoot(parsed.domain, parsed.scopeId, parsed.sourceRoot, parsed.beforeId);
+        if (parsed.transactionId.equals(active.transactionId))
+            revisions.clearTransactionId(parsed.domain, parsed.scopeId, parsed.sourceRoot,
+                    parsed.beforeId, parsed.transactionId);
         revisions.deleteRevision(parsed.domain, parsed.scopeId, parsed.sourceRoot, parsed.afterId);
         if (audit != null) audit.record(parsed.record("ROLLED_BACK"));
         cleanupRevisionTransaction(transaction);
@@ -489,7 +657,8 @@ final class SourceFileTransaction {
                 .append(record.requestId == null ? "-" : encoded(record.requestId)).append('\t')
                 .append(record.validationRevision == null ? "-" : encoded(record.validationRevision)).append('\t')
                 .append(encoded(record.activationStatus)).append('\t').append(encoded(record.createdAt)).append('\t')
-                .append(record.restoredFromSnapshotId==null?"-":encoded(record.restoredFromSnapshotId)).append('\n');
+                .append(record.restoredFromSnapshotId==null?"-":encoded(record.restoredFromSnapshotId)).append('\t')
+                .append(encoded(record.outcome)).append('\n');
         for (String resource : record.resources) value.append("R\t").append(encoded(resource)).append('\n');
         writeForcedAtomically(transaction.resolve("journal"), value.toString().getBytes(StandardCharsets.UTF_8));
     }
@@ -501,9 +670,11 @@ final class SourceFileTransaction {
         if (lines.isEmpty()) throw new IOException("Source transaction journal is invalid");
         String[] fields = lines.get(0).split("\\t", -1);
         boolean legacy = LEGACY_REVISION_JOURNAL_VERSION.equals(fields[0]);
+        boolean older = OLDER_REVISION_JOURNAL_VERSION.equals(fields[0]);
         boolean previous = PREVIOUS_REVISION_JOURNAL_VERSION.equals(fields[0]);
         boolean current = REVISION_JOURNAL_VERSION.equals(fields[0]);
-        if (legacy ? fields.length != 13 : previous ? fields.length != 16 : current ? fields.length != 17 : true)
+        if (legacy ? fields.length != 13 : older ? fields.length != 16
+                : previous ? fields.length != 17 : current ? fields.length != 18 : true)
             throw new IOException("Source transaction journal is invalid");
         String transactionId = decoded(fields[1]);
         String beforeId = decoded(fields[9]), afterId = decoded(fields[10]);
@@ -513,10 +684,12 @@ final class SourceFileTransaction {
         String domain = decoded(fields[2]);
         String activationStatus = legacy ? AuditRecord.defaultActivationStatus(domain) : decoded(fields[14]);
         String createdAt = legacy ? "UNKNOWN" : decoded(fields[15]);
-        String restoredFromSnapshotId=current&& !"-".equals(fields[16])?decoded(fields[16]):null;
+        String restoredFromSnapshotId=(current||previous)&& !"-".equals(fields[16])?decoded(fields[16]):null;
+        String outcome=current?decoded(fields[17]):"COMMITTED";
         if (!transactionId.matches("T[A-F0-9]{32}") || !beforeId.matches("R[A-F0-9]{32}")
                 || !afterId.matches("R[A-F0-9]{32}") || treeDigest != null && !isDigest(treeDigest)
-                || restoredFromSnapshotId!=null&&!restoredFromSnapshotId.matches("R[A-F0-9]{32}"))
+                || restoredFromSnapshotId!=null&&!restoredFromSnapshotId.matches("R[A-F0-9]{32}")
+                || !Set.of("COMMITTED","ROLLED_BACK","FAILED").contains(outcome))
             throw new IOException("Source transaction journal is invalid");
         String beforeRevision = decoded(fields[7]), afterRevision = decoded(fields[8]);
         if (!isDigest(beforeRevision) || !isDigest(afterRevision)
@@ -538,7 +711,7 @@ final class SourceFileTransaction {
         return new RevisionJournal(transactionId, domain, decoded(fields[3]),
                 canonicalRoot(java.nio.file.Paths.get(decoded(fields[4]))), decoded(fields[5]), decoded(fields[6]),
                 beforeRevision, afterRevision, beforeId, afterId, treeDigest, requestId, validationRevision,
-                activationStatus, createdAt, restoredFromSnapshotId,resources);
+                activationStatus, createdAt, restoredFromSnapshotId, outcome,resources);
     }
 
     private static boolean validRevisionCommitMarker(Path marker, String transactionId, String revision) throws IOException {
@@ -883,20 +1056,21 @@ final class SourceFileTransaction {
 
     private static final class RevisionJournal {
         final String transactionId, domain, scopeId, actor, action, beforeRevision, afterRevision;
-        final String beforeId, afterId, afterTreeDigest, requestId, validationRevision, activationStatus, createdAt;
+        final String beforeId, afterId, afterTreeDigest, requestId, validationRevision, activationStatus, createdAt, outcome;
         final String restoredFromSnapshotId;
         final Path sourceRoot;
         final List<String> resources;
         RevisionJournal(String transactionId, String domain, String scopeId, Path sourceRoot, String actor,
                         String action, String beforeRevision, String afterRevision, String beforeId, String afterId,
                         String afterTreeDigest, String requestId, String validationRevision, String activationStatus,
-                        String createdAt,String restoredFromSnapshotId,List<String> resources) {
+                        String createdAt,String restoredFromSnapshotId,String outcome,List<String> resources) {
             this.transactionId = transactionId; this.domain = domain; this.scopeId = scopeId;
             this.sourceRoot = sourceRoot; this.actor = actor; this.action = action;
             this.beforeRevision = beforeRevision; this.afterRevision = afterRevision; this.beforeId = beforeId;
             this.afterId = afterId; this.afterTreeDigest = afterTreeDigest; this.requestId = requestId;
             this.validationRevision = validationRevision; this.activationStatus = activationStatus; this.createdAt = createdAt;
             this.restoredFromSnapshotId=restoredFromSnapshotId;
+            this.outcome=outcome;
             this.resources = Collections.unmodifiableList(new ArrayList<>(resources));
         }
         AuditRecord record(String outcome) {

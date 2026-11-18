@@ -135,36 +135,36 @@ describe('PackageTestdataWorkspace', () => {
         ? [{ id: 'new-shipments', source: 'testdata/new-shipments.yaml' }] : [] }] })),
       getTestdataRecords: vi.fn(async (_packageId: string, descriptorId: string) => ({ descriptorId, offset: 0, limit: 50, total: 0, records: [] })),
       getManagedPackageAuthoringSource: vi.fn(async () => ({ available: true, present: true, logicalPath: 'package.yaml', format: 'yaml',
-        text: 'testdata: []\n', sourceEtag: 'etag-1', revision: 'revision-1', baseSourceRevision: 'base-1', registryRevision: 'registry-1' })),
+        text: 'schemaVersion: att-package/v2\ntestdata:\n  descriptors: []\n', sourceEtag: 'etag-1', revision: 'revision-1', baseSourceRevision: 'base-1', registryRevision: 'registry-1' })),
       stageSourceChangeSet: stage,
       sourceChangeSetAction: sharedApi.sourceChangeSetAction,
     } as unknown as ExplorerApi;
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     await act(async () => root.render(<Harness api={api} />)); await flush();
     expect(host.textContent).toContain('Create Testdata descriptor');
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Create Testdata descriptor')?.click()); await flush();
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Edit')?.click());
-    const manifestEditor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]');
-    if (!manifestEditor) throw new Error('Authorized Package Manifest editor was not rendered.');
-    setInputValue(manifestEditor, 'testdata:\n  - id: new-shipments\n    source: testdata/new-shipments.yaml\n');
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Add current file to candidate')?.click());
-
-    setInputValue(host.querySelector<HTMLInputElement>('input[aria-label="Related file path"]')!, 'testdata/new-shipments.yaml');
-    setInputValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Related file content"]')!, 'selection: { strategy: random }\n');
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Add related file')?.click());
-    setInputValue(host.querySelector<HTMLSelectElement>('select[aria-label="Related file operation"]')!, 'replace');
-    setInputValue(host.querySelector<HTMLInputElement>('input[aria-label="Related file path"]')!, 'testdata/overlays/UAT.yaml');
-    setInputValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Related file content"]')!, 'records: []\n');
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Add related file')?.click());
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Stage candidate (3 files)')?.click()); await flush();
-    expect(stage).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', 'base-1', 'registry-1', [
-      { operation: 'replace', path: 'package.yaml', content: 'testdata:\n  - id: new-shipments\n    source: testdata/new-shipments.yaml\n' },
-      { operation: 'create', path: 'testdata/new-shipments.yaml', content: 'selection: { strategy: random }\n' },
-      { operation: 'replace', path: 'testdata/overlays/UAT.yaml', content: 'records: []\n' },
-    ], expect.any(AbortSignal));
+    setInputValue(host.querySelector<HTMLInputElement>('input[aria-label="New Testdata ID"]')!, 'new-shipments');
+    setInputValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Testdata JSON records"]')!, '[{ "shipmentId": "S-001" }]');
+    setInputValue(host.querySelector<HTMLSelectElement>('select[aria-label="Testdata selection strategy"]')!, 'roundRobin');
+    setInputValue(host.querySelector<HTMLSelectElement>('select[aria-label="Testdata exhaustion policy"]')!, 'recycle');
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Prepare atomic candidate')?.click()); await flush(); await flush();
+    expect(host.textContent).toContain('testdata/new-shipments.yaml');
+    expect(host.textContent).toContain('package.yaml');
+    await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Stage candidate (2 files)')?.click()); await flush();
+    expect(stage).toHaveBeenCalledTimes(1);
+    const operations = stage.mock.calls[0][4] as Array<{ operation: string; path: string; content?: string }>;
+    expect(operations).toHaveLength(2);
+    expect(operations.map(operation => [operation.operation, operation.path])).toEqual([
+      ['create', 'testdata/new-shipments.yaml'], ['replace', 'package.yaml'],
+    ]);
+    expect(operations[0].content).toContain('schemaVersion: att-testdata/v1.0');
+    expect(operations[0].content).toContain('strategy: roundRobin');
+    expect(operations[0].content).toContain('exhaustion: recycle');
+    expect(operations[1].content).toContain('testdata/new-shipments.yaml');
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Validate')?.click()); await flush();
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Review changed files')?.click()); await flush();
-    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Publish')?.click()); await flush(); await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Publish')?.click()); await flush();
+    await act(async () => host.querySelector<HTMLButtonElement>('.att-confirm-actions button:last-child')?.click()); await flush(); await flush();
     expect(actions.mock.calls.map(call => call[3])).toEqual(['validate', 'review', 'publish']);
     expect(vi.mocked(api.getEffectiveConfiguration).mock.calls.length).toBeGreaterThan(1);
     expect(host.textContent).toContain('new-shipments');

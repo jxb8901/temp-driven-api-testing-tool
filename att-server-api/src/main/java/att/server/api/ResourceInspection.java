@@ -15,6 +15,45 @@ public final class ResourceInspection {
         public String requestId;
     }
 
+    /** Revision-fenced Package-wide index of safe, statically referenced files. */
+    public static final class FilePage {
+        public List<PackageFile> items;
+        public int total;
+        public String nextCursor;
+        public String packageRevision;
+        public Boolean canEdit;
+        public FileCoverage coverage;
+        public String requestId;
+    }
+
+    public static final class PackageFile {
+        public String path;
+        public Boolean available;
+        public String reason;
+        public List<PackageFileUse> uses;
+    }
+
+    public static final class PackageFileUse {
+        public String type;
+        public String resourceId;
+        public String label;
+        public String referenceId;
+        public String originPath;
+        public Boolean available;
+        public String reason;
+        public String resolution;
+        public List<Map<String, Object>> callSites;
+    }
+
+    public static final class FileCoverage {
+        public String state;
+        public Boolean complete;
+        public int resourcesScanned;
+        public int resourcesIncomplete;
+        public int referenceSetsTruncated;
+        public Boolean filesTruncated;
+    }
+
     public static final class Detail {
         public Resource resource;
         public Map<String, Object> definition;

@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AppShellContext, type AppShellContextValue } from '../../AppShell';
 import { TestcaseAuthoringWorkspace } from './TestcaseAuthoringWorkspace';
 import { PackageTestdataWorkspace } from './PackageTestdataCatalog';
 import type { ExplorerApi } from './types';
@@ -14,7 +15,14 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-async function settle() { await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); }); }
+async function settle() {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+    const confirm = host.querySelector<HTMLButtonElement>('.att-confirm-actions button:last-child');
+    if (!confirm) break;
+    await act(async () => { confirm.click(); await Promise.resolve(); });
+  }
+}
 function button(name: string): HTMLButtonElement {
   const found = [...host.querySelectorAll('button')].find(item => item.textContent?.trim() === name);
   if (!found) throw new Error(`Button not found: ${name}`);
@@ -27,8 +35,35 @@ function setValue(element: HTMLInputElement, value: string) {
     element.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
+function workspaceContext(setWorkspaceEditorLock: (locked: boolean) => void): AppShellContextValue {
+  return {
+    selectedPackage: 'payments', selectedEnvironment: 'SIT', themePreference: 'system', uiLocale: 'en', uiLocalePreference: 'en',
+    currentUser: null, accessCapabilities: { operate: true, accountManage: true, systemSettingsWrite: true, configurationAdmin: true },
+    preferenceStatus: 'idle', canRevealConfigurationFields: false, setWorkspaceEditorLock,
+    onPackageChange: vi.fn(), onEnvironmentChange: vi.fn(), onThemePreferenceChange: vi.fn(), onUiLocaleChange: vi.fn(), onJobAccepted: vi.fn(),
+  };
+}
 
 describe('TestcaseAuthoringWorkspace', () => {
+  it('does not lock workspace navigation just because the source revision is available', async () => {
+    const setWorkspaceEditorLock = vi.fn();
+    const api = { getManagedPackageAuthoringSource: vi.fn(async () => ({ available: true, present: true,
+      logicalPath: 'package.yaml', format: 'yaml', text: 'must not be rendered', sourceEtag: 'etag-1',
+      revision: 'revision-1', baseSourceRevision: 'base-1', registryRevision: 'registry-1' })) } as unknown as ExplorerApi;
+    await act(async () => root.render(<AppShellContext.Provider value={workspaceContext(setWorkspaceEditorLock)}>
+      <TestcaseAuthoringWorkspace api={api} packageId="payments" sourcePath="cases/case-01.xml" />
+    </AppShellContext.Provider>));
+    await settle();
+    expect(host.querySelector('[aria-label="Testcase source publication workflow"]')).not.toBeNull();
+    expect(setWorkspaceEditorLock).toHaveBeenLastCalledWith(false);
+    const provenance = host.querySelector<HTMLDetailsElement>('details[aria-label="Advanced Testcase revision provenance"]');
+    expect(provenance?.open).toBe(false);
+    if (!provenance) throw new Error('Advanced Testcase revision provenance disclosure was not rendered.');
+    click(provenance.querySelector('summary')!);
+    expect(provenance.textContent).toContain('etag-1');
+    expect(provenance.textContent).toContain('registry-1');
+  });
+
   it('stages a paired upload and requires an explicit hash-bound snapshot action', async () => {
     const draft = { changeSetId: 'cs-case', domain: 'PACKAGE_SOURCE' as const, scopeId: 'payments', state: 'draft',
       baseSourceRevision: 'base-1', registryRevision: 'registry-1', changedFiles: [] };

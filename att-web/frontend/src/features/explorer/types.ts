@@ -2,6 +2,7 @@ import type { ResourceRoute, ValidationScope } from '../../router';
 import type {
   ManagedAuthoringSource, PackageAuthoringSourceQuery, SourceChangeAction, SourceChangeSet,
   SourceDomain, SourceImpactReport, SourceImpactAcknowledgement, SourceOperation, SourcePublishResult, SourceSnapshotRequest,
+  SourceHistoryDiffResponse, SourceHistoryResponse,
 } from './sourceManagement';
 
 export type ResourceType = 'case' | 'template' | 'flow' | 'tool';
@@ -74,6 +75,41 @@ export interface ResourcePage {
   total: number;
   nextCursor?: string | null;
   diagnostics?: Diagnostic[];
+}
+
+export interface PackageFileIndexUse {
+  type: 'template' | 'flow';
+  resourceId: string;
+  label: string;
+  referenceId?: string;
+  originPath?: string;
+  available: boolean;
+  reason?: string;
+  resolution?: string;
+  callSites: Array<{ kind?: string; resourceId?: string; actionId?: string; [key: string]: unknown }>;
+}
+
+export interface PackageFileIndexItem {
+  path: string;
+  available: boolean;
+  reason?: string;
+  uses: PackageFileIndexUse[];
+}
+
+export interface PackageFileIndexPage {
+  items: PackageFileIndexItem[];
+  total: number;
+  nextCursor?: string | null;
+  packageRevision: string;
+  canEdit?: boolean;
+  coverage: {
+    state: 'COMPLETE' | 'PARTIAL' | string;
+    complete: boolean;
+    resourcesScanned: number;
+    resourcesIncomplete: number;
+    referenceSetsTruncated: number;
+    filesTruncated?: boolean;
+  };
 }
 
 export interface ResourceDetail {
@@ -347,6 +383,7 @@ export type PackageSutMetricsDraftAction = 'validate' | 'review' | 'publish' | '
 /** Operation-level facade implemented by the shared same-origin API module. */
 export interface ExplorerApi {
   listResources(packageId: string, query: ResourceQuery, signal?: AbortSignal): Promise<ResourcePage>;
+  listPackageFileIndex?(packageId: string, query: { query?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<PackageFileIndexPage>;
   getResource(identity: ResourceIdentity, signal?: AbortSignal): Promise<ResourceDetail>;
   getSafeSource(identity: ResourceIdentity, signal?: AbortSignal): Promise<SourceProjection>;
   getManagedPackageAuthoringSource?(packageId: string, query: PackageAuthoringSourceQuery, signal?: AbortSignal): Promise<ManagedAuthoringSource>;
@@ -356,6 +393,11 @@ export interface ExplorerApi {
   stagePackageSourceArchive?(packageId: string, archive: File, signal?: AbortSignal): Promise<SourceChangeSet>;
   sourceChangeSetAction?(domain: SourceDomain, scopeId: string, changeSetId: string, action: SourceChangeAction,
     signal?: AbortSignal, impactAcknowledgement?: SourceImpactAcknowledgement): Promise<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }>;
+  getSourceHistory?(domain: SourceDomain, scopeId: string, offset?: number, limit?: number, signal?: AbortSignal): Promise<SourceHistoryResponse>;
+  getSourceHistoryDiff?(domain: SourceDomain, scopeId: string, beforeSnapshotId: string, afterSnapshotId: string,
+    path?: string, signal?: AbortSignal): Promise<SourceHistoryDiffResponse>;
+  stageSourceRestore?(domain: SourceDomain, scopeId: string, snapshotId: string, expectedSourceRevision: string,
+    registryRevision?: string, signal?: AbortSignal): Promise<SourceChangeSet>;
   generateTestcaseSnapshot?(packageId: string, changeSetId: string, input: SourceSnapshotRequest, signal?: AbortSignal): Promise<SourceChangeSet>;
   getCentralConfigImpact?(changeSetId: string, cursor?: string, signal?: AbortSignal): Promise<SourceImpactReport>;
   getResourceSourceFile?(identity: ResourceIdentity, referenceId: string, signal?: AbortSignal, origin?: string): Promise<SourceProjection>;
@@ -400,5 +442,6 @@ export interface ExplorerPageProps {
   onScheduleDebug?: (input: { packageId: string; environment?: string; draftId: string; previewYaml?: string; executionType: 'run' | 'load'; legacyDebug?: boolean; target: { type: DebugResourceType; id: string } }) => boolean | void;
   onOpenConfigurationFile?: (path: string, origin?: string, reference?: ResourceSourceReference) => void;
   onOpenTestdata?: () => void;
+  onOpenPackageConfiguration?: () => void;
   canManagePackageSource?: boolean;
 }

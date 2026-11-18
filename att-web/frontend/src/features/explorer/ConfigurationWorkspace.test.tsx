@@ -45,6 +45,23 @@ function Harness({ api, sourceReference, canRevealAdminFields = false }: { api: 
 }
 
 describe('ConfigurationWorkspace', () => {
+  it('clearly separates read-only shared-config inspection from ADMIN draft authoring', async () => {
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      listConfigurationFiles: vi.fn(async () => ({ items: [], total: 0 })),
+    } as unknown as ExplorerApi;
+    const render = (canManageCentralConfiguration: boolean) => <ConfigurationWorkspace api={api} packageId="" environment=""
+      filePath={undefined} tab="source" onEnvironmentChange={vi.fn()} onFileChange={vi.fn()} onTabChange={vi.fn()}
+      onOpenResource={vi.fn()} canManageCentralConfiguration={canManageCentralConfiguration} />;
+
+    await act(async () => root.render(render(false)));
+    await flush();
+    expect(host.textContent).toContain('Global Runtime Configuration applies across Packages. The source inspector is read-only; authorized ADMINs author changes as a separate reviewed draft.');
+    await act(async () => root.render(render(true)));
+    await flush();
+    expect(host.textContent).toContain('The source inspector is read-only; authorized ADMINs author changes as a separate reviewed draft.');
+  });
+
   it('loads shared views with All packages and does not reload them on package selection', async () => {
     const api = {
       getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'SIT', state: 'active' }], sections: [] })),

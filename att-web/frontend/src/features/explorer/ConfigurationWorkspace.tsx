@@ -4,6 +4,7 @@ import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
 import { ConfigurationExplorer } from './ConfigurationExplorer';
 import type { ConfigurationFileNode, ExplorerApi, ResourceReference, ResourceSourceReference, SourceProjection } from './types';
 import { SourceAuthoringWorkspace } from './SourceAuthoringWorkspace';
+import { readUiLocale } from '../../uiLocale';
 import './configuration-workspace.css';
 
 type WorkspaceTab = 'source' | 'declared' | 'effective' | 'compare';
@@ -223,14 +224,16 @@ export function ConfigurationWorkspace({ api, packageId, environment, filePath, 
 
   return <div className="page-content att-configuration-page">
     <header className="att-configuration-page-heading">
-      <div><p className="eyebrow">Shared Runtime Configuration</p><h1>Configuration</h1><p>Inspect centrally managed runtime configuration safely. This view is read-only.</p></div>
+      <div><p className="eyebrow">Shared Runtime Configuration</p><h1>Configuration</h1><p>Global Runtime Configuration applies across Packages. The source inspector is read-only; authorized ADMINs author changes as a separate reviewed draft.</p></div>
       <div className="att-configuration-context">
         {onValidate && <button className="button button-quiet" type="button" title={validationHelp} onClick={onValidate}>{validationLabel || 'Validate Shared Config'}</button>}
         {onValidatePackage && <button className="button button-quiet" type="button" title={validationHelp} onClick={onValidatePackage}>{packageValidationLabel || 'Validate Effective Config'}</button>}
         <label>Environment<select aria-label="Configuration environment" value={environment} onChange={event => onEnvironmentChange(event.currentTarget.value)}>
           <option value="">Runtime default</option>{profiles.map(item => <option key={item.name} value={item.name}>{item.name}{item.default ? ' · default' : ''}</option>)}
         </select></label>
-        <button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen(value => !value)}>Inspector {inspectorOpen ? 'on' : 'off'}</button>
+        <button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen(value => !value)}>
+          {readUiLocale() === 'zh-Hant' ? (inspectorOpen ? '檢視器開啟' : '檢視器關閉') : inspectorOpen ? 'Inspector on' : 'Inspector off'}
+        </button>
         {canRevealAdminFields && (tab === 'effective' || tab === 'compare') && <label className="att-config-all-fields-toggle"><input type="checkbox" checked={includeAllFields} onChange={event => setIncludeAllFields(event.currentTarget.checked)} /> Show more DB fields (sensitive values stay hidden)</label>}
       </div>
     </header>

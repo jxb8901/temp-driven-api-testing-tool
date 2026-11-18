@@ -84,6 +84,66 @@ export interface SourceChangeSet {
   snapshotPath?: string;
 }
 
+export interface SourceHistoryEntry {
+  transactionId: string;
+  domain: SourceDomain;
+  createdAt: string;
+  action: string;
+  outcome: string;
+  beforeRevision?: string;
+  afterRevision?: string;
+  validationRevision?: string;
+  activationStatus?: string;
+  restoredFromSnapshotId?: string | null;
+  author?: string;
+  beforeSnapshotId?: string | null;
+  afterSnapshotId?: string | null;
+  changedResources?: string[];
+  changedResourceCount?: number;
+  revisionsAvailable?: boolean;
+}
+
+export interface SourceHistoryResponse {
+  schemaVersion: 'att-source-history/v1' | string;
+  domain: SourceDomain;
+  scopeId: string;
+  items: SourceHistoryEntry[];
+  offset: number;
+  limit: number;
+  total: number;
+  hasMore: boolean;
+  currentSourceRevision: string;
+  registryRevision?: string;
+  noStore?: boolean;
+  retention?: { policy?: string; transactionLimit?: number; retainedTransactions?: number; state?: string };
+}
+
+export interface SourceHistoryDiffEntry {
+  path: string;
+  change: 'added' | 'modified' | 'deleted' | string;
+  beforeBytes?: number;
+  afterBytes?: number;
+  contentAvailable?: boolean;
+  redacted?: boolean;
+  beforeContent?: string | null;
+  afterContent?: string | null;
+  contentDiff?: string[];
+}
+
+export interface SourceHistoryDiffResponse {
+  schemaVersion: 'att-source-history-diff/v1' | string;
+  domain: SourceDomain;
+  scopeId: string;
+  beforeSnapshotId: string;
+  afterSnapshotId: string;
+  items: SourceHistoryDiffEntry[];
+  offset: number;
+  limit: number;
+  total: number;
+  hasMore: boolean;
+  noStore?: boolean;
+}
+
 export interface SourcePublishResult {
   published: boolean;
   domain: SourceDomain;

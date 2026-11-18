@@ -5,6 +5,10 @@ import java.util.Map;
 
 /** Versioned wire request. Paths are interpreted relative to packageRoot when not absolute. */
 public class WorkerRequest {
+    /** Protocol used for ordinary Worker requests. */
+    public static final String PROTOCOL_V1 = "att-worker/v1";
+    /** Fail-closed protocol required when the Server supplies an accepted source snapshot. */
+    public static final String SOURCE_SNAPSHOT_PROTOCOL = "att-worker/v2";
     /** Internal one-shot prewarm envelope. The Server overwrites caller values. */
     public Map<String,String> executionEnvironment;
     /** Trusted Server policy, snapshotted for each new Job. */

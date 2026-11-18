@@ -363,6 +363,7 @@ def check_schema_references():
     registered_tokens = {name + "/v" + version for name, versions in registered.items() for version in versions}
     documented_protocols = {
         "att-worker/v1": DOCS / "system-design/worker-protocol.md",
+        "att-worker/v2": DOCS / "system-design/worker-protocol.md",
         "att-prewarm/v1": DOCS / "system-design/execution-prewarm.md",
     }
     for token in sorted(tokens):

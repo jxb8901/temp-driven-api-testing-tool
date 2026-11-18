@@ -1000,6 +1000,7 @@ public final class ApiServlet extends HttpServlet {
             if(parts.length<4||!"packages".equals(parts[1])||parts[2].isEmpty()||!"resources".equals(parts[3]))throw new ServerRuntime.NotFoundException();
             String packageId=parts[2],action,kind=null,resourceId=null;String query=req.getParameter("query"),cursor=req.getParameter("cursor");int limit=parseLimit(req.getParameter("limit"));
             if(parts.length==4)action="list";
+            else if(parts.length==5&&"files".equals(parts[4]))action="file-index";
             else if(parts.length==7&&"source".equals(parts[6])){action="source";kind=parts[4];resourceId=parts[5];}
             else if(parts.length==7&&"source-file".equals(parts[6])){action="source-file";kind=parts[4];resourceId=parts[5];query=req.getParameter("referenceId");}
             else if(parts.length==7&&"debug-form".equals(parts[6])){action="debug-form";kind=parts[4];resourceId=parts[5];}
@@ -1015,11 +1016,20 @@ public final class ApiServlet extends HttpServlet {
                     ?runtime.inspectDebugForm(packageId,kind,resourceId,req.getParameter("environment"),principal)
                     :"quick-load-form".equals(action)?runtime.inspectQuickLoadForm(packageId,kind,resourceId,req.getParameter("model"),req.getParameter("environment"),principal)
                     :runtime.inspectResource(packageId,action,kind,resourceId,query,limit,cursor,sort,direction,sourceOrigin,principal);
+            if("file-index".equals(action)) {
+                boolean canEdit=false;
+                try { runtime.changeSetPublisher.requirePackageSourceEditor(packageId,principal); canEdit=true; }
+                catch(Exception deniedOrUnavailable) { /* Readable safe inventory remains available without authoring rights. */ }
+                result.put("canEdit",Boolean.valueOf(canEdit));
+            }
             Object cacheRevision=result.remove("_cacheRevision");
             if(cacheRevision instanceof String)res.setHeader("X-ATT-Inspection-Revision",(String)cacheRevision);
             res.setHeader("Cache-Control","no-store");
             if("list".equals(action)) {
                 ResourceInspection.Page response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Page.class);
+                response.requestId=requestId;json(res,200,response);
+            } else if("file-index".equals(action)) {
+                ResourceInspection.FilePage response=ServerRuntime.JSON.convertValue(result,ResourceInspection.FilePage.class);
                 response.requestId=requestId;json(res,200,response);
             } else if("detail".equals(action)) {
                 ResourceInspection.Detail response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Detail.class);

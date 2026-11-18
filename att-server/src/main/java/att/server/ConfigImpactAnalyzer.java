@@ -129,6 +129,17 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
     private final Map<String, ChangeSetPublisher.Candidate> candidates = new ConcurrentHashMap<>();
     private final Map<String, ChangeSetPublisher.Candidate> candidatesByFingerprint = new ConcurrentHashMap<>();
     private final Map<String, String> issuedReports = new ConcurrentHashMap<>();
+    private final Map<String, ActivationPlan> activationPlansByRevision = new ConcurrentHashMap<>();
+
+    static final class ActivationPlan {
+        final String revision;
+        final List<AffectedPackage> affectedPackages;
+
+        ActivationPlan(String revision, List<AffectedPackage> affectedPackages) {
+            this.revision = revision;
+            this.affectedPackages = List.copyOf(affectedPackages);
+        }
+    }
 
     ConfigImpactAnalyzer(Inventory inventory, PackageConfigurationPolicy packagePolicy,
                          SourceCandidateValidator engine, ConfigActivationCoordinator activation) {
@@ -304,8 +315,16 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
         if (report.decision == ImpactDecision.BLOCKED)
             return new ApprovalDecision(SourceManagementContracts.ApprovalState.REJECTED, null,
                     report.unavailableCode == null ? "ATT-CONFIG-IMPACT-BLOCKED" : report.unavailableCode);
+        String publishedRevision = ChangeSetPublisher.publishedRevision(sourceCandidate);
+        activationPlansByRevision.put(publishedRevision,
+                new ActivationPlan(publishedRevision, report.affectedPackages));
+        boundCaches();
         return new ApprovalDecision(SourceManagementContracts.ApprovalState.APPROVED,
                 digest(freshnessFingerprint + "\n" + request.actor + "\n" + report.decision), null);
+    }
+
+    ActivationPlan takeActivationPlan(String publishedRevision) {
+        return publishedRevision == null ? null : activationPlansByRevision.remove(publishedRevision);
     }
 
     static String freshnessFingerprint(ImpactFreshnessToken token) {
@@ -1243,6 +1262,7 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
         if (candidates.size() > 128) trim(candidates);
         if (candidatesByFingerprint.size() > 128) trim(candidatesByFingerprint);
         if (issuedReports.size() > 128) trim(issuedReports);
+        if (activationPlansByRevision.size() > 128) trim(activationPlansByRevision);
     }
     private static <T> void trim(Map<String, T> values) {
         synchronized (values) {

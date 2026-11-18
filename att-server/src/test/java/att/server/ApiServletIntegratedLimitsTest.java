@@ -168,17 +168,71 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void packageFileIndexPagesCanonicalReferencesWithCallSitesAndRejectsStaleCursors() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("package-file-index-packages"));
+        Path packageRoot=createPackage(packages.resolve("alice"));
+        Path template=Files.createDirectories(packageRoot.resolve("templates/SAMPLE")).resolve("template.yaml");
+        Files.writeString(template,"schemaVersion: att-template/v3.6\nname: SAMPLE\ndescription: File index fixture\nactions:\n"
+                +"  sendRequest:\n    type: log\n    message: '&{./input.json}'\n"
+                +"  retryRequest:\n    type: log\n    message: '&{./input.json}'\n"
+                +"  sendArchive:\n    type: log\n    message: '&{./archive.xml}'\n");
+        Files.writeString(packageRoot.resolve("templates/SAMPLE/input.json"),"{\"ok\":true}\n");
+        Files.writeString(packageRoot.resolve("templates/SAMPLE/archive.xml"),"<archive/>\n");
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"package-file-index-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,
+                workerLibraries("package-file-index-libs"))) {
+            ApiServlet servlet=servlet(runtime);
+            Captured resources=invokeAs(servlet,"alice","GET","/packages/alice/resources",
+                    Map.of("type","template"),new byte[0]);
+            JsonNode resourcePage=ServerRuntime.JSON.readTree(resources.body());
+            assertEquals(200,resources.status,new String(resources.body(),StandardCharsets.UTF_8));
+            assertEquals(1,resourcePage.path("total").asInt(),resourcePage.toString());
+            assertEquals("ready",resourcePage.path("items").get(0).path("state").asText(),resourcePage.toString());
+            assertEquals(true,resourcePage.path("items").get(0).path("sourceAvailable").asBoolean(),resourcePage.toString());
+            Captured first=invokeAs(servlet,"alice","GET","/packages/alice/resources/files",
+                    Map.of("limit","1"),new byte[0]);
+            JsonNode firstPage=ServerRuntime.JSON.readTree(first.body());
+            assertEquals(200,first.status,new String(first.body(),StandardCharsets.UTF_8));
+            assertEquals(2,firstPage.path("total").asInt(),firstPage.toString());
+            assertEquals("COMPLETE",firstPage.path("coverage").path("state").asText());
+            JsonNode input=firstPage.path("items").get(0);
+            assertEquals("templates/SAMPLE/archive.xml",input.path("path").asText());
+            assertFalse(firstPage.path("nextCursor").asText().isBlank());
+
+            String cursor=firstPage.path("nextCursor").asText();
+            Captured second=invokeAs(servlet,"alice","GET","/packages/alice/resources/files",
+                    Map.of("limit","1","cursor",cursor),new byte[0]);
+            JsonNode secondPage=ServerRuntime.JSON.readTree(second.body());
+            assertEquals(200,second.status,new String(second.body(),StandardCharsets.UTF_8));
+            assertEquals("templates/SAMPLE/input.json",secondPage.path("items").get(0).path("path").asText());
+            JsonNode use=secondPage.path("items").get(0).path("uses").get(0);
+            assertEquals("SAMPLE",use.path("label").asText());
+            assertEquals(2,use.path("callSites").size());
+            assertEquals(Set.of("sendRequest","retryRequest"),java.util.stream.StreamSupport.stream(
+                    secondPage.path("items").get(0).path("uses").get(0).path("callSites").spliterator(),false)
+                    .map(callSite->callSite.path("actionId").asText()).collect(java.util.stream.Collectors.toSet()));
+            Files.writeString(packageRoot.resolve("templates/SAMPLE/input.json"),"{\"ok\":false}\n");
+            Captured stale=invokeAs(servlet,"alice","GET","/packages/alice/resources/files",
+                    Map.of("limit","1","cursor",cursor),new byte[0]);
+            JsonNode staleBody=ServerRuntime.JSON.readTree(stale.body());
+            assertEquals(409,stale.status,new String(stale.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-RESOURCE-CURSOR-STALE",staleBody.path("error").path("code").asText());
+            stopInspectionProcesses(runtime);
+        }
+    }
+
     @Test void asynchronousValidationRecordIsDurableOwnerScopedAndCreatesNoJob() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("validation-record-packages"));
         createPackage(packages.resolve("payments"));
         Path runtimeConfig=sharedRuntimeConfig();
         Path sharedHelper=Files.createDirectories(runtimeConfig.getParent().resolve("dbhelpers/sit")).resolve("orders.yaml");
         Files.writeString(sharedHelper,sharedDbHelper("initial helper"));
-        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.15\nenvironment: SIT\n"
                 +"environments:\n  SIT:\n    dbhelpers: [config/dbhelpers/sit/orders.yaml]\ntimeoutMs: 10000\n"
                 +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
         Path libs=workerLibraries("validation-record-libs");
-        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"validation-record-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true,1)) {
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"validation-record-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,
+                true,1,ref->System.getenv("ATT_SECRET_"+ref),true)) {
             ApiServlet servlet=servlet(runtime);
             byte[] body="{\"command\":\"validate\",\"targetKind\":\"config\"}".getBytes(StandardCharsets.UTF_8);
             Captured accepted=invokeAs(servlet,"POST","/validations",Map.of(),body,"alice");
@@ -229,13 +283,14 @@ class ApiServletIntegratedLimitsTest {
             assertTrue(validationAdmission.availablePermits()>0,"The next submission must have a free validation admission slot");
 
             Files.writeString(runtimeConfig,Files.readString(runtimeConfig)+"\n# changed after validation\n");
-            Captured stale=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
-            assertEquals("STALE",ServerRuntime.JSON.readTree(stale.body()).path("applicability").asText());
+            Captured mirrorEdit=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
+            assertEquals("CURRENT",ServerRuntime.JSON.readTree(mirrorEdit.body()).path("applicability").asText(),
+                    "Unpublished edits to the deployment mirror do not change the active Config used by validation");
 
             Files.writeString(sharedHelper,sharedDbHelper("edited external child helper"));
             Captured sharedHelperStale=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
-            assertEquals("STALE",ServerRuntime.JSON.readTree(sharedHelperStale.body()).path("applicability").asText(),
-                    "A shared Runtime Config helper edit must stale a completed Shared Config validation");
+            assertEquals("CURRENT",ServerRuntime.JSON.readTree(sharedHelperStale.body()).path("applicability").asText(),
+                    "Unpublished helper edits do not change the active Config used by validation");
 
             long packageAdmissionDeadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             while(validationAdmission.availablePermits()==0&&System.nanoTime()<packageAdmissionDeadline)Thread.sleep(5);
@@ -257,8 +312,49 @@ class ApiServletIntegratedLimitsTest {
             assertEquals("CURRENT",packageCompleted.path("applicability").asText());
             Files.writeString(sharedHelper,sharedDbHelper("edited again for Package validation"));
             Captured packageHelperStale=invokeAs(servlet,"GET","/validations/"+packageValidationId,Map.of(),new byte[0],"alice");
-            assertEquals("STALE",ServerRuntime.JSON.readTree(packageHelperStale.body()).path("applicability").asText(),
-                    "A shared Runtime Config helper edit must stale a completed Package validation");
+            assertEquals("CURRENT",ServerRuntime.JSON.readTree(packageHelperStale.body()).path("applicability").asText(),
+                    "Package validation also remains bound to the active central Config revision");
+
+            // The publication transaction imports the deployment mirror only after a caller has
+            // reviewed it. Restore the accepted mirror bytes so this test can publish an explicit,
+            // independently staged Config revision after proving the unreviewed edits stayed inert.
+            Path activeRoot=runtime.executionCentralSourceRoot();
+            Path activeConfig=activeRoot.resolve("config/config.yaml");
+            Files.writeString(runtimeConfig,Files.readString(activeConfig));
+            Files.writeString(sharedHelper,Files.readString(activeRoot.resolve("config/dbhelpers/sit/orders.yaml")));
+            Map<String,String> revisions=runtime.changeSetPublisher.currentRevisions(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true);
+            String candidate=Files.readString(activeConfig)+"\n# published validation source revision\n";
+            Map<String,Object> draft=runtime.changeSetPublisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,revisions.get("baseSourceRevision"),null,
+                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml",candidate.getBytes(StandardCharsets.UTF_8))));
+            String changeSetId=String.valueOf(draft.get("changeSetId"));
+            try {
+                runtime.changeSetPublisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                        ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,changeSetId);
+            } catch(ChangeSetPublisher.ValidationRejected rejected) {
+                throw new AssertionError("validation-source revision candidate rejected with "+rejected.code,rejected);
+            }
+            runtime.changeSetPublisher.review(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,changeSetId);
+            var impact=runtime.changeSetPublisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,changeSetId,null);
+            assertNotEquals(att.server.api.source.SourceManagementContracts.ImpactDecision.BLOCKED,impact.decision,
+                    "Impact provider="+impact.providerState+" code="+impact.unavailableCode+" coverage="+impact.coverage);
+            String freshness=ConfigImpactAnalyzer.freshnessFingerprint(impact.freshness);
+            att.server.api.source.SourceManagementContracts.ImpactAcknowledgement acknowledgement=
+                    new att.server.api.source.SourceManagementContracts.ImpactAcknowledgement(freshness,"alice",
+                            ConfigImpactAnalyzer.acknowledgementDigest(freshness,"alice"));
+            Map<String,Object> publication=runtime.publishConfigurationChangeSet("alice",changeSetId,
+                    "validation-source-revision-test",acknowledgement);
+            assertEquals(Boolean.TRUE,publication.get("published"));
+
+            Captured sharedConfigStale=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
+            assertEquals("STALE",ServerRuntime.JSON.readTree(sharedConfigStale.body()).path("applicability").asText(),
+                    "Publishing a new active central Config revision stales the prior Shared Config validation");
+            Captured packageConfigStale=invokeAs(servlet,"GET","/validations/"+packageValidationId,Map.of(),new byte[0],"alice");
+            assertEquals("STALE",ServerRuntime.JSON.readTree(packageConfigStale.body()).path("applicability").asText(),
+                    "Publishing a new active central Config revision stales Package validation too");
 
             ReentrantLock workerLock=inspectionWorkerLock(runtime);workerLock.lock();
             java.util.concurrent.CountDownLatch blockerStarted=new java.util.concurrent.CountDownLatch(1);

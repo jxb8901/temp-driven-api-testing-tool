@@ -93,6 +93,11 @@ class ServerRuntimeTest {
         Path yaml=Files.writeString(temp.resolve("compaction-counter-server.yaml"),"server:\n  dataDir: "+temp.resolve("compaction-counter-data")
                 +"\nworkers: {}\npackages:\n  allowedRoots:\n    - "+allowed+"\n  entries:\n    p: "+pkg+"\n");
         try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),Files.createDirectory(temp.resolve("compaction-counter-libs")).toString())) {
+            Map<?,?> sourceHistory=(Map<?,?>)runtime.counts().get("sourceHistoryRetention");
+            assertEquals("OK",sourceHistory.get("state"));
+            assertEquals(0L,sourceHistory.get("cleanupFailuresSinceStart"));
+            assertTrue(sourceHistory.get("scopes") instanceof List<?> scopes && scopes.size() >= 2,
+                    "Package and central source cleanup scopes should be exposed to ADMIN /metrics");
             Job first=monitoringJob(runtime,"J0000000000000001");
             runtime.jobs.put(first.id,first);
             first.events.recordCompactionFailure();
@@ -549,6 +554,35 @@ class ServerRuntimeTest {
             assertTrue(((Number)timings.get("workerLifetimeMs")).doubleValue()>=0.0);
             assertEquals(4096L,((Number)((Map<?,?>)performance.get("worker")).get("heapPeakUsedBytes")).longValue());
         } finally {runtime.close();}
+    }
+
+    @Test void centralPublicationNotificationDoesNotImportExternalRuntimeConfigMirrorEdits() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("central-notify-packages"));
+        Path pkg=Files.createDirectories(allowed.resolve("p"));
+        Path runtimeConfig=temp.resolve("central-notify-home/config/config.yaml");
+        Files.createDirectories(runtimeConfig.getParent());
+        String approved="schemaVersion: att-config/v2.12\nenvironment: SIT\n";
+        String external="schemaVersion: att-config/v2.12\nenvironment: UAT\n";
+        Files.writeString(runtimeConfig,approved);
+        Path yaml=temp.resolve("central-notify-server.yaml");
+        Files.writeString(yaml,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("central-notify-data"))
+                +"\nworkers: {}\npackages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(allowed)
+                +"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(pkg)+"\n");
+
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(yaml),null)) {
+            Path approvedSnapshot=runtime.executionCentralSourceRoot();
+            Files.writeString(runtimeConfig,external);
+            runtime.notifySourcePublished(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,Map.of(),"post-publication-notification");
+
+            assertEquals(approved,Files.readString(approvedSnapshot.resolve("config/config.yaml")),
+                    "The notification path must keep execution pinned to the approved revision.");
+            assertEquals(external,Files.readString(runtimeConfig),
+                    "The external deployment mirror edit remains available for explicit review.");
+            assertEquals(approvedSnapshot,runtime.executionCentralSourceRoot(),
+                    "A publication notification must not move the central active pointer.");
+        }
     }
 
     @Test void appliesValidatedHeapBoundsToWorkerCommandWithoutAcceptingArbitraryJvmFlags() throws Exception {

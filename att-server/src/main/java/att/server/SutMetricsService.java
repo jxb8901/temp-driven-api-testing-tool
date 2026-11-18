@@ -76,6 +76,16 @@ final class SutMetricsService implements AutoCloseable {
                               String runtimeConfigRevision, Set<String> workloadIds,
                               List<WorkloadSubject> workloadSubjects,
                               att.config.FrameworkConfig frameworkConfig) { }
+    private record RuntimeConfigSource(Path configPath, Path root) {
+        RuntimeConfigSource {
+            if ((configPath == null) != (root == null))
+                throw new IllegalArgumentException("Runtime Config path and root must be supplied together.");
+            if (configPath != null) {
+                configPath = configPath.toAbsolutePath().normalize();
+                root = root.toAbsolutePath().normalize();
+            }
+        }
+    }
     private record BusinessCallResult(Object value, Instant observedAt, long durationMs, Exception failure,
                                       boolean submitted, boolean started) { }
     private record BusinessMappedRow(Map<String, Object> row, Map<String, String> labels) { }
@@ -165,7 +175,9 @@ final class SutMetricsService implements AutoCloseable {
     private static final Set<String> SENSITIVE_METRIC_LABEL_PARTS = Set.of(
             "token", "secret", "password", "credential", "authorization", "apikey");
     private final ObjectMapper json = ServerRuntime.JSON;
-    private final Path dataDir, jobsRoot, catalogPath, runtimeConfigPath, runtimeConfigRoot;
+    private final Path dataDir, jobsRoot, catalogPath;
+    private volatile RuntimeConfigSource runtimeConfigSource;
+    private final Object runtimeConfigSwitchLock = new Object();
     private final Set<String> allowedPrometheusHosts;
     private final Function<String, String> secretResolver;
     private final Consumer<Path> afterManifestPublication;
@@ -249,35 +261,39 @@ final class SutMetricsService implements AutoCloseable {
         this.dataDir = dataDir.toAbsolutePath().normalize();
         this.jobsRoot = this.dataDir.resolve("jobs");
         this.catalogPath = this.dataDir.resolve("sut-metrics-catalog.json");
-        this.runtimeConfigPath = runtimeConfigPath == null ? null : runtimeConfigPath.toAbsolutePath().normalize();
-        this.runtimeConfigRoot = runtimeConfigRoot == null ? null : runtimeConfigRoot.toAbsolutePath().normalize();
-        if ((this.runtimeConfigPath == null) != (this.runtimeConfigRoot == null))
-            throw new IllegalArgumentException("Runtime Config path and root must be supplied together.");
+        this.runtimeConfigSource = new RuntimeConfigSource(runtimeConfigPath, runtimeConfigRoot);
         this.allowedPrometheusHosts = normalizeAllowedHosts(allowedPrometheusHosts);
         this.secretResolver = java.util.Objects.requireNonNull(secretResolver, "secretResolver");
         this.afterManifestPublication = java.util.Objects.requireNonNull(afterManifestPublication, "afterManifestPublication");
         this.beforeThresholdEvidenceRead = java.util.Objects.requireNonNull(beforeThresholdEvidenceRead, "beforeThresholdEvidenceRead");
         this.beforeRuntimeConfigActivation = java.util.Objects.requireNonNull(beforeRuntimeConfigActivation, "beforeRuntimeConfigActivation");
-        if (this.runtimeConfigPath == null) loadCatalog();
+        if (this.runtimeConfigSource == null || this.runtimeConfigSource.configPath == null) loadCatalog();
         else refreshConfiguredCatalog(true);
         recoverInterruptedCollections();
         recoverThresholdEvaluations();
     }
 
     private void refreshConfiguredCatalog(boolean startup) {
-        if (runtimeConfigPath == null) return;
+        RuntimeConfigSource source = runtimeConfigSource;
+        if (source == null || source.configPath == null) return;
         while (true) {
+            if (runtimeConfigSource != source) {
+                source = runtimeConfigSource;
+                if (source == null || source.configPath == null) return;
+                continue;
+            }
             String attemptedRevision = null;
             String attemptedConfigDigest = null;
             try {
-                byte[] bytes = readRuntimeConfigBytes();
+                byte[] bytes = readRuntimeConfigBytes(source.configPath);
                 attemptedConfigDigest = sha256(bytes);
                 att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration loaded =
-                        new att.config.FrameworkConfigLoader().loadSutMetricsRuntimeConfiguration(runtimeConfigPath,
-                                runtimeConfigRoot, new String(bytes, StandardCharsets.UTF_8));
+                        new att.config.FrameworkConfigLoader().loadSutMetricsRuntimeConfiguration(source.configPath,
+                                source.root, new String(bytes, StandardCharsets.UTF_8));
                 attemptedRevision = loaded.overallRevision();
                 String revision = attemptedRevision;
                 synchronized (catalogLock) {
+                    if (runtimeConfigSource != source) continue;
                     if (revision.equals(activeRuntimeConfigRevision)) {
                         rejectedRuntimeConfigRevision = null;
                         runtimeConfigDiagnosticCode = null;
@@ -289,11 +305,12 @@ final class SutMetricsService implements AutoCloseable {
                 beforeRuntimeConfigActivation.accept(revision);
                 ConfiguredCatalog candidate = buildConfiguredCatalog(loaded);
                 synchronized (catalogLock) {
+                    if (runtimeConfigSource != source) continue;
                     // Candidate construction, including resolving server secrets and checking all
                     // cross-catalog references, happens before the serialized publish step. Fence
                     // that complete result against the on-disk revision immediately before swap.
                     byte[] currentBytes;
-                    try { currentBytes = readRuntimeConfigBytes(); }
+                    try { currentBytes = readRuntimeConfigBytes(source.configPath); }
                     catch (Exception unavailable) {
                         if (activeRuntimeConfigRevision == null || startup)
                             throw new IllegalStateException("The selected Runtime Config is unavailable.", unavailable);
@@ -302,7 +319,7 @@ final class SutMetricsService implements AutoCloseable {
                         rejectedRuntimeConfigRevision = null;
                         return;
                     }
-                    String currentRevision = loadRuntimeConfig(currentBytes).overallRevision();
+                    String currentRevision = loadRuntimeConfig(currentBytes, source).overallRevision();
                     if (!revision.equals(currentRevision)) continue;
                     if (revision.equals(activeRuntimeConfigRevision)) {
                         rejectedRuntimeConfigRevision = null;
@@ -319,12 +336,13 @@ final class SutMetricsService implements AutoCloseable {
                 return;
             } catch (Exception invalid) {
                 synchronized (catalogLock) {
+                    if (runtimeConfigSource != source) continue;
                     // Fence failure diagnostics too: an old rejected candidate must not overwrite
                     // the status or retry marker for a newer file revision that is already active.
                     if (attemptedRevision != null) {
                         byte[] currentBytes;
                         try {
-                            currentBytes = readRuntimeConfigBytes();
+                            currentBytes = readRuntimeConfigBytes(source.configPath);
                         } catch (Exception unavailable) {
                             if (activeRuntimeConfigRevision == null || startup)
                                 throw new IllegalStateException("The selected Runtime Config is unavailable.", unavailable);
@@ -334,14 +352,14 @@ final class SutMetricsService implements AutoCloseable {
                             return;
                         }
                         try {
-                            if (!attemptedRevision.equals(loadRuntimeConfig(currentBytes).overallRevision())) continue;
+                            if (!attemptedRevision.equals(loadRuntimeConfig(currentBytes, source).overallRevision())) continue;
                         } catch (Exception currentInvalid) {
                             if (attemptedConfigDigest != null && !attemptedConfigDigest.equals(sha256(currentBytes))) continue;
                         }
                     } else if (attemptedConfigDigest != null) {
                         byte[] currentBytes;
                         try {
-                            currentBytes = readRuntimeConfigBytes();
+                            currentBytes = readRuntimeConfigBytes(source.configPath);
                         } catch (Exception unavailable) {
                             if (activeRuntimeConfigRevision == null || startup)
                                 throw new IllegalStateException("The selected Runtime Config is unavailable.", unavailable);
@@ -355,7 +373,7 @@ final class SutMetricsService implements AutoCloseable {
                         // byte-for-byte identical. Retry once the current complete configuration
                         // becomes readable instead of fencing only on the manifest bytes.
                         try {
-                            loadRuntimeConfig(currentBytes);
+                            loadRuntimeConfig(currentBytes, source);
                             continue;
                         } catch (Exception stillInvalid) { /* reject this exact current candidate */ }
                     }
@@ -376,10 +394,11 @@ final class SutMetricsService implements AutoCloseable {
         }
     }
 
-    private att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration loadRuntimeConfig(byte[] bytes)
+    private att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration loadRuntimeConfig(byte[] bytes,
+                                                                                              RuntimeConfigSource source)
             throws java.io.IOException {
-        return new att.config.FrameworkConfigLoader().loadSutMetricsRuntimeConfiguration(runtimeConfigPath,
-                runtimeConfigRoot, new String(bytes, StandardCharsets.UTF_8));
+        return new att.config.FrameworkConfigLoader().loadSutMetricsRuntimeConfiguration(source.configPath,
+                source.root, new String(bytes, StandardCharsets.UTF_8));
     }
 
     private static String safeConfigDiagnosticField(Throwable failure) {
@@ -409,7 +428,29 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private byte[] readRuntimeConfigBytes() throws Exception {
-        return readRuntimeConfigBytes(runtimeConfigPath);
+        RuntimeConfigSource source = runtimeConfigSource;
+        return readRuntimeConfigBytes(source == null ? null : source.configPath);
+    }
+
+    /** Switches all live Runtime Config catalog reads to one immutable activated revision. */
+    void activateRuntimeConfigSnapshot(Path configPath, Path runtimeRoot) throws Exception {
+        RuntimeConfigSource next = new RuntimeConfigSource(configPath, runtimeRoot);
+        if (next.configPath == null) throw new IllegalArgumentException("Runtime Config snapshot is unavailable.");
+        synchronized (runtimeConfigSwitchLock) {
+            RuntimeConfigSource previous = runtimeConfigSource;
+            String expectedRevision = loadRuntimeConfig(readRuntimeConfigBytes(next.configPath), next).overallRevision();
+            runtimeConfigSource = next;
+            try {
+                refreshConfiguredCatalog(true);
+                if (!expectedRevision.equals(activeRuntimeConfigRevision))
+                    throw new IllegalStateException("The activated Runtime Config did not become the live SUT Metrics catalog.");
+            } catch (Exception failure) {
+                runtimeConfigSource = previous;
+                try { refreshConfiguredCatalog(true); }
+                catch (Exception restoreFailure) { failure.addSuppressed(restoreFailure); }
+                throw failure;
+            }
+        }
     }
 
     private byte[] readRuntimeConfigBytes(Path path) throws Exception {
@@ -623,7 +664,8 @@ final class SutMetricsService implements AutoCloseable {
     Map<String, Object> validatePackageMetricResource(Path packageRoot, String packageId, String actor,
                                                        String relativePath, String environment, String source,
                                                        String candidateManifestSource, String expectedManifestDigest) {
-        if (runtimeConfigPath == null || runtimeConfigRoot == null)
+        RuntimeConfigSource runtimeSource = runtimeConfigSource;
+        if (runtimeSource == null || runtimeSource.configPath == null)
             throw new IllegalArgumentException("The selected Runtime Config is unavailable.");
         try {
             boolean manifestAddition = candidateManifestSource != null || expectedManifestDigest != null;
@@ -636,10 +678,10 @@ final class SutMetricsService implements AutoCloseable {
             String selectedEnvironment = environment == null || environment.isBlank()
                     ? candidate.defaultEnvironment() : environment.trim();
             if (selectedEnvironment == null || selectedEnvironment.isBlank()) {
-                byte[] configBytes = readRuntimeConfigBytes(runtimeConfigPath);
+                byte[] configBytes = readRuntimeConfigBytes(runtimeSource.configPath);
                 att.config.FrameworkConfigLoader.SutMetricsRuntimeConfiguration runtime =
                         new att.config.FrameworkConfigLoader().loadSutMetricsRuntimeConfiguration(
-                                runtimeConfigPath, runtimeConfigRoot, new String(configBytes, StandardCharsets.UTF_8));
+                                runtimeSource.configPath, runtimeSource.root, new String(configBytes, StandardCharsets.UTF_8));
                 if (runtime.environments().isEmpty())
                     throw new IllegalArgumentException("The selected Runtime Config has no Environment.");
                 selectedEnvironment = runtime.environments().keySet().iterator().next();
@@ -650,17 +692,17 @@ final class SutMetricsService implements AutoCloseable {
             // concurrent package, Runtime Config, DBHelper, or Package Tool definition edits.
             PackageCatalog first = buildPackageCatalog(packageRoot, packageId, selectedEnvironment,
                     actor, false, null, candidate, relativePath, expectedManifestDigest);
-            String firstDependencies = packageMetricDependencyRevision(packageRoot, runtimeConfigPath,
-                    runtimeConfigRoot, selectedEnvironment, candidate);
+            String firstDependencies = packageMetricDependencyRevision(packageRoot, runtimeSource.configPath,
+                    runtimeSource.root, selectedEnvironment, candidate);
             PackageCatalog second = buildPackageCatalog(packageRoot, packageId, selectedEnvironment,
                     actor, false, null, candidate, relativePath, expectedManifestDigest);
-            String secondDependencies = packageMetricDependencyRevision(packageRoot, runtimeConfigPath,
-                    runtimeConfigRoot, selectedEnvironment, candidate);
+            String secondDependencies = packageMetricDependencyRevision(packageRoot, runtimeSource.configPath,
+                    runtimeSource.root, selectedEnvironment, candidate);
             String firstRevision = packageMetricValidationRevision(packageId, candidate, first, firstDependencies,
                     expectedManifestDigest);
             String secondRevision = packageMetricValidationRevision(packageId, candidate, second, secondDependencies,
                     expectedManifestDigest);
-            if (!firstRevision.equals(secondRevision))
+            if (!firstRevision.equals(secondRevision) || runtimeConfigSource != runtimeSource)
                 throw new IllegalArgumentException("The Package or Runtime definitions changed during resource validation.");
 
             String resourceDigest = packageMetricResourceDigest(candidate, relativePath);
@@ -803,10 +845,12 @@ final class SutMetricsService implements AutoCloseable {
         if (callContext != null && (callContext.environment() == null
                 || !selectedEnvironment.equals(callContext.environment().trim().toLowerCase(Locale.ROOT))))
             throw new IllegalArgumentException("The Package context does not match the selected Environment.");
-        Path selectedRuntimePath = callContext != null && callContext.runtimeConfigPath() != null
-                ? callContext.runtimeConfigPath().toAbsolutePath().normalize() : runtimeConfigPath;
-        Path selectedRuntimeRoot = callContext != null && callContext.runtimeConfigRoot() != null
-                ? callContext.runtimeConfigRoot().toAbsolutePath().normalize() : runtimeConfigRoot;
+        RuntimeConfigSource selectedRuntimeSource = callContext != null
+                && callContext.runtimeConfigPath() != null && callContext.runtimeConfigRoot() != null
+                ? new RuntimeConfigSource(callContext.runtimeConfigPath(), callContext.runtimeConfigRoot())
+                : runtimeConfigSource;
+        Path selectedRuntimePath = selectedRuntimeSource == null ? null : selectedRuntimeSource.configPath;
+        Path selectedRuntimeRoot = selectedRuntimeSource == null ? null : selectedRuntimeSource.root;
         if (selectedRuntimePath == null || selectedRuntimeRoot == null)
             throw new IllegalArgumentException("The selected Runtime Config is unavailable.");
         try {
@@ -920,6 +964,8 @@ final class SutMetricsService implements AutoCloseable {
                     .loadSutMetricsRuntimeConfiguration(selectedRuntimePath, selectedRuntimeRoot,
                             new String(currentRuntimeBytes, StandardCharsets.UTF_8));
             if (!effectiveRevision.equals(currentRuntime.effectiveRevision(selectedEnvironment)))
+                throw new IllegalArgumentException("The selected Runtime Config changed during SUT Metrics resolution.");
+            if (callContext == null && runtimeConfigSource != selectedRuntimeSource)
                 throw new IllegalArgumentException("The selected Runtime Config changed during SUT Metrics resolution.");
             String packageRevision = callContext == null ? null : callContext.packageRevision();
             resourceProvenance.add(0, fields("kind", "package-catalog", "id", packageId,
@@ -1107,7 +1153,8 @@ final class SutMetricsService implements AutoCloseable {
 
     private Map<String, Object> catalogResponse(String schemaVersion, List<Map<String, Object>> items) {
         Map<String, Object> response = fields("schemaVersion", schemaVersion, "items", items);
-        if (runtimeConfigPath != null) response.put("configuration", runtimeConfigStatus());
+        if (runtimeConfigSource != null && runtimeConfigSource.configPath != null)
+            response.put("configuration", runtimeConfigStatus());
         return response;
     }
 
@@ -1127,7 +1174,7 @@ final class SutMetricsService implements AutoCloseable {
     }
 
     private void requireCatalogWritable() {
-        if (runtimeConfigPath != null) throw new ReadOnlyCatalogException();
+        if (runtimeConfigSource != null && runtimeConfigSource.configPath != null) throw new ReadOnlyCatalogException();
     }
 
     static final class ReadOnlyCatalogException extends IllegalStateException {

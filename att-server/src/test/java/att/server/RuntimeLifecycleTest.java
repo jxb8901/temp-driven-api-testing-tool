@@ -128,6 +128,41 @@ class RuntimeLifecycleTest {
             }
         }
     }
+    @Test void sourcePublicationAuditReplayReplacesCommittedOutcomeWithRollbackIdempotently() throws Exception {
+        ServerConfig config=config();
+        SourceFileTransaction.AuditRecord committed=new SourceFileTransaction.AuditRecord(
+                "T33333333333333333333333333333333","alice",ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                ChangeSetPublisher.CENTRAL_SCOPE_ID,"SOURCE_CHANGE_SET_PUBLISH","COMMITTED",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","request-rollback-audit",
+                List.of("config/config.yaml"),"R00000000000000000000000000000000",
+                "R11111111111111111111111111111111",null,"ACTIVE","2026-11-18T12:34:56Z");
+        try(JobStore store=new JobStore(config)) {
+            store.persistSourcePublicationAudit(committed);
+            SourceFileTransaction.AuditRecord rolledBack=committed.withOutcome("ROLLED_BACK")
+                    .withActivationStatus("FAILED");
+            store.persistSourcePublicationAudit(rolledBack);
+            store.persistSourcePublicationAudit(rolledBack); // Startup journal replay is idempotent.
+
+            DriverManager.registerDriver(org.h2.Driver.load());
+            String url="jdbc:h2:file:"+config.dataDir.resolve("db/att-server").toString().replace('\\','/')
+                    +";DB_CLOSE_ON_EXIT=FALSE;AUTO_SERVER=FALSE;WRITE_DELAY=0";
+            try(java.sql.Connection connection=DriverManager.getConnection(url,"sa","");
+                java.sql.PreparedStatement query=connection.prepareStatement(
+                        "SELECT outcome,activation_status FROM source_publication_audit WHERE transaction_id=?")) {
+                query.setString(1,committed.transactionId);
+                try(java.sql.ResultSet row=query.executeQuery()) {
+                    assertTrue(row.next());
+                    assertEquals("ROLLED_BACK",row.getString(1));
+                    assertEquals("FAILED",row.getString(2));
+                }
+            }
+            ChangeSetPublisher.HistoryBatch history=store.sourcePublicationHistory(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,0,
+                    ChangeSetPublisher.MAX_HISTORY_PAGE_SIZE);
+            assertEquals(0,history.total,"A rolled-back Runtime Config must not appear as a committed publication.");
+        }
+    }
     @Test void sourcePublicationHistoryRetentionBoundsAuditRowsAndKeepsTheNewestSnapshotClosure() throws Exception {
         ServerConfig config=config();
         try(JobStore store=new JobStore(config)) {

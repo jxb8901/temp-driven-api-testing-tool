@@ -1,12 +1,14 @@
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ApiError } from '../../types';
 import { AppShellContext } from '../../AppShell';
 import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
 import { SourceViewer } from './SourceViewer';
+import { AuthoringWorkflow, type AuthoringStepState } from './AuthoringWorkflow';
+import { useAccessibleConfirmation } from './useAccessibleConfirmation';
 import type { ExplorerApi, ResourceIdentity, ResourceSourceReference } from './types';
 import type {
   ChangedSourceFile, ManagedAuthoringSource, PackageAuthoringSourceQuery, SourceAffectedPackage,
-  SourceAffectedSchedule, SourceChangeSet, SourceImpactReport, SourceOperation,
+  SourceAffectedSchedule, SourceChangeSet, SourceHistoryDiffResponse, SourceHistoryEntry, SourceHistoryResponse, SourceImpactReport, SourceOperation,
   SourcePublishResult, SourceValidationDiagnostic,
 } from './sourceManagement';
 import {
@@ -32,6 +34,12 @@ type CentralSourceTarget = {
   label?: string;
 };
 export type SourceAuthoringTarget = PackageSourceTarget | CentralSourceTarget;
+export interface SourceAuthoringInitialCandidate {
+  key: string;
+  baseSourceRevision: string;
+  registryRevision?: string;
+  operations: SourceOperation[];
+}
 
 type EditMode = 'view' | 'edit' | 'create';
 type AccessState = 'checking' | 'authorized' | 'denied' | 'unavailable';
@@ -42,6 +50,7 @@ interface SourceAuthoringWorkspaceProps {
   canManageCentral?: boolean;
   registerUnsavedChanges?: (isDirty: boolean, description?: string) => () => void;
   onDirtyChange?: (isDirty: boolean) => void;
+  initialCandidate?: SourceAuthoringInitialCandidate;
   onOpenFileReference?: (path: string, origin?: string, reference?: ResourceSourceReference) => void;
   onPublished?: (result: SourcePublishResult) => void;
 }
@@ -125,8 +134,9 @@ function summarizeReferences(file: ChangedSourceFile): string[] {
   });
 }
 
-export function SourceAuthoringWorkspace({ api, target, canManageCentral = false, registerUnsavedChanges, onDirtyChange, onOpenFileReference, onPublished }: SourceAuthoringWorkspaceProps) {
+export function SourceAuthoringWorkspace({ api, target, canManageCentral = false, registerUnsavedChanges, onDirtyChange, initialCandidate, onOpenFileReference, onPublished }: SourceAuthoringWorkspaceProps) {
   const workspace = useContext(AppShellContext);
+  const { confirm: confirmAction, dialog: confirmationDialog } = useAccessibleConfirmation();
   const [source, setSource] = useState<ManagedAuthoringSource | null>(null);
   const [access, setAccess] = useState<AccessState>(target.domain === 'CENTRAL_RUNTIME_CONFIG' && !canManageCentral ? 'denied' : 'checking');
   const [loading, setLoading] = useState(false);
@@ -154,6 +164,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   const [editorBaseSourceRevision, setEditorBaseSourceRevision] = useState('');
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const targetKey = useMemo(() => JSON.stringify(target), [target]);
   const controllerRef = useRef<AbortController | null>(null);
@@ -164,6 +175,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   const previousTargetKeyRef = useRef(targetKey);
   const recoveryRequiredRef = useRef(false);
   const suspendedRef = useRef(false);
+  const initialCandidateAppliedRef = useRef('');
   const packageTarget = target.domain === 'PACKAGE_SOURCE' ? target : null;
   const centralTarget = target.domain === 'CENTRAL_RUNTIME_CONFIG' ? target : null;
   const isDirty = Boolean(busy || (mode === 'edit' && source && content !== source.text)
@@ -194,11 +206,18 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     && acknowledgedImpact.actor === impactActor && impactActor);
   const centralReportReady = Boolean(!draftStale && !impactLoading && impact?.providerState === 'AVAILABLE'
     && impactMatchesCurrentDraft && impact.coverage === 'COMPLETE'
-    && impact.decision && impact.decision !== 'BLOCKED' && impactAcknowledged);
+    && impact.decision && impact.decision !== 'BLOCKED'
+    && (!impact.acknowledgementRequired || impactAcknowledged));
+  const centralPublishedRevision = published?.publishedRevision || published?.revision;
+  const centralActiveRevision = published?.activeRevision || impact?.activationStatus?.activeRevision;
+  const centralActivationState = published?.activationState || impact?.activationStatus?.state;
+  const centralPublicationIsActive = Boolean(centralTarget && published && centralActivationState === 'ACTIVE'
+    && centralPublishedRevision && centralActiveRevision === centralPublishedRevision);
 
   useLayoutEffect(() => {
     if (previousTargetKeyRef.current === targetKey) return;
     previousTargetKeyRef.current = targetKey;
+    initialCandidateAppliedRef.current = '';
     controllerRef.current?.abort();
     actionControllerRef.current?.abort();
     impactControllerRef.current?.abort(); impactControllerRef.current = null;
@@ -206,10 +225,29 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     setContent(''); setMode('view'); setCreatePath(''); setMovePath(''); setEditorBaseSourceRevision(''); setImpactLoading(false);
     setPendingOperations([]); setRelatedPath(''); setRelatedContent(''); setRelatedOperation('create');
     setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
+    setHistoryOpen(false);
     setSuspended(false); setRecoveryPending(false); recoveryRequiredRef.current = false; suspendedRef.current = false;
     setError(''); setStatus(''); setBusy(false); setLoading(false);
     setAccess(centralTarget && !canManageCentral ? 'denied' : 'checking');
   }, [targetKey, centralTarget, canManageCentral]);
+
+  useEffect(() => {
+    if (!initialCandidate || !source || access !== 'authorized' || initialCandidateAppliedRef.current === initialCandidate.key) return;
+    initialCandidateAppliedRef.current = initialCandidate.key;
+    if (source.baseSourceRevision !== initialCandidate.baseSourceRevision
+        || source.registryRevision !== initialCandidate.registryRevision) {
+      setError('The Package source changed after the guided candidate was prepared. Reload the Manifest and create the candidate again.');
+      return;
+    }
+    if (draft || pendingOperations.length) {
+      setError('Finish or discard the current draft before loading the guided candidate.');
+      return;
+    }
+    setContent(source.text); setMode('view'); setPendingOperations(initialCandidate.operations);
+    setPendingBaseSourceRevision(initialCandidate.baseSourceRevision);
+    setPendingRegistryRevision(initialCandidate.registryRevision);
+    setStatus('The guided Testdata candidate includes the descriptor and Package Manifest as one atomic source draft.');
+  }, [initialCandidate, source, access, draft, pendingOperations.length]);
 
   useEffect(() => {
     if (!registerUnsavedChanges) return;
@@ -222,9 +260,9 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
 
   useEffect(() => {
     const lockWorkspace = centralTarget ? canManageCentral : access === 'authorized';
-    workspace?.setWorkspaceEditorLock?.(Boolean(lockWorkspace));
+    workspace?.setWorkspaceEditorLock?.(Boolean(lockWorkspace && isDirty));
     return () => workspace?.setWorkspaceEditorLock?.(false);
-  }, [workspace?.setWorkspaceEditorLock, centralTarget, canManageCentral, access, mode, draft]);
+  }, [workspace?.setWorkspaceEditorLock, centralTarget, canManageCentral, access, isDirty]);
 
   useEffect(() => {
     controllerRef.current?.abort();
@@ -235,7 +273,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       previousTargetKeyRef.current = targetKey;
       setDraft(null); setPublished(null); setContent(''); setMode('view'); setCreatePath(''); setMovePath(''); setEditorBaseSourceRevision('');
     }
-    setSource(null); setImpact(null); setImpactLoading(false); setDiagnostics([]); setError(''); setStatus('');
+    setSource(null); setImpact(null); setImpactLoading(false); setDiagnostics([]); setError(''); setStatus(''); setHistoryOpen(false);
     if (centralTarget && !canManageCentral) {
       actionControllerRef.current?.abort();
       setDraft(null); setPublished(null); setContent(''); setMode('view'); setPendingOperations([]);
@@ -298,6 +336,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       controllerRef.current?.abort();
       impactControllerRef.current?.abort(); impactControllerRef.current = null;
       setSource(null); setImpact(null); setAcknowledgedImpact(null); setLoading(false);
+      setHistoryOpen(false);
       if (!recoveryRequiredRef.current) {
         setDraft(null); setPublished(null); setContent(''); setMode('view'); setCreatePath(''); setMovePath('');
         setEditorBaseSourceRevision(''); setPendingOperations([]); setRelatedPath(''); setRelatedContent('');
@@ -327,16 +366,17 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     impactControllerRef.current?.abort(); impactControllerRef.current = null;
   }, []);
 
-  const clearAfterRevocation = () => {
+  const clearAfterRevocation = useCallback(() => {
     controllerRef.current?.abort();
     actionControllerRef.current?.abort();
     impactControllerRef.current?.abort(); impactControllerRef.current = null;
     setSource(null); setDraft(null); setPublished(null); setImpact(null); setAcknowledgedImpact(null); setImpactLoading(false);
     setContent(''); setMode('view'); setCreatePath(''); setMovePath(''); setEditorBaseSourceRevision(''); setAccess('denied');
+    setHistoryOpen(false);
     setPendingOperations([]); setRelatedPath(''); setRelatedContent(''); setRecoveryPending(false); setSuspended(false);
     setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
     recoveryRequiredRef.current = false; suspendedRef.current = false;
-  };
+  }, []);
 
   async function withBusy(action: string, run: (signal: AbortSignal) => Promise<void>) {
     const controller = new AbortController();
@@ -358,6 +398,31 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
 
   function getScopeId() {
     return target.domain === 'PACKAGE_SOURCE' ? target.packageId : 'central-runtime-config';
+  }
+
+  async function stageRestoreFromHistory(snapshotId: string, currentSourceRevision: string, registryRevision?: string) {
+    if (!api.stageSourceRestore) { setError('This Server does not provide source history restore.'); return; }
+    if (!source || currentSourceRevision !== source.baseSourceRevision
+        || packageTarget && registryRevision !== source.registryRevision) {
+      setError('The source changed after this history page loaded. Reload the current source and history before staging a restore.');
+      setHistoryOpen(false); setRefreshKey(value => value + 1); return;
+    }
+    if (draft || pendingOperations.length || mode !== 'view' || currentEditorHasUnqueuedChanges) {
+      setError('Finish or discard the current editor and draft before staging a historical restore.'); return;
+    }
+    const scopeLabel = packageTarget ? `Package ${packageTarget.packageId}` : 'Global Runtime Configuration';
+    if (!await confirmAction({ title: 'Stage historical source restore?',
+      message: `Stage the selected ${scopeLabel} snapshot as a new draft. This includes every difference in this source scope; published source stays unchanged until validation, review, and publication.`,
+      confirmLabel: 'Stage restore draft' })) return;
+    await withBusy('stage the historical source restore', async signal => {
+      const restored = await api.stageSourceRestore!(target.domain, getScopeId(), snapshotId,
+        currentSourceRevision, packageTarget ? registryRevision : undefined, signal);
+      if (signal.aborted) return;
+      setDraft(restored); setImpact(null); setAcknowledgedImpact(null); setPublished(null);
+      setMode('view'); setPendingOperations([]); setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
+      setHistoryOpen(false);
+      setStatus(`Historical source restore is staged as draft ${restored.changeSetId}. Review every changed file, then Validate, Review, and Publish.`);
+    });
   }
 
   async function stage(operations: SourceOperation[]) {
@@ -389,10 +454,14 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       await loadImpact(draft.changeSetId);
       return;
     }
-    if (action === 'publish' && !window.confirm(`Publish the reviewed source draft for ${displayedPath}? This changes published source.`)) return;
-    if (action === 'discard' && !window.confirm(`Discard draft ${draft.changeSetId}? Its staged source changes will be removed.`)) return;
+    if (action === 'publish' && !await confirmAction({ title: 'Publish reviewed source?',
+      message: `Publish the reviewed draft for ${displayedPath}. This changes the Package source${centralTarget ? ' used across Packages' : ''}.`,
+      confirmLabel: 'Publish source' })) return;
+    if (action === 'discard' && !await confirmAction({ title: 'Discard source draft?',
+      message: `Discard draft ${draft.changeSetId} and remove its staged source changes. Published source remains unchanged.`,
+      confirmLabel: 'Discard draft', destructive: true })) return;
     await withBusy(`${action} the source draft`, async signal => {
-      const acknowledgement = action === 'publish' && centralTarget && impact?.freshness
+      const acknowledgement = action === 'publish' && centralTarget && impact?.acknowledgementRequired && impact.freshness
         ? await createImpactAcknowledgement(impact.freshness, impactActor) : undefined;
       if (signal.aborted) return;
       const result = await api.sourceChangeSetAction!(target.domain, getScopeId(), draft.changeSetId, action, signal, acknowledgement);
@@ -402,7 +471,14 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
         setPublished(publication); setDraft(null); setImpact(null); setAcknowledgedImpact(null); setSource(null); setContent(''); setMode('view');
         setPendingOperations([]); recoveryRequiredRef.current = false; setRecoveryPending(false);
         setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
-        setStatus(`Published revision ${publication.revision}.${publication.auditConfirmed === false ? ' The Server reports the durable audit record is pending confirmation.' : ''}`);
+        const activationStatus = publication.activationState || 'unavailable';
+        const auditNote = publication.auditConfirmed === false ? ' The durable audit record is pending confirmation.' : '';
+        setStatus(centralTarget
+          ? (activationStatus === 'ACTIVE' && (publication.activeRevision || '') === (publication.publishedRevision || publication.revision)
+            ? 'Runtime Config published and active.'
+            : 'Runtime Config was published but is not confirmed active. Keep new work paused and repair activation before retrying.')
+            + auditNote
+          : 'Package source published successfully.' + auditNote);
         onPublished?.(publication);
         setRefreshKey(value => value + 1);
       } else if (action === 'discard') {
@@ -520,7 +596,9 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     if (draft || pendingOperations.length || currentEditorHasUnqueuedChanges) {
       setError('Publish, discard, or stage the current draft before importing another Package ZIP.'); return;
     }
-    if (!window.confirm(`Import ${archive.name} as a private Package source draft? The ZIP will not change published files until validation, review, and publish.`)) return;
+    if (!await confirmAction({ title: 'Import Package ZIP?',
+      message: `Stage ${archive.name} as a private Package draft. It will not change published files until validation, review, and publication.`,
+      confirmLabel: 'Import as draft' })) return;
     const controller = new AbortController();
     actionControllerRef.current?.abort();
     actionControllerRef.current = controller;
@@ -570,8 +648,8 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     void stage(pendingOperations);
   }
 
-  function saveTextDraft() {
-    if (editorStale) { setError('Review the latest source and rebase your local changes before saving.'); return; }
+  async function saveTextDraft() {
+    if (editorStale) { setError('Your editor text is preserved, but the source revision changed. Copy the changes you need, discard this editor, then edit the latest source and reapply them.'); return; }
     if (mode === 'create') {
       const path = createPath.trim();
       if (!safeLogicalPath(path)) { setError('Enter a valid relative path, such as templates/new-template/template.yaml.'); return; }
@@ -585,10 +663,20 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     }
     if (!source || content === source.text) { setStatus('There are no source changes to save.'); return; }
     const operation = source.present ? 'replace' : 'create';
-    if (!window.confirm(packageTarget?.allowFileOperations
-      ? `Add ${source.logicalPath} to the local candidate? Related Package files can be added before staging.`
-      : `Save a draft for ${source.logicalPath}? Published source will not change until you publish.`)) return;
+    if (!await confirmAction({ title: packageTarget?.allowFileOperations ? 'Add source to candidate?' : 'Stage source draft?',
+      message: packageTarget?.allowFileOperations
+        ? `Add ${source.logicalPath} to the local candidate. Related Package files can be added before staging.`
+        : `Create a draft for ${source.logicalPath}. Published source remains unchanged until you publish.`,
+      confirmLabel: packageTarget?.allowFileOperations ? 'Add to candidate' : 'Stage draft' })) return;
     if (packageTarget?.allowFileOperations) {
+      const queuedIndex = pendingOperations.findIndex(item => item.path === source.logicalPath);
+      if (queuedIndex >= 0) {
+        setPendingOperations(current => current.map((item, index) => index === queuedIndex
+          ? { operation, path: source.logicalPath, content } : item));
+        setStatus(`Updated ${source.logicalPath} in the local candidate. Stage the complete candidate when related files are ready.`);
+        setMode('view'); setContent(source.text); setEditorBaseSourceRevision('');
+        return;
+      }
       if (addPendingOperation({ operation, path: source.logicalPath, content })) {
         setMode('view'); setContent(source.text); setEditorBaseSourceRevision('');
       }
@@ -596,17 +684,21 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     else void stage([{ operation, path: source.logicalPath, content }]);
   }
 
-  function beginDelete() {
+  async function beginDelete() {
     if (!source || !source.present) return;
     if (mode === 'edit' && content !== source.text) { setError('Add or discard the local editor changes before deleting this source.'); return; }
-    if (!window.confirm(`Add deletion of ${source.logicalPath} to the candidate? The review will list known references before publication.`)) return;
+    if (!await confirmAction({ title: 'Add source deletion?',
+      message: `Add deletion of ${source.logicalPath} to the Package candidate. Review will list known references before publication.`,
+      confirmLabel: 'Add deletion', destructive: true })) return;
     if (addPendingOperation({ operation: 'delete', path: source.logicalPath })) { setMode('view'); setContent(source.text); setEditorBaseSourceRevision(''); }
   }
-  function beginMove() {
+  async function beginMove() {
     if (!source || !source.present) return;
     if (mode === 'edit' && content !== source.text) { setError('Add or discard the local editor changes before moving this source.'); return; }
     if (!safeLogicalPath(movePath)) { setError('Enter a valid new relative path.'); return; }
-    if (!window.confirm(`Add move of ${source.logicalPath} to ${movePath} to the candidate? Known inbound references will be reviewed.`)) return;
+    if (!await confirmAction({ title: 'Add source move?',
+      message: `Move ${source.logicalPath} to ${movePath} in the Package candidate. Known inbound references will be reviewed.`,
+      confirmLabel: 'Add move' })) return;
     if (addPendingOperation({ operation: 'move', path: source.logicalPath, targetPath: movePath })) { setMode('view'); setContent(source.text); setEditorBaseSourceRevision(''); }
   }
 
@@ -615,24 +707,42 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
         label={`${mode === 'edit' ? 'Edit' : 'View'} authorized source ${source.logicalPath}`}
         readOnly={mode !== 'edit' || busy} onChange={setContent} maxCharacters={Math.max(200_000, source.text.length, content.length)} /> : null;
 
-  function reloadSource() {
+  const workflowCurrent = published ? 'publish' : draft
+    ? draft.state === 'reviewed' ? 'publish' : draft.state === 'validated' ? 'review' : 'validate'
+    : pendingOperations.length ? 'stage' : mode !== 'view' ? 'edit' : 'view';
+  const workflowLabels = workspace?.uiLocale === 'zh-Hant'
+    ? ['檢視', '編輯', '建立草稿', '驗證草稿', '檢閱變更 / 影響', '發布']
+    : ['View', 'Edit', 'Stage draft', 'Validate draft', 'Review changes / impact', 'Publish'];
+  const workflowIds = ['view', 'edit', 'stage', 'validate', 'review', 'publish'];
+  const workflowIndex = workflowIds.indexOf(workflowCurrent);
+  const workflowSteps = workflowIds.map((id, index) => {
+    let state: AuthoringStepState = published || index < workflowIndex ? 'complete'
+      : index === workflowIndex ? 'current' : 'upcoming';
+    let reason: string | undefined;
+    if (id === 'publish' && centralTarget && !centralReportReady && !published) {
+      state = 'blocked';
+      reason = workspace?.uiLocale === 'zh-Hant' ? '需要最新且可用的 Config Impact 報告。' : 'A current, available Config Impact report is required.';
+    } else if ((draftStale || editorStale || candidateStale) && index >= workflowIndex && !published) {
+      state = 'blocked';
+      reason = workspace?.uiLocale === 'zh-Hant' ? '來源 revision 已過期；請重新載入並重新建立草稿。' : 'The source revision is stale. Reload and stage a fresh draft.';
+    }
+    return { id, label: workflowLabels[index], state, reason };
+  });
+
+  async function reloadSource() {
     if (draft) { setRefreshKey(value => value + 1); return; }
     const hasLocalChanges = Boolean(mode === 'edit' && source && content !== source.text || mode === 'create' && (content.length || createPath.trim()) || pendingOperations.length);
-    if (hasLocalChanges && !window.confirm('Reloading will discard these unsaved local editor changes. Continue?')) return;
+    if (hasLocalChanges && !await confirmAction({ title: 'Discard local source changes?',
+      message: 'Reloading removes the current local editor text, new path, and queued candidate operations. Server drafts are not affected.',
+      confirmLabel: 'Discard and reload', destructive: true })) return;
     if (hasLocalChanges) { setMode('view'); setContent(''); setCreatePath(''); setEditorBaseSourceRevision(''); setPendingOperations([]); setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined); setRelatedPath(''); setRelatedContent(''); }
     setRefreshKey(value => value + 1);
-  }
-
-  function rebaseLocalEditor() {
-    if (!source || !editorStale) return;
-    if (!window.confirm('Rebase the editor content on the current source revision? Compare the latest source above and merge any changes before saving.')) return;
-    setEditorBaseSourceRevision(source.baseSourceRevision);
-    setStatus('Editor rebased on the current source revision. Compare and merge the latest source before saving.');
   }
 
   if (centralTarget && !canManageCentral) return null;
 
   if (suspended) return <section className="att-source-authoring" aria-label="Source authoring reauthorization">
+    {confirmationDialog}
     <h2>Source hidden while away</h2>
     {access === 'checking' && <p role="status" aria-busy="true">Rechecking source permission before showing any source or draft.</p>}
     {access === 'unavailable' && <><p role="alert">{error || 'Source reauthorization failed. Retry before resuming this work.'}</p>
@@ -640,9 +750,11 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     {access === 'authorized' && recoveryPending && source && <>
       <p role="status">Permission was rechecked. Resume the in-memory editor and draft, or discard the recovered work.</p>
       <button type="button" onClick={() => { recoveryRequiredRef.current = false; suspendedRef.current = false; setRecoveryPending(false); setSuspended(false); }} disabled={busy}>Resume work</button>
-      <button type="button" onClick={() => {
+      <button type="button" onClick={async () => {
         if (draft) { void act('discard'); return; }
-        if (!window.confirm('Discard the recovered local changes? Published source is unchanged.')) return;
+        if (!await confirmAction({ title: 'Discard recovered local changes?',
+          message: 'Remove the recovered local editor text and queued operations. Published source remains unchanged.',
+          confirmLabel: 'Discard recovered work', destructive: true })) return;
         setContent(source.text); setMode('view'); setCreatePath(''); setMovePath(''); setPendingOperations([]);
         setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined);
         setRelatedPath(''); setRelatedContent(''); setEditorBaseSourceRevision('');
@@ -652,6 +764,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   </section>;
 
   return <section className={`att-source-authoring ${target.domain === 'CENTRAL_RUNTIME_CONFIG' ? 'is-central' : ''}`} aria-label={target.label || 'Source authoring'}>
+    {confirmationDialog}
     <header className="att-source-authoring-heading">
       <div><p className="eyebrow">{centralTarget ? 'CENTRAL_RUNTIME_CONFIG · ADMIN' : `PACKAGE_SOURCE · ${packageTarget?.packageId}`}</p>
         <h2>{target.label || displayedPath}</h2>
@@ -662,7 +775,10 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
         <button type="button" className="button button-quiet" onClick={reloadSource} disabled={loading || busy}>
           {loading ? 'Loading…' : 'Reload source'}
         </button>
-        <button type="button" className="button button-quiet" disabled title="Source history and restore are provided by the #256 history service when available.">History / Restore unavailable</button>
+        <button type="button" className="button button-quiet" onClick={() => setHistoryOpen(value => !value)}
+          disabled={access !== 'authorized' || !source || loading || busy} aria-expanded={historyOpen}>
+          {historyOpen ? 'Close History / Restore' : 'History / Restore'}
+        </button>
         {packageTarget && access === 'authorized' && api.stagePackageSourceArchive && <>
           <button type="button" className="button button-quiet" onClick={() => packageZipInputRef.current?.click()}
             disabled={busy || loading || Boolean(draft) || pendingOperations.length > 0 || currentEditorHasUnqueuedChanges}>Import Package ZIP</button>
@@ -691,29 +807,62 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       {item.message && <span>{item.message}</span>}{item.remedy && <span>Remedy: {item.remedy}</span>}
     </li>)}</ul>}
     {status && <p className="att-source-authoring-status" role="status" aria-live="polite">{status}</p>}
+    {published && <details aria-label="Advanced publication provenance">
+      <summary>Advanced publication provenance</summary>
+      <dl>
+        <div><dt>Published revision</dt><dd><code>{published.publishedRevision || published.revision}</code></dd></div>
+        {centralTarget && <>
+          <div><dt>Active revision</dt><dd><code>{published.activeRevision || 'Unavailable'}</code></dd></div>
+          <div><dt>Activation state</dt><dd>{published.activationState || 'Unavailable'}</dd></div>
+          {published.activationFailureCode && <div><dt>Activation failure</dt><dd>{published.activationFailureCode}</dd></div>}
+        </>}
+        {published.validationRevision && <div><dt>Validation revision</dt><dd><code>{published.validationRevision}</code></dd></div>}
+        {published.configGateRevision && <div><dt>Config gate revision</dt><dd><code>{published.configGateRevision}</code></dd></div>}
+      </dl>
+    </details>}
 
     {access === 'authorized' && source && <>
+      <AuthoringWorkflow label={workspace?.uiLocale === 'zh-Hant' ? '來源發布工作流程' : 'Source publication workflow'} steps={workflowSteps} />
       {draftStale && <p className="att-error" role="alert">This draft uses an older source or Package registration revision. Compare the latest authorized source below, then discard this draft and stage a new one.</p>}
-      {editorStale && <p className="att-error" role="alert">The Package source changed after these local edits began. Compare the current source below and rebase before saving.</p>}
-      <div className="att-source-revision-strip" aria-label="Source revision details">
-        <span><strong>{draft ? 'Draft' : published ? 'Published' : 'Published source'}</strong></span>
-        <span>Source ETag <code>{source.sourceEtag}</code></span>
-        <span>Base revision <code>{source.baseSourceRevision}</code></span>
-        {packageSourceIdentity && <span>Package source revision <code>{packageSourceIdentity.revision}</code></span>}
-        {executionRevisionIdentity && <span>Execution revision <code>{executionRevisionIdentity.revision}</code></span>}
-        {source.registryRevision && <span>Package registration revision <code>{source.registryRevision}</code></span>}
-        {draft && <span>Draft revision <code>{draft.validationRevision || draft.baseSourceRevision}</code></span>}
-        {published && <span>Published revision <code>{published.revision}</code></span>}
-        {published && centralTarget && <span>Active revision <code>{published.activeRevision || impact?.activationStatus?.activeRevision || 'Unavailable'}</code></span>}
+      {editorStale && <p className="att-error" role="alert">The Package source changed after these local edits began. Your editor text is preserved, but it cannot be rebased safely. Copy the changes you need, discard this editor, then edit the latest source and reapply them.</p>}
+      <div className="att-source-revision-strip" aria-label="Source publication status">
+        <span><strong>{draft ? 'Draft staged' : published
+          ? centralTarget ? centralPublicationIsActive ? 'Published and active' : 'Published · activation needs attention'
+            : 'Published successfully'
+          : source.present ? 'Published source' : 'Source not published'}</strong></span>
+        {draft && <span>Published source is unchanged.</span>}
+        {centralTarget && published && !centralPublicationIsActive && <span role="alert">
+          Published Runtime Config is not confirmed active. Keep new work paused until an administrator repairs activation.
+          {(published.activationFailureMessage || impact?.activationStatus?.failureMessage) && <> {published.activationFailureMessage || impact?.activationStatus?.failureMessage}</>}
+        </span>}
+        <details aria-label="Advanced source revision provenance">
+          <summary>Advanced revision provenance</summary>
+          <dl>
+            <div><dt>Source ETag</dt><dd><code>{source.sourceEtag}</code></dd></div>
+            <div><dt>Base revision</dt><dd><code>{source.baseSourceRevision}</code></dd></div>
+            {packageSourceIdentity && <div><dt>Package source revision</dt><dd><code>{packageSourceIdentity.revision}</code></dd></div>}
+            {executionRevisionIdentity && <div><dt>Execution revision</dt><dd><code>{executionRevisionIdentity.revision}</code></dd></div>}
+            {source.registryRevision && <div><dt>Package registration revision</dt><dd><code>{source.registryRevision}</code></dd></div>}
+            {draft && <div><dt>Draft revision</dt><dd><code>{draft.validationRevision || draft.baseSourceRevision}</code></dd></div>}
+            {published && <div><dt>Published revision</dt><dd><code>{centralPublishedRevision}</code></dd></div>}
+            {published && centralTarget && <div><dt>Active revision</dt><dd><code>{centralActiveRevision || 'Unavailable'}</code></dd></div>}
+          </dl>
+        </details>
       </div>
+
+      {historyOpen && <SourceHistoryPanel api={api} domain={target.domain} scopeId={getScopeId()} locale={workspace?.uiLocale || 'en'}
+        disabled={busy || loading || Boolean(draft) || pendingOperations.length > 0 || mode !== 'view' || currentEditorHasUnqueuedChanges}
+        onRestore={stageRestoreFromHistory} onAccessRevoked={clearAfterRevocation} />}
 
       {!draft && <>
         {source.present === false && <p className="att-source-authoring-note">This approved source path does not exist yet. Create publishes only after the draft is validated and reviewed.</p>}
         {isBinaryWorkbook(source.logicalPath) && <p className="att-source-authoring-note">Binary workbook bytes cannot be opened in CodeEditor. Use the explicit Testcase workbook upload flow for workbook changes.</p>}
         <div className="att-source-authoring-toolbar" role="group" aria-label="Source actions">
           {mode === 'view' && <button type="button" onClick={() => { setMode('edit'); setContent(source.text); setEditorBaseSourceRevision(source.baseSourceRevision); }} disabled={busy || isBinaryWorkbook(source.logicalPath)}>{source.present ? 'Edit' : 'Create source'}</button>}
-          {mode === 'edit' && <button type="button" onClick={() => {
-            if (content !== source.text && !window.confirm('Discard the local source edits? Published source is unchanged.')) return;
+          {mode === 'edit' && <button type="button" onClick={async () => {
+            if (content !== source.text && !await confirmAction({ title: 'Discard local source edits?',
+              message: 'Discard this local editor text. Published source is unchanged.',
+              confirmLabel: 'Discard edits', destructive: true })) return;
             setMode('view'); setContent(source.text); setEditorBaseSourceRevision(''); setError('');
           }} disabled={busy}>Discard local changes</button>}
           {packageTarget && <>
@@ -734,7 +883,6 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
         {mode === 'edit' && <p className="att-source-authoring-note">The editor contains the exact authorized source shown in View. Source bytes remain in memory only and are never placed in inspection cache or browser storage.</p>}
         {mode === 'edit' && editorStale && <details className="att-source-current-copy"><summary>Latest authorized source</summary>
           <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || source.format)} label={`Latest authorized source ${source.logicalPath}`} readOnly maxCharacters={Math.max(200_000, source.text.length)} />
-          <button type="button" onClick={rebaseLocalEditor} disabled={busy}>Rebase local changes on current revision</button>
         </details>}
         {sourceEditor}
         {mode === 'create' && <div className="att-source-create-form">
@@ -742,7 +890,6 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
           <CodeEditor value={content} language={detectCodeLanguage(createPath)} label="New source content" readOnly={busy} onChange={setContent} maxCharacters={Math.max(200_000, content.length)} />
           {editorStale && <details className="att-source-current-copy"><summary>Latest authorized source</summary>
             <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || source.format)} label={`Latest authorized source ${source.logicalPath}`} readOnly maxCharacters={Math.max(200_000, source.text.length)} />
-            <button type="button" onClick={rebaseLocalEditor} disabled={busy}>Rebase local changes on current revision</button>
           </details>}
           <div><button type="button" onClick={() => { setMode('view'); setContent(source.text); setCreatePath(''); setEditorBaseSourceRevision(''); }} disabled={busy}>Cancel</button>
             <button type="button" className="button button-primary" onClick={saveTextDraft} disabled={busy || editorStale || !createPath || !content.trim()}>
@@ -776,13 +923,15 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
         </fieldset>
         <button type="button" className="button button-primary" onClick={stageCandidate}
           disabled={busy || !pendingOperations.length || candidateStale || currentEditorHasUnqueuedChanges}>
-          Stage candidate{pendingOperations.length ? ` (${pendingOperations.length} files)` : ''}
+          {workspace?.uiLocale === 'zh-Hant'
+            ? `建立候選草稿${pendingOperations.length ? `（${pendingOperations.length} 個檔案）` : ''}`
+            : `Stage candidate${pendingOperations.length ? ` (${pendingOperations.length} files)` : ''}`}
         </button>
       </section>}
 
       {draft && <section className="att-source-review" aria-label="Changed source review">
         <div className="att-source-review-heading"><div><h3>Draft {draft.changeSetId}</h3><p>{draft.state} · expires {draft.expiresAt || 'per Server policy'} · published source remains unchanged</p></div></div>
-        <ChangedFiles files={draft.changedFiles || []} />
+        <ChangedFiles files={draft.changedFiles || []} locale={workspace?.uiLocale || 'en'} />
         {draftStale && <details className="att-source-current-copy"><summary>Latest authorized source</summary>
           <CodeEditor value={source.text} language={detectCodeLanguage(source.logicalPath || source.format)} label={`Latest authorized source ${source.logicalPath}`} readOnly maxCharacters={Math.max(200_000, source.text.length)} />
         </details>}
@@ -801,19 +950,207 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
         {centralTarget && !impact && <p className="att-source-authoring-note">Central publication requires a current #335 Impact Report. Review will load the server report and block publication when its provider is unavailable or stale.</p>}
       </section>}
 
-      {published && <section className="att-source-publication-result" aria-label="Publication result">
-        <h3>Published revision {published.publishedRevision || published.revision}</h3>
-        {centralTarget && <p>Active revision: {published.activeRevision || impact?.activationStatus?.activeRevision || 'Activation status unavailable from this Server'}.
-          {(published.activationState || impact?.activationStatus?.state) && <> State: {published.activationState || impact?.activationStatus?.state}.</>}
-          {(published.activationFailureMessage || impact?.activationStatus?.failureMessage) && <span role="alert"> {published.activationFailureMessage || impact?.activationStatus?.failureMessage}</span>}</p>}
-      </section>}
     </>}
   </section>;
 }
 
-export function ChangedFiles({ files }: { files: ChangedSourceFile[] }) {
+const SOURCE_HISTORY_PAGE_SIZE = 20;
+function isSafeSnapshotId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value);
+}
+
+function SourceHistoryPanel({ api, domain, scopeId, locale = 'en', disabled, onRestore, onAccessRevoked }: {
+  api: ExplorerApi;
+  domain: 'PACKAGE_SOURCE' | 'CENTRAL_RUNTIME_CONFIG';
+  scopeId: string;
+  locale?: 'en' | 'zh-Hant';
+  disabled: boolean;
+  onRestore: (snapshotId: string, currentSourceRevision: string, registryRevision?: string) => void;
+  onAccessRevoked: () => void;
+}) {
+  const [history, setHistory] = useState<SourceHistoryResponse | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [diff, setDiff] = useState<SourceHistoryDiffResponse | null>(null);
+  const [selectedEntry, setSelectedEntry] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState('');
+  const historyControllerRef = useRef<AbortController | null>(null);
+  const diffControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!api.getSourceHistory) {
+      setHistoryError('This Server does not provide source history.');
+      return;
+    }
+    const controller = new AbortController();
+    historyControllerRef.current = controller;
+    setHistoryLoading(true);
+    setHistoryError('');
+    api.getSourceHistory(domain, scopeId, 0, SOURCE_HISTORY_PAGE_SIZE, controller.signal).then(result => {
+      if (controller.signal.aborted) return;
+      if (!Array.isArray(result.items) || typeof result.currentSourceRevision !== 'string') {
+        throw new Error('The Server returned an incomplete source history response.');
+      }
+      setHistory(result);
+    }).catch(reason => {
+      if (controller.signal.aborted) return;
+      if (statusOf(reason) === 403) onAccessRevoked();
+      else setHistoryError(statusOf(reason) === 404
+        ? 'Source history is unavailable on this Server or for this source.'
+        : failureText(reason, 'load source history'));
+    }).finally(() => {
+      if (!controller.signal.aborted) setHistoryLoading(false);
+    });
+    return () => {
+      controller.abort();
+      if (historyControllerRef.current === controller) historyControllerRef.current = null;
+      diffControllerRef.current?.abort(); diffControllerRef.current = null;
+    };
+  }, [api, domain, scopeId, onAccessRevoked]);
+
+  async function loadMore() {
+    if (!api.getSourceHistory || !history?.hasMore || historyLoading) return;
+    historyControllerRef.current?.abort();
+    const controller = new AbortController();
+    historyControllerRef.current = controller;
+    setHistoryLoading(true); setHistoryError('');
+    try {
+      const result = await api.getSourceHistory(domain, scopeId, history.offset + history.items.length,
+        SOURCE_HISTORY_PAGE_SIZE, controller.signal);
+      if (controller.signal.aborted) return;
+      if (result.currentSourceRevision !== history.currentSourceRevision || result.registryRevision !== history.registryRevision) {
+        const refreshed = await api.getSourceHistory(domain, scopeId, 0, SOURCE_HISTORY_PAGE_SIZE, controller.signal);
+        if (controller.signal.aborted) return;
+        setHistory(refreshed); setDiff(null); setSelectedEntry(null); setSelectedPath(null);
+        setHistoryError('The source changed while loading history. The list was refreshed; review the current revisions before restoring.');
+      } else setHistory({ ...result, items: [...history.items, ...result.items] });
+    } catch (reason) {
+      if (!controller.signal.aborted) {
+        if (statusOf(reason) === 403) onAccessRevoked();
+        else setHistoryError(failureText(reason, 'load more source history'));
+      }
+    } finally {
+      if (!controller.signal.aborted) setHistoryLoading(false);
+    }
+  }
+
+  async function loadDiff(entry: SourceHistoryEntry, path?: string) {
+    if (!api.getSourceHistoryDiff || !isSafeSnapshotId(entry.beforeSnapshotId) || !isSafeSnapshotId(entry.afterSnapshotId)) {
+      setDiffError('A safe comparison is unavailable for this history entry.'); return;
+    }
+    diffControllerRef.current?.abort();
+    const controller = new AbortController();
+    diffControllerRef.current = controller;
+    setDiffLoading(true); setDiffError(''); setSelectedEntry(entry.transactionId); setSelectedPath(path || null);
+    if (!path) setDiff(null);
+    try {
+      const result = await api.getSourceHistoryDiff(domain, scopeId, entry.beforeSnapshotId, entry.afterSnapshotId, path, controller.signal);
+      if (!controller.signal.aborted) setDiff(result);
+    } catch (reason) {
+      if (!controller.signal.aborted) {
+        if (statusOf(reason) === 403) onAccessRevoked();
+        else { setDiff(null); setDiffError(failureText(reason, 'compare historical source')); }
+      }
+    } finally {
+      if (!controller.signal.aborted) setDiffLoading(false);
+    }
+  }
+
+  const selectedHistoryEntry = history?.items.find(item => item.transactionId === selectedEntry);
+  const selectedDiffEntry = diff?.items.find(item => item.path === selectedPath);
+
+  return <section className="att-source-history att-source-review" aria-label="Source history and restore">
+    <header className="att-source-review-heading"><div><h3>Source history</h3>
+      <p>{domain === 'PACKAGE_SOURCE' ? 'Package source scope' : 'Global Runtime Configuration scope'} · Restore stages every difference as a new draft. Published source stays unchanged until Publish.</p></div>
+    </header>
+    {historyLoading && !history && <p role="status" aria-busy="true">Loading source history…</p>}
+    {historyError && <p role="alert">{historyError}</p>}
+    {history && <>
+      <p>Current source revision <code>{history.currentSourceRevision}</code>{history.registryRevision && <> · Package registration <code>{history.registryRevision}</code></>}</p>
+      {history.items.length === 0 ? <p>No retained source history is available.</p> : <ol className="att-source-history-list">
+        {history.items.map(entry => {
+          const comparable = isSafeSnapshotId(entry.beforeSnapshotId) && isSafeSnapshotId(entry.afterSnapshotId);
+          const restorable = entry.revisionsAvailable === true && isSafeSnapshotId(entry.afterSnapshotId);
+          return <li key={entry.transactionId}>
+            <div><strong>{entry.action}</strong> · {entry.outcome} · <time dateTime={entry.createdAt}>{entry.createdAt}</time>
+              {entry.author && <> · {entry.author}</>}
+            </div>
+            {(entry.beforeRevision || entry.afterRevision) && <p>Revision {entry.beforeRevision || '—'} → {entry.afterRevision || '—'}</p>}
+            {entry.changedResources?.length ? <ul aria-label={`Changed files in ${entry.transactionId}`}>
+              {entry.changedResources.map(path => <li key={path}><code>{path}</code></li>)}
+            </ul> : <p>{entry.changedResourceCount ?? 0} changed file(s)</p>}
+            {entry.restoredFromSnapshotId && <p>Restored from <code>{entry.restoredFromSnapshotId}</code></p>}
+            <div className="att-source-authoring-toolbar">
+              <button type="button" onClick={() => void loadDiff(entry)} disabled={!comparable || diffLoading}>
+                {selectedEntry === entry.transactionId && diff ? 'Refresh changes' : 'View changes'}
+              </button>
+              <button type="button" className="button button-primary" onClick={() => history.currentSourceRevision && onRestore(
+                entry.afterSnapshotId!, history.currentSourceRevision, history.registryRevision)}
+                disabled={disabled || !restorable || !history.currentSourceRevision || domain === 'PACKAGE_SOURCE' && !history.registryRevision}
+                title={restorable ? 'Stage this complete historical source snapshot as a new draft' : 'This history entry has no retained restorable snapshot'}>
+                Stage restore as draft
+              </button>
+            </div>
+          </li>;
+        })}
+      </ol>}
+      {history.hasMore && <button type="button" onClick={() => void loadMore()} disabled={historyLoading}>
+        {historyLoading ? 'Loading…' : 'Load older history'}
+      </button>}
+      {history.retention && <p>{locale === 'zh-Hant'
+        ? `保留狀態：共 ${history.retention.retainedTransactions ?? history.total} 筆，政策上限 ${history.retention.transactionLimit ?? '未提供'} 筆 · ${history.retention.state || '狀態無法使用'}。`
+        : `Retention: ${history.retention.retainedTransactions ?? history.total} of ${history.retention.transactionLimit ?? 'policy limit'} transactions · ${history.retention.state || 'status unavailable'}.`}</p>}
+    </>}
+    {selectedHistoryEntry && <section className="att-source-history-diff" aria-label="Historical source comparison">
+      <h4>Compare {selectedHistoryEntry.action} · {selectedHistoryEntry.createdAt}</h4>
+      {diffLoading && <p role="status" aria-busy="true">Loading comparison…</p>}
+      {diffError && <p role="alert">{diffError}</p>}
+      {diff && <>
+        {!selectedPath && <>
+          {!diff.items.length && <p>No source changes between these snapshots.</p>}
+          <ul aria-label="Files changed between snapshots">{diff.items.map(item => <li key={item.path}>
+            <button type="button" onClick={() => void loadDiff(selectedHistoryEntry, item.path)} disabled={diffLoading}>
+              {item.change} <code>{item.path}</code> · {item.beforeBytes ?? 0} → {item.afterBytes ?? 0} bytes
+            </button>
+          </li>)}</ul>
+          {diff.hasMore && <p>Only the first page is shown. Restore will still be reviewed as a complete source-scope change.</p>}
+        </>}
+        {selectedPath && selectedDiffEntry && <>
+          <p><strong>{selectedDiffEntry.change}</strong> <code>{selectedDiffEntry.path}</code></p>
+          {selectedDiffEntry.contentAvailable && <>
+            <details><summary>Show before and after source</summary><div className="att-source-history-content-diff">
+              <section><h5>Before</h5><CodeEditor value={selectedDiffEntry.beforeContent ?? ''}
+                language={detectCodeLanguage(selectedDiffEntry.path)} label={`Historical source before ${selectedDiffEntry.path}`}
+                readOnly maxCharacters={200_000} /></section>
+              <section><h5>After</h5><CodeEditor value={selectedDiffEntry.afterContent ?? ''}
+                language={detectCodeLanguage(selectedDiffEntry.path)} label={`Historical source after ${selectedDiffEntry.path}`}
+                readOnly maxCharacters={200_000} /></section>
+            </div></details>
+            {selectedDiffEntry.contentDiff && <details><summary>Show unified diff</summary>
+              <DiffLineList lines={selectedDiffEntry.contentDiff} label={`Unified diff for ${selectedDiffEntry.path}`} />
+            </details>}
+          </>}
+          {selectedDiffEntry.contentAvailable === false && <p>{selectedDiffEntry.redacted
+            ? 'The Server withheld protected source content. Path and change metadata remain available.'
+            : 'Text comparison is unavailable for this file. The Server withheld its contents.'}</p>}
+        </>}
+      </>}
+    </section>}
+  </section>;
+}
+
+export function ChangedFiles({ files, locale = 'en' }: { files: ChangedSourceFile[]; locale?: 'en' | 'zh-Hant' }) {
+  const [filter, setFilter] = useState('');
+  const query = filter.trim().toLocaleLowerCase();
+  const visibleFiles = files.filter(file => !query || `${file.operation} ${file.path} ${file.targetPath || ''}`.toLocaleLowerCase().includes(query));
   return <div className="att-source-changed-files"><h4>Changed files</h4>
-    {!files.length ? <p>The Server did not return changed-file details.</p> : <ul>{files.map((file, index) => <li key={`${file.operation}:${file.path}:${index}`}>
+    {!files.length ? <p>The Server did not return changed-file details.</p> : <>
+      <label>Filter changed files <input type="search" aria-label="Filter changed files" value={filter} onChange={event => setFilter(event.currentTarget.value)} /></label>
+      <p>{locale === 'zh-Hant' ? `顯示 ${visibleFiles.length} 個，共 ${files.length} 個變更檔案。`
+        : `Showing ${visibleFiles.length} of ${files.length} changed files.`}</p>
+      <ul>{visibleFiles.map((file, index) => <li key={`${file.operation}:${file.path}:${index}`}>
       <div className="att-source-file-change"><strong>{file.operation.toUpperCase()}</strong> <code>{file.path}</code>
         {file.targetPath && <> → <code>{file.targetPath}</code></>}
         <span>{file.oldBytes ?? 0} B → {file.newBytes ?? 0} B</span></div>
@@ -821,9 +1158,21 @@ export function ChangedFiles({ files }: { files: ChangedSourceFile[] }) {
       {file.inboundReferences?.length ? <div className="att-source-inbound-references"><strong>Referenced by</strong><ul>{summarizeReferences(file).map(reference => <li key={reference}>{reference}</li>)}</ul>
         <p>Review each returned call site and its certainty before publishing this delete or move. The reference list may be incomplete.</p></div> : null}
       {file.contentSummary && <p>{file.contentSummary}</p>}
-      {file.contentDiff && <pre aria-label={`Review diff for ${file.path}`}>{file.contentDiff.join('\n')}</pre>}
-    </li>)}</ul>}
+      {file.contentDiff && <details><summary>Show unified diff for {file.path}</summary>
+        <DiffLineList lines={file.contentDiff} label={`Review diff for ${file.path}`} />
+      </details>}
+    </li>)}</ul></>}
   </div>;
+}
+
+function DiffLineList({ lines, label }: { lines: string[]; label: string }) {
+  return <ol className="att-source-diff-lines" aria-label={label}>{lines.map((line, index) => {
+    const marker = line[0];
+    const kind = marker === '+' ? 'added' : marker === '-' ? 'removed' : 'context';
+    return <li className={`att-source-diff-line is-${kind}`} key={`${index}:${line}`}>
+      <span aria-label={`Diff row ${index + 1}`}>{index + 1}</span><code>{line}</code>
+    </li>;
+  })}</ol>;
 }
 
 function ImpactReview({ report, loading, filter, onFilter, onLoadMore, actor, actorEntry, onActorEntry, actorFromSession, acknowledged, onAcknowledged, canAcknowledge }: {
@@ -851,12 +1200,12 @@ function ImpactReview({ report, loading, filter, onFilter, onLoadMore, actor, ac
         <div><dt>Package / Manifest / Schema / Schedule snapshots</dt><dd>{report.freshness.packageSources.length} / {report.freshness.manifests.length} / {report.freshness.engineSchema.revision} / {report.freshness.scheduleSnapshots.length}</dd></div>
       </dl></details>}
       {report.acknowledgementRequired && <p className="att-source-impact-ack" role="status">This report requires administrator acknowledgement of the current impact assessment.</p>}
-      {!actorFromSession && <label>Authenticated administrator ID <input aria-label="Authenticated administrator ID" value={actorEntry}
+      {report.acknowledgementRequired && !actorFromSession && <label>Authenticated administrator ID <input aria-label="Authenticated administrator ID" value={actorEntry}
         onChange={event => onActorEntry(event.currentTarget.value)} placeholder="Exact authenticated Server principal" autoComplete="off" /></label>}
-      <label><input type="checkbox" aria-label="Acknowledge current Config impact" checked={acknowledged}
+      {report.acknowledgementRequired && <label><input type="checkbox" aria-label="Acknowledge current Config impact" checked={acknowledged}
         disabled={!canAcknowledge || !actor || loading} onChange={event => onAcknowledged(event.currentTarget.checked)} />
-        I have reviewed affected Packages and Schedules and approve this exact revision for publication.</label>
-      {!actor && <p role="status">Enter your authenticated administrator ID to bind approval to the current Server principal; publication remains disabled.</p>}
+        I have reviewed affected Packages and Schedules and approve this exact revision for publication.</label>}
+      {report.acknowledgementRequired && !actor && <p role="status">Enter your authenticated administrator ID to bind approval to the current Server principal; publication remains disabled.</p>}
       <label>Filter affected Packages / Environments <input type="search" value={filter} onChange={event => onFilter(event.currentTarget.value)} /></label>
       <div className="att-source-impact-table-wrap"><table><thead><tr><th>Package</th><th>Environment</th><th>Certainty</th><th>Why</th><th>Changed logical IDs</th></tr></thead>
         <tbody>{packages.map((item: SourceAffectedPackage, index: number) => <tr key={`${item.packageId}:${item.environment}:${index}`}>
@@ -867,8 +1216,17 @@ function ImpactReview({ report, loading, filter, onFilter, onLoadMore, actor, ac
           {!schedules.length && <tr><td colSpan={5}>No Schedule details were returned for this page.</td></tr>}</tbody></table></div>
       {report.schedules?.truncated && <p>The Server bounded the affected Schedule list. Continue loading pages to inspect the remaining details.</p>}
       {report.schedules?.nextCursor && <button type="button" onClick={onLoadMore} disabled={loading}>{loading ? 'Loading Schedules…' : 'Load more Schedules'}</button>}
-      {report.activationStatus && <p>Activation: {report.activationStatus.state || 'Unknown'} · Published {report.activationStatus.publishedRevision || 'unavailable'} · Active {report.activationStatus.activeRevision || 'unavailable'}.
-        {report.activationStatus.failureMessage && <span role="alert"> {report.activationStatus.failureMessage}</span>}</p>}
+      {report.activationStatus && <>
+        <p>Activation state: {report.activationStatus.state || 'Unknown'}.
+          {report.activationStatus.state !== 'ACTIVE' && ' New Job admission must remain paused until activation is verified.'}</p>
+        {report.activationStatus.failureMessage && <p role="alert">{report.activationStatus.failureMessage}</p>}
+        <details><summary>Advanced activation provenance</summary>
+          <dl className="att-impact-revisions">
+            <div><dt>Published revision</dt><dd><code>{report.activationStatus.publishedRevision || 'unavailable'}</code></dd></div>
+            <div><dt>Active revision</dt><dd><code>{report.activationStatus.activeRevision || 'unavailable'}</code></dd></div>
+          </dl>
+        </details>
+      </>}
     </>}
   </section>;
 }

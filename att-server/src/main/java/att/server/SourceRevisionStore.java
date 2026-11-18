@@ -45,7 +45,7 @@ final class SourceRevisionStore {
     private static final int MAX_CENTRAL_REFERENCE_COUNT = 4096;
     private static final int MAX_CENTRAL_DESCRIPTOR_YAML_BYTES = 3_000_000;
     private static final Set<String> CENTRAL_HELPER_LIST_FIELDS = Set.of(
-            "toolgroups", "dbhelpers", "mqhelpers", "httphelpers", "sshhelpers");
+            "toolgroups", "dbhelpers", "mqhelpers", "httphelpers", "sshhelpers", "datasources");
     private static final Map<Path, ReentrantLock> JVM_WRITER_LOCKS = new ConcurrentHashMap<>();
 
     static final class Revision {
@@ -157,7 +157,8 @@ final class SourceRevisionStore {
     Path executionPin(String domain, String scopeId, Path root) throws Exception {
         Registration registration = lookup(domain, scopeId, root);
         try (WriterLock ignored = acquire(registration)) {
-            Revision active = refreshConfiguredSource(registration, false);
+            Revision active = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(domain)
+                    ? readActive(registration) : refreshConfiguredSource(registration, false);
             Path target = registration.executions.resolve(active.id);
             if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
                 if (Files.isSymbolicLink(target) || !Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)
@@ -196,6 +197,10 @@ final class SourceRevisionStore {
     WriterLock lock(String domain, String scopeId, Path root) throws Exception {
         Registration registration = lookup(domain, scopeId, root);
         return acquire(registration);
+    }
+
+    boolean writerLockHeld(String domain, String scopeId, Path root) throws Exception {
+        return localWriterLock(lookup(domain, scopeId, root)).isHeldByCurrentThread();
     }
 
     Revision refreshConfiguredSource(String domain, String scopeId, Path root, boolean verifyContent) throws Exception {
