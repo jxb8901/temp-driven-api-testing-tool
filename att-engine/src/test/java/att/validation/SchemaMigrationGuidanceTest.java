@@ -27,7 +27,13 @@ class SchemaMigrationGuidanceTest {
 
     @Test void twoClassloadersCanHoldNonOverlappingLeasesWithoutAllowingCacheDeletion() throws Exception {
         Path schema=SchemaFiles.resolve(root,"att-flow-v3.6.schema.json");
-        Path leaseFile=schema.getParent().getParent().resolve(".cache-use.lock");
+        Path cacheRoot=schema.getParent().getParent();
+        Path leaseFile=null;
+        try(java.util.stream.Stream<Path> entries=Files.list(cacheRoot)) {
+            leaseFile=entries.filter(path->path.getFileName().toString().startsWith(".cache-use.lock-"))
+                    .findFirst().orElse(null);
+        }
+        assertNotNull(leaseFile,"The active schema classloader must hold its unique cache lease");
         try(java.nio.channels.FileChannel second=java.nio.channels.FileChannel.open(leaseFile,
                 java.nio.file.StandardOpenOption.READ,java.nio.file.StandardOpenOption.WRITE)) {
             // The Engine's own lease uses a distinct random nonzero byte range.

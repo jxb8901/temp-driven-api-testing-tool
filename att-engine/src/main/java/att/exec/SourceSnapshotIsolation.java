@@ -6,7 +6,11 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.regex.Pattern;
 
 /** Builds an OS-enforced read-only boundary for a Worker using an accepted source snapshot. */
 public final class SourceSnapshotIsolation {
@@ -66,9 +70,12 @@ public final class SourceSnapshotIsolation {
             command.add("/proc");
             command.add("--tmpfs");
             command.add("/tmp");
+            appendWorkerClasspathMounts(command, effectiveWorkerCommand, acceptedPackage);
             // Mount host inputs after the tmpfs overlay. Bubblewrap resolves each SRC as a host
             // path, so accepted snapshots under host /tmp are then restored at their original
-            // in-sandbox paths, while Worker temporary files still use the new tmpfs.
+            // in-sandbox paths, while Worker temporary files still use the new tmpfs. Worker
+            // runtime JARs in test and local installations can also live under /tmp; restore
+            // only the Java classpath entries the Worker needs, read-only.
             command.add("--bind");
             command.add(output.toString());
             command.add(output.toString());
@@ -100,6 +107,57 @@ public final class SourceSnapshotIsolation {
 
     private static void appendWorkerCommand(List<String> command, List<String> workerCommand) {
         command.addAll(workerCommand);
+    }
+
+    static void appendWorkerClasspathMounts(List<String> command, List<String> workerCommand,
+                                            Path workingDirectory) throws IOException {
+        String classpath = workerClasspathArgument(workerCommand);
+        if (classpath == null || classpath.isEmpty()) return;
+        Path temporaryRoot = Paths.get("/tmp").toAbsolutePath().normalize();
+        Map<Path, Path> mounts = new LinkedHashMap<Path, Path>();
+        for (String entry : classpath.split(Pattern.quote(java.io.File.pathSeparator), -1)) {
+            if (entry.isEmpty()) continue;
+            Path classpathPath = Paths.get(entry);
+            if (!classpathPath.isAbsolute()) classpathPath = workingDirectory.resolve(classpathPath);
+            classpathPath = classpathPath.toAbsolutePath().normalize();
+            if (!classpathPath.startsWith(temporaryRoot)) continue;
+            if ("*".equals(classpathPath.getFileName() == null ? "" : classpathPath.getFileName().toString())) {
+                Path directory = classpathPath.getParent();
+                if (directory == null || !Files.isDirectory(directory)) continue;
+                try (java.util.stream.Stream<Path> children = Files.list(directory)) {
+                    Path[] jars = children.filter(Files::isRegularFile)
+                            .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar"))
+                            .sorted().toArray(Path[]::new);
+                    for (Path jar : jars) addClasspathMount(mounts, jar);
+                }
+            } else {
+                addClasspathMount(mounts, classpathPath);
+            }
+        }
+        for (Map.Entry<Path, Path> mount : mounts.entrySet()) {
+            command.add("--ro-bind");
+            command.add(mount.getValue().toString());
+            command.add(mount.getKey().toString());
+        }
+    }
+
+    private static String workerClasspathArgument(List<String> workerCommand) {
+        for (int index = 1; index < workerCommand.size(); index++) {
+            String argument = workerCommand.get(index);
+            if ("-cp".equals(argument) || "-classpath".equals(argument) || "--class-path".equals(argument))
+                return index + 1 < workerCommand.size() ? workerCommand.get(index + 1) : null;
+            if (argument.startsWith("--class-path=")) return argument.substring("--class-path=".length());
+            if ("--".equals(argument) || !argument.startsWith("-")) return null;
+        }
+        return null;
+    }
+
+    private static void addClasspathMount(Map<Path, Path> mounts, Path destination) throws IOException {
+        if (!Files.exists(destination)) return; // Java ignores missing classpath entries.
+        Path source = destination.toRealPath();
+        Path previous = mounts.put(destination, source);
+        if (previous != null && !previous.equals(source))
+            throw new IOException("Worker classpath entries resolve to conflicting paths in the source sandbox");
     }
 
     private static String macProfile(Path source, Path archive) throws IOException {

@@ -13,6 +13,7 @@ export class InspectionQueryCache {
   private generation = 0;
   sharedEpoch = 0;
   private context = '';
+  private sessionExpired = false;
   sessionEpoch = 0;
   private selection = '';
   private revisions = new Map<string, string>();
@@ -32,13 +33,17 @@ export class InspectionQueryCache {
     this.notify();
   }
   resetSession() {
-    this.context = ''; this.sessionEpoch++; this.clear();
+    // A 401 notification rerenders readers, which retries protected requests. Expire once until a new context arrives.
+    if (this.sessionExpired) return;
+    this.context = '';
+    this.sessionExpired = true; this.sessionEpoch++; this.clear();
     for (const listener of this.sessionListeners) listener();
   }
   setContext(context: string) {
     if (this.context === context) return;
     const hadContext = Boolean(this.context);
     this.context = context;
+    this.sessionExpired = false;
     this.clear();
     if (hadContext) { this.sessionEpoch++; for (const listener of this.sessionListeners) listener(); }
   }
