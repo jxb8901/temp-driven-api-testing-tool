@@ -70,12 +70,6 @@ public final class SourceSnapshotIsolation {
             command.add("/proc");
             command.add("--tmpfs");
             command.add("/tmp");
-            appendWorkerClasspathMounts(command, effectiveWorkerCommand, acceptedPackage);
-            // Mount host inputs after the tmpfs overlay. Bubblewrap resolves each SRC as a host
-            // path, so accepted snapshots under host /tmp are then restored at their original
-            // in-sandbox paths, while Worker temporary files still use the new tmpfs. Worker
-            // runtime JARs in test and local installations can also live under /tmp; restore
-            // only the Java classpath entries the Worker needs, read-only.
             command.add("--bind");
             command.add(output.toString());
             command.add(output.toString());
@@ -85,6 +79,12 @@ public final class SourceSnapshotIsolation {
             command.add("--ro-bind");
             command.add(bundle.toString());
             command.add(bundle.toString());
+            // Mount host inputs after the tmpfs overlay. Bubblewrap resolves each SRC as a host
+            // path, so accepted snapshots under host /tmp are restored at their original paths,
+            // while Worker temporary files still use the new tmpfs. Restore the executable and
+            // only the classpath files needed by the Worker, read-only.
+            appendWorkerExecutableMount(command, effectiveWorkerCommand, acceptedPackage);
+            appendWorkerClasspathMounts(command, effectiveWorkerCommand, acceptedPackage);
             command.add("--chdir");
             command.add(acceptedPackage.toString());
             command.add("--");
@@ -95,9 +95,12 @@ public final class SourceSnapshotIsolation {
         // WorkerSourceSnapshot refuses an archive-backed request unless Server launched it through
         // this boundary. The operating-system sandbox, inherited by Tool descendants, is the
         // authority; this marker only catches accidental unwrapped launches.
-        int javaIndex = command.indexOf(effectiveWorkerCommand.get(0));
-        if (javaIndex < 0) throw new IOException("Unable to identify the Worker Java executable");
-        command.add(javaIndex + 1, "-D" + WORKER_PROPERTY + "=" + PROPERTY_VALUE);
+        int separator = command.indexOf("--");
+        int workerIndex = separator < 0 ? command.lastIndexOf(effectiveWorkerCommand.get(0)) : separator + 1;
+        if (workerIndex < 0 || workerIndex >= command.size()
+                || !effectiveWorkerCommand.get(0).equals(command.get(workerIndex)))
+            throw new IOException("Unable to identify the Worker Java executable");
+        command.add(workerIndex + 1, "-D" + WORKER_PROPERTY + "=" + PROPERTY_VALUE);
         return command;
     }
 
@@ -138,6 +141,23 @@ public final class SourceSnapshotIsolation {
             command.add("--ro-bind");
             command.add(mount.getValue().toString());
             command.add(mount.getKey().toString());
+        }
+    }
+
+    static void appendWorkerExecutableMount(List<String> command, List<String> workerCommand,
+                                            Path workingDirectory) throws IOException {
+        if (workerCommand == null || workerCommand.isEmpty()) return;
+        Path temporaryRoot = Paths.get("/tmp").toAbsolutePath().normalize();
+        Path executable = Paths.get(workerCommand.get(0));
+        if (!executable.isAbsolute()) executable = workingDirectory.resolve(executable);
+        executable = executable.toAbsolutePath().normalize();
+        if (!executable.startsWith(temporaryRoot)) return;
+        Map<Path, Path> mount = new LinkedHashMap<Path, Path>();
+        addClasspathMount(mount, executable);
+        for (Map.Entry<Path, Path> entry : mount.entrySet()) {
+            command.add("--ro-bind");
+            command.add(entry.getValue().toString());
+            command.add(entry.getKey().toString());
         }
     }
 

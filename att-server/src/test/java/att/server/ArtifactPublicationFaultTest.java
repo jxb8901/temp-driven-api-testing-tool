@@ -439,13 +439,14 @@ class ArtifactPublicationFaultTest {
 
     @Test void cancellationArchivesPartialOutputOnlyAfterTheSurvivingWriterIsStopped() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX Worker and detached-writer fixture");
-        Path writer = Files.writeString(temp.resolve("writer.sh"), "#!/bin/sh\ntrap '' TERM\n"
+        Files.createDirectories(temp.resolve("packages/p"));
+        Files.writeString(temp.resolve("packages/p/child-writer.sh"), "#!/bin/sh\ntrap '' TERM\n"
                 + "printf 'password=att-test-private-canary\\nbusiness=partial\\n' >> \"$1/case.log\"\n"
                 + "touch \"$1/child.ready\"\n"
                 + "while :; do printf 'business=partial\\n' >> \"$1/case.log\"; sleep 0.02; done\n");
         String launcher = "#!/bin/sh\nIFS= read -r request\n"
                 + "output=$(printf '%s' \"$request\" | sed 's/.*\"outputDirectory\":\"\\([^\"]*\\)\".*/\\1/')\n"
-                + "sh '" + writer + "' \"$output\" >/dev/null 2>&1 &\n"
+                + "sh ./child-writer.sh \"$output\" >/dev/null 2>&1 &\n"
                 + "echo $! > \"$output/child.pid\"\nwait\n";
         var child = new java.util.concurrent.atomic.AtomicReference<ProcessHandle>();
         AtomicInteger publications = new AtomicInteger();
@@ -462,7 +463,13 @@ class ArtifactPublicationFaultTest {
                 while ((!Files.exists(output.resolve("child.ready")) || !Files.exists(output.resolve("child.pid")))
                         && System.nanoTime() < deadline) Thread.sleep(10);
                 assertTrue(Files.exists(output.resolve("child.ready")));
-                child.set(ProcessHandle.of(Long.parseLong(Files.readString(output.resolve("child.pid")).trim())).orElseThrow());
+                Process worker = runtime.jobs.get(id).process;
+                long childDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (child.get() == null && System.nanoTime() < childDeadline) {
+                    child.set(processWithArgument(worker, "./child-writer.sh"));
+                    if (child.get() == null) Thread.sleep(10);
+                }
+                assertNotNull(child.get(), "The detached writer must be visible in the Worker process tree");
                 assertTrue(child.get().isAlive());
                 assertEquals("CANCELLED", runtime.cancel(id, "user-a"));
                 awaitReady(runtime, id);
@@ -538,6 +545,15 @@ class ArtifactPublicationFaultTest {
             Thread.sleep(10);
         } while (System.nanoTime() < deadline);
         fail("Archive did not become READY: " + runtime.artifactIndex(id));
+    }
+
+    private static ProcessHandle processWithArgument(Process process, String argument) {
+        if (process == null) return null;
+        return process.toHandle().descendants().filter(handle -> {
+            for (String value : handle.info().arguments().orElse(new String[0]))
+                if (argument.equals(value)) return true;
+            return false;
+        }).findFirst().orElse(null);
     }
 
     private static void awaitState(ServerRuntime runtime, String id, String state) throws Exception {

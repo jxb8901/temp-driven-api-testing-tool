@@ -327,7 +327,8 @@ class ServerWarUiIT {
         long startDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);
         while((!outputHas(output,"started")||!outputHas(output,"child.pid"))&&System.nanoTime()<startDeadline)Thread.sleep(10);
         assertTrue(outputHas(output,"started")&&outputHas(output,"child.pid"),type+" "+template+" Tool must start before cancellation/timeout evidence");
-        long toolPid=Long.parseLong(Files.readString(outputFile(output,"child.pid")).trim());
+        List<Long> toolPids=workerDescendantPids(runtime,id);
+        if(cancel)assertFalse(toolPids.isEmpty(),"The Worker process tree must include its child Tool before cancellation");
         if(cancel) {
             JsonNode cancelled=apiJsonResponse(port,"DELETE",api+"/jobs/"+id,auth,origin,null,200);
             assertEquals("CANCELLED",cancelled.path("status").asText());
@@ -343,8 +344,10 @@ class ServerWarUiIT {
         List<String> primaryReports=java.util.stream.StreamSupport.stream(archive.path("primaryReports").spliterator(),false)
                 .map(item->item.path("path").asText()).sorted().toList();
         long processDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
-        while(ProcessHandle.of(toolPid).map(ProcessHandle::isAlive).orElse(false)&&System.nanoTime()<processDeadline)Thread.sleep(20);
-        assertFalse(ProcessHandle.of(toolPid).map(ProcessHandle::isAlive).orElse(false),type+" "+template+" Tool child must be reaped");
+        while(toolPids.stream().anyMatch(pid->ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false))
+                &&System.nanoTime()<processDeadline)Thread.sleep(20);
+        assertTrue(toolPids.stream().noneMatch(pid->ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)),
+                type+" "+template+" Tool child must be reaped");
         if(prewarm)assertNotEquals(previousLease,awaitPrewarmedPids(runtime).get(0),
                 "A completed or interrupted "+type+" must consume and replace exactly one Worker");
         return new PackagedExecutionCapture(dispatch,job.path("status").asText(),result.path("job").path("status").asText(),
@@ -397,6 +400,16 @@ class ServerWarUiIT {
     private static Path jobOutputDirectory(Object runtime,String jobId) throws Exception {
         var output=runtime.getClass().getDeclaredMethod("outputDirectoryForJob",String.class);output.setAccessible(true);
         return (Path)output.invoke(runtime,jobId);
+    }
+
+    private static List<Long> workerDescendantPids(Object runtime,String jobId) throws Exception {
+        var jobsField=runtime.getClass().getDeclaredField("jobs");jobsField.setAccessible(true);
+        Object job=((Map<?,?>)jobsField.get(runtime)).get(jobId);
+        if(job==null)return List.of();
+        var processField=job.getClass().getDeclaredField("process");processField.setAccessible(true);
+        Process process=(Process)processField.get(job);
+        if(process==null)return List.of();
+        return process.toHandle().descendants().map(ProcessHandle::pid).toList();
     }
 
     private static boolean outputHas(Path root,String name) { return outputFile(root,name)!=null; }

@@ -387,11 +387,12 @@ class ExecutionWorkerSemanticParityTest {
             Path output=data.resolve("jobs").resolve(id).resolve("output");
             await(()->outputContains(output,"started")&&outputContains(output,"child.pid")&&job.workerPid!=null,20);
             long workerPid=job.workerPid;
-            long toolPid=Long.parseLong(Files.readString(outputFile(output,"child.pid")));
+            List<Long> workerDescendants=descendantPids(job.process);
+            if(cancel)assertFalse(workerDescendants.isEmpty(),"The Worker process tree must include its child Tool");
             if(cancel)assertEquals("CANCELLED",runtime.cancel(id,"alice"));
             Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,id);
             await(()->!ProcessHandle.of(workerPid).map(ProcessHandle::isAlive).orElse(false)
-                    &&!ProcessHandle.of(toolPid).map(ProcessHandle::isAlive).orElse(false),15);
+                    &&workerDescendants.stream().noneMatch(pid->ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)),15);
             awaitArchive(runtime,id,20);
             Map<?,?> row=(Map<?,?>)result.get("job");
             Map<?,?> performance=(Map<?,?>)row.get("performance");
@@ -510,6 +511,11 @@ class ExecutionWorkerSemanticParityTest {
     private static String normalizeLog(String message) {
         return message.replaceAll("\\b[0-9]{8}-[0-9]{6}\\b","<run>")
                 .replaceAll("durationMs: ?[0-9]+","durationMs: <measured>");
+    }
+
+    private static List<Long> descendantPids(Process process) {
+        if(process==null)return List.of();
+        return process.toHandle().descendants().map(ProcessHandle::pid).toList();
     }
 
     private static void dropMeasuredDurations(JsonNode node) {

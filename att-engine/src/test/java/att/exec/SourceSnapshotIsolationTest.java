@@ -1,5 +1,6 @@
 package att.exec;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -14,6 +15,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SourceSnapshotIsolationTest {
     @TempDir Path temporary;
+
+    @Test void temporaryWorkerExecutableIsRestoredAsAReadOnlyMount() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(
+                System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win"),
+                "The /tmp overlay is specific to Unix hosts");
+        Path alias = Paths.get("/tmp").resolve("att-worker-executable-" + java.util.UUID.randomUUID());
+        Files.createSymbolicLink(alias, temporary);
+        Path executable = alias.resolve("test-worker");
+        Files.write(executable, "#!/bin/sh\nexit 0\n".getBytes(StandardCharsets.UTF_8));
+        assertTrue(executable.toFile().setExecutable(true));
+        List<String> mounts = new ArrayList<String>();
+
+        try {
+            SourceSnapshotIsolation.appendWorkerExecutableMount(mounts, Arrays.asList(executable.toString()), temporary);
+
+            assertTrue(hasReadOnlyBind(mounts, executable.toRealPath(), executable),
+                    "A Worker executable hidden by the /tmp overlay must be restored as one read-only file");
+        } finally {
+            Files.deleteIfExists(alias);
+        }
+    }
 
     @Test void temporaryWorkerClasspathRestoresOnlyRequiredJarsAsReadOnlyMounts() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(

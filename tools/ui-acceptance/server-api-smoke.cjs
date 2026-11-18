@@ -72,7 +72,8 @@ async function main() {
     await page.getByRole('button', { name: 'Clear filters' }).click();
     await page.getByRole('button', { name: 'Refresh resources' }).click();
     await page.getByRole('button', { name: 'Reference Flow' }).waitFor();
-    await page.getByRole('button', { name: 'Testdata', exact: true }).click();
+    await page.getByRole('navigation', { name: 'Package Explorer views' })
+      .getByRole('button', { name: 'Testdata', exact: true }).click();
     await page.getByRole('heading', { name: 'Testdata', level: 1 }).waitFor();
     await page.getByRole('button', { name: 'Back to resources', exact: true }).click();
     await page.getByRole('button', { name: 'Reference Flow' }).waitFor();

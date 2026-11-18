@@ -790,7 +790,7 @@ class LoadScenarioTest {
                 + "  verify: {type: assert, assert: \"'actual' == 'expected'\", expected: expected, actual: actual}\n");
         Path scenarioFile = write(project, "capped-failures.yaml", "schemaVersion: att-load/v1.0\n"
                 + "target: {type: template, id: CAPPED_FAIL_TEMPLATE}\n"
-                + "load: {users: 8, duration: 150ms}\n"
+                + "load: {users: 8, duration: 1s}\n"
                 + "evidence: {mode: failures, maxSamples: 3}\n");
         FrameworkConfig config = new FrameworkConfig(Paths.get("output"), Paths.get("report"), Paths.get("logs"), "SIT", 10000,
                 Paths.get("templates"), Collections.emptyMap(), null, null);
