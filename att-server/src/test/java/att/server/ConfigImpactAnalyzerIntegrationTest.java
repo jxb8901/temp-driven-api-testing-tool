@@ -30,30 +30,26 @@ import static org.junit.jupiter.api.Assertions.*;
 class ConfigImpactAnalyzerIntegrationTest {
     @TempDir Path temp;
 
-    @Test void ignoresUnreferencedToolAndCommentChangesButRequiresFreshAcknowledgementForEffectiveChanges() throws Exception {
-        Path runtime = Files.createDirectories(temp.resolve("runtime"));
-        Path packageRoot = Files.createDirectories(temp.resolve("packages/default"));
-        Path globalDefaultPackageRoot = Files.createDirectories(temp.resolve("packages/global-default"));
-        Path data = Files.createDirectories(temp.resolve("data"));
+    @Test void ignoresUnreferencedExtensionMetadataAndCommentChangesButRequiresFreshAcknowledgementForEffectiveChanges() throws Exception {
+        Path runtime = Files.createDirectories(temp.resolve("runtime")).toRealPath();
+        Path packageRoot = Files.createDirectories(temp.resolve("packages/default")).toRealPath();
+        Path globalDefaultPackageRoot = Files.createDirectories(temp.resolve("packages/global-default")).toRealPath();
+        Path data = Files.createDirectories(temp.resolve("data")).toRealPath();
         Path configDirectory = Files.createDirectories(runtime.resolve("config"));
         createPackage(packageRoot, "SIT-default Package", "SIT");
         createPackage(globalDefaultPackageRoot, "Global-default Package", null);
         Path configFile = configDirectory.resolve("config.yaml");
         String original = """
-                schemaVersion: att-config/v2.13
+                schemaVersion: att-config/v2.15
                 environment: SIT
                 timeoutMs: 10000
                 testcase:
                   root: testcase
                 templates:
                   root: templates
-                tools:
-                  impactUnusedProbe:
-                    name: Impact unused probe
-                    description: Baseline description for an unreferenced tool
-                    command: [./tools/probe.sh]
-                    stdoutFormat: text
-                    arguments: {}
+                x-impactMetadata:
+                  description: Baseline unreferenced extension metadata
+                  unusedAddition: false
                 environments:
                   SIT: {}
                   UAT: {}
@@ -148,18 +144,11 @@ class ConfigImpactAnalyzerIntegrationTest {
                             .findFirst().orElseThrow().revision,
                     "Impact must publish the canonical Package source revision, not an all-directory digest");
 
-            String unusedTool = original.replace("Baseline description for an unreferenced tool",
-                    "Changed description for an unreferenced tool").replace(
-                    "                    arguments: {}\n                environments:",
-                    "                    arguments: {}\n  impactUnusedAddition:\n"
-                            + "    name: Impact unused addition\n"
-                            + "    description: An unreferenced added Tool\n"
-                            + "    command: [./tools/probe.sh]\n"
-                            + "    stdoutFormat: text\n"
-                            + "    arguments: {}\n                environments:");
+            String unusedExtension = original.replace("Baseline unreferenced extension metadata",
+                    "Changed unreferenced extension metadata").replace("unusedAddition: false", "unusedAddition: true");
             Map<String, Object> unusedDraft = publisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
                     ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, current.get("baseSourceRevision"), null,
-                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml", bytes(unusedTool))));
+                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml", bytes(unusedExtension))));
             String unusedId = String.valueOf(unusedDraft.get("changeSetId"));
             publisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG, ChangeSetPublisher.CENTRAL_SCOPE_ID,
                     "admin", true, unusedId);
@@ -170,7 +159,7 @@ class ConfigImpactAnalyzerIntegrationTest {
             assertTrue(unusedImpact.affectedPackages.isEmpty());
             assertFalse(unusedImpact.acknowledgementRequired);
 
-            String withComment = unusedTool + "\n# A comment does not change effective Config semantics.\n";
+            String withComment = unusedExtension + "\n# A comment does not change effective Config semantics.\n";
             String changedTimeout = withComment.replace("timeoutMs: 10000", "timeoutMs: 12000");
             Map<String, Object> impactDraft = publisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
                     ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, current.get("baseSourceRevision"), null,

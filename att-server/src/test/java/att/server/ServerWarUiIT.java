@@ -137,8 +137,8 @@ class ServerWarUiIT {
                 +"  - id: one-shot-control\n    target: {type: template, id: PARITY}\n"
                 +"    load: {users: 1, duration: 1s}\n");
         Path holdScript=Files.createDirectories(pkg.resolve("tools")).resolve("hold.sh");
-        Files.writeString(holdScript,"#!/bin/sh\nprintf '%s' \"$$\" > \"$ATT_CASE_OUTPUT_DIR/child.pid\"\n"
-                +"touch \"$ATT_CASE_OUTPUT_DIR/started\"\nexec sleep 60\n");
+        Files.writeString(holdScript,"#!/bin/sh\ntouch \"$ATT_CASE_OUTPUT_DIR/started\"\n"
+                +"count=0\nwhile :; do count=$((count+1)); printf '%s\\n' \"$count\" > \"$ATT_CASE_OUTPUT_DIR/heartbeat\"; sleep 0.02; done\n");
         holdScript.toFile().setExecutable(true);
         Files.createDirectories(pkg.resolve("testcase"));
         try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();var out=Files.newOutputStream(pkg.resolve("testcase/parity.xlsx"))) {
@@ -174,7 +174,7 @@ class ServerWarUiIT {
             assertNotEquals("PASS",cold.timedOutRun().status(),"Cold RUN Tool timeout must be terminal failure");
             assertNotEquals("PASS",cold.timedOutDebug().status(),"Cold DEBUG Tool timeout must be terminal failure");
             assertEquals("cold",cold.run().dispatch());assertEquals("cold",cold.debug().dispatch());
-            assertEquals("warm",warm.run().dispatch());assertEquals("warm",warm.debug().dispatch());
+            assertEquals("cold",warm.run().dispatch(),"Source-pinned RUN must use the isolated cold Worker");assertEquals("cold",warm.debug().dispatch(),"Source-pinned DEBUG must use the isolated cold Worker");
         } finally {
             if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);
             if(oldHome==null)System.clearProperty("att.home");else System.setProperty("att.home",oldHome);
@@ -215,16 +215,16 @@ class ServerWarUiIT {
             long runLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
             PackagedExecutionCapture run=executePackagedDraft(port,api,auth,origin,"run","PARITY","PASS",prewarm);
             long debugLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
-            if(prewarm)assertNotEquals(runLease,debugLease,"A completed packaged RUN must be replaced before DEBUG dispatch");
+            if(prewarm)assertEquals(runLease,debugLease,"A source-pinned packaged RUN must leave the idle Worker untouched before DEBUG");
             PackagedExecutionCapture debug=executePackagedDraft(port,api,auth,origin,"debug","PARITY","PASS",prewarm);
             long failedRunLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
-            if(prewarm)assertNotEquals(debugLease,failedRunLease,"A completed packaged DEBUG must be replaced before a failing RUN");
+            if(prewarm)assertEquals(debugLease,failedRunLease,"A source-pinned packaged DEBUG must leave the idle Worker untouched before a failing RUN");
             PackagedExecutionCapture failedRun=executePackagedDraft(port,api,auth,origin,"run","PARITY_FAIL","FAIL",prewarm);
             long failedDebugLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
-            if(prewarm)assertNotEquals(failedRunLease,failedDebugLease,"A failed packaged RUN must still consume exactly one Worker Job");
+            if(prewarm)assertEquals(failedRunLease,failedDebugLease,"A source-pinned failed RUN must leave the idle Worker untouched before DEBUG");
             PackagedExecutionCapture failedDebug=executePackagedDraft(port,api,auth,origin,"debug","PARITY_FAIL","FAIL",prewarm);
-            if(prewarm)assertNotEquals(failedDebugLease,awaitPrewarmedPids(runtime).get(0),
-                    "A failed packaged DEBUG must also be replaced after its one Job");
+            if(prewarm)assertEquals(failedDebugLease,awaitPrewarmedPids(runtime).get(0),
+                    "A source-pinned failed DEBUG must leave the idle Worker untouched");
             PackagedExecutionCapture cancelledRun=executePackagedInterruptedDraft(port,api,auth,origin,pkg,runtime,
                     "run","HOLD",true,prewarm);
             PackagedExecutionCapture cancelledDebug=executePackagedInterruptedDraft(port,api,auth,origin,pkg,runtime,
@@ -296,7 +296,7 @@ class ServerWarUiIT {
         String id=accepted.path("jobId").asText(),jobPath=api+"/jobs/"+id;
         JsonNode job=awaitJobStatus(port,jobPath,auth,expectedStatus);
         String dispatch=job.path("performance").path("workerDispatch").asText();
-        assertEquals(prewarm?"warm":"cold",dispatch,type+" must use the expected dispatch path");
+        assertEquals("cold",dispatch,type+" source-pinned Job must use the isolated cold Worker");
         String logData=sseDataUntil(port,jobPath+"/events",auth,"packaged-war-parity");
         assertTrue(logData.contains("packaged-war-parity"),type+" must preserve the packaged Worker log event");
         JsonNode result=getJson(port,jobPath+"/result",auth);
@@ -325,17 +325,15 @@ class ServerWarUiIT {
         String id=accepted.path("jobId").asText(),jobPath=api+"/jobs/"+id;
         Path output=jobOutputDirectory(runtime,id);
         long startDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);
-        while((!outputHas(output,"started")||!outputHas(output,"child.pid"))&&System.nanoTime()<startDeadline)Thread.sleep(10);
-        assertTrue(outputHas(output,"started")&&outputHas(output,"child.pid"),type+" "+template+" Tool must start before cancellation/timeout evidence");
-        List<Long> toolPids=workerDescendantPids(runtime,id);
-        if(cancel)assertFalse(toolPids.isEmpty(),"The Worker process tree must include its child Tool before cancellation");
+        while((!outputHas(output,"started")||!outputHas(output,"heartbeat"))&&System.nanoTime()<startDeadline)Thread.sleep(10);
+        assertTrue(outputHas(output,"started")&&outputHas(output,"heartbeat"),type+" "+template+" Tool must start before cancellation/timeout evidence");
         if(cancel) {
             JsonNode cancelled=apiJsonResponse(port,"DELETE",api+"/jobs/"+id,auth,origin,null,200);
             assertEquals("CANCELLED",cancelled.path("status").asText());
         }
         JsonNode job=awaitTerminalJobStatus(port,jobPath,auth);
         String dispatch=job.path("performance").path("workerDispatch").asText();
-        assertEquals(prewarm?"warm":"cold",dispatch,type+" must use the expected "+template+" dispatch path");
+        assertEquals("cold",dispatch,type+" "+template+" source-pinned Job must use the isolated cold Worker");
         JsonNode result=getJson(port,jobPath+"/result",auth);
         assertEquals(job.path("status").asText(),result.path("job").path("status").asText(),result.toString());
         JsonNode archive=awaitArchive(port,api,id,auth);
@@ -343,13 +341,9 @@ class ServerWarUiIT {
                 .map(item->item.path("path").asText()).sorted().toList();
         List<String> primaryReports=java.util.stream.StreamSupport.stream(archive.path("primaryReports").spliterator(),false)
                 .map(item->item.path("path").asText()).sorted().toList();
-        long processDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
-        while(toolPids.stream().anyMatch(pid->ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false))
-                &&System.nanoTime()<processDeadline)Thread.sleep(20);
-        assertTrue(toolPids.stream().noneMatch(pid->ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)),
-                type+" "+template+" Tool child must be reaped");
-        if(prewarm)assertNotEquals(previousLease,awaitPrewarmedPids(runtime).get(0),
-                "A completed or interrupted "+type+" must consume and replace exactly one Worker");
+        assertHeartbeatStopped(output,type+" "+template+" Tool must stop writing after cleanup");
+        if(prewarm)assertEquals(previousLease,awaitPrewarmedPids(runtime).get(0),
+                "A source-pinned "+type+" must leave the idle prewarmed Worker untouched");
         return new PackagedExecutionCapture(dispatch,job.path("status").asText(),result.path("job").path("status").asText(),
                 artifactPaths,primaryReports,false);
     }
@@ -402,22 +396,20 @@ class ServerWarUiIT {
         return (Path)output.invoke(runtime,jobId);
     }
 
-    private static List<Long> workerDescendantPids(Object runtime,String jobId) throws Exception {
-        var jobsField=runtime.getClass().getDeclaredField("jobs");jobsField.setAccessible(true);
-        Object job=((Map<?,?>)jobsField.get(runtime)).get(jobId);
-        if(job==null)return List.of();
-        var processField=job.getClass().getDeclaredField("process");processField.setAccessible(true);
-        Process process=(Process)processField.get(job);
-        if(process==null)return List.of();
-        return process.toHandle().descendants().map(ProcessHandle::pid).toList();
-    }
-
     private static boolean outputHas(Path root,String name) { return outputFile(root,name)!=null; }
     private static Path outputFile(Path root,String name) {
         if(root==null||!Files.isDirectory(root))return null;
         try(var paths=Files.walk(root)) {
             return paths.filter(path->path.getFileName()!=null&&name.equals(path.getFileName().toString())).findFirst().orElse(null);
         } catch(Exception unavailable) { return null; }
+    }
+
+    private static void assertHeartbeatStopped(Path output,String message) throws Exception {
+        Path heartbeat=outputFile(output,"heartbeat");
+        assertNotNull(heartbeat,"The child Tool must write a heartbeat before cleanup");
+        String stoppedValue=Files.readString(heartbeat);
+        Thread.sleep(250);
+        assertEquals(stoppedValue,Files.readString(heartbeat),message);
     }
 
     @Test

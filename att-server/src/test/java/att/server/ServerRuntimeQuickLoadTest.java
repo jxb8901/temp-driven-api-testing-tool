@@ -24,11 +24,10 @@ class ServerRuntimeQuickLoadTest {
     @Test void quickLoadDraftOmitsDebugImportsAndRunsOnlyExplicitLoadTestdata() throws Exception {
         Path allowed=Files.createDirectory(temp.resolve("quick-load-packages"));Path packageRoot=Files.createDirectory(allowed.resolve("p"));
         Path templates=Files.createDirectories(packageRoot.resolve("templates/FORM"));Files.createDirectories(packageRoot.resolve("testcase"));
-        Path toolInvocations=temp.resolve("tool-invocations.log");
+        Path jobsDirectory=temp.resolve("quick-load-data/jobs");
         Path runtimeConfig=temp.resolve("quick-load-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
         Path toolScript=Files.createDirectories(packageRoot.resolve("tools")).resolve("check-load-inputs.sh");
-        String invocationLog=toolInvocations.toString().replace("'","'\\''");
-        Files.writeString(toolScript,"#!/bin/sh\nprintf 'called\\n' >> '"+invocationLog+"'\n[ \"$1\" = CORR-176 ] && [ \"$2\" = ARG-176 ]\n");
+        Files.writeString(toolScript,"#!/bin/sh\nprintf 'called\\n' >> \"$ATT_CASE_OUTPUT_DIR/tool-invocations.log\"\n[ \"$1\" = CORR-176 ] && [ \"$2\" = ARG-176 ]\n");
         toolScript.toFile().setExecutable(true);
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\n"
                 +"environments:\n  SIT: {}\ntestcase:\n  root: testcase\ntemplates:\n  root: templates\n"
@@ -102,7 +101,7 @@ class ServerRuntimeQuickLoadTest {
             assertTrue(brokenFlowError.diagnostics.toString().contains("suggestion"),brokenFlowError.diagnostics.toString());
             Map<String,Object> draft=runtime.createQuickLoadDraft(body,"alice");String draftId=String.valueOf(draft.get("draftId"));
             assertEquals(1,inspectorStarts.get(),"Quick Load inspection and draft validation should reuse one bounded Inspector Worker");
-            assertFalse(Files.exists(toolInvocations),"Draft validation must not invoke package Tools");
+            assertFalse(hasToolInvocation(jobsDirectory),"Draft validation must not invoke package Tools");
             assertFalse(draft.toString().contains("debugAccounts"));assertFalse(draft.toString().contains("testdata/load.yaml"));
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getQuickLoadDraft(draftId,"bob"));
             assertArrayEquals(originalSidecar,Files.readAllBytes(debugSidecar),"Draft validation must leave Debug sidecars unchanged");
@@ -131,7 +130,7 @@ class ServerRuntimeQuickLoadTest {
             assertFalse(brokenAdvancedError.diagnostics.isEmpty());
             assertTrue(brokenAdvancedError.diagnostics.toString().contains("missing.inner.v1"),brokenAdvancedError.diagnostics.toString());
             assertEquals(1,inspectorStarts.get(),"Failed Advanced Load validation should stay on the existing Inspector");
-            assertFalse(Files.exists(toolInvocations),"A rejected Advanced Load draft must not invoke package Tools");
+            assertFalse(hasToolInvocation(jobsDirectory),"A rejected Advanced Load draft must not invoke package Tools");
             Map<String,Object> advancedDraft;
             try { advancedDraft=runtime.createAdvancedLoadDraft(advancedBody,"alice"); }
             catch(ServerRuntime.DraftValidationException invalid) { throw new AssertionError(invalid.diagnostics.toString(),invalid); }
@@ -154,7 +153,7 @@ class ServerRuntimeQuickLoadTest {
             assertEquals(1,runtime.store.savedLoadScenarioSummaries("container:alice",10,0).size());
             assertArrayEquals(originalToolSidecar,Files.readAllBytes(toolSidecar),"Advanced Load validation must leave Tool sidecars unchanged");
             assertEquals(1,inspectorStarts.get(),"Quick and Advanced Load validation should share the bounded Inspector Worker");
-            assertFalse(Files.exists(toolInvocations),"Advanced Load draft validation must not invoke package Tools");
+            assertFalse(hasToolInvocation(jobsDirectory),"Advanced Load draft validation must not invoke package Tools");
             Map<String,Object> advancedAccepted=runtime.submitAdvancedLoadDraft(ServerRuntime.JSON.readTree("{\"packageId\":\"p\",\"draftId\":\""+advancedDraftId+"\"}"),"alice");
             String advancedJobId=String.valueOf(advancedAccepted.get("jobId"));long advancedDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);Map<String,Object> advancedRecord=runtime.jobRecord(advancedJobId);
             while(!List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(advancedRecord.get("status"))&&System.nanoTime()<advancedDeadline){Thread.sleep(20);advancedRecord=runtime.jobRecord(advancedJobId);}
@@ -162,7 +161,8 @@ class ServerRuntimeQuickLoadTest {
             long advancedReleaseDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
             while(((Number)runtime.counts().get("activeWorkers")).intValue()>0&&System.nanoTime()<advancedReleaseDeadline)Thread.sleep(10);
             assertEquals(0,((Number)runtime.counts().get("activeWorkers")).intValue(),"The Advanced Load Worker must exit before the test temp directory is removed");
-            assertTrue(Files.exists(toolInvocations),"Advanced Load submission should invoke the configured Tool; result="
+            Path toolInvocations=findToolInvocation(runtime.outputDirectoryForJob(advancedJobId));
+            assertNotNull(toolInvocations,"Advanced Load submission should invoke the configured Tool; result="
                     +runtime.resultRecord(advancedJobId));
             assertTrue(Files.readString(toolInvocations).contains("called\n"));
             assertArrayEquals(originalToolSidecar,Files.readAllBytes(toolSidecar));
@@ -179,7 +179,7 @@ class ServerRuntimeQuickLoadTest {
             assertTrue(String.valueOf(composedDraft.get("previewYaml")).contains("workload-2"));
             assertTrue(String.valueOf(composedDraft.get("previewYaml")).contains("CORR-176"));
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getAdvancedLoadDraft(String.valueOf(composedDraft.get("draftId")),"bob"));
-            assertFalse(Files.exists(toolInvocations),"Template composition validation must not invoke package Tools");
+            assertFalse(hasToolInvocation(jobsDirectory),"Template composition validation must not invoke package Tools");
             assertEquals(0,((Number)runtime.counts().get("activeWorkers")).intValue(),"Template validation starts no execution Worker");
             composedBody.withObject("/templateComposition").put("revision","0".repeat(64));
             assertThrows(ServerRuntime.StaleCursorException.class,()->runtime.createAdvancedLoadDraft(composedBody,"alice"));
@@ -194,6 +194,18 @@ class ServerRuntimeQuickLoadTest {
             clock.advance(Duration.ofMinutes(11));
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getQuickLoadDraft(String.valueOf(expired.get("draftId")),"alice"));
         } finally {runtime.close();}
+    }
+
+    private static boolean hasToolInvocation(Path root) {
+        return findToolInvocation(root) != null;
+    }
+
+    private static Path findToolInvocation(Path root) {
+        if (root == null || !Files.isDirectory(root)) return null;
+        try (var paths = Files.walk(root)) {
+            return paths.filter(path -> path.getFileName() != null
+                    && "tool-invocations.log".equals(path.getFileName().toString())).findFirst().orElse(null);
+        } catch (Exception unavailable) { return null; }
     }
 
 }

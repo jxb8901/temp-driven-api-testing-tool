@@ -260,7 +260,7 @@ class PackageManifestPublisherTest {
             Path outside=Files.createDirectories(temporary.resolve("outside"));
             Path metrics=Files.createDirectories(root.resolve("load/sut-metrics"));
             Files.createSymbolicLink(metrics.resolve("sources"),outside);
-            assertThrows(IllegalArgumentException.class,()->publisher.stageResource("owner","owner",
+            assertThrows(java.io.IOException.class,()->publisher.stageResource("owner","owner",
                     "load/sut-metrics/sources/prom.yaml",RESOURCE,sha("")));
             assertFalse(Files.exists(outside.resolve("prom.yaml")));
         }

@@ -30,13 +30,14 @@ class ServerRuntimeJobReplayTest {
         ServerRuntime open(ServerRuntimeTestSupport.MutableClock clock) throws Exception {return new ServerRuntime(ServerConfig.load(server),libs.toString(),ProcessBuilder::start,clock);}
     }
     private Fixture fixture() throws Exception {
-        Path root=Files.createDirectories(temp.resolve("unified-package"));
+        Path root=Files.createDirectories(temp.resolve("unified-package")).toRealPath();
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("templates/SIMPLE"));Files.createDirectories(root.resolve("templates/SNAPSHOT"));
         Files.createDirectories(root.resolve("templates/BAD"));Files.createDirectories(root.resolve("templates/flows/simple"));
         Files.createDirectories(root.resolve("files"));Files.createDirectories(root.resolve("testdata"));
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
-        Path runtimeConfig=temp.resolve("unified-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
+        Path runtimeConfigDirectory=Files.createDirectories(temp.resolve("unified-runtime/config")).toRealPath();
+        Path runtimeConfig=runtimeConfigDirectory.resolve("config.yaml");
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}, UAT: {}}\ntemplates: {root: templates}\ntestcase: {root: testcase}\n");
 
         Files.writeString(Files.createDirectories(root.resolve("tools")).resolve("version.yaml"),
@@ -1032,6 +1033,13 @@ class ServerRuntimeJobReplayTest {
             updatedMetric.put("query","down");updatedProfile.put("metrics",List.of(updatedMetric));
             writeSutMetricsConfig(fixture,List.of(simplePrometheusSource()),List.of(updatedProfile));
             clock.advance(Duration.ofMinutes(runtime.config.scheduling.minimumIntervalMinutes+1L));
+            Path registeredRoot=runtime.packageRegistry.snapshot().packages.get("p");
+            assertNotNull(registeredRoot,"The Schedule's Package must remain registered after a central Config update");
+            assertFalse(Files.isSymbolicLink(registeredRoot),"The Schedule's Package root must not become a symlink");
+            assertTrue(Files.isDirectory(registeredRoot,java.nio.file.LinkOption.NOFOLLOW_LINKS),
+                    "The Schedule's Package root must remain an available directory: "+registeredRoot);
+            assertEquals(registeredRoot.toRealPath(),registeredRoot,
+                    "The Schedule's Package root must remain canonical: "+registeredRoot);
             Map<String,Object> secondOccurrence=runtime.triggerLoadSchedule(schedule.id,"alice");
             assertEquals("submitted",secondOccurrence.get("status"),secondOccurrence.toString());
             String secondJob=String.valueOf(secondOccurrence.get("jobId"));

@@ -22,11 +22,11 @@ import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Public Job semantics that must remain identical on cold and prewarmed one-shot dispatch. */
+/** Public Job semantics that must remain identical with the execution pool enabled or disabled. */
 class ExecutionWorkerSemanticParityTest {
     @TempDir Path temp;
 
-    @Test void warmAndColdRunAndDebugPassAndFailHaveEquivalentStateEventsAndReports() throws Exception {
+    @Test void poolEnabledAndDisabledRunAndDebugPassAndFailHaveEquivalentStateEventsAndReports() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("allowed"));
         Path pkg=Files.createDirectories(allowed.resolve("p"));
         Files.createDirectories(pkg.resolve("templates/SIMPLE"));
@@ -85,7 +85,7 @@ class ExecutionWorkerSemanticParityTest {
         assertEquals("cold",load.dispatch,"LOAD must keep the existing isolated cold one-shot path");
     }
 
-    @Test void revisionPublicationFallsBackSafelyForWarmRunAndDebugRequests() throws Exception {
+    @Test void revisionPublicationKeepsSourcePinnedRunAndDebugOnTheColdPath() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("published-allowed"));
         Path pkg=Files.createDirectories(allowed.resolve("p"));
         Path template=Files.createDirectories(pkg.resolve("templates/SIMPLE"));
@@ -134,7 +134,7 @@ class ExecutionWorkerSemanticParityTest {
             String runId=String.valueOf(runAccepted.get("jobId"));
             Map<String,Object> runResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,runId);
             assertEquals("PASS",((Map<?,?>)runResult.get("job")).get("status"),runResult.toString());
-            assertEquals("warm",workerDispatch(runResult),"A replacement idle Worker must use the exact published Package revision");
+            assertEquals("cold",workerDispatch(runResult),"A source-pinned RUN must use the isolated cold Worker after publication");
 
             publishTemplateRevision(runtime,pkg,"# published before DEBUG\n");
             awaitReadyRoot(runtime,runtime.executionPackageRoot("p"),15);
@@ -147,11 +147,11 @@ class ExecutionWorkerSemanticParityTest {
             String debugId=String.valueOf(debugAccepted.get("jobId"));
             Map<String,Object> debugResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,debugId);
             assertEquals("PASS",((Map<?,?>)debugResult.get("job")).get("status"),debugResult.toString());
-            assertEquals("warm",workerDispatch(debugResult),"A replacement idle Worker must use the exact published Package revision for DEBUG");
+            assertEquals("cold",workerDispatch(debugResult),"A source-pinned DEBUG must use the isolated cold Worker after publication");
         }
     }
 
-    @Test void warmAndColdRunAndDebugCancellationAndToolTimeoutHaveEquivalentTerminalEvidence() throws Exception {
+    @Test void poolEnabledAndDisabledRunAndDebugCancellationAndToolTimeoutHaveEquivalentTerminalEvidence() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),
                 "Uses a POSIX child Tool fixture");
         Path allowed=Files.createDirectories(temp.resolve("lifecycle-allowed"));
@@ -187,31 +187,31 @@ class ExecutionWorkerSemanticParityTest {
         TerminalCapture coldCancel=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"HOLD",true,false,"cold-cancel");
         TerminalCapture warmCancel=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"HOLD",true,false,"warm-cancel");
         assertEquals("CANCELLED",coldCancel.status);
-        assertEquals("cold",coldCancel.dispatch);assertEquals("warm",warmCancel.dispatch);
+        assertEquals("cold",coldCancel.dispatch);assertEquals("cold",warmCancel.dispatch,"Source-pinned cancellation must use the isolated cold Worker");
         assertTerminalEquivalent(coldCancel,warmCancel,"Cancellation state, event, diagnostic, archive and history must match");
 
         TerminalCapture coldTimeout=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,false,"cold-timeout");
         TerminalCapture warmTimeout=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,false,"warm-timeout");
         assertNotEquals("PASS",coldTimeout.status);
-        assertEquals("cold",coldTimeout.dispatch);assertEquals("warm",warmTimeout.dispatch);
+        assertEquals("cold",coldTimeout.dispatch);assertEquals("cold",warmTimeout.dispatch,"Source-pinned timeout must use the isolated cold Worker");
         assertTerminalEquivalent(coldTimeout,warmTimeout,"Timeout state, event, diagnostic, archive and history must match");
 
         TerminalCapture coldDebugCancel=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"HOLD",true,true,"cold-debug-cancel");
         TerminalCapture warmDebugCancel=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"HOLD",true,true,"warm-debug-cancel");
         assertEquals("CANCELLED",coldDebugCancel.status);
-        assertEquals("cold",coldDebugCancel.dispatch);assertEquals("warm",warmDebugCancel.dispatch);
+        assertEquals("cold",coldDebugCancel.dispatch);assertEquals("cold",warmDebugCancel.dispatch,"Source-pinned DEBUG cancellation must use the isolated cold Worker");
         assertTerminalEquivalent(coldDebugCancel,warmDebugCancel,"DEBUG cancellation evidence must match across dispatch paths");
 
         TerminalCapture coldDebugTimeout=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,true,"cold-debug-timeout");
         TerminalCapture warmDebugTimeout=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,true,"warm-debug-timeout");
         assertNotEquals("PASS",coldDebugTimeout.status);
-        assertEquals("cold",coldDebugTimeout.dispatch);assertEquals("warm",warmDebugTimeout.dispatch);
+        assertEquals("cold",coldDebugTimeout.dispatch);assertEquals("cold",warmDebugTimeout.dispatch,"Source-pinned DEBUG timeout must use the isolated cold Worker");
         assertTerminalEquivalent(coldDebugTimeout,warmDebugTimeout,"DEBUG Tool-timeout evidence must match across dispatch paths");
     }
 
     private void assertEquivalent(String expectedStatus,RunCapture cold,RunCapture warm) {
         assertEquals("cold",cold.dispatch);
-        assertEquals("warm",warm.dispatch);
+        assertEquals("cold",warm.dispatch,"Jobs admitted with a source snapshot must use the isolated cold Worker");
         assertEquals(cold.status,warm.status);
         assertEquals(expectedStatus,warm.status);
         assertEquals(cold.exitCode,warm.exitCode);

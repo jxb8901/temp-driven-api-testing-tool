@@ -1100,7 +1100,7 @@ final class ServerRuntime implements AutoCloseable {
                 if(rawObservability instanceof Map<?,?>) {
                     Map<String,Object> observability=JSON.convertValue(rawObservability,Map.class);
                     SutMetricsService.BusinessCallContext callContext=businessCallContext(packageId,root,request.environment,
-                            request.expectedRevisionDigest,workloadSubjects(scenario),observability);
+                            request.expectedRevisionDigest,workloadSubjects(scenario),observability,scheduledSnapshot);
                     sutSnapshot=sutMetrics.resolveScenario(observability,observationPrincipal,
                             sutAdminPrincipal(observationPrincipal),callContext);
                 }
@@ -3553,7 +3553,14 @@ final class ServerRuntime implements AutoCloseable {
     private SutMetricsService.BusinessCallContext businessCallContext(String packageId,Path root,String environment,
                                                                        String packageRevision,List<SutMetricsService.WorkloadSubject> workloadSubjects,
                                                                        Map<String,Object> observability) throws Exception {
-        validatePackageRoot(root);
+        return businessCallContext(packageId,root,environment,packageRevision,workloadSubjects,observability,null);
+    }
+    private SutMetricsService.BusinessCallContext businessCallContext(String packageId,Path root,String environment,
+                                                                       String packageRevision,List<SutMetricsService.WorkloadSubject> workloadSubjects,
+                                                                       Map<String,Object> observability,
+                                                                       JobSourceClosureStore.SourceSnapshot acceptedSnapshot) throws Exception {
+        if(acceptedSnapshot==null)validatePackageRoot(root);
+        else validateAcceptedPackageSnapshot(packageId,root,acceptedSnapshot);
         String pinnedRevision=packageRevision;
         if(pinnedRevision==null||pinnedRevision.isBlank()) {
             WorkerRequest revisionRequest=inspectionRequest(packageId,root,environment);
@@ -3577,6 +3584,17 @@ final class ServerRuntime implements AutoCloseable {
                 pinnedRuntimeRevision,workloadSubjects==null?Set.of():workloadSubjects.stream()
                         .map(SutMetricsService.WorkloadSubject::workloadId).collect(java.util.stream.Collectors.toUnmodifiableSet()),
                 workloadSubjects==null?List.of():List.copyOf(workloadSubjects),frameworkConfig);
+    }
+
+    private static void validateAcceptedPackageSnapshot(String packageId,Path root,
+                                                         JobSourceClosureStore.SourceSnapshot snapshot) throws Exception {
+        var revision=snapshot==null||snapshot.revisions==null?null:snapshot.revisions.packageSourceRevision;
+        Path canonical=root==null?null:root.toRealPath();
+        if(root==null||snapshot==null||!root.equals(snapshot.packageRoot)||!root.equals(canonical)
+                ||revision==null||revision.kind!=RevisionKind.PACKAGE_SOURCE||!packageId.equals(revision.scopeId)
+                ||Files.isSymbolicLink(root)||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                ||!Files.isReadable(root)||!Files.isExecutable(root)||!ServerConfig.hasReadSearchPermissionBits(root))
+            throw new IllegalArgumentException("Accepted Package source snapshot is unavailable or invalid");
     }
 
     private String runtimeConfigRevision(String environment) throws Exception {

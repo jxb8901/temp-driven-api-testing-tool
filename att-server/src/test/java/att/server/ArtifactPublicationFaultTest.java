@@ -24,8 +24,9 @@ class ArtifactPublicationFaultTest {
     @ValueSource(strings={"unverified", "ledger-failure", "quarantine-store-failure", "load"})
     void incompleteProofReleasesCapacityOnlyAfterDurableQuarantine(String failure) throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX Worker protocol fixture");
-        Path gate=temp.resolve("finish-worker");
-        String script="#!/bin/sh\nread request\nwhile [ ! -f '"+gate+"' ]; do sleep 0.02; done\n"
+        String script="#!/bin/sh\nIFS= read -r request || exit 2\n"
+                +"output=$(printf '%s' \"$request\" | sed -n 's/.*\"outputDirectory\":\"\\([^\"]*\\)\".*/\\1/p')\n"
+                +"while [ ! -f \"$output/finish-worker\" ]; do sleep 0.02; done\n"
                 +"printf '%s\\n' '{\"type\":\"RESULT\",\"status\":\"PASS\",\"exitCode\":0}'\n";
         String command="load".equals(failure)?"load":"run";
         ServerConfig config;
@@ -34,6 +35,7 @@ class ArtifactPublicationFaultTest {
             config=runtime.config;
             var request=ServerRuntime.JSON.createObjectNode().put("packageId","p");
             first=String.valueOf(runtime.submit(command,request,"user-a").get("jobId"));
+            Path gate=runtime.outputDirectoryForJob(first).resolve("finish-worker");
             Job job=runtime.jobs.get(first);
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
             while(job.processFence==null&&System.nanoTime()<deadline)Thread.sleep(10);
@@ -487,10 +489,12 @@ class ArtifactPublicationFaultTest {
 
     @Test void queuedCancellationPublishesItsEmptyArchiveWithoutAReconciliationRetry() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX blocked Worker fixture");
-        Path started = temp.resolve("active.started");
-        String script = "#!/bin/sh\nread request\ntouch '" + started + "'\nexec sleep 60\n";
+        String script = "#!/bin/sh\nIFS= read -r request || exit 2\n"
+                +"output=$(printf '%s' \"$request\" | sed -n 's/.*\"outputDirectory\":\"\\([^\"]*\\)\".*/\\1/p')\n"
+                +"touch \"$output/active.started\"\nexec sleep 60\n";
         try (ServerRuntime runtime = runtime(ArtifactArchive::build, script, 1)) {
             String active = String.valueOf(runtime.submit("run", ServerRuntime.JSON.createObjectNode().put("packageId", "p"), "user-a").get("jobId"));
+            Path started = runtime.outputDirectoryForJob(active).resolve("active.started");
             try {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (!Files.exists(started) && System.nanoTime() < deadline) Thread.sleep(10);

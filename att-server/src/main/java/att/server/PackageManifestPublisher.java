@@ -55,13 +55,13 @@ final class PackageManifestPublisher implements AutoCloseable {
                     +" requestId="+String.valueOf(record.requestId)+" resources="+String.join(",",record.resources));
         }
     }
-    private record Draft(String id,String packageId,String actor,Path root,String resourcePath,String environment,String source,String beforeDigest,
+    private record Draft(String id,String packageId,String actor,Path root,Path registeredRoot,String resourcePath,String environment,String source,String beforeDigest,
                          String packageSourceRevision,String candidatePackageSourceRevision,
                          String candidateManifestSource,String expectedManifestDigest,
                          Instant expires,Map<String,Object> validation,boolean reviewed) {
         private Draft(String id,String packageId,String actor,Path root,String resourcePath,String environment,String source,String beforeDigest,
                       Instant expires,Map<String,Object> validation,boolean reviewed) {
-            this(id,packageId,actor,root,resourcePath,environment,source,beforeDigest,null,null,null,null,expires,validation,reviewed);
+            this(id,packageId,actor,root,null,resourcePath,environment,source,beforeDigest,null,null,null,null,expires,validation,reviewed);
         }
     }
     private final PackageConfigurationPolicy policy;
@@ -223,7 +223,7 @@ final class PackageManifestPublisher implements AutoCloseable {
         enforceCapacity(actor);
         String packageSourceRevision=currentPackageSourceRevision(root);
         String candidatePackageSourceRevision=packageSourceRevision(root,canonicalPath,source.getBytes(StandardCharsets.UTF_8));
-        Draft draft=new Draft("R"+UUID.randomUUID().toString().replace("-","").toUpperCase(),packageId,actor,root,
+        Draft draft=new Draft("R"+UUID.randomUUID().toString().replace("-","").toUpperCase(),packageId,actor,root,registeredRoot(packageId),
                 canonicalPath,environment,source,beforeResourceDigest,packageSourceRevision,candidatePackageSourceRevision,
                 candidateManifestSource,expectedManifestDigest,
                 clock.instant().plusSeconds(policy.draftTtlSeconds),null,false);
@@ -247,7 +247,7 @@ final class PackageManifestPublisher implements AutoCloseable {
         requireDigest(String.valueOf(validated.get("validationRevision")));
         if(old.candidateManifestSource==null)unchanged(old);
         else unchangedForCreatedResource(old,candidateDigest);
-        Draft next=new Draft(old.id,old.packageId,old.actor,old.root,old.resourcePath,old.environment,old.source,old.beforeDigest,
+        Draft next=new Draft(old.id,old.packageId,old.actor,old.root,old.registeredRoot,old.resourcePath,old.environment,old.source,old.beforeDigest,
                 old.packageSourceRevision,old.candidatePackageSourceRevision,old.candidateManifestSource,
                 old.expectedManifestDigest,old.expires,Map.copyOf(validated),false);
         drafts.put(id,next);audit.record(actor,"PKG_SUT_METRIC_RESOURCE_VALIDATE",packageId,old.resourcePath+":"+validated.get("validationRevision"));
@@ -259,7 +259,7 @@ final class PackageManifestPublisher implements AutoCloseable {
         if(old.candidateManifestSource==null)unchanged(old);
         else unchangedForCreatedResource(old,digest(old.source.getBytes(StandardCharsets.UTF_8)));
         if(old.validation==null)throw new IllegalArgumentException("Validate the Package resource draft before review");
-        Draft next=new Draft(old.id,old.packageId,old.actor,old.root,old.resourcePath,old.environment,old.source,old.beforeDigest,
+        Draft next=new Draft(old.id,old.packageId,old.actor,old.root,old.registeredRoot,old.resourcePath,old.environment,old.source,old.beforeDigest,
                 old.packageSourceRevision,old.candidatePackageSourceRevision,old.candidateManifestSource,
                 old.expectedManifestDigest,old.expires,old.validation,true);
         drafts.put(id,next);audit.record(actor,"PKG_SUT_METRIC_RESOURCE_REVIEW",packageId,old.resourcePath+":"+id);
@@ -376,8 +376,10 @@ final class PackageManifestPublisher implements AutoCloseable {
             }
         } else if(!resourceDigest.equals(digest(currentResource)))throw new Conflict();
 
-        if(!draft.expectedManifestDigest.equals(currentDigest(root))
-                ||!resourceDigest.equals(currentResourceDigest(root,draft.resourcePath)))throw new Conflict();
+        Path activeRoot=authorizedRoot(draft.packageId,actor);
+        if(!draft.registeredRoot.equals(registeredRoot(draft.packageId))
+                ||!draft.expectedManifestDigest.equals(currentDigest(activeRoot))
+                ||!resourceDigest.equals(currentResourceDigest(activeRoot,draft.resourcePath)))throw new Conflict();
         Map<String,Object> commitValidation=resourceValidator.validateCandidate(draft.packageId,draft.actor,draft.resourcePath,
                 draft.environment,draft.source,draft.candidateManifestSource,draft.expectedManifestDigest);
         verifyCreatedResourceValidation(draft,commitValidation,resourceDigest,candidateManifestDigest);
@@ -388,18 +390,19 @@ final class PackageManifestPublisher implements AutoCloseable {
                 draft.environment,draft.source,draft.candidateManifestSource,draft.expectedManifestDigest);
         verifyCreatedResourceValidation(draft,finalValidation,resourceDigest,candidateManifestDigest);
         unchangedForCreatedResource(draft,resourceDigest);
-        if(!draft.expectedManifestDigest.equals(currentDigest(root)))throw new Conflict();
-        boolean manifestExists=Files.exists(root.resolve("package.yaml"),LinkOption.NOFOLLOW_LINKS);
+        if(!draft.expectedManifestDigest.equals(currentDigest(activeRoot)))throw new Conflict();
+        boolean manifestExists=Files.exists(activeRoot.resolve("package.yaml"),LinkOption.NOFOLLOW_LINKS);
         Map<String,SourceFileTransaction.Write> manifestWrites=new LinkedHashMap<>();
         manifestWrites.put("package.yaml",new SourceFileTransaction.Write("package.yaml",manifestBytes,
                 manifestExists?draft.expectedManifestDigest:null));
         SourceFileTransaction.CommitResult manifestCommit;
         try {
-            manifestCommit=sourceTransaction.commitWithAudit(ChangeSetPublisher.PACKAGE_SOURCE,draft.packageId,root,actor,
+            manifestCommit=sourceTransaction.commitWithAudit(ChangeSetPublisher.PACKAGE_SOURCE,draft.packageId,activeRoot,actor,
                     draft.expectedManifestDigest,candidateManifestDigest,manifestWrites,()->{
-                if(!root.equals(authorizedRoot(draft.packageId,actor)))throw new Conflict();
+                if(!activeRoot.equals(authorizedRoot(draft.packageId,actor))
+                        ||!draft.registeredRoot.equals(registeredRoot(draft.packageId)))throw new Conflict();
                 unchangedForCreatedResource(draft,resourceDigest);
-                if(!draft.expectedManifestDigest.equals(currentDigest(root)))throw new Conflict();
+                if(!draft.expectedManifestDigest.equals(currentDigest(activeRoot)))throw new Conflict();
                 Map<String,Object> latest=resourceValidator.validateCandidate(draft.packageId,draft.actor,
                         draft.resourcePath,draft.environment,draft.source,draft.candidateManifestSource,
                         draft.expectedManifestDigest);
@@ -436,14 +439,21 @@ final class PackageManifestPublisher implements AutoCloseable {
     }
 
     private void unchangedForCreatedResource(Draft draft,String resourceDigest) throws Exception {
-        if(!draft.root.equals(authorizedRoot(draft.packageId,draft.actor)))throw new Conflict();
-        if(!draft.expectedManifestDigest.equals(currentDigest(draft.root)))throw new Conflict();
-        String currentResource=currentResourceDigest(draft.root,draft.resourcePath);
+        if(!draft.registeredRoot.equals(registeredRoot(draft.packageId)))throw new Conflict();
+        Path activeRoot=authorizedRoot(draft.packageId,draft.actor);
+        if(!draft.expectedManifestDigest.equals(currentDigest(activeRoot)))throw new Conflict();
+        String currentResource=currentResourceDigest(activeRoot,draft.resourcePath);
         if(!draft.beforeDigest.equals(currentResource)&&!resourceDigest.equals(currentResource))throw new Conflict();
         String expectedPackageRevision=resourceDigest.equals(currentResource)
                 ?draft.candidatePackageSourceRevision:draft.packageSourceRevision;
-        if(expectedPackageRevision==null||!expectedPackageRevision.equals(currentPackageSourceRevision(draft.root)))
+        if(expectedPackageRevision==null||!expectedPackageRevision.equals(currentPackageSourceRevision(activeRoot)))
             throw new Conflict();
+    }
+
+    private Path registeredRoot(String packageId) {
+        Path root=sourceTransaction.registeredRoot(ChangeSetPublisher.PACKAGE_SOURCE,packageId);
+        if(root==null)throw new Conflict();
+        return root;
     }
 
     synchronized List<Map<String,Object>> historyResource(String packageId,String actor,String relativePath) throws Exception {

@@ -31,7 +31,7 @@ class PrewarmedWorkerTest {
             assertEquals(root.toRealPath().toString(),ready.path("cwd").asText());
             assertTrue(ready.path("schemaRegistryDigest").asText().matches("[a-f0-9]{64}"));
             assertTrue(process.isAlive());
-            assertFalse(Files.exists(root.resolve("business-started")));
+            assertFalse(Files.exists(root.resolve("output/business-started")));
             Map<String,Object> request=request(root,"debug");
             Map<String,String> env=new HashMap<String,String>(System.getenv());env.put("LEASE_MARKER","assigned");
             request.put("executionEnvironment",env);
@@ -39,8 +39,8 @@ class PrewarmedWorkerTest {
             assertEquals(0,process.exitValue(),output);
             assertEquals(1,countResults(output));
             assertTrue(output.contains("\"status\":\"PASS\""),output);
-            assertTrue(Files.exists(root.resolve("business-started")),output);
-            assertEquals("env-ok",new String(Files.readAllBytes(root.resolve("business-started")),StandardCharsets.UTF_8));
+            assertTrue(Files.exists(root.resolve("output/business-started")),output);
+            assertEquals("env-ok",new String(Files.readAllBytes(root.resolve("output/business-started")),StandardCharsets.UTF_8));
         } finally {process.destroyForcibly();}
     }
 
@@ -54,8 +54,8 @@ class PrewarmedWorkerTest {
             String output=assign(process,mapper.writeValueAsString(request));
             assertEquals(0,process.exitValue(),output);
             assertTrue(output.contains("\"status\":\"PASS\""),output);
-            assertTrue(Files.exists(root.resolve("business-started")),output);
-            assertEquals("env-ok",new String(Files.readAllBytes(root.resolve("business-started")),StandardCharsets.UTF_8));
+            assertTrue(Files.exists(root.resolve("output/business-started")),output);
+            assertEquals("env-ok",new String(Files.readAllBytes(root.resolve("output/business-started")),StandardCharsets.UTF_8));
         } finally {process.destroyForcibly();}
     }
 
@@ -71,7 +71,7 @@ class PrewarmedWorkerTest {
             String output=assign(process,mapper.writeValueAsString(request));
             assertNotEquals(0,process.exitValue(),output);
             assertTrue(output.contains("WORKER_SOURCE_SNAPSHOT_INVALID"),output);
-            assertFalse(Files.exists(root.resolve("business-started")),output);
+            assertFalse(Files.exists(root.resolve("output/business-started")),output);
         } finally {process.destroyForcibly();}
     }
 
@@ -88,7 +88,7 @@ class PrewarmedWorkerTest {
             String output=assign(process,mapper.writeValueAsString(request));
             assertEquals(0,process.exitValue(),output);
             assertTrue(output.contains("\"status\":\"PASS\""),output);
-            assertEquals("env-ok",new String(Files.readAllBytes(root.resolve("business-started")),StandardCharsets.UTF_8));
+            assertEquals("env-ok",new String(Files.readAllBytes(root.resolve("output/business-started")),StandardCharsets.UTF_8));
         } finally {process.destroyForcibly();}
     }
 
@@ -281,7 +281,7 @@ class PrewarmedWorkerTest {
                 String output=assign(process,input);
                 assertNotEquals(0,process.exitValue(),variant+" "+output);
                 assertEquals(1,countResults(output));
-                assertFalse(Files.exists(root.resolve("business-started")));
+                assertFalse(Files.exists(root.resolve("output/business-started")));
             } finally {process.destroyForcibly();}
         }
     }
@@ -300,7 +300,7 @@ class PrewarmedWorkerTest {
         Files.createDirectories(root.resolve("tools"));
         Files.write(root.resolve("tools/env.yaml"),("schemaVersion: att-tool/v1\nid: env\n"
                 +"name: Environment fixture\ndescription: Assigned environment\n"
-                +"command: ["+quote(java)+", '-cp', "+quote(cp)+", 'att.worker.PrewarmEnvironmentFixture', "+quote(root.resolve("business-started").toString())+"]\n"
+                +"command: ["+quote(java)+", '-cp', "+quote(cp)+", 'att.worker.PrewarmEnvironmentFixture', "+quote(root.resolve("output/business-started").toString())+"]\n"
                 +"stdoutFormat: text\narguments: {}\n").getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("templates/ENV/template.yaml"),("schemaVersion: att-template/v3.6\nname: ENV\ndescription: Environment fixture\nactions:\n"
                 +"  call:\n    type: tool\n    call: \"#{env()}\"\n").getBytes(StandardCharsets.UTF_8));
@@ -501,7 +501,7 @@ class PrewarmedWorkerTest {
                 } else request.remove("expectedExecutionRevisionDigest");
                 String output=assign(process,mapper.writeValueAsString(request));
                 assertNotEquals(0,process.exitValue(),variant+" "+output);
-                assertEquals(1,countResults(output));assertFalse(Files.exists(root.resolve("business-started")));
+                assertEquals(1,countResults(output));assertFalse(Files.exists(root.resolve("output/business-started")));
                 if("native".equals(variant)) {
                     String config=new String(Files.readAllBytes(root.resolve("config/config.yaml")),StandardCharsets.UTF_8);
                     Files.write(root.resolve("config/config.yaml"),config.replace("\ndbhelpers: [config/db.yaml]\n","").getBytes(StandardCharsets.UTF_8));

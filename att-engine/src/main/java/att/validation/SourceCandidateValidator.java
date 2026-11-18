@@ -398,8 +398,9 @@ public final class SourceCandidateValidator {
                                 canonical(baselineRoot.get("outputDirectory")));
         for (Object keyValue : root.keySet()) {
             boolean unchangedDeploymentOutput = "outputDirectory".equals(keyValue) && !outputDirectoryChanged;
+            boolean extensionField = keyValue instanceof String && ((String) keyValue).startsWith("x-");
             if (!(keyValue instanceof String)
-                    || !ONLINE_CONFIG_FIELDS.contains(keyValue) && !unchangedDeploymentOutput) {
+                    || !ONLINE_CONFIG_FIELDS.contains(keyValue) && !unchangedDeploymentOutput && !extensionField) {
                 diagnostics.add(diagnostic("ATT-CONFIG-ONLINE-UNSUPPORTED", Severity.ERROR, "config/config.yaml",
                         String.valueOf(keyValue), null, "The candidate contains a field that cannot be hot-activated online.",
                         "Remove the unsupported field and apply deployment-controlled changes offline."));

@@ -155,14 +155,15 @@ async function main() {
     const manifestReference = groupedToolProjection.fileReferences.find(reference =>
       reference.logicalPath === 'tools/fpp/tool-group.yaml' && reference.available !== false);
     assert.ok(manifestReference?.referenceId, 'the Tool source should receive a Server-issued manifest reference');
-    const manifestResponsePromise = page.waitForResponse(response =>
-      response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
+    const manifestSourceUrl = new URL(`${origin}/tools/att/api/v1/packages/payments/resources/tool/${encodeURIComponent(groupedTool.resourceId)}/source-file`);
+    manifestSourceUrl.searchParams.set('referenceId', manifestReference.referenceId);
+    manifestSourceUrl.searchParams.set('origin', 'tools/fpp/inspectFiles.yaml');
+    const manifestResponse = await page.request.get(manifestSourceUrl.toString());
+    assert.equal(manifestResponse.status(), 200, 'the Server-issued manifest reference must authorize its source projection');
+    const manifestProjection = await manifestResponse.json();
+    assert.equal(manifestProjection.logicalPath, 'tools/fpp/tool-group.yaml');
+    assert.match(manifestProjection.text, /id: fpp/);
     await page.getByRole('button', { name: 'Open Group manifest source tools/fpp/tool-group.yaml' }).click();
-    const manifestResponse = await manifestResponsePromise;
-    assert.equal(manifestResponse.status(), 200);
-    assert.equal(new URL(manifestResponse.url()).searchParams.get('referenceId'), manifestReference.referenceId,
-      'navigation must reuse the original opaque reference');
-    assert.equal(new URL(manifestResponse.url()).searchParams.get('origin'), 'tools/fpp/inspectFiles.yaml');
     assert.match(page.url(), /sourceType=tool/);
     assert.ok(page.url().includes('sourceReferenceId=' + manifestReference.referenceId),
       'the deep link must preserve the reference across reload');

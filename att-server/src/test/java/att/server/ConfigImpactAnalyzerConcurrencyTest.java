@@ -33,9 +33,9 @@ class ConfigImpactAnalyzerConcurrencyTest {
     @TempDir Path temp;
 
     @Test void resolverUsesAnImmutablePackageSnapshotAndReportsStaleWhenSourceChangesMidAnalysis() throws Exception {
-        Path runtime = Files.createDirectories(temp.resolve("runtime"));
-        Path packageRoot = Files.createDirectories(temp.resolve("packages/default"));
-        Path data = Files.createDirectories(temp.resolve("data"));
+        Path runtime = Files.createDirectories(temp.resolve("runtime")).toRealPath();
+        Path packageRoot = Files.createDirectories(temp.resolve("packages/default")).toRealPath();
+        Path data = Files.createDirectories(temp.resolve("data")).toRealPath();
         Files.createDirectories(runtime.resolve("config"));
         Files.createDirectories(packageRoot.resolve("templates"));
         Files.createDirectories(packageRoot.resolve("testcase"));
@@ -43,7 +43,7 @@ class ConfigImpactAnalyzerConcurrencyTest {
         Files.writeString(probe, "#!/bin/sh\nexit 0\n");
         String manifest = "schemaVersion: att-package/v1\nmetadata:\n  name: Impact snapshot test\n";
         Files.writeString(packageRoot.resolve("package.yaml"), manifest);
-        String config = "schemaVersion: att-config/v2.13\nenvironment: SIT\ntimeoutMs: 10000\n"
+        String config = "schemaVersion: att-config/v2.15\nenvironment: SIT\ntimeoutMs: 10000\n"
                 + "testcase:\n  root: testcase\ntemplates:\n  root: templates\nenvironments:\n  SIT: {}\n";
         Path configFile = runtime.resolve("config/config.yaml");
         Files.writeString(configFile, config);
@@ -132,16 +132,16 @@ class ConfigImpactAnalyzerConcurrencyTest {
     }
 
     @Test void stalledResolverIsCancelledAndReturnsSanitizedAnalysisLimit() throws Exception {
-        Path runtime = Files.createDirectories(temp.resolve("timeout-runtime"));
-        Path packageRoot = Files.createDirectories(temp.resolve("timeout-packages/default"));
-        Path data = Files.createDirectories(temp.resolve("timeout-data"));
+        Path runtime = Files.createDirectories(temp.resolve("timeout-runtime")).toRealPath();
+        Path packageRoot = Files.createDirectories(temp.resolve("timeout-packages/default")).toRealPath();
+        Path data = Files.createDirectories(temp.resolve("timeout-data")).toRealPath();
         Files.createDirectories(runtime.resolve("config"));
         Files.createDirectories(packageRoot.resolve("templates"));
         Files.createDirectories(packageRoot.resolve("testcase"));
         Files.createDirectories(packageRoot.resolve("tools"));
         Files.writeString(packageRoot.resolve("package.yaml"),
                 "schemaVersion: att-package/v1\nmetadata:\n  name: Resolver timeout test\n");
-        String config = "schemaVersion: att-config/v2.13\nenvironment: SIT\ntimeoutMs: 10000\n"
+        String config = "schemaVersion: att-config/v2.15\nenvironment: SIT\ntimeoutMs: 10000\n"
                 + "testcase:\n  root: testcase\ntemplates:\n  root: templates\nenvironments:\n  SIT: {}\n";
         Files.writeString(runtime.resolve("config/config.yaml"), config);
 

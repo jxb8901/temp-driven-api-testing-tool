@@ -1589,7 +1589,9 @@ class ApiServletIntegratedLimitsTest {
         Path yaml=temp.resolve(dataName+".yaml");
         StringBuilder entries=new StringBuilder();
         try(java.util.stream.Stream<Path> children=Files.list(packages)) {
-            children.filter(Files::isDirectory).sorted().forEach(path->entries.append("    ").append(path.getFileName())
+            children.filter(Files::isDirectory)
+                    .filter(path->path.getFileName().toString().matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}"))
+                    .sorted().forEach(path->entries.append("    ").append(path.getFileName())
                     .append(": ").append(ServerRuntimeTestSupport.yaml(path)).append("\n"));
         }
         String config="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve(dataName))
@@ -1615,7 +1617,7 @@ class ApiServletIntegratedLimitsTest {
 
     private Path sharedRuntimeConfig() throws Exception {
         Path root=Files.createDirectories(temp.resolve("shared-runtime-config/config"));
-        return Files.writeString(root.resolve("config.yaml"),"schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+        return Files.writeString(root.resolve("config.yaml"),"schemaVersion: att-config/v2.15\nenvironment: SIT\n"
                 +"environments:\n  SIT: {}\ntimeoutMs: 10000\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
     }
 
