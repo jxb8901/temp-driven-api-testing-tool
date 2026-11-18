@@ -84,6 +84,18 @@ describe('inspection transport caching', () => {
     expect(checks).toBe(2);
   });
 
+  it('preserves a source 401 so the active reader can show the expired-session message', async () => {
+    const identity = { packageId: 'p', type: 'template' as const, resourceId: 'x' };
+    const sourceRead = vi.fn(async () => json({ error: { code: 'UNAUTHORIZED', summary: 'sensitive server detail' } }, 401));
+    vi.stubGlobal('fetch', vi.fn(async (url: URL) => {
+      if (url.pathname.endsWith('/auth/capabilities')) return json({ inspectionCacheContext: 'alice:USER:policy-1' });
+      return sourceRead();
+    }));
+
+    await expect(api.getSafeSource(identity)).rejects.toMatchObject({ status: 401 });
+    expect(sourceRead).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to uncached transport with older Servers and keeps auth/session responses uncached', async () => {
     const fetcher = vi.fn(async () => json({ items: [], configurationAdmin: false })); vi.stubGlobal('fetch', fetcher);
     await api.listResources('p', { type: 'all' }); await api.listResources('p', { type: 'all' });

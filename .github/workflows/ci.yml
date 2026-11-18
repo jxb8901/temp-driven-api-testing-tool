@@ -152,6 +152,8 @@ jobs:
         # ubuntu-24.04 has 4 vCPUs. Four forks keep the suite within its memory budget.
         # Each test JVM is capped so four forks plus their Worker processes fit
         # in the runner without raising the job timeout.
+        env:
+          ATT_CAPTURE_BWRAP_DIAGNOSTICS: "true"
         run: mvn -B -ntp -U -T 1C -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -DforkCount=4 -DreuseForks=false -DargLine=-Xmx2g '-Dtest=**/Test*.java,**/*Test.java,**/*Tests.java,**/*TestCase.java,!ServerRuntimeJobReplayTest,!ArtifactPublicationFaultTest,!AuthenticationIntegrationTest,!ExecutionWorkerSemanticParityTest' -Dsurefire.failIfNoSpecifiedTests=false test
 
       - name: Upload Server unit reports on failure
@@ -196,6 +198,8 @@ jobs:
           echo "ATT_HOME=$RUNNER_TEMP/att-server-test-home" >> "$GITHUB_ENV"
 
       - name: Verify long-running Server process and publication tests
+        env:
+          ATT_CAPTURE_BWRAP_DIAGNOSTICS: "true"
         run: mvn -B -ntp -U -T 1C -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -DforkCount=4 -DreuseForks=false -DargLine=-Xmx2g '-Dtest=ServerRuntimeJobReplayTest,ArtifactPublicationFaultTest,AuthenticationIntegrationTest,ExecutionWorkerSemanticParityTest' -Dsurefire.failIfNoSpecifiedTests=false test
 
       - name: Upload Server process test reports on failure
@@ -274,6 +278,7 @@ jobs:
         env:
           ATT_CI_SKIP_COVERED_TESTS: "true"
           ATT_UI_SERVER_PLAYWRIGHT: "1"
+          ATT_CAPTURE_BWRAP_DIAGNOSTICS: "true"
         run: ./build.sh
 
       - name: Upload Local and Server release packages
@@ -321,6 +326,8 @@ jobs:
       - name: Verify same-JVM redeploy lifecycle on Tomcat 11
         # ServerWarUiIT assembles a Local runtime from att-worker/target/classes,
         # so include Worker explicitly even though it is not a Server dependency.
+        env:
+          ATT_CAPTURE_BWRAP_DIAGNOSTICS: "true"
         run: mvn -B -ntp -Ptomcat-11 -pl att-worker,att-server -am -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true -Datt.skipServerUnitTests=true '-Dit.test=ServerWarUiIT#repeatedRedeployReleasesCompactorsAndJdbcWhilePreservingSchedulesAndJournals' verify
 
       - name: Upload Tomcat 11 test reports on failure

@@ -1205,8 +1205,30 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void startStderrDrainer(Process process,String name) {
         Thread thread=new Thread(()->{
-            try(var input=process.getErrorStream()){byte[] buffer=new byte[8192];while(input.read(buffer)>=0){} }
-            catch(Exception ignored){}finally{stderrDrainers.remove(Thread.currentThread());}
+            boolean captureSandboxDiagnostics="true".equalsIgnoreCase(System.getenv("ATT_CAPTURE_BWRAP_DIAGNOSTICS"));
+            byte[] capturedBytes=captureSandboxDiagnostics?new byte[2048]:null;int capturedLength=0;
+            try(var input=process.getErrorStream()){
+                byte[] buffer=new byte[8192];int count;
+                while((count=input.read(buffer))>=0) {
+                    if(capturedBytes!=null&&capturedLength<capturedBytes.length) {
+                        int copy=Math.min(count,capturedBytes.length-capturedLength);
+                        System.arraycopy(buffer,0,capturedBytes,capturedLength,copy);capturedLength+=copy;
+                    }
+                }
+            }
+            catch(Exception ignored){}
+            finally {
+                if(capturedLength>0) {
+                    String text=new String(capturedBytes,0,capturedLength,java.nio.charset.StandardCharsets.UTF_8);
+                    for(String line:text.split("\\R")) {
+                        if(line.startsWith("bwrap:")) {
+                            String safe=line.replaceAll("/[^\\s]+","<path>");
+                            System.err.println("ATT Worker sandbox diagnostic: "+safe.substring(0,Math.min(512,safe.length())));
+                        }
+                    }
+                }
+                stderrDrainers.remove(Thread.currentThread());
+            }
         },name);
         thread.setDaemon(true);stderrDrainers.put(thread,process);thread.start();
     }

@@ -53,6 +53,10 @@ describe('inspection session memory', () => {
     cache.resetSession();
     expect(changed).toHaveBeenCalledTimes(1);
     expect(sessionChanged).toHaveBeenCalledTimes(1);
+    cache.setContext('alice');
+    cache.resetSession();
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(sessionChanged).toHaveBeenCalledTimes(1);
     await cache.query('anonymous', async () => 'temporary result');
     cache.resetSession();
     expect(changed).toHaveBeenCalledTimes(1);

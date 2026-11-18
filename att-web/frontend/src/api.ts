@@ -185,7 +185,10 @@ async function transport<T>(path: string, init: RequestInit = {}): Promise<T> {
     const payload = body && typeof body === 'object' ? body as { error?: ApiErrorBody; code?: string; message?: string; detail?: string; requestId?: string; diagnostics?: unknown } : {};
     const detail = payload.error;
     const message = detail?.summary || detail?.message || detail?.detail || payload.message || payload.detail;
-    if (isInspectionQuery(path, init) && [401, 403, 404, 409].includes(response.status)) {
+    // A 401 must reach the active reader so it can show the session-expired
+    // state. Invalidating the package here aborts that in-flight query and
+    // replaces the useful 401 with an AbortError during the resulting rerender.
+    if (isInspectionQuery(path, init) && [403, 404, 409].includes(response.status)) {
       const packageMatch = /^packages\/([^/]+)\//.exec(path);
       if (packageMatch) inspectionCache.invalidatePackage(decodeURIComponent(packageMatch[1]));
     }
