@@ -1,6 +1,6 @@
 # Migrate SUT Metrics to Package-owned definitions
 
-ATT 4.3.1 separates shared connections from metric definitions. Global `att-config/v2.15` keeps Data Source connection descriptors. The selected Package owns its Metric Sources, Groups, and Profiles through an explicit `att-package/v2` inventory. A LOAD scenario must select a Profile from that Package before metrics are collected.
+ATT 4.4.0 separates shared connections from metric definitions. Global `att-config/v2.15` keeps Data Source connection descriptors. The selected Package owns its Metric Sources, Groups, and Profiles through an explicit `att-package/v2` inventory. A LOAD scenario must select a Profile from that Package before metrics are collected.
 
 The complete file layout is in the [Package-local SUT Metrics example](../../examples/package-local-sut-metrics/README.md). It includes the global SIT/UAT connection descriptors and one Package's definitions.
 

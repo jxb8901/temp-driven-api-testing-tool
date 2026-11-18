@@ -1738,10 +1738,6 @@ class ApiServletIntegratedLimitsTest {
         return invokeAs(servlet,method,path,parameters,body,login,null,true);
     }
 
-    private Captured invokeAs(ApiServlet servlet,String login,String method,String path,Map<String,String> parameters,byte[] body) throws Exception {
-        return invokeAs(servlet,method,path,parameters,body,login,null,false);
-    }
-
     private Captured invokeAs(ApiServlet servlet,String login,String method,String path,Map<String,String> parameters,
                               byte[] body,boolean admin) throws Exception {
         return invokeAs(servlet,method,path,parameters,body,login,null,admin);

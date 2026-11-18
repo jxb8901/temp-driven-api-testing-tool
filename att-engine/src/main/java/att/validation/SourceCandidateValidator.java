@@ -117,7 +117,7 @@ public final class SourceCandidateValidator {
                     complete = false;
                     break;
                 }
-                collectEffectiveBindings(packageId, environment, runtime, effective, dependencies);
+                collectEffectiveBindings(pkg, packageId, environment, runtime, effective, dependencies);
                 complete &= validateLoadCandidates(pkg, packageId, environment, effective, dependencies, diagnostics);
                 collectFileDependencies(pkg, packageId, environment, effective, dependencies);
                 collectPackageResourceDependencies(pkg, config, effective, packageId, environment, dependencies);
@@ -225,7 +225,7 @@ public final class SourceCandidateValidator {
                 origins.put(entry.getKey(), origin(entry.getValue()));
         }
         List<DependencyReference> bindings = new ArrayList<DependencyReference>();
-        collectEffectiveBindings(packageId, selected, runtime, effective, bindings);
+        collectEffectiveBindings(pkg, packageId, selected, runtime, effective, bindings);
         collectManifestDependencies(pkg, packageId, bindings);
         collectFileDependencies(pkg, packageId, selected, effective, bindings);
         collectPackageResourceDependencies(pkg, config, effective, packageId, selected, bindings);
@@ -340,10 +340,20 @@ public final class SourceCandidateValidator {
         StageTemplateLoader templates = new StageTemplateLoader(pkg, effective.templatesRoot(), false);
         FlowRegistry flows = new FlowRegistry(pkg, effective.templatesRoot(), false);
         List<FileExpressionResolver.FileExpressionSnapshot> snapshots = new ArrayList<FileExpressionResolver.FileExpressionSnapshot>();
-        for (String reference : templates.paths())
-            snapshots.addAll(fileActionSnapshots(pkg, templates.load(reference), flows));
+        for (String reference : templates.paths()) {
+            StageTemplate template;
+            try { template = templates.load(reference); }
+            catch (DiagnosticException invalidUnrelatedTemplate) {
+                // Whole-Package validation owns invalid descriptors. Keep them out of this
+                // execution snapshot so they do not block a separate valid target.
+                continue;
+            }
+            snapshots.addAll(fileActionSnapshots(pkg, template, flows));
+        }
         for (String flowId : flows.ids()) {
-            FlowDefinition flow = flows.get(flowId);
+            FlowDefinition flow;
+            try { flow = flows.get(flowId); }
+            catch (IllegalArgumentException invalidUnrelatedFlow) { continue; }
             if (flow == null) continue;
             StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(),
                     flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
@@ -491,11 +501,17 @@ public final class SourceCandidateValidator {
         return true;
     }
 
-    private static void collectEffectiveBindings(String packageId, String environment, Path runtimeRoot,
-                                                FrameworkConfig config,
+    private static void collectEffectiveBindings(Path packageRoot, String packageId, String environment,
+                                                Path runtimeRoot, FrameworkConfig config,
                                                 List<DependencyReference> output) throws Exception {
-        for (att.config.ToolConfig tool : config.tools().values())
-            addConfigBinding(output, packageId, environment, runtimeRoot, tool.sourceFile(), tool.key(), "tool-descriptor");
+        for (att.config.ToolConfig tool : config.tools().values()) {
+            Path source = tool.sourceFile();
+            String logical = source == null ? null : logicalPath(packageRoot, source);
+            String fingerprint = source == null ? null : fileDigest(source);
+            output.add(new DependencyReference(DependencyKind.TOOL, packageId, environment, tool.key(),
+                    logical, fingerprint, "package-tool-descriptor", null,
+                    source == null ? ReferenceCertainty.UNKNOWN : ReferenceCertainty.KNOWN));
+        }
         for (att.config.DbHelperConfig helper : config.dbHelpers().values())
             addConfigBinding(output, packageId, environment, runtimeRoot, helper.sourceFile(), helper.id(), "db-helper");
         for (att.config.MqHelperConfig helper : config.mqHelpers().values())
@@ -536,8 +552,7 @@ public final class SourceCandidateValidator {
                                          Path runtimeRoot, Path sourceFile, String id, String relationship) throws Exception {
         String logical = sourceFile == null ? null : logicalPath(runtimeRoot, sourceFile);
         String fingerprint = sourceFile == null ? null : fileDigest(sourceFile);
-        DependencyKind kind = relationship.endsWith("descriptor") ? DependencyKind.TOOL : DependencyKind.HELPER;
-        output.add(new DependencyReference(kind, packageId, environment, id, logical, fingerprint,
+        output.add(new DependencyReference(DependencyKind.HELPER, packageId, environment, id, logical, fingerprint,
                 relationship, null, sourceFile == null ? ReferenceCertainty.UNKNOWN : ReferenceCertainty.KNOWN));
     }
 
@@ -611,12 +626,22 @@ public final class SourceCandidateValidator {
         StageTemplateLoader templates = new StageTemplateLoader(packageRoot, config.templatesRoot(), false);
         FlowRegistry flows = new FlowRegistry(packageRoot, config.templatesRoot(), false);
         Map<String, DependencyReference> found = new LinkedHashMap<String, DependencyReference>();
-        for (String reference : templates.paths())
+        for (String reference : templates.paths()) {
+            StageTemplate template;
+            try { template = templates.load(reference); }
+            catch (DiagnosticException invalidUnrelatedTemplate) {
+                // Whole-Package validation reports bad descriptors. An unrelated invalid
+                // Template is not part of another Job's immutable execution closure.
+                continue;
+            }
             for (FileExpressionResolver.FileExpressionSnapshot snapshot : fileActionSnapshots(
-                    packageRoot, templates.load(reference), flows))
+                    packageRoot, template, flows))
                 collectFilePlans(packageRoot, packageId, environment, snapshot, found);
+        }
         for (String flowId : flows.ids()) {
-            FlowDefinition flow = flows.get(flowId);
+            FlowDefinition flow;
+            try { flow = flows.get(flowId); }
+            catch (IllegalArgumentException invalidUnrelatedFlow) { continue; }
             if (flow == null) continue;
             StageTemplate body = new StageTemplate(flow.name(), flow.directory(), flow.actions(),
                     flow.templateSchemaVersion(), flow.directory().resolve("flow.yaml"));
@@ -855,8 +880,7 @@ public final class SourceCandidateValidator {
             if (dependency.kind != DependencyKind.TOOL && dependency.kind != DependencyKind.HELPER
                     && dependency.kind != DependencyKind.TESTDATA && dependency.kind != DependencyKind.LOAD_OVERLAY
                     && dependency.kind != DependencyKind.FILE) continue;
-            Path sourceRoot = dependency.kind == DependencyKind.TOOL || dependency.kind == DependencyKind.HELPER
-                    ? runtimeRoot : packageRoot;
+            Path sourceRoot = dependency.kind == DependencyKind.HELPER ? runtimeRoot : packageRoot;
             Path source = sourceRoot.resolve(dependency.canonicalPath).normalize();
             if (!source.startsWith(sourceRoot)) throw new IOException("Candidate semantic dependency escapes its source root");
             String sourceSemantic = dependency.kind == DependencyKind.FILE ? fileDigest(source)

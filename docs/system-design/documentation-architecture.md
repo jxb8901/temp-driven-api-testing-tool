@@ -2,7 +2,7 @@
 
 # Documentation architecture and truth matrix
 
-This page records the current documentation owners, feature/interface availability and migration decisions for ATT 4.3.1. Product claims are checked against released source, schemas, tests and merged behavior. An open issue or an unmerged implementation does not make a feature Current.
+This page records documentation owners, feature/interface availability and migration decisions for the ATT 4.4.0 release candidate. Product claims are checked against this branch source, schemas, tests and merged behavior. Open or unverified acceptance issues remain Pending.
 
 ## Inventory and link impact
 
@@ -17,7 +17,7 @@ The documentation release gate checks local links and anchors from current entry
 
 ## Feature, interface and availability matrix
 
-| Capability | ATT 4.3.1 Local CLI | ATT Remote compatibility CLI | Studio and REST | Engine or Server | Status |
+| Capability | ATT 4.4.0 candidate Local CLI | ATT Remote compatibility CLI | Studio and REST | Engine or Server | Status |
 |---|---|---|---|---|---|
 | Functional Case execution | Current run command selects workbook Cases | Current remote run submits Server work | Current unified RUN supports Case and selected Case batches | Engine executes Case work; Server validates drafts and owns Jobs | Current |
 | Template, Flow and Tool execution | Current standalone debug command | Current remote debug command | Current unified RUN targets these resources; Debug is optional diagnostic mode | Shared execution and Action contracts | Current; local CLI verb is legacy |
@@ -74,7 +74,7 @@ The product feature, interface and release status are separate facts. A Server o
 
 ## Current and Planned CLI migration
 
-ATT 4.3.1 keeps explicit workbook Snapshot authoring, package validation and legacy Case execution. The current Quick Start remains runnable with that interface. VALIDATE reads and checks authored files; it never generates or refreshes a Snapshot.
+ATT 4.4.0 keeps explicit workbook Snapshot authoring, package validation and legacy Case execution. The current Quick Start remains runnable with that interface. VALIDATE reads and checks authored files; it never generates or refreshes a Snapshot.
 
 | Legacy compatibility syntax | Proposed vNext syntax | Status |
 |---|---|---|

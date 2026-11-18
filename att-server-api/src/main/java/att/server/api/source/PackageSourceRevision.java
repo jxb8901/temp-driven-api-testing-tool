@@ -89,10 +89,12 @@ public final class PackageSourceRevision {
     /** Applies a validated authoring overlay without mutating the published source. */
     public static String digest(Path root, Map<String, byte[]> overrides) throws IOException {
         if (root == null || overrides == null) throw new IOException("Package source root is unavailable");
-        final Path canonical = root.toAbsolutePath().normalize();
-        if (!Files.isDirectory(canonical, LinkOption.NOFOLLOW_LINKS)
-                || Files.isSymbolicLink(canonical) || !canonical.equals(canonical.toRealPath()))
+        final Path requested = root.toAbsolutePath().normalize();
+        if (!Files.isDirectory(requested, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(requested))
             throw new IOException("Package source root is unsafe");
+        // Resolve aliases in parent components (for example macOS /var -> /private/var),
+        // while still refusing a symlink at the Package root itself.
+        final Path canonical = requested.toRealPath();
         final TreeMap<String, Path> sources = new TreeMap<String, Path>();
         final int[] visited = new int[] { 0 };
         Files.walkFileTree(canonical, new SimpleFileVisitor<Path>() {

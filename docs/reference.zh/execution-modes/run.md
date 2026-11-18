@@ -2,7 +2,7 @@
 
 <!-- att-doc-status: current release=4.3.1 -->
 
-ATT 4.3.1 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](unified-run.md)。
+ATT 4.4.0 Local CLI 的 run command 是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](unified-run.md)。
 
 ```sh
 ./att.sh run --all

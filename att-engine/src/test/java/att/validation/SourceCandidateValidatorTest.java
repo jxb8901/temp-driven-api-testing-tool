@@ -113,15 +113,15 @@ class SourceCandidateValidatorTest {
 
     @Test void allowsUnchangedDeploymentOutputDirectoryWhenOtherConfigFieldsChange() throws Exception {
         Path baseline = temp.resolve("baseline/config.yaml");
-        write(baseline, "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\noutputDirectory: output\n");
-        write(configFile, "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\noutputDirectory: output\ntimeoutMs: 2400\n");
+        write(baseline, "schemaVersion: att-config/v2.15\nenvironment: SIT\nenvironments:\n  SIT: {}\noutputDirectory: output\n");
+        write(configFile, "schemaVersion: att-config/v2.15\nenvironment: SIT\nenvironments:\n  SIT: {}\noutputDirectory: output\ntimeoutMs: 2400\n");
         CandidateValidation result = validator.validateCentralConfig(configFile, runtimeRoot, baseline,
                 revisions("central"), FINGERPRINT);
         assertEquals(ValidationState.VALID, result.state, describe(result));
 
         for (String candidate : Arrays.asList(
-                "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\noutputDirectory: reports\n",
-                "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\n")) {
+                "schemaVersion: att-config/v2.15\nenvironment: SIT\nenvironments:\n  SIT: {}\noutputDirectory: reports\n",
+                "schemaVersion: att-config/v2.15\nenvironment: SIT\nenvironments:\n  SIT: {}\n")) {
             write(configFile, candidate);
             CandidateValidation changed = validator.validateCentralConfig(configFile, runtimeRoot, baseline,
                     revisions("central"), FINGERPRINT);
@@ -130,8 +130,8 @@ class SourceCandidateValidatorTest {
                     && "outputDirectory".equals(item.field)), describe(changed));
         }
 
-        write(baseline, "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\n");
-        write(configFile, "schemaVersion: att-config/v2.13\nenvironment: SIT\nenvironments:\n  SIT: {}\noutputDirectory: output\n");
+        write(baseline, "schemaVersion: att-config/v2.15\nenvironment: SIT\nenvironments:\n  SIT: {}\n");
+        write(configFile, "schemaVersion: att-config/v2.15\nenvironment: SIT\nenvironments:\n  SIT: {}\noutputDirectory: output\n");
         CandidateValidation added = validator.validateCentralConfig(configFile, runtimeRoot, baseline,
                 revisions("central"), FINGERPRINT);
         assertEquals(ValidationState.INVALID, added.state, describe(added));
@@ -242,6 +242,27 @@ class SourceCandidateValidatorTest {
         assertEquals(3,plans.size(),plans.toString());
         assertEquals(3,plans.stream().map(att.template.FileExpressionResolver.CompiledFileDependency::sourceDirectory)
                 .distinct().count());
+    }
+
+    @Test void unrelatedInvalidTemplateDoesNotBlockFileSnapshotForValidResources() throws Exception {
+        write(firstPackage.resolve("files/selected.txt"),"selected source bytes\n");
+        Path selected=Files.createDirectories(firstPackage.resolve("templates/selected"));
+        write(selected.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: Selected\n"
+                +"description: Valid execution target\nactions:\n  read: {type: log, message: '&{../../files/selected.txt}'}\n");
+        Path unrelated=Files.createDirectories(firstPackage.resolve("templates/unrelated"));
+        write(unrelated.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: Unrelated\nactions: []\n");
+
+        EffectiveResolution resolution=validator.resolveEffective("first","SIT",firstPackage,
+                configFile,runtimeRoot,revisions("first"));
+        assertTrue(resolution.complete,resolution.diagnostics.toString());
+        assertTrue(resolution.dependencies.stream().anyMatch(ref->ref.kind==DependencyKind.FILE
+                &&"files/selected.txt".equals(ref.canonicalPath)));
+
+        byte[] compiled=validator.compileFileExpressionSnapshot(firstPackage,configFile,runtimeRoot,"SIT");
+        att.template.FileExpressionResolver.FileExpressionSnapshot restored=
+                att.template.FileExpressionResolver.FileExpressionSnapshot.restore(firstPackage,compiled);
+        assertEquals(1,restored.dependencies().size(),restored.dependencies().toString());
+        assertEquals("files/selected.txt",restored.dependencies().get(0).logicalPath());
     }
 
     @Test void effectiveResolutionCapturesSelectedLoadTestdataOverlayAndDescriptorIdentity() throws Exception {

@@ -319,11 +319,9 @@ class PrewarmedWorkerTest {
         StringBuilder command=new StringBuilder("['./tools/local-tool.sh', ").append(quote(marker.toString()));
         for(String argument:additionalArguments)command.append(", ").append(quote(argument));
         command.append(']');
-        Path config=root.resolve("config/config.yaml");
-        String current=new String(Files.readAllBytes(config),StandardCharsets.UTF_8);
-        current+="  local:\n    name: Package-local executable\n    description: Snapshot mode regression\n"
-                +"    command: "+command+"\n    stdoutFormat: text\n    arguments: {}\n";
-        Files.write(config,current.getBytes(StandardCharsets.UTF_8));
+        Files.write(tools.resolve("local.yaml"),("schemaVersion: att-tool/v1\nid: local\n"
+                +"name: Package-local executable\ndescription: Snapshot mode regression\n"
+                +"command: "+command+"\nstdoutFormat: text\narguments: {}\n").getBytes(StandardCharsets.UTF_8));
         Path template=root.resolve("templates/ENV/template.yaml");
         String templateText=new String(Files.readAllBytes(template),StandardCharsets.UTF_8);
         templateText+="  packageTool:\n    type: tool\n    call: \"#{local()}\"\n";

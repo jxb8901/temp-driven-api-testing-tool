@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.catalina.core.StandardHost;
 import org.apache.catalina.realm.MemoryRealm;
 import org.apache.catalina.startup.Tomcat;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -103,6 +104,8 @@ class ServerWarUiIT {
     }
 
     @Test void packagedWarRunAndDebugKeepColdEquivalentResultsWhenLeasingOneShotWorkers() throws Exception {
+        Assumptions.assumeTrue(sourceSnapshotSandboxAvailable(),
+                "OS-enforced source snapshot sandbox is unavailable on this host");
         Path war=Path.of(System.getProperty("att.server.war"));assertTrue(Files.isRegularFile(war));
         Path home=createScheduledLocalRuntime();
         Files.createDirectories(home.resolve("config"));
@@ -176,6 +179,19 @@ class ServerWarUiIT {
             if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);
             if(oldHome==null)System.clearProperty("att.home");else System.setProperty("att.home",oldHome);
         }
+    }
+
+    private boolean sourceSnapshotSandboxAvailable() throws Exception {
+        Path source=Files.createDirectories(temp.resolve("sandbox-probe/source"));
+        Path archive=Files.write(temp.resolve("sandbox-probe/source.tar"),new byte[]{1});
+        Path output=Files.createDirectories(temp.resolve("sandbox-probe/output"));
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase(java.util.Locale.ROOT).contains("win")?"java.exe":"java");
+        List<String> command=att.exec.SourceSnapshotIsolation.wrap(List.of(javaBin.toString(),"-version"),source,archive,output);
+        Process probe=new ProcessBuilder(command).redirectErrorStream(true)
+                .redirectOutput(temp.resolve("sandbox-probe.log").toFile()).start();
+        if(!probe.waitFor(10,TimeUnit.SECONDS)) { probe.destroyForcibly(); return false; }
+        return probe.exitValue()==0;
     }
 
     private PackagedWarModeCapture exercisePackagedWarMode(Path war,Path home,Path allowed,Path pkg,Path users,

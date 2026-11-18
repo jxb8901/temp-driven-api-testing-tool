@@ -1006,7 +1006,8 @@ public final class PackageResourceInspector implements AutoCloseable {
                     return discovery;
                 }
                 String id = sourceReferenceId(parent.resourceId, logical);
-                discovery.references.put(id, new SourceFileReference(id, logical, target.canonicalPath()));
+                Path authoredTarget=authoredTargetPath((String)manifestPath,packageRoot);
+                discovery.references.put(id, new SourceFileReference(id, logical, target.canonicalPath(),authoredTarget));
             } catch (Exception unavailable) { discovery.unavailable = true; }
             return discovery;
         }

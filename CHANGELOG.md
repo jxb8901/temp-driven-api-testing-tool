@@ -1,3 +1,11 @@
+# ATT 4.4.0 - release candidate (2026-11-18; acceptance pending)
+
+- Add Package registration and immutable source revision contracts, source authoring and Change Set publication, plus Studio source editors for Package files, Testcases, and Testdata (#250–#255).
+- Add source-pinned Job execution with an OS-enforced read-only boundary for accepted Package and Config trees; Linux requires `bubblewrap` and still needs hosted CI verification (#254).
+- Add Config impact analysis and activation fencing. Central Config activation remains fail-closed where a production file-backed activation guard is unavailable (#335).
+- Keep Epic #233 open. Source history/diff/restore and Package export (#256), integrated end-to-end acceptance and rollout documentation (#257), and Central Config SUT Metrics authoring (#382) remain outstanding.
+- Release acceptance is pending. Do not tag or publish until Linux isolation and exact-head hosted CI pass, and the remaining #233 acceptance items are resolved.
+
 # ATT 4.3.1 - release candidate (2026-11-16; not released)
 
 - Add versioned Metric Source, Metric Group, flat Profile, normalized Observation v2, Job snapshot v2, and execution payload v2 contracts with bounded schema validation and v1 compatibility readers (#374).
