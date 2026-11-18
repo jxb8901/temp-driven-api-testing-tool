@@ -75,7 +75,7 @@ class InspectionCacheRuntimeTest {
         }
     }
 
-    @Test void packageScopeRejectsInPlaceEditsBetweenRevisionAndConfigurationObservations() throws Exception {
+    @Test void packageScopeKeepsCentralConfigPinnedAcrossExternalMirrorEdits() throws Exception {
         Path root=fixture("scope-revision-race");
         try(ServerRuntime runtime=new ServerRuntime(config(root,1,""),libs().toString(),ProcessBuilder::start)) {
             Map<String,Object> baseline=runtime.packageScope("p");
@@ -89,13 +89,20 @@ class InspectionCacheRuntimeTest {
             assertNotEquals(baseline.get("packageManifestRevision"),afterManifest.get("packageManifestRevision"));
 
             Path central=temp.resolve("shared-config/config/config.yaml");
-            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.packageScope("p",()->{
+            Map<String,Object> afterExternalMirrorEdit=runtime.packageScope("p",()->{
                 try {Files.writeString(central,Files.readString(central)+"# changed runtime configuration\n");}
                 catch(IOException failed){throw new UncheckedIOException(failed);}
-            }),"Central Config changes between snapshots must reject a mixed revision tuple");
+            });
+            assertEquals(afterManifest.get("centralConfigSourceRevision"),afterExternalMirrorEdit.get("centralConfigSourceRevision"),
+                    "A direct edit to the deployment mirror is not an approved Config source revision");
+            assertEquals(afterManifest.get("activeEffectiveConfigRevision"),afterExternalMirrorEdit.get("activeEffectiveConfigRevision"),
+                    "The immutable active Runtime Config remains pinned across unreviewed mirror edits");
             Map<String,Object> afterConfig=runtime.packageScope("p");
             assertEquals(afterManifest.get("packageSourceRevision"),afterConfig.get("packageSourceRevision"));
-            assertNotEquals(afterManifest.get("executionRevisionDigest"),afterConfig.get("executionRevisionDigest"));
+            assertEquals(afterManifest.get("executionRevisionDigest"),afterConfig.get("executionRevisionDigest"),
+                    "New scope observations must continue using the last approved Runtime Config snapshot");
+            assertTrue(Files.readString(central).endsWith("# changed runtime configuration\n"),
+                    "The external mirror remains available for explicit review and publication");
         }
     }
 
