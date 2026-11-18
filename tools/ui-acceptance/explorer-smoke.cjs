@@ -495,6 +495,8 @@ async function main() {
     await page.goto(`${base}#/packages/payments`);
     await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
     await page.getByLabel('Package Explorer views')
+      .getByRole('button', { name: 'Supporting sources', exact: true }).click();
+    await page.getByRole('group', { name: 'Package source destinations' })
       .getByRole('button', { name: 'Testdata', exact: true }).click();
     await page.getByRole('heading', { name: 'Testdata', level: 1 }).waitFor();
     assert.match(page.url(), /#\/packages\/payments\/testdata(?:\?.*)?$/,
