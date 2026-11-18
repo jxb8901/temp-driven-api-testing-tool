@@ -494,7 +494,8 @@ async function main() {
       'Shared Runtime Configuration must not own the Package Testdata catalog');
     await page.goto(`${base}#/packages/payments`);
     await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
-    await page.getByRole('button', { name: 'Testdata', exact: true }).click();
+    await page.getByLabel('Package Explorer views')
+      .getByRole('button', { name: 'Testdata', exact: true }).click();
     await page.getByRole('heading', { name: 'Testdata', level: 1 }).waitFor();
     assert.match(page.url(), /#\/packages\/payments\/testdata(?:\?.*)?$/,
       'Package Testdata should be owned by the selected Package Explorer route');

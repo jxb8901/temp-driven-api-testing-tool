@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Stream;
 
 /** The selected Package owns standalone Tools and grouped Tool manifests. */
@@ -222,11 +223,11 @@ public final class PackageToolRegistry {
             digest.update((byte) 0);
             Path source = tool.sourceFile();
             if (source != null && Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
-                digest.update(Files.readAllBytes(source));
+                updateDescriptor(digest, source);
                 if (tool.grouped()) {
                     Path manifest = source.getParent().resolve(GROUP_FILENAME);
                     if (hashedGroups.add(manifest) && Files.isRegularFile(manifest, LinkOption.NOFOLLOW_LINKS))
-                        digest.update(Files.readAllBytes(manifest));
+                        updateDescriptor(digest, manifest);
                 }
             } else {
                 digest.update(String.valueOf(tool.call()).getBytes(StandardCharsets.UTF_8));
@@ -250,5 +251,25 @@ public final class PackageToolRegistry {
         StringBuilder value = new StringBuilder();
         for (byte b : digest.digest()) value.append(String.format("%02x", b & 0xff));
         return value.toString();
+    }
+
+    private static void updateDescriptor(MessageDigest digest, Path source) throws Exception {
+        Object parsed = YamlSupport.load(source);
+        digest.update(att.validation.JsonSupport.mapper().writeValueAsBytes(canonicalYaml(parsed)));
+    }
+
+    private static Object canonicalYaml(Object value) {
+        if (value instanceof Map<?, ?>) {
+            Map<String, Object> sorted = new TreeMap<String, Object>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet())
+                sorted.put(String.valueOf(entry.getKey()), canonicalYaml(entry.getValue()));
+            return sorted;
+        }
+        if (value instanceof Iterable<?>) {
+            List<Object> ordered = new ArrayList<Object>();
+            for (Object item : (Iterable<?>) value) ordered.add(canonicalYaml(item));
+            return ordered;
+        }
+        return value;
     }
 }

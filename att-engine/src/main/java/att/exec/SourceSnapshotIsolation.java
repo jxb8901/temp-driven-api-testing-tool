@@ -20,8 +20,11 @@ public final class SourceSnapshotIsolation {
                                     Path archive, Path outputDirectory) throws IOException {
         if (workerCommand == null || workerCommand.isEmpty()) throw new IllegalArgumentException("A Worker command is required");
         Path source = requiredDirectory(snapshotDirectory, "accepted source snapshot");
+        Path acceptedPackage = requiredDirectory(source.resolve("package"), "accepted Package source");
         Path bundle = requiredFile(archive, "accepted source archive");
         Path output = requiredDirectory(outputDirectory, "Worker output directory");
+        if (!acceptedPackage.startsWith(source))
+            throw new IOException("The accepted Package source escapes its snapshot directory");
         if (overlaps(source, output) || overlaps(bundle, output) || overlaps(source, bundle))
             throw new IOException("Accepted source paths overlap each other or a writable Worker output path");
 
@@ -75,6 +78,8 @@ public final class SourceSnapshotIsolation {
             command.add("--ro-bind");
             command.add(bundle.toString());
             command.add(bundle.toString());
+            command.add("--chdir");
+            command.add(acceptedPackage.toString());
             command.add("--");
             appendWorkerCommand(command, effectiveWorkerCommand);
         } else {

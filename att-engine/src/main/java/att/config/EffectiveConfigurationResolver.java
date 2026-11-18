@@ -93,6 +93,7 @@ public final class EffectiveConfigurationResolver {
         fields.put("sshhelpers.ids", canonical(new java.util.TreeSet<String>(global.sshHelpers().keySet())));
         fields.put("httphelpers.ids", canonical(new java.util.TreeSet<String>(global.httpHelpers().keySet())));
         fields.put("tools.definitions", semanticCanonical(global.tools(), root, "tools"));
+        fields.put("tools.packageRevision", PackageToolRegistry.revision(global.tools(), root));
         fields.put("dbhelpers.definitions", semanticCanonical(global.dbHelpers(), root, "dbhelpers"));
         fields.put("mqhelpers.definitions", semanticCanonical(global.mqHelpers(), root, "mqhelpers"));
         fields.put("sshhelpers.definitions", semanticCanonical(global.sshHelpers(), root, "sshhelpers"));

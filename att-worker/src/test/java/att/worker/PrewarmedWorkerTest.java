@@ -133,13 +133,13 @@ class PrewarmedWorkerTest {
         catch(java.io.IOException unavailable) {
             assertFalse(sandboxAvailable,"An available OS sandbox must launch the Worker process");
             assertFalse(Files.exists(sideEffect),"The Tool must not run without OS isolation");
-            assertEquals("accepted-value",Files.readString(accepted.packageRoot.resolve("files/watched.txt")).trim());
+            assertEquals("accepted-value",readUtf8(accepted.packageRoot.resolve("files/watched.txt")).trim());
             return;
         }
         try {
             String output=assign(process,mapper.writeValueAsString(request));
             assertFalse(Files.exists(sideEffect),"The Tool must stop before its follow-up side effect");
-            assertEquals("accepted-value",Files.readString(accepted.packageRoot.resolve("files/watched.txt")).trim(),
+            assertEquals("accepted-value",readUtf8(accepted.packageRoot.resolve("files/watched.txt")).trim(),
                     "Accepted source bytes must remain unchanged");
             if(sandboxAvailable) {
                 assertTrue(output.contains("Operation not permitted")||output.contains("Permission denied"),output);
@@ -369,10 +369,13 @@ class PrewarmedWorkerTest {
         catch(java.io.IOException unavailable) { return false; }
         ProcessBuilder builder=new ProcessBuilder(isolated);
         if(System.getProperty("os.name","").toLowerCase(Locale.ROOT).contains("linux"))builder.environment().put("TMPDIR","/tmp");
-        builder.redirectError(ProcessBuilder.Redirect.DISCARD);
+        builder.redirectError(temp.resolve(UUID.randomUUID()+".sandbox-probe.stderr").toFile());
         Process process=builder.start();
         if(!process.waitFor(10,TimeUnit.SECONDS)){process.destroyForcibly();return false;}
         return process.exitValue()==0;
+    }
+    private String readUtf8(Path path) throws java.io.IOException {
+        return new String(Files.readAllBytes(path),StandardCharsets.UTF_8);
     }
     private JsonNode ready(Process process) throws Exception {
         CompletableFuture<String> frame=CompletableFuture.supplyAsync(()->{

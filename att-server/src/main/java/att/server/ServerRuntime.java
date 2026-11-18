@@ -1392,7 +1392,9 @@ final class ServerRuntime implements AutoCloseable {
                 throw new IllegalStateException("Accepted source execution is unavailable because OS-enforced Worker isolation could not be established",unavailable);
             }
         }
-        ProcessBuilder builder=new ProcessBuilder(command).directory(packageRoot.toFile());
+        Path workerDirectory=packageRoot;
+        if(sourceSnapshotDirectory!=null)workerDirectory=Path.of(sourceSnapshotDirectory).resolve("package");
+        ProcessBuilder builder=new ProcessBuilder(command).directory(workerDirectory.toFile());
         if(sourceSnapshotDirectory!=null&&System.getProperty("os.name","").toLowerCase(java.util.Locale.ROOT).contains("linux")) {
             builder.environment().put("TMPDIR","/tmp");builder.environment().put("TMP","/tmp");builder.environment().put("TEMP","/tmp");
         }

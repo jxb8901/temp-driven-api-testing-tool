@@ -193,6 +193,28 @@ class SourceCandidateValidatorTest {
         assertNotEquals(workbookIdentity, changedWorkbookIdentity);
     }
 
+    @Test void packageToolDescriptorsAndReferencedScriptsEnterAcceptedExecutionClosure() throws Exception {
+        Path group = Files.createDirectories(firstPackage.resolve("tools/sample"));
+        write(group.resolve("tool-group.yaml"), "schemaVersion: att-tool-group/v3.0\nid: sample\n"
+                + "name: Sample Tools\ndescription: Group\nscript: [./tools/dispatcher.sh]\ntools: [request.yaml]\n");
+        write(group.resolve("request.yaml"), "schemaVersion: att-tool/v1\nid: request\nname: Request\n"
+                + "description: Request Tool\ncommand: [bash, ./tools/member.sh]\nstdoutFormat: text\n");
+        write(firstPackage.resolve("tools/dispatcher.sh"), "#!/bin/sh\necho dispatch\n");
+        write(firstPackage.resolve("tools/member.sh"), "#!/bin/sh\necho member\n");
+
+        EffectiveResolution resolution = validator.resolveEffective("first", "SIT", firstPackage,
+                configFile, runtimeRoot, revisions("first"));
+        assertTrue(resolution.complete, resolution.diagnostics.toString());
+        java.util.Set<String> toolPaths = resolution.dependencies.stream()
+                .filter(item -> item.kind == DependencyKind.TOOL)
+                .map(item -> item.canonicalPath)
+                .collect(java.util.stream.Collectors.toSet());
+        assertTrue(toolPaths.contains("tools/sample/tool-group.yaml"), toolPaths.toString());
+        assertTrue(toolPaths.contains("tools/sample/request.yaml"), toolPaths.toString());
+        assertTrue(toolPaths.contains("tools/dispatcher.sh"), toolPaths.toString());
+        assertTrue(toolPaths.contains("tools/member.sh"), toolPaths.toString());
+    }
+
     @Test void unchangedTemplateInboundFileReferenceIsValidatedAgainstWholeCandidate() throws Exception {
         Path templateDirectory = Files.createDirectories(firstPackage.resolve("templates/lookup"));
         write(templateDirectory.resolve("template.yaml"), "schemaVersion: att-template/v3.6\nname: Lookup\ndescription: Lookup\nactions:\n"

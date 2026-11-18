@@ -4,6 +4,7 @@ import att.Version;
 import att.config.FrameworkConfig;
 import att.config.FrameworkConfigLoader;
 import att.config.PackageConfig;
+import att.config.PackageToolScripts;
 import att.config.SchemaSupport;
 import att.config.SuiteConfigResolver;
 import att.config.YamlSupport;
@@ -504,13 +505,19 @@ public final class SourceCandidateValidator {
     private static void collectEffectiveBindings(Path packageRoot, String packageId, String environment,
                                                 Path runtimeRoot, FrameworkConfig config,
                                                 List<DependencyReference> output) throws Exception {
+        Set<String> packageToolSources = new LinkedHashSet<String>();
         for (att.config.ToolConfig tool : config.tools().values()) {
             Path source = tool.sourceFile();
-            String logical = source == null ? null : logicalPath(packageRoot, source);
-            String fingerprint = source == null ? null : fileDigest(source);
-            output.add(new DependencyReference(DependencyKind.TOOL, packageId, environment, tool.key(),
-                    logical, fingerprint, "package-tool-descriptor", null,
-                    source == null ? ReferenceCertainty.UNKNOWN : ReferenceCertainty.KNOWN));
+            addPackageToolSource(output, packageToolSources, packageRoot, packageId, environment,
+                    source, tool.key(), "package-tool-descriptor", null);
+            if (tool.grouped() && source != null) {
+                addPackageToolSource(output, packageToolSources, packageRoot, packageId, environment,
+                        source.getParent().resolve("tool-group.yaml"), tool.groupId(),
+                        "package-tool-group-descriptor", tool.key());
+            }
+            for (Path script : PackageToolScripts.referenced(packageRoot, tool))
+                addPackageToolSource(output, packageToolSources, packageRoot, packageId, environment,
+                        script, logicalPath(packageRoot, script), "package-tool-script", tool.key());
         }
         for (att.config.DbHelperConfig helper : config.dbHelpers().values())
             addConfigBinding(output, packageId, environment, runtimeRoot, helper.sourceFile(), helper.id(), "db-helper");
@@ -520,6 +527,22 @@ public final class SourceCandidateValidator {
             addLocatedHelperBinding(output, packageId, environment, runtimeRoot, helper.id(), "config/httphelpers", "http-helper");
         for (att.config.SshHelperConfig helper : config.sshHelpers().values())
             addLocatedHelperBinding(output, packageId, environment, runtimeRoot, helper.id(), "config/sshhelpers", "ssh-helper");
+    }
+
+    private static void addPackageToolSource(List<DependencyReference> output, Set<String> seen,
+                                             Path packageRoot, String packageId, String environment,
+                                             Path source, String logicalId, String relationship,
+                                             String callSite) throws Exception {
+        if (source == null) {
+            output.add(new DependencyReference(DependencyKind.TOOL, packageId, environment, logicalId,
+                    null, null, relationship, callSite, ReferenceCertainty.UNKNOWN));
+            return;
+        }
+        String logical = logicalPath(packageRoot, source);
+        String key = relationship + "|" + logical + "|" + String.valueOf(callSite);
+        if (!seen.add(key)) return;
+        output.add(new DependencyReference(DependencyKind.TOOL, packageId, environment, logicalId,
+                logical, fileDigest(source), relationship, callSite, ReferenceCertainty.KNOWN));
     }
 
     private static void addLocatedHelperBinding(List<DependencyReference> output, String packageId,

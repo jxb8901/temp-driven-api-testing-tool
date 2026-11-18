@@ -182,12 +182,13 @@ class ServerWarUiIT {
     }
 
     private boolean sourceSnapshotSandboxAvailable() throws Exception {
-        Path source=Files.createDirectories(temp.resolve("sandbox-probe/source"));
+        Path source=Files.createDirectories(temp.resolve("sandbox-probe/source/package"));
+        Path snapshot=source.getParent();
         Path archive=Files.write(temp.resolve("sandbox-probe/source.tar"),new byte[]{1});
         Path output=Files.createDirectories(temp.resolve("sandbox-probe/output"));
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",
                 System.getProperty("os.name","").toLowerCase(java.util.Locale.ROOT).contains("win")?"java.exe":"java");
-        List<String> command=att.exec.SourceSnapshotIsolation.wrap(List.of(javaBin.toString(),"-version"),source,archive,output);
+        List<String> command=att.exec.SourceSnapshotIsolation.wrap(List.of(javaBin.toString(),"-version"),snapshot,archive,output);
         Process probe=new ProcessBuilder(command).redirectErrorStream(true)
                 .redirectOutput(temp.resolve("sandbox-probe.log").toFile()).start();
         if(!probe.waitFor(10,TimeUnit.SECONDS)) { probe.destroyForcibly(); return false; }
