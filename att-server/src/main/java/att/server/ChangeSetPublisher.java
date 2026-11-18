@@ -47,6 +47,9 @@ final class ChangeSetPublisher implements AutoCloseable {
     static final int MAX_FILE_BYTES = 4 * 1024 * 1024;
     static final int MAX_CHANGE_BYTES = 8 * 1024 * 1024;
     static final int MAX_DRAFT_BYTES = 64 * 1024 * 1024;
+    static final int MAX_HISTORY_PAGE_SIZE = 100;
+    static final int MAX_HISTORY_OFFSET = 100000;
+    static final int MAX_HISTORY_RECORDS = 500;
     static final int MAX_REVISION_FILES = 20000;
     static final long MAX_REVISION_BYTES = 512L * 1024L * 1024L;
     static final long MAX_REVISION_FILE_BYTES = 64L * 1024L * 1024L;
@@ -71,8 +74,18 @@ final class ChangeSetPublisher implements AutoCloseable {
     interface CandidateValidator { ValidationResult validate(Candidate candidate) throws Exception; }
     interface SnapshotGenerator { byte[] generate(Candidate candidate, String workbookPath) throws Exception; }
     interface ConfigPublishGate { GateDecision authorize(Candidate candidate, Map<String, Object> review) throws Exception; }
+    static final class HistoryBatch {
+        final List<SourceFileTransaction.AuditRecord> records;
+        final long total;
+        HistoryBatch(List<SourceFileTransaction.AuditRecord> records,long total) {
+            this.records=Collections.unmodifiableList(new ArrayList<>(records));this.total=total;
+        }
+    }
     interface Audit {
         void record(String actor, String action, String domain, String scopeId, String detail) throws Exception;
+        default HistoryBatch history(String domain,String scopeId,int offset,int limit) throws Exception {
+            return new HistoryBatch(Collections.emptyList(),0);
+        }
         default void recordCommitted(SourceFileTransaction.AuditRecord record) throws Exception {
             record(record.actor, record.action, record.domain, record.scopeId,
                     "transactionId=" + record.transactionId + " before=" + record.beforeRevision
@@ -332,6 +345,7 @@ final class ChangeSetPublisher implements AutoCloseable {
         final Map<String, SnapshotAuthorization> generatedSnapshots = new LinkedHashMap<String, SnapshotAuthorization>();
         String validationRevision;
         att.server.api.source.SourceManagementContracts.RevisionSet validationRevisions;
+        String restoreSnapshotId;
         boolean reviewed;
         boolean publishing;
         Draft(String id, String actor, Scope scope, RevisionState base, Instant expires, Map<String, byte[]> changes,
@@ -444,6 +458,248 @@ final class ChangeSetPublisher implements AutoCloseable {
             if(current.registryRevision!=null)result.put("registryRevision",current.registryRevision);
             return Collections.unmodifiableMap(result);
         } finally { sourceReadLock.unlock(); }
+    }
+
+    synchronized Map<String,Object> sourceHistory(String domain,String scopeId,String actor,boolean systemSettingsWrite,
+                                                   int offset,int limit) throws Exception {
+        validateHistoryPage(offset,limit);
+        sourceReadLock.lock();
+        try {
+            Scope scope=historyScope(domain,scopeId,actor,systemSettingsWrite);
+            Map<String,Object> result=historyResponse(domain,scopeId,audit.history(domain,scopeId,offset,limit),offset,limit,true);
+            RevisionState current=state(scope);result.put("currentSourceRevision",current.sourceRevision);
+            if(current.registryRevision!=null)result.put("registryRevision",current.registryRevision);
+            return result;
+        } finally { sourceReadLock.unlock(); }
+    }
+
+    /** Safe summary for an authenticated Package operator who is not its source owner. */
+    synchronized Map<String,Object> sourceHistorySummary(String packageId,int offset,int limit) throws Exception {
+        validateHistoryPage(offset,limit);
+        return historyResponse(PACKAGE_SOURCE,packageId,audit.history(PACKAGE_SOURCE,packageId,offset,limit),
+                offset,limit,false);
+    }
+
+    synchronized Map<String,Object> sourceHistoryDiffSummary(String packageId,String beforeSnapshotId,
+                                                              String afterSnapshotId) throws Exception {
+        String before=requireSnapshotId(beforeSnapshotId),after=requireSnapshotId(afterSnapshotId);
+        HistoryBatch first=audit.history(PACKAGE_SOURCE,packageId,0,MAX_HISTORY_PAGE_SIZE);
+        for(int offset=0;offset<first.total&&offset<=MAX_HISTORY_OFFSET;offset+=MAX_HISTORY_PAGE_SIZE) {
+            HistoryBatch page=offset==0?first:audit.history(PACKAGE_SOURCE,packageId,offset,MAX_HISTORY_PAGE_SIZE);
+            for(SourceFileTransaction.AuditRecord record:page.records)
+                if(before.equals(record.beforeSnapshotId)&&after.equals(record.afterSnapshotId)) {
+                    Map<String,Object> item=new LinkedHashMap<>();item.put("createdAt",record.createdAt);
+                    item.put("action",safeHistoryAction(record.action));item.put("changedResourceCount",record.resources.size());
+                    item.put("contentAvailable",Boolean.FALSE);item.put("redacted",Boolean.TRUE);
+                    Map<String,Object> result=new LinkedHashMap<>();result.put("schemaVersion","att-source-history-diff/v1");
+                    result.put("domain",PACKAGE_SOURCE);result.put("scopeId",packageId);result.put("items",List.of(item));
+                    result.put("total",1);result.put("hasMore",false);result.put("noStore",Boolean.TRUE);return result;
+                }
+        }
+        throw new Missing();
+    }
+
+    private static Map<String,Object> historyResponse(String domain,String scopeId,HistoryBatch batch,
+                                                       int offset,int limit,boolean includeSourceDetails) {
+        List<Map<String,Object>> items=new ArrayList<>();
+        for(SourceFileTransaction.AuditRecord record:batch.records) {
+            Map<String,Object> item=new LinkedHashMap<>();
+            item.put("transactionId",record.transactionId);item.put("domain",record.domain);
+            item.put("createdAt",record.createdAt);item.put("action",safeHistoryAction(record.action));
+            item.put("outcome",record.outcome);item.put("beforeRevision",record.beforeRevision);
+            item.put("afterRevision",record.afterRevision);item.put("validationRevision",record.validationRevision);
+            item.put("activationStatus",record.activationStatus);
+            if(includeSourceDetails) {
+                if(record.restoredFromSnapshotId!=null)item.put("restoredFromSnapshotId",safeSnapshotId(record.restoredFromSnapshotId));
+                item.put("author",safeHistoryActor(record.actor));
+                item.put("beforeSnapshotId",safeSnapshotId(record.beforeSnapshotId));
+                item.put("afterSnapshotId",safeSnapshotId(record.afterSnapshotId));
+                List<String> paths=new ArrayList<>();
+                for(String path:record.resources)if(historyAllowedPath(domain,path))paths.add(path);
+                item.put("changedResources",paths);
+                item.put("revisionsAvailable",safeSnapshotId(record.beforeSnapshotId)!=null
+                        &&safeSnapshotId(record.afterSnapshotId)!=null);
+            } else {
+                item.remove("beforeRevision");item.remove("afterRevision");item.remove("validationRevision");
+                item.remove("activationStatus");item.put("changedResourceCount",record.resources.size());
+            }
+            items.add(item);
+        }
+        Map<String,Object> result=new LinkedHashMap<>();
+        result.put("schemaVersion","att-source-history/v1");result.put("domain",domain);result.put("scopeId",scopeId);
+        result.put("items",items);result.put("offset",offset);result.put("limit",limit);result.put("total",batch.total);
+        result.put("hasMore",offset+(long)items.size()<batch.total);result.put("noStore",Boolean.TRUE);
+        Map<String,Object> retention=new LinkedHashMap<>();
+        retention.put("policy","latest_committed_transactions_per_source_scope");
+        retention.put("transactionLimit",MAX_HISTORY_RECORDS);retention.put("retainedTransactions",batch.total);
+        retention.put("state",batch.total>MAX_HISTORY_RECORDS?"cleanup_pending":"within_limit");
+        result.put("retention",retention);
+        return result;
+    }
+
+    synchronized Map<String,Object> sourceHistoryDiff(String domain,String scopeId,String actor,boolean systemSettingsWrite,
+                                                       String beforeSnapshotId,String afterSnapshotId,String selectedPath,
+                                                       int offset,int limit) throws Exception {
+        validateHistoryPage(offset,limit);sourceReadLock.lock();
+        try {
+            Scope scope=historyScope(domain,scopeId,actor,systemSettingsWrite);
+            String beforeId=requireSnapshotId(beforeSnapshotId),afterId=requireSnapshotId(afterSnapshotId);
+            Path revisionStoreRoot=historyStoreRoot(domain,scopeId);
+            Path beforeRoot=transaction.revisionRoot(domain,scopeId,revisionStoreRoot,beforeId);
+            Path afterRoot=transaction.revisionRoot(domain,scopeId,revisionStoreRoot,afterId);
+            ScanIndex before=scan(beforeRoot,domain),after=scan(afterRoot,domain);
+            Set<String> all=new java.util.TreeSet<>();all.addAll(before.hashes.keySet());all.addAll(after.hashes.keySet());
+            List<Map<String,Object>> changed=new ArrayList<>();
+            for(String path:all) {
+                if(!historyAllowedPath(domain,path))continue;
+                String oldHash=before.hashes.get(path),newHash=after.hashes.get(path);
+                if(equal(oldHash,newHash))continue;
+                Map<String,Object> item=new LinkedHashMap<>();item.put("path",path);
+                item.put("change",oldHash==null?"added":newHash==null?"deleted":"modified");
+                Path oldFile=before.files.get(path),newFile=after.files.get(path);
+                item.put("beforeBytes",oldFile==null?0L:Files.size(oldFile));
+                item.put("afterBytes",newFile==null?0L:Files.size(newFile));
+                changed.add(item);
+            }
+            int start=selectedPath==null?Math.min(offset,changed.size()):0;
+            int end=selectedPath==null?Math.min(changed.size(),start+limit):changed.size();
+            List<Map<String,Object>> page=new ArrayList<>();
+            for(int i=start;i<end;i++) {
+                Map<String,Object> item=changed.get(i);
+                if(selectedPath!=null&&!selectedPath.equals(item.get("path")))continue;
+                page.add(item);
+            }
+            if(selectedPath!=null&&page.isEmpty())throw new Missing();
+            if(selectedPath!=null) {
+                Map<String,Object> item=page.get(0);String path=(String)item.get("path");
+                byte[] oldBytes=null,newBytes=null;boolean unavailable=false;
+                try {oldBytes=readHistoryBytes(before.files.get(path));newBytes=readHistoryBytes(after.files.get(path));}
+                catch(IOException unsafeOrTooLarge) {unavailable=true;}
+                if(unavailable) {item.put("contentAvailable",Boolean.FALSE);item.put("redacted",Boolean.FALSE);}
+                else {
+                    if(oldBytes==null)oldBytes=new byte[0];if(newBytes==null)newBytes=new byte[0];
+                    String oldText=null,newText=null;
+                    try {oldText=decodeUtf8(oldBytes);newText=decodeUtf8(newBytes);}
+                    catch(IllegalArgumentException binary) { /* Binary revisions expose metadata only. */ }
+                    if(oldText!=null&&newText!=null&&oldBytes.length+newBytes.length<=MAX_CHANGE_BYTES
+                            &&!hasProtectedReviewContent(path,oldText)&&!hasProtectedReviewContent(path,newText)) {
+                        item.put("contentAvailable",Boolean.TRUE);
+                        item.put("beforeContent",before.files.containsKey(path)?oldText:null);
+                        item.put("afterContent",after.files.containsKey(path)?newText:null);
+                        item.put("contentDiff",contentDiff(path,oldText,newText));
+                    } else {
+                        item.put("contentAvailable",Boolean.FALSE);
+                        item.put("redacted",Boolean.valueOf(oldText!=null&&newText!=null
+                                &&(hasProtectedReviewContent(path,oldText)||hasProtectedReviewContent(path,newText))));
+                    }
+                }
+            }
+            Map<String,Object> result=new LinkedHashMap<>();result.put("schemaVersion","att-source-history-diff/v1");
+            result.put("domain",domain);result.put("scopeId",scopeId);result.put("beforeSnapshotId",beforeId);
+            result.put("afterSnapshotId",afterId);result.put("items",page);result.put("offset",offset);
+            result.put("limit",limit);result.put("total",changed.size());result.put("hasMore",selectedPath==null&&end<changed.size());
+            result.put("noStore",Boolean.TRUE);return result;
+        } finally {sourceReadLock.unlock();}
+    }
+
+    synchronized Map<String,Object> stageRestore(String domain,String scopeId,String actor,boolean systemSettingsWrite,
+                                                  String snapshotId,String expectedSourceRevision,
+                                                  String expectedRegistryRevision,String requestId) throws Exception {
+        sourceReadLock.lock();
+        try {
+            Scope scope=authorizedScope(domain,scopeId,actor,systemSettingsWrite);
+            RevisionState base=state(scope);
+            if(expectedSourceRevision==null||!base.sourceRevision.equals(requireDigest(expectedSourceRevision))
+                    ||!equal(expectedRegistryRevision,base.registryRevision))throw new Conflict();
+            String targetId=requireSnapshotId(snapshotId);
+            Path targetRoot=transaction.revisionRoot(domain,scopeId,historyStoreRoot(domain,scopeId),targetId);
+            ScanIndex target=scan(targetRoot,domain);
+            ScanIndex current=PACKAGE_SOURCE.equals(domain)?base.packageIndex:base.centralIndex;
+            Set<String> paths=new java.util.TreeSet<>();paths.addAll(current.hashes.keySet());paths.addAll(target.hashes.keySet());
+            List<OperationInput> operations=new ArrayList<>();
+            for(String path:paths) {
+                if(!historyAllowedPath(domain,path))continue;
+                String currentHash=current.hashes.get(path),targetHash=target.hashes.get(path);
+                if(equal(currentHash,targetHash))continue;
+                byte[] content=targetHash==null?null:readBounded(target.files.get(path),MAX_FILE_BYTES);
+                operations.add(new OperationInput(targetHash==null?"delete":currentHash==null?"create":"replace",
+                        path,null,content));
+                if(operations.size()>MAX_OPERATIONS)throw new ValidationRejected("ATT-CHANGESET-RESTORE-LIMIT");
+            }
+            if(operations.isEmpty())throw new ValidationRejected("ATT-CHANGESET-RESTORE-NO-CHANGES");
+            Map<String,Object> result=stage(domain,scopeId,actor,systemSettingsWrite,base.sourceRevision,
+                    base.registryRevision,operations,requestId);
+            String id=(String)result.get("changeSetId");Draft draft=drafts.get(id);
+            if(draft==null)throw new Missing();draft.restoreSnapshotId=targetId;
+            audit.record(actor,"SOURCE_CHANGE_SET_RESTORE_STAGE",domain,scopeId,
+                    auditDetail(requestId,"changeSetId="+id+" sourceSnapshotId="+targetId+" paths="+pathList(draft.diff)));
+            result.put("restoredFromSnapshotId",targetId);return result;
+        } finally {sourceReadLock.unlock();}
+    }
+
+    private static void validateHistoryPage(int offset,int limit) {
+        if(offset<0||offset>MAX_HISTORY_OFFSET||limit<1||limit>MAX_HISTORY_PAGE_SIZE)
+            throw new IllegalArgumentException("History offset or limit is outside its supported range");
+    }
+
+    private Scope historyScope(String domain,String scopeId,String actor,boolean systemSettingsWrite) throws Exception {
+        if(PACKAGE_SOURCE.equals(domain))return authorizedScope(domain,scopeId,actor,systemSettingsWrite);
+        if(!CENTRAL_RUNTIME_CONFIG.equals(domain)||!CENTRAL_SCOPE_ID.equals(scopeId)
+                ||actor==null||actor.trim().isEmpty()||!systemSettingsWrite)throw new Denied();
+        try { return access.resolve(domain,scopeId,actor,true); }
+        catch(Denied disabled) {
+            Path root=transaction.registeredRoot(domain,scopeId);
+            if(root==null)throw new Missing();
+            return new Scope(domain,scopeId,root,root,null,"unavailable");
+        }
+    }
+
+    private Path historyStoreRoot(String domain,String scopeId) throws Missing {
+        Path root=transaction.registeredRoot(domain,scopeId);
+        if(root==null)throw new Missing();
+        return root;
+    }
+
+    private static boolean historyAllowedPath(String domain,String path) {
+        try {requireAllowed(domain,normalizePath(path));return true;}
+        catch(RuntimeException denied) {return false;}
+    }
+
+    private static String safeHistoryAction(String action) {
+        return action!=null&&action.matches("[A-Z0-9_]{1,40}")?action:"SOURCE_PUBLICATION";
+    }
+
+    private static String safeHistoryActor(String actor) {
+        return actor!=null&&actor.matches("[A-Za-z0-9._@-]{1,256}")?actor:"unavailable";
+    }
+
+    private static String safeSnapshotId(String value) {
+        return value!=null&&value.matches("R[A-F0-9]{32}")?value:null;
+    }
+
+    private static String requireSnapshotId(String value) {
+        String id=safeSnapshotId(value);if(id==null)throw new IllegalArgumentException("A source snapshot ID is required");return id;
+    }
+
+    private static byte[] readHistoryBytes(Path path) throws IOException {
+        if(path==null)return null;
+        if(Files.isSymbolicLink(path)||!Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Source history is unavailable");
+        return readBounded(path,MAX_FILE_BYTES);
+    }
+
+    private static List<String> contentDiff(String path,String before,String after) {
+        String[] oldLines=before.split("\\n",-1),newLines=after.split("\\n",-1);
+        if(oldLines.length+newLines.length>MAX_REVIEW_DIFF_LINES)return List.of("Content diff exceeds the line limit");
+        int prefix=0;while(prefix<oldLines.length&&prefix<newLines.length&&oldLines[prefix].equals(newLines[prefix]))prefix++;
+        int suffix=0;while(suffix<oldLines.length-prefix&&suffix<newLines.length-prefix
+                &&oldLines[oldLines.length-1-suffix].equals(newLines[newLines.length-1-suffix]))suffix++;
+        List<String> lines=new ArrayList<>();lines.add("--- "+path);lines.add("+++ "+path);
+        int oldCount=oldLines.length-prefix-suffix,newCount=newLines.length-prefix-suffix;
+        lines.add("@@ -"+(prefix+(oldCount==0?0:1))+","+oldCount+" +"+(prefix+(newCount==0?0:1))+","+newCount+" @@");
+        for(int i=prefix;i<oldLines.length-suffix;i++)lines.add("-"+oldLines[i]);
+        for(int i=prefix;i<newLines.length-suffix;i++)lines.add("+"+newLines[i]);
+        return lines;
     }
 
     synchronized Map<String,Object> stagePackageArchive(String packageId,String actor,byte[] archive,
@@ -709,9 +965,11 @@ final class ChangeSetPublisher implements AutoCloseable {
                         if(!java.util.Objects.equals(approvedRevision,freshRevision))
                             throw new Conflict("ATT-CONFIG-IMPACT-STALE");
                     }
-                },requestId,new ArrayList<>(draft.changes.keySet()),"SOURCE_CHANGE_SET_PUBLISH",
+                },requestId,new ArrayList<>(draft.changes.keySet()),draft.restoreSnapshotId==null
+                        ?"SOURCE_CHANGE_SET_PUBLISH":"SOURCE_RESTORE_PUBLISH",
                         draft.validationRevision,
-                        CENTRAL_RUNTIME_CONFIG.equals(domain) ? "PENDING" : "NOT_APPLICABLE", audit::recordCommitted);
+                        CENTRAL_RUNTIME_CONFIG.equals(domain) ? "PENDING" : "NOT_APPLICABLE",
+                        draft.restoreSnapshotId,audit::recordCommitted);
                 committed = true;
                 auditConfirmed=commitResult.auditConfirmed;
             } catch (SourceFileTransaction.RevisionConflict changed) {
@@ -725,6 +983,7 @@ final class ChangeSetPublisher implements AutoCloseable {
             result.put("published", Boolean.TRUE); result.put("domain", domain); result.put("scopeId", scopeId);
             result.put("changeSetId", id); result.put("beforeRevision", draft.base.sourceRevision);
             result.put("revision", afterRevision); result.put("validationRevision", draft.validationRevision);
+            if(draft.restoreSnapshotId!=null)result.put("restoredFromSnapshotId",draft.restoreSnapshotId);
             result.put("auditConfirmed", Boolean.valueOf(auditConfirmed)); result.put("noStore", Boolean.TRUE);
             if (approvalRevision != null) result.put("configGateRevision", approvalRevision);
             result.put("changedFiles", draftDiffView(draft));
@@ -1046,11 +1305,13 @@ final class ChangeSetPublisher implements AutoCloseable {
     private static boolean excludedDirectory(String domain, String path) {
         String lower = path.toLowerCase(Locale.ROOT);
         if (CENTRAL_RUNTIME_CONFIG.equals(domain) && !lower.equals("config") && !lower.startsWith("config/")) return true;
-        for (String part : lower.split("/")) {
+        if (!CENTRAL_RUNTIME_CONFIG.equals(domain))
+            return att.server.api.source.PackageSourceRevision.excludedDirectory(path);
+        String[] parts = lower.split("/");
+        for (String part : parts) {
             if (set("secrets", "credentials", "private", "auth", "roles", "security", "bootstrap",
                     "schemas", "output", "jobs", "cache", "node_modules", ".npm", ".yarn", ".git", ".att", "target", "logs", "reports",
                     "results", "artifacts", "work", "server").contains(part)) return true;
-            if (!CENTRAL_RUNTIME_CONFIG.equals(domain) && "config".equals(part)) return true;
         }
         return false;
     }
@@ -1320,6 +1581,8 @@ final class ChangeSetPublisher implements AutoCloseable {
         for (Draft draft : drafts.values()) if (draft.actor.equals(actor)) count++;
         return count;
     }
+
+    synchronized void expireDrafts() { expire(); }
 
     private void expire() {
         Instant now = clock.instant();

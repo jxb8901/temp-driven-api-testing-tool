@@ -1360,7 +1360,7 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
-    @Test void packageZipImportUsesOwnerAuthorizationAndStagesWithoutPublishing() throws Exception {
+    @Test void packageZipImportStagesReviewsAndPublishesPackageLocalChanges() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("package-zip-import-packages"));
         Path ownerPackage=createPackage(packages.resolve("alice"));
         Path runtimeConfig=sharedRuntimeConfig();
@@ -1385,6 +1385,13 @@ class ApiServletIntegratedLimitsTest {
             assertEquals(403,unauthorized.status,new String(unauthorized.body(),StandardCharsets.UTF_8));
             assertEquals("ATT-PACKAGE-SOURCE-DENIED",ServerRuntime.JSON.readTree(unauthorized.body())
                     .path("error").path("code").asText(),"Package ownership is checked before parsing an archive");
+
+            byte[] traversal=packageZip("files/partial-import.txt","must-not-publish\n","../outside.yaml","escaped\n");
+            Captured rejectedTraversal=invokeAsContentType(servlet,"alice","POST","/packages/alice/change-sets/import",
+                    Collections.emptyMap(),traversal,"application/zip");
+            assertEquals(400,rejectedTraversal.status,new String(rejectedTraversal.body(),StandardCharsets.UTF_8));
+            assertFalse(Files.exists(ownerPackage.getParent().resolve("outside.yaml")),"A rejected traversal ZIP writes no outside file");
+            assertFalse(Files.exists(ownerPackage.resolve("files/partial-import.txt")),"A rejected ZIP stages no valid prefix entry");
 
             Captured imported=invokeAsContentType(servlet,"alice","POST","/packages/alice/change-sets/import",
                     Collections.emptyMap(),archive,"application/zip");
@@ -1414,11 +1421,45 @@ class ApiServletIntegratedLimitsTest {
                 assertArrayEquals(runtimeConfigBefore,Files.readAllBytes(runtimeConfig),
                         "Package Change Set gates must not modify the global Runtime Config");
             }
-            Captured discarded=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+id+"/discard",
+            Captured published=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+id+"/publish",
                     Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
-            assertEquals(200,discarded.status,new String(discarded.body(),StandardCharsets.UTF_8));
-            assertFalse(Files.exists(ownerPackage.resolve("files/a-imported.txt"))
-                    ||Files.exists(ownerPackage.resolve("files/z-imported.txt")));
+            assertEquals(200,published.status,new String(published.body(),StandardCharsets.UTF_8));
+            assertEquals("first\n",Files.readString(ownerPackage.resolve("files/a-imported.txt")));
+            assertEquals("last\n",Files.readString(ownerPackage.resolve("files/z-imported.txt")));
+            assertArrayEquals(runtimeConfigBefore,Files.readAllBytes(runtimeConfig));
+
+            byte[] replacementArchive=packageZip("files/a-imported.txt","updated\n","files/new-imported.txt","new\n");
+            Captured replacement=invokeAsContentType(servlet,"alice","POST","/packages/alice/change-sets/import",
+                    Collections.emptyMap(),replacementArchive,"application/zip");
+            assertEquals(201,replacement.status,new String(replacement.body(),StandardCharsets.UTF_8));
+            JsonNode replacementDraft=ServerRuntime.JSON.readTree(replacement.body());
+            assertEquals("replace",replacementDraft.path("changedFiles").path(0).path("operation").asText());
+            assertEquals("files/a-imported.txt",replacementDraft.path("changedFiles").path(0).path("path").asText());
+            assertEquals("create",replacementDraft.path("changedFiles").path(1).path("operation").asText());
+            String replacementId=replacementDraft.path("changeSetId").asText();
+            for(String action:List.of("validate","review")) {
+                Captured response=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+replacementId+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+                assertEquals(200,response.status,new String(response.body(),StandardCharsets.UTF_8));
+            }
+            Captured replacementPublished=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+replacementId+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(200,replacementPublished.status,new String(replacementPublished.body(),StandardCharsets.UTF_8));
+            assertEquals("updated\n",Files.readString(ownerPackage.resolve("files/a-imported.txt")));
+            assertEquals("new\n",Files.readString(ownerPackage.resolve("files/new-imported.txt")));
+            assertArrayEquals(runtimeConfigBefore,Files.readAllBytes(runtimeConfig));
+
+            byte[] malformedWorkbookArchive=packageZip("files/valid-prefix.txt","must-stay-private\n",
+                    "testcase/malformed.xlsx","not an XLSX workbook");
+            Captured malformedWorkbookImport=invokeAsContentType(servlet,"alice","POST","/packages/alice/change-sets/import",
+                    Collections.emptyMap(),malformedWorkbookArchive,"application/zip");
+            assertEquals(400,malformedWorkbookImport.status,new String(malformedWorkbookImport.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-PACKAGE-ZIP-INVALID",ServerRuntime.JSON.readTree(malformedWorkbookImport.body())
+                    .path("error").path("code").asText());
+            assertFalse(Files.exists(ownerPackage.resolve("files/valid-prefix.txt")),
+                    "A valid ZIP prefix must not be staged when another entry contains a malformed workbook");
+            assertFalse(Files.exists(ownerPackage.resolve("testcase/malformed.xlsx")),
+                    "A malformed workbook must never become a published Package source");
             assertArrayEquals(runtimeConfigBefore,Files.readAllBytes(runtimeConfig));
         }
     }

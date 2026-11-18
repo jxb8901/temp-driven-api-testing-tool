@@ -62,7 +62,7 @@ public final class PackageSourceRevision {
         if ("package.yaml".equals(lower) || "att-server.yaml".equals(lower)) return false;
         String[] segments = lower.split("/");
         for (String segment : segments) if (segment.isEmpty() || ".".equals(segment)
-                || "..".equals(segment) || EXCLUDED.contains(segment)) return false;
+                || "..".equals(segment) || excludedSegment(segment, segments[0])) return false;
         // Raw runtime asset roots may contain extensionless/binary File Expressions.
         // A script referenced by a Template can also live in a custom Package path.
         if (RAW_ASSET_ROOTS.contains(segments[0])) return true;
@@ -77,9 +77,15 @@ public final class PackageSourceRevision {
     /** Exclude deployment and generated trees when capturing a Package source snapshot. */
     public static boolean excludedDirectory(String logicalPath) {
         if (logicalPath == null || logicalPath.isEmpty()) return false;
-        for (String segment : logicalPath.toLowerCase(Locale.ROOT).split("/"))
-            if (EXCLUDED.contains(segment)) return true;
+        String[] segments = logicalPath.toLowerCase(Locale.ROOT).split("/");
+        for (String segment : segments) if (excludedSegment(segment, segments[0])) return true;
         return false;
+    }
+
+    private static boolean excludedSegment(String segment, String root) {
+        // TARGET is a common symbolic Template directory; keep it in the authored
+        // closure while continuing to omit generated root-level Maven target trees.
+        return EXCLUDED.contains(segment) && !("target".equals(segment) && "templates".equals(root));
     }
 
     public static String digest(Path root) throws IOException {
@@ -104,7 +110,8 @@ public final class PackageSourceRevision {
                 if (dir.equals(canonical)) return FileVisitResult.CONTINUE;
                 String logical = canonical.relativize(dir).toString().replace('\\', '/');
                 String[] segments = logical.toLowerCase(Locale.ROOT).split("/");
-                for (String part : segments) if (EXCLUDED.contains(part)) return FileVisitResult.SKIP_SUBTREE;
+                for (String part : segments)
+                    if (excludedSegment(part, segments[0])) return FileVisitResult.SKIP_SUBTREE;
                 if (attrs.isSymbolicLink() || Files.isSymbolicLink(dir))
                     throw new IOException("Package source contains an unsafe directory");
                 return FileVisitResult.CONTINUE;

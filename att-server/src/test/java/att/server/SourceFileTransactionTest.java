@@ -222,6 +222,37 @@ class SourceFileTransactionTest {
                 "A corrupted published revision must fail closed for new execution snapshots");
     }
 
+    @Test void historyRetentionKeepsCurrentAndReferencedRevisionsAndReclaimsOrphanCopies() throws Exception {
+        Path root=initialTree(),data=Files.createDirectories(temp.resolve("history-retention-data"));
+        SourceFileTransaction transaction=new SourceFileTransaction(data,new SourcePublicationBarrier());
+        Path initial=transaction.pin(PACKAGE,SCOPE,root);String initialId=initial.getFileName().toString();
+        transaction.executionPin(PACKAGE,SCOPE,root);
+        transaction.commit(PACKAGE,SCOPE,initial,"owner",BEFORE_REVISION,AFTER_REVISION,
+                writes("old-a","old-b","first-a","first-b"),()->{});
+        Path first=transaction.pin(PACKAGE,SCOPE,root);String firstId=first.getFileName().toString();
+        transaction.executionPin(PACKAGE,SCOPE,root);
+        transaction.commit(PACKAGE,SCOPE,first,"owner",AFTER_REVISION,BEFORE_REVISION,
+                writes("first-a","first-b","second-a","second-b"),()->{});
+        Path active=transaction.pin(PACKAGE,SCOPE,root);String activeId=active.getFileName().toString();
+        transaction.executionPin(PACKAGE,SCOPE,root);
+
+        Path store=active.getParent().getParent();
+        Path interruptedCopy=Files.createDirectories(store.resolve("executions/.copy-interrupted"));
+        Files.writeString(interruptedCopy.resolve("partial"),"partial");
+        // No concurrent publication is present in this fixture; the WriterLock is the cross-process GC fence.
+        try(SourceRevisionStore.WriterLock ignored=transaction.lock(PACKAGE,SCOPE,root)) {
+            transaction.pruneUnreferencedRevisions(PACKAGE,SCOPE,root,Set.of(firstId));
+        }
+
+        assertTrue(Files.isDirectory(transaction.revisionRoot(PACKAGE,SCOPE,root,firstId)));
+        assertTrue(Files.isDirectory(transaction.revisionRoot(PACKAGE,SCOPE,root,activeId)));
+        assertThrows(java.io.IOException.class,()->transaction.revisionRoot(PACKAGE,SCOPE,root,initialId));
+        assertFalse(Files.exists(store.resolve("executions").resolve(initialId)));
+        assertTrue(Files.isDirectory(store.resolve("executions").resolve(firstId)));
+        assertTrue(Files.isDirectory(store.resolve("executions").resolve(activeId)));
+        assertFalse(Files.exists(interruptedCopy));
+    }
+
     @Test void pinnedRevisionsAreReadOnlyAndDelayedReadersKeepTheirOriginalTree() throws Exception {
         Path root = initialTree();
         Path data = Files.createDirectories(temp.resolve("data"));
@@ -423,8 +454,8 @@ class SourceFileTransactionTest {
         String validationRevision = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
         SourceFileTransaction.CommitResult committed = transaction.commitWithAudit(PACKAGE, SCOPE, active, "alice",
                 BEFORE_REVISION, AFTER_REVISION, writes("old-a", "old-b", "new-a", "new-b"), () -> { },
-                "request-252", List.of("templates/b.yaml", "templates/a.yaml"), "SOURCE_CHANGE_SET_PUBLISH",
-                validationRevision, "NOT_APPLICABLE",
+                "request-252", List.of("templates/b.yaml", "templates/a.yaml"), "SOURCE_RESTORE_PUBLISH",
+                validationRevision, "NOT_APPLICABLE","R22222222222222222222222222222222",
                 record -> { throw new java.io.IOException("injected durable audit failure"); });
         assertEquals(AFTER_REVISION, committed.revision);
         assertFalse(committed.auditConfirmed);
@@ -448,6 +479,7 @@ class SourceFileTransactionTest {
         assertTrue(Files.isDirectory(transaction.revisionRoot(PACKAGE, SCOPE, root, record.afterSnapshotId)));
         assertEquals(validationRevision, record.validationRevision);
         assertEquals("NOT_APPLICABLE", record.activationStatus);
+        assertEquals("R22222222222222222222222222222222",record.restoredFromSnapshotId);
         assertDoesNotThrow(() -> java.time.Instant.parse(record.createdAt));
         assertEquals("COMMITTED", record.outcome);
     }
@@ -499,7 +531,7 @@ class SourceFileTransactionTest {
         Path journal = transactionDirectory.resolve("journal");
         List<String> lines = new java.util.ArrayList<>(Files.readAllLines(journal, StandardCharsets.UTF_8));
         String[] header = lines.get(0).split("\\t", -1);
-        assertEquals(16, header.length);
+        assertEquals(17, header.length);
         header[0] = "att-source-revision-transaction-v2";
         lines.set(0, String.join("\t", java.util.Arrays.copyOf(header, 13)));
         Files.write(journal, lines, StandardCharsets.UTF_8);

@@ -9,6 +9,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -35,6 +37,7 @@ class ChangeSetPublisherTest {
     private SourceFileTransaction transaction;
     private AtomicReference<String> registryRevision;
     private final List<String> audit = new ArrayList<String>();
+    private final List<SourceFileTransaction.AuditRecord> publicationHistory = new ArrayList<>();
     private AtomicInteger validatorCalls;
     private AtomicInteger gateCalls;
 
@@ -48,6 +51,7 @@ class ChangeSetPublisherTest {
         validatorCalls = new AtomicInteger();
         gateCalls = new AtomicInteger();
         audit.clear();
+        publicationHistory.clear();
     }
 
     @Test void publishesMultiFileCandidatesAllOrNoneAndDraftValidationNeverTouchesLiveFiles() throws Exception {
@@ -74,6 +78,99 @@ class ChangeSetPublisherTest {
                     ChangeSetPublisher.OperationInput.create("templates/next.yaml", bytes("id: next\n"))));
             assertEquals(result.get("revision"), next.get("baseSourceRevision"));
         } finally { publisher.close(); }
+    }
+
+    @Test void sourceHistoryReturnsSafeDiffsAndStagesRestoreAsANewCurrentChangeSet() throws Exception {
+        ChangeSetPublisher publisher=publisher(acceptingValidator(),allowingGate());
+        try {
+            Map<String,Object> first=stagePackage(publisher,List.of(
+                    ChangeSetPublisher.OperationInput.create("templates/history.yaml",bytes("id: first\n"))));
+            String firstDraft=String.valueOf(first.get("changeSetId"));validateReview(publisher,firstDraft);
+            publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,firstDraft);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> firstItems=(List<Map<String,Object>>)publisher.sourceHistory(
+                    ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,0,10).get("items");
+            String firstSnapshot=String.valueOf(firstItems.get(0).get("afterSnapshotId"));
+
+            Map<String,Object> second=publisher.stage(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,
+                    (String)publisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false).get("baseSourceRevision"),
+                    registryRevision.get(),List.of(ChangeSetPublisher.OperationInput.replace("templates/history.yaml",bytes("id: second\n"))));
+            String secondDraft=String.valueOf(second.get("changeSetId"));validateReview(publisher,secondDraft);
+            publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,secondDraft);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> entries=(List<Map<String,Object>>)publisher.sourceHistory(
+                    ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,0,10).get("items");
+            String secondSnapshot=String.valueOf(entries.get(0).get("afterSnapshotId"));
+            Map<String,Object> diff=publisher.sourceHistoryDiff(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,
+                    firstSnapshot,secondSnapshot,"templates/history.yaml",0,10);
+            @SuppressWarnings("unchecked") Map<String,Object> changed=(Map<String,Object>)((List<?>)diff.get("items")).get(0);
+            assertEquals("id: first\n",changed.get("beforeContent"));
+            assertEquals("id: second\n",changed.get("afterContent"));
+            assertTrue(changed.get("contentDiff").toString().contains("+id: second"));
+
+            Map<String,String> current=publisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false);
+            Map<String,Object> restore=publisher.stageRestore(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,
+                    firstSnapshot,current.get("baseSourceRevision"),current.get("registryRevision"),"restore-request");
+            assertEquals(firstSnapshot,restore.get("restoredFromSnapshotId"));
+            String restoreDraft=String.valueOf(restore.get("changeSetId"));validateReview(publisher,restoreDraft);
+            Map<String,Object> restored=publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,restoreDraft);
+            assertEquals(firstSnapshot,restored.get("restoredFromSnapshotId"));
+            assertEquals("id: first\n",read("templates/history.yaml"));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> finalHistory=(List<Map<String,Object>>)publisher.sourceHistory(
+                    ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,0,10).get("items");
+            assertEquals("SOURCE_RESTORE_PUBLISH",finalHistory.get(0).get("action"));
+            assertEquals(firstSnapshot,finalHistory.get(0).get("restoredFromSnapshotId"));
+
+            Map<String,Object> summary=publisher.sourceHistorySummary("owner",0,10);
+            @SuppressWarnings("unchecked") Map<String,Object> safe=(Map<String,Object>)((List<?>)summary.get("items")).get(0);
+            assertFalse(safe.containsKey("changedResources"));assertFalse(safe.containsKey("author"));
+            assertFalse(safe.containsKey("afterRevision"));assertTrue(safe.containsKey("changedResourceCount"));
+        } finally {publisher.close();}
+    }
+
+    @Test void expiredPrivateChangeSetDraftsAreReclaimedWithoutAnotherStageRequest() throws Exception {
+        MutableClock clock=new MutableClock(Instant.parse("2026-11-18T00:00:00Z"));
+        ChangeSetPublisher publisher=publisher(clock,1,1,acceptingValidator(),allowingGate(),null);
+        try {
+            Map<String,Object> first=stagePackage(publisher,List.of(
+                    ChangeSetPublisher.OperationInput.create("templates/expired.yaml",bytes("id: first\n"))));
+            String expiredId=String.valueOf(first.get("changeSetId"));
+            clock.advanceSeconds(2);
+
+            publisher.expireDrafts();
+
+            Map<String,Object> next=stagePackage(publisher,List.of(
+                    ChangeSetPublisher.OperationInput.create("templates/next.yaml",bytes("id: next\n"))));
+            assertNotEquals(expiredId,next.get("changeSetId"));
+            assertThrows(ChangeSetPublisher.Missing.class,()->publisher.review(
+                    ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,expiredId));
+        } finally { publisher.close(); }
+    }
+
+    @Test void sourceHistoryDiffNeverReturnsStructuredSecretValues() throws Exception {
+        ChangeSetPublisher publisher=publisher(acceptingValidator(),allowingGate());
+        try {
+            Map<String,Object> first=stagePackage(publisher,List.of(ChangeSetPublisher.OperationInput.create(
+                    "templates/secret-history.yaml",bytes("password: first-secret-value\n"))));
+            String firstDraft=String.valueOf(first.get("changeSetId"));validateReview(publisher,firstDraft);
+            publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,firstDraft);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> firstRows=(List<Map<String,Object>>)publisher.sourceHistory(
+                    ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,0,10).get("items");
+            String before=(String)firstRows.get(0).get("afterSnapshotId");
+            Map<String,String> current=publisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false);
+            Map<String,Object> second=publisher.stage(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,
+                    current.get("baseSourceRevision"),current.get("registryRevision"),List.of(ChangeSetPublisher.OperationInput.replace(
+                            "templates/secret-history.yaml",bytes("password: second-secret-value\n"))));
+            String secondDraft=String.valueOf(second.get("changeSetId"));validateReview(publisher,secondDraft);
+            publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,secondDraft);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> rows=(List<Map<String,Object>>)publisher.sourceHistory(
+                    ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,0,10).get("items");
+            String after=(String)rows.get(0).get("afterSnapshotId");
+            Map<String,Object> diff=publisher.sourceHistoryDiff(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,
+                    before,after,"templates/secret-history.yaml",0,10);
+            @SuppressWarnings("unchecked") Map<String,Object> item=(Map<String,Object>)((List<?>)diff.get("items")).get(0);
+            assertEquals(Boolean.FALSE,item.get("contentAvailable"));assertEquals(Boolean.TRUE,item.get("redacted"));
+            assertFalse(item.containsKey("beforeContent"));assertFalse(item.containsKey("afterContent"));
+            assertFalse(ServerRuntime.JSON.writeValueAsString(diff).contains("secret-value"));
+        } finally {publisher.close();}
     }
 
     @Test void concurrentEditorsFromOneBaseRevisionHaveOneSuccessAndOneTypedConflict() throws Exception {
@@ -671,8 +768,31 @@ class ChangeSetPublisherTest {
     private ChangeSetPublisher publisher(ChangeSetPublisher.CandidateValidator validator,
                                          ChangeSetPublisher.ConfigPublishGate gate,
                                          ChangeSetPublisher.SnapshotGenerator snapshotGenerator) throws Exception {
+        return publisher(Clock.systemUTC(),128,900,validator,gate,snapshotGenerator);
+    }
+
+    private ChangeSetPublisher publisher(Clock clock,int maxDrafts,int ttlSeconds,
+                                         ChangeSetPublisher.CandidateValidator validator,
+                                         ChangeSetPublisher.ConfigPublishGate gate,
+                                         ChangeSetPublisher.SnapshotGenerator snapshotGenerator) throws Exception {
         transaction = new SourceFileTransaction(dataRoot, new SourcePublicationBarrier());
-        return new ChangeSetPublisher(Clock.systemUTC(), 128, 8, 900,
+        ChangeSetPublisher.Audit sourceAudit=new ChangeSetPublisher.Audit() {
+            @Override public void record(String actor,String action,String domain,String scope,String detail) {
+                audit.add(actor+" "+action+" "+domain+" "+scope+" "+detail);
+            }
+            @Override public void recordCommitted(SourceFileTransaction.AuditRecord record) {
+                publicationHistory.add(record);
+                audit.add(record.actor+" "+record.action+" "+record.domain+" "+record.scopeId);
+            }
+            @Override public ChangeSetPublisher.HistoryBatch history(String domain,String scope,int offset,int limit) {
+                List<SourceFileTransaction.AuditRecord> matching=publicationHistory.stream()
+                        .filter(record->record.outcome.equals("COMMITTED")&&record.domain.equals(domain)&&record.scopeId.equals(scope))
+                        .sorted((a,b)->b.createdAt.compareTo(a.createdAt)).toList();
+                int start=Math.min(offset,matching.size()),end=Math.min(matching.size(),start+limit);
+                return new ChangeSetPublisher.HistoryBatch(matching.subList(start,end),matching.size());
+            }
+        };
+        return new ChangeSetPublisher(clock, maxDrafts, 8, ttlSeconds,
                 (domain, scope, actor, systemSettingsWrite) -> {
                     if (ChangeSetPublisher.PACKAGE_SOURCE.equals(domain)) {
                         if (!"owner".equals(scope) || !"owner".equals(actor)) throw new ChangeSetPublisher.Denied();
@@ -685,9 +805,17 @@ class ChangeSetPublisherTest {
                         throw new ChangeSetPublisher.Denied();
                     Path active=transaction.pin(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,scope,centralRoot);
                     return new ChangeSetPublisher.Scope(domain, scope, active, active, null, SCHEMA_REVISION);
-                }, validator, gate,
-                (actor, action, domain, scope, detail) -> audit.add(actor + " " + action + " " + domain + " " + scope + " " + detail),
+                }, validator, gate,sourceAudit,
                 transaction, snapshotGenerator);
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant now;
+        MutableClock(Instant now){this.now=now;}
+        void advanceSeconds(long seconds){now=now.plusSeconds(seconds);}
+        @Override public ZoneId getZone(){return ZoneId.of("UTC");}
+        @Override public Clock withZone(ZoneId zone){return this;}
+        @Override public Instant instant(){return now;}
     }
 
     private String read(String path) throws Exception {

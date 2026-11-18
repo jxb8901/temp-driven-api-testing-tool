@@ -270,6 +270,36 @@ final class SourceRevisionStore {
         forceDirectory(registration.revisions);
     }
 
+    /** Caller holds the registered cross-process WriterLock and publication barrier. */
+    int pruneUnreferencedRevisions(String domain,String scopeId,Path root,Set<String> retainedIds) throws Exception {
+        Registration registration=lookup(domain,scopeId,root);
+        Set<String> keep=new HashSet<>(retainedIds==null?Set.of():retainedIds);
+        keep.add(readActive(registration).id);
+        int removed=pruneRevisionDirectory(registration.revisions,keep);
+        removed+=pruneRevisionDirectory(registration.executions,keep);
+        if(removed>0) { forceDirectory(registration.revisions);forceDirectory(registration.executions); }
+        return removed;
+    }
+
+    private static int pruneRevisionDirectory(Path directory,Set<String> keep) throws IOException {
+        if(Files.isSymbolicLink(directory)||!Files.isDirectory(directory,LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Source revision storage is unavailable");
+        int removed=0;
+        try(java.nio.file.DirectoryStream<Path> entries=Files.newDirectoryStream(directory)) {
+            for(Path entry:entries) {
+                String name=entry.getFileName().toString();
+                if(Files.isSymbolicLink(entry))throw new IOException("Source revision storage contains an unsafe entry");
+                if(name.startsWith(".copy-")) {
+                    deleteTree(entry);removed++;continue;
+                }
+                if(!name.matches("R[A-F0-9]{32}")||!Files.isDirectory(entry,LinkOption.NOFOLLOW_LINKS))
+                    throw new IOException("Source revision storage contains an unknown entry");
+                if(!keep.contains(name)) { deleteTree(entry);removed++; }
+            }
+        }
+        return removed;
+    }
+
     Path revisionRoot(String domain,String scopeId,Path root,String id) throws Exception {
         Registration registration=lookup(domain,scopeId,root);
         Path revision=checkedRevision(registration,id);

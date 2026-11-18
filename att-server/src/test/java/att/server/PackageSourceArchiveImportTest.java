@@ -11,6 +11,7 @@ import java.util.zip.ZipOutputStream;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PackageSourceArchiveImportTest {
     @Test void acceptsRelativeUtf8FilesAndEmptyDirectoryEntries() throws Exception {
@@ -40,6 +41,27 @@ class PackageSourceArchiveImportTest {
         String repeated="A".repeat(800_000);
         assertThrows(PackageSourceArchiveImport.InvalidArchive.class,
                 ()->PackageSourceArchiveImport.parse(zip(new String[][]{{"templates/large.yaml",repeated}})));
+    }
+
+    @Test void rejectsCompressedExpandedAndEntryCountQuotas() throws Exception {
+        assertThrows(PackageSourceArchiveImport.InvalidArchive.class,
+                ()->PackageSourceArchiveImport.parse(new byte[PackageSourceArchiveImport.MAX_ARCHIVE_BYTES+1]));
+
+        String[][] tooManyEntries=new String[PackageSourceArchiveImport.MAX_ENTRIES+1][2];
+        for(int index=0;index<tooManyEntries.length;index++)
+            tooManyEntries[index]=new String[]{"files/entry-"+index+".txt","x"};
+        assertThrows(PackageSourceArchiveImport.InvalidArchive.class,
+                ()->PackageSourceArchiveImport.parse(zip(tooManyEntries)));
+
+        String[] paths={"files/one.txt","files/two.txt","files/three.txt"};
+        byte[][] contents={new byte[3*1024*1024],new byte[3*1024*1024],new byte[3*1024*1024]};
+        java.util.Random random=new java.util.Random(42L);
+        for(byte[] content:contents)random.nextBytes(content);
+        byte[] expandedArchive=zipBytes(paths,contents);
+        assertTrue(expandedArchive.length<PackageSourceArchiveImport.MAX_ARCHIVE_BYTES,
+                "The fixture reaches the expanded-size bound without exceeding the compressed request bound");
+        assertThrows(PackageSourceArchiveImport.InvalidArchive.class,
+                ()->PackageSourceArchiveImport.parse(expandedArchive));
     }
 
     @Test void rejectsUnixSpecialFileEntries() throws Exception {
@@ -84,6 +106,16 @@ class PackageSourceArchiveImportTest {
                 output.putNextEntry(new ZipEntry(item[0]));
                 output.write(item[1].getBytes(StandardCharsets.UTF_8));
                 output.closeEntry();
+            }
+        }
+        return bytes.toByteArray();
+    }
+
+    private static byte[] zipBytes(String[] paths,byte[][] contents) throws Exception {
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+        try(ZipOutputStream output=new ZipOutputStream(bytes,StandardCharsets.UTF_8)) {
+            for(int index=0;index<paths.length;index++) {
+                output.putNextEntry(new ZipEntry(paths[index]));output.write(contents[index]);output.closeEntry();
             }
         }
         return bytes.toByteArray();

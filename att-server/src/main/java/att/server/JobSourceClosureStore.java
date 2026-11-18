@@ -153,6 +153,7 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
     private final Map<String, Registration> registrations = new ConcurrentHashMap<>();
     private final Map<String, LeaseRecord> leases = new ConcurrentHashMap<>();
     private final Set<String> retired = ConcurrentHashMap.newKeySet();
+    private volatile boolean leaseIndexIncomplete;
 
     JobSourceClosureStore(Path dataDirectory) throws IOException {
         directory = dataDirectory.resolve("job-source-closures").toAbsolutePath().normalize();
@@ -257,6 +258,53 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
         for (LeaseRecord record : leases.values())
             if (record.owners != null && record.owners.contains(ownerReference)) return snapshotAvailable(record);
         return false;
+    }
+
+    /** Source revisions held by durable Job/Schedule leases must outlive history retention. */
+    synchronized Set<String> retainedSourceRevisionIds(String domain,String scopeId) throws IOException {
+        if(!PACKAGE_DOMAIN.equals(domain)&&!CONFIG_DOMAIN.equals(domain))
+            throw new IllegalArgumentException("The immutable source domain is invalid");
+        refreshDurableLeases();
+        if(leaseIndexIncomplete)throw new IOException("The immutable source lease index is incomplete");
+        Set<String> retained=new LinkedHashSet<>();
+        try {
+            for(LeaseRecord record:leases.values()) {
+                RevisionSet revisions=revisionSet(record.revisions);
+                RevisionIdentity identity=PACKAGE_DOMAIN.equals(domain)
+                        ?(revisions.packageSourceRevision==null?revisions.businessSource:revisions.packageSourceRevision)
+                        :revisions.configSource;
+                if(identity==null)throw new IOException("A durable source lease has no revision identity");
+                if(scopeId.equals(identity.scopeId)) {
+                    if(!identity.revision.matches("R[A-F0-9]{32}"))
+                        throw new IOException("A durable source lease revision identity is invalid");
+                    retained.add(identity.revision);
+                }
+            }
+        } catch(RuntimeException invalid) {
+            throw new IOException("A durable source lease revision identity is invalid",invalid);
+        }
+        return Collections.unmodifiableSet(retained);
+    }
+
+    private void refreshDurableLeases() throws IOException {
+        Set<String> present=new LinkedHashSet<>();
+        leaseIndexIncomplete=false;
+        try(DirectoryStream<Path> paths=Files.newDirectoryStream(leasesDirectory,"L*.json")) {
+            for(Path path:paths) {
+                if(Files.isSymbolicLink(path)||!Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)
+                        ||Files.size(path)>1024*1024) { leaseIndexIncomplete=true;continue; }
+                try {
+                    LeaseRecord record=ServerRuntime.JSON.readValue(path.toFile(),LeaseRecord.class);
+                    if(record.id==null||!record.id.matches("L[A-F0-9]{32}")||record.owners==null||record.owners.isEmpty()
+                            ||record.packageRoot==null||record.configRoot==null||record.revisions==null
+                            ||!path.getFileName().toString().equals(record.id+".json")) {
+                        leaseIndexIncomplete=true;continue;
+                    }
+                    present.add(record.id);leases.put(record.id,record);
+                } catch(Exception invalid) { leaseIndexIncomplete=true; }
+            }
+        }
+        if(!leaseIndexIncomplete)leases.keySet().retainAll(present);
     }
 
     synchronized void bindWorkerConfiguration(String leaseId,Path workerConfigPath) throws IOException {
@@ -860,14 +908,20 @@ final class JobSourceClosureStore implements ImmutableSourceClosureStore {
     private void loadLeases() throws IOException {
         try (DirectoryStream<Path> paths = Files.newDirectoryStream(leasesDirectory, "L*.json")) {
             for (Path path : paths) {
-                if (Files.isSymbolicLink(path) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || Files.size(path) > 1024 * 1024)
+                if (Files.isSymbolicLink(path) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || Files.size(path) > 1024 * 1024) {
+                    leaseIndexIncomplete=true;
                     continue;
+                }
                 try {
                     LeaseRecord record = ServerRuntime.JSON.readValue(path.toFile(), LeaseRecord.class);
                     if (record.id != null && record.id.matches("L[A-F0-9]{32}") && record.owners != null && !record.owners.isEmpty()
                             && record.packageRoot != null && record.configRoot != null && record.revisions != null
                             && path.getFileName().toString().equals(record.id + ".json")) leases.put(record.id, record);
-                } catch (Exception invalid) { /* Corrupt leases remain unavailable; never resolve them by a mutable source path. */ }
+                    else leaseIndexIncomplete=true;
+                } catch (Exception invalid) {
+                    leaseIndexIncomplete=true;
+                    /* Corrupt leases remain unavailable; never resolve them by a mutable source path. */
+                }
             }
         }
     }

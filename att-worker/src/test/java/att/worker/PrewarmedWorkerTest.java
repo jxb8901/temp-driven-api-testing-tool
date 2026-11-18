@@ -148,6 +148,47 @@ class PrewarmedWorkerTest {
         } finally {process.destroyForcibly();}
     }
 
+    @Test void sameOwnerToolCannotRenameOrUnlinkAcceptedSourceOrPerformItsFollowUpSideEffect() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"The OS source sandbox is not available on Windows");
+        for(String operation:Arrays.asList("rename","unlink")) {
+            Path root=fixture(temp.resolve("sandbox-"+operation+"-package-"+UUID.randomUUID()));
+            Files.createDirectories(root.resolve("files"));
+            Path acceptedFile=root.resolve("files/watched.txt");
+            Files.write(acceptedFile,"accepted-value\n".getBytes(StandardCharsets.UTF_8));
+            Path renamedFile=root.resolve("files/watched.txt.renamed");
+            Path sideEffect=root.resolve("output/"+operation+"-side-effect.marker");
+            String script="#!/bin/sh\nset -e\ntool_dir=$(CDPATH= cd \"$(dirname \"$0\")\" && pwd)\n"
+                    +"source=\"$tool_dir/../files/watched.txt\"\n"
+                    +"if [ \"$2\" = rename ]; then mv \"$source\" \"$source.renamed\"; else rm \"$source\"; fi\n"
+                    +"touch \"$1\"\n";
+            fixtureWithLocalTool(root,sideEffect,script,operation);
+            SourceArchive accepted=sourceArchive(root);
+            Map<String,Object> request=request(root,"debug");attachSnapshot(request,accepted);
+            Files.createDirectories(Paths.get(String.valueOf(request.get("outputDirectory"))));
+            boolean sandboxAvailable=osSandboxAvailable(accepted,root.resolve("output"));
+            Process process;
+            try { process=startCold(root,accepted); }
+            catch(java.io.IOException unavailable) {
+                assertFalse(sandboxAvailable,"An available OS sandbox must launch the Worker process");
+                assertFalse(Files.exists(sideEffect),"The Tool must not run without OS isolation");
+                assertEquals("accepted-value",readUtf8(accepted.packageRoot.resolve("files/watched.txt")).trim());
+                continue;
+            }
+            try {
+                String output=assign(process,mapper.writeValueAsString(request));
+                assertFalse(Files.exists(sideEffect),"The Tool must stop before its follow-up side effect: "+operation);
+                assertTrue(Files.isRegularFile(accepted.packageRoot.resolve("files/watched.txt")),
+                        "The accepted source path must remain present: "+operation);
+                assertEquals("accepted-value",readUtf8(accepted.packageRoot.resolve("files/watched.txt")).trim(),
+                        "Accepted source bytes must remain unchanged: "+operation);
+                assertFalse(Files.exists(accepted.packageRoot.resolve("files/watched.txt.renamed")),
+                        "The accepted source must not be renamed: "+operation);
+                if(sandboxAvailable) assertTrue(output.contains("exitCode: 1"),output);
+                else assertNotEquals(0,process.exitValue(),"Unavailable OS isolation must fail before Worker execution");
+            } finally {process.destroyForcibly();}
+        }
+    }
+
     @Test void workerRejectsAStagedSourceMutationBetweenReadsDuringExecution() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"The mutation fixture uses a POSIX package-local executable");
         Path root=fixture(temp.resolve("mutation-package-"+UUID.randomUUID()));

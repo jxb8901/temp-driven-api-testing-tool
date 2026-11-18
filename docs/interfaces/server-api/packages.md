@@ -111,3 +111,54 @@ Comparison requires a section ID returned by the declared or effective view. The
 The `source` endpoint resolves eligible package-local text references against their origin under `safe-package-files`; `allowlist-only` requires the existing exact package-relative `server.inspection.safeTextSources` entries. A linked request must include the opaque Server-issued `referenceId` returned by its authorized parent source; caller-supplied path and origin are insufficient. External scripts are available only through their exact canonical per-package allowlist under a configured external root, and their absolute paths are never returned. This remains a bounded source endpoint, not an arbitrary file browser. Testdata record previews require an effective descriptor ID. Literal records are paged with `limit` from 1 to 100 (the UI requests 50 at a time). Generated descriptors return `state: "preview-required"` and no records unless `previewGenerated=true` is explicitly requested. The same inspection identity, redaction policy, worker, source-size, response-size, queue, and timeout limits apply.
 
 Configuration responses include `view`, `state`, `schemaVersion` when available, and `diagnostics`. Paged responses also include `section`, `offset`, `limit`, `total`, and `nextOffset`. An invalid configuration returns HTTP 200 with `state: "invalid"` and a stable diagnostic; malformed profile parameters return `400`. Unknown packages return `404`, oversized responses return `413`, a full inspection queue returns `503`, and an inspector timeout returns `504`. The same response-size, queue, and timeout limits used by resource inspection apply.
+
+## Source history, diff, and restore
+
+Package source history is separate from Job artifacts. Package owners can read complete permitted source history; another authenticated Package operator receives only a safe summary. Central Runtime Config history is a separate namespace and requires active `SYSTEM_SETTINGS_WRITE` (ADMIN). Revoked Package owners cannot use these routes to read old source. All successful responses use `Cache-Control: private, no-store`.
+
+```http
+GET /api/v1/packages/{packageId}/source-history?offset=0&limit=50
+GET /api/v1/packages/{packageId}/source-history/diff?beforeSnapshotId={snapshotId}&afterSnapshotId={snapshotId}&offset=0&limit=50
+GET /api/v1/packages/{packageId}/source-history/diff?beforeSnapshotId={snapshotId}&afterSnapshotId={snapshotId}&path=load%2Fscenario.yaml
+POST /api/v1/packages/{packageId}/source-history/restore
+
+GET /api/v1/configuration/source-history?offset=0&limit=50
+GET /api/v1/configuration/source-history/diff?beforeSnapshotId={snapshotId}&afterSnapshotId={snapshotId}&path=config%2Fconfig.yaml
+POST /api/v1/configuration/source-history/restore
+```
+
+History pages are ordered newest first. `offset` is zero-based; `limit` defaults to 50 and accepts 1–100. Owner/Admin history includes transaction and revision metadata, action, author, snapshot IDs, permitted changed logical paths, validation revision, and activation status. Non-owner Package summaries omit paths, authors, snapshot IDs, and revision digests. The diff endpoint without `path` returns a paged list of changed permitted paths and byte counts. Add one logical `path` to request its text diff. The Server returns content only for bounded UTF-8 text that passes protected-value checks; binary, oversized, protected, or unparseable content returns metadata without source bytes. File references remain literal source text.
+
+Each source scope retains at most the newest 500 committed transactions. History responses include a `retention` object with `transactionLimit`, `retainedTransactions`, and a `state` of `within_limit` or `cleanup_pending`. Scheduled cleanup removes older audit rows and revision copies no longer referenced by retained history, the active source pointer, or a durable Job/Schedule source lease. Old snapshots outside that window may no longer be available for Diff or Restore. Expired private Change Set drafts are reclaimed at least once per minute; crash recovery reconciles transaction journals, and the periodic source-history sweep removes abandoned `.copy-*` revision directories.
+
+Restore creates a new Change Set from an immutable snapshot against the current source revision. It never rewrites the selected history entry or changes an accepted Job's pinned source. Send the current revision returned by the owner/Admin history response; Package restores also require the current Package registry revision:
+
+```json
+{
+  "snapshotId": "R0123456789ABCDEF0123456789ABCDEF",
+  "expectedSourceRevision": "<current source revision>",
+  "registryRevision": "<current Package registry revision>"
+}
+```
+
+Omit `registryRevision` for Central Runtime Config. A successful request returns a new `changeSetId` and `restoredFromSnapshotId`; continue through the existing Change Set `validate`, `review`, and `publish` actions. Package restore uses the Package owner permission boundary. Central Config restore remains subject to the current Config impact and publication gate, including rejection when that gate cannot approve the candidate. A stale source or Package registry revision returns `409`; invalid, unavailable, or over-limit restores return a safe error without publishing.
+
+History and diff ignore query parameters that have no documented meaning. Restore accepts only `snapshotId`, `expectedSourceRevision`, and `registryRevision` for Package sources; Central Runtime Config restore accepts the first two fields. The API does not expose physical revision-store paths or provide unrestricted Central Config export.
+
+## Package ZIP import
+
+Package owners can import a ZIP as a private Change Set. The import does not write published Package files or Runtime Config. It uses the existing Change Set validation, review, and publication gates.
+
+```http
+POST /api/v1/packages/{packageId}/change-sets/import
+Content-Type: application/zip
+X-ATT-CSRF: {token}
+
+<raw ZIP request body>
+```
+
+The Server parses the complete archive before staging any files. Each entry becomes a `create` or `replace` operation against the current Package revision. The `201` response contains the new `changeSetId` and a path-sorted `changedFiles` preview. Check that preview, then call the normal Change Set `validate`, `review`, and `publish` endpoints. A stale source or registry revision returns `409`; an invalid archive or disallowed Package path returns `400`. Rejected archives create no draft and publish no partial entries.
+
+The importer accepts at most 16 MiB of compressed data, 32 entries, 8 MiB of expanded file data, 4 MiB per file, and a 200:1 expansion ratio. Directory entries must be empty. It rejects traversal, absolute and drive-prefixed paths, backslashes, duplicate or case-colliding paths, file/directory conflicts, symlinks and special files, unsupported ZIP metadata, and inconsistent or malformed central directories. Nested archives are never recursively extracted. Imported paths and content still pass the Package Change Set allowlist and file validators, including workbook archive checks.
+
+This request imports Package source into the Package's own Change Set. It does not import or export Job Artifact ZIPs, write another Package, or change global Runtime Config. The API does not provide Package source ZIP export.

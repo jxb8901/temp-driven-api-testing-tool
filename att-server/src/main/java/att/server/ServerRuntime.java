@@ -340,6 +340,10 @@ final class ServerRuntime implements AutoCloseable {
                         store.audit(actor,action,null,ChangeSetPublisher.PACKAGE_SOURCE.equals(domain)?scopeId:null,
                                 domain+" "+scopeId+" "+detail);
                     }
+                    @Override public ChangeSetPublisher.HistoryBatch history(String domain,String scopeId,
+                                                                               int offset,int limit) throws Exception {
+                        return store.sourcePublicationHistory(domain,scopeId,offset,limit);
+                    }
                     @Override public void recordCommitted(SourceFileTransaction.AuditRecord record) throws Exception {
                         SourceFileTransaction.AuditRecord durableRecord=record;
                         if(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(record.domain)) {
@@ -410,7 +414,9 @@ final class ServerRuntime implements AutoCloseable {
                 r->{Thread t=new Thread(r,"att-server-validation");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
         try {
         store.interruptActiveValidationRecords(clock.instant());
-        recover();reconcileDeletingJobsSafely();cleanupExpiredJobsSafely();recoverArtifactArchivesSafely();recoverLoadReportV2Safely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
+        recover();reconcileDeletingJobsSafely();cleanupExpiredJobsSafely();recoverArtifactArchivesSafely();recoverLoadReportV2Safely();
+        cleanupSourceHistorySafely();retention.scheduleWithFixedDelay(this::cleanupExpiredJobsSafely,1,1,TimeUnit.HOURS);
+        retention.scheduleWithFixedDelay(this::cleanupSourceHistorySafely,1,1,TimeUnit.HOURS);
         if(config.jobStorage.enabled){if(!skipInitialStorageSweep)cleanupJobStorageSafely();retention.scheduleWithFixedDelay(this::cleanupJobStorageSafely,config.jobStorage.cleanupIntervalMinutes,config.jobStorage.cleanupIntervalMinutes,TimeUnit.MINUTES);}
         artifactMaintenance.scheduleWithFixedDelay(this::recoverArtifactArchivesSafely,5,5,TimeUnit.MINUTES);
         artifactMaintenance.scheduleWithFixedDelay(this::recoverLoadReportV2Safely,5,5,TimeUnit.MINUTES);
@@ -4382,8 +4388,35 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void expireDraftsSafely() {
         synchronized(draftLock){expireDrafts();}
+        changeSetPublisher.expireDrafts();
         try {store.expireReplayIntents(clock.instant().toEpochMilli());}
         catch(Exception failure){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to expire old replay intents");}
+    }
+    private void cleanupSourceHistorySafely() {
+        if(closing)return;
+        Map<String,Path> packages=packageRegistry.snapshot().packages;
+        for(Map.Entry<String,Path> entry:packages.entrySet())
+            cleanupSourceHistoryScope(ChangeSetPublisher.PACKAGE_SOURCE,entry.getKey(),entry.getValue());
+        try {
+            Path central=ServerConfig.runtimeConfigRoot(config.runtimeConfigPath).toRealPath();
+            cleanupSourceHistoryScope(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,central);
+        } catch(Exception unavailable) {
+            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Central source history cleanup will retry");
+        }
+    }
+    private void cleanupSourceHistoryScope(String domain,String scopeId,Path root) {
+        java.util.concurrent.locks.Lock publicationLock=sourcePublicationBarrier.writeLock();
+        if(!publicationLock.tryLock())return;
+        try(SourceRevisionStore.WriterLock ignored=sourceFileTransaction.lock(domain,scopeId,root)) {
+            Set<String> retainedLeases=jobSourceClosures.retainedSourceRevisionIds(domain,scopeId);
+            Set<String> retained=new LinkedHashSet<>(store.pruneSourcePublicationHistory(
+                    domain,scopeId,ChangeSetPublisher.MAX_HISTORY_RECORDS));
+            retained.addAll(retainedLeases);
+            sourceFileTransaction.pruneUnreferencedRevisions(domain,scopeId,root,retained);
+        } catch(Exception failure) {
+            java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Source history cleanup will retry");
+        } finally { publicationLock.unlock(); }
     }
     private static void requireObject(JsonNode value,String message) {if(value==null||!value.isObject())throw new IllegalArgumentException(message);}
     private static void requireOnlyFields(JsonNode object,String... allowed) {

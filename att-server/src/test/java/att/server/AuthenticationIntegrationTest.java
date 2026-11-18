@@ -1,5 +1,10 @@
 package att.server;
 
+import att.config.FrameworkConfig;
+import att.config.FrameworkConfigLoader;
+import att.config.SuiteConfigResolver;
+import att.excel.ExcelTestSuiteLoader;
+import att.snapshot.TestcaseSnapshotService;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.catalina.realm.MemoryRealm;
 import org.apache.catalina.startup.Tomcat;
@@ -109,6 +114,10 @@ class AuthenticationIntegrationTest {
             row.createCell(2).setCellValue("safe");row.createCell(3).setCellValue("TARGET");row.createCell(4).setCellValue("safe");
             workbook.write(output);
         }
+        Path workbookPath=pkg.resolve("testcase/cases.xlsx");
+        FrameworkConfig globalConfig=new FrameworkConfigLoader().load(home.resolve("config/config.yaml"),home,pkg,"SIT");
+        FrameworkConfig suiteConfig=new SuiteConfigResolver(pkg,globalConfig).resolve(workbookPath);
+        new TestcaseSnapshotService().write(workbookPath,suiteConfig,new ExcelTestSuiteLoader(suiteConfig).load(workbookPath));
         String original="# keep this comment and authored ordering\nschemaVersion: att-package/v1\ndefaultEnvironment: SIT\n";
         Files.writeString(pkg.resolve("package.yaml"),original);
         Files.writeString(adminPackage.resolve("package.yaml"),original);
@@ -177,6 +186,8 @@ class AuthenticationIntegrationTest {
             assertEquals(200,central.statusCode(),central.body());
             assertEquals(centralText,ServerRuntime.JSON.readTree(central.body()).path("text").asText());
             assertEquals("private, no-store",central.headers().firstValue("Cache-Control").orElseThrow());
+            assertEquals(200,sendWithCookie(client,port,"GET","/att/api/v1/configuration/source-history",admin.cookie,null,null,null).statusCode());
+            assertEquals(403,sendWithCookie(client,port,"GET","/att/api/v1/configuration/source-history",owner.cookie,null,null,null).statusCode());
             List<String> embeddedProtectedRecords=List.of(
                     "schemaVersion: att-package/v1\npayload: |\n  classification: secret\n  value: route-block-canary\n",
                     "schemaVersion: att-package/v1\npayload: >\n  classification: secret\n  value: route-folded-canary\n",
@@ -210,6 +221,59 @@ class AuthenticationIntegrationTest {
             HttpResponse<String> published=sendWithCookie(client,port,"POST",base+"/drafts/"+id+"/publish",owner.cookie,origin,owner.csrf,"{}");
             assertEquals(200,published.statusCode(),published.body());assertEquals(candidate,Files.readString(pkg.resolve("package.yaml")));
             assertEquals(200,sendWithCookie(client,port,"GET",base+"/history",owner.cookie,null,null,null).statusCode());
+            String sourceHistoryPath="/att/api/v1/packages/owner/source-history";
+            HttpResponse<String> sourceHistory=sendWithCookie(client,port,"GET",sourceHistoryPath,owner.cookie,null,null,null);
+            assertEquals(200,sourceHistory.statusCode(),sourceHistory.body());
+            assertEquals("private, no-store",sourceHistory.headers().firstValue("Cache-Control").orElseThrow());
+            JsonNode sourceHistoryBody=ServerRuntime.JSON.readTree(sourceHistory.body());
+            assertTrue(sourceHistoryBody.path("currentSourceRevision").isTextual());
+            assertTrue(sourceHistoryBody.path("registryRevision").isTextual());
+            assertEquals(ChangeSetPublisher.MAX_HISTORY_RECORDS,sourceHistoryBody.path("retention").path("transactionLimit").asInt());
+            assertEquals("within_limit",sourceHistoryBody.path("retention").path("state").asText());
+            JsonNode publication=sourceHistoryBody.path("items").get(0);
+            String beforeSnapshot=publication.path("beforeSnapshotId").asText();
+            String afterSnapshot=publication.path("afterSnapshotId").asText();
+            assertTrue(publication.path("changedResources").toString().contains("package.yaml"));
+            String diffPath=sourceHistoryPath+"/diff?beforeSnapshotId="+beforeSnapshot+"&afterSnapshotId="+afterSnapshot+"&path=package.yaml";
+            HttpResponse<String> sourceDiff=sendWithCookie(client,port,"GET",diffPath,owner.cookie,null,null,null);
+            assertEquals(200,sourceDiff.statusCode(),sourceDiff.body());
+            assertEquals(original,ServerRuntime.JSON.readTree(sourceDiff.body()).path("items").get(0).path("beforeContent").asText());
+            assertEquals(candidate,ServerRuntime.JSON.readTree(sourceDiff.body()).path("items").get(0).path("afterContent").asText());
+            HttpResponse<String> safeHistory=sendWithCookie(client,port,"GET",sourceHistoryPath,other.cookie,null,null,null);
+            assertEquals(200,safeHistory.statusCode(),safeHistory.body());
+            assertFalse(safeHistory.body().contains("package.yaml"));assertFalse(safeHistory.body().contains("defaultEnvironment"));
+            assertTrue(ServerRuntime.JSON.readTree(safeHistory.body()).path("items").get(0).path("changedResourceCount").asInt()>0);
+            HttpResponse<String> safeDiff=sendWithCookie(client,port,"GET",diffPath,other.cookie,null,null,null);
+            assertEquals(200,safeDiff.statusCode(),safeDiff.body());
+            assertEquals(Boolean.FALSE,ServerRuntime.JSON.readTree(safeDiff.body()).path("items").get(0).path("contentAvailable").asBoolean());
+
+            String restoreBody=ServerRuntime.JSON.writeValueAsString(Map.of("snapshotId",beforeSnapshot,
+                    "expectedSourceRevision",sourceHistoryBody.path("currentSourceRevision").asText(),
+                    "registryRevision",sourceHistoryBody.path("registryRevision").asText()));
+            HttpResponse<String> restore=sendWithCookie(client,port,"POST",sourceHistoryPath+"/restore",owner.cookie,origin,owner.csrf,restoreBody);
+            assertEquals(201,restore.statusCode(),restore.body());
+            String restoreId=ServerRuntime.JSON.readTree(restore.body()).path("changeSetId").asText();
+            for(String action:List.of("validate","review")) {
+                HttpResponse<String> response=sendWithCookie(client,port,"POST","/att/api/v1/packages/owner/change-sets/"+restoreId+"/"+action,
+                        owner.cookie,origin,owner.csrf,"{}");
+                assertEquals(200,response.statusCode(),response.body());
+            }
+            HttpResponse<String> restored=sendWithCookie(client,port,"POST","/att/api/v1/packages/owner/change-sets/"+restoreId+"/publish",
+                    owner.cookie,origin,owner.csrf,"{}");
+            assertEquals(200,restored.statusCode(),restored.body());assertEquals(original,Files.readString(pkg.resolve("package.yaml")));
+            JsonNode restoreHistory=ServerRuntime.JSON.readTree(sendWithCookie(client,port,"GET",sourceHistoryPath,owner.cookie,null,null,null).body());
+            assertEquals("SOURCE_RESTORE_PUBLISH",restoreHistory.path("items").get(0).path("action").asText());
+            assertEquals(beforeSnapshot,restoreHistory.path("items").get(0).path("restoredFromSnapshotId").asText());
+            HttpResponse<String> firstHistoryPage=sendWithCookie(client,port,"GET",sourceHistoryPath+"?offset=0&limit=1",owner.cookie,null,null,null);
+            assertEquals(200,firstHistoryPage.statusCode(),firstHistoryPage.body());
+            JsonNode firstHistoryPageBody=ServerRuntime.JSON.readTree(firstHistoryPage.body());
+            assertEquals(1,firstHistoryPageBody.path("items").size());assertEquals(2,firstHistoryPageBody.path("total").asInt());
+            assertTrue(firstHistoryPageBody.path("hasMore").asBoolean(),"The first history page reports another retained transaction");
+            HttpResponse<String> secondHistoryPage=sendWithCookie(client,port,"GET",sourceHistoryPath+"?offset=1&limit=1",owner.cookie,null,null,null);
+            assertEquals(200,secondHistoryPage.statusCode(),secondHistoryPage.body());
+            JsonNode secondHistoryPageBody=ServerRuntime.JSON.readTree(secondHistoryPage.body());
+            assertEquals(1,secondHistoryPageBody.path("items").size());assertFalse(secondHistoryPageBody.path("hasMore").asBoolean());
+            assertEquals(publication.path("transactionId").asText(),secondHistoryPageBody.path("items").get(0).path("transactionId").asText());
             for(boolean revoke:List.of(false,true)) {
                 source=sendWithCookie(client,port,"GET",base+"/source",owner.cookie,null,null,null);
                 digest=ServerRuntime.JSON.readTree(source.body()).path("manifestDigest").asText();

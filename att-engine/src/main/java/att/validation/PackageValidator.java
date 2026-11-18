@@ -1664,7 +1664,11 @@ public final class PackageValidator {
         context.seedDebugVariables(debugVariables);
         for (String name : assignedCaseVariables) context.noteValidationCaseVariableAssigned(name);
         context.beginStage(stage, template.name(), template.directory());
-        att.template.UnifiedTemplateEngine engine = new att.template.UnifiedTemplateEngine(new att.exec.ToolInvoker(projectRoot, config));
+        // Package validation also runs on discovery-only Runtime Config. This
+        // engine only checks expressions and Package file references; wiring an
+        // execution ToolInvoker would construct execution-only helpers and reject
+        // metadata validation before any Action is evaluated.
+        att.template.UnifiedTemplateEngine engine = att.template.UnifiedTemplateEngine.forProject(projectRoot);
         Set<String> completedActions = new LinkedHashSet<String>();
         Set<String> actionIds = new LinkedHashSet<String>();
         validateTemplateRuntimeActions(template, testCase, config, caseFile, assignedCaseVariables,

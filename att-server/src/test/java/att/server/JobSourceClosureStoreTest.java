@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -86,6 +87,32 @@ class JobSourceClosureStoreTest {
         store.releaseOwner("schedule:S00000000000000000000000000000001:1");
         assertFalse(store.hasOwner("schedule:S00000000000000000000000000000001:1"));
         assertTrue(Files.exists(packageRoot.resolve("templates/use.yaml")),"Retirement does not delete bytes owned by immutable revisions");
+    }
+
+    @Test void durableJobAndScheduleLeasesPinPackageAndCentralHistoryRevisionsAcrossRestart() throws Exception {
+        Path data=Files.createDirectories(temp.resolve("lease-retention-data"));
+        Path packageRoot=sourceTree("R11000000000000000000000000000001","Pinned Package",true);
+        Path configRoot=sourceTree("R11000000000000000000000000000002","Pinned Config",false);
+        RevisionSet revisions=revisions(packageRoot,configRoot);
+        JobSourceClosureStore store=new JobSourceClosureStore(data);
+        store.registerSnapshot(revisions.packageSourceRevision,ChangeSetPublisher.PACKAGE_SOURCE,packageRoot);
+        store.registerSnapshot(revisions.configSource,ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,configRoot);
+        var job=store.acquire(new SourceManagementContracts.SourceLeaseRequest(PACKAGE_ID,"SIT",revisions,
+                List.of("templates/use.yaml","config.yaml"),"job:J0000000000000006"));
+        var schedule=store.acquire(new SourceManagementContracts.SourceLeaseRequest(PACKAGE_ID,"SIT",revisions,
+                List.of("templates/use.yaml","config.yaml"),"schedule:S00000000000000000000000000000006:1"));
+
+        JobSourceClosureStore restarted=new JobSourceClosureStore(data);
+        assertEquals(Set.of(packageRoot.getFileName().toString()),restarted.retainedSourceRevisionIds(
+                ChangeSetPublisher.PACKAGE_SOURCE,PACKAGE_ID),"A durable Job lease pins its Package source revision");
+        assertEquals(Set.of(configRoot.getFileName().toString()),restarted.retainedSourceRevisionIds(
+                ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,CONFIG_SCOPE),"A durable Schedule lease pins its Central Config revision");
+
+        Files.write(data.resolve("job-source-closures/leases").resolve(job.leaseId()+".json"),"{invalid".getBytes(StandardCharsets.UTF_8));
+        JobSourceClosureStore incomplete=new JobSourceClosureStore(data);
+        assertThrows(java.io.IOException.class,()->incomplete.retainedSourceRevisionIds(
+                ChangeSetPublisher.PACKAGE_SOURCE,PACKAGE_ID),"An incomplete durable lease index must stop destructive retention");
+        assertNotNull(schedule.leaseId());
     }
 
     @Test void leaseReadsStayInsideTheApprovedLogicalPathClosure() throws Exception {

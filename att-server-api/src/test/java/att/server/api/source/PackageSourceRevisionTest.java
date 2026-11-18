@@ -16,6 +16,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PackageSourceRevisionTest {
     @TempDir Path root;
 
+    @Test void targetNamedTemplateStaysInThePackageSourceClosure() throws Exception {
+        Path template = Files.createDirectories(root.resolve("templates/TARGET")).resolve("template.yaml");
+        Files.write(template, bytes("schemaVersion: att-template/v3.6\nname: TARGET\n"));
+        Path generated = Files.createDirectories(root.resolve("target/classes")).resolve("generated.txt");
+        Files.write(generated, bytes("generated\n"));
+
+        String before = PackageSourceRevision.digest(root);
+        assertTrue(PackageSourceRevision.includes("templates/TARGET/template.yaml"));
+        assertFalse(PackageSourceRevision.includes("target/classes/generated.txt"));
+        assertFalse(PackageSourceRevision.excludedDirectory("templates/TARGET"));
+        assertTrue(PackageSourceRevision.excludedDirectory("target/classes"));
+
+        Files.write(template, bytes("schemaVersion: att-template/v3.6\nname: TARGET\ndescription: revised\n"));
+        assertNotEquals(before, PackageSourceRevision.digest(root));
+    }
+
     @Test void candidateOverlayAndPublishedBytesHaveOneIdentityWithoutManifestAndGeneratedArtifacts() throws Exception {
         Path templates = Files.createDirectories(root.resolve("templates/payments"));
         Path scripts = templates.resolve("request.sh");

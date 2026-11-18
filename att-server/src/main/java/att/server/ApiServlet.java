@@ -163,6 +163,10 @@ public final class ApiServlet extends HttpServlet {
                     error(res,500,"ATT-CONFIG-IMPACT-FAILED","The Config impact report could not be completed",requestId);return;
                 }
             }
+            if(centralSourceHistoryPath(path)) {
+                if(!requireSystemSettingsWrite(req,res,requestId))return;
+                sourceHistoryGet(req,res,path,requestId,principalExact(req),true);return;
+            }
             if("/configuration/activation-status".equals(path)) {
                 if(!requireSystemSettingsWrite(req,res,requestId))return;
                 res.setHeader("Cache-Control","private, no-store");
@@ -172,6 +176,9 @@ public final class ApiServlet extends HttpServlet {
             if(path.startsWith("/configuration/")||"/configuration".equals(path)) {
                 if(!requireSharedConfigurationRead(req,res,requestId))return;
             } else if(!requireOperator(req,res,requestId))return;
+            if(packageSourceHistoryPath(path)) {
+                sourceHistoryGet(req,res,path,requestId,principalExact(req),false);return;
+            }
             if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,principal);return;}
             if(path.matches("/packages/[^/]+/authoring-source")) {packageAuthoringSourceGet(req,res,path,requestId);return;}
             if(path.matches("/packages/[^/]+/load-templates")) {
@@ -386,11 +393,18 @@ public final class ApiServlet extends HttpServlet {
         if("/validation".equals(path)){validationPost(req,res,requestId,authorizationPrincipal);return;}
         if("/validations".equals(path)){validationAsyncPost(req,res,requestId,authorizationPrincipal);return;}
         if(path.matches("/validations/V[0-9A-F]{32}/cancel")) {validationCancelPost(req,res,path,requestId,authorizationPrincipal);return;}
+        if(centralSourceHistoryRestorePath(path)) {
+            if(!requireSystemSettingsWrite(req,res,requestId))return;
+            sourceHistoryPost(req,res,path,requestId,principalExact(req),true);return;
+        }
         if(centralChangeSetPath(path)) {
             if(!requireSystemSettingsWrite(req,res,requestId))return;
             changeSetPost(req,res,path,requestId,principalExact(req),true);return;
         }
         if(!requireOperator(req,res,requestId))return;
+        if(packageSourceHistoryRestorePath(path)) {
+            sourceHistoryPost(req,res,path,requestId,principalExact(req),false);return;
+        }
         if(savedLoadScenarioPath(path)){savedLoadScenarioAction(req,res,path,requestId,authorizationPrincipal);return;}
         if(packageChangeSetPath(path)) {changeSetPost(req,res,path,requestId,principalExact(req),false);return;}
         if(path.matches("/packages/[^/]+/package-configuration/(?:drafts(?:/[^/]+/(?:validate|review|publish|discard))?|rollback)")) {
@@ -1457,6 +1471,85 @@ public final class ApiServlet extends HttpServlet {
                 requiredChangeText(input,"actor"),requiredChangeText(input,"acknowledgementDigest"));
     }
 
+    private void sourceHistoryGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,
+                                  String actor,boolean central) throws IOException {
+        try {
+            int offset=parseOffset(req.getParameter("offset")),limit=parseConfigurationLimit(req.getParameter("limit"));
+            String domain=central?ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG:ChangeSetPublisher.PACKAGE_SOURCE;
+            String scopeId=central?ChangeSetPublisher.CENTRAL_SCOPE_ID:segment(path,2);
+            boolean diff=path.endsWith("/diff");
+            Map<String,Object> result;
+            if(central) {
+                result=diff?runtime.changeSetPublisher.sourceHistoryDiff(domain,scopeId,actor,true,
+                        req.getParameter("beforeSnapshotId"),req.getParameter("afterSnapshotId"),req.getParameter("path"),offset,limit)
+                        :runtime.changeSetPublisher.sourceHistory(domain,scopeId,actor,true,offset,limit);
+            } else {
+                result=runtime.withPackageSourceAuthority(actor,
+                        login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),()->{
+                            if(diff)try {
+                                return runtime.changeSetPublisher.sourceHistoryDiff(domain,scopeId,actor,false,
+                                        req.getParameter("beforeSnapshotId"),req.getParameter("afterSnapshotId"),
+                                        req.getParameter("path"),offset,limit);
+                            } catch(ChangeSetPublisher.Denied notOwner) {
+                                runtime.packageView(scopeId,actor);
+                                return runtime.changeSetPublisher.sourceHistoryDiffSummary(scopeId,
+                                        req.getParameter("beforeSnapshotId"),req.getParameter("afterSnapshotId"));
+                            }
+                            try{return runtime.changeSetPublisher.sourceHistory(domain,scopeId,actor,false,offset,limit);}
+                            catch(ChangeSetPublisher.Denied notOwner) {
+                                runtime.packageView(scopeId,actor); // Do not expose summaries for unregistered IDs.
+                                return runtime.changeSetPublisher.sourceHistorySummary(scopeId,offset,limit);
+                            }
+                        });
+            }
+            result.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,result);
+        } catch(ChangeSetPublisher.Denied denied){error(res,403,central?"ATT-SERVER-FORBIDDEN":"ATT-PACKAGE-SOURCE-DENIED",
+                central?"SYSTEM_SETTINGS_WRITE is required":"Package source editing is not authorized",requestId);}
+          catch(ChangeSetPublisher.Missing|ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","Source history was not found",requestId);}
+          catch(ChangeSetPublisher.Conflict conflict){error(res,409,conflict.code,"Source history changed or is unavailable; refresh and retry",requestId);}
+          catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+          catch(Exception failure){error(res,500,"ATT-SOURCE-HISTORY-FAILED","Source history could not be read",requestId);getServletContext().log("ATT Source history failed id="+requestId,failure);}
+    }
+
+    private void sourceHistoryPost(HttpServletRequest req,HttpServletResponse res,String path,String requestId,
+                                   String actor,boolean central) throws IOException {
+        if(actor==null||RequestIdentity.ANONYMOUS.equals(actor)) {
+            error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;
+        }
+        if(!isJson(req.getContentType())) {
+            error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;
+        }
+        if(!checkOrigin(req,res,requestId,false))return;
+        try {
+            int limit=Math.min(runtime.config.maxRequestBytes,16384);
+            byte[] bytes=readBoundedBody(req.getInputStream(),limit);
+            if(bytes.length>limit){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Restore request exceeds the configured size limit",requestId);return;}
+            JsonNode input=ServerRuntime.JSON.readTree(bytes);
+            if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
+            Set<String> fields=central?Set.of("snapshotId","expectedSourceRevision"):Set.of("snapshotId","expectedSourceRevision","registryRevision");
+            java.util.Iterator<String> names=input.fieldNames();while(names.hasNext())if(!fields.contains(names.next()))
+                throw new IllegalArgumentException("Unsupported source Restore field");
+            String domain=central?ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG:ChangeSetPublisher.PACKAGE_SOURCE;
+            String scopeId=central?ChangeSetPublisher.CENTRAL_SCOPE_ID:segment(path,2);
+            String expectedRegistry=central?null:requiredChangeText(input,"registryRevision");
+            Map<String,Object> result;
+            if(central)result=runtime.changeSetPublisher.stageRestore(domain,scopeId,actor,true,
+                    requiredChangeText(input,"snapshotId"),requiredChangeText(input,"expectedSourceRevision"),expectedRegistry,requestId);
+            else result=runtime.withPackageSourceAuthority(actor,
+                    login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),
+                    ()->runtime.changeSetPublisher.stageRestore(domain,scopeId,actor,false,
+                            requiredChangeText(input,"snapshotId"),requiredChangeText(input,"expectedSourceRevision"),expectedRegistry,requestId));
+            result.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,201,result);
+        } catch(ChangeSetPublisher.Denied denied){error(res,403,central?"ATT-SERVER-FORBIDDEN":"ATT-PACKAGE-SOURCE-DENIED",
+                central?"SYSTEM_SETTINGS_WRITE is required":"Package source editing is not authorized",requestId);}
+          catch(ChangeSetPublisher.Missing|ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","Source history or Package was not found",requestId);}
+          catch(ChangeSetPublisher.Conflict conflict){error(res,409,conflict.code,"Source or registry revision changed; refresh and retry",requestId);}
+          catch(ChangeSetPublisher.ValidationRejected rejected){error(res,422,rejected.code,"The historical revision cannot be staged as a current Change Set",requestId);}
+          catch(ChangeSetPublisher.Capacity full){error(res,429,"ATT-CHANGESET-CAPACITY","Change Set capacity is full",requestId);}
+          catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+          catch(Exception failure){error(res,500,"ATT-CHANGESET-FAILED","Source Restore could not be staged",requestId);getServletContext().log("ATT Source Restore failed id="+requestId,failure);}
+    }
+
     private static byte[] readBoundedBody(java.io.InputStream input,int limit) throws IOException {
         java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream(Math.min(limit,8192));
         byte[] buffer=new byte[8192];int count,total=0;
@@ -1544,6 +1637,10 @@ public final class ApiServlet extends HttpServlet {
     }
     private static boolean packageChangeSetPath(String path){return path.matches("/packages/[^/]+/change-sets(?:/import|/[^/]+/(?:validate|review|publish|discard|generate-snapshot))?");}
     private static boolean packageSourceImportPath(String path){return path.matches("/packages/[^/]+/change-sets/import");}
+    private static boolean packageSourceHistoryPath(String path){return path.matches("/packages/[^/]+/source-history(?:/diff)?");}
+    private static boolean packageSourceHistoryRestorePath(String path){return path.matches("/packages/[^/]+/source-history/restore");}
+    private static boolean centralSourceHistoryPath(String path){return path.matches("/configuration/source-history(?:/diff)?");}
+    private static boolean centralSourceHistoryRestorePath(String path){return path.matches("/configuration/source-history/restore");}
     private static boolean centralChangeSetPath(String path){return path.matches("/configuration/change-sets(?:/[^/]+/(?:validate|review|publish|discard))?");}
     private static boolean centralImpactPath(String path){return path.matches("/configuration/change-sets/[^/]+/impact");}
     private static boolean configurationPath(String path){return path.matches("/packages/[^/]+/package-configuration(?:/.*)?")||path.matches("/packages/[^/]+/configuration(?:/.*)?")||path.matches("/configuration(?:/.*)?");}
