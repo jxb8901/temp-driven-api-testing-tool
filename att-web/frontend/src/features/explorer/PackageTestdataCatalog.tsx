@@ -3,6 +3,7 @@ import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
 import type { ConfigurationEntry, ExplorerApi, JsonValue, ResourceReference, TestdataRecordsResponse } from './types';
 import { CodeEditor } from '../code/CodeEditor';
+import { SourceAuthoringWorkspace } from './SourceAuthoringWorkspace';
 import './package-testdata.css';
 
 function errorText(error: unknown, action: string): string {
@@ -73,9 +74,11 @@ interface KeyedRecordResponse {
   value: TestdataRecordsResponse;
 }
 
-export function TestdataCatalog({ api, packageId, environment, defaultEnvironment, descriptorId, refreshKey, onDescriptorChange, onOpenResource, onRefresh }: {
+export function TestdataCatalog({ api, packageId, environment, defaultEnvironment, descriptorId, refreshKey, onDescriptorChange, onOpenResource, onRefresh, registerUnsavedChanges, canManagePackageSource = false }: {
   api: ExplorerApi; packageId: string; environment: string; defaultEnvironment?: string; descriptorId?: string; refreshKey: number;
   onDescriptorChange(descriptorId?: string): void; onOpenResource(resource: { type: string; resourceId: string }): void; onRefresh(): void;
+  registerUnsavedChanges?: (isDirty: boolean, description?: string) => () => void;
+  canManagePackageSource?: boolean;
 }) {
   const inspectionRefresh = useInspectionRefresh();
   const [entries, setEntries] = useState<ConfigurationEntry[]>([]);
@@ -97,6 +100,8 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   const [catalogNextOffset, setCatalogNextOffset] = useState<number | null>(null);
   const [catalogTotal, setCatalogTotal] = useState<number | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [creatingDescriptor, setCreatingDescriptor] = useState(false);
+  const [creatorDirty, setCreatorDirty] = useState(false);
   const catalogQuery = routeLookupQuery || catalogSearch.trim();
   const catalogQueryKey = JSON.stringify([packageId, environment, catalogQuery, inspectionRefresh, refreshKey]);
   const catalogQueryKeyRef = useRef(catalogQueryKey);
@@ -300,6 +305,7 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   if (error && !selectedId) return <section className="att-testdata-workspace"><h2>Testdata</h2><p className="att-error" role="alert">{error}<button type="button" onClick={onRefresh}>Retry</button></p></section>;
   return <section className="att-testdata-workspace" aria-label="Structured Testdata catalog">
     <header><div><h2>Descriptors</h2><p>Resolved metadata and bounded records for {environment || defaultEnvironment || 'the Package default environment'}.</p></div>
+      {canManagePackageSource && <button type="button" onClick={() => setCreatingDescriptor(true)}>Create Testdata descriptor</button>}
       {(catalogTotal !== 0 || entries.length > 0 || catalogSearch) && <label>Search descriptors<input type="search" aria-label="Search Testdata descriptors" value={catalogSearch} onChange={event => {
         setCatalogSearch(event.currentTarget.value); setSelectedIdState(''); updateRecordControls({ offset: 0, previewGenerated: false, copiedRecord: null });
         setRecordResponseState(null); onDescriptorChange(undefined);
@@ -317,6 +323,14 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
         {entries.length > 0 && !visibleEntries.length && <p>No descriptors match this search.</p>}
       </nav>
       <div className="att-testdata-detail">
+    {canManagePackageSource && creatingDescriptor && <section className="att-testdata-create" aria-label="Create Testdata descriptor">
+      <header><div><h3>New Testdata descriptor</h3><p>Update the Package Manifest and create the descriptor file in one candidate before staging.</p></div>
+        <button type="button" onClick={() => setCreatingDescriptor(false)} disabled={creatorDirty}
+          title={creatorDirty ? 'Stage or discard the local editor work and draft before closing.' : undefined}>Close creator</button></header>
+      <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
+        query: { kind: 'manifest' }, label: 'Testdata descriptor and Package registration', allowFileOperations: true }}
+        registerUnsavedChanges={registerUnsavedChanges} onDirtyChange={setCreatorDirty} onPublished={() => setCreatingDescriptor(false)} />
+    </section>}
     {selectedEntry ? <>
       <dl className="att-testdata-meta"><div><dt>Descriptor</dt><dd>{selectedEntry.id}</dd></div><div><dt>Source</dt><dd>{selectedEntry.source ? <span title="Package-local descriptor, not a shared Configuration source">{packageId}: {selectedEntry.source}</span> : 'Not provided'}</dd></div>
         <div><dt>Generated</dt><dd>{isGenerated ? 'Yes' : 'No'}</dd></div><div><dt>Records</dt><dd>{response?.recordCount?.toLocaleString() || displayField(selectedEntry, 'recordCount')}</dd></div>
@@ -348,6 +362,9 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
           : <p className="att-config-empty">{loading ? 'Loading records…' : response ? 'This descriptor contains no records.' : 'No records are available for this descriptor.'}</p>)}
       {response?.nextOffset != null && <button type="button" onClick={() => updateRecordControls({ offset: response.nextOffset || 0, copiedRecord: null })} disabled={loading}>Load next 50 records</button>}
       <details className="att-testdata-source"><summary>Advanced descriptor metadata</summary><CodeEditor value={JSON.stringify(Object.fromEntries(Object.entries(selectedEntry.fields || {}).map(([key, field]) => [key, field.state === 'visible' ? field.value : field.state])), null, 2)} language="json" label="Advanced Testdata descriptor metadata" readOnly /></details>
+      {canManagePackageSource && selectedEntry.source && <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
+        query: { kind: 'testdata', resourceId: selectedEntry.id, environment: environment || undefined },
+        label: `Testdata descriptor · ${selectedEntry.source}`, allowFileOperations: true }} registerUnsavedChanges={registerUnsavedChanges} />}
     </> : <p className="att-config-empty">{descriptorId ? `Testdata descriptor ${descriptorId} is unavailable for this Package or Environment.` : 'No Testdata descriptors were returned for the selected environment.'}</p>}
       </div>
     </div>
@@ -357,18 +374,20 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
 export type PackageRegistrationState = 'loading' | 'ready' | 'error';
 
 export function PackageTestdataWorkspace({ api, packageId, packageLabel, registrationState, registered, environment, descriptorId,
-  onEnvironmentChange, onDescriptorChange, onBackToResources, onOpenResource, onOpenPackageConfiguration }: {
+  onEnvironmentChange, onDescriptorChange, onBackToResources, onOpenResource, onOpenPackageConfiguration, registerUnsavedChanges, canManagePackageSource = false }: {
   api: ExplorerApi; packageId: string; packageLabel: string; registrationState: PackageRegistrationState; registered: boolean;
   environment: string; descriptorId?: string; onEnvironmentChange(environment: string): void;
   onDescriptorChange(descriptorId?: string): void; onBackToResources(): void;
   onOpenResource(resource: { type: string; resourceId: string }): void;
   onOpenPackageConfiguration(): void;
+  registerUnsavedChanges?: (isDirty: boolean, description?: string) => () => void;
+  canManagePackageSource?: boolean;
 }) {
   const [declared, setDeclared] = useState<Awaited<ReturnType<ExplorerApi['getDeclaredConfiguration']>> | null>(null);
   const [environmentError, setEnvironmentError] = useState('');
   const [environmentNotice, setEnvironmentNotice] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
-  const inspectionRefresh = useInspectionRefresh(true);
+  const inspectionRefresh = useInspectionRefresh();
   const profiles = useMemo(() => (declared?.environments || []).filter(item => item.name && item.state === 'active'), [declared]);
   const defaultEnvironment = profiles.find(item => item.default)?.name;
   const refresh = useCallback(() => {
@@ -410,8 +429,8 @@ export function PackageTestdataWorkspace({ api, packageId, packageLabel, registr
     <p role="status">Effective environment: {environment || defaultEnvironment || 'Package default'}{environment ? ' (selected)' : ' (Package default)'}.</p>
     {environmentNotice && <p role="status">{environmentNotice}</p>}
     {environmentError && <p className="att-error" role="alert">{environmentError}<button type="button" onClick={refresh}>Retry Package environments</button></p>}
-    <TestdataCatalog api={api} packageId={packageId} environment={environment} defaultEnvironment={defaultEnvironment} descriptorId={descriptorId} refreshKey={refreshKey}
-      onDescriptorChange={onDescriptorChange} onOpenResource={onOpenResource} onRefresh={refresh} />
+    <TestdataCatalog api={api} packageId={packageId} environment={environment} defaultEnvironment={defaultEnvironment} descriptorId={descriptorId} refreshKey={refreshKey} canManagePackageSource={canManagePackageSource}
+      onDescriptorChange={onDescriptorChange} onOpenResource={onOpenResource} onRefresh={refresh} registerUnsavedChanges={registerUnsavedChanges} />
     <button type="button" onClick={refresh}>Refresh Testdata</button>
   </main>;
 }

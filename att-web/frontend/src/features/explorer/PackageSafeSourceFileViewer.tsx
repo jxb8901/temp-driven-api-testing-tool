@@ -5,6 +5,7 @@ import { useInspectionRefresh } from '../../useInspectionRefresh';
 import { CodeEditor, detectCodeLanguage } from '../code/CodeEditor';
 import type { ExplorerApi, ResourceIdentity, ResourceSourceReference, SafeSourceFileReference, SourceProjection } from './types';
 import type { UiLocale } from '../../uiLocale';
+import { SourceAuthoringWorkspace } from './SourceAuthoringWorkspace';
 import { sourceViewerLimits } from './SourceViewer';
 import './explorer.css';
 
@@ -23,9 +24,10 @@ function safeError(error: unknown, locale?: UiLocale): string {
 
 type SourceFileError = 'missing-reference' | 'unsupported-client' | { kind: 'request'; reason: unknown };
 
-export function PackageSafeSourceFileViewer({ api, packageId, filePath, fileOrigin, sourceReference, onBack, onOpenFile, locale }: {
-  api: ExplorerApi; packageId: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReference;
-  onBack(): void; onOpenFile(path: string, origin: string | undefined, sourceReference: ResourceSourceReference): void;
+export function PackageSafeSourceFileViewer({ api, packageId, filePath, fileOrigin, sourceReference, onBack, onOpenFile, locale, registerUnsavedChanges, canManagePackageSource = false }: {
+  api: ExplorerApi; packageId: string; filePath?: string; fileOrigin?: string; sourceReference?: ResourceSourceReference; canManagePackageSource?: boolean;
+  onBack(): void; registerUnsavedChanges?: (isDirty: boolean, description?: string) => () => void;
+  onOpenFile(path: string, origin: string | undefined, sourceReference: ResourceSourceReference): void;
   locale?: UiLocale;
 }) {
   const [projection, setProjection] = useState<SourceProjection | null>(null);
@@ -146,5 +148,13 @@ export function PackageSafeSourceFileViewer({ api, packageId, filePath, fileOrig
       </li>)}</ul> : null}
       {projection.fileReferencesTruncated && <p role="status">{text(locale, 'Additional references were omitted by the Server safety limit.', 'Server 安全限制已省略其他參照。')}</p>}
     </section> : null}
+    {canManagePackageSource && identity && sourceReference && <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
+      query: { kind: 'file', resourceType: sourceReference.type, resourceId: sourceReference.resourceId,
+        referenceId: sourceReference.referenceId, origin: fileOrigin },
+      label: `File authoring · ${projection?.logicalPath || filePath || 'referenced Package file'}`,
+      allowFileOperations: true, allowCreate: true }} registerUnsavedChanges={registerUnsavedChanges}
+      onOpenFileReference={(path, origin, reference) => {
+        if (reference) onOpenFile(path, origin, { type: reference.type, resourceId: reference.resourceId, referenceId: reference.referenceId });
+      }} />}
   </main>;
 }
