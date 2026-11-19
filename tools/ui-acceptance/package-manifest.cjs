@@ -68,7 +68,9 @@ async function main() {
     await validate.click();await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent === 'Review validated Manifest' && !button.disabled));
     assert.equal(await publish.isDisabled(), true);await review.click();
     await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent === 'Publish reviewed Manifest' && !button.disabled));
-    await publish.click();await workspace.getByText('Manifest published. Package views will refresh.', { exact: true }).waitFor();
+    await publish.click();
+    await workspace.getByRole('alertdialog').getByRole('button', { name: 'Publish Manifest', exact: true }).click();
+    await workspace.getByText('Manifest published. Package views will refresh.', { exact: true }).waitFor();
     assert.deepEqual(actions, ['drafts', 'drafts/M123/validate', 'drafts/M123/review', 'drafts/M123/publish']);
     await workspace.getByRole('button', { name: 'Effective', exact: true }).click();
     await workspace.getByText('UAT', { exact: true }).first().waitFor();
@@ -81,9 +83,11 @@ async function main() {
     await create.waitFor();await create.click();await validate.click();
     await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent === 'Review validated Manifest' && !button.disabled));
     await review.click();conflict = true;await publish.click();
+    await workspace.getByRole('alertdialog').getByRole('button', { name: 'Publish Manifest', exact: true }).click();
     await workspace.getByRole('alert').filter({ hasText: 'Sources changed after validation' }).waitFor();
     assert.equal(await workspace.getByRole('button', { name: 'Discard Manifest draft' }).isVisible(), true);
     await workspace.getByRole('button', { name: 'Discard Manifest draft' }).click();
+    await workspace.getByRole('alertdialog').getByRole('button', { name: 'Discard draft', exact: true }).click();
     unavailable = true;await workspace.getByRole('button', { name: 'Refresh Package Configuration' }).click();
     await workspace.getByText('Complete authoring source is unavailable. The safe inspection source remains read only.', { exact: true }).waitFor();
     assert.equal(await create.isDisabled(), true);assert.equal(await workspace.locator('.cm-content[contenteditable="true"]').count(), 0);
