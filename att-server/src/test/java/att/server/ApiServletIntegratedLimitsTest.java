@@ -246,6 +246,34 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void centralExternalConfigDriftClearsAfterMirrorRestoreAndResumesNewJobs() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("external-drift-recovery-packages"));
+        createPackage(packages.resolve("p"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        Path libs=workerLibraries("external-drift-recovery-libs");
+        String original=Files.readString(runtimeConfig);
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"external-drift-recovery-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true,true)) {
+            Files.writeString(runtimeConfig,original+"# unreviewed deployment edit\n");
+            var drift=runtime.configurationActivationStatus();
+            assertEquals(att.server.api.source.SourceManagementContracts.ActivationState.FAILED,drift.state);
+            assertEquals("ATT-CONFIG-EXTERNAL-SOURCE-DRIFT",drift.failureCode);
+
+            byte[] runRequest=ServerRuntime.JSON.writeValueAsBytes(Map.of("packageId","p","all",true));
+            Captured blocked=invokeAs(servlet(runtime),"POST","/jobs/run",Map.of(),runRequest,"alice",
+                    Set.of(runtime.config.authorization.userRole));
+            assertEquals(409,blocked.status,new String(blocked.body(),StandardCharsets.UTF_8));
+
+            Files.writeString(runtimeConfig,original);
+            var recovered=runtime.configurationActivationStatus();
+            assertEquals(att.server.api.source.SourceManagementContracts.ActivationState.ACTIVE,recovered.state);
+            assertNull(recovered.failureCode);
+            Captured admitted=invokeAs(servlet(runtime),"POST","/jobs/run",Map.of(),runRequest,"alice",
+                    Set.of(runtime.config.authorization.userRole));
+            assertEquals(202,admitted.status,new String(admitted.body(),StandardCharsets.UTF_8));
+        }
+    }
+
     @Test void emptyRegisteredPackageReturnsEmptyInspectorInventoryAndDoesNotAffectAnotherPackage() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("empty-package-packages"));
         Files.createDirectory(packages.resolve("lilyzhou"));

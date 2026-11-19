@@ -231,7 +231,8 @@ final class ConfigActivationCoordinator implements PublicationLifecycleHook {
         ActivationStatus local = statuses.get(scopeId);
         ActivationStatus external = guardStatus(scopeId);
         RevisionIdentity expectedPublished = local == null ? null : local.publishedRevision;
-        if (local != null && local.state == ActivationState.FAILED && external != null
+        if (local != null && local.state == ActivationState.FAILED
+                && !"ATT-CONFIG-EXTERNAL-SOURCE-DRIFT".equals(local.failureCode) && external != null
                 && same(local.publishedRevision, external.publishedRevision)
                 && same(local.publishedRevision, external.activeRevision)) {
             // An ACTIVE-looking read-back of the failed candidate does not make it

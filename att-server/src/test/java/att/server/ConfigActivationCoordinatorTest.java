@@ -55,6 +55,26 @@ class ConfigActivationCoordinatorTest {
         assertEquals("ATT-CONFIG-ACTIVATION-FAILED", status.failureCode);
     }
 
+    @Test void externalSourceDriftCanRecoverAfterTheRuntimeGuardVerifiesTheActiveRevision() {
+        RevisionIdentity active = revision("a");
+        Guard guard = new Guard(active);
+        ConfigActivationCoordinator coordinator = new ConfigActivationCoordinator(guard);
+        coordinator.seed(SCOPE, active);
+
+        guard.observed = new ActivationStatus(SCOPE, active, active, ActivationState.FAILED,
+                "ATT-CONFIG-EXTERNAL-SOURCE-DRIFT");
+        ActivationStatus drift = coordinator.activationStatus(SCOPE);
+        assertEquals(ActivationState.FAILED, drift.state);
+        assertEquals("ATT-CONFIG-EXTERNAL-SOURCE-DRIFT", drift.failureCode);
+
+        guard.observed = new ActivationStatus(SCOPE, active, active, ActivationState.ACTIVE, null);
+        ActivationStatus recovered = coordinator.activationStatus(SCOPE);
+        assertEquals(ActivationState.ACTIVE, recovered.state);
+        assertEquals(active.revision, recovered.publishedRevision.revision);
+        assertEquals(active.revision, recovered.activeRevision.revision);
+        assertNull(recovered.failureCode);
+    }
+
     @Test void successfulActivationPublishesAndActivatesTheSameRevisionAndInvalidatesTargetedScopes() {
         AtomicInteger invalidations = new AtomicInteger();
         RevisionIdentity before = revision("a");
