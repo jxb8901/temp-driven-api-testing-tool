@@ -215,6 +215,8 @@ describe('App Dashboard job refresh', () => {
     };
 
     await act(async () => root.render(<App />)); await settle();
+    // Let the inspector apply the resolved default Environment before the validation context captures its route key.
+    await vi.waitFor(() => expect(window.location.hash).toBe('#/configuration?environment=SIT'), { timeout: 5000 });
     await clickButton('Validate Shared Config');
     await vi.waitFor(() => expect(submitted).toHaveLength(1));
     await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'), { timeout: 5000 });
