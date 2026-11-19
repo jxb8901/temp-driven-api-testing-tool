@@ -1181,13 +1181,13 @@ class ApiServletIntegratedLimitsTest {
     @Test void sutMetricsLiveRouteUsesPinnedTenantAndReturnsBoundedTimeoutAndResponseFailures() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("sut-metrics-live-api-packages"));
         createPackage(packages.resolve("p"));
-        Map<String,Map<String,Object>> cases=Map.of(
-                "ready",Map.of(),
-                "timeout",Map.of("requestTimeoutMs",250),
-                "response-limit",Map.of("maxResponseBytes",1024));
+        Map<String,Map<String,Object>> cases=new LinkedHashMap<>();
+        cases.put("ready",Map.of("connectTimeoutMs",30_000,"requestTimeoutMs",30_000));
+        cases.put("timeout",Map.of("connectTimeoutMs",30_000,"requestTimeoutMs",5_000));
+        cases.put("response-limit",Map.of("connectTimeoutMs",30_000,"requestTimeoutMs",30_000,"maxResponseBytes",1024));
         for(Map.Entry<String,Map<String,Object>> entry:cases.entrySet()) {
             String name=entry.getKey();boolean delay="timeout".equals(name);int responseBytes="response-limit".equals(name)?2048:0;
-            try(ApiPrometheusFixture fixture=new ApiPrometheusFixture(delay?700:0,responseBytes);
+            try(ApiPrometheusFixture fixture=new ApiPrometheusFixture(delay?7_000:0,responseBytes);
                 ServerRuntime runtime=runtime(packages,writeSutMetricsConfig(sharedRuntimeConfig(),
                         List.of(prometheusSource("prom","Prometheus",fixture.url(),List.of(),List.of("USER"),List.of("tenant-a"),"tenant-a",
                                 entry.getValue(),Map.of())),List.of(),List.of(),List.of(baseProfile("base","Base profile",
