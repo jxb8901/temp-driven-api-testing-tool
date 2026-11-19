@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { act, useState } from 'react';
+import { act, useCallback, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PackageTestdataWorkspace } from './PackageTestdataCatalog';
 import type { ConfigurationResponse, ExplorerApi, TestdataRecordsResponse } from './types';
 import { inspectionCache } from '../../inspectionCache';
 import { api as sharedApi } from '../../api';
+import { formatRoute, NavigationGuardContext, useRouteState } from '../../router';
 
 vi.mock('../code/CodeEditor', () => ({
   CodeEditor: ({ value, label, readOnly = true, onChange, maxCharacters = 200_000 }: {
@@ -28,6 +29,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove();
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
   vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 async function flush() { await act(async () => { await Promise.resolve(); await Promise.resolve(); }); }
@@ -80,6 +82,18 @@ function clickButton(label: string) {
   if (!button) throw new Error(`Button ${label} is not available`);
   act(() => button.click());
 }
+function clickDescriptor(id: string) {
+  const button = [...host.querySelectorAll<HTMLButtonElement>('nav[aria-label="Testdata descriptors"] button')]
+    .find(item => item.querySelector('span')?.textContent === id);
+  if (!button) throw new Error(`Testdata descriptor ${id} is not available`);
+  act(() => button.click());
+}
+async function confirmGuardNavigation() {
+  const button = host.querySelector<HTMLButtonElement>('[role="dialog"] button:last-child');
+  if (!button) throw new Error('Route discard confirmation is not available');
+  await act(async () => button.click());
+  await flushRoute();
+}
 async function confirmAction() {
   await flush();
   const button = host.querySelector<HTMLButtonElement>('.att-confirm-actions button:last-child');
@@ -99,7 +113,165 @@ function Harness({ api, initialEnvironment = '', descriptorId, registered = true
     canManagePackageSource={canManagePackageSource} />;
 }
 
+function GuardedHarness({ api }: { api: ExplorerApi }) {
+  const navigation = useRouteState();
+  const route = navigation.route.kind === 'package' && navigation.route.view === 'testdata' ? navigation.route
+    : { kind: 'package' as const, packageId: 'payments', view: 'testdata' as const, environment: 'UAT' };
+  const onDescriptorChange = useCallback((testdataDescriptorId?: string) =>
+    navigation.navigate({ ...route, testdataDescriptorId }), [navigation.navigate, route]);
+  return <NavigationGuardContext.Provider value={navigation}>
+    <PackageTestdataWorkspace api={api} packageId="payments" packageLabel="Payments" registrationState="ready" registered
+      environment={route.environment || ''} descriptorId={route.testdataDescriptorId} onEnvironmentChange={environment => navigation.navigate({ ...route, environment })}
+      onDescriptorChange={onDescriptorChange} onBackToResources={() => navigation.navigate({ kind: 'package', packageId: 'payments' })}
+      onOpenResource={vi.fn()} onOpenPackageConfiguration={() => navigation.navigate({ kind: 'configuration', packageId: 'payments' })}
+      canManagePackageSource registerUnsavedChanges={navigation.registerUnsavedChanges} />
+    {navigation.pendingNavigation && <div role="dialog" aria-label="Unsaved work confirmation">
+      {navigation.pendingNavigationError && <p role="alert">{navigation.pendingNavigationError}</p>}
+      <button type="button" onClick={navigation.cancelNavigation}>Cancel</button>
+      <button type="button" onClick={navigation.confirmNavigation} disabled={navigation.pendingNavigationBusy}>Confirm discard</button>
+    </div>}
+    <output aria-label="Current route">{formatRoute(navigation.route)}</output>
+  </NavigationGuardContext.Provider>;
+}
+
+function setInitialGuardedRoute(descriptor?: string) {
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${formatRoute({
+    kind: 'package', packageId: 'payments', view: 'testdata', environment: 'UAT', ...(descriptor ? { testdataDescriptorId: descriptor } : {}),
+  })}`);
+}
+
+async function flushRoute() {
+  await flush();
+  await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+  await flush();
+}
+
+function guardedCatalogApi() {
+  let ids = ['descriptor-a', 'descriptor-b'];
+  const sourceText = (id: string) => `schemaVersion: att-testdata/v1.0\nid: ${id}\nrecords: [{id: BASE}]\n`;
+  const stageSourceChangeSet = vi.fn(async (_domain: unknown, _scope: unknown, baseSourceRevision: string, registryRevision: string,
+    operations: Array<{ operation: string; path: string; content?: string }>) => ({
+      changeSetId: 'cs-testdata-a', domain: 'PACKAGE_SOURCE' as const, scopeId: 'payments', state: 'reviewed',
+      baseSourceRevision, registryRevision, changedFiles: operations.map(operation => ({
+        operation: operation.operation, path: operation.path, contentDiff: ['@@ -1 +1 @@', `-${sourceText('descriptor-a').trim()}`, `+${operation.content?.trim() || ''}`],
+      })),
+    }));
+  const sourceChangeSetAction = vi.fn(async (_domain: unknown, _scope: unknown, changeSetId: string, action: string) => ({
+    discarded: action === 'discard', changeSetId,
+  }));
+  const api = {
+    getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'UAT', state: 'active' as const }] })),
+    getEffectiveConfiguration: vi.fn(async () => ({ total: ids.length, environment: 'UAT', sections: [{ id: 'testdata', entries: ids.map(id => ({
+      id, source: `testdata/${id}.yaml`, fields: { 'selection.strategy': { state: 'visible' as const, value: 'sequential' } },
+    })) }] })),
+    getTestdataRecords: vi.fn(async (_packageId: string, descriptorId: string) => ({ descriptorId, offset: 0, limit: 50, total: 0, records: [] })),
+    getManagedPackageAuthoringSource: vi.fn(async (_packageId: string, query: { resourceId?: string }) => {
+      const id = query.resourceId || 'descriptor-a';
+      return { available: true, present: true, logicalPath: `testdata/${id}.yaml`, format: 'yaml', text: sourceText(id),
+        sourceEtag: `etag-${id}`, baseSourceRevision: `base-${id}`, registryRevision: 'registry-1' };
+    }),
+    stageSourceChangeSet,
+    sourceChangeSetAction,
+  } as unknown as ExplorerApi;
+  return { api, stageSourceChangeSet, sourceChangeSetAction, removeDescriptorA: () => { ids = ['descriptor-b']; }, sourceText };
+}
+
 describe('PackageTestdataWorkspace', () => {
+  it('keeps unsaved Testdata text when a guarded descriptor switch is cancelled and resets only after confirmation', async () => {
+    const { api } = guardedCatalogApi();
+    const edited = 'schemaVersion: att-testdata/v1.0\nid: descriptor-a\nrecords: [{id: EXACT-UNSAVED-BYTES}]\n';
+    setInitialGuardedRoute();
+    await act(async () => root.render(<GuardedHarness api={api} />)); await flushRoute(); await flushRoute();
+    clickButton('Edit');
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]');
+    if (!editor) throw new Error('The default descriptor source editor was not rendered');
+    setInputValue(editor, edited);
+
+    clickDescriptor('descriptor-b');
+    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="dialog"] button:first-child')?.click());
+    await flushRoute();
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]')?.value).toBe(edited);
+    expect(host.querySelector('output[aria-label="Current route"]')?.textContent).not.toContain('descriptor=descriptor-b');
+
+    clickDescriptor('descriptor-b');
+    await confirmGuardNavigation();
+    expect(host.querySelector('output[aria-label="Current route"]')?.textContent).toContain('descriptor=descriptor-b');
+    expect(host.textContent).toContain('testdata/descriptor-b.yaml');
+    expect(host.textContent).not.toContain('EXACT-UNSAVED-BYTES');
+    expect(api.getManagedPackageAuthoringSource).toHaveBeenCalledWith('payments', { kind: 'testdata', resourceId: 'descriptor-b', environment: 'UAT' }, expect.any(AbortSignal));
+  });
+
+  it('treats Testdata search as a list filter and preserves the active dirty descriptor', async () => {
+    const { api } = guardedCatalogApi();
+    const edited = 'schemaVersion: att-testdata/v1.0\nid: descriptor-a\nrecords: [{id: SEARCH-CANCEL-PRESERVES}]\n';
+    setInitialGuardedRoute();
+    await act(async () => root.render(<GuardedHarness api={api} />)); await flushRoute(); await flushRoute();
+    clickButton('Edit');
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]');
+    if (!editor) throw new Error('The default descriptor source editor was not rendered');
+    setInputValue(editor, edited);
+
+    await act(async () => setSearchValue('descriptor-b'));
+    await flush(); await flush();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(host.querySelector('output[aria-label="Current route"]')?.textContent).not.toContain('descriptor=descriptor-b');
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Search Testdata descriptors"]')?.value).toBe('descriptor-b');
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]')?.value).toBe(edited);
+    expect(host.textContent).toContain('descriptor-a');
+    expect(host.textContent).toContain('descriptor-b');
+
+    clickDescriptor('descriptor-b');
+    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="dialog"] button:first-child')?.click());
+    await flushRoute();
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]')?.value).toBe(edited);
+  });
+
+  it('retains a removed dirty descriptor and discards its staged Change Set once after confirmed navigation', async () => {
+    const { api, sourceChangeSetAction, stageSourceChangeSet, removeDescriptorA } = guardedCatalogApi();
+    const edited = 'schemaVersion: att-testdata/v1.0\nid: descriptor-a\nrecords: [{id: EXACT-STAGED-BYTES}]\n';
+    setInitialGuardedRoute();
+    await act(async () => root.render(<GuardedHarness api={api} />)); await flushRoute(); await flushRoute();
+    clickButton('Edit');
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]');
+    if (!editor) throw new Error('The default descriptor source editor was not rendered');
+    setInputValue(editor, edited);
+    clickButton('Add current file to candidate'); await confirmAction();
+    clickButton('Stage candidate (1 files)'); await flush(); await flush();
+    expect(stageSourceChangeSet).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', 'base-descriptor-a', 'registry-1', [
+      { operation: 'replace', path: 'testdata/descriptor-a.yaml', content: edited },
+    ], expect.any(AbortSignal));
+    expect(host.textContent).toContain('Draft cs-testdata-a');
+    expect(host.textContent).toContain('EXACT-STAGED-BYTES');
+
+    removeDescriptorA();
+    clickButton('Refresh Testdata');
+    await flush(); await flush(); await flush(); await flushRoute();
+    expect(host.textContent).toContain('Descriptor descriptor-a is no longer present in the refreshed catalog.');
+    expect(host.textContent).toContain('Draft cs-testdata-a');
+    expect(host.textContent).toContain('EXACT-STAGED-BYTES');
+    const publish = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Publish');
+    expect(publish?.disabled).toBe(true);
+
+    clickDescriptor('descriptor-b');
+    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="dialog"] button:first-child')?.click());
+    await flushRoute();
+    expect(host.textContent).toContain('Draft cs-testdata-a');
+    expect(host.textContent).toContain('EXACT-STAGED-BYTES');
+    expect(sourceChangeSetAction).not.toHaveBeenCalled();
+
+    clickDescriptor('descriptor-b');
+    await confirmGuardNavigation();
+    expect(sourceChangeSetAction).toHaveBeenCalledTimes(1);
+    expect(sourceChangeSetAction.mock.calls[0][2]).toBe('cs-testdata-a');
+    expect(sourceChangeSetAction.mock.calls[0][3]).toBe('discard');
+    expect(host.querySelector('output[aria-label="Current route"]')?.textContent).toContain('descriptor=descriptor-b');
+    expect(host.textContent).not.toContain('Draft cs-testdata-a');
+    expect(host.textContent).not.toContain('EXACT-STAGED-BYTES');
+  });
+
   it('keeps Testdata browsing available while withholding owner-only editing from non-owners', async () => {
     const managedSource = vi.fn(async () => ({
       available: true, present: true, logicalPath: 'testdata/accounts.yaml', format: 'yaml', text: 'records: []',

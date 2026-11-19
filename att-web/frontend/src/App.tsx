@@ -242,7 +242,7 @@ function ExplorerRouteView({ route, inlineLoadEnabled, schedulingEnabled, onSche
     navigation.navigate({ ...route, environment: nextEnvironment });
   }, [navigation.navigate, route]);
   const onTestdataDescriptorChange = useCallback((descriptorId?: string) => {
-    navigation.navigate({ ...route, testdataDescriptorId: descriptorId });
+    return navigation.navigate({ ...route, testdataDescriptorId: descriptorId });
   }, [navigation.navigate, route]);
   const onOpenTestdata = useCallback(() => {
     navigation.navigate({ kind: 'package', packageId, view: 'testdata', environment });
