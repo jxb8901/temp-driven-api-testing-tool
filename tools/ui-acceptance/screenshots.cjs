@@ -6,6 +6,9 @@ const repositoryRoot = path.resolve(__dirname, '../..');
 const outputDirectory = path.join(repositoryRoot, 'docs/system-design/ui-shell-baseline');
 
 async function main() {
+  const pom = await fs.readFile(path.join(repositoryRoot, 'pom.xml'), 'utf8');
+  const repositoryVersion = pom.match(/<version>([^<]+)<\/version>/)?.[1];
+  if (!repositoryVersion) throw new Error('The root pom.xml must declare the repository version.');
   await fs.mkdir(outputDirectory, { recursive: true });
   const fixture = await startFixture();
   let browser;
@@ -38,7 +41,7 @@ async function main() {
         wait: async page => {
           await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
           await page.locator('.att-explorer-table tbody tr').first().waitFor();
-          await page.getByText(/sorting applies to all matching resources/i).waitFor();
+          await page.getByText(/column sorting applies to matching resources before pagination/i).waitFor();
         },
       },
       {
@@ -47,8 +50,8 @@ async function main() {
         wait: async page => {
           await page.getByRole('heading', { name: 'Resource details', level: 1, exact: true }).waitFor();
           await page.getByRole('heading', { name: 'checkout' }).waitFor();
-          await page.locator('.att-code-editor[aria-label="Safe resource definition"] .cm-line')
-            .filter({ hasText: '"name"' }).waitFor();
+          await page.getByRole('heading', { name: 'Actions', level: 3, exact: true }).waitFor();
+          await page.getByRole('heading', { name: 'submit', level: 3, exact: true }).waitFor();
         },
       },
       {
@@ -97,7 +100,7 @@ async function main() {
           await floating.getByRole('tab', { name: 'Events', exact: true }).click();
           await floating.locator('.att-job-events li:not([aria-hidden])').first().waitFor();
           await floating.getByRole('tab', { name: 'Live Output', exact: true }).click();
-          await floating.getByText('This Job has no console lines. Structured events remain on the Events tab.', { exact: true }).waitFor();
+          await floating.getByText('Connected; no console lines have been emitted yet.', { exact: true }).waitFor();
         },
       },
       {
@@ -154,7 +157,7 @@ async function main() {
     }
     await fs.writeFile(path.join(outputDirectory, 'manifest.json'), `${JSON.stringify({
       generatedAt: new Date().toISOString(),
-      repositoryVersion: '4.3.0',
+      repositoryVersion,
       browser: await browser.version(),
       playwright: require('playwright/package.json').version,
       fixtureOrigin: fixture.origin,

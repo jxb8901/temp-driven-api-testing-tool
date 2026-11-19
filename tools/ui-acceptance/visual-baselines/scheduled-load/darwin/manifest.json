@@ -1,6 +1,6 @@
 {
-  "repositoryVersion": "4.2.1",
-  "generatedAt": "2026-10-16T13:17:08.934Z",
+  "repositoryVersion": "4.4.0",
+  "generatedAt": "2026-11-19T04:41:25.131Z",
   "platform": "darwin",
   "architecture": "arm64",
   "maxChangedPixelRatio": 0.04,
@@ -8,7 +8,7 @@
   "captures": [
     {
       "browser": "chromium",
-      "version": "155.0.8059.82",
+      "version": "158.0.8127.36",
       "width": 1280,
       "height": 900,
       "theme": "light",
@@ -17,7 +17,7 @@
     },
     {
       "browser": "chromium",
-      "version": "155.0.8059.82",
+      "version": "158.0.8127.36",
       "width": 1280,
       "height": 900,
       "theme": "dark",
@@ -26,7 +26,7 @@
     },
     {
       "browser": "chromium",
-      "version": "155.0.8059.82",
+      "version": "158.0.8127.36",
       "width": 768,
       "height": 900,
       "theme": "light",
@@ -35,7 +35,7 @@
     },
     {
       "browser": "chromium",
-      "version": "155.0.8059.82",
+      "version": "158.0.8127.36",
       "width": 768,
       "height": 900,
       "theme": "dark",
@@ -44,7 +44,7 @@
     },
     {
       "browser": "chromium",
-      "version": "155.0.8059.82",
+      "version": "158.0.8127.36",
       "width": 390,
       "height": 900,
       "theme": "light",
@@ -53,7 +53,7 @@
     },
     {
       "browser": "chromium",
-      "version": "155.0.8059.82",
+      "version": "158.0.8127.36",
       "width": 390,
       "height": 900,
       "theme": "dark",
@@ -168,5 +168,6 @@
       "route": "#/load-schedules",
       "file": "webkit-scheduled-390-dark.png"
     }
-  ]
+  ],
+  "reviewReason": "Reviewed 4.4.0 schedules layout with workspace header and scope filters across desktop, tablet, and mobile in light and dark themes."
 }

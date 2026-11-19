@@ -83,6 +83,9 @@ async function assertAxe(page, engine, theme, width) {
 }
 
 async function main() {
+  const pom = await fs.readFile(path.join(__dirname, '../../pom.xml'), 'utf8');
+  const repositoryVersion = pom.match(/<version>([^<]+)<\/version>/)?.[1];
+  assert.ok(repositoryVersion, 'The root pom.xml must declare the repository version.');
   if (!updateVisualBaselines) {
     assert.ok(['darwin', 'linux'].includes(process.platform), `No committed Schedules screenshot baseline exists for ${process.platform}.`);
     const baselineManifest = JSON.parse(await fs.readFile(path.join(visualBaselineDirectory, 'manifest.json'), 'utf8'));
@@ -182,12 +185,12 @@ async function main() {
       }
     }
     await fs.writeFile(path.join(outputDirectory, 'manifest.json'), `${JSON.stringify({
-      repositoryVersion: '4.3.0', generatedAt: new Date().toISOString(), platform: process.platform,
+      repositoryVersion, generatedAt: new Date().toISOString(), platform: process.platform,
       architecture: process.arch, captures: manifest,
     }, null, 2)}\n`);
     if (updateVisualBaselines) {
       await fs.writeFile(path.join(visualBaselineDirectory, 'manifest.json'), `${JSON.stringify({
-        repositoryVersion: '4.3.0', generatedAt: new Date().toISOString(), platform: process.platform,
+        repositoryVersion, generatedAt: new Date().toISOString(), platform: process.platform,
         architecture: process.arch,
         maxChangedPixelRatio: visualDifferenceLimit, channelTolerance, captures: manifest,
         reviewReason: baselineReviewReason,
@@ -207,7 +210,7 @@ async function main() {
     }
     if (visualDifferences.length > 0) {
       await fs.writeFile(reportJsonPath, `${JSON.stringify({
-        repositoryVersion: '4.3.0',
+        repositoryVersion,
         generatedAt: new Date().toISOString(),
         platform: process.platform,
         maxChangedPixelRatio: visualDifferenceLimit,
