@@ -1188,7 +1188,7 @@ class ApiServletIntegratedLimitsTest {
         for(Map.Entry<String,Map<String,Object>> entry:cases.entrySet()) {
             String name=entry.getKey();boolean delay="timeout".equals(name);int responseBytes="response-limit".equals(name)?2048:0;
             try(ApiPrometheusFixture fixture=new ApiPrometheusFixture(delay?7_000:0,responseBytes);
-                ServerRuntime runtime=runtime(packages,writeSutMetricsConfig(sharedRuntimeConfig(),
+                ServerRuntime runtime=runtime(packages,writeSutMetricsConfig(sharedRuntimeConfig("sut-metrics-live-api-"+name+"-runtime"),
                         List.of(prometheusSource("prom","Prometheus",fixture.url(),List.of(),List.of("USER"),List.of("tenant-a"),"tenant-a",
                                 entry.getValue(),Map.of())),List.of(),List.of(),List.of(baseProfile("base","Base profile",
                                 List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up")))),false),
@@ -1217,7 +1217,7 @@ class ApiServletIntegratedLimitsTest {
                     assertEquals("UNAVAILABLE",item.path("queryStatus").asText(),item.toString());
                     assertTrue(item.path("error").asText().toLowerCase().contains("timeout")
                             || item.path("error").asText().toLowerCase().contains("timed out")
-                            || item.path("error").asText().toLowerCase().contains("limit"),item.toString());
+                            || item.path("error").asText().toLowerCase().contains("limit"),name+" (fixture requests="+fixture.requests.get()+"): "+item);
                 }
             }
         }
@@ -1953,7 +1953,11 @@ class ApiServletIntegratedLimitsTest {
     }
 
     private Path sharedRuntimeConfig() throws Exception {
-        Path root=Files.createDirectories(temp.resolve("shared-runtime-config/config"));
+        return sharedRuntimeConfig("shared-runtime-config");
+    }
+
+    private Path sharedRuntimeConfig(String name) throws Exception {
+        Path root=Files.createDirectories(temp.resolve(name+"/config"));
         return Files.writeString(root.resolve("config.yaml"),"schemaVersion: att-config/v2.15\nenvironment: SIT\n"
                 +"environments:\n  SIT: {}\ntimeoutMs: 10000\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
     }

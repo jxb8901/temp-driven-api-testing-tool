@@ -6358,6 +6358,8 @@ final class SutMetricsService implements AutoCloseable {
         return "PROMETHEUS_UNAVAILABLE";
     }
     private static String safeFailureMessage(Exception failure) {
+        if (failure instanceof java.net.http.HttpTimeoutException)
+            return "Prometheus query timed out.";
         String message = failure.getMessage(); if (message == null || message.isBlank()) return "Prometheus query failed.";
         // Never reflect an endpoint or authentication header into public diagnostics.
         if (message.contains("http://") || message.contains("https://") || message.toLowerCase(Locale.ROOT).contains("authorization")) return "Prometheus query failed; endpoint details are withheld.";
