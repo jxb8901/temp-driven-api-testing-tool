@@ -71,6 +71,15 @@ File catalog 按 canonical Package-relative path 合併 references，並顯示�
 
 引導式建立工具要求可編輯的 `att-package/v2` Manifest。若 Package 還需要其他 inventory 修改，請使用進階 Manifest editor。
 
+## 編輯或刪除 Testdata
+
+1. 在所選 Package 及 Environment 的 Testdata catalog 選擇描述檔。
+2. 具備 Package source authoring 權限時，可在描述檔的 source workspace 編輯、移動或刪除檔案。編輯內容會透過共用 Change Set 工作流程暫存。
+3. 移動或刪除檔案時，請在同一 candidate 加入對應的 Package Manifest inventory 更新及受影響的 LOAD Scenario 參照。使用 **Add a related file** 將這些 source 一起加入。
+4. Publish 前驗證並檢查完整 candidate，並確保 Base 及 Environment inventory 與保留的檔案一致。
+
+描述檔編輯器不會自動修改 Manifest 或 Scenario 參照。Publish 前請檢查所有受影響的 source。
+
 ## 編輯 SUT Metrics
 
 在所選 Package 的 supporting sources 開啟 **SUT Metrics**，編輯該 Package 擁有的 Metric Sources、Groups 及 Profiles。Package Manifest 會在 `load/sut-metrics/` 下登錄這些檔案。

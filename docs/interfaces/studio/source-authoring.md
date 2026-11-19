@@ -71,6 +71,15 @@ If snapshot generation or validation fails, fix the source and retry before publ
 
 The guided creator requires an editable `att-package/v2` Manifest. Use the advanced Manifest editor when the Package needs another inventory change.
 
+## Edit or delete Testdata
+
+1. In the selected Package and Environment, choose a descriptor from the Testdata catalog.
+2. With Package source authoring access, use the descriptor's source workspace to edit, move, or delete its file. Stage edits through the shared Change Set workflow.
+3. For a move or delete, add the matching Package Manifest inventory update and any affected LOAD Scenario references to the same candidate. Use **Add a related file** to include those source files.
+4. Validate and review the complete candidate before publishing. Keep Base and Environment inventory entries consistent with the files that remain.
+
+The descriptor editor does not rewrite Manifest or Scenario references automatically. Review every affected source before Publish.
+
 ## Edit SUT Metrics
 
 Open **SUT Metrics** under the selected Package's supporting sources to edit Package-owned Metric Sources, Groups, and Profiles. The Package Manifest inventories those files under `load/sut-metrics/`.

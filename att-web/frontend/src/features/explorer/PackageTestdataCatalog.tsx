@@ -524,7 +524,9 @@ export function PackageTestdataWorkspace({ api, packageId, packageLabel, registr
 
   return <main className="page-content att-testdata-page">
     <header className="att-testdata-page-heading">
-      <div><p className="eyebrow">Packages / {packageId} / Explorer</p><h1>Testdata</h1><p>Read-only Package descriptor and record inspection.</p></div>
+      <div><p className="eyebrow">Packages / {packageId} / Explorer</p><h1>Testdata</h1><p>{canManagePackageSource
+        ? 'Inspect descriptors and records, and manage authorized Package sources.'
+        : 'Read-only Package descriptor and record inspection.'}</p></div>
       <div className="att-testdata-page-actions"><button type="button" onClick={onBackToResources}>Back to resources</button>
         <button type="button" onClick={onOpenPackageConfiguration}>Package Configuration</button>
         <label>Environment<select aria-label="Testdata environment" value={environment} onChange={event => { setEnvironmentNotice(''); onEnvironmentChange(event.currentTarget.value); }}>
