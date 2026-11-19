@@ -461,8 +461,8 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       message: `Discard draft ${draft.changeSetId} and remove its staged source changes. Published source remains unchanged.`,
       confirmLabel: 'Discard draft', destructive: true })) return;
     await withBusy(`${action} the source draft`, async signal => {
-      const acknowledgement = action === 'publish' && centralTarget && impact?.acknowledgementRequired && impact.freshness
-        ? await createImpactAcknowledgement(impact.freshness, impactActor) : undefined;
+      const acknowledgement = action === 'publish' && centralTarget && impact?.freshness
+        ? await createImpactAcknowledgement(impact.freshness, impactActor, impact.acknowledgementRequired === true) : undefined;
       if (signal.aborted) return;
       const result = await api.sourceChangeSetAction!(target.domain, getScopeId(), draft.changeSetId, action, signal, acknowledgement);
       if (signal.aborted) return;

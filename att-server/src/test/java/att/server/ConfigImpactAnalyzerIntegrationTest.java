@@ -191,6 +191,12 @@ class ConfigImpactAnalyzerIntegrationTest {
                     && item.action == ScheduleAction.UNCHANGED));
 
             String freshness = ConfigImpactAnalyzer.freshnessFingerprint(impact.freshness);
+            ImpactAcknowledgement freshnessOnly = new ImpactAcknowledgement(freshness);
+            ChangeSetPublisher.Conflict missingRequiredAcknowledgement = assertThrows(ChangeSetPublisher.Conflict.class,
+                    () -> publisher.publish(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                            ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, impactId,
+                            "requires-review-without-acknowledgement", freshnessOnly));
+            assertEquals("ATT-CONFIG-IMPACT-STALE", missingRequiredAcknowledgement.code);
             ImpactAcknowledgement acknowledgement = new ImpactAcknowledgement(freshness, "admin",
                     ConfigImpactAnalyzer.acknowledgementDigest(freshness, "admin"));
             LoadSchedule changedSchedule = schedule("schedule-default", "default", null, false, "pause");
@@ -325,7 +331,8 @@ class ConfigImpactAnalyzerIntegrationTest {
                 ChangeSetPublisher.CENTRAL_SCOPE_ID, "admin", true, id, null);
         assertEquals(ImpactDecision.COMPATIBLE, report.decision);
         String freshness = ConfigImpactAnalyzer.freshnessFingerprint(report.freshness);
-        return new ImpactAcknowledgement(freshness, "admin", ConfigImpactAnalyzer.acknowledgementDigest(freshness, "admin"));
+        assertFalse(report.acknowledgementRequired);
+        return new ImpactAcknowledgement(freshness);
     }
 
     private static void assertStalePublish(ChangeSetPublisher publisher, String id,

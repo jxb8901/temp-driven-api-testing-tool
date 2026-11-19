@@ -492,6 +492,15 @@ final class PackageManifestPublisher implements AutoCloseable {
         return result;
     }
 
+    synchronized Map<String,Object> previewDraftSource(String packageId,String actor,String draftId) throws Exception {
+        Draft draft=manifestDraft(packageId,actor,draftId);
+        if(draft.source==null)throw new IOException("Manifest draft source is unavailable");
+        byte[] source=draft.source.getBytes(StandardCharsets.UTF_8);
+        if(source.length>MAX_SOURCE_BYTES)throw new IOException("Manifest draft source exceeds its size limit");
+        return Map.of("draftId",draft.id,"source",draft.source,"sourceDigest",digest(source),
+                "expectedManifestDigest",draft.beforeDigest);
+    }
+
     synchronized Map<String,Object> rollbackDraft(String packageId,String actor,String revision,String expectedDigest) throws Exception {
         authorizedRoot(packageId,actor);requireDigest(revision);
         Path history=historyDirectory(packageId).resolve(revision+".yaml");

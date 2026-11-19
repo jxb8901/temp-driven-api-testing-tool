@@ -1,5 +1,5 @@
 export interface SavedLoadScenario { id: string; packageId: string; name: string; description: string; tags: string[]; model: string; revision: number; updatedAt: string; workloadCount?: number }
-import type { ManifestView, ManifestProjection, ManifestDraft, ManifestHistory, AuthoringSourceProjection } from './features/explorer/packageManifest';
+import type { ManifestView, ManifestProjection, ManifestDraft, ManifestDraftSource, ManifestHistory, AuthoringSourceProjection } from './features/explorer/packageManifest';
 import type { JobReplay, JobReplayEditorDraft } from "./features/load/types";
 import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type MonitoringJobJournal, type MonitoringSnapshot, type PackageSummary, type ServerVersion } from './types';
 import type {
@@ -579,6 +579,10 @@ export const api = {
   },
   getPackageAuthoringSource(packageId: string, signal?: AbortSignal): Promise<AuthoringSourceProjection> {
     return request('packages/' + encodeURIComponent(packageId) + '/authoring-source' + queryString({ type: 'manifest' }), { signal });
+  },
+  getPackageManifestDraftSource(packageId: string, draftId: string, signal?: AbortSignal): Promise<ManifestDraftSource> {
+    return request('packages/' + encodeURIComponent(packageId) + '/package-configuration/drafts/'
+      + encodeURIComponent(draftId) + '/source', { signal, cache: 'no-store' });
   },
   getManagedPackageAuthoringSource(packageId: string, query: PackageAuthoringSourceQuery, signal?: AbortSignal): Promise<ManagedAuthoringSource> {
     return request('packages/' + encodeURIComponent(packageId) + '/authoring-source' + queryString({

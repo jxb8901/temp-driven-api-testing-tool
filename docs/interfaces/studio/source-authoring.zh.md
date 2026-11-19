@@ -24,6 +24,17 @@
 
 Server 負責權限、validation、revision 檢查及 publication。若編輯期間 source 已變更，Studio 會保留本機文字，但不允許以舊 revision 暫存。複製仍需保留的修改、重新載入最新 source，再手動套用。Studio 不會靜默 rebase 或合併整份檔案。
 
+## 編輯 Package Manifest
+
+1. 在 **Explorer** 開啟 **Supporting sources**，再選擇目前 Package 的 **Package manifest**。
+2. 使用 **Effective** 檢查解析後的 Package 設定，使用 **Compare with Global** 比較 Package 與 Global 的值，並使用 **Declared** 檢視 Manifest 宣告值。選擇 **Source** 檢視或編輯 `package.yaml`；只有 Server 提供完整且已授權的 source，並允許此帳戶編輯 Package source 時，才可編輯。
+3. 修改 YAML，再選擇 **Create Manifest draft**。這會暫存私人候選版本，不會修改已發布的 Package。
+4. 依序選擇 **Validate Manifest draft** 及 **Review validated Manifest**。在檢閱面板比較已發布來源與候選版本，並檢查變更路徑及 Manifest 基底 revision。
+5. 選擇 **Publish reviewed Manifest** 並確認。新 Manifest 會用於之後的 Package 設定解析。此流程發布 Package 擁有的設定；共用 Runtime Config 使用獨立的 ADMIN workflow。
+6. 載入 Manifest history 以檢查歷史 revision。**Stage rollback** 會以保留的 revision 建立新 draft；必須驗證、檢閱並發布後才會成為目前版本。發布後，可在 **Published Manifest revision (advanced)** 檢視 revision digest。
+
+若發布回傳 `409`，表示候選版本建立後 source 已變更。捨棄過期 draft、重新載入 Manifest，並將修改套用至新的候選版本。
+
 ## 直接修改檔案與已發布狀態
 
 請將 Package 檔案及 Runtime Config 部署目錄視為部署輸入。直接修改不會建立已核准的 Change Set、acknowledgement 或線上 activation。Server 可能偵測 Package 變更並建立新的 source revision，令現有 draft 過期。直接修改 central Runtime Config mirror 不會令該 revision 成為 active；請使用 ADMIN 的 Validate → Review Impact → Publish 流程。不要把檔案複製結果標示為 Published 或 Active。

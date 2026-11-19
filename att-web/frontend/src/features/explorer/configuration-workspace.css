@@ -59,4 +59,17 @@
 .att-manifest-workspace pre { white-space:pre-wrap; overflow-wrap:anywhere; max-width:60ch; }
 .att-manifest-workspace section { margin-top:1rem; padding-top:1rem; border-top:1px solid var(--att-color-border,#cbd5e1); }
 .att-manifest-workspace section>button { margin:.25rem; }
+.att-manifest-source-diff { display:grid; gap:.55rem; min-width:0; padding:.75rem; border:1px solid var(--att-color-border,#cbd5e1); border-radius:.5rem; background:var(--att-color-surface-subtle,#f8fafc); }
+.att-manifest-source-diff>p { overflow-wrap:anywhere; }
+.att-manifest-source-diff>div { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,24rem),1fr)); gap:.6rem; min-width:0; }
+.att-manifest-source-diff>div>section { min-width:0; margin:0; padding:.55rem; border:1px solid var(--att-color-border,#cbd5e1); border-radius:.4rem; background:var(--att-color-surface,#fff); }
+.att-manifest-source-diff h4 { margin:.1rem 0 .4rem; }
+.att-manifest-workspace .att-authoring-workflow { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr)); gap:.4rem; margin:.8rem 0; padding:0; list-style:none; }
+.att-manifest-workspace .att-authoring-workflow>li { display:grid; grid-template-columns:auto minmax(0,1fr); gap:.25rem .45rem; min-width:0; padding:.45rem .55rem; border:1px solid var(--att-color-border,#cbd5e1); border-radius:.45rem; background:var(--att-color-surface-subtle,#f8fafc); color:var(--att-color-muted,#667085); }
+.att-manifest-workspace .att-authoring-workflow>li[data-state="complete"] { border-color:var(--att-color-success,#087443); color:var(--att-color-text,#172033); }
+.att-manifest-workspace .att-authoring-workflow>li[data-state="current"] { border-color:var(--att-color-primary,#2563eb); color:var(--att-color-text,#172033); box-shadow:inset 0 0 0 1px var(--att-color-primary,#2563eb); }
+.att-manifest-workspace .att-authoring-workflow>li[data-state="blocked"] { border-color:var(--att-color-danger,#b42318); color:var(--att-color-danger,#b42318); }
+.att-manifest-workspace .att-authoring-workflow-number { display:grid; place-items:center; width:1.45rem; height:1.45rem; border-radius:50%; background:var(--att-color-border,#cbd5e1); color:var(--att-color-text,#172033); font-size:.78rem; font-weight:700; }
+.att-manifest-workspace .att-authoring-workflow-label { min-width:0; overflow-wrap:anywhere; font-size:.82rem; font-weight:650; }
+.att-manifest-workspace .att-authoring-workflow-reason { grid-column:1/-1; font-size:.72rem; line-height:1.35; }
 .att-manifest-workspace [role=alert] { color:var(--att-color-danger,#a21b1b); }

@@ -27,4 +27,9 @@ describe('Config impact acknowledgement (#335 contract)', () => {
       .toBeLessThan(canonicalImpactFreshness(withPackages).indexOf('PACKAGE_SOURCE\tz'));
     await expect(createImpactAcknowledgement(freshness, '  ')).rejects.toThrow('administrator ID');
   });
+  it('binds a compatible report freshness without creating an acknowledgement', async () => {
+    expect(await createImpactAcknowledgement(freshness, '', false)).toEqual({
+      freshnessFingerprint: '89d049ca4392286a7559208799b1555d114a06593c6da36f0200f3dd3b04966b',
+    });
+  });
 });

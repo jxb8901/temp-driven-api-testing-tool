@@ -188,7 +188,7 @@ public final class ApiServlet extends HttpServlet {
             }
             if(resourceRequest){resourceGet(req,res,path,requestId,principal);return;}
             if(loadCatalogRequest){loadCatalogGet(req,res,path,requestId,principal);return;}
-            if(path.matches("/packages/[^/]+/package-configuration(?:/(?:declared|effective|compare|source|history))?")) {
+            if(path.matches("/packages/[^/]+/package-configuration(?:/(?:declared|effective|compare|source|history|drafts/[^/]+/source))?")) {
                 manifestGet(req,res,path,requestId,principalExact(req));return;
             }
             if("/registry".equals(path)) {
@@ -1477,8 +1477,10 @@ public final class ApiServlet extends HttpServlet {
         java.util.Iterator<String> fields=input.fieldNames();
         while(fields.hasNext())if(!allowed.contains(fields.next()))
             throw new IllegalArgumentException("Unsupported impact acknowledgement field");
-        return new ImpactAcknowledgement(requiredChangeText(input,"freshnessFingerprint"),
-                requiredChangeText(input,"actor"),requiredChangeText(input,"acknowledgementDigest"));
+        String freshnessFingerprint=requiredChangeText(input,"freshnessFingerprint");
+        String actor=optionalChangeText(input,"actor");
+        String acknowledgementDigest=optionalChangeText(input,"acknowledgementDigest");
+        return new ImpactAcknowledgement(freshnessFingerprint,actor,acknowledgementDigest);
     }
 
     private void sourceHistoryGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,
@@ -1575,12 +1577,18 @@ public final class ApiServlet extends HttpServlet {
 
     private void manifestGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String actor) throws IOException {
         String[] parts=path.split("/");String action=parts.length==4?"effective":parts[4];
+        boolean privateDraftSource=parts.length==7&&"drafts".equals(parts[4])&&"source".equals(parts[6]);
         try {
-            Map<String,Object> result="history".equals(action)?new java.util.LinkedHashMap<>(Map.of("items",runtime.withPackageSourceAuthority(actor,
+            Map<String,Object> result;
+            if(privateDraftSource) {
+                result=new java.util.LinkedHashMap<>(runtime.withPackageSourceAuthority(actor,
+                        login -> login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),
+                        () -> runtime.manifestPublisher.previewDraftSource(segment(path,2),actor,parts[5])));
+            } else if("history".equals(action))result=new java.util.LinkedHashMap<>(Map.of("items",runtime.withPackageSourceAuthority(actor,
                     login -> login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),
-                    () -> runtime.manifestPublisher.history(segment(path,2),actor)))):
-                    runtime.inspectPackageConfiguration(segment(path,2),action,req.getParameter("environment"),actor);
-            result.put("requestId",requestId);res.setHeader("Cache-Control","no-store");json(res,200,result);
+                    () -> runtime.manifestPublisher.history(segment(path,2),actor))));
+            else result=runtime.inspectPackageConfiguration(segment(path,2),action,req.getParameter("environment"),actor);
+            result.put("requestId",requestId);res.setHeader("Cache-Control",privateDraftSource?"private, no-store":"no-store");json(res,200,result);
         } catch(PackageManifestPublisher.Denied e){error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);}
           catch(PackageManifestPublisher.Missing|ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","Package source was not found",requestId);}
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full",requestId);}

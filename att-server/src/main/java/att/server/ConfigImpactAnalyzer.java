@@ -270,10 +270,7 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
             return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null, IMPACT_STALE);
         if (acknowledgement == null
                 || !java.util.Objects.equals(request.acknowledgementBinding, acknowledgement.freshnessFingerprint)
-                || !issuedFingerprint.equals(acknowledgement.freshnessFingerprint)
-                || !request.actor.equals(acknowledgement.actor)
-                || !acknowledgementDigest(issuedFingerprint, request.actor)
-                .equals(acknowledgement.acknowledgementDigest))
+                || !issuedFingerprint.equals(acknowledgement.freshnessFingerprint))
             return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null, IMPACT_STALE);
         long preflightDeadline = System.nanoTime() + Duration.ofMillis(maxAnalysisMillis).toNanos();
         InventorySnapshot current = snapshot(sourceCandidate, candidate.validationFingerprint, preflightDeadline, null);
@@ -302,12 +299,15 @@ final class ConfigImpactAnalyzer implements ImpactReportProvider {
                 || !java.util.Objects.equals(request.acknowledgementBinding, acknowledgement.freshnessFingerprint))
             return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null,
                     "ATT-CONFIG-IMPACT-STALE");
-        if (!request.actor.equals(acknowledgement.actor)
-                || !freshnessFingerprint.equals(acknowledgement.freshnessFingerprint)
-                || !acknowledgementDigest(freshnessFingerprint, request.actor)
-                .equals(acknowledgement.acknowledgementDigest)) {
-            return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null,
-                    "ATT-CONFIG-IMPACT-STALE");
+        if (!freshnessFingerprint.equals(acknowledgement.freshnessFingerprint))
+            return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null, "ATT-CONFIG-IMPACT-STALE");
+        if (report.acknowledgementRequired) {
+            if (!request.actor.equals(acknowledgement.actor)
+                    || !acknowledgementDigest(freshnessFingerprint, request.actor)
+                    .equals(acknowledgement.acknowledgementDigest)) {
+                return new ApprovalDecision(SourceManagementContracts.ApprovalState.STALE, null,
+                        "ATT-CONFIG-IMPACT-STALE");
+            }
         }
         if (!activation.canActivateOnline())
             return new ApprovalDecision(SourceManagementContracts.ApprovalState.REJECTED, null,

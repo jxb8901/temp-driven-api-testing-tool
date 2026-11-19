@@ -730,9 +730,14 @@ public final class SourceManagementContracts {
         public final String acknowledgementDigest;
         public ImpactAcknowledgement(String freshnessFingerprint, String actor, String acknowledgementDigest) {
             this.freshnessFingerprint = requiredDigest(freshnessFingerprint, "freshnessFingerprint");
-            this.actor = requiredToken(actor, "actor", 160);
-            this.acknowledgementDigest = requiredDigest(acknowledgementDigest, "acknowledgementDigest");
+            if ((actor == null) != (acknowledgementDigest == null))
+                throw new IllegalArgumentException("actor and acknowledgementDigest must be supplied together");
+            this.actor = actor == null ? null : requiredToken(actor, "actor", 160);
+            this.acknowledgementDigest = acknowledgementDigest == null ? null
+                    : requiredDigest(acknowledgementDigest, "acknowledgementDigest");
         }
+        /** Binds a compatible report without claiming that administrator acknowledgement was required. */
+        public ImpactAcknowledgement(String freshnessFingerprint) { this(freshnessFingerprint, null, null); }
     }
 
     public interface ImpactReportProvider {

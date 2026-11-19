@@ -248,8 +248,8 @@ export interface SourceAffectedSchedule {
 /** ADMIN acknowledgement is bound to this central Config publish, never a separate request. */
 export interface SourceImpactAcknowledgement {
   freshnessFingerprint: string;
-  actor: string;
-  acknowledgementDigest: string;
+  actor?: string;
+  acknowledgementDigest?: string;
 }
 
 export interface SourceImpactReport {

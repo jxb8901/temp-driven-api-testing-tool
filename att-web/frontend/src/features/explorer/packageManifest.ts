@@ -30,6 +30,12 @@ export interface ManifestDraft {
   validation?: ManifestProjection;
   resetToEmptyManifest?: boolean;
 }
+export interface ManifestDraftSource {
+  draftId: string;
+  source: string;
+  sourceDigest: string;
+  expectedManifestDigest: string;
+}
 export interface ManifestHistory { manifestDigest: string; modifiedAt: string }
 export interface AuthoringSourceProjection {
   available: boolean; present: boolean; logicalPath: string; format: string; text: string;
@@ -38,6 +44,7 @@ export interface AuthoringSourceProjection {
 export interface PackageManifestApi {
   getPackageManifest(packageId: string, view: ManifestView, environment?: string, signal?: AbortSignal): Promise<ManifestProjection>;
   getPackageAuthoringSource(packageId: string, signal?: AbortSignal): Promise<AuthoringSourceProjection>;
+  getPackageManifestDraftSource(packageId: string, draftId: string, signal?: AbortSignal): Promise<ManifestDraftSource>;
   stagePackageManifest(packageId: string, source: string, expectedManifestDigest: string, signal?: AbortSignal): Promise<ManifestDraft>;
   manifestDraftAction(packageId: string, draftId: string, action: 'validate' | 'review' | 'discard', signal?: AbortSignal): Promise<ManifestDraft>;
   publishPackageManifest(packageId: string, draftId: string, signal?: AbortSignal): Promise<{ published: boolean; manifestDigest: string; auditConfirmed?: boolean }>;

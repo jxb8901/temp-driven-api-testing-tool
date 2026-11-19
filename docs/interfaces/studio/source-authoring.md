@@ -24,6 +24,17 @@ Use this guide to edit Package resources or shared Runtime Config in ATT Studio.
 
 The Server owns authorization, validation, revision checks, and publication. If the source changes while you edit, Studio preserves your local text but blocks staging against the old revision. Copy the changes you still need, reload the latest source, and reapply them. Studio does not silently rebase or merge full-file edits.
 
+## Edit a Package Manifest
+
+1. In **Explorer**, open **Supporting sources**, then choose **Package manifest** for the selected Package.
+2. Use **Effective** to inspect resolved Package configuration, **Compare with Global** to compare Package and Global values, and **Declared** to inspect declared values. Choose **Source** to view or edit `package.yaml`; editing is available only when the Server returns the complete authorized source and grants Package source write access.
+3. Edit the YAML and choose **Create Manifest draft**. This stages a private candidate without changing the published Package.
+4. Choose **Validate Manifest draft**, then **Review validated Manifest**. Compare the published source with the candidate in the review panel, including its changed path and base Manifest revision.
+5. Choose **Publish reviewed Manifest** and confirm. The new Manifest applies to future Package configuration resolution. This workflow publishes Package-owned configuration; shared Runtime Config has its own ADMIN workflow.
+6. To inspect revisions, load Manifest history. **Stage rollback** creates a new draft from a retained revision; validate, review, and publish that draft before it becomes current. The published revision digest is available under **Published Manifest revision (advanced)** after publication.
+
+If publication returns `409`, the source changed after the candidate was prepared. Discard the stale draft, refresh the Manifest, and reapply the changes to a new candidate.
+
 ## Direct filesystem edits and published state
 
 Treat Package files and the Runtime Config deployment directory as deployment inputs. Editing them directly does not create an approved Change Set, acknowledgement, or online activation. Package edits may be detected as a new source revision and will make existing drafts stale. A direct edit to the central Runtime Config mirror is not adopted as the active revision; use the ADMIN Validate → Review Impact → Publish flow. Do not report a filesystem copy as Published or Active.

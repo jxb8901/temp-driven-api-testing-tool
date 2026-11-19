@@ -111,15 +111,13 @@ class ApiServletIntegratedLimitsTest {
             assertNotNull(impact.freshness);
             String freshness=ConfigImpactAnalyzer.freshnessFingerprint(impact.freshness);
             att.server.api.source.SourceManagementContracts.ImpactAcknowledgement acknowledgement=
-                    new att.server.api.source.SourceManagementContracts.ImpactAcknowledgement(freshness,"alice",
-                            ConfigImpactAnalyzer.acknowledgementDigest(freshness,"alice"));
+                    new att.server.api.source.SourceManagementContracts.ImpactAcknowledgement(freshness);
 
             Path manifest=packageRoot.resolve("package.yaml");
             Files.writeString(manifest,Files.readString(manifest)+"# concurrent manifest change\n");
             Captured response=invokeAsAdmin(servlet(runtime),"alice","POST",
                     "/configuration/change-sets/"+id+"/publish",Map.of(),ServerRuntime.JSON.writeValueAsBytes(Map.of(
-                            "impactAcknowledgement",Map.of("freshnessFingerprint",freshness,"actor","alice",
-                                    "acknowledgementDigest",acknowledgement.acknowledgementDigest))));
+                            "impactAcknowledgement",Map.of("freshnessFingerprint",freshness))));
             JsonNode error=ServerRuntime.JSON.readTree(response.body()).path("error");
             assertEquals(409,response.status,new String(response.body(),StandardCharsets.UTF_8));
             assertEquals("ATT-CONFIG-IMPACT-STALE",error.path("code").asText());

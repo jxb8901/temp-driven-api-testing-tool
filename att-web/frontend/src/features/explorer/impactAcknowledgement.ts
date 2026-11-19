@@ -26,10 +26,12 @@ async function sha256Hex(value: string): Promise<string> {
 }
 
 /** Server independently validates actor, freshness, decision, approval and ADMIN permission. */
-export async function createImpactAcknowledgement(freshness: Freshness, actor: string): Promise<SourceImpactAcknowledgement> {
+export async function createImpactAcknowledgement(freshness: Freshness, actor: string,
+  acknowledgementRequired = true): Promise<SourceImpactAcknowledgement> {
+  const freshnessFingerprint = await sha256Hex(canonicalImpactFreshness(freshness));
+  if (!acknowledgementRequired) return { freshnessFingerprint };
   const normalizedActor = actor.trim();
   if (!normalizedActor || normalizedActor.length > 160) throw new Error('Enter the exact authenticated administrator ID before publishing.');
-  const freshnessFingerprint = await sha256Hex(canonicalImpactFreshness(freshness));
   return {
     freshnessFingerprint,
     actor: normalizedActor,

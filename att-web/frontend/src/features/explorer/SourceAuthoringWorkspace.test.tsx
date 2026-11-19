@@ -168,7 +168,9 @@ describe('SourceAuthoringWorkspace', () => {
     expect(button('Publish').disabled).toBe(false);
     click(button('Publish')); await settle();
     const publishCall = action.mock.calls.find(call => call[3] === 'publish');
-    expect(publishCall?.[5]).toBeUndefined();
+    expect(publishCall?.[5]).toEqual(expect.objectContaining({ freshnessFingerprint: expect.any(String) }));
+    expect(publishCall?.[5]).not.toHaveProperty('actor');
+    expect(publishCall?.[5]).not.toHaveProperty('acknowledgementDigest');
   });
 
   it('locks workspace navigation only while the source editor has unsaved work', async () => {
@@ -507,7 +509,9 @@ describe('SourceAuthoringWorkspace', () => {
     expect(host.querySelector('input[aria-label="Acknowledge current Config impact"]')).toBeNull();
     click(button('Publish')); await settle();
     const publishCall = action.mock.calls.find(call => call[3] === 'publish');
-    expect(publishCall?.[5]).toBeUndefined();
+    expect(publishCall?.[5]).toEqual(expect.objectContaining({ freshnessFingerprint: expect.any(String) }));
+    expect(publishCall?.[5]).not.toHaveProperty('actor');
+    expect(publishCall?.[5]).not.toHaveProperty('acknowledgementDigest');
   });
 
   it('requires actor and freshness-bound acknowledgement when the Server requires review approval', async () => {
