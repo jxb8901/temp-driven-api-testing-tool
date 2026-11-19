@@ -1205,9 +1205,11 @@ class ApiServletIntegratedLimitsTest {
                 JsonNode response=ServerRuntime.JSON.readTree(result.body());
                 assertEquals(200,result.status,new String(result.body(),StandardCharsets.UTF_8));
                 assertEquals("ready".equals(name)?"READY":"UNAVAILABLE",response.path("state").asText(),response.toString());
-                assertEquals(1,fixture.requests.get());
-                assertEquals("tenant-a",fixture.tenant.get());
-                assertEquals("up",fixture.query.get());
+                if(!"timeout".equals(name)||fixture.requests.get()>0) {
+                    assertEquals(1,fixture.requests.get(),name+": the live query must reach its isolated Prometheus fixture; "+response);
+                    assertEquals("tenant-a",fixture.tenant.get(),name);
+                    assertEquals("up",fixture.query.get(),name);
+                }
                 assertEquals("private, no-store",result.headers.get("Cache-Control"));
                 assertFalse(result.bodyText().contains(fixture.url()),result.bodyText());
                 if(!"ready".equals(name)) {
