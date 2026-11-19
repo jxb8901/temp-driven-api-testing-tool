@@ -120,6 +120,7 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   const catalogQueryKey = JSON.stringify([packageId, environment, catalogQuery, inspectionRefresh, refreshKey]);
   const catalogQueryKeyRef = useRef(catalogQueryKey);
   const catalogEntriesQueryRef = useRef(catalogQuery);
+  const catalogEntriesScopeRef = useRef<{ packageId: string; environment: string; query: string; inspectionRefresh: number; refreshKey: number } | null>(null);
   const catalogGenerationRef = useRef(0);
   const catalogFirstPageControllerRef = useRef<AbortController | null>(null);
   const catalogLoadMoreControllerRef = useRef<AbortController | null>(null);
@@ -176,15 +177,22 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   useEffect(() => {
     const generation = catalogGenerationRef.current;
     const queryKey = catalogQueryKey;
+    const priorEntriesScope = catalogEntriesScopeRef.current;
+    const preserveCurrentEntries = Boolean(priorEntriesScope && priorEntriesScope.packageId === packageId
+      && priorEntriesScope.environment === environment
+      && (priorEntriesScope.query === catalogQuery || priorEntriesScope.inspectionRefresh !== inspectionRefresh
+        || priorEntriesScope.refreshKey !== refreshKey));
     const controller = new AbortController();
     catalogFirstPageControllerRef.current = controller;
-    setEntries([]); setRecordResponseState(null); setError(''); setStatus('Loading resolved Testdata catalog…');
-    setCatalogNextOffset(null); setCatalogTotal(null); setCatalogLoading(false);
+    if (!preserveCurrentEntries) { setEntries([]); setCatalogTotal(null); }
+    setRecordResponseState(null); setError(''); setStatus(preserveCurrentEntries ? 'Refreshing resolved Testdata catalog…' : 'Loading resolved Testdata catalog…');
+    setCatalogNextOffset(null); setCatalogLoading(false);
     api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogQuery || undefined, offset: 0, limit: 50 }, controller.signal)
       .then(async result => {
         const data = result.sections?.find(section => section.id === 'testdata')?.entries || [];
         const isCurrent = () => !controller.signal.aborted && generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current;
         if (!isCurrent()) return;
+        catalogEntriesScopeRef.current = { packageId, environment, query: catalogQuery, inspectionRefresh, refreshKey };
         catalogEntriesQueryRef.current = catalogQuery;
         setEntries(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? data : current);
         const firstPageNextOffset = result.nextOffset ?? null;

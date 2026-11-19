@@ -8,6 +8,8 @@ const INITIAL_REVISION = 'a'.repeat(64);
 const TEMPLATE_PATH = 'templates/checkout/template.yaml';
 const FILE_PATH = 'templates/checkout/payloads/request.xml';
 const INITIAL_SOURCE = 'template: checkout\nversion: A\npayload: &{./payloads/request.xml}\n';
+const TESTDATA_PATH = 'testdata/uat-accounts.yaml';
+const TESTDATA_INITIAL = 'schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: U-1}]\n';
 
 function send(route, body, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -256,11 +258,148 @@ async function runBrowser(browserType, fixture) {
   }
 }
 
+async function installTestdataApi(page, state, unexpected) {
+  await page.route('**/api/v1/**', async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname.slice(url.pathname.indexOf('/api/v1/') + '/api/v1/'.length);
+    const method = request.method();
+
+    if (method === 'GET' && path === 'version')
+      return send(route, { apiVersion: '1', version: '4.4.0', authMode: 'container', authenticationRequired: false });
+    if (method === 'GET' && path === 'auth/capabilities')
+      return send(route, { capabilities: { operate: true, accountManage: false, systemSettingsWrite: false, configurationAdmin: false },
+        operate: true, accountManage: false, systemSettingsWrite: false, configurationAdmin: false,
+        inspectionCacheContext: 'f'.repeat(64) });
+    if (method === 'GET' && path === 'packages')
+      return send(route, { items: [{ packageId: 'payments', name: 'payments', state: 'ready', canEditPackageContent: true }], total: 1 });
+    if (method === 'GET' && path === 'packages/payments/configuration') {
+      assert.equal(url.searchParams.get('view'), 'declared');
+      return send(route, { environments: [{ name: 'UAT', state: 'active' }] });
+    }
+    if (method === 'GET' && path === 'packages/payments/configuration/effective') {
+      assert.equal(url.searchParams.get('environment'), 'UAT');
+      assert.equal(url.searchParams.get('section'), 'testdata');
+      state.effectiveReads++;
+      return send(route, { environment: 'UAT', sections: [{ id: 'testdata', entries: [
+        { id: 'accounts', source: TESTDATA_PATH },
+      ] }], total: 1 });
+    }
+    if (method === 'GET' && path === 'packages/payments/configuration/testdata/accounts/records') {
+      assert.equal(url.searchParams.get('environment'), 'UAT');
+      return send(route, { descriptorId: 'accounts', offset: 0, limit: 50, total: 0, records: [] });
+    }
+    if (method === 'GET' && path === 'packages/payments/authoring-source') {
+      assert.equal(url.searchParams.get('type'), 'testdata');
+      assert.equal(url.searchParams.get('resourceId'), 'accounts');
+      assert.equal(url.searchParams.get('environment'), 'UAT');
+      state.sourceReads++;
+      return send(route, { available: true, present: true, logicalPath: TESTDATA_PATH, format: 'yaml',
+        text: TESTDATA_INITIAL, sourceEtag: `"sha256:${state.revision}"`, revision: state.revision,
+        baseSourceRevision: state.revision, registryRevision: REGISTRY_REVISION });
+    }
+    if (method === 'POST' && path === 'packages/payments/change-sets') {
+      const input = request.postDataJSON();
+      state.stageRequests.push(input);
+      assert.equal(input.baseSourceRevision, state.revision);
+      assert.equal(input.registryRevision, REGISTRY_REVISION);
+      const changeSetId = `CS-TESTDATA-${state.nextDraft++}`;
+      return send(route, { changeSetId, domain: 'PACKAGE_SOURCE', scopeId: 'payments', state: 'draft',
+        baseSourceRevision: state.revision, registryRevision: REGISTRY_REVISION, expiresAt: '2030-01-01T00:00:00Z',
+        changedFiles: input.operations.map(operation => ({ operation: operation.operation, path: operation.path,
+          oldBytes: operation.operation === 'create' ? 0 : 40, newBytes: operation.content?.length || 0,
+          oldHash: operation.operation === 'create' ? null : '1'.repeat(64), newHash: '2'.repeat(64),
+          contentDiff: ['- id: U-1', '+ id: U-2'], inboundReferences: [] })) }, 201);
+    }
+
+    unexpected.push(`${method} ${path}`);
+    return send(route, { error: { code: 'FIXTURE_NOT_FOUND', summary: `Unexpected request ${method} ${path}.` } }, 404);
+  });
+}
+
+async function openTestdataPage(context, fixture, state, unexpected) {
+  const effectiveReadsBefore = state.effectiveReads;
+  await selectFixture(context, fixture.origin, 'loaded');
+  await context.addInitScript(() => localStorage.setItem('att-ui-language', 'en'));
+  const page = await context.newPage();
+  const pageErrors = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await installTestdataApi(page, state, unexpected);
+  await page.goto(`${fixture.origin}/att/ui/#/packages/payments/testdata?environment=UAT&descriptor=accounts`);
+  await page.getByRole('heading', { name: 'Testdata', exact: true }).waitFor();
+  await page.getByRole('region', { name: 'Structured Testdata catalog', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Edit', exact: true }).waitFor();
+  await page.getByText('Effective environment: UAT (selected).', { exact: true }).waitFor();
+  const deadline = Date.now() + 5000;
+  while (state.effectiveReads < effectiveReadsBefore + 1 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.ok(state.effectiveReads >= effectiveReadsBefore + 1, 'the Testdata catalog finishes its deep-link lookup before authoring begins');
+  await page.waitForTimeout(100);
+  return { page, pageErrors };
+}
+
+async function runTestdataBrowser(browserType, fixture) {
+  const browser = await launchBrowser(browserType);
+  const state = { revision: INITIAL_REVISION, sourceReads: 0, effectiveReads: 0, nextDraft: 1, stageRequests: [] };
+  const unexpected = [];
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  try {
+    const { page, pageErrors } = await openTestdataPage(context, fixture, state, unexpected);
+    const catalog = page.getByRole('region', { name: 'Structured Testdata catalog', exact: true });
+    const editor = page.locator('.cm-content[contenteditable="true"]');
+
+    await catalog.getByRole('button', { name: 'Edit', exact: true }).click();
+    await editor.waitFor();
+    const editedSource = 'schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: U-2}]\n';
+    await editor.fill(editedSource);
+    await page.getByRole('button', { name: 'Add current file to candidate', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Add to candidate', exact: true }).click();
+    await page.getByRole('button', { name: 'Stage candidate (1 files)', exact: true }).click();
+    await page.locator('.att-source-review').getByRole('heading', { name: 'Draft CS-TESTDATA-1', exact: true }).waitFor();
+    assert.equal(state.stageRequests.length, 1);
+    assert.deepEqual(state.stageRequests[0].operations, [{ operation: 'replace', path: TESTDATA_PATH, content: editedSource }]);
+
+    // Start deletion in a fresh page so it has its own unmodified source revision.
+    const { page: deletePage, pageErrors: deleteErrors } = await openTestdataPage(context, fixture, state, unexpected);
+    const deleteCatalog = deletePage.getByRole('region', { name: 'Structured Testdata catalog', exact: true });
+    await deleteCatalog.getByRole('button', { name: 'Delete', exact: true }).waitFor();
+    await deleteCatalog.getByRole('button', { name: 'Delete', exact: true }).click();
+    await deletePage.getByRole('alertdialog').getByRole('button', { name: 'Add deletion', exact: true }).click();
+    const candidate = deletePage.locator('.att-source-candidate');
+    await candidate.getByRole('heading', { name: 'Candidate file changes', exact: true }).waitFor();
+    await candidate.locator('select[aria-label="Related file operation"]').selectOption('replace');
+    await candidate.locator('input[aria-label="Related file path"]').fill('package.yaml');
+    await candidate.locator('textarea[aria-label="Related file content"]').fill(
+      'schemaVersion: att-package/v2\ntestdata:\n  descriptors: [testdata/accounts.yaml]\n  environments:\n    UAT: [testdata/uat-orders.yaml]\n');
+    await candidate.getByRole('button', { name: 'Add related file', exact: true }).click();
+    await candidate.locator('select[aria-label="Related file operation"]').selectOption('replace');
+    await candidate.locator('input[aria-label="Related file path"]').fill('load/scenario.yaml');
+    await candidate.locator('textarea[aria-label="Related file content"]').fill('schemaVersion: att-load/v1.6\ntestdata: []\nworkloads: []\n');
+    await candidate.getByRole('button', { name: 'Add related file', exact: true }).click();
+    await deletePage.getByRole('button', { name: 'Stage candidate (3 files)', exact: true }).click();
+    await deletePage.locator('.att-source-review').getByRole('heading', { name: 'Draft CS-TESTDATA-2', exact: true }).waitFor();
+    assert.equal(state.stageRequests.length, 2);
+    assert.deepEqual(state.stageRequests[1].operations.map(operation => [operation.operation, operation.path]), [
+      ['delete', TESTDATA_PATH], ['replace', 'package.yaml'], ['replace', 'load/scenario.yaml'],
+    ]);
+    assert.equal(state.sourceReads, 2);
+    assert.deepEqual(unexpected, [], `unexpected API routes for ${browserType.name()} Testdata flow`);
+    assert.deepEqual(pageErrors, [], `page errors while editing Testdata in ${browserType.name()}`);
+    assert.deepEqual(deleteErrors, [], `page errors while deleting Testdata in ${browserType.name()}`);
+    console.log(`Testdata browser acceptance passed (${browserType.name()}): UAT descriptor edit and delete stage revision-fenced Package source candidates with Manifest/LOAD reference updates.`);
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+}
+
 async function main() {
   const fixture = await startFixture();
   const browserTypes = process.env.FULL_BROWSER_SUITE === 'true' ? [chromium, firefox, webkit] : [chromium];
   try {
-    for (const browserType of browserTypes) await runBrowser(browserType, fixture);
+    for (const browserType of browserTypes) {
+      await runBrowser(browserType, fixture);
+      await runTestdataBrowser(browserType, fixture);
+    }
   } finally {
     await stopFixture(fixture);
   }

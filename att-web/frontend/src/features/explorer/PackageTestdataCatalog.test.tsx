@@ -75,6 +75,18 @@ function setInputValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSel
     element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
   });
 }
+function clickButton(label: string) {
+  const button = [...host.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === label);
+  if (!button) throw new Error(`Button ${label} is not available`);
+  act(() => button.click());
+}
+async function confirmAction() {
+  await flush();
+  const button = host.querySelector<HTMLButtonElement>('.att-confirm-actions button:last-child');
+  if (!button) throw new Error('Confirmation action is not available');
+  await act(async () => button.click());
+  await flush();
+}
 
 function Harness({ api, initialEnvironment = '', descriptorId, registered = true, onOpenPackageConfiguration, canManagePackageSource = true }: {
   api: ExplorerApi; initialEnvironment?: string; descriptorId?: string; registered?: boolean; onOpenPackageConfiguration?: () => void; canManagePackageSource?: boolean;
@@ -168,6 +180,87 @@ describe('PackageTestdataWorkspace', () => {
     expect(actions.mock.calls.map(call => call[3])).toEqual(['validate', 'review', 'publish']);
     expect(vi.mocked(api.getEffectiveConfiguration).mock.calls.length).toBeGreaterThan(1);
     expect(host.textContent).toContain('new-shipments');
+  });
+
+  it('edits the descriptor selected from the UAT Testdata overlay through Package source authoring', async () => {
+    const stage = vi.fn(async () => ({ changeSetId: 'cs-uat-edit', domain: 'PACKAGE_SOURCE' as const,
+      scopeId: 'payments', state: 'draft', baseSourceRevision: 'base-uat-1', registryRevision: 'registry-1', changedFiles: [] }));
+    const managedSource = vi.fn(async () => ({ available: true, present: true, logicalPath: 'testdata/uat-accounts.yaml',
+      format: 'yaml', text: 'schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: U-1}]\n',
+      sourceEtag: 'etag-uat', baseSourceRevision: 'base-uat-1', registryRevision: 'registry-1' }));
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'UAT', state: 'active' as const }] })),
+      getEffectiveConfiguration: vi.fn(async () => ({ environment: 'UAT', sections: [{ id: 'testdata', entries: [
+        { id: 'accounts', source: 'testdata/uat-accounts.yaml' },
+      ] }] })),
+      getTestdataRecords: vi.fn(async () => ({ descriptorId: 'accounts', offset: 0, limit: 50, total: 0, records: [] })),
+      getManagedPackageAuthoringSource: managedSource,
+      stageSourceChangeSet: stage,
+    } as unknown as ExplorerApi;
+    await act(async () => root.render(<Harness api={api} initialEnvironment="UAT" descriptorId="accounts" />));
+    await flush(); await flush();
+
+    expect(host.textContent).toContain('Effective environment: UAT');
+    expect(host.textContent).toContain('manage authorized Package sources');
+    expect(managedSource).toHaveBeenCalledWith('payments', { kind: 'testdata', resourceId: 'accounts', environment: 'UAT' }, expect.any(AbortSignal));
+    clickButton('Edit');
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]');
+    if (!editor) throw new Error('The selected UAT Testdata source editor was not rendered');
+    setInputValue(editor, 'schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: U-2}]\n');
+    clickButton('Add current file to candidate');
+    await confirmAction();
+    clickButton('Stage candidate (1 files)');
+    await flush();
+
+    expect(stage).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', 'base-uat-1', 'registry-1', [
+      { operation: 'replace', path: 'testdata/uat-accounts.yaml',
+        content: 'schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: U-2}]\n' },
+    ], expect.any(AbortSignal));
+    expect(host.textContent).toContain('Draft cs-uat-edit saved');
+  });
+
+  it('deletes a UAT Testdata descriptor with Manifest and LOAD references in the same candidate', async () => {
+    const draft = { changeSetId: 'cs-uat-delete', domain: 'PACKAGE_SOURCE' as const, scopeId: 'payments', state: 'draft',
+      baseSourceRevision: 'base-uat-2', registryRevision: 'registry-2', changedFiles: [] };
+    const stage = vi.fn(async () => draft);
+    const managedSource = vi.fn(async () => ({ available: true, present: true, logicalPath: 'testdata/uat-accounts.yaml',
+      format: 'yaml', text: 'schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: U-1}]\n',
+      sourceEtag: 'etag-uat', baseSourceRevision: 'base-uat-2', registryRevision: 'registry-2' }));
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'UAT', state: 'active' as const }] })),
+      getEffectiveConfiguration: vi.fn(async () => ({ environment: 'UAT', sections: [{ id: 'testdata', entries: [
+        { id: 'accounts', source: 'testdata/uat-accounts.yaml' },
+      ] }] })),
+      getTestdataRecords: vi.fn(async () => ({ descriptorId: 'accounts', offset: 0, limit: 50, total: 0, records: [] })),
+      getManagedPackageAuthoringSource: managedSource,
+      stageSourceChangeSet: stage,
+    } as unknown as ExplorerApi;
+    await act(async () => root.render(<Harness api={api} initialEnvironment="UAT" descriptorId="accounts" />));
+    await flush(); await flush();
+
+    clickButton('Delete');
+    await confirmAction();
+    setInputValue(host.querySelector<HTMLSelectElement>('select[aria-label="Related file operation"]')!, 'replace');
+    setInputValue(host.querySelector<HTMLInputElement>('input[aria-label="Related file path"]')!, 'package.yaml');
+    setInputValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Related file content"]')!,
+      'schemaVersion: att-package/v2\ntestdata:\n  descriptors: [testdata/accounts.yaml]\n  environments:\n    UAT: [testdata/uat-orders.yaml]\n');
+    clickButton('Add related file');
+    setInputValue(host.querySelector<HTMLSelectElement>('select[aria-label="Related file operation"]')!, 'replace');
+    setInputValue(host.querySelector<HTMLInputElement>('input[aria-label="Related file path"]')!, 'load/scenario.yaml');
+    setInputValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Related file content"]')!,
+      'schemaVersion: att-load/v1.6\ntestdata: []\nworkloads: []\n');
+    clickButton('Add related file');
+    clickButton('Stage candidate (3 files)');
+    await flush();
+
+    expect(stage).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', 'base-uat-2', 'registry-2', [
+      { operation: 'delete', path: 'testdata/uat-accounts.yaml' },
+      { operation: 'replace', path: 'package.yaml', content:
+        'schemaVersion: att-package/v2\ntestdata:\n  descriptors: [testdata/accounts.yaml]\n  environments:\n    UAT: [testdata/uat-orders.yaml]\n' },
+      { operation: 'replace', path: 'load/scenario.yaml', content:
+        'schemaVersion: att-load/v1.6\ntestdata: []\nworkloads: []\n' },
+    ], expect.any(AbortSignal));
+    expect(host.textContent).toContain('Draft cs-uat-delete saved');
   });
 
   it('loads the linked Package descriptor and shows safe metadata when record preview is unavailable', async () => {
