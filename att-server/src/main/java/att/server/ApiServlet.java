@@ -1379,7 +1379,7 @@ public final class ApiServlet extends HttpServlet {
                             :runtime.changeSetPublisher.publish(domain,scopeId,actor,systemSettingsWrite,id,requestId,impactAcknowledgement);
                     runtime.notifySourcePublished(domain,scopeId,result,requestId);
                     if(central&&Boolean.TRUE.equals(result.get("published")))
-                        result.put("activationStatus",runtime.configurationActivationStatus());
+                        addActivationResultFields(result,runtime.configurationActivationStatus());
                 }
                 else if("discard".equals(action))result=runtime.changeSetPublisher.discard(domain,scopeId,actor,systemSettingsWrite,id,requestId);
                 else if("generate-snapshot".equals(action)) {
@@ -1404,6 +1404,16 @@ public final class ApiServlet extends HttpServlet {
           catch(ChangeSetPublisher.ValidationRejected e){error(res,422,e.code,"Candidate source validation or publication gate rejected the Change Set",requestId);}
           catch(IllegalArgumentException e){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(e),requestId);}
           catch(Exception e){error(res,500,"ATT-CHANGESET-FAILED","Change Set action could not be completed",requestId);getServletContext().log("ATT Change Set failed id="+requestId,e);}
+    }
+
+    static void addActivationResultFields(Map<String,Object> publication,
+            att.server.api.source.SourceManagementContracts.ActivationStatus status) {
+        Object revision=publication.get("revision");
+        publication.put("publishedRevision",revision instanceof String?revision:
+                status!=null&&status.publishedRevision!=null?status.publishedRevision.revision:null);
+        publication.put("activeRevision",status==null||status.activeRevision==null?null:status.activeRevision.revision);
+        publication.put("activationState",status==null?"UNAVAILABLE":status.state.name());
+        publication.put("activationFailureCode",status==null?"ATT-CONFIG-ACTIVATION-STATUS-UNAVAILABLE":status.failureCode);
     }
 
     private void packageSourceImportAuthorized(HttpServletRequest req,HttpServletResponse res,String path,

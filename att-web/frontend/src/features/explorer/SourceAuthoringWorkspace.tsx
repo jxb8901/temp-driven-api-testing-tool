@@ -82,6 +82,7 @@ function diagnosticsOf(error: unknown): SourceValidationDiagnostic[] {
 function failureText(error: unknown, action: string): string {
   const status = statusOf(error);
   const code = codeOf(error);
+  if (code === 'ATT-CHANGESET-RESTORE-LIMIT') return 'This historical restore exceeds the Server limit of 32 file operations. Stage the required files in smaller drafts; this restore did not publish or partially apply any files.';
   if (status === 401) return 'Your session expired. Sign in again and reload this source.';
   if (status === 403) return `The Server denied ${action}. Source editing permission is unavailable or was revoked.`;
   if (status === 404) return 'The source is protected, unavailable, or no longer registered. Reload the package or choose an approved source path.';
@@ -1037,22 +1038,26 @@ function SourceHistoryPanel({ api, domain, scopeId, locale = 'en', disabled, onR
     }
   }
 
-  async function loadDiff(entry: SourceHistoryEntry, path?: string) {
+  async function loadDiff(entry: SourceHistoryEntry, path?: string, append = false) {
     if (!api.getSourceHistoryDiff || !isSafeSnapshotId(entry.beforeSnapshotId) || !isSafeSnapshotId(entry.afterSnapshotId)) {
       setDiffError('A safe comparison is unavailable for this history entry.'); return;
     }
+    const offset = append && diff ? diff.offset + diff.items.length : 0;
     diffControllerRef.current?.abort();
     const controller = new AbortController();
     diffControllerRef.current = controller;
     setDiffLoading(true); setDiffError(''); setSelectedEntry(entry.transactionId); setSelectedPath(path || null);
-    if (!path) setDiff(null);
+    if (!path && !append) setDiff(null);
     try {
-      const result = await api.getSourceHistoryDiff(domain, scopeId, entry.beforeSnapshotId, entry.afterSnapshotId, path, controller.signal);
-      if (!controller.signal.aborted) setDiff(result);
+      const result = await api.getSourceHistoryDiff(domain, scopeId, entry.beforeSnapshotId, entry.afterSnapshotId,
+        path, controller.signal, offset, SOURCE_HISTORY_PAGE_SIZE);
+      if (!controller.signal.aborted) setDiff(previous => append && previous
+        && previous.beforeSnapshotId === result.beforeSnapshotId && previous.afterSnapshotId === result.afterSnapshotId
+        ? { ...result, items: [...previous.items, ...result.items] } : result);
     } catch (reason) {
       if (!controller.signal.aborted) {
         if (statusOf(reason) === 403) onAccessRevoked();
-        else { setDiff(null); setDiffError(failureText(reason, 'compare historical source')); }
+        else { if (!append) setDiff(null); setDiffError(failureText(reason, 'compare historical source')); }
       }
     } finally {
       if (!controller.signal.aborted) setDiffLoading(false);
@@ -1116,7 +1121,10 @@ function SourceHistoryPanel({ api, domain, scopeId, locale = 'en', disabled, onR
               {item.change} <code>{item.path}</code> · {item.beforeBytes ?? 0} → {item.afterBytes ?? 0} bytes
             </button>
           </li>)}</ul>
-          {diff.hasMore && <p>Only the first page is shown. Restore will still be reviewed as a complete source-scope change.</p>}
+          <p>Showing {Math.min(diff.offset + diff.items.length, diff.total)} of {diff.total} changed files.</p>
+          {diff.hasMore && <button type="button" onClick={() => void loadDiff(selectedHistoryEntry, undefined, true)} disabled={diffLoading}>
+            {diffLoading ? 'Loading…' : 'Load more changed files'}
+          </button>}
         </>}
         {selectedPath && selectedDiffEntry && <>
           <p><strong>{selectedDiffEntry.change}</strong> <code>{selectedDiffEntry.path}</code></p>

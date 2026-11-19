@@ -10,6 +10,7 @@
 - 編輯 Package source 時，帳戶必須啟用並具有該 Package 的 source-editing 權限。`default` Package 不可編輯。
 - 編輯共用 Runtime Config 時，使用 `ADMIN` 帳戶。Server 必須啟用 `server.centralConfigurationEditingEnabled: true`；變更此部署設定需要重啟 Server。
 - 將相關 source 檔案放在所選 Package。Global Runtime Config 管理共用 Data Source connection 及 security policy；每個 Package 擁有自己的 Metric Sources、Groups 及 Profiles。
+- 執行 Worker acceptance 時，使用支援的隔離環境：Linux 必須在 `PATH` 提供 `bwrap` 並啟用 user namespace，或 macOS 必須提供 `/usr/bin/sandbox-exec`。若無法建立隔離邊界，Worker execution 會 fail closed；詳見 [source change 與 Worker isolation contract](../../system-design/source-change-contracts.md)。
 
 ## 使用 source workflow
 
@@ -22,7 +23,7 @@
 7. 選擇 **Review changed files**，並只在候選版本與 Impact report 仍為最新時選擇 **Publish**。若系統要求 ADMIN acknowledgement，請綁定目前的 report 後再發布。
 8. 檢查發布結果。Runtime Config 必須確認 Active revision 與 Published revision 相同，且 activation state 為 `ACTIVE`，才可開始新的工作。
 
-Server 負責權限、validation、revision 檢查及 publication。若編輯期間 source 已變更，Studio 會保留本機文字，但不允許以舊 revision 暫存。複製仍需保留的修改、重新載入最新 source，再手動套用。Studio 不會靜默 rebase 或合併整份檔案。
+Server 負責權限、validation、revision 檢查及 publication。`Published` 表示 Publish 已提交的 source revision；`Active` 表示 Runtime Config activation 已核實的 revision。`auditConfirmed` 只表示 publication audit 是否已持久記錄，不能證明已 activation。若編輯期間 source 已變更，Studio 會保留本機文字，但不允許以舊 revision 暫存。複製仍需保留的修改、重新載入最新 source，再手動套用。Studio 不會靜默 rebase 或合併整份檔案。
 
 ## 編輯 Package Manifest
 
@@ -37,9 +38,9 @@ Server 負責權限、validation、revision 檢查及 publication。若編輯期
 
 ## 直接修改檔案與已發布狀態
 
-請將 Package 檔案及 Runtime Config 部署目錄視為部署輸入。直接修改不會建立已核准的 Change Set、acknowledgement 或線上 activation。Server 可能偵測 Package 變更並建立新的 source revision，令現有 draft 過期。直接修改 central Runtime Config mirror 不會令該 revision 成為 active；請使用 ADMIN 的 Validate → Review Impact → Publish 流程。不要把檔案複製結果標示為 Published 或 Active。
+Package 檔案與 central Runtime Config 目錄使用不同 policy。直接修改 Package 檔案可能會匯入成新的 Package source revision，並令現有 draft 過期。Central Config 初次登錄後，其設定目錄只作 deployment mirror：直接修改不會匯入成 revision，也不會 activation。Server 會繼續使用最後一個 immutable Config revision，並回報 `FAILED` 及 `ATT-CONFIG-EXTERNAL-SOURCE-DRIFT`；mirror 不一致時會暫停新 Job admission。已接納的 Job 仍使用原先 pinned source。ADMIN 仍可在 Studio 載入已核實的 source，並以該 revision 為基礎建立 draft。只有完成 Validate、Review 及最新 Impact approval 的 managed publication 才會將已檢閱 revision export 至 mirror 並清除 drift。不要把檔案複製結果標示為 Published 或 Active。
 
-若為復原而需要帶外修改，涉及 Runtime Config 時先暫停新 Job admission，保留目前檔案，再透過 Studio reviewed candidate 對齊變更。不要手動修改或刪除 Server 管理的 revision store。Source revision 及 publication 不要求使用 Git；若團隊有需要，可另行維持 Git workflow。
+若要復原外部 Config drift，先保留部署檔案供調查，在 Studio 重新載入已核實 source、暫存預期結果，並完成 Validate → Review → Impact → Publish。Draft 以已核實 revision 為基礎；如需保留外部變更，必須明確納入並檢閱。Activation 失敗或 unavailable 不代表 Published revision 已 Active：檢查 `activationState`、`publishedRevision`、`activeRevision` 及 `activationFailureCode`，保持新 Job 暫停，並依 Server 管理員的 activation 復原程序處理，再以目前已核實 revision 重試。不要手動修改或刪除 Server 管理的 revision store。Source revision 及 publication 不要求使用 Git；若團隊有需要，可另行維持 Git workflow。
 
 ## 同時編輯 Template 或 Flow 及其參照 File
 
@@ -82,7 +83,7 @@ File catalog 按 canonical Package-relative path 合併 references，並顯示�
 2. 暫存 Runtime Config 變更，並完成 **Validate** 及 **Review changed files / Impact**。
 3. 確認 Impact report 為 `AVAILABLE`、coverage 為 `COMPLETE`，且 decision 不是 `BLOCKED`。檢查每一頁受影響的 Package、Environment 及 Schedule。
 4. 若 Studio 要求 acknowledgement，請確認目前 report 後再選擇 **Publish**。
-5. 確認發布結果為 `ACTIVE`，且 Published 與 Active revision 相同。若 activation 失敗或無法取得狀態，先依 Server 管理員的復原程序處理，再開始新工作。
+5. 確認 response 的 `activationState` 為 `ACTIVE`，且 `publishedRevision` 等於 `activeRevision`。`auditConfirmed` 不代表 activation 成功。若 `activationState` 為 `FAILED`、`PENDING` 或 `UNAVAILABLE`，依 `activationFailureCode` 復原；恢復已核實狀態前不要開始新工作。
 
 Server 會拒絕不適用於線上發布的欄位。Deployment、bootstrap、security 及其他 Server 設定仍由部署設定管理，並可能需要重啟。
 
@@ -91,7 +92,7 @@ Server 會拒絕不適用於線上發布的欄位。Deployment、bootstrap、sec
 1. 開啟具備授權的 source，選擇 **History / Restore**。
 2. 選取保留的 transaction，檢查變更檔案。Server 可能隱藏受保護的 source 內容，但仍提供安全的路徑及變更中繼資料。
 3. 選擇 **Stage restore as draft**。Studio 會以保留的 snapshot 建立新候選版本，不會直接回退 active source。
-4. 檢查完整候選版本、執行 validation，然後完成一般 review 及 publish。Central Config restore 也必須取得最新 Impact report 及 activation approval。
+4. 檢查完整候選版本、執行 validation，然後完成一般 review 及 publish。Central Config restore 也必須取得最新 Impact report 及 activation approval。Diff 檔案會分頁載入；選擇 **Load more changed files** 直到看到完整清單。若 restore 超過 Server 的 32 個檔案操作 Change Set 上限，request 會被拒絕且不會部分發布；請將所需檔案分成較小的 draft 暫存。
 
 ## Source snapshot 儲存及保留
 

@@ -635,11 +635,11 @@ export const api = {
     return request<SourceHistoryResponse>(base + queryString({ offset, limit }), { signal, cache: 'no-store' });
   },
   getSourceHistoryDiff(domain: SourceDomain, scopeId: string, beforeSnapshotId: string, afterSnapshotId: string,
-    path?: string, signal?: AbortSignal): Promise<SourceHistoryDiffResponse> {
+    path?: string, signal?: AbortSignal, offset = 0, limit = 20): Promise<SourceHistoryDiffResponse> {
     const base = domain === 'PACKAGE_SOURCE'
       ? 'packages/' + encodeURIComponent(scopeId) + '/source-history/diff'
       : 'configuration/source-history/diff';
-    return request<SourceHistoryDiffResponse>(base + queryString({ beforeSnapshotId, afterSnapshotId, path }), { signal, cache: 'no-store' });
+    return request<SourceHistoryDiffResponse>(base + queryString({ beforeSnapshotId, afterSnapshotId, path, offset, limit }), { signal, cache: 'no-store' });
   },
   stageSourceRestore(domain: SourceDomain, scopeId: string, snapshotId: string, expectedSourceRevision: string,
     registryRevision?: string, signal?: AbortSignal): Promise<SourceChangeSet> {

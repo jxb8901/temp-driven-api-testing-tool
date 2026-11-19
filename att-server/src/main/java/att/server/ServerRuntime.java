@@ -319,6 +319,7 @@ final class ServerRuntime implements AutoCloseable {
                 var current=observed;
                 if(current==null||current.state!=att.server.api.source.SourceManagementContracts.ActivationState.FAILED)
                     return true;
+                if("ATT-CONFIG-EXTERNAL-SOURCE-DRIFT".equals(current.failureCode))return true;
                 if(current.publishedRevision==null||current.activeRevision==null
                         ||current.publishedRevision.revision.equals(current.activeRevision.revision))return false;
                 try {
@@ -382,6 +383,22 @@ final class ServerRuntime implements AutoCloseable {
                     var activeIdentity=att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
                             att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE,scopeId,activeRevision);
                     var current=observed;
+                    if(!sourceFileTransaction.configuredSourceMatchesActive(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                            ChangeSetPublisher.CENTRAL_SCOPE_ID,centralRoot)) {
+                        var drift=new att.server.api.source.SourceManagementContracts.ActivationStatus(scopeId,
+                                activeIdentity,activeIdentity,
+                                att.server.api.source.SourceManagementContracts.ActivationState.FAILED,
+                                "ATT-CONFIG-EXTERNAL-SOURCE-DRIFT");
+                        observed=drift;
+                        return drift;
+                    }
+                    if(current!=null&&"ATT-CONFIG-EXTERNAL-SOURCE-DRIFT".equals(current.failureCode)) {
+                        var recovered=new att.server.api.source.SourceManagementContracts.ActivationStatus(scopeId,
+                                activeIdentity,activeIdentity,
+                                att.server.api.source.SourceManagementContracts.ActivationState.ACTIVE,null);
+                        observed=recovered;
+                        return recovered;
+                    }
                     if(current!=null&&current.state!=att.server.api.source.SourceManagementContracts.ActivationState.ACTIVE) {
                         var reconciled=new att.server.api.source.SourceManagementContracts.ActivationStatus(scopeId,
                                 current.publishedRevision,activeIdentity,current.state,current.failureCode);

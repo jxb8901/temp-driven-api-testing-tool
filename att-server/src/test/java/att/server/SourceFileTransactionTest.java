@@ -217,6 +217,10 @@ class SourceFileTransactionTest {
         Files.writeString(configured, "schemaVersion: att-config/v2.12\nenvironment: UAT\n", StandardCharsets.UTF_8);
 
         Path active = transaction.activeRevisionRoot(domain, scope, root);
+        assertFalse(transaction.configuredSourceMatchesActive(domain, scope, root),
+                "The central mirror mismatch must be observable without importing it as a revision.");
+        assertEquals(published, transaction.pin(domain, scope, root),
+                "Studio staging remains based on the verified immutable revision while drift is reported.");
         Path execution = transaction.executionPin(domain, scope, root);
 
         assertEquals(published, active, "An external mirror edit must not move the published pointer.");

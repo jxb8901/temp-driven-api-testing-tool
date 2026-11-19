@@ -126,6 +126,126 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void centralPublishRouteReturnsFlatActivationWireContract() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("activation-wire-packages"));
+        createPackage(packages.resolve("p"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"activation-wire-data",DEFAULT_INSPECTION_TIMEOUT_MS,
+                null,workerLibraries("activation-wire-libs"),true,true)) {
+            Map<String,String> revisions=runtime.changeSetPublisher.currentRevisions(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true);
+            String candidate=Files.readString(runtimeConfig)+"# wire contract candidate\n";
+            Map<String,Object> draft=runtime.changeSetPublisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,revisions.get("baseSourceRevision"),null,
+                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml",candidate.getBytes(StandardCharsets.UTF_8))));
+            String id=String.valueOf(draft.get("changeSetId"));
+            runtime.changeSetPublisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id);
+            runtime.changeSetPublisher.review(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id);
+            var impact=runtime.changeSetPublisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id,null);
+            String freshness=ConfigImpactAnalyzer.freshnessFingerprint(impact.freshness);
+            Captured response=invokeAsAdmin(servlet(runtime),"alice","POST",
+                    "/configuration/change-sets/"+id+"/publish",Map.of(),ServerRuntime.JSON.writeValueAsBytes(Map.of(
+                            "impactAcknowledgement",Map.of("freshnessFingerprint",freshness))));
+            JsonNode body=ServerRuntime.JSON.readTree(response.body());
+            assertEquals(200,response.status,new String(response.body(),StandardCharsets.UTF_8));
+            assertTrue(body.path("published").asBoolean(),body.toString());
+            assertEquals("ACTIVE",body.path("activationState").asText(),body.toString());
+            assertEquals(body.path("revision").asText(),body.path("publishedRevision").asText(),body.toString());
+            assertEquals(body.path("revision").asText(),body.path("activeRevision").asText(),body.toString());
+            assertTrue(body.path("auditConfirmed").asBoolean(),body.toString());
+            assertFalse(body.has("activationStatus"),"Publish response must match the flat Studio SourcePublishResult contract.");
+        }
+    }
+
+    @Test void centralPublishActivationFieldsSerializeEveryStatusOutcome() throws Exception {
+        String scope=ChangeSetPublisher.CENTRAL_SCOPE_ID;
+        var published=att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE,scope,"a".repeat(64));
+        var active=att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE,scope,"b".repeat(64));
+        for(var state:att.server.api.source.SourceManagementContracts.ActivationState.values()) {
+            Map<String,Object> publication=new LinkedHashMap<>();
+            publication.put("published",true);publication.put("revision",published.revision);publication.put("auditConfirmed",true);
+            String failure=state==att.server.api.source.SourceManagementContracts.ActivationState.FAILED
+                    ?"ATT-CONFIG-ACTIVATION-FAILED":null;
+            var status=new att.server.api.source.SourceManagementContracts.ActivationStatus(scope,published,
+                    state==att.server.api.source.SourceManagementContracts.ActivationState.UNAVAILABLE?null:active,state,failure);
+            ApiServlet.addActivationResultFields(publication,status);
+            JsonNode wire=ServerRuntime.JSON.readTree(ServerRuntime.JSON.writeValueAsBytes(publication));
+            assertEquals(state.name(),wire.path("activationState").asText(),wire.toString());
+            assertEquals(published.revision,wire.path("publishedRevision").asText(),wire.toString());
+            if(state==att.server.api.source.SourceManagementContracts.ActivationState.UNAVAILABLE)
+                assertTrue(wire.path("activeRevision").isNull(),wire.toString());
+            else assertEquals(active.revision,wire.path("activeRevision").asText(),wire.toString());
+            if(state==att.server.api.source.SourceManagementContracts.ActivationState.FAILED)
+                assertEquals(failure,wire.path("activationFailureCode").asText(),wire.toString());
+            assertTrue(wire.path("auditConfirmed").asBoolean(),wire.toString());
+            assertFalse(wire.has("activationStatus"),wire.toString());
+        }
+    }
+
+    @Test void centralExternalConfigEditsStayUnreviewedAcrossRestartAndPauseNewJobs() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("external-config-packages"));
+        createPackage(packages.resolve("p"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        Path libs=workerLibraries("external-config-libs");
+        String dataName="external-config-data";
+        String original=Files.readString(runtimeConfig);
+        String baseRevision;
+        ServerRuntime first=runtime(packages,runtimeConfig,dataName,DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true,true);
+        try {
+            baseRevision=first.changeSetPublisher.currentRevisions(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true).get("baseSourceRevision");
+            Files.writeString(runtimeConfig,original+"# unreviewed deployment edit\n");
+            var status=first.configurationActivationStatus();
+            assertEquals(att.server.api.source.SourceManagementContracts.ActivationState.FAILED,status.state);
+            assertEquals("ATT-CONFIG-EXTERNAL-SOURCE-DRIFT",status.failureCode);
+            assertEquals(baseRevision,first.changeSetPublisher.currentRevisions(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true).get("baseSourceRevision"),
+                    "An out-of-band edit must not become the Studio draft base revision.");
+            Captured blocked=invokeAs(servlet(first),"POST","/jobs/run",Map.of(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("packageId","p")),"alice",
+                    Set.of(first.config.authorization.userRole));
+            assertEquals(409,blocked.status,new String(blocked.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-CONFIG-ACTIVATION-FAILED",ServerRuntime.JSON.readTree(blocked.body()).path("error").path("code").asText());
+        } finally { first.close(); }
+
+        try(ServerRuntime restarted=runtime(packages,runtimeConfig,dataName,DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true,true)) {
+            var status=restarted.configurationActivationStatus();
+            assertEquals(att.server.api.source.SourceManagementContracts.ActivationState.FAILED,status.state);
+            assertEquals("ATT-CONFIG-EXTERNAL-SOURCE-DRIFT",status.failureCode);
+            assertEquals(baseRevision,restarted.changeSetPublisher.currentRevisions(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true).get("baseSourceRevision"));
+
+            Map<String,Object> draft=restarted.changeSetPublisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,baseRevision,null,
+                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml",
+                            (original+"# reviewed Studio publication\n").getBytes(StandardCharsets.UTF_8))));
+            String id=String.valueOf(draft.get("changeSetId"));
+            restarted.changeSetPublisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id);
+            restarted.changeSetPublisher.review(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id);
+            var impact=restarted.changeSetPublisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id,null);
+            String freshness=ConfigImpactAnalyzer.freshnessFingerprint(impact.freshness);
+            Captured published=invokeAsAdmin(servlet(restarted),"alice","POST",
+                    "/configuration/change-sets/"+id+"/publish",Map.of(),ServerRuntime.JSON.writeValueAsBytes(Map.of(
+                            "impactAcknowledgement",Map.of("freshnessFingerprint",freshness))));
+            JsonNode body=ServerRuntime.JSON.readTree(published.body());
+            assertEquals(200,published.status,new String(published.body(),StandardCharsets.UTF_8));
+            assertEquals("ACTIVE",body.path("activationState").asText(),body.toString());
+            assertEquals(body.path("revision").asText(),body.path("activeRevision").asText(),body.toString());
+            assertTrue(Files.readString(runtimeConfig).contains("# reviewed Studio publication"));
+            assertFalse(Files.readString(runtimeConfig).contains("# unreviewed deployment edit"));
+            assertEquals(att.server.api.source.SourceManagementContracts.ActivationState.ACTIVE,
+                    restarted.configurationActivationStatus().state);
+        }
+    }
+
     @Test void emptyRegisteredPackageReturnsEmptyInspectorInventoryAndDoesNotAffectAnotherPackage() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("empty-package-packages"));
         Files.createDirectory(packages.resolve("lilyzhou"));

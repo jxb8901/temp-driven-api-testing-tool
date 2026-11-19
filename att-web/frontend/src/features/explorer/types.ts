@@ -395,7 +395,7 @@ export interface ExplorerApi {
     signal?: AbortSignal, impactAcknowledgement?: SourceImpactAcknowledgement): Promise<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }>;
   getSourceHistory?(domain: SourceDomain, scopeId: string, offset?: number, limit?: number, signal?: AbortSignal): Promise<SourceHistoryResponse>;
   getSourceHistoryDiff?(domain: SourceDomain, scopeId: string, beforeSnapshotId: string, afterSnapshotId: string,
-    path?: string, signal?: AbortSignal): Promise<SourceHistoryDiffResponse>;
+    path?: string, signal?: AbortSignal, offset?: number, limit?: number): Promise<SourceHistoryDiffResponse>;
   stageSourceRestore?(domain: SourceDomain, scopeId: string, snapshotId: string, expectedSourceRevision: string,
     registryRevision?: string, signal?: AbortSignal): Promise<SourceChangeSet>;
   generateTestcaseSnapshot?(packageId: string, changeSetId: string, input: SourceSnapshotRequest, signal?: AbortSignal): Promise<SourceChangeSet>;

@@ -16,6 +16,7 @@ describe('source history API', () => {
     await api.getSourceHistory('PACKAGE_SOURCE', 'payments', 20, 20);
     await api.getSourceHistory('CENTRAL_RUNTIME_CONFIG', 'central-runtime-config', 0, 20);
     await api.getSourceHistoryDiff('PACKAGE_SOURCE', 'payments', 'a'.repeat(64), 'b'.repeat(64), 'templates/payments/a.yaml');
+    await api.getSourceHistoryDiff('CENTRAL_RUNTIME_CONFIG', 'central-runtime-config', 'c'.repeat(64), 'd'.repeat(64), undefined, undefined, 20, 20);
 
     const urls = fetchMock.mock.calls.map(([input]) => new URL(String(input)));
     expect(urls[0]?.pathname.endsWith('/packages/payments/source-history')).toBe(true);
@@ -23,7 +24,11 @@ describe('source history API', () => {
     expect(urls[1]?.pathname.endsWith('/configuration/source-history')).toBe(true);
     expect(urls[2]?.pathname.endsWith('/packages/payments/source-history/diff')).toBe(true);
     expect(Object.fromEntries(urls[2]!.searchParams.entries())).toEqual({
-      beforeSnapshotId: 'a'.repeat(64), afterSnapshotId: 'b'.repeat(64), path: 'templates/payments/a.yaml',
+      beforeSnapshotId: 'a'.repeat(64), afterSnapshotId: 'b'.repeat(64), path: 'templates/payments/a.yaml', offset: '0', limit: '20',
+    });
+    expect(urls[3]?.pathname.endsWith('/configuration/source-history/diff')).toBe(true);
+    expect(Object.fromEntries(urls[3]!.searchParams.entries())).toEqual({
+      beforeSnapshotId: 'c'.repeat(64), afterSnapshotId: 'd'.repeat(64), offset: '20', limit: '20',
     });
     expect(fetchMock.mock.calls.every(([, init]) => init?.cache === 'no-store')).toBe(true);
   });

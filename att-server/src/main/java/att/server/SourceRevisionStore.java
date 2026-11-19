@@ -222,6 +222,23 @@ final class SourceRevisionStore {
         return readActive(lookup(domain, scopeId, root));
     }
 
+    boolean configuredSourceMatchesActive(String domain, String scopeId, Path root) throws Exception {
+        Registration registration = lookup(domain, scopeId, root);
+        ReentrantLock local = localWriterLock(registration);
+        if (local.isHeldByCurrentThread()) return configuredSourceMatchesActive(registration);
+        try (WriterLock ignored = acquire(registration)) {
+            return configuredSourceMatchesActive(registration);
+        }
+    }
+
+    private boolean configuredSourceMatchesActive(Registration registration) throws Exception {
+        Revision active = readActive(registration);
+        String configuredDigest = ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(registration.domain)
+                ? treeDigestConfigured(registration.domain, registration.sourceRoot, registration.configuredConfigPath)
+                : treeDigest(registration.domain, registration.sourceRoot);
+        return configuredDigest.equals(active.treeDigest);
+    }
+
     void switchTo(String domain, String scopeId, Path root, String id, String sourceRevision, String transactionId) throws Exception {
         Registration registration = lookup(domain, scopeId, root);
         Path target = checkedRevision(registration, id);
@@ -451,8 +468,9 @@ final class SourceRevisionStore {
     }
 
     /**
-     * The configured source tree is the deployment import/export mirror. Server readers use
-     * immutable revisions; a changed mirror is copied and verified before the active pointer moves.
+     * The configured source tree is a deployment mirror. Package source retains its import
+     * behavior. Central Config drift is never imported: it remains unreviewed until an approved
+     * Studio publication exports a reviewed revision over the mirror.
      */
     private Revision refreshConfiguredSource(Registration registration, boolean verifyContent) throws Exception {
         Revision active = readActive(registration);
@@ -461,6 +479,8 @@ final class SourceRevisionStore {
                 ? treeDigestConfigured(registration.domain, registration.sourceRoot, registration.configuredConfigPath)
                 : treeDigest(registration.domain, registration.sourceRoot);
         if (sourceDigest.equals(active.treeDigest)) return active;
+
+        if (ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG.equals(registration.domain)) return active;
 
         String id = nextId();
         Path imported = checkedRevision(registration, id);

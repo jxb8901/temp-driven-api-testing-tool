@@ -117,11 +117,13 @@ describe('SourceAuthoringWorkspace', () => {
     click(button('History / Restore')); await settle();
     expect(getHistory).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', 0, 20, expect.any(AbortSignal));
     click(button('View changes')); await settle();
-    expect(getDiff).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', beforeSnapshotId, afterSnapshotId, undefined, expect.any(AbortSignal));
+    expect(getDiff).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', beforeSnapshotId, afterSnapshotId,
+      undefined, expect.any(AbortSignal), 0, 20);
     const pathButton = [...host.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes(path));
     if (!pathButton) throw new Error('History diff path was not rendered.');
     click(pathButton); await settle();
-    expect(getDiff).toHaveBeenLastCalledWith('PACKAGE_SOURCE', 'payments', beforeSnapshotId, afterSnapshotId, path, expect.any(AbortSignal));
+    expect(getDiff).toHaveBeenLastCalledWith('PACKAGE_SOURCE', 'payments', beforeSnapshotId, afterSnapshotId,
+      path, expect.any(AbortSignal), 0, 20);
     expect(host.textContent).toContain('enabled: false');
     expect(host.textContent).toContain('enabled: true');
     click(button('Stage restore as draft')); await settle();
@@ -129,6 +131,43 @@ describe('SourceAuthoringWorkspace', () => {
     expect(host.textContent).toContain('Historical source restore is staged as draft cs-1');
     expect(button('Validate')).toBeDefined();
     expect(button('Publish').disabled).toBe(true);
+  });
+
+  it('loads every page of a large historical diff', async () => {
+    const beforeSnapshotId = 'e'.repeat(64);
+    const afterSnapshotId = 'f'.repeat(64);
+    const paths = Array.from({ length: 31 }, (_, index) => `templates/page-${String(index + 1).padStart(2, '0')}.yaml`);
+    const getHistory = vi.fn(async () => ({ schemaVersion: 'att-source-history/v1', domain: 'PACKAGE_SOURCE' as const,
+      scopeId: 'payments', items: [{ transactionId: 'tx-many', domain: 'PACKAGE_SOURCE' as const,
+        createdAt: '2026-11-18T00:00:00Z', action: 'SOURCE_CHANGE_SET_PUBLISH', outcome: 'COMMITTED', author: 'owner',
+        beforeSnapshotId, afterSnapshotId, revisionsAvailable: true, changedResources: paths }],
+      offset: 0, limit: 20, total: 1, hasMore: false, currentSourceRevision: 'base-1', registryRevision: 'registry-1' }));
+    const getDiff = vi.fn(async (_domain: unknown, _scope: unknown, _before: string, _after: string,
+      _selectedPath?: string, _signal?: AbortSignal, offset = 0, limit = 20) => ({
+      schemaVersion: 'att-source-history-diff/v1', domain: 'PACKAGE_SOURCE' as const, scopeId: 'payments',
+      beforeSnapshotId, afterSnapshotId, offset, limit, total: paths.length, hasMore: offset + limit < paths.length,
+      items: paths.slice(offset, offset + limit).map(path => ({ path, change: 'modified' as const,
+        beforeBytes: 1, afterBytes: 2, contentAvailable: false })),
+    }));
+    const api = {
+      getManagedPackageAuthoringSource: vi.fn(async () => source()), getSourceHistory: getHistory,
+      getSourceHistoryDiff: getDiff,
+    } as unknown as ExplorerApi;
+    await act(async () => root.render(<SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId: 'payments',
+      query: { kind: 'resource', resourceType: 'template', resourceId: 'checkout' } }} />));
+    await settle();
+    click(button('History / Restore')); await settle();
+    click(button('View changes')); await settle();
+    expect(host.textContent).toContain('Showing 20 of 31 changed files.');
+    expect(button('Load more changed files')).toBeDefined();
+    click(button('Load more changed files')); await settle();
+    expect(getDiff).toHaveBeenNthCalledWith(1, 'PACKAGE_SOURCE', 'payments', beforeSnapshotId, afterSnapshotId,
+      undefined, expect.any(AbortSignal), 0, 20);
+    expect(getDiff).toHaveBeenNthCalledWith(2, 'PACKAGE_SOURCE', 'payments', beforeSnapshotId, afterSnapshotId,
+      undefined, expect.any(AbortSignal), 20, 20);
+    expect(host.textContent).toContain('Showing 31 of 31 changed files.');
+    expect([...host.querySelectorAll('button')].some(item => item.textContent?.includes('Load more changed files'))).toBe(false);
+    for (const path of paths) expect(host.textContent).toContain(path);
   });
 
   it('requires fresh Config Impact after staging a Central history restore', async () => {
@@ -171,6 +210,28 @@ describe('SourceAuthoringWorkspace', () => {
     expect(publishCall?.[5]).toEqual(expect.objectContaining({ freshnessFingerprint: expect.any(String) }));
     expect(publishCall?.[5]).not.toHaveProperty('actor');
     expect(publishCall?.[5]).not.toHaveProperty('acknowledgementDigest');
+  });
+
+  it('shows actionable guidance when a history restore exceeds the operation limit', async () => {
+    const beforeSnapshotId = '1'.repeat(64);
+    const afterSnapshotId = '2'.repeat(64);
+    const getHistory = vi.fn(async () => ({ schemaVersion: 'att-source-history/v1', domain: 'PACKAGE_SOURCE' as const,
+      scopeId: 'payments', items: [{ transactionId: 'tx-large', domain: 'PACKAGE_SOURCE' as const,
+        createdAt: '2026-11-18T00:00:00Z', action: 'SOURCE_CHANGE_SET_PUBLISH', outcome: 'COMMITTED', author: 'owner',
+        beforeSnapshotId, afterSnapshotId, revisionsAvailable: true, changedResources: ['templates/a.yaml'] }],
+      offset: 0, limit: 20, total: 1, hasMore: false, currentSourceRevision: 'base-1', registryRevision: 'registry-1' }));
+    const api = {
+      getManagedPackageAuthoringSource: vi.fn(async () => source()), getSourceHistory: getHistory,
+      stageSourceRestore: vi.fn(async () => { throw Object.assign(new Error('restore limit'),
+        { status: 422, code: 'ATT-CHANGESET-RESTORE-LIMIT' }); }),
+    } as unknown as ExplorerApi;
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await act(async () => root.render(<SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId: 'payments',
+      query: { kind: 'resource', resourceType: 'template', resourceId: 'checkout' } }} />));
+    await settle(); click(button('History / Restore')); await settle();
+    click(button('Stage restore as draft')); await settle();
+    expect(host.textContent).toContain('exceeds the Server limit of 32 file operations');
+    expect(host.textContent).toContain('did not publish or partially apply any files');
   });
 
   it('locks workspace navigation only while the source editor has unsaved work', async () => {
@@ -489,7 +550,8 @@ describe('SourceAuthoringWorkspace', () => {
       scopeId: 'central-runtime-config', baseSourceRevision: 'config-base-1' });
     const action = vi.fn(async (_domain: unknown, _scope: unknown, _id: unknown, actionName: string,
       _signal: AbortSignal, _acknowledgement?: unknown) =>
-      actionName === 'publish' ? { published: true, revision: 'published-1', auditConfirmed: true }
+      actionName === 'publish' ? { published: true, revision: 'published-1', publishedRevision: 'published-1',
+        activeRevision: 'published-1', activationState: 'ACTIVE', activationFailureCode: null, auditConfirmed: true }
         : centralDraft(actionName === 'validate' ? 'validated' : 'reviewed'));
     const api = {
       getCentralAuthoringSource: vi.fn(async () => centralSource),
@@ -512,6 +574,7 @@ describe('SourceAuthoringWorkspace', () => {
     expect(publishCall?.[5]).toEqual(expect.objectContaining({ freshnessFingerprint: expect.any(String) }));
     expect(publishCall?.[5]).not.toHaveProperty('actor');
     expect(publishCall?.[5]).not.toHaveProperty('acknowledgementDigest');
+    expect(host.textContent).toContain('Runtime Config published and active.');
   });
 
   it('requires actor and freshness-bound acknowledgement when the Server requires review approval', async () => {

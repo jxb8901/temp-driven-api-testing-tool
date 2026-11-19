@@ -10,6 +10,7 @@ Use this guide to edit Package resources or shared Runtime Config in ATT Studio.
 - To edit a Package source, use an active account with source-editing access for that Package. The default `default` Package is not editable.
 - To edit shared Runtime Config, use an `ADMIN` account. The Server must have `server.centralConfigurationEditingEnabled: true`; changing this deployment setting requires a Server restart.
 - Keep related source files in the selected Package. Global Runtime Config owns shared Data Source connections and security policy; each Package owns its Metric Sources, Groups, and Profiles.
+- For Worker execution acceptance, use a supported isolation host: Linux with `bwrap` on `PATH` and user namespaces enabled, or macOS with `/usr/bin/sandbox-exec`. Worker execution fails closed when that boundary is unavailable; see [source change and Worker isolation contracts](../../system-design/source-change-contracts.md).
 
 ## Use the source workflow
 
@@ -22,7 +23,7 @@ Use this guide to edit Package resources or shared Runtime Config in ATT Studio.
 7. Choose **Review changed files**, then choose **Publish** only when the candidate and impact report are current. If an administrator acknowledgement is required, bind it to the current report before publishing.
 8. Check the publication result. For Runtime Config, confirm that the Active revision matches the Published revision and that activation state is `ACTIVE` before starting new work.
 
-The Server owns authorization, validation, revision checks, and publication. If the source changes while you edit, Studio preserves your local text but blocks staging against the old revision. Copy the changes you still need, reload the latest source, and reapply them. Studio does not silently rebase or merge full-file edits.
+The Server owns authorization, validation, revision checks, and publication. `Published` identifies the source revision committed by Publish; `Active` identifies the revision verified by Runtime Config activation. `auditConfirmed` only reports whether publication audit was durably recorded. If the source changes while you edit, Studio preserves your local text but blocks staging against the old revision. Copy the changes you still need, reload the latest source, and reapply them. Studio does not silently rebase or merge full-file edits.
 
 ## Edit a Package Manifest
 
@@ -37,9 +38,9 @@ If publication returns `409`, the source changed after the candidate was prepare
 
 ## Direct filesystem edits and published state
 
-Treat Package files and the Runtime Config deployment directory as deployment inputs. Editing them directly does not create an approved Change Set, acknowledgement, or online activation. Package edits may be detected as a new source revision and will make existing drafts stale. A direct edit to the central Runtime Config mirror is not adopted as the active revision; use the ADMIN Validate → Review Impact → Publish flow. Do not report a filesystem copy as Published or Active.
+Package files and the central Runtime Config directory have different policies. A Package filesystem edit may be imported as a new Package source revision and make existing drafts stale. After the initial central Config registration, its configured directory is only a deployment mirror: direct edits are never imported as a revision or activated. The Server keeps serving the last immutable Config revision and reports `FAILED` with `ATT-CONFIG-EXTERNAL-SOURCE-DRIFT`; new Job admission pauses while the mirror differs. Existing accepted Jobs keep their pinned source. ADMINs can still load the verified source in Studio and stage a draft against that revision. Publish only after Validate, Review, and current Impact approval; a successful managed publication exports the reviewed revision to the mirror and clears the drift. Do not report a filesystem copy as Published or Active.
 
-If an out-of-band edit is needed for recovery, stop new Job admission when Runtime Config is involved, preserve the current files, then reconcile the change through a reviewed Studio candidate. Do not edit or remove the Server-managed revision store by hand. Git is not required for source revisioning or publication; teams may keep an external Git workflow if they need it.
+To recover from external Config drift, preserve the deployment files for investigation, reload the verified source in Studio, stage the intended result, and complete Validate → Review → Impact → Publish. A draft starts from the verified revision; include any desired external changes explicitly in its reviewed contents. A failed or unavailable activation does not make the Published revision Active: inspect `activationState`, `publishedRevision`, `activeRevision`, and `activationFailureCode`, keep new Jobs paused, and follow the Server administrator's activation recovery procedure before retrying from the current verified revision. Do not edit or remove the Server-managed revision store by hand. Git is not required for source revisioning or publication; teams may keep an external Git workflow if they need it.
 
 ## Edit a Template or Flow and its referenced File
 
@@ -82,7 +83,7 @@ Use shared Runtime Config for Data Source connections and their security policy.
 2. Stage the Runtime Config change and complete **Validate** and **Review changed files / Impact**.
 3. Confirm the Impact report is `AVAILABLE`, has `COMPLETE` coverage, and is not `BLOCKED`. Review every affected Package, Environment, and Schedule page.
 4. Acknowledge the exact report when Studio requires it, then choose **Publish**.
-5. Confirm the publication result reports `ACTIVE` and the same Published and Active revision. A failed or unavailable activation means the new Config is not ready for new work; follow the Server administrator's recovery procedure.
+5. Confirm the response has `activationState: ACTIVE`, and `publishedRevision` equals `activeRevision`. `auditConfirmed` does not prove activation. If `activationState` is `FAILED`, `PENDING`, or `UNAVAILABLE`, use `activationFailureCode` to guide recovery and do not start new work until the verified state is restored.
 
 The Server rejects fields that are not eligible for online publication. Deployment, bootstrap, security, and other Server settings remain managed through the deployment configuration and may require a restart.
 
@@ -91,7 +92,7 @@ The Server rejects fields that are not eligible for online publication. Deployme
 1. Open an authorized source and choose **History / Restore**.
 2. Select a retained transaction and compare its changed files. The Server may withhold protected source contents while leaving safe path and change metadata visible.
 3. Choose **Stage restore as draft**. Studio creates a new candidate from the retained snapshot; it does not rewind the active source in place.
-4. Review the complete candidate, validate it, and complete the normal review and publish steps. Central Config restore also requires a fresh Impact report and activation approval.
+4. Review the complete candidate, validate it, and complete the normal review and publish steps. Central Config restore also requires a fresh Impact report and activation approval. Diff files load in pages; choose **Load more changed files** until the full list is visible. A restore that exceeds the Server's 32-file-operation Change Set limit is rejected without partial publication; stage the required files as smaller drafts.
 
 ## Source snapshot storage and retention
 

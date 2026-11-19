@@ -199,6 +199,9 @@ final class SourceFileTransaction {
     Path activeRevisionRoot(String domain, String scopeId, Path root) throws Exception {
         return revisions.readActive(domain, scopeId, root).root;
     }
+    boolean configuredSourceMatchesActive(String domain, String scopeId, Path root) throws Exception {
+        return revisions.configuredSourceMatchesActive(domain, scopeId, root);
+    }
     Path executionPin(String domain, String scopeId, Path root) throws Exception { return revisions.executionPin(domain, scopeId, root); }
 
     Path revisionRoot(String domain,String scopeId,Path root,String revisionId) throws Exception {
