@@ -540,6 +540,7 @@ describe('SourceAuthoringWorkspace', () => {
     acknowledgeCentralImpact('admin');
     expect(button('Publish').disabled).toBe(false);
     click(button('Publish')); await settle();
+    await vi.waitFor(() => expect(action.mock.calls.some(call => call[3] === 'publish')).toBe(true));
     const publishCall = action.mock.calls.find(call => call[3] === 'publish');
     expect(publishCall?.[5]).toMatchObject({ actor: 'admin' });
     expect((publishCall?.[5] as { freshnessFingerprint?: string } | undefined)?.freshnessFingerprint).toMatch(/^[a-f0-9]{64}$/);
