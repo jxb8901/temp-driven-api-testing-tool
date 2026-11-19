@@ -448,6 +448,7 @@ jobs:
           npm run smoke
           npm run smoke:explorer
           npm run smoke:package-manifest
+          npm run smoke:source-authoring
           npm run smoke:archive-metrics
           npm run smoke:report-fragments
           npm run smoke:workspace-context

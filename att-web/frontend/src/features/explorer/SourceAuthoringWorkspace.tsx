@@ -273,7 +273,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       previousTargetKeyRef.current = targetKey;
       setDraft(null); setPublished(null); setContent(''); setMode('view'); setCreatePath(''); setMovePath(''); setEditorBaseSourceRevision('');
     }
-    setSource(null); setImpact(null); setImpactLoading(false); setDiagnostics([]); setError(''); setStatus(''); setHistoryOpen(false);
+    setSource(null); setImpact(null); setImpactLoading(false); setDiagnostics([]); setError(''); setHistoryOpen(false);
     if (centralTarget && !canManageCentral) {
       actionControllerRef.current?.abort();
       setDraft(null); setPublished(null); setContent(''); setMode('view'); setPendingOperations([]);
@@ -730,12 +730,13 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   });
 
   async function reloadSource() {
-    if (draft) { setRefreshKey(value => value + 1); return; }
+    if (draft) { setStatus(''); setRefreshKey(value => value + 1); return; }
     const hasLocalChanges = Boolean(mode === 'edit' && source && content !== source.text || mode === 'create' && (content.length || createPath.trim()) || pendingOperations.length);
     if (hasLocalChanges && !await confirmAction({ title: 'Discard local source changes?',
       message: 'Reloading removes the current local editor text, new path, and queued candidate operations. Server drafts are not affected.',
       confirmLabel: 'Discard and reload', destructive: true })) return;
     if (hasLocalChanges) { setMode('view'); setContent(''); setCreatePath(''); setEditorBaseSourceRevision(''); setPendingOperations([]); setPendingBaseSourceRevision(''); setPendingRegistryRevision(undefined); setRelatedPath(''); setRelatedContent(''); }
+    setStatus('');
     setRefreshKey(value => value + 1);
   }
 
