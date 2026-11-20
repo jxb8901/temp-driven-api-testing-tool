@@ -2,7 +2,7 @@
 
 - **狀態：** Proposed（提案中，尚未接受為已實作契約）
 - **日期：** 2026-11-20
-- **適用範圍：** ATT 下一代 Test Authoring；非 4.4.0 已發布功能
+- **適用範圍：** ATT 下一代 Test Authoring；非 4.4.0 已發佈功能
 - **相關工作：** [Issue #388](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/388)、[Source Management #233](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/233)、[PR #386](https://github.com/jxb8901/temp-driven-api-testing-tool/pull/386)
 - **英文主文件：** [ADR-0001](0001-flow-centric-testcase-resolution.md)
 
@@ -30,7 +30,7 @@
 | **Test Suite** | 一個或多個 Definition 的 Resolved Cases 的選取或分組 | 預設可隱式形成，必要時才持久化 |
 | **Case Execution** | Resolved Case 的一次實際執行及 Result／Evidence | Runtime Record／Artifacts |
 | **LOAD Run／Iteration** | 整個負載 Job／選定 Target 的一次執行 | 既有 Scheduler／Iteration 模型 |
-| **Debug Input** | 指定 Target 的臨時 Inputs／Vars | 現有 `debug.yaml`；不是自動發布的 Test Case |
+| **Debug Input** | 指定 Target 的臨時 Inputs／Vars | 現有 `debug.yaml`；不是自動發佈的 Test Case |
 
 不引入獨立的 **Steps／Step Group Resource 或 DSL**。邏輯步驟直接是 Flow 中的 Action 或巢狀 Flow 呼叫。新的 `testcase.yaml` **直接引用一個入口 Flow**，自身不再包含一套 Template／Stage／Actions 定義。Expected Values 作為 Input，由 Flow Assertion 驗證；預設不另建 Test Case Assertion 語法。
 
@@ -82,41 +82,80 @@ Flow
 
 ### 多種 Data Source，共用 Resolution 模型
 
-- **Inline YAML：** 一組輸入通常產生一個 Resolved Case。
-- **Excel：** 預設一行資料產生一個 Resolved Case；Flow 仍由 Definition 引用，毋須在 Excel 儲存可執行邏輯。
-- **ATT Testdata：** 可作為生成 Resolved Cases 的來源，也可在執行時依既有政策動態選取；**兩者必須區分**。
-- **Generated／Transformed Data：** 未來支援邊界值、等價類、範圍、過濾及組合，使用同一 Resolution Contract。
+#### 建議的 `att-testcase/v1` Schema 方向
 
-V1 不必一次實作所有 Generator，也不必為每種 Data Source 引入新 Resource Type 或通用 Plugin Framework。
+以下為**提案中的最小 Schema**（欄位名稱與精確語法仍待後續 Schema Issue 凍結）。Excel Data Source 刻意復用 `att-sidecar/v2.2` 熟悉的欄位映射語彙，以降低遷移成本。
 
-單案例示例（**建議語法，尚未實作**）：
+**Inline 單 Case（最簡）：**
 
 ```yaml
 schemaVersion: att-testcase/v1
 id: fpp.transfer.success
 name: FPP Transfer Success
 flow: payment.transfer.v1
-tags: [fpp, regression]
+tags: [fpp, smoke]
 inputs:
+  debitAccount: "A001"
   amount: 100
   expectedStatus: SUCCESS
 ```
 
-Excel Data-driven 示例（**建議語法，欄位及 ID Expression 契約待確定**）：
+**Inline 多 Case：**
+
+```yaml
+schemaVersion: att-testcase/v1
+id: fpp.transfer.boundary.inline
+flow: payment.transfer.v1
+dataSource:
+  type: inline
+  records:
+    - caseId: min
+      amount: 1
+      expectedStatus: SUCCESS
+    - caseId: zero
+      amount: 0
+      expectedStatus: REJECTED
+caseId: "${DATA.caseId}"
+inputs:
+  amount: "${DATA.amount}"
+  expectedStatus: "${DATA.expectedStatus}"
+```
+
+**Excel Data Source（復用 sidecar 風格映射）：**
 
 ```yaml
 schemaVersion: att-testcase/v1
 id: fpp.transfer.regression
+name: FPP Transfer Regression
 flow: payment.transfer.v1
+tags: [fpp, regression]
 dataSource:
   type: excel
   path: testdata/transfer-cases.xlsx
   sheet: Cases
-  caseIdColumn: Case ID
-  mapping:
+  headerRows: 1
+  caseId: "Case ID"                 # 復用 sidecar excel.caseId 概念
+  tags: "Tags"                      # 可選，復用 sidecar
+  dataColumns:                      # 完全復用 sidecar dataColumns 語法
+    debitAccount: Debit Account
     amount: Amount
-    expectedStatus: Expected Status
+    expectedStatus: Expected Status(yaml)
+    # 亦支援：note: "備註,補充"
+    #         payload: "請求(yaml)"(yaml)
+# inputs 可選：若省略，則 dataColumns 的 alias 直接成為 Flow inputs
+inputs:
+  debitAccount: "${DATA.debitAccount}"
+  amount: "${DATA.amount}"
+  expectedStatus: "${DATA.expectedStatus}"
+report:
+  format: xlsx
+  template: sourceWorkbook          # 可選；輸出永遠是新的 workbook
 ```
+
+主要復用點（來自 `att-sidecar/v2.2`）：
+- `headerRows`、`caseId`、`tags`，尤其是 `dataColumns`（包含 `alias=ColumnName`、`ColumnName(yaml)`、引號規則、空白／N/A 正規化）刻意保留。
+- Stage selector 欄位與 `stages[].dataColumns` **不適用**；Definition 直接綁定單一入口 Flow。
+- `(yaml)` 型別解析行為應與現有 sidecar 規則一致。
 
 單一 Definition 加上三行 Excel 通常形成三個 Resolved Cases，每個都執行同一 Flow。日後一條邊界值規則亦可產生 `min_minus_1`、`min`、`min_plus_1`、`max_minus_1`、`max`、`max_plus_1` 六個 Cases；具體 Generator 和 Expected Mapping 細節留待後續 Schema 設計。
 
@@ -192,13 +231,13 @@ View／Validate／Preview 不可改動 Source、產生有副作用的 Legacy Sna
 
 現有 **XLSX + Sidecar + XML Snapshot**、多 Stage Case、Template Target、CLI、Job／Schedule、報告必須繼續可用。Stage 的 `required`、`runWhen`、`onFailure`、Scope／Input Overlay、Rollback／Cleanup 和 Nested Flow Scope **不能假設等同普通 Flow Action**。未驗證等價前應保留 Legacy Adapter／Execution Path。
 
-必須重用 4.4.0 的 Package Source／Change Sets／Validate／Review／Publish／Revision／History／Restore 及不可變 Job Source Snapshot，不另建平行發布系統。
+必須重用 4.4.0 的 Package Source／Change Sets／Validate／Review／Publish／Revision／History／Restore 及不可變 Job Source Snapshot，不另建平行發佈系統。
 
 **本 ADR 不要求 PR #386／4.4.0 GA 完成 Native Cases、Generator、Template／Stage 合併或 LOAD Case Target。** 屬於後續逐步演進方向。
 
 ## 接受 ADR 前仍需處理的問題
 
-1. `att-testcase/v1` 精確 Schema、Inputs／Defaults 的覆蓋優先級與 `EXEC.VARS` 初始化。
+1. `att-testcase/v1` 精確 Schema、Inputs／Defaults 的覆蓋優先級與 `EXEC.VARS` 初始化。（上方 Schema 方向為提案，供評審。）
 2. Case ID Expression 語法、命名空間、改名／移動時的身份穩定性，與 Legacy ID 的對應。
 3. `m = 0`、無效資料、Generator Seed／數量上限、動態外部資料與重跑保證。
 4. Resolution 何時進行、是否支援決定性的 Lazy／Bounded Enumeration、如何在 Job 接受前固定 Target。
