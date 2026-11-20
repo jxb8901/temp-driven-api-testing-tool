@@ -100,7 +100,7 @@ class ArtifactLifecycleTest {
             runtime.sutMetrics.writeSnapshot(id,emptySutMetricsSnapshot());
             runtime.sutMetrics.jobFinished(id,null,null);
             awaitLoadReport(runtime,id,"FAILED","user-a");
-            assertFalse(runtime.store.loadReportPublicationPending(id),"A deferred retry keeps recovery scheduled without fencing retention during backoff.");
+            awaitLoadReportRetentionPending(runtime,id,false);
             assertEquals(1,reportAttempts.get());
             Path current=config.dataDir.resolve("jobs").resolve(id).resolve("load-report-publications/v2/current.json");
             var failedPointer=ServerRuntime.JSON.readTree(current.toFile());
