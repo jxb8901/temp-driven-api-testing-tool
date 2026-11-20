@@ -81,34 +81,80 @@ The same Case ID does **not** imply the same input values in every execution: ru
 
 ### Native and data-driven authoring
 
-Single-case example (**proposed, not implemented**):
+#### Proposed `att-testcase/v1` schema direction
+
+The following is a **proposed minimal schema** for review (field names and exact grammar remain open until a follow-up schema issue freezes them). Excel Data Source deliberately reuses the familiar `att-sidecar/v2.2` column-mapping vocabulary to reduce migration cost.
+
+**Inline single-case (simplest):**
 
 ```yaml
 schemaVersion: att-testcase/v1
 id: fpp.transfer.success
 name: FPP Transfer Success
 flow: payment.transfer.v1
-tags: [fpp, regression]
+tags: [fpp, smoke]
 inputs:
+  debitAccount: "A001"
   amount: 100
   expectedStatus: SUCCESS
 ```
 
-Data-driven Excel example (**proposed, not implemented; caseId and mapping syntax TBD**):
+**Inline multi-case:**
+
+```yaml
+schemaVersion: att-testcase/v1
+id: fpp.transfer.boundary.inline
+flow: payment.transfer.v1
+dataSource:
+  type: inline
+  records:
+    - caseId: min
+      amount: 1
+      expectedStatus: SUCCESS
+    - caseId: zero
+      amount: 0
+      expectedStatus: REJECTED
+caseId: "${DATA.caseId}"
+inputs:
+  amount: "${DATA.amount}"
+  expectedStatus: "${DATA.expectedStatus}"
+```
+
+**Excel Data Source (reuses sidecar-style mapping):**
 
 ```yaml
 schemaVersion: att-testcase/v1
 id: fpp.transfer.regression
+name: FPP Transfer Regression
 flow: payment.transfer.v1
+tags: [fpp, regression]
 dataSource:
   type: excel
   path: testdata/transfer-cases.xlsx
   sheet: Cases
-  caseIdColumn: Case ID
-  mapping:
+  headerRows: 1
+  caseId: "Case ID"                 # reuses sidecar excel.caseId concept
+  tags: "Tags"                      # optional, reuses sidecar
+  dataColumns:                      # reuses sidecar dataColumns syntax exactly
+    debitAccount: Debit Account
     amount: Amount
-    expectedStatus: Expected Status
+    expectedStatus: Expected Status(yaml)
+    # also supports: note: "備註,補充"
+    #                payload: "請求(yaml)"(yaml)
+# inputs optional: if omitted, dataColumns aliases become Flow inputs directly
+inputs:
+  debitAccount: "${DATA.debitAccount}"
+  amount: "${DATA.amount}"
+  expectedStatus: "${DATA.expectedStatus}"
+report:
+  format: xlsx
+  template: sourceWorkbook          # optional; output is always a new workbook
 ```
+
+Key reuse points from `att-sidecar/v2.2`:
+- `headerRows`, `caseId`, `tags`, and especially `dataColumns` (including `alias=ColumnName`, `ColumnName(yaml)`, quoting rules, and blank/N/A normalization) are intentionally preserved.
+- Stage selector columns and `stages[].dataColumns` do **not** apply; the Definition binds a single entry Flow.
+- `(yaml)` type parsing behavior should match existing sidecar rules.
 
 One Definition plus three Excel rows usually resolves into **three Cases**, all calling the same Flow. One boundary-value rule may resolve into six Cases using a documented generated key/expected-value policy. Static Excel rows, inline input, ATT Testdata, and future generated/filtered/transformed data share **one conceptual Resolution contract**; advanced generators and all source types need not ship in V1.
 
@@ -177,7 +223,7 @@ Reuse 4.4.0 Package Source / Change Sets / Validate / Review / Publish / Revisio
 
 ## Open questions before acceptance
 
-1. Exact `att-testcase/v1` schema and input/default precedence, especially bootstrap `EXEC.VARS`.
+1. Exact `att-testcase/v1` schema and input/default precedence, especially bootstrap `EXEC.VARS`. (Schema direction above is a proposal for review.)
 2. Case ID expression grammar, namespace, stable identity under edits/moves, migration of legacy `workbookId.groupId.rowCaseId`.
 3. Zero-case handling, invalid-record policy, generator seed/limits, external/non-deterministic sources and precise replay guarantees.
 4. Eager vs deterministic bounded/lazy Resolution; when/where selected target sets are pinned.
