@@ -36,7 +36,8 @@ class ServerRuntimeJobReplayTest {
         ServerRuntime open() throws Exception {return new ServerRuntime(ServerConfig.load(server),libs.toString());}
         ServerRuntime open(ServerRuntimeTestSupport.MutableClock clock) throws Exception {return new ServerRuntime(ServerConfig.load(server),libs.toString(),ProcessBuilder::start,clock);}
     }
-    private Fixture fixture() throws Exception {
+    private Fixture fixture() throws Exception { return fixture(null); }
+    private Fixture fixture(Integer maxConcurrentLoad) throws Exception {
         Path root=Files.createDirectories(temp.resolve("unified-package")).toRealPath();
         Files.createDirectories(root.resolve("testcase"));
         Files.createDirectories(root.resolve("templates/SIMPLE"));Files.createDirectories(root.resolve("templates/SNAPSHOT"));
@@ -70,7 +71,9 @@ class ServerRuntimeJobReplayTest {
         new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(root,runtimeConfig,"SIT",List.of(workbook),null,java.util.Set.of(),false));
         Path server=temp.resolve("unified-server.yaml");
         Path ownerRoot=temp.resolve("owner-package");
-        Files.writeString(server,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("unified-data"))+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)+"\n  auth: {mode: local}\n  centralConfigurationEditingEnabled: true\n  packageConfiguration: {sourceEditingEnabled: true}\n  inspection:\n    enabled: true\n    timeoutMs: 30000\n  inlineLoad: {enabled: true, maxDurationSeconds: 86400}\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(root)+", "+ServerRuntimeTestSupport.yaml(ownerRoot)+"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(root)+"\n    owner: "+ServerRuntimeTestSupport.yaml(ownerRoot)+"\n");
+        Files.writeString(server,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("unified-data"))+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)+"\n  auth: {mode: local}\n  centralConfigurationEditingEnabled: true\n  packageConfiguration: {sourceEditingEnabled: true}\n  inspection:\n    enabled: true\n    timeoutMs: 30000\n  inlineLoad: {enabled: true, maxDurationSeconds: 86400}\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n"
+                +(maxConcurrentLoad==null?"":"  maxConcurrentLoad: "+maxConcurrentLoad+"\n")
+                +"  queuedLimit: 2\npackages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(root)+", "+ServerRuntimeTestSupport.yaml(ownerRoot)+"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(root)+"\n    owner: "+ServerRuntimeTestSupport.yaml(ownerRoot)+"\n");
         Path libs=Files.createDirectory(temp.resolve("unified-libs"));
         for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
         ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
@@ -389,7 +392,7 @@ class ServerRuntimeJobReplayTest {
 
     @Test void acceptedLoadSurvivesPackageRepointRemovalAndSelectedScenarioTestdataDeletion() throws Exception {
         assumeSourceSnapshotIsolationAvailable();
-        Fixture fixture=fixture();
+        Fixture fixture=fixture(3);
         Path acceptedScenario=fixture.root.resolve("load/snapshot.yaml");
         Path selectedOverlay=fixture.root.resolve("testdata/scenario-overlay.yaml");
         Files.writeString(selectedOverlay,"schemaVersion: att-testdata/v1.0\nid: scenarioAccounts\nrecords: [{currency: PRIVATE-ACCEPTED-VALUE}]\n");

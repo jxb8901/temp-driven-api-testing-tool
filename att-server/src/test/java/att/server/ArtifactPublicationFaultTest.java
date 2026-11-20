@@ -514,7 +514,8 @@ class ArtifactPublicationFaultTest {
     }
 
     private ServerRuntime runtime(ServerRuntime.ArtifactPublisher publisher) throws Exception {
-        return runtime(publisher, "#!/bin/sh\nread request\nprintf '%s\\n' '{\"type\":\"RESULT\",\"status\":\"PASS\",\"exitCode\":0}'\n");
+        return runtime(publisher, "#!/bin/sh\nfor argument do [ \"$argument\" = \"-version\" ] && exit 0; done\n"
+                +"read request\nprintf '%s\\n' '{\"type\":\"RESULT\",\"status\":\"PASS\",\"exitCode\":0}'\n");
     }
 
     private ServerRuntime runtime(ServerRuntime.ArtifactPublisher publisher, String script) throws Exception {
