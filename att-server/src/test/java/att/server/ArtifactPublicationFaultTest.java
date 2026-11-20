@@ -24,7 +24,8 @@ class ArtifactPublicationFaultTest {
     @ValueSource(strings={"unverified", "ledger-failure", "quarantine-store-failure", "load"})
     void incompleteProofReleasesCapacityOnlyAfterDurableQuarantine(String failure) throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX Worker protocol fixture");
-        String script="#!/bin/sh\nIFS= read -r request || exit 2\n"
+        String script="#!/bin/sh\nfor argument do [ \"$argument\" = \"-version\" ] && exit 0; done\n"
+                +"IFS= read -r request || exit 2\n"
                 +"output=$(printf '%s' \"$request\" | sed -n 's/.*\"outputDirectory\":\"\\([^\"]*\\)\".*/\\1/p')\n"
                 +"while [ ! -f \"$output/finish-worker\" ]; do sleep 0.02; done\n"
                 +"printf '%s\\n' '{\"type\":\"RESULT\",\"status\":\"PASS\",\"exitCode\":0}'\n";

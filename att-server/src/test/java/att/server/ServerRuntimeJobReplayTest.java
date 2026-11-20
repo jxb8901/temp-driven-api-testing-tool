@@ -421,7 +421,8 @@ class ServerRuntimeJobReplayTest {
             List<?> dependencies=(List<?>)acceptedA.get("dependencyClosure");
             assertTrue(dependencies.stream().filter(Map.class::isInstance).map(value->(Map<?,?>)value)
                     .anyMatch(value->"LOAD_OVERLAY".equals(value.get("kind"))
-                            &&"load/snapshot.yaml".equals(value.get("canonicalPath"))));
+                            &&"testdata/scenario-overlay.yaml".equals(value.get("canonicalPath"))),
+                    "The accepted Load scenario's explicit overlay is pinned in the dependency closure");
             assertTrue(dependencies.stream().filter(Map.class::isInstance).map(value->(Map<?,?>)value)
                     .anyMatch(value->"TESTDATA".equals(value.get("kind"))
                             &&"scenarioAccounts".equals(value.get("logicalId"))
@@ -466,8 +467,10 @@ class ServerRuntimeJobReplayTest {
         try(ServerRuntime runtime=fixture.open()) {
             Map<String,Object> historical=runtime.jobRecord(original);
             assertEquals(Boolean.FALSE,historical.get("sourceSnapshotAvailable"));
-            assertEquals("UNAVAILABLE",((Map<?,?>)historical.get("sourceProvenance")).get("snapshotState"));
-            assertTrue(String.valueOf(historical.get("requiredAction")).contains("replace"));
+            Map<?,?> unavailableProvenance=(Map<?,?>)historical.get("sourceProvenance");
+            assertEquals("UNAVAILABLE",unavailableProvenance.get("snapshotState"));
+            assertTrue(String.valueOf(unavailableProvenance.get("requiredAction")).contains("replace"));
+            assertEquals("validate-again",historical.get("requiredAction"));
 
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice",
                     ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));

@@ -1400,13 +1400,17 @@ final class ServerRuntime implements AutoCloseable {
         }
         } finally {sourcePublicationBarrier.readLock().unlock();admissionLifecycle.readLock().unlock();}
     }
-    Process startWorkerProcess(ProcessBuilder builder) throws java.io.IOException {
+    @FunctionalInterface interface PlatformContextOperation<T> { T run() throws java.io.IOException; }
+    static <T> T withPlatformContextClassLoader(PlatformContextOperation<T> operation) throws java.io.IOException {
         // JDK 17 process reapers inherit the spawning thread's context loader.
         // They belong to the JVM and may outlive this WAR even after every child exits.
         Thread caller=Thread.currentThread();ClassLoader previous=caller.getContextClassLoader();
         caller.setContextClassLoader(ClassLoader.getPlatformClassLoader());
-        try {return processLauncher.start(builder);}
+        try {return operation.run();}
         finally {caller.setContextClassLoader(previous);}
+    }
+    Process startWorkerProcess(ProcessBuilder builder) throws java.io.IOException {
+        return withPlatformContextClassLoader(()->processLauncher.start(builder));
     }
     private void startStderrDrainer(Process process,String name) {
         Thread thread=new Thread(()->{
@@ -1601,8 +1605,11 @@ final class ServerRuntime implements AutoCloseable {
             Path output=config.dataDir.resolve(".source-isolation-probe").resolve(UUID.randomUUID().toString());
             try {
                 Files.createDirectories(output);
-                att.exec.SourceSnapshotIsolation.verifyAvailable(config.javaExecutable,snapshot.directory,
-                        snapshot.archivePath,output);
+                withPlatformContextClassLoader(()->{
+                    att.exec.SourceSnapshotIsolation.verifyAvailable(config.javaExecutable,snapshot.directory,
+                            snapshot.archivePath,output);
+                    return null;
+                });
                 sourceSnapshotIsolationVerified=true;
             } finally { deleteTree(output); }
         }

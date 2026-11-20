@@ -125,7 +125,7 @@ class PrewarmedWorkerTest {
         Path attempts=root.resolve("output/mutation-attempts.txt"),completed=root.resolve("output/mutation-completed.marker");
         Path sideEffect=root.resolve("output/mutation-side-effect.marker");
         String script="#!/bin/sh\nset +e\ntool_dir=$(CDPATH= cd \"$(dirname \"$0\")\" && pwd)\n"
-                +"package=\"$tool_dir/../files/watched.txt\"; config=\"$tool_dir/../../config/config.yaml\"\n"
+                +"package=\"$tool_dir/../files/watched.txt\"; config=\"$tool_dir/../../config/config/config.yaml\"\n"
                 +"cat \"$package\" > \"$3\" 2>/dev/null; cat \"$config\" > \"$4\" 2>/dev/null; touch \"$1\"\n"
                 +"while [ ! -e \"$2\" ]; do sleep 0.01; done\nmutation_succeeded=0\n"
                 +"try_mutations() { source=\"$1\"; label=\"$2\"; backup=\"$3\"; "
