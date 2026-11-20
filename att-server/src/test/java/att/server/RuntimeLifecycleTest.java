@@ -72,6 +72,19 @@ class RuntimeLifecycleTest {
             assertSame(original,Thread.currentThread().getContextClassLoader());
         }
     }
+    @Test void sourceIsolationProbeUsesPlatformLoaderAndRestoresCallerOnSuccessAndFailure() throws Exception {
+        ClassLoader original=Thread.currentThread().getContextClassLoader();
+        assertEquals("probe",ServerRuntime.withPlatformContextClassLoader(()->{
+            assertSame(ClassLoader.getPlatformClassLoader(),Thread.currentThread().getContextClassLoader());
+            return "probe";
+        }));
+        assertSame(original,Thread.currentThread().getContextClassLoader());
+        assertThrows(java.io.IOException.class,()->ServerRuntime.withPlatformContextClassLoader(()->{
+            assertSame(ClassLoader.getPlatformClassLoader(),Thread.currentThread().getContextClassLoader());
+            throw new java.io.IOException("probe failed");
+        }));
+        assertSame(original,Thread.currentThread().getContextClassLoader());
+    }
     @Test void sharedH2RegistrationSurvivesOneStoreClosingAndReloadsAfterLastClose() throws Exception {
         ServerConfig config=config();JobStore first=new JobStore(config),second=new JobStore(config);
         try {

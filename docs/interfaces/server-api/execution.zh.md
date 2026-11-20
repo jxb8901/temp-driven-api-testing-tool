@@ -34,6 +34,8 @@ Content-Type: application/json
 
 Server 會在提交時及 Worker 啟動前重新檢查 package revision。若在提交時發現變更，會回傳 `409 ATT-SERVER-DRAFT-STALE`；若工作已接受後才發現變更，工作會以該 diagnostic 標記為 `INVALID`。驗證失敗會在頂層 `diagnostics` array 回傳安全的 `code`、`summary`、`field` 及邏輯 `resourceId`；不會包含 source path 或 parser snippet。Worker 會收到與預覽驗證相同的不可變 typed values；inline input 留在記憶體，不會在 package root 下建立檔案。舊有以路徑提交的 Debug request 仍可供相容用戶端使用。
 
+Source-pinned Job 需要 OS 強制的唯讀 Worker 邊界。Server 在啟動後第一次接納此類工作前，會針對已接受的 Package 及 Config snapshot 探測隔離功能。若 sandbox 不可用，會在建立 Job record 或排入佇列前回傳 `409 ATT-SOURCE-ISOLATION-UNAVAILABLE`。支援主機及安裝要求見 [Server 部署需求](../../operations/server-deployment.zh.md)。
+
 ## 目標範圍內的 Quick Load
 
 設定 `server.inlineLoad.enabled: true` 後，Quick Load 才可從已選取的 Template、Flow 或 Tool 開啟；它固定使用該目標並組成一個 Workload。Model 可選 `virtualUsers` 或 `arrivalRate`；Server 會組成相符的現行 `att-load/v1.9` policy，並使用現有 Load pipeline 驗證目標。功能停用時，Quick Load form、policy 及 draft endpoint 都會回傳 `403 ATT-SERVER-INLINE-LOAD-DISABLED`。

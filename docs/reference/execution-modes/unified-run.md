@@ -118,6 +118,8 @@ New retained execution specs use `att-job-execution/v2`; the parser still accept
 
 Historical Jobs without a retained definition show **Rerun unavailable for this historical job**. Validation-only Jobs, failed safe retention, and classified submitted inputs cannot be replayed exactly. Legacy direct submissions with raw overrides or unresolved `rerunFailed` history selection require a new validated draft before safe retention. Configure a new run and provide missing credentials through the normal protected input flow. Never reconstruct an execution from logs, artifacts or redacted previews. Safe definitions are limited to 256 KiB and exclude Worker transport fields and host roots.
 
+After upgrading from Worker source-snapshot v1, the Server marks those old leases **UNAVAILABLE** because they lack the executable metadata required for safe dispatch. The historical Job and value-free provenance remain readable; the Server does not rewrite or dispatch the old snapshot. To run it again, review and validate against the current Package, then explicitly confirm the rerun. The new Job receives a v2 source snapshot and keeps its own provenance.
+
 The Job lifecycle API uses the following endpoints under `/api/v1`:
 
 | Method and path | Result |

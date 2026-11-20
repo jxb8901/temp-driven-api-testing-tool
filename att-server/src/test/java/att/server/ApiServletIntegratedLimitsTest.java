@@ -160,6 +160,82 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void centralHistoryRestoreRequiresFreshImpactAndActivatesThroughTheNormalGate() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("central-restore-impact-packages"));
+        createPackage(packages.resolve("p"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"central-restore-impact-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("central-restore-impact-libs"),true,true)) {
+            ApiServlet servlet=servlet(runtime);
+            String original=Files.readString(runtimeConfig);
+            Map<String,String> revisions=runtime.changeSetPublisher.currentRevisions(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true);
+            String candidate=original+"# published candidate for history restore\n";
+            Map<String,Object> firstDraft=runtime.changeSetPublisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,revisions.get("baseSourceRevision"),null,
+                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml",candidate.getBytes(StandardCharsets.UTF_8))));
+            String firstId=String.valueOf(firstDraft.get("changeSetId"));
+            runtime.changeSetPublisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,firstId);
+            runtime.changeSetPublisher.review(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,firstId);
+            var firstImpact=runtime.changeSetPublisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,firstId,null);
+            String firstFreshness=ConfigImpactAnalyzer.freshnessFingerprint(firstImpact.freshness);
+            Captured firstPublished=invokeAsAdmin(servlet,"alice","POST",
+                    "/configuration/change-sets/"+firstId+"/publish",Map.of(),ServerRuntime.JSON.writeValueAsBytes(Map.of(
+                            "impactAcknowledgement",Map.of("freshnessFingerprint",firstFreshness))));
+            assertEquals(200,firstPublished.status,new String(firstPublished.body(),StandardCharsets.UTF_8));
+            assertEquals("ACTIVE",ServerRuntime.JSON.readTree(firstPublished.body()).path("activationState").asText());
+
+            @SuppressWarnings("unchecked") List<Map<String,Object>> history=(List<Map<String,Object>>)runtime.changeSetPublisher.sourceHistory(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,0,20).get("items");
+            String originalSnapshot=String.valueOf(history.get(0).get("beforeSnapshotId"));
+            assertTrue(originalSnapshot.matches("R[A-F0-9]{32}"),"The pre-publication Config is retained as an immutable history snapshot");
+            String currentRevision=runtime.changeSetPublisher.currentRevisions(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true).get("baseSourceRevision");
+            Captured staged=invokeAsAdmin(servlet,"alice","POST","/configuration/source-history/restore",Map.of(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("snapshotId",originalSnapshot,
+                            "expectedSourceRevision",currentRevision)));
+            assertEquals(201,staged.status,new String(staged.body(),StandardCharsets.UTF_8));
+            JsonNode restore=ServerRuntime.JSON.readTree(staged.body());
+            assertEquals(originalSnapshot,restore.path("restoredFromSnapshotId").asText());
+            String restoreId=restore.path("changeSetId").asText();
+            for(String action:List.of("validate","review")) {
+                Captured response=invokeAsAdmin(servlet,"alice","POST","/configuration/change-sets/"+restoreId+"/"+action,
+                        Map.of(),"{}".getBytes(StandardCharsets.UTF_8));
+                assertEquals(200,response.status,new String(response.body(),StandardCharsets.UTF_8));
+            }
+
+            Captured withoutImpact=invokeAsAdmin(servlet,"alice","POST",
+                    "/configuration/change-sets/"+restoreId+"/publish",Map.of(),"{}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(409,withoutImpact.status,new String(withoutImpact.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-CONFIG-IMPACT-STALE",ServerRuntime.JSON.readTree(withoutImpact.body())
+                    .path("error").path("code").asText());
+            assertEquals(candidate,Files.readString(runtimeConfig),"A restore without fresh impact must not change the active Config");
+
+            Captured reportResponse=invokeAsAdmin(servlet,"alice","GET",
+                    "/configuration/change-sets/"+restoreId+"/impact",Map.of(),new byte[0]);
+            assertEquals(200,reportResponse.status,new String(reportResponse.body(),StandardCharsets.UTF_8));
+            var restoreImpact=runtime.configurationImpactReport("alice",restoreId,null);
+            assertNotNull(restoreImpact.freshness);
+            assertEquals(att.server.api.source.SourceManagementContracts.ImpactDecision.COMPATIBLE,restoreImpact.decision);
+            String restoreFreshness=ConfigImpactAnalyzer.freshnessFingerprint(restoreImpact.freshness);
+            Captured restored=invokeAsAdmin(servlet,"alice","POST",
+                    "/configuration/change-sets/"+restoreId+"/publish",Map.of(),ServerRuntime.JSON.writeValueAsBytes(Map.of(
+                            "impactAcknowledgement",Map.of("freshnessFingerprint",restoreFreshness))));
+            JsonNode restoredBody=ServerRuntime.JSON.readTree(restored.body());
+            assertEquals(200,restored.status,new String(restored.body(),StandardCharsets.UTF_8));
+            assertEquals("ACTIVE",restoredBody.path("activationState").asText(),restoredBody.toString());
+            assertEquals(restoredBody.path("revision").asText(),restoredBody.path("activeRevision").asText(),restoredBody.toString());
+            assertEquals(original,Files.readString(runtimeConfig));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> restoredHistory=(List<Map<String,Object>>)runtime.changeSetPublisher.sourceHistory(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,0,20).get("items");
+            assertEquals("SOURCE_RESTORE_PUBLISH",restoredHistory.get(0).get("action"));
+            assertEquals(originalSnapshot,restoredHistory.get(0).get("restoredFromSnapshotId"));
+        }
+    }
+
     @Test void centralPublishActivationFieldsSerializeEveryStatusOutcome() throws Exception {
         String scope=ChangeSetPublisher.CENTRAL_SCOPE_ID;
         var published=att.server.api.source.SourceManagementContracts.RevisionIdentity.of(

@@ -112,18 +112,38 @@ class PrewarmedWorkerTest {
         for(String command:Arrays.asList("debug","run","load"))verifyPackageLocalExecutableTool(command,false);
     }
 
-    @Test void sameOwnerToolCannotChangeAcceptedSourceOrPerformItsFollowUpSideEffect() throws Exception {
+    @Test void sameOwnerToolCannotChangePackageOrConfigClosureOrPerformItsFollowUpSideEffect() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"The OS source sandbox is not available on Windows");
         Path root=fixture(temp.resolve("sandbox-mutation-package-"+UUID.randomUUID()));
         Files.createDirectories(root.resolve("files"));
         Files.write(root.resolve("files/watched.txt"),"accepted-value\n".getBytes(StandardCharsets.UTF_8));
-        Path sideEffect=root.resolve("output/side-effect.marker");
-        String script="#!/bin/sh\nset -e\ntool_dir=$(CDPATH= cd \"$(dirname \"$0\")\" && pwd)\n"
-                +"source=\"$tool_dir/../files/watched.txt\"\n"
-                +"chmod u+w \"$source\"\n"
-                +"printf 'mutated-value\\n' > \"$source\"\n"
-                +"touch \"$1\"\n";
-        fixtureWithLocalTool(root,sideEffect,script);
+        Path acceptedConfig=root.resolve("config/config.yaml");
+        String acceptedConfigBytes=readUtf8(acceptedConfig);
+        Path started=root.resolve("output/mutation-started.marker"),release=root.resolve("output/mutation-release.marker");
+        Path firstPackageRead=root.resolve("output/package-first-read.txt"),firstConfigRead=root.resolve("output/config-first-read.txt");
+        Path secondPackageRead=root.resolve("output/package-second-read.txt"),secondConfigRead=root.resolve("output/config-second-read.txt");
+        Path attempts=root.resolve("output/mutation-attempts.txt"),completed=root.resolve("output/mutation-completed.marker");
+        Path sideEffect=root.resolve("output/mutation-side-effect.marker");
+        String script="#!/bin/sh\nset +e\ntool_dir=$(CDPATH= cd \"$(dirname \"$0\")\" && pwd)\n"
+                +"package=\"$tool_dir/../files/watched.txt\"; config=\"$tool_dir/../../config/config/config.yaml\"\n"
+                +"cat \"$package\" > \"$3\" 2>/dev/null; cat \"$config\" > \"$4\" 2>/dev/null; touch \"$1\"\n"
+                +"while [ ! -e \"$2\" ]; do sleep 0.01; done\nmutation_succeeded=0\n"
+                +"try_mutations() { source=\"$1\"; label=\"$2\"; backup=\"$3\"; "
+                +"cp \"$source\" \"$backup\" 2>/dev/null; "
+                +"chmod u+w \"$source\" >/dev/null 2>&1; chmod_status=$?; "
+                +"printf 'mutated-value\\n' > \"$source\" 2>/dev/null; write_status=$?; "
+                +"cat \"$backup\" > \"$source\" 2>/dev/null; restore_status=$?; "
+                +"mv \"$source\" \"$source.renamed\" >/dev/null 2>&1; rename_status=$?; "
+                +"printf '%s:%s,%s,%s,%s\\n' \"$label\" \"$chmod_status\" \"$write_status\" "
+                +"\"$restore_status\" \"$rename_status\" >> \"$4\"; "
+                +"if [ \"$chmod_status\" -eq 0 ] || [ \"$write_status\" -eq 0 ] || "
+                +"[ \"$restore_status\" -eq 0 ] || [ \"$rename_status\" -eq 0 ]; then mutation_succeeded=1; fi; }\n"
+                +"try_mutations \"$package\" package \"$1.package-backup\" \"$7\"\n"
+                +"try_mutations \"$config\" config \"$1.config-backup\" \"$7\"\n"
+                +"cat \"$package\" > \"$5\" 2>/dev/null; cat \"$config\" > \"$6\" 2>/dev/null; touch \"$8\"\n"
+                +"if [ \"$mutation_succeeded\" -eq 1 ]; then touch \"$9\"; exit 1; fi\nprintf 'mutation-denied\\n'\n";
+        fixtureWithLocalTool(root,started,script,release.toString(),firstPackageRead.toString(),firstConfigRead.toString(),
+                secondPackageRead.toString(),secondConfigRead.toString(),attempts.toString(),completed.toString(),sideEffect.toString());
         SourceArchive accepted=sourceArchive(root);
         Map<String,Object> request=request(root,"debug");attachSnapshot(request,accepted);
         Files.createDirectories(Paths.get(String.valueOf(request.get("outputDirectory"))));
@@ -137,12 +157,50 @@ class PrewarmedWorkerTest {
             return;
         }
         try {
-            String output=assign(process,mapper.writeValueAsString(request));
-            assertFalse(Files.exists(sideEffect),"The Tool must stop before its follow-up side effect");
+            CompletableFuture<String> outputFuture=CompletableFuture.supplyAsync(()->{
+                try{return assign(process,mapper.writeValueAsString(request));}
+                catch(Exception failure){throw new CompletionException(failure);}
+            });
+            try { awaitFile(started,process,"Package-local Tool did not pause between accepted source reads"); }
+            catch(AssertionError unavailable) {
+                if(workerError(process).contains("sandbox_apply: Operation not permitted")) {
+                    assertFalse(Files.exists(sideEffect),"A failed sandbox launch cannot cause the attack follow-up side effect");
+                    assertEquals("accepted-value",readUtf8(accepted.packageRoot.resolve("files/watched.txt")).trim());
+                    assertEquals(acceptedConfigBytes,readUtf8(accepted.configRoot.resolve("config/config.yaml")));
+                    org.junit.jupiter.api.Assumptions.assumeTrue(false,
+                            "This macOS host does not permit sandbox-exec to launch the Worker Tool");
+                }
+                throw unavailable;
+            }
+            assertEquals("accepted-value",readUtf8(firstPackageRead).trim());
+            assertEquals(acceptedConfigBytes,readUtf8(firstConfigRead));
+            Files.createFile(release);
+            String output=outputFuture.get(20,TimeUnit.SECONDS);
+            assertTrue(process.waitFor(10,TimeUnit.SECONDS),"The Worker must finish after the synchronized source reads");
+            assertEquals(0,process.exitValue(),output+"; stderr="+workerError(process));
+            assertTrue(Files.exists(completed),"The Worker continued after all source mutation attempts were denied");
+            assertFalse(Files.exists(sideEffect),"The Tool's forbidden follow-up side effect must not occur");
+            Map<String,String> attemptsBySource=new HashMap<String,String>();
+            for(String line:readUtf8(attempts).split("\\R")) {
+                String[] pair=line.split(":",2);assertEquals(2,pair.length,line);attemptsBySource.put(pair[0],pair[1]);
+            }
+            for(String resource:Arrays.asList("package","config")) {
+                assertTrue(attemptsBySource.containsKey(resource),"Missing mutation results for "+resource+": "+attemptsBySource);
+                String[] statuses=attemptsBySource.get(resource).split(",");
+                assertEquals(4,statuses.length,attemptsBySource.toString());
+                for(String status:statuses)assertNotEquals("0",status,
+                        resource+" source must reject chmod, write, restore, and rename: "+attemptsBySource);
+            }
+            assertEquals("accepted-value",readUtf8(secondPackageRead).trim(),"Package source B must still be revision A");
+            assertEquals(acceptedConfigBytes,readUtf8(secondConfigRead),"Config source B must still be revision A");
             assertEquals("accepted-value",readUtf8(accepted.packageRoot.resolve("files/watched.txt")).trim(),
-                    "Accepted source bytes must remain unchanged");
+                    "Accepted Package bytes must remain unchanged");
+            assertEquals(acceptedConfigBytes,readUtf8(accepted.configRoot.resolve("config/config.yaml")),
+                    "Accepted Config bytes must remain unchanged");
+            assertFalse(Files.exists(accepted.packageRoot.resolve("files/watched.txt.renamed")));
+            assertFalse(Files.exists(accepted.configRoot.resolve("config/config.yaml.renamed")));
             if(sandboxAvailable) {
-                assertTrue(output.contains("exitCode: 1"),output);
+                assertTrue(output.contains("\"status\":\"PASS\""),output);
             }
             else assertNotEquals(0,process.exitValue(),"Unavailable OS isolation must fail before Worker execution");
         } finally {process.destroyForcibly();}

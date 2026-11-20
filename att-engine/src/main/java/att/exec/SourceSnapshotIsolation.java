@@ -10,6 +10,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /** Builds an OS-enforced read-only boundary for a Worker using an accepted source snapshot. */
@@ -106,6 +108,40 @@ public final class SourceSnapshotIsolation {
 
     public static boolean workerBoundaryDeclared() {
         return PROPERTY_VALUE.equals(System.getProperty(WORKER_PROPERTY));
+    }
+
+    /** Executes a bounded sandbox probe before the Server accepts a source-pinned Job. */
+    public static void verifyAvailable(Path javaExecutable, Path snapshotDirectory,
+                                       Path archive, Path outputDirectory) throws IOException {
+        if (javaExecutable == null) throw new IOException("The Worker Java executable is unavailable");
+        Path output = requiredDirectory(outputDirectory, "Worker output directory");
+        Path log = output.resolve(".source-isolation-probe-" + UUID.randomUUID() + ".log");
+        Process process = null;
+        try {
+            List<String> probe = new ArrayList<String>();
+            probe.add(javaExecutable.toAbsolutePath().normalize().toString());
+            probe.add("-version");
+            List<String> command = wrap(probe, snapshotDirectory, archive, output);
+            ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile());
+            if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux")) {
+                builder.environment().put("TMPDIR", "/tmp");
+                builder.environment().put("TMP", "/tmp");
+                builder.environment().put("TEMP", "/tmp");
+            }
+            process = builder.start();
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new IOException("The OS-enforced Worker sandbox probe timed out");
+            }
+            if (process.exitValue() != 0)
+                throw new IOException("The OS-enforced Worker sandbox probe failed");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("The OS-enforced Worker sandbox probe was interrupted", interrupted);
+        } finally {
+            if (process != null && process.isAlive()) process.destroyForcibly();
+            Files.deleteIfExists(log);
+        }
     }
 
     private static void appendWorkerCommand(List<String> command, List<String> workerCommand) {

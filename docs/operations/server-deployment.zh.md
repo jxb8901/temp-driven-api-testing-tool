@@ -10,7 +10,11 @@
 4. 將 `$ATT_HOME/config/att-server.example.yaml` 複製至 `$ATT_HOME/config/att-server.yaml` 或受保護的外部路徑，更新絕對路徑，並勿將憑證放入 package。升級時不可覆寫既有的 active config。
 5. 將 `att-server-4.3.0.war` 部署至 Tomcat 10.1+。Tomcat 可直接部署 packed WAR；隔離的 Worker 會從 `$ATT_HOME/lib` 載入版本相符的 `att-local-4.3.0.jar`。
 
-Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.3.0.jar` 中共用的 Worker/Engine runtime；升級或 rollback 時，必須同時部署版本相符的 Local archive 與 Server WAR。Startup 會驗證 Worker JAR 版本及內嵌 Schema Registry；每個 Worker 處理請求前也會確認 Registry identity 與 Server 驗證過的 runtime 相符。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
+Local archive 解壓後的目錄就是共享安裝及部署根目錄 `ATT_HOME`。此目錄包含 launcher 及 `lib/att-local-4.3.0.jar` 中共用的 Worker/Engine runtime；升級或 rollback 時，必須同時部署配套的 Local archive 與 Server WAR。Startup 會驗證 Worker JAR 版本、build commit 及內嵌 Schema Registry；每個 Worker 處理請求前也會確認 Registry identity 與 Server 驗證過的 runtime 相符。每個 `ATT_HOME/lib` 只保留一個有版本號的 `att-local-<version>.jar`。不要混合升級 Server 與 Worker：Local runtime 的產品版本或 build commit 不相符時，Server 會拒絕啟動；舊 Worker 亦會拒絕不可變 source snapshot dispatch。可執行的 package 內容位於 `packages/<id>/`；Server state 位於另外設定的 `server.dataDir`。Archive 只包含 `config/att-server.example.yaml` 範本，不會包含 active 的 `config/att-server.yaml` 或 `data/` 目錄。
+
+Source-pinned Job 需要 OS 強制的 Worker 邊界：Linux deployment 必須安裝可使用 user/PID namespace 的 `bwrap`（bubblewrap）；macOS 使用 `/usr/bin/sandbox-exec`。Server 在啟動後第一次接納 source-pinned Job 前，會針對已接受的 Package 及 Config snapshot 執行有界 sandbox probe。若無法建立隔離，request 會回傳 `409 ATT-SOURCE-ISOLATION-UNAVAILABLE`，不會排入可能讀取可變 source 的工作。其他作業系統不支援 source-pinned Worker execution。
+
+從 Worker source-snapshot v1 升級後，缺少 executable metadata 的歷史 Job lease 會標記為 **UNAVAILABLE**，不可 dispatch。Job record 及不含值的 provenance 仍可讀取。若要再次執行，請先針對目前 Package review 及驗證，再確認 rerun；Server 會建立有 v2 source snapshot 的新 Job，不會從目前 Package 推測舊 bytes，也不會改寫歷史 Job。
 
 Server 依次尋找 JVM property `-Datt.server.config`、環境變數 `ATT_SERVER_CONFIG`，再尋找 `$ATT_HOME/config/att-server.yaml`。最後一個路徑的 `ATT_HOME` 先取自 `-Datt.home`，再取自 `ATT_HOME` 環境變數。若選定的 config 不存在、不可讀或無效，Server 會在診斷中指出其路徑並停止啟動，不會改用其他來源。沒有明確來源或可用的預設 config 時，啟動錯誤會提供設定指引。
 
