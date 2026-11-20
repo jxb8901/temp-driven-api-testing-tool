@@ -46,6 +46,14 @@ class WorkerRuntimeClasspathTest {
         assertTrue(mismatch.getMessage().contains("requires matching"));
     }
 
+    @Test void rejectsDifferentBuildCommitEvenWhenProductVersionMatches() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse("unknown".equals(ServerBuildInfo.GIT_COMMIT));
+        Path mismatchedHome=runtimeHome("mismatched-commit-home",ServerBuildInfo.PRODUCT,"different-commit");
+        IllegalStateException mismatch=assertThrows(IllegalStateException.class,
+                ()->WorkerRuntimeClasspath.resolve(mismatchedHome.toString(),null));
+        assertTrue(mismatch.getMessage().contains("build identities do not match"));
+    }
+
     @Test void buildsWorkerClasspathFromInstallAndThenConfiguredDirectories() throws Exception {
         Path localLib=Files.createDirectories(temp.resolve("att-home/lib"));
         Path jdbc=Files.createDirectories(temp.resolve("jdbc"));
@@ -59,11 +67,15 @@ class WorkerRuntimeClasspathTest {
     }
 
     private Path runtimeHome(String name,String version) throws Exception {
+        return runtimeHome(name,version,ServerBuildInfo.GIT_COMMIT);
+    }
+
+    private Path runtimeHome(String name,String version,String commit) throws Exception {
         Path home=Files.createDirectories(temp.resolve(name));
         Path lib=Files.createDirectories(home.resolve("lib"));
         Path bundle=lib.resolve(bundleName());
         try(JarOutputStream jar=new JarOutputStream(Files.newOutputStream(bundle))) {
-            add(jar,"att-build.properties",("att.version="+version+"\natt.gitCommit="+ServerBuildInfo.GIT_COMMIT+"\n").getBytes(StandardCharsets.UTF_8));
+            add(jar,"att-build.properties",("att.version="+version+"\natt.gitCommit="+commit+"\n").getBytes(StandardCharsets.UTF_8));
             add(jar,"att/security/SecretProtection.class",new byte[]{0});
             add(jar,"att/worker/WorkerMain.class",new byte[]{0});
             add(jar,"att/server/api/WorkerRequest.class",new byte[]{0});

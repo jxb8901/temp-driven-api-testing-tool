@@ -226,6 +226,8 @@ final class ServerRuntime implements AutoCloseable {
     private final SecureRandom cursorRandom=new SecureRandom();
     private final Path workerLibs;
     private final String workerSchemaRegistryDigest;
+    private final Object sourceSnapshotIsolationLock=new Object();
+    private volatile boolean sourceSnapshotIsolationVerified;
     ExecutionWorkerPool executionWorkers;
     ServerRuntime(ServerConfig config,String workerLibs) throws Exception {
         this(config,workerLibs,ProcessBuilder::start);
@@ -1310,6 +1312,7 @@ final class ServerRuntime implements AutoCloseable {
         try {
             id="J"+UUID.randomUUID().toString().replace("-","").substring(0,16).toUpperCase();request.jobId=id;
             if(sourceProvenance!=null) {
+                JobSourceClosureStore.SourceSnapshot workerSnapshot;
                 try {
                     if(scheduledSnapshot!=null) {
                         sourceLease=jobSourceClosures.retainOwner(scheduledSourceOwner,JobSourceClosureStore.JOB_OWNER_PREFIX+id);
@@ -1322,7 +1325,7 @@ final class ServerRuntime implements AutoCloseable {
                         jobSourceClosures.bindWorkerConfiguration(sourceLease.leaseId(),selectedConfiguration.sourceWorkerConfigPath,
                                 sourceProvenance.dependencies,sourceProvenance.compiledFilePlans);
                     }
-                    JobSourceClosureStore.SourceSnapshot workerSnapshot=jobSourceClosures.snapshotForOwner(JobSourceClosureStore.JOB_OWNER_PREFIX+id);
+                    workerSnapshot=jobSourceClosures.snapshotForOwner(JobSourceClosureStore.JOB_OWNER_PREFIX+id);
                     request.sourceSnapshotArchivePath=workerSnapshot.archivePath.toString();
                     request.sourceSnapshotArchiveSha256=workerSnapshot.archiveSha256;
                     request.sourceSnapshotDirectory=workerSnapshot.directory.toString();
@@ -1330,6 +1333,11 @@ final class ServerRuntime implements AutoCloseable {
                     request.protocolVersion=WorkerRequest.SOURCE_SNAPSHOT_PROTOCOL;
                 } catch(Exception staleSource) {
                     throw new JobConflictException("ATT-SOURCE-REVISION-STALE","The approved Package or Config source revision is unavailable. Validate the execution again.");
+                }
+                try { verifySourceSnapshotIsolation(workerSnapshot); }
+                catch(java.io.IOException unavailable) {
+                    throw new JobConflictException("ATT-SOURCE-ISOLATION-UNAVAILABLE",
+                            "The OS-enforced Worker source boundary is unavailable; no Job was accepted.");
                 }
                 if(executionSpec!=null)executionSpec=JobExecutionSpec.parse(executionSpec).withSourceProvenance(sourceProvenance.view()).json();
             }
@@ -1585,6 +1593,19 @@ final class ServerRuntime implements AutoCloseable {
     }
     private List<String> workerClasspath() {
         return WorkerRuntimeClasspath.entries(workerLibs,config.workerLibraryDirs);
+    }
+    private void verifySourceSnapshotIsolation(JobSourceClosureStore.SourceSnapshot snapshot) throws java.io.IOException {
+        if(sourceSnapshotIsolationVerified)return;
+        synchronized(sourceSnapshotIsolationLock) {
+            if(sourceSnapshotIsolationVerified)return;
+            Path output=config.dataDir.resolve(".source-isolation-probe").resolve(UUID.randomUUID().toString());
+            try {
+                Files.createDirectories(output);
+                att.exec.SourceSnapshotIsolation.verifyAvailable(config.javaExecutable,snapshot.directory,
+                        snapshot.archivePath,output);
+                sourceSnapshotIsolationVerified=true;
+            } finally { deleteTree(output); }
+        }
     }
     private ProcessBuilder workerBuilder(boolean prewarm,String packageId) {
         return workerBuilder(prewarm,packageId,executionPackageRoot(packageId));

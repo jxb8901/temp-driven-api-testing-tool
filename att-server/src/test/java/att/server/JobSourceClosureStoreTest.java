@@ -7,12 +7,17 @@ import att.server.api.source.SourceManagementContracts.RevisionSet;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -226,6 +231,8 @@ class JobSourceClosureStoreTest {
         store.bindWorkerConfiguration(lease.leaseId(),configRoot.resolve("config.yaml"));
         JobSourceClosureStore.SourceSnapshot snapshot=store.snapshotForOwner(owner);
         Path backup=temp.resolve("snapshot.zip.bak");Files.copy(snapshot.archivePath,backup);
+        Path leaseRecord=data.resolve("job-source-closures/leases").resolve(snapshot.leaseId+".json");
+        byte[] originalLeaseRecord=Files.readAllBytes(leaseRecord);
 
         Files.delete(snapshot.archivePath);
         JobSourceClosureStore missing=new JobSourceClosureStore(data);
@@ -248,6 +255,24 @@ class JobSourceClosureStoreTest {
         JobSourceClosureStore restored=new JobSourceClosureStore(data);
         assertTrue(restored.hasOwner(owner));
         assertEquals("Retained Package",Files.readString(restored.snapshotForOwner(owner).packageRoot.resolve("templates/use.yaml")));
+
+        Path materializedRoot=data.resolve("job-source-closures/materialized").resolve(snapshot.leaseId);
+        deleteTree(materializedRoot);
+        rewriteArchiveEntry(snapshot.archivePath,"package/templates/use.yaml","damaged after checksum validation");
+        updateLeaseArchiveDigest(leaseRecord,snapshot.archivePath);
+        JobSourceClosureStore failedRestore=new JobSourceClosureStore(data);
+        assertTrue(failedRestore.hasOwner(owner),"The archive envelope and manifest are valid, so restoration reaches tree verification");
+        assertThrows(SourceManagementContracts.StaleSourceException.class,()->failedRestore.snapshotForOwner(owner));
+        assertFalse(Files.exists(materializedRoot),"A failed restore must not expose a partially extracted source tree");
+        try(var remaining=Files.list(materializedRoot.getParent())) {
+            assertTrue(remaining.findAny().isEmpty(),"A failed restore must remove its temporary extraction directory");
+        }
+
+        Files.copy(backup,snapshot.archivePath,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Files.write(leaseRecord,originalLeaseRecord);
+        JobSourceClosureStore recovered=new JobSourceClosureStore(data);
+        assertTrue(recovered.hasOwner(owner));
+        assertEquals("Retained Package",Files.readString(recovered.snapshotForOwner(owner).packageRoot.resolve("templates/use.yaml")));
     }
 
     @Test void publicationRefreshesOnlyItsPackageAndConfigActivationWaitsForTheCoordinator() {
@@ -289,6 +314,36 @@ class JobSourceClosureStoreTest {
 
     private static void write(Path root,String relative,String value) throws Exception {
         Path file=root.resolve(relative);Files.createDirectories(file.getParent());Files.writeString(file,value,StandardCharsets.UTF_8);
+    }
+
+    private static void rewriteArchiveEntry(Path archivePath,String targetPath,String replacement) throws Exception {
+        Path rewritten=archivePath.resolveSibling("tampered-snapshot.tmp.zip");
+        try(ZipFile source=new ZipFile(archivePath.toFile());OutputStream output=Files.newOutputStream(rewritten);
+            ZipOutputStream target=new ZipOutputStream(output)) {
+            var entries=source.entries();
+            while(entries.hasMoreElements()) {
+                ZipEntry entry=entries.nextElement();byte[] bytes;
+                if(targetPath.equals(entry.getName()))bytes=replacement.getBytes(StandardCharsets.UTF_8);
+                else try(InputStream input=source.getInputStream(entry)){bytes=input.readAllBytes();}
+                ZipEntry copied=new ZipEntry(entry.getName());if(entry.getTime()>=0)copied.setTime(entry.getTime());
+                target.putNextEntry(copied);target.write(bytes);target.closeEntry();
+            }
+        }
+        Files.move(rewritten,archivePath,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static void updateLeaseArchiveDigest(Path leaseRecord,Path archivePath) throws Exception {
+        com.fasterxml.jackson.databind.node.ObjectNode record=(com.fasterxml.jackson.databind.node.ObjectNode)ServerRuntime.JSON.readTree(leaseRecord.toFile());
+        record.put("snapshotArchiveSha256",java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(archivePath))));
+        Files.write(leaseRecord,ServerRuntime.JSON.writeValueAsBytes(record));
+    }
+
+    private static void deleteTree(Path root) throws Exception {
+        if(!Files.exists(root,java.nio.file.LinkOption.NOFOLLOW_LINKS))return;
+        try(var paths=Files.walk(root)) {
+            for(Path path:paths.sorted(java.util.Comparator.reverseOrder()).toList())Files.deleteIfExists(path);
+        }
     }
 
     private static RevisionSet revisions(Path packageRoot,Path configRoot) {

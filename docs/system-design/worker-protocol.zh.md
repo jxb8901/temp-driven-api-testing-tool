@@ -8,7 +8,7 @@ Request 是 JSON object。一般 request 使用 `protocolVersion: att-worker/v1`
 
 常用選填欄位包括 `config`、`environment`、`outputDirectory` 和 `runId`。相對 config、suite、scenario 及 output 路徑均以指定的 package root 為基準。`target` 為 Debug 或不含 scenario 的 Load 提供 `type` 和 `id`。`suites`、`suiteDirectory`、`caseIds`、`tags`、`excludeTags` 及 `all` 用於選取 Run、Validate 或 Snapshot 的輸入。`load` 可包含 `users`、`arrivalRate`、`duration` 和 `maxConcurrent` 等 policy override；`overrides` 使用 ATT 接受的安全 value syntax 傳遞 typed input、argument 及 variable 指派。
 
-Server 接受的 Job 亦會以完整一組內部欄位傳入 `sourceSnapshotArchivePath`、`sourceSnapshotArchiveSha256`、`sourceSnapshotDirectory` 和 `sourceSnapshotConfigPath`。Worker 會先檢查 archive digest、manifest 版本和 Package identity、execution revision、Config path、materialized tree digest、已聲明的 dependencies 及 compiled File-expression plans，然後才 dispatch。Server 會在 OS 強制的唯讀來源邊界內冷啟動這些 Worker；欄位不完整、檢查失敗或無法建立邊界都會拒絕執行。呼叫端不得自行建立這些內部欄位。Server 啟動時要求 Local Worker bundle 的產品版本相符；Server build identity 已知時，Git commit 亦須相符。Server 與 Worker 使用不同 build version 不受支援，並會 fail closed。
+Server 接受的 Job 亦會以完整一組內部欄位傳入 `sourceSnapshotArchivePath`、`sourceSnapshotArchiveSha256`、`sourceSnapshotDirectory` 和 `sourceSnapshotConfigPath`。Worker 會先檢查 archive digest、manifest 版本和 Package identity、execution revision、Config path、materialized tree digest、已聲明的 dependencies 及 compiled File-expression plans，然後才 dispatch。Server 會在 OS 強制的唯讀來源邊界內冷啟動這些 Worker；欄位不完整或檢查失敗會拒絕執行。Server 在啟動後第一次接納 source-pinned Job 前，會針對已接受的 source snapshot 執行有界 probe。若無法使用 sandbox，Job 會在建立 record 或排入佇列前以 `409 ATT-SOURCE-ISOLATION-UNAVAILABLE` 拒絕。呼叫端不得自行建立這些內部欄位。Server 啟動時要求 Local Worker bundle 的產品版本相符；Server build identity 已知時，Git commit 亦須相符。Server 與 Worker 使用不同 build version 不受支援，並會 fail closed。
 
 ## Events
 

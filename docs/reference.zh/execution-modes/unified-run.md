@@ -116,6 +116,8 @@ Schedule 維持獨立流程：**Edit existing schedule**、**Create new schedule
 
 未保留執行定義的歷史 Job 會顯示 **Rerun unavailable for this historical job**。僅驗證的 Job、安全保留失敗或包含已分類敏感輸入的 Job，不能進行精確 replay。含有原始 overrides 或未解析 `rerunFailed` 歷史選擇的舊式直接提交，須先建立新的驗證 draft 才能安全保留。請設定新執行，並透過正常的受保護輸入流程補充憑證。不可從 log、artifact 或已遮罩預覽重建執行。安全定義上限為 256 KiB，不包含 Worker transport 欄位及主機根目錄。
 
+從 Worker source-snapshot v1 升級後，Server 會將舊 lease 標記為 **UNAVAILABLE**，因為舊 archive 缺少安全 dispatch 所需的 executable metadata。歷史 Job 及不含值的 provenance 仍可讀取；Server 不會改寫或 dispatch 舊 snapshot。若要再次執行，請先針對目前 Package 重新 review 及驗證，再明確確認 rerun。新 Job 會建立 v2 source snapshot，並保留自己的 provenance。
+
 Job lifecycle API 在 `/api/v1` 下提供以下 endpoint：
 
 | Method 與 path | 結果 |

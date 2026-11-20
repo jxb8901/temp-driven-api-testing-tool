@@ -23,6 +23,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ServerRuntimeJobReplayTest {
@@ -261,6 +266,14 @@ class ServerRuntimeJobReplayTest {
         }
         fail("Job did not finish: "+id);
     }
+    private static void awaitTerminal(ServerRuntime runtime,String id) throws Exception {
+        Instant deadline=Instant.now().plusSeconds(30);
+        while(Instant.now().isBefore(deadline)) {
+            if(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(String.valueOf(runtime.jobRecord(id).get("status"))))return;
+            Thread.sleep(25);
+        }
+        fail("Job did not reach a terminal state: "+id);
+    }
     private static void awaitRunning(ServerRuntime runtime,String id) throws Exception {
         Instant deadline=Instant.now().plusSeconds(30);
         while(Instant.now().isBefore(deadline)) {
@@ -371,6 +384,210 @@ class ServerRuntimeJobReplayTest {
             Map<?,?> provenance=(Map<?,?>)unavailable.get("sourceProvenance");
             assertEquals("UNAVAILABLE",provenance.get("snapshotState"));
             assertNotNull(provenance.get("requiredAction"));
+        }
+    }
+
+    @Test void acceptedLoadSurvivesPackageRepointRemovalAndSelectedScenarioTestdataDeletion() throws Exception {
+        assumeSourceSnapshotIsolationAvailable();
+        Fixture fixture=fixture();
+        Path acceptedScenario=fixture.root.resolve("load/snapshot.yaml");
+        Path selectedOverlay=fixture.root.resolve("testdata/scenario-overlay.yaml");
+        Files.writeString(selectedOverlay,"schemaVersion: att-testdata/v1.0\nid: scenarioAccounts\nrecords: [{currency: PRIVATE-ACCEPTED-VALUE}]\n");
+        Files.writeString(acceptedScenario,"schemaVersion: att-load/v1.6\n"
+                +"testdata: [testdata/scenario-overlay.yaml]\nworkloads:\n"
+                +"  - id: accepted-overlay\n    target: {type: template, id: SIMPLE}\n"
+                +"    inputs: {currency: '@{scenarioAccounts.currency}'}\n    load: {users: 1, duration: 1s}\n");
+        Files.writeString(fixture.root.resolve("load/hold.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n"
+                +"  - id: hold-registry-change\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 8s}\n");
+        Path replacement=Files.createDirectories(temp.resolve("replacement-package"));
+        Files.createDirectories(replacement.resolve("templates/B_ONLY"));Files.createDirectories(replacement.resolve("load"));
+        Files.writeString(replacement.resolve("package.yaml"),"schemaVersion: att-package/v1\n");
+        Files.writeString(replacement.resolve("templates/B_ONLY/template.yaml"),"schemaVersion: att-template/v3.6\nname: B_ONLY\n"
+                +"description: Repointed Package fixture\nactions:\n  show: {type: log, message: package-B}\n");
+        Files.writeString(replacement.resolve("load/smoke.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n"
+                +"  - id: package-b\n    target: {type: template, id: B_ONLY}\n    load: {users: 1, duration: 1s}\n");
+
+        String runningId,acceptedAId,acceptedBId;
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            runningId=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of(
+                    "packageId","p","environment","SIT","scenario","load/hold.yaml")),"alice").get("jobId"));
+            awaitRunning(runtime,runningId);
+
+            acceptedAId=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of(
+                    "packageId","p","environment","SIT","scenario","load/snapshot.yaml")),"alice").get("jobId"));
+            assertEquals("QUEUED",runtime.jobRecord(acceptedAId).get("status"));
+            Map<?,?> acceptedA=(Map<?,?>)runtime.jobRecord(acceptedAId).get("sourceProvenance");
+            List<?> dependencies=(List<?>)acceptedA.get("dependencyClosure");
+            assertTrue(dependencies.stream().filter(Map.class::isInstance).map(value->(Map<?,?>)value)
+                    .anyMatch(value->"LOAD_OVERLAY".equals(value.get("kind"))
+                            &&"load/snapshot.yaml".equals(value.get("canonicalPath"))));
+            assertTrue(dependencies.stream().filter(Map.class::isInstance).map(value->(Map<?,?>)value)
+                    .anyMatch(value->"TESTDATA".equals(value.get("kind"))
+                            &&"scenarioAccounts".equals(value.get("logicalId"))
+                            &&"testdata/scenario-overlay.yaml".equals(value.get("canonicalPath"))));
+            assertFalse(acceptedA.toString().contains("PRIVATE-ACCEPTED-VALUE"),"Testdata evidence records identity without row values");
+
+            updatePackageRegistry(fixture,runtime,List.of(fixture.root,fixture.ownerRoot,replacement),
+                    Map.of("p",replacement,"owner",fixture.ownerRoot));
+            acceptedBId=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of(
+                    "packageId","p","environment","SIT","scenario","load/smoke.yaml")),"alice").get("jobId"));
+            assertEquals("QUEUED",runtime.jobRecord(acceptedBId).get("status"));
+
+            Files.delete(acceptedScenario);Files.delete(selectedOverlay);
+            updatePackageRegistry(fixture,runtime,List.of(fixture.ownerRoot,replacement),Map.of("owner",fixture.ownerRoot));
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.createRunDraft(ServerRuntime.JSON.valueToTree(Map.of(
+                    "schemaVersion",RunDefinition.VERSION,"executionType","run","packageId","p","target",Map.of("type","template","id","SIMPLE"),
+                    "input",Map.of())),"alice"),"Removed registrations reject new admissions");
+
+            await(runtime,runningId);await(runtime,acceptedAId);await(runtime,acceptedBId);
+            assertEquals("PASS",runtime.jobRecord(runningId).get("status"));
+            assertEquals("PASS",runtime.jobRecord(acceptedAId).get("status"),runtime.resultRecord(acceptedAId).toString());
+            assertEquals("PASS",runtime.jobRecord(acceptedBId).get("status"),runtime.resultRecord(acceptedBId).toString());
+            assertEquals(true,runtime.jobRecord(acceptedAId).get("sourceSnapshotAvailable"));
+            assertEquals(true,runtime.jobRecord(acceptedBId).get("sourceSnapshotAvailable"));
+            assertNotEquals(sourceRevision(runtime,acceptedAId,"packageSourceRevision"),
+                    sourceRevision(runtime,acceptedBId,"packageSourceRevision"),"A repointed Package gets a distinct pinned source identity");
+        }
+    }
+
+    @Test void unavailableLegacyV1SnapshotRequiresExplicitCurrentReplayAndCreatesV2Lease() throws Exception {
+        assumeSourceSnapshotIsolationAvailable();
+        Fixture fixture=fixture();String original;
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of(
+                    "packageId","p","environment","SIT","scenario","load/smoke.yaml")),"alice").get("jobId"));
+            awaitTerminal(runtime,original);
+            JobSourceClosureStore.SourceSnapshot retained=new JobSourceClosureStore(ServerConfig.load(fixture.server).dataDir).snapshotForOwner(
+                    JobSourceClosureStore.JOB_OWNER_PREFIX+original);
+            rewriteSnapshotAsLegacyV1(retained.archivePath,ServerConfig.load(fixture.server).dataDir,retained.leaseId);
+        }
+        try(ServerRuntime runtime=fixture.open()) {
+            Map<String,Object> historical=runtime.jobRecord(original);
+            assertEquals(Boolean.FALSE,historical.get("sourceSnapshotAvailable"));
+            assertEquals("UNAVAILABLE",((Map<?,?>)historical.get("sourceProvenance")).get("snapshotState"));
+            assertTrue(String.valueOf(historical.get("requiredAction")).contains("replace"));
+
+            Map<String,Object> review=runtime.createJobReplayDraft(original,"alice",
+                    ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
+            assertEquals("current",review.get("sourcePolicy"));
+            String rerun=String.valueOf(runtime.rerunJob(original,replayConfirmation(review,true,"current"),"alice").get("jobId"));
+            Map<String,Object> replacement=runtime.jobRecord(rerun);
+            assertNotNull(replacement,"Explicit confirmation creates a separate Job");
+            assertEquals(Boolean.TRUE,replacement.get("sourceSnapshotAvailable"));
+            assertEquals("RETAINED",((Map<?,?>)replacement.get("sourceProvenance")).get("snapshotState"));
+            JobSourceClosureStore.SourceSnapshot upgraded=new JobSourceClosureStore(ServerConfig.load(fixture.server).dataDir).snapshotForOwner(
+                    JobSourceClosureStore.JOB_OWNER_PREFIX+rerun);
+            try(ZipFile archive=new ZipFile(upgraded.archivePath.toFile())) {
+                JsonNode manifest=ServerRuntime.JSON.readTree(archive.getInputStream(archive.getEntry("manifest.json")));
+                assertEquals("att-worker-source-snapshot/v2",manifest.path("schemaVersion").asText());
+            }
+            assertEquals(Boolean.FALSE,runtime.jobRecord(original).get("sourceSnapshotAvailable"),
+                    "Reapproval creates a new v2 Job and does not rewrite historical source evidence");
+        }
+    }
+
+    @Test void unavailableWorkerSourceSandboxRejectsAdmissionWithoutCreatingAJob() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeFalse(
+                System.getProperty("os.name", "").toLowerCase().contains("win"),
+                "Uses a POSIX probe executable");
+        Fixture fixture=fixture();
+        Path realJava=Path.of(System.getProperty("java.home"),"bin","java");
+        String rejectingProbe="#!/bin/sh\nfor argument in \"$@\"; do [ \"$argument\" = \"-version\" ] && exit 17; done\nexec "
+                +ServerRuntimeTestSupport.yaml(realJava)+" \"$@\"\n";
+        Path unavailableJava=Files.writeString(temp.resolve("java-source-sandbox-unavailable"),rejectingProbe);
+        Files.setPosixFilePermissions(unavailableJava,java.util.EnumSet.of(
+                java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+                java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE));
+        String serverYaml=Files.readString(fixture.server).replaceFirst("(?m)^  javaExecutable:.*$",
+                "  javaExecutable: "+ServerRuntimeTestSupport.yaml(unavailableJava));
+        Files.writeString(fixture.server,serverYaml);
+        ServerRuntime runtime=fixture.open();
+        try {
+            users(runtime);
+            ServerRuntime.JobConflictException rejection=assertThrows(ServerRuntime.JobConflictException.class,
+                    ()->runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of(
+                            "packageId","p","environment","SIT","scenario","load/smoke.yaml")),"alice"));
+            assertEquals("ATT-SOURCE-ISOLATION-UNAVAILABLE",rejection.code);
+            assertTrue(runtime.jobs.isEmpty(),"An unavailable Worker boundary must not accept or retain a Job");
+            assertEquals(0,runtime.store.list(100).size(),"Rejected admission must not persist a Job record");
+            try(var entries=Files.list(runtime.config.dataDir.resolve("jobs"))) {
+                assertEquals(0,entries.count(),"Rejected admission must not create a durable Job directory");
+            }
+        } finally {
+            try { runtime.close(); }
+            catch(RuntimeException restrictedProcessInspection) {
+                if(!String.valueOf(restrictedProcessInspection.getMessage()).contains("sysctl failed"))
+                    throw restrictedProcessInspection;
+            }
+        }
+    }
+
+    private static void updatePackageRegistry(Fixture fixture,ServerRuntime runtime,List<Path> allowedRoots,
+                                             Map<String,Path> entries) throws Exception {
+        String current=Files.readString(fixture.server);int packages=current.indexOf("packages:\n");
+        assertTrue(packages>=0,"Fixture has a Package Registry section");
+        StringBuilder candidate=new StringBuilder(current.substring(0,packages)).append("packages:\n  allowedRoots:\n");
+        for(Path root:allowedRoots)candidate.append("    - ").append(ServerRuntimeTestSupport.yaml(root)).append('\n');
+        candidate.append("  entries:\n");
+        for(Map.Entry<String,Path> entry:entries.entrySet())candidate.append("    ").append(entry.getKey()).append(": ")
+                .append(ServerRuntimeTestSupport.yaml(entry.getValue())).append('\n');
+        Files.writeString(fixture.server,candidate.toString());
+        Instant deadline=Instant.now().plusSeconds(15);
+        while(Instant.now().isBefore(deadline)) {
+            runtime.packageRegistry.pollNow();
+            PackageRegistry.Snapshot snapshot=runtime.packageRegistry.snapshot();boolean matches=snapshot.packages.size()==entries.size();
+            for(Map.Entry<String,Path> entry:entries.entrySet())matches&=entry.getValue().toAbsolutePath().normalize()
+                    .equals(snapshot.packages.get(entry.getKey()));
+            if(matches)return;
+            Thread.sleep(50);
+        }
+        fail("Package Registry did not apply the requested change");
+    }
+
+    private static void rewriteSnapshotAsLegacyV1(Path archivePath,Path dataDirectory,String leaseId) throws Exception {
+        Path rewritten=archivePath.resolveSibling("legacy-v1.tmp.zip");
+        try(ZipFile source=new ZipFile(archivePath.toFile());OutputStream output=Files.newOutputStream(rewritten);
+            ZipOutputStream target=new ZipOutputStream(output)) {
+            var entries=source.entries();
+            while(entries.hasMoreElements()) {
+                ZipEntry entry=entries.nextElement();if("file-plans.bin".equals(entry.getName()))continue;
+                byte[] bytes;
+                try(InputStream input=source.getInputStream(entry)){bytes=input.readAllBytes();}
+                if("manifest.json".equals(entry.getName())) {
+                    com.fasterxml.jackson.databind.node.ObjectNode manifest=(com.fasterxml.jackson.databind.node.ObjectNode)ServerRuntime.JSON.readTree(bytes);
+                    manifest.put("schemaVersion","att-worker-source-snapshot/v1");
+                    for(String field:List.of("executionRevisionDigest","packageExecutableFiles","configExecutableFiles",
+                            "packageExecutableDigest","configExecutableDigest","compiledFilePlansSha256"))manifest.remove(field);
+                    bytes=ServerRuntime.JSON.writeValueAsBytes(manifest);
+                }
+                ZipEntry copied=new ZipEntry(entry.getName());if(entry.getTime()>=0)copied.setTime(entry.getTime());
+                target.putNextEntry(copied);target.write(bytes);target.closeEntry();
+            }
+        }
+        Files.move(rewritten,archivePath,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        Path leasePath=dataDirectory.resolve("job-source-closures/leases").resolve(leaseId+".json");
+        com.fasterxml.jackson.databind.node.ObjectNode lease=(com.fasterxml.jackson.databind.node.ObjectNode)ServerRuntime.JSON.readTree(leasePath.toFile());
+        lease.remove("packageExecutableDigest");lease.remove("configExecutableDigest");lease.remove("compiledFilePlansSha256");
+        lease.put("snapshotArchiveSha256",java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(archivePath))));
+        Files.write(leasePath,ServerRuntime.JSON.writeValueAsBytes(lease));
+    }
+
+    private void assumeSourceSnapshotIsolationAvailable() throws Exception {
+        Path probe=Files.createDirectories(temp.resolve("source-isolation-probe"));
+        Path snapshot=Files.createDirectories(probe.resolve("snapshot/package"));
+        Path archive=Files.write(probe.resolve("snapshot.zip"),new byte[0]);
+        Path output=Files.createDirectories(probe.resolve("output"));
+        Path javaExecutable=Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        try {
+            att.exec.SourceSnapshotIsolation.verifyAvailable(javaExecutable,snapshot.getParent(),archive,output);
+        } catch(java.io.IOException unavailable) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(false,
+                    "The host cannot launch a Worker through the OS source sandbox: "+unavailable.getMessage());
         }
     }
 

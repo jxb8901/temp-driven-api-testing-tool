@@ -34,6 +34,8 @@ Content-Type: application/json
 
 The Server rechecks the package revision at submission and before Worker start. A change detected during submission returns `409 ATT-SERVER-DRAFT-STALE`; a change detected after job acceptance marks the job `INVALID` with that diagnostic. Validation failures return a top-level `diagnostics` array with safe `code`, `summary`, `field`, and logical `resourceId` values; source paths and parser snippets are omitted. Worker execution receives the same immutable typed values validated for the preview; inline values remain in memory and do not create files under the package root. Existing path-based Debug requests remain supported for compatible clients.
 
+Source-pinned Jobs require an OS-enforced read-only Worker boundary. Before accepting the first such Job after Server startup, the Server probes the boundary against the accepted Package and Config snapshot. If the sandbox is unavailable, admission returns `409 ATT-SOURCE-ISOLATION-UNAVAILABLE` before creating a Job record or queue entry. See the [Server deployment requirements](../../operations/server-deployment.md) for supported hosts.
+
 ## Target-scoped Quick Load
 
 Quick Load is available from a selected Template, Flow, or Tool when `server.inlineLoad.enabled` is true. It uses one fixed target and creates one Workload. The model is `virtualUsers` or `arrivalRate`; the Server composes the matching current `att-load/v1.9` policy and validates the target through the existing Load pipeline. When disabled, both Quick Load form/policy reads and draft creation return `403 ATT-SERVER-INLINE-LOAD-DISABLED`.

@@ -126,6 +126,61 @@ class ChangeSetPublisherTest {
         } finally {publisher.close();}
     }
 
+    @Test void packageRestorePublishesManifestFlowLoadTestdataAndFileAsANewCurrentRevision() throws Exception {
+        ChangeSetPublisher publisher=publisher(acceptingValidator(),allowingGate());
+        Map<String,String> original=Map.of(
+                "package.yaml","schemaVersion: att-package/v1\nmetadata: {name: checkout}\n",
+                "flows/checkout.yaml","schemaVersion: att-flow/v1\nid: checkout\n",
+                "load/checkout.yaml","schemaVersion: att-load/v1.6\nworkloads: []\n",
+                "testdata/checkout.yaml","schemaVersion: att-testdata/v1.0\nid: checkout\n",
+                "files/request.xml","<request>revision-a</request>\n");
+        Map<String,String> replacement=Map.of(
+                "package.yaml","schemaVersion: att-package/v1\nmetadata: {name: changed}\n",
+                "flows/checkout.yaml","schemaVersion: att-flow/v1\nid: changed\n",
+                "load/checkout.yaml","schemaVersion: att-load/v1.6\nworkloads: [{id: changed}]\n",
+                "testdata/checkout.yaml","schemaVersion: att-testdata/v1.0\nid: changed\n",
+                "files/request.xml","<request>revision-b</request>\n");
+        try {
+            List<ChangeSetPublisher.OperationInput> initialOperations=original.entrySet().stream()
+                    .map(entry->ChangeSetPublisher.OperationInput.create(entry.getKey(),bytes(entry.getValue())))
+                    .toList();
+            Map<String,Object> first=stagePackage(publisher,initialOperations);
+            String firstDraft=String.valueOf(first.get("changeSetId"));validateReview(publisher,firstDraft);
+            Map<String,Object> firstPublish=publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,firstDraft);
+            String firstRevision=String.valueOf(firstPublish.get("revision"));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> initialHistory=(List<Map<String,Object>>)publisher.sourceHistory(
+                    ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,0,20).get("items");
+            String firstSnapshot=String.valueOf(initialHistory.get(0).get("afterSnapshotId"));
+
+            List<ChangeSetPublisher.OperationInput> replacementOperations=replacement.entrySet().stream()
+                    .map(entry->ChangeSetPublisher.OperationInput.replace(entry.getKey(),bytes(entry.getValue())))
+                    .toList();
+            Map<String,Object> second=stagePackage(publisher,replacementOperations);
+            String secondDraft=String.valueOf(second.get("changeSetId"));validateReview(publisher,secondDraft);
+            Map<String,Object> secondPublish=publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,secondDraft);
+            assertNotEquals(firstRevision,secondPublish.get("revision"));
+
+            Map<String,String> current=publisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false);
+            Map<String,Object> restore=publisher.stageRestore(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,
+                    firstSnapshot,current.get("baseSourceRevision"),current.get("registryRevision"),"multi-file-restore");
+            String restoreId=String.valueOf(restore.get("changeSetId"));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> changes=(List<Map<String,Object>>)restore.get("changedFiles");
+            assertEquals(original.size(),changes.size(),"Restore stages the complete affected closure in one current-base Change Set");
+            assertEquals(firstSnapshot,restore.get("restoredFromSnapshotId"));
+            validateReview(publisher,restoreId);
+            Map<String,Object> restored=publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,restoreId);
+            assertNotEquals(secondPublish.get("revision"),restored.get("revision"),"Restore creates a new source revision");
+            for(Map.Entry<String,String> entry:original.entrySet()) assertEquals(entry.getValue(),read(entry.getKey()));
+
+            @SuppressWarnings("unchecked") List<Map<String,Object>> finalHistory=(List<Map<String,Object>>)publisher.sourceHistory(
+                    ChangeSetPublisher.PACKAGE_SOURCE,"owner","owner",false,0,20).get("items");
+            assertEquals("SOURCE_RESTORE_PUBLISH",finalHistory.get(0).get("action"));
+            assertEquals(firstSnapshot,finalHistory.get(0).get("restoredFromSnapshotId"));
+            assertEquals(3,finalHistory.size(),"Restore appends history and preserves both original publication records");
+            assertEquals(firstSnapshot,finalHistory.get(2).get("afterSnapshotId"));
+        } finally {publisher.close();}
+    }
+
     @Test void centralHistoryRestoreIsAdminOnlyAndPublishesOnlyAsANewValidatedChangeSet() throws Exception {
         ChangeSetPublisher publisher=publisher(acceptingValidator(),allowingGate());
         try {
