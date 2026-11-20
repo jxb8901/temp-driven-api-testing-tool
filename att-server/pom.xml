@@ -3,7 +3,7 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <parent><groupId>att</groupId><artifactId>template-driven-api-testing-tool</artifactId><version>4.3.1</version><relativePath>../pom.xml</relativePath></parent>
+    <parent><groupId>att</groupId><artifactId>template-driven-api-testing-tool</artifactId><version>4.4.0</version><relativePath>../pom.xml</relativePath></parent>
     <artifactId>att-server</artifactId>
     <packaging>war</packaging>
     <name>ATT Server</name>
@@ -13,7 +13,10 @@
         <!-- Business metrics execute one bounded post-run call through the existing Engine DBHelper/Tool APIs. -->
         <!-- Business-call execution uses the Engine DBHelper/Tool path, not its Excel import/report suite. -->
         <dependency><groupId>att</groupId><artifactId>att-engine</artifactId><version>${project.version}</version>
-            <exclusions><exclusion><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId></exclusion></exclusions>
+            <exclusions>
+                <exclusion><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId></exclusion>
+                <exclusion><groupId>org.apache.commons</groupId><artifactId>commons-math3</artifactId></exclusion>
+            </exclusions>
         </dependency>
         <!-- Server test fixtures exercise the Engine Excel/Archive helpers; keep those libraries out of the runtime WAR. -->
         <dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId><scope>test</scope></dependency>
@@ -30,6 +33,7 @@
         <dependency><groupId>jakarta.servlet</groupId><artifactId>jakarta.servlet-api</artifactId><version>${jakarta.servlet.version}</version><scope>provided</scope></dependency>
         <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
         <dependency><groupId>org.apache.tomcat.embed</groupId><artifactId>tomcat-embed-core</artifactId><version>${tomcat.test.version}</version><scope>test</scope></dependency>
+        <dependency><groupId>org.apache.tomcat.embed</groupId><artifactId>tomcat-embed-jasper</artifactId><version>${tomcat.test.version}</version><scope>test</scope></dependency>
     </dependencies>
     <build>
         <resources><resource><directory>src/main/resources</directory><filtering>true</filtering></resource></resources>

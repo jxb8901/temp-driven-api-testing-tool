@@ -3,6 +3,9 @@ import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
 import type { ConfigurationEntry, ExplorerApi, JsonValue, ResourceReference, TestdataRecordsResponse } from './types';
 import { CodeEditor } from '../code/CodeEditor';
+import { parseDocument, stringify } from 'yaml';
+import { SourceAuthoringWorkspace, type SourceAuthoringInitialCandidate } from './SourceAuthoringWorkspace';
+import type { SourceOperation } from './sourceManagement';
 import './package-testdata.css';
 
 function errorText(error: unknown, action: string): string {
@@ -73,12 +76,23 @@ interface KeyedRecordResponse {
   value: TestdataRecordsResponse;
 }
 
-export function TestdataCatalog({ api, packageId, environment, defaultEnvironment, descriptorId, refreshKey, onDescriptorChange, onOpenResource, onRefresh }: {
+export function TestdataCatalog({ api, packageId, environment, defaultEnvironment, descriptorId, refreshKey, onDescriptorChange, onOpenResource, onRefresh, registerUnsavedChanges, canManagePackageSource = false }: {
   api: ExplorerApi; packageId: string; environment: string; defaultEnvironment?: string; descriptorId?: string; refreshKey: number;
-  onDescriptorChange(descriptorId?: string): void; onOpenResource(resource: { type: string; resourceId: string }): void; onRefresh(): void;
+  onDescriptorChange(descriptorId?: string): boolean | void; onOpenResource(resource: { type: string; resourceId: string }): void; onRefresh(): void;
+  registerUnsavedChanges?: (isDirty: boolean, description?: string, onConfirmDiscard?: () => boolean | Promise<boolean>) => () => void;
+  canManagePackageSource?: boolean;
 }) {
   const inspectionRefresh = useInspectionRefresh();
   const [entries, setEntries] = useState<ConfigurationEntry[]>([]);
+  const [retainedSelectedEntry, setRetainedSelectedEntry] = useState<ConfigurationEntry | null>(null);
+  const retainedSelectedEntryRef = useRef<ConfigurationEntry | null>(null);
+  const [missingDescriptorId, setMissingDescriptorId] = useState('');
+  const [, setAuthoringDirty] = useState(false);
+  const authoringDirtyRef = useRef(false);
+  const onAuthoringDirtyChange = useCallback((dirty: boolean) => {
+    authoringDirtyRef.current = dirty;
+    setAuthoringDirty(dirty);
+  }, []);
   const [selectedIdState, setSelectedIdState] = useState(descriptorId || '');
   const selectedId = descriptorId ?? selectedIdState;
   const recordIdentity = JSON.stringify([packageId, environment, selectedId]);
@@ -97,10 +111,25 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   const [catalogNextOffset, setCatalogNextOffset] = useState<number | null>(null);
   const [catalogTotal, setCatalogTotal] = useState<number | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [creatingDescriptor, setCreatingDescriptor] = useState(false);
+  const [creatorDirty, setCreatorDirty] = useState(false);
+  const [newDescriptorId, setNewDescriptorId] = useState('newTestdata');
+  const [descriptorFormat, setDescriptorFormat] = useState<'records' | 'generated'>('records');
+  const [descriptorRecords, setDescriptorRecords] = useState('[\n  { "id": "A-100" }\n]');
+  const [generatedRecord, setGeneratedRecord] = useState('{\n  "id": "A-%{seq}"\n}');
+  const [generatedFrom, setGeneratedFrom] = useState('1');
+  const [generatedTo, setGeneratedTo] = useState('10');
+  const [generatedNumberFormat, setGeneratedNumberFormat] = useState('%04d');
+  const [selectionStrategy, setSelectionStrategy] = useState<'sequential' | 'roundRobin' | 'random'>('sequential');
+  const [selectionExhaustion, setSelectionExhaustion] = useState<'error' | 'recycle' | 'stop'>('error');
+  const [descriptorError, setDescriptorError] = useState('');
+  const [preparingDescriptor, setPreparingDescriptor] = useState(false);
+  const [preparedCandidate, setPreparedCandidate] = useState<SourceAuthoringInitialCandidate | null>(null);
   const catalogQuery = routeLookupQuery || catalogSearch.trim();
   const catalogQueryKey = JSON.stringify([packageId, environment, catalogQuery, inspectionRefresh, refreshKey]);
   const catalogQueryKeyRef = useRef(catalogQueryKey);
   const catalogEntriesQueryRef = useRef(catalogQuery);
+  const catalogEntriesScopeRef = useRef<{ packageId: string; environment: string; query: string; inspectionRefresh: number; refreshKey: number } | null>(null);
   const catalogGenerationRef = useRef(0);
   const catalogFirstPageControllerRef = useRef<AbortController | null>(null);
   const catalogLoadMoreControllerRef = useRef<AbortController | null>(null);
@@ -110,7 +139,14 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   const recordsRequestKey = JSON.stringify([recordIdentity, offset, previewGenerated, revision, inspectionRefresh, refreshKey]);
   const response = recordResponseState?.key === recordsRequestKey ? recordResponseState.value : null;
   const loading = recordLoadingKey === recordsRequestKey;
-  const selectedEntry = entries.find(item => item.id === selectedId);
+  const selectedEntry = entries.find(item => item.id === selectedId)
+    || (retainedSelectedEntry?.id === selectedId ? retainedSelectedEntry : undefined);
+  const selectedEntryRef = useRef<ConfigurationEntry | undefined>(selectedEntry);
+  selectedEntryRef.current = selectedEntry;
+  retainedSelectedEntryRef.current = retainedSelectedEntry;
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  const activeDescriptorMissing = Boolean(selectedId && missingDescriptorId === selectedId);
   const visibleEntries = useMemo(() => entries
     .filter(item => !catalogSearch.trim() || item.id.toLocaleLowerCase().includes(catalogSearch.trim().toLocaleLowerCase())
       || (item.source || displayField(item, 'source')).toLocaleLowerCase().includes(catalogSearch.trim().toLocaleLowerCase()))
@@ -152,21 +188,49 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
     setRouteLookupQuery(descriptorId && !alreadyInNextQueryResults ? descriptorId : '');
   }, [api, packageId, environment, inspectionRefresh, refreshKey, descriptorId, catalogSearch, entries]);
 
-  useLayoutEffect(() => { setSelectedIdState(descriptorId || ''); }, [packageId, environment, descriptorId]);
+  useLayoutEffect(() => {
+    setSelectedIdState(descriptorId || '');
+    setRetainedSelectedEntry(null);
+    setMissingDescriptorId('');
+  }, [packageId, environment, descriptorId]);
 
   useEffect(() => {
     const generation = catalogGenerationRef.current;
     const queryKey = catalogQueryKey;
+    const priorEntriesScope = catalogEntriesScopeRef.current;
+    const preserveCurrentEntries = Boolean(priorEntriesScope && priorEntriesScope.packageId === packageId
+      && priorEntriesScope.environment === environment
+      && (priorEntriesScope.query === catalogQuery || priorEntriesScope.inspectionRefresh !== inspectionRefresh
+        || priorEntriesScope.refreshKey !== refreshKey));
     const controller = new AbortController();
     catalogFirstPageControllerRef.current = controller;
-    setEntries([]); setRecordResponseState(null); setError(''); setStatus('Loading resolved Testdata catalog…');
-    setCatalogNextOffset(null); setCatalogTotal(null); setCatalogLoading(false);
+    if (!preserveCurrentEntries) {
+      if (selectedEntryRef.current) setRetainedSelectedEntry(selectedEntryRef.current);
+      setEntries([]); setCatalogTotal(null);
+    }
+    setRecordResponseState(null); setError(''); setStatus(preserveCurrentEntries ? 'Refreshing resolved Testdata catalog…' : 'Loading resolved Testdata catalog…');
+    setCatalogNextOffset(null); setCatalogLoading(false);
     api.getEffectiveConfiguration(packageId, { environment: environment || undefined, section: 'testdata', query: catalogQuery || undefined, offset: 0, limit: 50 }, controller.signal)
       .then(async result => {
         const data = result.sections?.find(section => section.id === 'testdata')?.entries || [];
         const isCurrent = () => !controller.signal.aborted && generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current;
         if (!isCurrent()) return;
+        catalogEntriesScopeRef.current = { packageId, environment, query: catalogQuery, inspectionRefresh, refreshKey };
         catalogEntriesQueryRef.current = catalogQuery;
+        const currentSelectedId = selectedIdRef.current;
+        const currentSelectedEntry = selectedEntryRef.current
+          || (retainedSelectedEntryRef.current?.id === currentSelectedId ? retainedSelectedEntryRef.current : undefined);
+        const activeEntryFound = Boolean(currentSelectedId && data.some(item => item.id === currentSelectedId));
+        const exactSelectedLookupComplete = Boolean(currentSelectedId && routeLookupQuery === currentSelectedId && result.nextOffset == null);
+        const fullCatalogLookupComplete = Boolean(!catalogQuery && result.nextOffset == null);
+        if (activeEntryFound) {
+          setRetainedSelectedEntry(null);
+          setMissingDescriptorId(current => current === currentSelectedId ? current : '');
+        } else if (currentSelectedId && currentSelectedEntry) {
+          setRetainedSelectedEntry(currentSelectedEntry);
+          if (fullCatalogLookupComplete || exactSelectedLookupComplete) setMissingDescriptorId(currentSelectedId);
+          else if (!catalogQuery && result.nextOffset != null) setRouteLookupQuery(currentSelectedId);
+        }
         setEntries(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? data : current);
         const firstPageNextOffset = result.nextOffset ?? null;
         const firstPageTotal = result.total ?? data.length;
@@ -175,25 +239,26 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
         setCatalogNextOffset(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? firstPageNextOffset : current);
         setSelectedIdState(current => {
           if (generation !== catalogGenerationRef.current || queryKey !== catalogQueryKeyRef.current) return current;
-          return current && data.some(item => item.id === current) ? current
-            : descriptorId && !data.some(item => item.id === descriptorId) ? descriptorId : data[0]?.id || '';
+          if (current && (data.some(item => item.id === current) || catalogQuery || authoringDirtyRef.current || descriptorId)) return current;
+          return data[0]?.id || '';
         });
         setCatalogTotal(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current ? firstPageTotal : current);
         setStatus(current => generation === catalogGenerationRef.current && queryKey === catalogQueryKeyRef.current
           ? data.length ? `${firstPageTotal} Testdata descriptors match this search for ${environment || result.environment || 'package default'}.` : 'No Testdata descriptors match this search.'
           : current);
 
-        // A route descriptor ID is exact, but the server query also matches sources.
-        // Keep paging only this deep-link lookup until its exact entry is found; manual
-        // catalog searches continue to use the existing Load more control.
-        if (!descriptorId || routeLookupQuery !== descriptorId || data.some(item => item.id === descriptorId) || nextOffset == null) return;
+        // A selected descriptor ID is an exact lookup, but the server query also matches sources.
+        // Page through this lookup until its exact entry is found; manual catalog searches
+        // continue to use the existing Load more control.
+        const selectedLookupId = routeLookupQuery;
+        if (!selectedLookupId || data.some(item => item.id === selectedLookupId) || nextOffset == null) return;
         setCatalogLoading(true);
         let loaded = data;
         try {
-          while (nextOffset != null && !loaded.some(item => item.id === descriptorId)) {
+          while (nextOffset != null && !loaded.some(item => item.id === selectedLookupId)) {
             const pageOffset = nextOffset;
             const page = await api.getEffectiveConfiguration(packageId, {
-              environment: environment || undefined, section: 'testdata', query: descriptorId, offset: pageOffset, limit: 50,
+              environment: environment || undefined, section: 'testdata', query: selectedLookupId, offset: pageOffset, limit: 50,
             }, controller.signal);
             if (!isCurrent()) return;
             const pageEntries = page.sections?.find(section => section.id === 'testdata')?.entries || [];
@@ -205,6 +270,14 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
             setEntries(current => isCurrent() ? nextLoaded : current);
             setCatalogNextOffset(current => isCurrent() ? pageNextOffset : current);
             setCatalogTotal(current => isCurrent() ? pageTotal : current);
+          }
+          const currentSelectedId = selectedIdRef.current;
+          const activeEntry = selectedEntryRef.current
+            || (retainedSelectedEntryRef.current?.id === currentSelectedId ? retainedSelectedEntryRef.current : undefined);
+          if (selectedLookupId && selectedLookupId === currentSelectedId && !loaded.some(item => item.id === selectedLookupId)
+              && nextOffset == null && activeEntry && isCurrent()) {
+            setRetainedSelectedEntry(activeEntry);
+            setMissingDescriptorId(selectedLookupId);
           }
         } catch (reason) {
           if (isCurrent()) setError(errorText(reason, 'continue searching for the linked Testdata descriptor'));
@@ -251,12 +324,13 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
   }
 
   useEffect(() => {
-    if (selectedId && visibleEntries.length && !visibleEntries.some(item => item.id === selectedId) && selectedId !== descriptorId) {
-      const next = visibleEntries[0].id; setSelectedIdState(next); setDescriptorChange(next);
-    } else if (!selectedId && visibleEntries.length) setSelectedIdState(visibleEntries[0].id);
-  }, [visibleEntries, selectedId]);
+    if (!selectedId && visibleEntries.length) {
+      const next = visibleEntries[0].id;
+      if (onDescriptorChange(next) !== false) setSelectedIdState(next);
+    }
+  }, [visibleEntries, selectedId, onDescriptorChange]);
 
-  function setDescriptorChange(value?: string) { onDescriptorChange(value); }
+  function requestDescriptorChange(value?: string): boolean { return onDescriptorChange(value) !== false; }
 
   function updateRecordControls(patch: Partial<Pick<RecordControls, 'offset' | 'previewGenerated' | 'copiedRecord'>>) {
     setRecordControls(current => {
@@ -295,28 +369,138 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
     }
   }
 
+  async function prepareTestdataCandidate() {
+    const id = newDescriptorId.trim();
+    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) { setDescriptorError('Use a Testdata ID that starts with a letter and contains only letters, numbers, _ or -.'); return; }
+    if (entries.some(item => item.id === id)) { setDescriptorError(`Testdata ID ${id} already appears in the selected Environment.`); return; }
+    if (!api.getManagedPackageAuthoringSource) { setDescriptorError('This Server does not provide revision-fenced Package source authoring.'); return; }
+    let records: unknown;
+    try {
+      records = JSON.parse(descriptorFormat === 'records' ? descriptorRecords : generatedRecord);
+      if (descriptorFormat === 'records' && (!Array.isArray(records) || records.length < 1))
+        throw new Error('Inline records must be a JSON array with at least one record.');
+      if (descriptorFormat === 'generated' && (!records || typeof records !== 'object' || Array.isArray(records)))
+        throw new Error('The generated record template must be a JSON object.');
+    } catch (failure) {
+      setDescriptorError(failure instanceof Error ? failure.message : 'Enter valid JSON for the Testdata records.'); return;
+    }
+    const descriptorPath = `testdata/${id}.yaml`;
+    const from = Number(generatedFrom), to = Number(generatedTo);
+    if (descriptorFormat === 'generated' && (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from > to
+        || to - from > 999_999 || !/^%d$|^%0[1-9][0-9]?d$/.test(generatedNumberFormat))) {
+      setDescriptorError('Generated sequence bounds must be integers, span at most 1,000,000 records, and use a supported numeric format.'); return;
+    }
+    const controller = new AbortController(); setPreparingDescriptor(true); setDescriptorError('');
+    try {
+      const source = await api.getManagedPackageAuthoringSource(packageId, { kind: 'manifest' }, controller.signal);
+      if (!source.available || !source.text || !source.baseSourceRevision || !source.sourceEtag)
+        throw new Error('The editable Package Manifest and its current source revision are unavailable.');
+      const manifest = parseDocument(source.text, { uniqueKeys: true });
+      if (manifest.errors.length) throw new Error('The Package Manifest has YAML errors. Fix the Manifest before creating Testdata.');
+      if (manifest.get('schemaVersion') !== 'att-package/v2')
+        throw new Error('Guided Testdata creation requires an editable att-package/v2 Manifest.');
+      const manifestValue = manifest.toJS() as { testdata?: { descriptors?: unknown } };
+      const inventoryValue = manifestValue.testdata?.descriptors;
+      const inventory = inventoryValue ?? [];
+      if (!Array.isArray(inventory) || inventory.some(path => typeof path !== 'string'))
+        throw new Error('Package Manifest testdata.descriptors must be a list of relative source paths.');
+      if (inventory.includes(descriptorPath)) throw new Error(`Package Manifest already lists ${descriptorPath}.`);
+      manifest.setIn(['testdata', 'descriptors'], [...inventory, descriptorPath]);
+      const descriptor: Record<string, unknown> = {
+        schemaVersion: 'att-testdata/v1.0', id,
+        records: descriptorFormat === 'records' ? records : {
+          generate: { seq: { from, to, ...(generatedNumberFormat ? { format: generatedNumberFormat } : {}) } },
+          record: records,
+        },
+        selection: { strategy: selectionStrategy, exhaustion: selectionExhaustion },
+      };
+      const operations: SourceOperation[] = [
+        { operation: 'create', path: descriptorPath, content: stringify(descriptor) },
+        { operation: 'replace', path: 'package.yaml', content: manifest.toString() },
+      ];
+      setPreparedCandidate({ key: `${id}:${source.baseSourceRevision}:${Date.now()}`,
+        baseSourceRevision: source.baseSourceRevision, registryRevision: source.registryRevision, operations });
+    } catch (failure) {
+      setDescriptorError(failure instanceof Error ? failure.message : 'Could not prepare the atomic Testdata candidate.');
+    } finally { setPreparingDescriptor(false); }
+  }
+
   const records = response?.records || [];
   const columns = useMemo(() => [...new Set(records.flatMap(record => record.value && typeof record.value === 'object' && !Array.isArray(record.value) ? Object.keys(record.value) : ['value']))], [records]);
   if (error && !selectedId) return <section className="att-testdata-workspace"><h2>Testdata</h2><p className="att-error" role="alert">{error}<button type="button" onClick={onRefresh}>Retry</button></p></section>;
   return <section className="att-testdata-workspace" aria-label="Structured Testdata catalog">
     <header><div><h2>Descriptors</h2><p>Resolved metadata and bounded records for {environment || defaultEnvironment || 'the Package default environment'}.</p></div>
+      {canManagePackageSource && <button type="button" onClick={() => setCreatingDescriptor(true)}>Create Testdata descriptor</button>}
       {(catalogTotal !== 0 || entries.length > 0 || catalogSearch) && <label>Search descriptors<input type="search" aria-label="Search Testdata descriptors" value={catalogSearch} onChange={event => {
-        setCatalogSearch(event.currentTarget.value); setSelectedIdState(''); updateRecordControls({ offset: 0, previewGenerated: false, copiedRecord: null });
-        setRecordResponseState(null); onDescriptorChange(undefined);
+        setCatalogSearch(event.currentTarget.value); setRouteLookupQuery('');
       }} placeholder="Search descriptor IDs and sources" /></label>}
     </header>
     <p role="status" aria-live="polite">{copyStatus || status}{loading ? ' Loading records…' : ''}</p>
+    {activeDescriptorMissing && selectedEntry && <p role="alert">
+      Descriptor {selectedEntry.id} is no longer present in the refreshed catalog. Its editor, local changes, and staged Change Set are preserved here; source writes are disabled until you leave this descriptor.
+    </p>}
     {error && <p className="att-error" role="alert">{error}<button type="button" onClick={onRefresh}>Retry</button></p>}
     <div className="att-testdata-layout">
       <nav className="att-testdata-catalog" aria-label="Testdata descriptors">
         <h3>Catalog</h3><p>{visibleEntries.length} shown of {catalogTotal ?? entries.length} matching descriptors ({entries.length} loaded)</p>
         <ul>{visibleEntries.map(item => <li key={item.id}><button type="button" aria-current={selectedId === item.id ? 'true' : undefined}
-          onClick={() => { setSelectedIdState(item.id); setDescriptorChange(item.id); updateRecordControls({ offset: 0, previewGenerated: false, copiedRecord: null }); setRecordResponseState(null); setRevision(value => value + 1); }}>
+          onClick={() => {
+            if (!requestDescriptorChange(item.id)) return;
+            setSelectedIdState(item.id);
+            if (item.id !== selectedId) { setRetainedSelectedEntry(null); setMissingDescriptorId(''); }
+            updateRecordControls({ offset: 0, previewGenerated: false, copiedRecord: null }); setRecordResponseState(null); setRevision(value => value + 1);
+          }}>
           <span>{item.id}</span><small>{item.source || displayField(item, 'source')}</small></button></li>)}</ul>
         {catalogNextOffset != null && <button type="button" onClick={() => void loadMoreCatalog()} disabled={catalogLoading}>{catalogLoading ? 'Loading…' : 'Load more descriptors'}</button>}
         {entries.length > 0 && !visibleEntries.length && <p>No descriptors match this search.</p>}
       </nav>
       <div className="att-testdata-detail">
+    {canManagePackageSource && creatingDescriptor && <section className="att-testdata-create" aria-label="Create Testdata descriptor">
+      <header><div><h3>New Testdata descriptor</h3><p>Choose a record format and selection policy. The descriptor and Package inventory will be staged together.</p></div>
+        <button type="button" onClick={() => { setCreatingDescriptor(false); setPreparedCandidate(null); setDescriptorError(''); }} disabled={creatorDirty}
+          title={creatorDirty ? 'Stage or discard the local editor work and draft before closing.' : undefined}>Close creator</button></header>
+      {!preparedCandidate && <form className="att-testdata-create-form" onSubmit={event => { event.preventDefault(); void prepareTestdataCandidate(); }}>
+        <p role="note">Selected Environment: <strong>{environment || defaultEnvironment || 'Package default'}</strong>. This creates a Package-owned descriptor and adds its path to the shared Package inventory.</p>
+        <label>Testdata ID<input aria-label="New Testdata ID" value={newDescriptorId} maxLength={80}
+          onChange={event => setNewDescriptorId(event.currentTarget.value)} /></label>
+        <label>Record format<select aria-label="Testdata record format" value={descriptorFormat}
+          onChange={event => setDescriptorFormat(event.currentTarget.value as 'records' | 'generated')}>
+          <option value="records">Literal JSON records</option><option value="generated">Generated sequence</option>
+        </select></label>
+        {descriptorFormat === 'records' ? <label>Record source: JSON array<textarea aria-label="Testdata JSON records"
+          value={descriptorRecords} rows={8} spellCheck={false} onChange={event => setDescriptorRecords(event.currentTarget.value)} /></label> : <>
+          <fieldset><legend>Generated sequence</legend>
+            <label>First sequence number<input aria-label="Generated sequence start" type="number" value={generatedFrom}
+              onChange={event => setGeneratedFrom(event.currentTarget.value)} /></label>
+            <label>Last sequence number<input aria-label="Generated sequence end" type="number" value={generatedTo}
+              onChange={event => setGeneratedTo(event.currentTarget.value)} /></label>
+            <label>Number format<input aria-label="Generated number format" value={generatedNumberFormat} maxLength={8}
+              onChange={event => setGeneratedNumberFormat(event.currentTarget.value)} /></label>
+          </fieldset>
+          <label>Generated record template: JSON object<textarea aria-label="Generated Testdata record template"
+            value={generatedRecord} rows={8} spellCheck={false} onChange={event => setGeneratedRecord(event.currentTarget.value)} /></label>
+        </>}
+        <fieldset><legend>Record selection</legend>
+          <label>Strategy<select aria-label="Testdata selection strategy" value={selectionStrategy}
+            onChange={event => setSelectionStrategy(event.currentTarget.value as typeof selectionStrategy)}>
+            <option value="sequential">Sequential</option><option value="roundRobin">Round robin</option><option value="random">Random</option>
+          </select></label>
+          <label>When records are exhausted<select aria-label="Testdata exhaustion policy" value={selectionExhaustion}
+            onChange={event => setSelectionExhaustion(event.currentTarget.value as typeof selectionExhaustion)}>
+            <option value="error">Error</option><option value="recycle">Recycle</option><option value="stop">Stop Load workload</option>
+          </select></label>
+        </fieldset>
+        {descriptorError && <p role="alert">{descriptorError}</p>}
+        <button type="submit" disabled={preparingDescriptor || !newDescriptorId.trim()}>
+          {preparingDescriptor ? 'Preparing candidate…' : 'Prepare atomic candidate'}
+        </button>
+      </form>}
+      {preparedCandidate && <p role="status">Prepared one candidate containing <code>testdata/{newDescriptorId.trim()}.yaml</code> and <code>package.yaml</code>. Edit the Manifest in Advanced mode if needed, then Stage, Validate, Review, and Publish both files together.</p>}
+      {preparedCandidate && <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
+        query: { kind: 'manifest' }, label: 'Testdata descriptor and Package registration', allowFileOperations: true }}
+        initialCandidate={preparedCandidate} registerUnsavedChanges={registerUnsavedChanges} onDirtyChange={setCreatorDirty}
+        onPublished={() => { setCreatingDescriptor(false); setPreparedCandidate(null); setCreatorDirty(false); }} />}
+    </section>}
     {selectedEntry ? <>
       <dl className="att-testdata-meta"><div><dt>Descriptor</dt><dd>{selectedEntry.id}</dd></div><div><dt>Source</dt><dd>{selectedEntry.source ? <span title="Package-local descriptor, not a shared Configuration source">{packageId}: {selectedEntry.source}</span> : 'Not provided'}</dd></div>
         <div><dt>Generated</dt><dd>{isGenerated ? 'Yes' : 'No'}</dd></div><div><dt>Records</dt><dd>{response?.recordCount?.toLocaleString() || displayField(selectedEntry, 'recordCount')}</dd></div>
@@ -348,6 +532,11 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
           : <p className="att-config-empty">{loading ? 'Loading records…' : response ? 'This descriptor contains no records.' : 'No records are available for this descriptor.'}</p>)}
       {response?.nextOffset != null && <button type="button" onClick={() => updateRecordControls({ offset: response.nextOffset || 0, copiedRecord: null })} disabled={loading}>Load next 50 records</button>}
       <details className="att-testdata-source"><summary>Advanced descriptor metadata</summary><CodeEditor value={JSON.stringify(Object.fromEntries(Object.entries(selectedEntry.fields || {}).map(([key, field]) => [key, field.state === 'visible' ? field.value : field.state])), null, 2)} language="json" label="Advanced Testdata descriptor metadata" readOnly /></details>
+      {canManagePackageSource && selectedEntry.source && <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
+        query: { kind: 'testdata', resourceId: selectedEntry.id, environment: environment || undefined },
+        label: `Testdata descriptor · ${selectedEntry.source}`, allowFileOperations: true }} registerUnsavedChanges={registerUnsavedChanges}
+        onDirtyChange={onAuthoringDirtyChange} readOnlyReason={activeDescriptorMissing
+          ? `Testdata descriptor ${selectedEntry.id} was removed from the resolved catalog.` : undefined} />}
     </> : <p className="att-config-empty">{descriptorId ? `Testdata descriptor ${descriptorId} is unavailable for this Package or Environment.` : 'No Testdata descriptors were returned for the selected environment.'}</p>}
       </div>
     </div>
@@ -357,18 +546,20 @@ export function TestdataCatalog({ api, packageId, environment, defaultEnvironmen
 export type PackageRegistrationState = 'loading' | 'ready' | 'error';
 
 export function PackageTestdataWorkspace({ api, packageId, packageLabel, registrationState, registered, environment, descriptorId,
-  onEnvironmentChange, onDescriptorChange, onBackToResources, onOpenResource, onOpenPackageConfiguration }: {
+  onEnvironmentChange, onDescriptorChange, onBackToResources, onOpenResource, onOpenPackageConfiguration, registerUnsavedChanges, canManagePackageSource = false }: {
   api: ExplorerApi; packageId: string; packageLabel: string; registrationState: PackageRegistrationState; registered: boolean;
   environment: string; descriptorId?: string; onEnvironmentChange(environment: string): void;
-  onDescriptorChange(descriptorId?: string): void; onBackToResources(): void;
+  onDescriptorChange(descriptorId?: string): boolean | void; onBackToResources(): void;
   onOpenResource(resource: { type: string; resourceId: string }): void;
   onOpenPackageConfiguration(): void;
+  registerUnsavedChanges?: (isDirty: boolean, description?: string, onConfirmDiscard?: () => boolean | Promise<boolean>) => () => void;
+  canManagePackageSource?: boolean;
 }) {
   const [declared, setDeclared] = useState<Awaited<ReturnType<ExplorerApi['getDeclaredConfiguration']>> | null>(null);
   const [environmentError, setEnvironmentError] = useState('');
   const [environmentNotice, setEnvironmentNotice] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
-  const inspectionRefresh = useInspectionRefresh(true);
+  const inspectionRefresh = useInspectionRefresh();
   const profiles = useMemo(() => (declared?.environments || []).filter(item => item.name && item.state === 'active'), [declared]);
   const defaultEnvironment = profiles.find(item => item.default)?.name;
   const refresh = useCallback(() => {
@@ -397,7 +588,9 @@ export function PackageTestdataWorkspace({ api, packageId, packageLabel, registr
 
   return <main className="page-content att-testdata-page">
     <header className="att-testdata-page-heading">
-      <div><p className="eyebrow">Packages / {packageId} / Explorer</p><h1>Testdata</h1><p>Read-only Package descriptor and record inspection.</p></div>
+      <div><p className="eyebrow">Packages / {packageId} / Explorer</p><h1>Testdata</h1><p>{canManagePackageSource
+        ? 'Inspect descriptors and records, and manage authorized Package sources.'
+        : 'Read-only Package descriptor and record inspection.'}</p></div>
       <div className="att-testdata-page-actions"><button type="button" onClick={onBackToResources}>Back to resources</button>
         <button type="button" onClick={onOpenPackageConfiguration}>Package Configuration</button>
         <label>Environment<select aria-label="Testdata environment" value={environment} onChange={event => { setEnvironmentNotice(''); onEnvironmentChange(event.currentTarget.value); }}>
@@ -410,8 +603,8 @@ export function PackageTestdataWorkspace({ api, packageId, packageLabel, registr
     <p role="status">Effective environment: {environment || defaultEnvironment || 'Package default'}{environment ? ' (selected)' : ' (Package default)'}.</p>
     {environmentNotice && <p role="status">{environmentNotice}</p>}
     {environmentError && <p className="att-error" role="alert">{environmentError}<button type="button" onClick={refresh}>Retry Package environments</button></p>}
-    <TestdataCatalog api={api} packageId={packageId} environment={environment} defaultEnvironment={defaultEnvironment} descriptorId={descriptorId} refreshKey={refreshKey}
-      onDescriptorChange={onDescriptorChange} onOpenResource={onOpenResource} onRefresh={refresh} />
+    <TestdataCatalog api={api} packageId={packageId} environment={environment} defaultEnvironment={defaultEnvironment} descriptorId={descriptorId} refreshKey={refreshKey} canManagePackageSource={canManagePackageSource}
+      onDescriptorChange={onDescriptorChange} onOpenResource={onOpenResource} onRefresh={refresh} registerUnsavedChanges={registerUnsavedChanges} />
     <button type="button" onClick={refresh}>Refresh Testdata</button>
   </main>;
 }

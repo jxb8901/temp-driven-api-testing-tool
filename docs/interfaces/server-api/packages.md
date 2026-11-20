@@ -1,6 +1,17 @@
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.3.0 -->
 
 # Package inspection APIs
+
+## Trusted registry and source scope
+
+The Server loads Package roots only from the selected deployment-controlled `att-server.yaml` `packages.entries` mapping. It polls for in-place edits and atomic replacements while Tomcat serves requests. Each candidate mapping is validated as a whole against canonical existing directories and `packages.allowedRoots`; invalid or unstable candidates keep the last-known-good registry. Changes to settings outside `packages` are reported as restart-required and are not partially applied. Unregistered directories never appear as Packages.
+
+```http
+GET /api/v1/registry
+GET /api/v1/packages/payments/scope
+```
+
+`GET /registry` returns `att-package-registry/v1`: a content-addressable `revision`, monotonic `generation`, reload timestamps, `Ready` or `Invalid` status, sanitized diagnostic, and explicitly registered logical package IDs with `Registered`, `Warming`, or `Ready` states. It does not expose filesystem paths. `GET /packages/{packageId}/scope` returns `att-source-scope/v1` with distinct registry, Package source, Package Manifest, Central Runtime Config source, active effective Config, execution, and embedded Engine schema revision identities, plus safe environment/version metadata. `packageSourceRevision` tracks Package-owned content; `executionRevisionDigest` binds execution comparisons to the selected Engine/schema, effective Config, and Environment. Change Set `baseSourceRevision` is a separate aggregate optimistic-concurrency fence and must not be substituted for either identity. The versioned Source Management `RevisionSet` exposes typed `packageSourceRevision` and `executionRevisionDigest` identities; `businessSource` remains a compatibility alias for Package source. It is read-only; the API does not accept source roots from clients. Drafts and approvals created against a prior registry revision are rejected after a registry change. Accepted Jobs retain their already-approved package root and inputs.
 
 ## Package resource inspection
 
@@ -45,6 +56,24 @@ The detail response contains `resource`, `definition`, `diagnostics`, and `reque
 
 Invalid list parameters return `400`; unknown packages/resources return the same `404` shape. Stale cursors return `409`, oversized responses `413`, a full inspection queue `503`, and an inspector timeout `504`. Error responses use the existing `error.code`, `error.summary`, and `requestId` envelope; they do not include physical paths or parser exception messages.
 
+## Lossless authoring-source reads
+
+Safe source inspection above remains available to authorized USER operators and returns the existing redacted projection. It is not writable input. Package authoring reads use a separate endpoint and require an authenticated active USER whose canonical login ID exactly equals the registered Package ID; `default` is never editable. Local login IDs are NFKC-normalized and lowercased with `Locale.ROOT`, then restricted to lowercase ASCII letters, digits, dots, underscores, and hyphens. Trusted container/SSO principals must already use that same canonical form; the source API does not fold case or Unicode and does not merge identities. The trusted deployment switch `server.packageConfiguration.sourceEditingEnabled` must also be `true`. ADMIN does not receive Package USER operations or owner access, and a Package owner does not receive central configuration privileges.
+
+```http
+GET /api/v1/packages/{packageId}/authoring-source?type=manifest
+GET /api/v1/packages/{packageId}/authoring-source?type=resource&resourceType=template&resourceId={resourceId}
+GET /api/v1/packages/{packageId}/authoring-source?type=file&resourceType=template&resourceId={resourceId}&referenceId={opaque}
+GET /api/v1/packages/{packageId}/authoring-source?type=load&path=load%2Fscenario.yaml
+GET /api/v1/packages/{packageId}/authoring-source?type=testdata&resourceId={descriptorId}&environment=SIT
+GET /api/v1/packages/{packageId}/authoring-source?type=testcase&resourceId={readyCaseResourceId}&selector=sidecar
+GET /api/v1/configuration/authoring-source?path=config%2Fconfig.yaml
+```
+
+Package sources are limited to fixed `package.yaml`, ready Template/Flow YAML, allowed `load/*.yaml` and `load/*.yml` sources, configured Package Testdata descriptors, eligible UTF-8 text files statically reached through an authorized Template/Flow `&{path}` reference, and the YAML sidecar of a ready indexed Testcase. The Testcase request requires its inspected Case `resourceId` and the fixed `selector=sidecar`; it does not accept a package path. The `file` request must reuse the opaque reference and origin issued by safe source inspection. Central source is restricted to the selected `config/config.yaml` Runtime Config file and YAML Helper/Tool descriptors declared by that central config; `att-server.yaml` and sensitive credential/key paths are excluded. It requires active `SYSTEM_SETTINGS_WRITE` (ADMIN) and the independent deployment switch `server.centralConfigurationEditingEnabled: true`, which defaults to `false`.
+
+Successful authoring responses contain exact UTF-8 `text`, `logicalPath`, `present`, a SHA-256 `revision`, and a quoted `sourceEtag`; the same content ETag is returned in the HTTP `ETag` header. Responses use `Cache-Control: private, no-store`. The Server repeats identity/role, canonical root, registry, path allowlist, symlink, size, UTF-8, and protected-secret checks for each read. Protected credentials and keys fail closed even when ordinary masking is disabled. A `redacted` query parameter is not accepted. Unauthorized callers receive `401`/`403`; unavailable or unapproved paths return `404`; a source/root race returns `409`; and an over-limit file returns `413`.
+
 Package inspection treats absent optional `templates/`, `testcase/`, and `load/` roots as empty inventories. A present root that is not a readable directory or that escapes the canonical Package returns HTTP `422 ATT-RESOURCE-ROOT-INVALID` with a safe `field` identifying the affected root. Other Worker validation errors return `422 ATT-RESOURCE-VALIDATION-FAILED`; neither response includes an absolute path or parser detail.
 
 ## Package configuration inspection
@@ -77,8 +106,59 @@ GET /api/v1/packages/payments/configuration/testdata/{descriptorId}/records?envi
 
 The descriptor must be configured for the selected environment. Records are paged (1–100 per response); credentials, authentication material, and classified personal-data fields are always masked, including in anonymous mode. Ordinary values remain visible by default. When `redaction.enabled` is true, the configured sensitive paths and field patterns are masked as well. The masking switch cannot authorize disclosure of protected values. Unknown or unconfigured descriptors return `404`.
 
-Comparison requires a section ID returned by the declared or effective view. The Server verifies that ID, filters both profiles to that section, and only then paginates. By default, it compares profile-sourced values; `includeInherited=true` also includes inherited and global values with their origins. `includeAllFields=true` adds otherwise-omitted non-secret DB properties and evidence fields, and requires the configured configuration administrator role (or local `ADMIN` in local-auth mode). These responses are not cached and are audited. This prevents unrelated sections from leaking into later pages. A sensitive field is returned as `state: "hidden"` with `change: "hidden"`; the response does not reveal whether its value is equal or different. Absolute local paths, credentials, server-owned secrets, and unrestricted descriptor content are not returned. Non-credential URLs and MQ host/port values can be visible in Effective/Compare when masking is disabled; HTTP header maps and SSH host/user/port/identity-file values remain protected in every view. Enabling masking also hides configured operational paths and fields.
+Comparison requires a section ID returned by the declared or effective view. The Server verifies that ID, filters both profiles to that section, and only then paginates. By default, it compares profile-sourced values; `includeInherited=true` also includes inherited and global values with their origins. `includeAllFields=true` adds otherwise-omitted non-secret DB properties and evidence fields, and requires active `SYSTEM_SETTINGS_WRITE` (ADMIN). These responses are not cached and are audited. This prevents unrelated sections from leaking into later pages. A sensitive field is returned as `state: "hidden"` with `change: "hidden"`; the response does not reveal whether its value is equal or different. Absolute local paths, credentials, server-owned secrets, and unrestricted descriptor content are not returned. Non-credential URLs and MQ host/port values can be visible in Effective/Compare when masking is disabled; HTTP header maps and SSH host/user/port/identity-file values remain protected in every view. Enabling masking also hides configured operational paths and fields.
 
 The `source` endpoint resolves eligible package-local text references against their origin under `safe-package-files`; `allowlist-only` requires the existing exact package-relative `server.inspection.safeTextSources` entries. A linked request must include the opaque Server-issued `referenceId` returned by its authorized parent source; caller-supplied path and origin are insufficient. External scripts are available only through their exact canonical per-package allowlist under a configured external root, and their absolute paths are never returned. This remains a bounded source endpoint, not an arbitrary file browser. Testdata record previews require an effective descriptor ID. Literal records are paged with `limit` from 1 to 100 (the UI requests 50 at a time). Generated descriptors return `state: "preview-required"` and no records unless `previewGenerated=true` is explicitly requested. The same inspection identity, redaction policy, worker, source-size, response-size, queue, and timeout limits apply.
 
 Configuration responses include `view`, `state`, `schemaVersion` when available, and `diagnostics`. Paged responses also include `section`, `offset`, `limit`, `total`, and `nextOffset`. An invalid configuration returns HTTP 200 with `state: "invalid"` and a stable diagnostic; malformed profile parameters return `400`. Unknown packages return `404`, oversized responses return `413`, a full inspection queue returns `503`, and an inspector timeout returns `504`. The same response-size, queue, and timeout limits used by resource inspection apply.
+
+## Source history, diff, and restore
+
+Package source history is separate from Job artifacts. Package owners can read complete permitted source history; another authenticated Package operator receives only a safe summary. Central Runtime Config history is a separate namespace and requires active `SYSTEM_SETTINGS_WRITE` (ADMIN). Revoked Package owners cannot use these routes to read old source. All successful responses use `Cache-Control: private, no-store`.
+
+```http
+GET /api/v1/packages/{packageId}/source-history?offset=0&limit=50
+GET /api/v1/packages/{packageId}/source-history/diff?beforeSnapshotId={snapshotId}&afterSnapshotId={snapshotId}&offset=0&limit=50
+GET /api/v1/packages/{packageId}/source-history/diff?beforeSnapshotId={snapshotId}&afterSnapshotId={snapshotId}&path=load%2Fscenario.yaml
+POST /api/v1/packages/{packageId}/source-history/restore
+
+GET /api/v1/configuration/source-history?offset=0&limit=50
+GET /api/v1/configuration/source-history/diff?beforeSnapshotId={snapshotId}&afterSnapshotId={snapshotId}&path=config%2Fconfig.yaml
+POST /api/v1/configuration/source-history/restore
+```
+
+History pages are ordered newest first. `offset` is zero-based; `limit` defaults to 50 and accepts 1–100. Owner/Admin history includes transaction and revision metadata, action, author, snapshot IDs, permitted changed logical paths, validation revision, and activation status. Non-owner Package summaries omit paths, authors, snapshot IDs, and revision digests. The diff endpoint without `path` returns a paged list of changed permitted paths and byte counts. Add one logical `path` to request its text diff. The Server returns content only for bounded UTF-8 text that passes protected-value checks; binary, oversized, protected, or unparseable content returns metadata without source bytes. File references remain literal source text.
+
+Each source scope retains at most the newest 500 committed transactions. History responses include a `retention` object with `transactionLimit`, `retainedTransactions`, and a `state` of `within_limit` or `cleanup_pending`. Scheduled cleanup removes older audit rows and revision copies no longer referenced by retained history, the active source pointer, or a durable Job/Schedule source lease. Old snapshots outside that window may no longer be available for Diff or Restore. Expired private Change Set drafts are reclaimed at least once per minute; crash recovery reconciles transaction journals, and the periodic source-history sweep removes abandoned `.copy-*` revision directories.
+
+Restore creates a new Change Set from an immutable snapshot against the current source revision. It never rewrites the selected history entry or changes an accepted Job's pinned source. Send the current revision returned by the owner/Admin history response; Package restores also require the current Package registry revision:
+
+```json
+{
+  "snapshotId": "R0123456789ABCDEF0123456789ABCDEF",
+  "expectedSourceRevision": "<current source revision>",
+  "registryRevision": "<current Package registry revision>"
+}
+```
+
+Omit `registryRevision` for Central Runtime Config. A successful request returns a new `changeSetId` and `restoredFromSnapshotId`; continue through the existing Change Set `validate`, `review`, and `publish` actions. Package restore uses the Package owner permission boundary. Central Config restore remains subject to the current Config impact and publication gate, including rejection when that gate cannot approve the candidate. A stale source or Package registry revision returns `409`; invalid, unavailable, or over-limit restores return a safe error without publishing.
+
+History and diff ignore query parameters that have no documented meaning. Restore accepts only `snapshotId`, `expectedSourceRevision`, and `registryRevision` for Package sources; Central Runtime Config restore accepts the first two fields. The API does not expose physical revision-store paths or provide unrestricted Central Config export.
+
+## Package ZIP import
+
+Package owners can import a ZIP as a private Change Set. The import does not write published Package files or Runtime Config. It uses the existing Change Set validation, review, and publication gates.
+
+```http
+POST /api/v1/packages/{packageId}/change-sets/import
+Content-Type: application/zip
+X-ATT-CSRF: {token}
+
+<raw ZIP request body>
+```
+
+The Server parses the complete archive before staging any files. Each entry becomes a `create` or `replace` operation against the current Package revision. The `201` response contains the new `changeSetId` and a path-sorted `changedFiles` preview. Check that preview, then call the normal Change Set `validate`, `review`, and `publish` endpoints. A stale source or registry revision returns `409`; an invalid archive or disallowed Package path returns `400`. Rejected archives create no draft and publish no partial entries.
+
+The importer accepts at most 16 MiB of compressed data, 32 entries, 8 MiB of expanded file data, 4 MiB per file, and a 200:1 expansion ratio. Directory entries must be empty. It rejects traversal, absolute and drive-prefixed paths, backslashes, duplicate or case-colliding paths, file/directory conflicts, symlinks and special files, unsupported ZIP metadata, and inconsistent or malformed central directories. Nested archives are never recursively extracted. Imported paths and content still pass the Package Change Set allowlist and file validators, including workbook archive checks.
+
+This request imports Package source into the Package's own Change Set. It does not import or export Job Artifact ZIPs, write another Package, or change global Runtime Config. The API does not provide Package source ZIP export.

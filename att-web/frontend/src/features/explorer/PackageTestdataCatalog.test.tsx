@@ -1,13 +1,22 @@
 // @vitest-environment jsdom
-import { act, useState } from 'react';
+import { act, useCallback, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PackageTestdataWorkspace } from './PackageTestdataCatalog';
 import type { ConfigurationResponse, ExplorerApi, TestdataRecordsResponse } from './types';
 import { inspectionCache } from '../../inspectionCache';
+import { api as sharedApi } from '../../api';
+import { formatRoute, NavigationGuardContext, useRouteState } from '../../router';
 
 vi.mock('../code/CodeEditor', () => ({
-  CodeEditor: ({ value, label }: { value: string; label: string }) => <pre aria-label={label}>{value}</pre>,
+  CodeEditor: ({ value, label, readOnly = true, onChange, maxCharacters = 200_000 }: {
+    value: string; label: string; readOnly?: boolean; onChange?: (value: string) => void; maxCharacters?: number;
+  }) => {
+    const displayed = value.length > maxCharacters ? value.slice(0, maxCharacters) : value;
+    return readOnly ? <pre aria-label={label}>{displayed}</pre>
+      : <textarea aria-label={label} value={displayed} onChange={event => onChange?.(event.currentTarget.value)} />;
+  },
+  detectCodeLanguage: () => 'yaml',
 }));
 
 let host: HTMLDivElement;
@@ -20,6 +29,8 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove();
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+  vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 async function flush() { await act(async () => { await Promise.resolve(); await Promise.resolve(); }); }
 
@@ -60,18 +71,370 @@ function setSearchValue(value: string) {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
+function setInputValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
+  act(() => {
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value')?.set?.call(element, value);
+    element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+  });
+}
+function clickButton(label: string) {
+  const button = [...host.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === label);
+  if (!button) throw new Error(`Button ${label} is not available`);
+  act(() => button.click());
+}
+function clickDescriptor(id: string) {
+  const button = [...host.querySelectorAll<HTMLButtonElement>('nav[aria-label="Testdata descriptors"] button')]
+    .find(item => item.querySelector('span')?.textContent === id);
+  if (!button) throw new Error(`Testdata descriptor ${id} is not available`);
+  act(() => button.click());
+}
+async function confirmGuardNavigation() {
+  const button = host.querySelector<HTMLButtonElement>('[role="dialog"] button:last-child');
+  if (!button) throw new Error('Route discard confirmation is not available');
+  await act(async () => button.click());
+  await flushRoute();
+}
+async function confirmAction() {
+  await flush();
+  const button = host.querySelector<HTMLButtonElement>('.att-confirm-actions button:last-child');
+  if (!button) throw new Error('Confirmation action is not available');
+  await act(async () => button.click());
+  await flush();
+}
 
-function Harness({ api, initialEnvironment = '', descriptorId, registered = true, onOpenPackageConfiguration }: {
-  api: ExplorerApi; initialEnvironment?: string; descriptorId?: string; registered?: boolean; onOpenPackageConfiguration?: () => void;
+function Harness({ api, initialEnvironment = '', descriptorId, registered = true, onOpenPackageConfiguration, canManagePackageSource = true }: {
+  api: ExplorerApi; initialEnvironment?: string; descriptorId?: string; registered?: boolean; onOpenPackageConfiguration?: () => void; canManagePackageSource?: boolean;
 }) {
   const [environment, setEnvironment] = useState(initialEnvironment);
   const [selectedDescriptor, setSelectedDescriptor] = useState(descriptorId);
   return <PackageTestdataWorkspace api={api} packageId="payments" packageLabel="Payments" registrationState="ready" registered={registered}
     environment={environment} descriptorId={selectedDescriptor} onEnvironmentChange={setEnvironment}
-    onDescriptorChange={setSelectedDescriptor} onBackToResources={vi.fn()} onOpenResource={vi.fn()} onOpenPackageConfiguration={onOpenPackageConfiguration || vi.fn()} />;
+    onDescriptorChange={setSelectedDescriptor} onBackToResources={vi.fn()} onOpenResource={vi.fn()} onOpenPackageConfiguration={onOpenPackageConfiguration || vi.fn()}
+    canManagePackageSource={canManagePackageSource} />;
+}
+
+function GuardedHarness({ api }: { api: ExplorerApi }) {
+  const navigation = useRouteState();
+  const route = navigation.route.kind === 'package' && navigation.route.view === 'testdata' ? navigation.route
+    : { kind: 'package' as const, packageId: 'payments', view: 'testdata' as const, environment: 'UAT' };
+  const onDescriptorChange = useCallback((testdataDescriptorId?: string) =>
+    navigation.navigate({ ...route, testdataDescriptorId }), [navigation.navigate, route]);
+  return <NavigationGuardContext.Provider value={navigation}>
+    <PackageTestdataWorkspace api={api} packageId="payments" packageLabel="Payments" registrationState="ready" registered
+      environment={route.environment || ''} descriptorId={route.testdataDescriptorId} onEnvironmentChange={environment => navigation.navigate({ ...route, environment })}
+      onDescriptorChange={onDescriptorChange} onBackToResources={() => navigation.navigate({ kind: 'package', packageId: 'payments' })}
+      onOpenResource={vi.fn()} onOpenPackageConfiguration={() => navigation.navigate({ kind: 'configuration', packageId: 'payments' })}
+      canManagePackageSource registerUnsavedChanges={navigation.registerUnsavedChanges} />
+    {navigation.pendingNavigation && <div role="dialog" aria-label="Unsaved work confirmation">
+      {navigation.pendingNavigationError && <p role="alert">{navigation.pendingNavigationError}</p>}
+      <button type="button" onClick={navigation.cancelNavigation}>Cancel</button>
+      <button type="button" onClick={navigation.confirmNavigation} disabled={navigation.pendingNavigationBusy}>Confirm discard</button>
+    </div>}
+    <output aria-label="Current route">{formatRoute(navigation.route)}</output>
+  </NavigationGuardContext.Provider>;
+}
+
+function setInitialGuardedRoute(descriptor?: string) {
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${formatRoute({
+    kind: 'package', packageId: 'payments', view: 'testdata', environment: 'UAT', ...(descriptor ? { testdataDescriptorId: descriptor } : {}),
+  })}`);
+}
+
+async function flushRoute() {
+  await flush();
+  await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)); });
+  await flush();
+}
+
+function guardedCatalogApi() {
+  let ids = ['descriptor-a', 'descriptor-b'];
+  const sourceText = (id: string) => `schemaVersion: att-testdata/v1.0\nid: ${id}\nrecords: [{id: BASE}]\n`;
+  const stageSourceChangeSet = vi.fn(async (_domain: unknown, _scope: unknown, baseSourceRevision: string, registryRevision: string,
+    operations: Array<{ operation: string; path: string; content?: string }>) => ({
+      changeSetId: 'cs-testdata-a', domain: 'PACKAGE_SOURCE' as const, scopeId: 'payments', state: 'reviewed',
+      baseSourceRevision, registryRevision, changedFiles: operations.map(operation => ({
+        operation: operation.operation, path: operation.path, contentDiff: ['@@ -1 +1 @@', `-${sourceText('descriptor-a').trim()}`, `+${operation.content?.trim() || ''}`],
+      })),
+    }));
+  const sourceChangeSetAction = vi.fn(async (_domain: unknown, _scope: unknown, changeSetId: string, action: string) => ({
+    discarded: action === 'discard', changeSetId,
+  }));
+  const api = {
+    getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'UAT', state: 'active' as const }] })),
+    getEffectiveConfiguration: vi.fn(async () => ({ total: ids.length, environment: 'UAT', sections: [{ id: 'testdata', entries: ids.map(id => ({
+      id, source: `testdata/${id}.yaml`, fields: { 'selection.strategy': { state: 'visible' as const, value: 'sequential' } },
+    })) }] })),
+    getTestdataRecords: vi.fn(async (_packageId: string, descriptorId: string) => ({ descriptorId, offset: 0, limit: 50, total: 0, records: [] })),
+    getManagedPackageAuthoringSource: vi.fn(async (_packageId: string, query: { resourceId?: string }) => {
+      const id = query.resourceId || 'descriptor-a';
+      return { available: true, present: true, logicalPath: `testdata/${id}.yaml`, format: 'yaml', text: sourceText(id),
+        sourceEtag: `etag-${id}`, baseSourceRevision: `base-${id}`, registryRevision: 'registry-1' };
+    }),
+    stageSourceChangeSet,
+    sourceChangeSetAction,
+  } as unknown as ExplorerApi;
+  return { api, stageSourceChangeSet, sourceChangeSetAction, removeDescriptorA: () => { ids = ['descriptor-b']; }, sourceText };
 }
 
 describe('PackageTestdataWorkspace', () => {
+  it('keeps unsaved Testdata text when a guarded descriptor switch is cancelled and resets only after confirmation', async () => {
+    const { api } = guardedCatalogApi();
+    const edited = 'schemaVersion: att-testdata/v1.0\nid: descriptor-a\nrecords: [{id: EXACT-UNSAVED-BYTES}]\n';
+    setInitialGuardedRoute();
+    await act(async () => root.render(<GuardedHarness api={api} />)); await flushRoute(); await flushRoute();
+    clickButton('Edit');
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]');
+    if (!editor) throw new Error('The default descriptor source editor was not rendered');
+    setInputValue(editor, edited);
+
+    clickDescriptor('descriptor-b');
+    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="dialog"] button:first-child')?.click());
+    await flushRoute();
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]')?.value).toBe(edited);
+    expect(host.querySelector('output[aria-label="Current route"]')?.textContent).not.toContain('descriptor=descriptor-b');
+
+    clickDescriptor('descriptor-b');
+    await confirmGuardNavigation();
+    expect(host.querySelector('output[aria-label="Current route"]')?.textContent).toContain('descriptor=descriptor-b');
+    expect(host.textContent).toContain('testdata/descriptor-b.yaml');
+    expect(host.textContent).not.toContain('EXACT-UNSAVED-BYTES');
+    expect(api.getManagedPackageAuthoringSource).toHaveBeenCalledWith('payments', { kind: 'testdata', resourceId: 'descriptor-b', environment: 'UAT' }, expect.any(AbortSignal));
+  });
+
+  it('treats Testdata search as a list filter and preserves the active dirty descriptor', async () => {
+    const { api } = guardedCatalogApi();
+    const edited = 'schemaVersion: att-testdata/v1.0\nid: descriptor-a\nrecords: [{id: SEARCH-CANCEL-PRESERVES}]\n';
+    setInitialGuardedRoute();
+    await act(async () => root.render(<GuardedHarness api={api} />)); await flushRoute(); await flushRoute();
+    clickButton('Edit');
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]');
+    if (!editor) throw new Error('The default descriptor source editor was not rendered');
+    setInputValue(editor, edited);
+
+    await act(async () => setSearchValue('descriptor-b'));
+    await flush(); await flush();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(host.querySelector('output[aria-label="Current route"]')?.textContent).not.toContain('descriptor=descriptor-b');
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Search Testdata descriptors"]')?.value).toBe('descriptor-b');
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]')?.value).toBe(edited);
+    expect(host.textContent).toContain('descriptor-a');
+    expect(host.textContent).toContain('descriptor-b');
+
+    clickDescriptor('descriptor-b');
+    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="dialog"] button:first-child')?.click());
+    await flushRoute();
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]')?.value).toBe(edited);
+  });
+
+  it('retains a removed dirty descriptor and discards its staged Change Set once after confirmed navigation', async () => {
+    const { api, sourceChangeSetAction, stageSourceChangeSet, removeDescriptorA } = guardedCatalogApi();
+    const edited = 'schemaVersion: att-testdata/v1.0\nid: descriptor-a\nrecords: [{id: EXACT-STAGED-BYTES}]\n';
+    setInitialGuardedRoute();
+    await act(async () => root.render(<GuardedHarness api={api} />)); await flushRoute(); await flushRoute();
+    clickButton('Edit');
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]');
+    if (!editor) throw new Error('The default descriptor source editor was not rendered');
+    setInputValue(editor, edited);
+    clickButton('Add current file to candidate'); await confirmAction();
+    clickButton('Stage candidate (1 files)'); await flush(); await flush();
+    expect(stageSourceChangeSet).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', 'base-descriptor-a', 'registry-1', [
+      { operation: 'replace', path: 'testdata/descriptor-a.yaml', content: edited },
+    ], expect.any(AbortSignal));
+    expect(host.textContent).toContain('Draft cs-testdata-a');
+    expect(host.textContent).toContain('EXACT-STAGED-BYTES');
+
+    removeDescriptorA();
+    clickButton('Refresh Testdata');
+    await flush(); await flush(); await flush(); await flushRoute();
+    expect(host.textContent).toContain('Descriptor descriptor-a is no longer present in the refreshed catalog.');
+    expect(host.textContent).toContain('Draft cs-testdata-a');
+    expect(host.textContent).toContain('EXACT-STAGED-BYTES');
+    const publish = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Publish');
+    expect(publish?.disabled).toBe(true);
+
+    clickDescriptor('descriptor-b');
+    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="dialog"] button:first-child')?.click());
+    await flushRoute();
+    expect(host.textContent).toContain('Draft cs-testdata-a');
+    expect(host.textContent).toContain('EXACT-STAGED-BYTES');
+    expect(sourceChangeSetAction).not.toHaveBeenCalled();
+
+    clickDescriptor('descriptor-b');
+    await confirmGuardNavigation();
+    expect(sourceChangeSetAction).toHaveBeenCalledTimes(1);
+    expect(sourceChangeSetAction.mock.calls[0][2]).toBe('cs-testdata-a');
+    expect(sourceChangeSetAction.mock.calls[0][3]).toBe('discard');
+    expect(host.querySelector('output[aria-label="Current route"]')?.textContent).toContain('descriptor=descriptor-b');
+    expect(host.textContent).not.toContain('Draft cs-testdata-a');
+    expect(host.textContent).not.toContain('EXACT-STAGED-BYTES');
+  });
+
+  it('keeps Testdata browsing available while withholding owner-only editing from non-owners', async () => {
+    const managedSource = vi.fn(async () => ({
+      available: true, present: true, logicalPath: 'testdata/accounts.yaml', format: 'yaml', text: 'records: []',
+      sourceEtag: 'owner-etag', baseSourceRevision: 'owner-revision',
+    }));
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getEffectiveConfiguration: vi.fn(async () => ({
+        sections: [{ id: 'testdata', entries: [{ id: 'accounts', source: 'testdata/accounts.yaml' }] }],
+      })),
+      getTestdataRecords: vi.fn(async () => ({ descriptorId: 'accounts', offset: 0, limit: 50, total: 0, records: [] })),
+      getManagedPackageAuthoringSource: managedSource,
+    } as unknown as ExplorerApi;
+    await act(async () => root.render(<Harness api={api} descriptorId="accounts" canManagePackageSource={false} />));
+    await flush();
+    expect(host.textContent).toContain('accounts');
+    expect(host.textContent).not.toContain('Create Testdata descriptor');
+    expect(host.querySelector('.att-source-authoring')).toBeNull();
+    expect(managedSource).not.toHaveBeenCalled();
+  });
+
+  it('creates and publishes a Testdata descriptor with its Manifest registration and overlay in one candidate', async () => {
+    let published = false;
+    const draft = { changeSetId: 'cs-testdata', domain: 'PACKAGE_SOURCE' as const, scopeId: 'payments', state: 'draft',
+      baseSourceRevision: 'base-1', registryRevision: 'registry-1', changedFiles: [] };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof Request ? input.url : String(input));
+      const action = url.pathname.split('/').at(-1);
+      let result: unknown;
+      if (action === 'validate') result = { ...draft, state: 'validated' };
+      else if (action === 'review') result = { ...draft, state: 'reviewed' };
+      else {
+        published = true;
+        result = { published: true, domain: 'PACKAGE_SOURCE', scopeId: 'payments', changeSetId: draft.changeSetId,
+          beforeRevision: 'base-1', revision: 'published-testdata-2' };
+      }
+      return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const actions = vi.spyOn(sharedApi, 'sourceChangeSetAction');
+    const stage = vi.fn(async (_domain: unknown, _scope: unknown, _base: unknown, _registry: unknown, _operations: unknown[]) => draft);
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [] })),
+      getEffectiveConfiguration: vi.fn(async () => ({ sections: [{ id: 'testdata', entries: published
+        ? [{ id: 'new-shipments', source: 'testdata/new-shipments.yaml' }] : [] }] })),
+      getTestdataRecords: vi.fn(async (_packageId: string, descriptorId: string) => ({ descriptorId, offset: 0, limit: 50, total: 0, records: [] })),
+      getManagedPackageAuthoringSource: vi.fn(async () => ({ available: true, present: true, logicalPath: 'package.yaml', format: 'yaml',
+        text: 'schemaVersion: att-package/v2\ntestdata:\n  descriptors: []\n', sourceEtag: 'etag-1', revision: 'revision-1', baseSourceRevision: 'base-1', registryRevision: 'registry-1' })),
+      stageSourceChangeSet: stage,
+      sourceChangeSetAction: sharedApi.sourceChangeSetAction,
+    } as unknown as ExplorerApi;
+    await act(async () => root.render(<Harness api={api} />)); await flush();
+    expect(host.textContent).toContain('Create Testdata descriptor');
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Create Testdata descriptor')?.click()); await flush();
+    setInputValue(host.querySelector<HTMLInputElement>('input[aria-label="New Testdata ID"]')!, 'new-shipments');
+    setInputValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Testdata JSON records"]')!, '[{ "shipmentId": "S-001" }]');
+    setInputValue(host.querySelector<HTMLSelectElement>('select[aria-label="Testdata selection strategy"]')!, 'roundRobin');
+    setInputValue(host.querySelector<HTMLSelectElement>('select[aria-label="Testdata exhaustion policy"]')!, 'recycle');
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Prepare atomic candidate')?.click()); await flush(); await flush();
+    expect(host.textContent).toContain('testdata/new-shipments.yaml');
+    expect(host.textContent).toContain('package.yaml');
+    await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Stage candidate (2 files)')?.click()); await flush();
+    expect(stage).toHaveBeenCalledTimes(1);
+    const operations = stage.mock.calls[0][4] as Array<{ operation: string; path: string; content?: string }>;
+    expect(operations).toHaveLength(2);
+    expect(operations.map(operation => [operation.operation, operation.path])).toEqual([
+      ['create', 'testdata/new-shipments.yaml'], ['replace', 'package.yaml'],
+    ]);
+    expect(operations[0].content).toContain('schemaVersion: att-testdata/v1.0');
+    expect(operations[0].content).toContain('strategy: roundRobin');
+    expect(operations[0].content).toContain('exhaustion: recycle');
+    expect(operations[1].content).toContain('testdata/new-shipments.yaml');
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Validate')?.click()); await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Review changed files')?.click()); await flush();
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Publish')?.click()); await flush();
+    await act(async () => host.querySelector<HTMLButtonElement>('.att-confirm-actions button:last-child')?.click()); await flush(); await flush();
+    expect(actions.mock.calls.map(call => call[3])).toEqual(['validate', 'review', 'publish']);
+    expect(vi.mocked(api.getEffectiveConfiguration).mock.calls.length).toBeGreaterThan(1);
+    expect(host.textContent).toContain('new-shipments');
+  });
+
+  it('edits the descriptor selected from the UAT Testdata overlay through Package source authoring', async () => {
+    const stage = vi.fn(async () => ({ changeSetId: 'cs-uat-edit', domain: 'PACKAGE_SOURCE' as const,
+      scopeId: 'payments', state: 'draft', baseSourceRevision: 'base-uat-1', registryRevision: 'registry-1', changedFiles: [] }));
+    const managedSource = vi.fn(async () => ({ available: true, present: true, logicalPath: 'testdata/uat-accounts.yaml',
+      format: 'yaml', text: 'schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: U-1}]\n',
+      sourceEtag: 'etag-uat', baseSourceRevision: 'base-uat-1', registryRevision: 'registry-1' }));
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'UAT', state: 'active' as const }] })),
+      getEffectiveConfiguration: vi.fn(async () => ({ environment: 'UAT', sections: [{ id: 'testdata', entries: [
+        { id: 'accounts', source: 'testdata/uat-accounts.yaml' },
+      ] }] })),
+      getTestdataRecords: vi.fn(async () => ({ descriptorId: 'accounts', offset: 0, limit: 50, total: 0, records: [] })),
+      getManagedPackageAuthoringSource: managedSource,
+      stageSourceChangeSet: stage,
+    } as unknown as ExplorerApi;
+    await act(async () => root.render(<Harness api={api} initialEnvironment="UAT" descriptorId="accounts" />));
+    await flush(); await flush();
+
+    expect(host.textContent).toContain('Effective environment: UAT');
+    expect(host.textContent).toContain('manage authorized Package sources');
+    expect(managedSource).toHaveBeenCalledWith('payments', { kind: 'testdata', resourceId: 'accounts', environment: 'UAT' }, expect.any(AbortSignal));
+    clickButton('Edit');
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]');
+    if (!editor) throw new Error('The selected UAT Testdata source editor was not rendered');
+    setInputValue(editor, 'schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: U-2}]\n');
+    clickButton('Add current file to candidate');
+    await confirmAction();
+    clickButton('Stage candidate (1 files)');
+    await flush();
+
+    expect(stage).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', 'base-uat-1', 'registry-1', [
+      { operation: 'replace', path: 'testdata/uat-accounts.yaml',
+        content: 'schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: U-2}]\n' },
+    ], expect.any(AbortSignal));
+    expect(host.textContent).toContain('Draft cs-uat-edit saved');
+  });
+
+  it('deletes a UAT Testdata descriptor with Manifest and LOAD references in the same candidate', async () => {
+    const draft = { changeSetId: 'cs-uat-delete', domain: 'PACKAGE_SOURCE' as const, scopeId: 'payments', state: 'draft',
+      baseSourceRevision: 'base-uat-2', registryRevision: 'registry-2', changedFiles: [] };
+    const stage = vi.fn(async () => draft);
+    const managedSource = vi.fn(async () => ({ available: true, present: true, logicalPath: 'testdata/uat-accounts.yaml',
+      format: 'yaml', text: 'schemaVersion: att-testdata/v1.0\nid: accounts\nrecords: [{id: U-1}]\n',
+      sourceEtag: 'etag-uat', baseSourceRevision: 'base-uat-2', registryRevision: 'registry-2' }));
+    const api = {
+      getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'UAT', state: 'active' as const }] })),
+      getEffectiveConfiguration: vi.fn(async () => ({ environment: 'UAT', sections: [{ id: 'testdata', entries: [
+        { id: 'accounts', source: 'testdata/uat-accounts.yaml' },
+      ] }] })),
+      getTestdataRecords: vi.fn(async () => ({ descriptorId: 'accounts', offset: 0, limit: 50, total: 0, records: [] })),
+      getManagedPackageAuthoringSource: managedSource,
+      stageSourceChangeSet: stage,
+    } as unknown as ExplorerApi;
+    await act(async () => root.render(<Harness api={api} initialEnvironment="UAT" descriptorId="accounts" />));
+    await flush(); await flush();
+
+    clickButton('Delete');
+    await confirmAction();
+    setInputValue(host.querySelector<HTMLSelectElement>('select[aria-label="Related file operation"]')!, 'replace');
+    setInputValue(host.querySelector<HTMLInputElement>('input[aria-label="Related file path"]')!, 'package.yaml');
+    setInputValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Related file content"]')!,
+      'schemaVersion: att-package/v2\ntestdata:\n  descriptors: [testdata/accounts.yaml]\n  environments:\n    UAT: [testdata/uat-orders.yaml]\n');
+    clickButton('Add related file');
+    setInputValue(host.querySelector<HTMLSelectElement>('select[aria-label="Related file operation"]')!, 'replace');
+    setInputValue(host.querySelector<HTMLInputElement>('input[aria-label="Related file path"]')!, 'load/scenario.yaml');
+    setInputValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Related file content"]')!,
+      'schemaVersion: att-load/v1.6\ntestdata: []\nworkloads: []\n');
+    clickButton('Add related file');
+    clickButton('Stage candidate (3 files)');
+    await flush();
+
+    expect(stage).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', 'base-uat-2', 'registry-2', [
+      { operation: 'delete', path: 'testdata/uat-accounts.yaml' },
+      { operation: 'replace', path: 'package.yaml', content:
+        'schemaVersion: att-package/v2\ntestdata:\n  descriptors: [testdata/accounts.yaml]\n  environments:\n    UAT: [testdata/uat-orders.yaml]\n' },
+      { operation: 'replace', path: 'load/scenario.yaml', content:
+        'schemaVersion: att-load/v1.6\ntestdata: []\nworkloads: []\n' },
+    ], expect.any(AbortSignal));
+    expect(host.textContent).toContain('Draft cs-uat-delete saved');
+  });
+
   it('loads the linked Package descriptor and shows safe metadata when record preview is unavailable', async () => {
     const api = {
       getDeclaredConfiguration: vi.fn(async () => ({ environments: [{ name: 'dev', state: 'active', default: true }] })),

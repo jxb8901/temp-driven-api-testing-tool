@@ -2,7 +2,7 @@
 
 # Documentation architecture and truth matrix
 
-本頁記錄 ATT 4.3.1 的文件 owner、feature/interface availability 及 migration 決策。產品 capability 以已發行 source、schema、test 及已合併行為核實；open issue 或未合併 implementation 不會自動成為 Current。
+本頁記錄 ATT 4.4.0 release candidate 的文件 owner、feature/interface availability 及 migration 決策。產品 capability 以本分支 source、schema、test 及已合併行為核實；尚未完成或未核實的 acceptance issue 仍標示為 Pending。
 
 ## Inventory 與 link impact
 
@@ -17,7 +17,7 @@ Documentation release gate 會檢查目前 entry point、配對 source module、
 
 ## Feature、interface 及 availability matrix
 
-| Capability | ATT 4.3.1 Local CLI | ATT Remote 相容 CLI | Studio 及 REST | Engine 或 Server | Status |
+| Capability | ATT 4.4.0 候選 Local CLI | ATT Remote 相容 CLI | Studio 及 REST | Engine 或 Server | Status |
 |---|---|---|---|---|---|
 | Functional Case execution | Current run command 選擇 workbook Case | Current remote run 提交 Server 工作 | Current unified RUN 支援 Case 及選取的 Case batch | Engine 執行 Case；Server 驗證 draft 並擁有 Job | Current |
 | Template、Flow、Tool execution | Current standalone debug command | Current remote debug command | Current unified RUN 支援這些 resource；Debug 是選用診斷模式 | 共用 execution 及 Action contract | Current；local CLI command 是 legacy |
@@ -74,7 +74,7 @@ Documentation release gate 會檢查目前 entry point、配對 source module、
 
 ## Current 與 Planned CLI migration
 
-ATT 4.3.1 保留明確的 workbook Snapshot authoring、Package validation 及 legacy Case execution。Current Quick Start 仍可在此 interface 執行。VALIDATE 會讀取並檢查 authored file，絕不產生或更新 Snapshot。
+ATT 4.4.0 保留明確的 workbook Snapshot authoring、Package validation 及 legacy Case execution。Current Quick Start 仍可在此 interface 執行。VALIDATE 會讀取並檢查 authored file，絕不產生或更新 Snapshot。
 
 | Legacy 相容語法 | Proposed vNext 語法 | 狀態 |
 |---|---|---|

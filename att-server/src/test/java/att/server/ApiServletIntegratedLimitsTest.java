@@ -88,6 +88,192 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void staleCentralImpactReturnsConflictThroughPublishRoute() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("impact-api-packages"));
+        Path packageRoot=createPackage(packages.resolve("p"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        Path libs=workerLibraries("impact-api-libs");
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"impact-api-data",DEFAULT_INSPECTION_TIMEOUT_MS,
+                null,libs,true,true)) {
+            Map<String,String> revisions=runtime.changeSetPublisher.currentRevisions(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true);
+            String candidate=Files.readString(runtimeConfig)+"# impact API candidate\n";
+            Map<String,Object> draft=runtime.changeSetPublisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,revisions.get("baseSourceRevision"),null,
+                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml",candidate.getBytes(StandardCharsets.UTF_8))));
+            String id=String.valueOf(draft.get("changeSetId"));
+            runtime.changeSetPublisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id);
+            runtime.changeSetPublisher.review(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id);
+            var impact=runtime.changeSetPublisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id,null);
+            assertNotNull(impact.freshness);
+            String freshness=ConfigImpactAnalyzer.freshnessFingerprint(impact.freshness);
+            att.server.api.source.SourceManagementContracts.ImpactAcknowledgement acknowledgement=
+                    new att.server.api.source.SourceManagementContracts.ImpactAcknowledgement(freshness);
+
+            Path manifest=packageRoot.resolve("package.yaml");
+            Files.writeString(manifest,Files.readString(manifest)+"# concurrent manifest change\n");
+            Captured response=invokeAsAdmin(servlet(runtime),"alice","POST",
+                    "/configuration/change-sets/"+id+"/publish",Map.of(),ServerRuntime.JSON.writeValueAsBytes(Map.of(
+                            "impactAcknowledgement",Map.of("freshnessFingerprint",freshness))));
+            JsonNode error=ServerRuntime.JSON.readTree(response.body()).path("error");
+            assertEquals(409,response.status,new String(response.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-CONFIG-IMPACT-STALE",error.path("code").asText());
+            assertFalse(Files.readString(runtimeConfig).contains("# impact API candidate"),
+                    "a stale impact must leave the central source unchanged");
+        }
+    }
+
+    @Test void centralPublishRouteReturnsFlatActivationWireContract() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("activation-wire-packages"));
+        createPackage(packages.resolve("p"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"activation-wire-data",DEFAULT_INSPECTION_TIMEOUT_MS,
+                null,workerLibraries("activation-wire-libs"),true,true)) {
+            Map<String,String> revisions=runtime.changeSetPublisher.currentRevisions(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true);
+            String candidate=Files.readString(runtimeConfig)+"# wire contract candidate\n";
+            Map<String,Object> draft=runtime.changeSetPublisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,revisions.get("baseSourceRevision"),null,
+                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml",candidate.getBytes(StandardCharsets.UTF_8))));
+            String id=String.valueOf(draft.get("changeSetId"));
+            runtime.changeSetPublisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id);
+            runtime.changeSetPublisher.review(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id);
+            var impact=runtime.changeSetPublisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id,null);
+            String freshness=ConfigImpactAnalyzer.freshnessFingerprint(impact.freshness);
+            Captured response=invokeAsAdmin(servlet(runtime),"alice","POST",
+                    "/configuration/change-sets/"+id+"/publish",Map.of(),ServerRuntime.JSON.writeValueAsBytes(Map.of(
+                            "impactAcknowledgement",Map.of("freshnessFingerprint",freshness))));
+            JsonNode body=ServerRuntime.JSON.readTree(response.body());
+            assertEquals(200,response.status,new String(response.body(),StandardCharsets.UTF_8));
+            assertTrue(body.path("published").asBoolean(),body.toString());
+            assertEquals("ACTIVE",body.path("activationState").asText(),body.toString());
+            assertEquals(body.path("revision").asText(),body.path("publishedRevision").asText(),body.toString());
+            assertEquals(body.path("revision").asText(),body.path("activeRevision").asText(),body.toString());
+            assertTrue(body.path("auditConfirmed").asBoolean(),body.toString());
+            assertFalse(body.has("activationStatus"),"Publish response must match the flat Studio SourcePublishResult contract.");
+        }
+    }
+
+    @Test void centralPublishActivationFieldsSerializeEveryStatusOutcome() throws Exception {
+        String scope=ChangeSetPublisher.CENTRAL_SCOPE_ID;
+        var published=att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE,scope,"a".repeat(64));
+        var active=att.server.api.source.SourceManagementContracts.RevisionIdentity.of(
+                att.server.api.source.SourceManagementContracts.RevisionKind.CONFIG_SOURCE,scope,"b".repeat(64));
+        for(var state:att.server.api.source.SourceManagementContracts.ActivationState.values()) {
+            Map<String,Object> publication=new LinkedHashMap<>();
+            publication.put("published",true);publication.put("revision",published.revision);publication.put("auditConfirmed",true);
+            String failure=state==att.server.api.source.SourceManagementContracts.ActivationState.FAILED
+                    ?"ATT-CONFIG-ACTIVATION-FAILED":null;
+            var status=new att.server.api.source.SourceManagementContracts.ActivationStatus(scope,published,
+                    state==att.server.api.source.SourceManagementContracts.ActivationState.UNAVAILABLE?null:active,state,failure);
+            ApiServlet.addActivationResultFields(publication,status);
+            JsonNode wire=ServerRuntime.JSON.readTree(ServerRuntime.JSON.writeValueAsBytes(publication));
+            assertEquals(state.name(),wire.path("activationState").asText(),wire.toString());
+            assertEquals(published.revision,wire.path("publishedRevision").asText(),wire.toString());
+            if(state==att.server.api.source.SourceManagementContracts.ActivationState.UNAVAILABLE)
+                assertTrue(wire.path("activeRevision").isNull(),wire.toString());
+            else assertEquals(active.revision,wire.path("activeRevision").asText(),wire.toString());
+            if(state==att.server.api.source.SourceManagementContracts.ActivationState.FAILED)
+                assertEquals(failure,wire.path("activationFailureCode").asText(),wire.toString());
+            assertTrue(wire.path("auditConfirmed").asBoolean(),wire.toString());
+            assertFalse(wire.has("activationStatus"),wire.toString());
+        }
+    }
+
+    @Test void centralExternalConfigEditsStayUnreviewedAcrossRestartAndPauseNewJobs() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("external-config-packages"));
+        createPackage(packages.resolve("p"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        Path libs=workerLibraries("external-config-libs");
+        String dataName="external-config-data";
+        String original=Files.readString(runtimeConfig);
+        String baseRevision;
+        ServerRuntime first=runtime(packages,runtimeConfig,dataName,DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true,true);
+        try {
+            baseRevision=first.changeSetPublisher.currentRevisions(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true).get("baseSourceRevision");
+            Files.writeString(runtimeConfig,original+"# unreviewed deployment edit\n");
+            var status=first.configurationActivationStatus();
+            assertEquals(att.server.api.source.SourceManagementContracts.ActivationState.FAILED,status.state);
+            assertEquals("ATT-CONFIG-EXTERNAL-SOURCE-DRIFT",status.failureCode);
+            assertEquals(baseRevision,first.changeSetPublisher.currentRevisions(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true).get("baseSourceRevision"),
+                    "An out-of-band edit must not become the Studio draft base revision.");
+            Captured blocked=invokeAs(servlet(first),"POST","/jobs/run",Map.of(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("packageId","p")),"alice",
+                    Set.of(first.config.authorization.userRole));
+            assertEquals(409,blocked.status,new String(blocked.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-CONFIG-ACTIVATION-FAILED",ServerRuntime.JSON.readTree(blocked.body()).path("error").path("code").asText());
+        } finally { first.close(); }
+
+        try(ServerRuntime restarted=runtime(packages,runtimeConfig,dataName,DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true,true)) {
+            var status=restarted.configurationActivationStatus();
+            assertEquals(att.server.api.source.SourceManagementContracts.ActivationState.FAILED,status.state);
+            assertEquals("ATT-CONFIG-EXTERNAL-SOURCE-DRIFT",status.failureCode);
+            assertEquals(baseRevision,restarted.changeSetPublisher.currentRevisions(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true).get("baseSourceRevision"));
+
+            Map<String,Object> draft=restarted.changeSetPublisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,baseRevision,null,
+                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml",
+                            (original+"# reviewed Studio publication\n").getBytes(StandardCharsets.UTF_8))));
+            String id=String.valueOf(draft.get("changeSetId"));
+            restarted.changeSetPublisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id);
+            restarted.changeSetPublisher.review(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id);
+            var impact=restarted.changeSetPublisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,id,null);
+            String freshness=ConfigImpactAnalyzer.freshnessFingerprint(impact.freshness);
+            Captured published=invokeAsAdmin(servlet(restarted),"alice","POST",
+                    "/configuration/change-sets/"+id+"/publish",Map.of(),ServerRuntime.JSON.writeValueAsBytes(Map.of(
+                            "impactAcknowledgement",Map.of("freshnessFingerprint",freshness))));
+            JsonNode body=ServerRuntime.JSON.readTree(published.body());
+            assertEquals(200,published.status,new String(published.body(),StandardCharsets.UTF_8));
+            assertEquals("ACTIVE",body.path("activationState").asText(),body.toString());
+            assertEquals(body.path("revision").asText(),body.path("activeRevision").asText(),body.toString());
+            assertTrue(Files.readString(runtimeConfig).contains("# reviewed Studio publication"));
+            assertFalse(Files.readString(runtimeConfig).contains("# unreviewed deployment edit"));
+            assertEquals(att.server.api.source.SourceManagementContracts.ActivationState.ACTIVE,
+                    restarted.configurationActivationStatus().state);
+        }
+    }
+
+    @Test void centralExternalConfigDriftClearsAfterMirrorRestoreAndResumesNewJobs() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("external-drift-recovery-packages"));
+        createPackage(packages.resolve("p"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        Path libs=workerLibraries("external-drift-recovery-libs");
+        String original=Files.readString(runtimeConfig);
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"external-drift-recovery-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true,true)) {
+            Files.writeString(runtimeConfig,original+"# unreviewed deployment edit\n");
+            var drift=runtime.configurationActivationStatus();
+            assertEquals(att.server.api.source.SourceManagementContracts.ActivationState.FAILED,drift.state);
+            assertEquals("ATT-CONFIG-EXTERNAL-SOURCE-DRIFT",drift.failureCode);
+
+            byte[] runRequest=ServerRuntime.JSON.writeValueAsBytes(Map.of("packageId","p","all",true));
+            Captured blocked=invokeAs(servlet(runtime),"POST","/jobs/run",Map.of(),runRequest,"alice",
+                    Set.of(runtime.config.authorization.userRole));
+            assertEquals(409,blocked.status,new String(blocked.body(),StandardCharsets.UTF_8));
+
+            Files.writeString(runtimeConfig,original);
+            var recovered=runtime.configurationActivationStatus();
+            assertEquals(att.server.api.source.SourceManagementContracts.ActivationState.ACTIVE,recovered.state);
+            assertNull(recovered.failureCode);
+            Captured admitted=invokeAs(servlet(runtime),"POST","/jobs/run",Map.of(),runRequest,"alice",
+                    Set.of(runtime.config.authorization.userRole));
+            assertEquals(202,admitted.status,new String(admitted.body(),StandardCharsets.UTF_8));
+        }
+    }
+
     @Test void emptyRegisteredPackageReturnsEmptyInspectorInventoryAndDoesNotAffectAnotherPackage() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("empty-package-packages"));
         Files.createDirectory(packages.resolve("lilyzhou"));
@@ -128,17 +314,71 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void packageFileIndexPagesCanonicalReferencesWithCallSitesAndRejectsStaleCursors() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("package-file-index-packages"));
+        Path packageRoot=createPackage(packages.resolve("alice"));
+        Path template=Files.createDirectories(packageRoot.resolve("templates/SAMPLE")).resolve("template.yaml");
+        Files.writeString(template,"schemaVersion: att-template/v3.6\nname: SAMPLE\ndescription: File index fixture\nactions:\n"
+                +"  sendRequest:\n    type: log\n    message: '&{./input.json}'\n"
+                +"  retryRequest:\n    type: log\n    message: '&{./input.json}'\n"
+                +"  sendArchive:\n    type: log\n    message: '&{./archive.xml}'\n");
+        Files.writeString(packageRoot.resolve("templates/SAMPLE/input.json"),"{\"ok\":true}\n");
+        Files.writeString(packageRoot.resolve("templates/SAMPLE/archive.xml"),"<archive/>\n");
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"package-file-index-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,
+                workerLibraries("package-file-index-libs"))) {
+            ApiServlet servlet=servlet(runtime);
+            Captured resources=invokeAs(servlet,"alice","GET","/packages/alice/resources",
+                    Map.of("type","template"),new byte[0]);
+            JsonNode resourcePage=ServerRuntime.JSON.readTree(resources.body());
+            assertEquals(200,resources.status,new String(resources.body(),StandardCharsets.UTF_8));
+            assertEquals(1,resourcePage.path("total").asInt(),resourcePage.toString());
+            assertEquals("ready",resourcePage.path("items").get(0).path("state").asText(),resourcePage.toString());
+            assertEquals(true,resourcePage.path("items").get(0).path("sourceAvailable").asBoolean(),resourcePage.toString());
+            Captured first=invokeAs(servlet,"alice","GET","/packages/alice/resources/files",
+                    Map.of("limit","1"),new byte[0]);
+            JsonNode firstPage=ServerRuntime.JSON.readTree(first.body());
+            assertEquals(200,first.status,new String(first.body(),StandardCharsets.UTF_8));
+            assertEquals(2,firstPage.path("total").asInt(),firstPage.toString());
+            assertEquals("COMPLETE",firstPage.path("coverage").path("state").asText());
+            JsonNode input=firstPage.path("items").get(0);
+            assertEquals("templates/SAMPLE/archive.xml",input.path("path").asText());
+            assertFalse(firstPage.path("nextCursor").asText().isBlank());
+
+            String cursor=firstPage.path("nextCursor").asText();
+            Captured second=invokeAs(servlet,"alice","GET","/packages/alice/resources/files",
+                    Map.of("limit","1","cursor",cursor),new byte[0]);
+            JsonNode secondPage=ServerRuntime.JSON.readTree(second.body());
+            assertEquals(200,second.status,new String(second.body(),StandardCharsets.UTF_8));
+            assertEquals("templates/SAMPLE/input.json",secondPage.path("items").get(0).path("path").asText());
+            JsonNode use=secondPage.path("items").get(0).path("uses").get(0);
+            assertEquals("SAMPLE",use.path("label").asText());
+            assertEquals(2,use.path("callSites").size());
+            assertEquals(Set.of("sendRequest","retryRequest"),java.util.stream.StreamSupport.stream(
+                    secondPage.path("items").get(0).path("uses").get(0).path("callSites").spliterator(),false)
+                    .map(callSite->callSite.path("actionId").asText()).collect(java.util.stream.Collectors.toSet()));
+            Files.writeString(packageRoot.resolve("templates/SAMPLE/input.json"),"{\"ok\":false}\n");
+            Captured stale=invokeAs(servlet,"alice","GET","/packages/alice/resources/files",
+                    Map.of("limit","1","cursor",cursor),new byte[0]);
+            JsonNode staleBody=ServerRuntime.JSON.readTree(stale.body());
+            assertEquals(409,stale.status,new String(stale.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-RESOURCE-CURSOR-STALE",staleBody.path("error").path("code").asText());
+            stopInspectionProcesses(runtime);
+        }
+    }
+
     @Test void asynchronousValidationRecordIsDurableOwnerScopedAndCreatesNoJob() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("validation-record-packages"));
         createPackage(packages.resolve("payments"));
         Path runtimeConfig=sharedRuntimeConfig();
         Path sharedHelper=Files.createDirectories(runtimeConfig.getParent().resolve("dbhelpers/sit")).resolve("orders.yaml");
         Files.writeString(sharedHelper,sharedDbHelper("initial helper"));
-        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.15\nenvironment: SIT\n"
                 +"environments:\n  SIT:\n    dbhelpers: [config/dbhelpers/sit/orders.yaml]\ntimeoutMs: 10000\n"
                 +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
         Path libs=workerLibraries("validation-record-libs");
-        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"validation-record-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,true,1)) {
+        try(ServerRuntime runtime=runtime(packages,runtimeConfig,"validation-record-data",DEFAULT_INSPECTION_TIMEOUT_MS,null,libs,
+                true,1,ref->System.getenv("ATT_SECRET_"+ref),true)) {
             ApiServlet servlet=servlet(runtime);
             byte[] body="{\"command\":\"validate\",\"targetKind\":\"config\"}".getBytes(StandardCharsets.UTF_8);
             Captured accepted=invokeAs(servlet,"POST","/validations",Map.of(),body,"alice");
@@ -189,13 +429,14 @@ class ApiServletIntegratedLimitsTest {
             assertTrue(validationAdmission.availablePermits()>0,"The next submission must have a free validation admission slot");
 
             Files.writeString(runtimeConfig,Files.readString(runtimeConfig)+"\n# changed after validation\n");
-            Captured stale=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
-            assertEquals("STALE",ServerRuntime.JSON.readTree(stale.body()).path("applicability").asText());
+            Captured mirrorEdit=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
+            assertEquals("CURRENT",ServerRuntime.JSON.readTree(mirrorEdit.body()).path("applicability").asText(),
+                    "Unpublished edits to the deployment mirror do not change the active Config used by validation");
 
             Files.writeString(sharedHelper,sharedDbHelper("edited external child helper"));
             Captured sharedHelperStale=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
-            assertEquals("STALE",ServerRuntime.JSON.readTree(sharedHelperStale.body()).path("applicability").asText(),
-                    "A shared Runtime Config helper edit must stale a completed Shared Config validation");
+            assertEquals("CURRENT",ServerRuntime.JSON.readTree(sharedHelperStale.body()).path("applicability").asText(),
+                    "Unpublished helper edits do not change the active Config used by validation");
 
             long packageAdmissionDeadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             while(validationAdmission.availablePermits()==0&&System.nanoTime()<packageAdmissionDeadline)Thread.sleep(5);
@@ -217,8 +458,49 @@ class ApiServletIntegratedLimitsTest {
             assertEquals("CURRENT",packageCompleted.path("applicability").asText());
             Files.writeString(sharedHelper,sharedDbHelper("edited again for Package validation"));
             Captured packageHelperStale=invokeAs(servlet,"GET","/validations/"+packageValidationId,Map.of(),new byte[0],"alice");
-            assertEquals("STALE",ServerRuntime.JSON.readTree(packageHelperStale.body()).path("applicability").asText(),
-                    "A shared Runtime Config helper edit must stale a completed Package validation");
+            assertEquals("CURRENT",ServerRuntime.JSON.readTree(packageHelperStale.body()).path("applicability").asText(),
+                    "Package validation also remains bound to the active central Config revision");
+
+            // The publication transaction imports the deployment mirror only after a caller has
+            // reviewed it. Restore the accepted mirror bytes so this test can publish an explicit,
+            // independently staged Config revision after proving the unreviewed edits stayed inert.
+            Path activeRoot=runtime.executionCentralSourceRoot();
+            Path activeConfig=activeRoot.resolve("config/config.yaml");
+            Files.writeString(runtimeConfig,Files.readString(activeConfig));
+            Files.writeString(sharedHelper,Files.readString(activeRoot.resolve("config/dbhelpers/sit/orders.yaml")));
+            Map<String,String> revisions=runtime.changeSetPublisher.currentRevisions(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true);
+            String candidate=Files.readString(activeConfig)+"\n# published validation source revision\n";
+            Map<String,Object> draft=runtime.changeSetPublisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,revisions.get("baseSourceRevision"),null,
+                    List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml",candidate.getBytes(StandardCharsets.UTF_8))));
+            String changeSetId=String.valueOf(draft.get("changeSetId"));
+            try {
+                runtime.changeSetPublisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                        ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,changeSetId);
+            } catch(ChangeSetPublisher.ValidationRejected rejected) {
+                throw new AssertionError("validation-source revision candidate rejected with "+rejected.code,rejected);
+            }
+            runtime.changeSetPublisher.review(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,changeSetId);
+            var impact=runtime.changeSetPublisher.impactReport(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                    ChangeSetPublisher.CENTRAL_SCOPE_ID,"alice",true,changeSetId,null);
+            assertNotEquals(att.server.api.source.SourceManagementContracts.ImpactDecision.BLOCKED,impact.decision,
+                    "Impact provider="+impact.providerState+" code="+impact.unavailableCode+" coverage="+impact.coverage);
+            String freshness=ConfigImpactAnalyzer.freshnessFingerprint(impact.freshness);
+            att.server.api.source.SourceManagementContracts.ImpactAcknowledgement acknowledgement=
+                    new att.server.api.source.SourceManagementContracts.ImpactAcknowledgement(freshness,"alice",
+                            ConfigImpactAnalyzer.acknowledgementDigest(freshness,"alice"));
+            Map<String,Object> publication=runtime.publishConfigurationChangeSet("alice",changeSetId,
+                    "validation-source-revision-test",acknowledgement);
+            assertEquals(Boolean.TRUE,publication.get("published"));
+
+            Captured sharedConfigStale=invokeAs(servlet,"GET","/validations/"+id,Map.of(),new byte[0],"alice");
+            assertEquals("STALE",ServerRuntime.JSON.readTree(sharedConfigStale.body()).path("applicability").asText(),
+                    "Publishing a new active central Config revision stales the prior Shared Config validation");
+            Captured packageConfigStale=invokeAs(servlet,"GET","/validations/"+packageValidationId,Map.of(),new byte[0],"alice");
+            assertEquals("STALE",ServerRuntime.JSON.readTree(packageConfigStale.body()).path("applicability").asText(),
+                    "Publishing a new active central Config revision stales Package validation too");
 
             ReentrantLock workerLock=inspectionWorkerLock(runtime);workerLock.lock();
             java.util.concurrent.CountDownLatch blockerStarted=new java.util.concurrent.CountDownLatch(1);
@@ -927,14 +1209,14 @@ class ApiServletIntegratedLimitsTest {
     @Test void sutMetricsLiveRouteUsesPinnedTenantAndReturnsBoundedTimeoutAndResponseFailures() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("sut-metrics-live-api-packages"));
         createPackage(packages.resolve("p"));
-        Map<String,Map<String,Object>> cases=Map.of(
-                "ready",Map.of(),
-                "timeout",Map.of("requestTimeoutMs",250),
-                "response-limit",Map.of("maxResponseBytes",1024));
+        Map<String,Map<String,Object>> cases=new LinkedHashMap<>();
+        cases.put("ready",Map.of("connectTimeoutMs",30_000,"requestTimeoutMs",30_000));
+        cases.put("timeout",Map.of("connectTimeoutMs",30_000,"requestTimeoutMs",5_000));
+        cases.put("response-limit",Map.of("connectTimeoutMs",30_000,"requestTimeoutMs",30_000,"maxResponseBytes",1024));
         for(Map.Entry<String,Map<String,Object>> entry:cases.entrySet()) {
             String name=entry.getKey();boolean delay="timeout".equals(name);int responseBytes="response-limit".equals(name)?2048:0;
-            try(ApiPrometheusFixture fixture=new ApiPrometheusFixture(delay?700:0,responseBytes);
-                ServerRuntime runtime=runtime(packages,writeSutMetricsConfig(sharedRuntimeConfig(),
+            try(ApiPrometheusFixture fixture=new ApiPrometheusFixture(delay?7_000:0,responseBytes);
+                ServerRuntime runtime=runtime(packages,writeSutMetricsConfig(sharedRuntimeConfig("sut-metrics-live-api-"+name+"-runtime"),
                         List.of(prometheusSource("prom","Prometheus",fixture.url(),List.of(),List.of("USER"),List.of("tenant-a"),"tenant-a",
                                 entry.getValue(),Map.of())),List.of(),List.of(),List.of(baseProfile("base","Base profile",
                                 List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query","up")))),false),
@@ -951,9 +1233,11 @@ class ApiServletIntegratedLimitsTest {
                 JsonNode response=ServerRuntime.JSON.readTree(result.body());
                 assertEquals(200,result.status,new String(result.body(),StandardCharsets.UTF_8));
                 assertEquals("ready".equals(name)?"READY":"UNAVAILABLE",response.path("state").asText(),response.toString());
-                assertEquals(1,fixture.requests.get());
-                assertEquals("tenant-a",fixture.tenant.get());
-                assertEquals("up",fixture.query.get());
+                if(!"timeout".equals(name)||fixture.requests.get()>0) {
+                    assertEquals(1,fixture.requests.get(),name+": the live query must reach its isolated Prometheus fixture; "+response);
+                    assertEquals("tenant-a",fixture.tenant.get(),name);
+                    assertEquals("up",fixture.query.get(),name);
+                }
                 assertEquals("private, no-store",result.headers.get("Cache-Control"));
                 assertFalse(result.bodyText().contains(fixture.url()),result.bodyText());
                 if(!"ready".equals(name)) {
@@ -961,7 +1245,7 @@ class ApiServletIntegratedLimitsTest {
                     assertEquals("UNAVAILABLE",item.path("queryStatus").asText(),item.toString());
                     assertTrue(item.path("error").asText().toLowerCase().contains("timeout")
                             || item.path("error").asText().toLowerCase().contains("timed out")
-                            || item.path("error").asText().toLowerCase().contains("limit"),item.toString());
+                            || item.path("error").asText().toLowerCase().contains("limit"),name+" (fixture requests="+fixture.requests.get()+"): "+item);
                 }
             }
         }
@@ -1182,6 +1466,354 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void privilegedAuthoringSourceCapacityIs503ForPackageAndCentralRoutes() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("authoring-capacity-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"authoring-capacity-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("authoring-capacity-libs"))) {
+            addAuthoringUsers(runtime);
+            ApiServlet servlet=servlet(runtime);Semaphore inspections=semaphore(runtime,"inspectionTaskSlots");inspections.acquire();
+            try {
+                Captured packageSource=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                        Collections.singletonMap("type","manifest"),new byte[0]);
+                Captured centralSource=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                        Collections.singletonMap("path","config/config.yaml"),new byte[0]);
+                assertSafeSourceFailure(packageSource,503,"ATT-SERVER-INSPECTION-CAPACITY");
+                assertSafeSourceFailure(centralSource,503,"ATT-SERVER-INSPECTION-CAPACITY");
+            } finally {inspections.release();}
+            Captured protectedPath=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                    Collections.singletonMap("path","config/att-server.yaml"),new byte[0]);
+            assertSafeSourceFailure(protectedPath,404,"ATT-SERVER-NOT-FOUND");
+        }
+    }
+
+    @Test void authoringSourceReadsReturnRequiredChangeSetRevisionPreconditions() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("authoring-revisions-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"authoring-revisions-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("authoring-revisions-libs"))) {
+            addAuthoringUsers(runtime);ApiServlet servlet=servlet(runtime);
+            Captured packageSource=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Collections.singletonMap("type","manifest"),new byte[0]);
+            JsonNode packageBody=ServerRuntime.JSON.readTree(packageSource.body());
+            assertEquals(200,packageSource.status,new String(packageSource.body(),StandardCharsets.UTF_8));
+            assertTrue(packageBody.path("baseSourceRevision").asText().matches("[a-f0-9]{64}"),packageBody.toString());
+            assertTrue(packageBody.path("registryRevision").asText().matches("[a-f0-9]{64}"),packageBody.toString());
+
+            Captured centralSource=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                    Collections.singletonMap("path","config/config.yaml"),new byte[0]);
+            JsonNode centralBody=ServerRuntime.JSON.readTree(centralSource.body());
+            assertEquals(200,centralSource.status,new String(centralSource.body(),StandardCharsets.UTF_8));
+            assertTrue(centralBody.path("baseSourceRevision").asText().matches("[a-f0-9]{64}"),centralBody.toString());
+            assertTrue(centralBody.path("registryRevision").isMissingNode(),centralBody.toString());
+
+            String baseRevision=packageBody.path("baseSourceRevision").asText();
+            String registryRevision=packageBody.path("registryRevision").asText();
+            Map<String,Object> operation=Map.of("operation","create","path","templates/stale-editor.yaml","content","id: stale\n");
+            Captured missingBase=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("registryRevision",registryRevision,"operations",List.of(operation))));
+            assertEquals(400,missingBase.status,new String(missingBase.body(),StandardCharsets.UTF_8));
+            Captured missingRegistry=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("baseSourceRevision",baseRevision,"operations",List.of(operation))));
+            assertEquals(400,missingRegistry.status,new String(missingRegistry.body(),StandardCharsets.UTF_8));
+
+            Field transactionField=ServerRuntime.class.getDeclaredField("sourceFileTransaction");transactionField.setAccessible(true);
+            SourceFileTransaction transaction=(SourceFileTransaction)transactionField.get(runtime);
+            Path configuredPackage=runtime.packageRegistry.snapshot().packages.get("alice").toRealPath();
+            Path active=transaction.pin(ChangeSetPublisher.PACKAGE_SOURCE,"alice",configuredPackage);
+            byte[] external= "id: external\n".getBytes(StandardCharsets.UTF_8);
+            transaction.commit(ChangeSetPublisher.PACKAGE_SOURCE,"alice",active,"alice",baseRevision,"c".repeat(64),
+                    Map.of("templates/external.yaml",new SourceFileTransaction.Write("templates/external.yaml",external,null)),()->{});
+            Captured stale=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("baseSourceRevision",baseRevision,
+                            "registryRevision",registryRevision,"operations",List.of(operation))));
+            assertEquals(409,stale.status,new String(stale.body(),StandardCharsets.UTF_8));
+            stopInspectionProcesses(runtime);
+        }
+    }
+
+    @Test void realChangeSetServletResponsesMatchVersionedSchemaAndNoStoreContract() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("change-set-schema-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        Path libs=workerLibraries("change-set-schema-libs");
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"change-set-schema-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,libs)) {
+            addAuthoringUsers(runtime);
+            ApiServlet servlet=servlet(runtime);
+            com.fasterxml.jackson.databind.JsonNode schemaNode;
+            try(java.io.InputStream stream=getClass().getResourceAsStream("/schemas/att-source-management-v1.schema.json")) {
+                assertNotNull(stream);
+                schemaNode=ServerRuntime.JSON.readTree(stream);
+            }
+            com.networknt.schema.JsonSchema schema=com.networknt.schema.JsonSchemaFactory
+                    .getInstance(com.networknt.schema.SpecVersion.VersionFlag.V202012).getSchema(schemaNode);
+
+            Captured packageSource=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Collections.singletonMap("type","manifest"),new byte[0]);
+            JsonNode packageRevisions=ServerRuntime.JSON.readTree(packageSource.body());
+            assertEquals(200,packageSource.status);
+            Map<String,Object> packageOperation=Map.of("operation","create","path","files/wire.txt","content","safe static file\n");
+            Map<String,Object> packageStage=Map.of("baseSourceRevision",packageRevisions.path("baseSourceRevision").asText(),
+                    "registryRevision",packageRevisions.path("registryRevision").asText(),"operations",List.of(packageOperation));
+            Captured staged=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(packageStage));
+            JsonNode stageBody=assertChangeSetSchema(schema,staged,201);
+            assertEquals("draft",stageBody.path("state").asText());
+            assertTrue(stageBody.path("revisions").path("packageRegistration").isObject());
+            String changeId=stageBody.path("changeSetId").asText();
+
+            for(String action:List.of("validate","review")) {
+                Captured response=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+changeId+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+                assertChangeSetSchema(schema,response,200);
+            }
+            Captured published=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+changeId+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+            assertChangeSetSchema(schema,published,200);
+
+            Captured currentPackage=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Collections.singletonMap("type","manifest"),new byte[0]);
+            JsonNode currentPackageRevisions=ServerRuntime.JSON.readTree(currentPackage.body());
+            Captured discardStage=invokeAs(servlet,"alice","POST","/packages/alice/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("baseSourceRevision",currentPackageRevisions.path("baseSourceRevision").asText(),
+                            "registryRevision",currentPackageRevisions.path("registryRevision").asText(),"operations",
+                            List.of(Map.of("operation","create","path","files/discard.txt","content","discard me\n")))));
+            JsonNode discardDraft=assertChangeSetSchema(schema,discardStage,201);
+            Captured discarded=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"
+                            +discardDraft.path("changeSetId").asText()+"/discard",Collections.emptyMap(),
+                    "{}".getBytes(StandardCharsets.UTF_8));
+            assertChangeSetSchema(schema,discarded,200);
+
+            Captured centralSource=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                    Collections.singletonMap("path","config/config.yaml"),new byte[0]);
+            JsonNode centralRevisions=ServerRuntime.JSON.readTree(centralSource.body());
+            Captured centralStage=invokeAs(servlet,"admin","POST","/configuration/change-sets",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("baseSourceRevision",centralRevisions.path("baseSourceRevision").asText(),
+                            "operations",List.of(Map.of("operation","replace","path","config/config.yaml",
+                                    "content",Files.readString(runtimeConfig))))));
+            JsonNode centralDraft=assertChangeSetSchema(schema,centralStage,201);
+            assertTrue(centralDraft.path("revisions").path("packageRegistration").isNull(),
+                    "central Config responses preserve absent Package registration identities as null");
+            Captured centralDiscard=invokeAs(servlet,"admin","POST","/configuration/change-sets/"
+                            +centralDraft.path("changeSetId").asText()+"/discard",Collections.emptyMap(),
+                    "{}".getBytes(StandardCharsets.UTF_8));
+            assertChangeSetSchema(schema,centralDiscard,200);
+        }
+    }
+
+    @Test void packageZipImportStagesReviewsAndPublishesPackageLocalChanges() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("package-zip-import-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"package-zip-import-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("package-zip-import-libs"))) {
+            addAuthoringUsers(runtime);ApiServlet servlet=servlet(runtime);
+            byte[] archive=packageZip("files/z-imported.txt","last\n","files/a-imported.txt","first\n");
+            byte[] runtimeConfigBefore=Files.readAllBytes(runtimeConfig);
+
+            Captured wrongType=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/import",
+                    Collections.emptyMap(),archive);
+            assertEquals(415,wrongType.status,new String(wrongType.body(),StandardCharsets.UTF_8));
+
+            Captured malformed=invokeAsContentType(servlet,"alice","POST","/packages/alice/change-sets/import",
+                    Collections.emptyMap(),new byte[]{1,2,3},"application/zip");
+            assertEquals(400,malformed.status,new String(malformed.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-PACKAGE-ZIP-INVALID",ServerRuntime.JSON.readTree(malformed.body())
+                    .path("error").path("code").asText());
+
+            Captured unauthorized=invokeAsContentType(servlet,"alice","POST","/packages/bob/change-sets/import",
+                    Collections.emptyMap(),new byte[]{1,2,3},"application/zip");
+            assertEquals(403,unauthorized.status,new String(unauthorized.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-PACKAGE-SOURCE-DENIED",ServerRuntime.JSON.readTree(unauthorized.body())
+                    .path("error").path("code").asText(),"Package ownership is checked before parsing an archive");
+
+            byte[] traversal=packageZip("files/partial-import.txt","must-not-publish\n","../outside.yaml","escaped\n");
+            Captured rejectedTraversal=invokeAsContentType(servlet,"alice","POST","/packages/alice/change-sets/import",
+                    Collections.emptyMap(),traversal,"application/zip");
+            assertEquals(400,rejectedTraversal.status,new String(rejectedTraversal.body(),StandardCharsets.UTF_8));
+            assertFalse(Files.exists(ownerPackage.getParent().resolve("outside.yaml")),"A rejected traversal ZIP writes no outside file");
+            assertFalse(Files.exists(ownerPackage.resolve("files/partial-import.txt")),"A rejected ZIP stages no valid prefix entry");
+
+            Captured imported=invokeAsContentType(servlet,"alice","POST","/packages/alice/change-sets/import",
+                    Collections.emptyMap(),archive,"application/zip");
+            assertEquals(201,imported.status,new String(imported.body(),StandardCharsets.UTF_8));
+            assertEquals("private, no-store",imported.headers.get("Cache-Control"));
+            JsonNode draft=ServerRuntime.JSON.readTree(imported.body());
+            assertEquals("draft",draft.path("state").asText());
+            assertEquals(2,draft.path("changedFiles").size());
+            assertEquals("create",draft.path("changedFiles").path(0).path("operation").asText());
+            assertEquals("files/a-imported.txt",draft.path("changedFiles").path(0).path("path").asText(),
+                    "ZIP entries should produce a deterministic path-sorted Change Set diff");
+            assertEquals("files/z-imported.txt",draft.path("changedFiles").path(1).path("path").asText());
+            String id=draft.path("changeSetId").asText();
+            assertArrayEquals(runtimeConfigBefore,Files.readAllBytes(runtimeConfig),
+                    "Package ZIP import must not modify the globally owned Runtime Config");
+            assertFalse(Files.exists(ownerPackage.resolve("files/a-imported.txt"))
+                            ||Files.exists(ownerPackage.resolve("files/z-imported.txt")),
+                    "Import creates an ordinary Change Set and must leave published Package files untouched");
+
+            for(String action:List.of("validate","review")) {
+                Captured response=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+id+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+                assertEquals(200,response.status,new String(response.body(),StandardCharsets.UTF_8));
+                assertFalse(Files.exists(ownerPackage.resolve("files/a-imported.txt"))
+                                ||Files.exists(ownerPackage.resolve("files/z-imported.txt")),
+                        "Validation and review must not publish imported files");
+                assertArrayEquals(runtimeConfigBefore,Files.readAllBytes(runtimeConfig),
+                        "Package Change Set gates must not modify the global Runtime Config");
+            }
+            Captured published=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+id+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(200,published.status,new String(published.body(),StandardCharsets.UTF_8));
+            assertEquals("first\n",Files.readString(ownerPackage.resolve("files/a-imported.txt")));
+            assertEquals("last\n",Files.readString(ownerPackage.resolve("files/z-imported.txt")));
+            assertArrayEquals(runtimeConfigBefore,Files.readAllBytes(runtimeConfig));
+
+            byte[] replacementArchive=packageZip("files/a-imported.txt","updated\n","files/new-imported.txt","new\n");
+            Captured replacement=invokeAsContentType(servlet,"alice","POST","/packages/alice/change-sets/import",
+                    Collections.emptyMap(),replacementArchive,"application/zip");
+            assertEquals(201,replacement.status,new String(replacement.body(),StandardCharsets.UTF_8));
+            JsonNode replacementDraft=ServerRuntime.JSON.readTree(replacement.body());
+            assertEquals("replace",replacementDraft.path("changedFiles").path(0).path("operation").asText());
+            assertEquals("files/a-imported.txt",replacementDraft.path("changedFiles").path(0).path("path").asText());
+            assertEquals("create",replacementDraft.path("changedFiles").path(1).path("operation").asText());
+            String replacementId=replacementDraft.path("changeSetId").asText();
+            for(String action:List.of("validate","review")) {
+                Captured response=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+replacementId+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+                assertEquals(200,response.status,new String(response.body(),StandardCharsets.UTF_8));
+            }
+            Captured replacementPublished=invokeAs(servlet,"alice","POST","/packages/alice/change-sets/"+replacementId+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(200,replacementPublished.status,new String(replacementPublished.body(),StandardCharsets.UTF_8));
+            assertEquals("updated\n",Files.readString(ownerPackage.resolve("files/a-imported.txt")));
+            assertEquals("new\n",Files.readString(ownerPackage.resolve("files/new-imported.txt")));
+            assertArrayEquals(runtimeConfigBefore,Files.readAllBytes(runtimeConfig));
+
+            byte[] malformedWorkbookArchive=packageZip("files/valid-prefix.txt","must-stay-private\n",
+                    "testcase/malformed.xlsx","not an XLSX workbook");
+            Captured malformedWorkbookImport=invokeAsContentType(servlet,"alice","POST","/packages/alice/change-sets/import",
+                    Collections.emptyMap(),malformedWorkbookArchive,"application/zip");
+            assertEquals(400,malformedWorkbookImport.status,new String(malformedWorkbookImport.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-PACKAGE-ZIP-INVALID",ServerRuntime.JSON.readTree(malformedWorkbookImport.body())
+                    .path("error").path("code").asText());
+            assertFalse(Files.exists(ownerPackage.resolve("files/valid-prefix.txt")),
+                    "A valid ZIP prefix must not be staged when another entry contains a malformed workbook");
+            assertFalse(Files.exists(ownerPackage.resolve("testcase/malformed.xlsx")),
+                    "A malformed workbook must never become a published Package source");
+            assertArrayEquals(runtimeConfigBefore,Files.readAllBytes(runtimeConfig));
+        }
+    }
+
+    private static JsonNode assertChangeSetSchema(com.networknt.schema.JsonSchema schema,Captured response,int status) throws Exception {
+        assertEquals(status,response.status,new String(response.body(),StandardCharsets.UTF_8));
+        assertEquals("private, no-store",response.headers.get("Cache-Control"));
+        JsonNode body=ServerRuntime.JSON.readTree(response.body());
+        assertEquals("limits-test",body.path("requestId").asText());
+        java.util.Set<com.networknt.schema.ValidationMessage> errors=schema.validate(body);
+        assertTrue(errors.isEmpty(),errors.toString()+" response="+body);
+        return body;
+    }
+
+    @Test void packageAuthoringSourceTimeoutIs504() throws Exception {
+        assertAuthoringSourceTimeout(false,"package-authoring-timeout");
+    }
+
+    @Test void centralAuthoringSourceTimeoutIs504() throws Exception {
+        assertAuthoringSourceTimeout(true,"central-authoring-timeout");
+    }
+
+    @Test void privilegedAuthoringSourceUnexpectedWorkerFailuresAreSafe500ForBothRoutes() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("authoring-failure-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        ServerRuntime.WorkerProcessLauncher brokenLauncher=builder->{throw new java.io.IOException("source-error-excerpt-canary");};
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"authoring-failure-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,brokenLauncher,workerLibraries("authoring-failure-libs"))) {
+            addAuthoringUsers(runtime);ApiServlet servlet=servlet(runtime);
+            Captured packageSource=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Collections.singletonMap("type","manifest"),new byte[0]);
+            Captured centralSource=invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                    Collections.singletonMap("path","config/config.yaml"),new byte[0]);
+            assertSafeSourceFailure(packageSource,500,"ATT-SERVER-REQUEST-FAILED");
+            assertSafeSourceFailure(centralSource,500,"ATT-SERVER-REQUEST-FAILED");
+            assertFalse(new String(packageSource.body(),StandardCharsets.UTF_8).contains("source-error-excerpt-canary"));
+            assertFalse(new String(centralSource.body(),StandardCharsets.UTF_8).contains("source-error-excerpt-canary"));
+        }
+    }
+
+    private void assertAuthoringSourceTimeout(boolean central,String dataName) throws Exception {
+        Path packages=Files.createDirectories(temp.resolve(dataName+"-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,dataName+"-data",100,null,
+                workerLibraries(dataName+"-libs"))) {
+            addAuthoringUsers(runtime);ApiServlet servlet=servlet(runtime);
+            java.util.List<ReentrantLock> held=new java.util.ArrayList<ReentrantLock>();
+            for(Object worker:inspectionWorkers(runtime)) {
+                Field lockField=worker.getClass().getDeclaredField("lock");lockField.setAccessible(true);
+                ReentrantLock lock=(ReentrantLock)lockField.get(worker);lock.lock();held.add(lock);
+            }
+            Captured response;
+            try {
+                response=central
+                        ?invokeAs(servlet,"admin","GET","/configuration/authoring-source",
+                                Collections.singletonMap("path","config/config.yaml"),new byte[0])
+                        :invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                                Collections.singletonMap("type","manifest"),new byte[0]);
+            } finally {for(int index=held.size()-1;index>=0;index--)held.get(index).unlock();}
+            assertSafeSourceFailure(response,504,"ATT-SERVER-INSPECTION-TIMEOUT");
+            stopInspectionProcesses(runtime);
+        }
+    }
+
+    private ServerRuntime authoringRuntime(Path packages,Path ownerPackage,Path runtimeConfig,String dataName,int timeout,
+                                            ServerRuntime.WorkerProcessLauncher launcher,Path libs) throws Exception {
+        Path yaml=temp.resolve(dataName+".yaml");
+        String config="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve(dataName))
+                +"\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  authenticationRequired: true\n  auth: {mode: local}\n  centralConfigurationEditingEnabled: true\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n"
+                +"    queuedLimit: 0\n    timeoutMs: "+timeout+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 0\n"
+                +"packages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(packages)+"]\n  entries:\n    alice: "
+                +ServerRuntimeTestSupport.yaml(ownerPackage)+"\n";
+        ServerConfig serverConfig=ServerConfig.load(Files.writeString(yaml,config));
+        return new ServerRuntime(serverConfig,libs.toString(),launcher==null?ProcessBuilder::start:launcher);
+    }
+
+    @Test void centralAuthoringSourceWithholdsProtectedEmbeddedScalarsFromActiveRevision() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("central-active-secret-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig();
+        String protectedSource=Files.readString(runtimeConfig)
+                +"x-authoring-secret-fixture: |\n  classification: secret\n  value: central-active-route-canary\n";
+        Files.writeString(runtimeConfig,protectedSource);
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"central-active-secret-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("central-active-secret-libs"))) {
+            addAuthoringUsers(runtime);
+            Captured central=invokeAs(servlet(runtime),"admin","GET","/configuration/authoring-source",
+                    Collections.singletonMap("path","config/config.yaml"),new byte[0]);
+            assertSafeSourceFailure(central,404,"ATT-SERVER-NOT-FOUND");
+            assertFalse(new String(central.body(),StandardCharsets.UTF_8).contains("central-active-route-canary"));
+        }
+    }
+
+    private static void addAuthoringUsers(ServerRuntime runtime) throws Exception {
+        runtime.auth.createUser("alice","Alice","alice source access password","USER");
+        runtime.auth.createUser("admin","Admin","admin source access password","ADMIN");
+    }
+
+    private static void assertSafeSourceFailure(Captured response,int status,String code) throws Exception {
+        JsonNode body=ServerRuntime.JSON.readTree(response.body());
+        assertEquals(status,response.status,new String(response.body(),StandardCharsets.UTF_8));
+        assertEquals(code,body.path("error").path("code").asText(),body.toString());
+        assertFalse(new String(response.body(),StandardCharsets.UTF_8).contains("schemaVersion"),
+                "Source failures must not include source excerpts");
+    }
+
     @Test void packageConfigurationByteLimitHasStructuredFieldsOnTheRealInspectionRoute() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("configuration-limit-packages"));createPackage(packages.resolve("p"));
         Path config=sharedRuntimeConfig();
@@ -1279,40 +1911,59 @@ class ApiServletIntegratedLimitsTest {
 
     private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
                                   ServerRuntime.WorkerProcessLauncher launcher,Path libs) throws Exception {
-        return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,false);
+        return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,false,false);
     }
 
     private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
                                   ServerRuntime.WorkerProcessLauncher launcher,Path libs,boolean authenticationRequired) throws Exception {
         return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,authenticationRequired,0,
-                ref->System.getenv("ATT_SECRET_"+ref));
+                ref->System.getenv("ATT_SECRET_"+ref),false);
     }
 
     private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
                                   ServerRuntime.WorkerProcessLauncher launcher,Path libs,boolean authenticationRequired,
                                   int inspectionQueuedLimit) throws Exception {
         return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,authenticationRequired,
-                inspectionQueuedLimit,ref->System.getenv("ATT_SECRET_"+ref));
+                inspectionQueuedLimit,ref->System.getenv("ATT_SECRET_"+ref),false);
     }
 
     private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
                                   ServerRuntime.WorkerProcessLauncher launcher,Path libs,boolean authenticationRequired,
                                   java.util.function.Function<String,String> secretResolver) throws Exception {
-        return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,authenticationRequired,0,secretResolver);
+        return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,authenticationRequired,0,secretResolver,false);
+    }
+
+    private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
+                                  ServerRuntime.WorkerProcessLauncher launcher,Path libs,
+                                  boolean authenticationRequired,boolean centralConfigurationEditingEnabled) throws Exception {
+        return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,authenticationRequired,0,
+                ref->System.getenv("ATT_SECRET_"+ref),centralConfigurationEditingEnabled);
     }
 
     private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
                                   ServerRuntime.WorkerProcessLauncher launcher,Path libs,boolean authenticationRequired,
                                   int inspectionQueuedLimit,java.util.function.Function<String,String> secretResolver) throws Exception {
+        return runtime(packages,runtimeConfig,dataName,timeout,launcher,libs,authenticationRequired,
+                inspectionQueuedLimit,secretResolver,false);
+    }
+
+    private ServerRuntime runtime(Path packages,Path runtimeConfig,String dataName,int timeout,
+                                  ServerRuntime.WorkerProcessLauncher launcher,Path libs,boolean authenticationRequired,
+                                  int inspectionQueuedLimit,java.util.function.Function<String,String> secretResolver,
+                                  boolean centralConfigurationEditingEnabled) throws Exception {
         Path yaml=temp.resolve(dataName+".yaml");
         StringBuilder entries=new StringBuilder();
         try(java.util.stream.Stream<Path> children=Files.list(packages)) {
-            children.filter(Files::isDirectory).sorted().forEach(path->entries.append("    ").append(path.getFileName())
+            children.filter(Files::isDirectory)
+                    .filter(path->path.getFileName().toString().matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}"))
+                    .sorted().forEach(path->entries.append("    ").append(path.getFileName())
                     .append(": ").append(ServerRuntimeTestSupport.yaml(path)).append("\n"));
         }
         String config="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve(dataName))
                 +"\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
-                +"\n  maxRequestBytes: 1024\n  authenticationRequired: "+authenticationRequired+"\n  authorization:\n    allowAnonymousOperations: "+(!authenticationRequired)+"\n"
+                +"\n  maxRequestBytes: 1024\n  authenticationRequired: "+authenticationRequired
+                +"\n  centralConfigurationEditingEnabled: "+centralConfigurationEditingEnabled
+                +"\n  authorization:\n    allowAnonymousOperations: "+(!authenticationRequired)+"\n"
                 +"  inspection:\n    enabled: true\n    maxConcurrent: 1\n    queuedLimit: "+inspectionQueuedLimit+"\n    timeoutMs: "+timeout
                 +"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 0\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(packages)
                 +"\n  entries:\n"+entries;
@@ -1330,8 +1981,12 @@ class ApiServletIntegratedLimitsTest {
     }
 
     private Path sharedRuntimeConfig() throws Exception {
-        Path root=Files.createDirectories(temp.resolve("shared-runtime-config/config"));
-        return Files.writeString(root.resolve("config.yaml"),"schemaVersion: att-config/v2.13\nenvironment: SIT\n"
+        return sharedRuntimeConfig("shared-runtime-config");
+    }
+
+    private Path sharedRuntimeConfig(String name) throws Exception {
+        Path root=Files.createDirectories(temp.resolve(name+"/config"));
+        return Files.writeString(root.resolve("config.yaml"),"schemaVersion: att-config/v2.15\nenvironment: SIT\n"
                 +"environments:\n  SIT: {}\ntimeoutMs: 10000\ntestcase: {root: testcase}\ntemplates: {root: templates}\n");
     }
 
@@ -1440,24 +2095,56 @@ class ApiServletIntegratedLimitsTest {
         return invokeAs(servlet,method,path,parameters,body,"alice",null);
     }
 
+    private Captured invokeAs(ApiServlet servlet,String login,String method,String path,
+                              Map<String,String> parameters,byte[] body) throws Exception {
+        return invokeAs(servlet,method,path,parameters,body,login,null,false);
+    }
+
     private Captured invokeAs(ApiServlet servlet,String method,String path,Map<String,String> parameters,byte[] body,String actor) throws Exception {
-        return invokeAs(servlet,method,path,parameters,body,actor,null);
+        return invokeAs(servlet,method,path,parameters,body,actor,null,false);
+    }
+
+    private Captured invokeAsAdmin(ApiServlet servlet,String login,String method,String path,
+                                   Map<String,String> parameters,byte[] body) throws Exception {
+        return invokeAs(servlet,method,path,parameters,body,login,null,true);
+    }
+
+    private Captured invokeAs(ApiServlet servlet,String login,String method,String path,Map<String,String> parameters,
+                              byte[] body,boolean admin) throws Exception {
+        return invokeAs(servlet,method,path,parameters,body,login,null,admin);
     }
 
     private Captured invokeAs(ApiServlet servlet,String method,String path,Map<String,String> parameters,byte[] body,
                               String login,Set<String> roles) throws Exception {
+        return invokeAs(servlet,method,path,parameters,body,login,roles,false);
+    }
+
+    private Captured invokeAs(ApiServlet servlet,String method,String path,Map<String,String> parameters,byte[] body,
+                              String login,Set<String> roles,boolean admin) throws Exception {
+        return invokeAsContentType(servlet,method,path,parameters,body,login,roles,admin,"application/json");
+    }
+
+    private Captured invokeAsContentType(ApiServlet servlet,String login,String method,String path,
+                                         Map<String,String> parameters,byte[] body,String contentType) throws Exception {
+        return invokeAsContentType(servlet,method,path,parameters,body,login,null,false,contentType);
+    }
+
+    private Captured invokeAsContentType(ApiServlet servlet,String method,String path,Map<String,String> parameters,
+                                         byte[] body,String login,Set<String> roles,boolean admin,String contentType) throws Exception {
         ServletContext context=servlet.getServletContext();
         HttpServletRequest request=proxy(HttpServletRequest.class,(self,called,args)->{
             switch(called.getName()) {
                 case "getServletContext": return context;
+                case "getAttribute": return AuthService.IDENTITY.equals(args[0])?login:null;
                 case "getMethod": return method;
                 case "getPathInfo": return path;
                 case "getContextPath": return "";
                 case "getParameter": return parameters.get(args[0]);
                 case "getHeader": return "X-Request-ID".equals(args[0])?"limits-test":null;
-                case "getContentType": return "application/json";
+                case "getContentType": return contentType;
                 case "getUserPrincipal": return login==null?null:(Principal)()->login;
-                case "isUserInRole": return roles==null?runtimeRole(servlet,args[0]):roles.contains(args[0]);
+                case "isUserInRole": return roles!=null?roles.contains(args[0])
+                        :admin?runtimeAdminRole(servlet,args[0]):runtimeRole(servlet,args[0]);
                 case "getInputStream": return input(body);
                 case "getRemoteAddr": return "127.0.0.1";
                 default: return defaultValue(called.getReturnType());
@@ -1474,11 +2161,31 @@ class ApiServletIntegratedLimitsTest {
         return response;
     }
 
+    private static byte[] packageZip(String... pathsAndContents) throws Exception {
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+        try(java.util.zip.ZipOutputStream zip=new java.util.zip.ZipOutputStream(bytes,StandardCharsets.UTF_8)) {
+            for(int index=0;index<pathsAndContents.length;index+=2) {
+                zip.putNextEntry(new java.util.zip.ZipEntry(pathsAndContents[index]));
+                zip.write(pathsAndContents[index+1].getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+        }
+        return bytes.toByteArray();
+    }
+
     private boolean runtimeRole(ApiServlet servlet,Object role) {
         try {
             Field field=ApiServlet.class.getDeclaredField("runtime");field.setAccessible(true);
             ServerRuntime runtime=(ServerRuntime)field.get(servlet);
             return runtime.config.authorization.userRole.equals(role);
+        } catch(Exception failure){throw new IllegalStateException(failure);}
+    }
+
+    private boolean runtimeAdminRole(ApiServlet servlet,Object role) {
+        try {
+            Field field=ApiServlet.class.getDeclaredField("runtime");field.setAccessible(true);
+            ServerRuntime runtime=(ServerRuntime)field.get(servlet);
+            return runtime.config.authorization.adminRole.equals(role);
         } catch(Exception failure){throw new IllegalStateException(failure);}
     }
 

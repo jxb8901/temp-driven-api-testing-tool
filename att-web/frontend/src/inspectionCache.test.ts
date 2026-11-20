@@ -45,6 +45,33 @@ describe('inspection session memory', () => {
     expect(await cache.query('page', async () => 'new login')).toBe('new login');
   });
 
+  it('notifies once for a failed session and starts a new reset cycle after login', async () => {
+    const cache = new InspectionQueryCache(); cache.setContext('alice');
+    const changed = vi.fn(), sessionChanged = vi.fn();
+    cache.subscribe(changed); cache.subscribeSession(sessionChanged);
+
+    cache.resetSession();
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(sessionChanged).toHaveBeenCalledTimes(1);
+    cache.setContext('alice');
+    cache.resetSession();
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(sessionChanged).toHaveBeenCalledTimes(1);
+    await cache.query('anonymous', async () => 'temporary result');
+    cache.resetSession();
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(sessionChanged).toHaveBeenCalledTimes(1);
+    const retainedAnonymous = vi.fn(async () => 'unexpected');
+    expect(await cache.query('anonymous', retainedAnonymous)).toBe('temporary result');
+    expect(retainedAnonymous).not.toHaveBeenCalled();
+
+    cache.setContext('bob');
+    expect(changed).toHaveBeenCalledTimes(2);
+    cache.resetSession();
+    expect(changed).toHaveBeenCalledTimes(3);
+    expect(sessionChanged).toHaveBeenCalledTimes(2);
+  });
+
   it('shows stale data while revalidating and notifies readers of updates and failures', async () => {
     let now = 0; const cache = new InspectionQueryCache(10, () => now);
     const changed = vi.fn(); cache.subscribe(changed);
@@ -98,6 +125,13 @@ describe('inspection session memory', () => {
     expect(await cache.query('list', load)).toBe('retained list');
     expect(load).not.toHaveBeenCalled();
     expect(cache.getView('filters')).toEqual({ query: 'checkout' });
+  });
+
+  it('notifies mounted package readers when publication invalidates Package projections', () => {
+    const cache = new InspectionQueryCache();
+    const mountedReader = vi.fn(); cache.subscribe(mountedReader);
+    cache.invalidatePackage('payments');
+    expect(mountedReader).toHaveBeenCalledTimes(1);
   });
 
   it('invalidates old pages and outstanding reads on a package revision change', async () => {

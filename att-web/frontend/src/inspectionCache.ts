@@ -13,6 +13,8 @@ export class InspectionQueryCache {
   private generation = 0;
   sharedEpoch = 0;
   private context = '';
+  private sessionExpired = false;
+  private expiredContext: string | null = null;
   sessionEpoch = 0;
   private selection = '';
   private revisions = new Map<string, string>();
@@ -32,13 +34,20 @@ export class InspectionQueryCache {
     this.notify();
   }
   resetSession() {
-    this.context = ''; this.sessionEpoch++; this.clear();
+    // A 401 notification rerenders readers, which retries protected requests. Expire once until a new context arrives.
+    if (this.sessionExpired) return;
+    this.expiredContext = this.context;
+    this.context = '';
+    this.sessionExpired = true; this.sessionEpoch++; this.clear();
     for (const listener of this.sessionListeners) listener();
   }
   setContext(context: string) {
+    if (this.sessionExpired && this.expiredContext === context) return;
     if (this.context === context) return;
     const hadContext = Boolean(this.context);
     this.context = context;
+    this.sessionExpired = false;
+    this.expiredContext = null;
     this.clear();
     if (hadContext) { this.sessionEpoch++; for (const listener of this.sessionListeners) listener(); }
   }
@@ -71,10 +80,11 @@ export class InspectionQueryCache {
       if (path.startsWith(marker) && path !== exceptPath) { flight.controller.abort(); this.flights.delete(key); }
     }
     this.views.clear(); this.revisions.delete(packageId);
+    this.notify();
   }
   revision(packageId: string, revision: string, path?: string) {
     const previous = this.revisions.get(packageId);
-    if (previous && previous !== revision) { this.invalidatePackage(packageId, path); this.notify(); }
+    if (previous && previous !== revision) this.invalidatePackage(packageId, path);
     this.revisions.set(packageId, revision);
     while (this.revisions.size > 32) this.revisions.delete(this.revisions.keys().next().value!);
   }

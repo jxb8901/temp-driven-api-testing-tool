@@ -1,11 +1,11 @@
 export interface SavedLoadScenario { id: string; packageId: string; name: string; description: string; tags: string[]; model: string; revision: number; updatedAt: string; workloadCount?: number }
-import type { ManifestView, ManifestProjection, ManifestDraft, ManifestHistory } from './features/explorer/packageManifest';
+import type { ManifestView, ManifestProjection, ManifestDraft, ManifestDraftSource, ManifestHistory, AuthoringSourceProjection } from './features/explorer/packageManifest';
 import type { JobReplay, JobReplayEditorDraft } from "./features/load/types";
 import { ApiError, type ApiEnvelope, type ApiErrorBody, type JobSummary, type LocalAuthUser, type MonitoringJobJournal, type MonitoringSnapshot, type PackageSummary, type ServerVersion } from './types';
 import type {
   AcceptedJob, ConfigurationComparisonQuery, ConfigurationFilePage, ConfigurationResponse, DebugDraftRequest, DraftResponse,
   DebugFormResponse, EffectiveConfigurationQuery, PackageSutMetricsCatalog, PackageSutMetricsDraft,
-  PackageSutMetricsDraftAction, PackageSutMetricsResource, PackageSutMetricsResourceDraftInput,
+  PackageFileIndexPage, PackageSutMetricsDraftAction, PackageSutMetricsResource, PackageSutMetricsResourceDraftInput,
   PackageSutMetricsResourceKind, ResourceDetail, ResourceIdentity, SourceProjection, TestdataRecordsResponse,
   ResourcePage, ResourceQuery,
 } from './features/explorer/types';
@@ -29,6 +29,11 @@ interface SutMetricCatalogResponse {
   items: Array<Record<string, unknown>>;
   configuration?: Record<string, unknown>;
 }
+import type {
+  ManagedAuthoringSource, PackageAuthoringSourceQuery, SourceChangeAction, SourceChangeSet,
+  SourceDomain, SourceImpactReport, SourceImpactAcknowledgement, SourceOperation, SourcePublishResult, SourceSnapshotRequest,
+  SourceHistoryDiffResponse, SourceHistoryResponse,
+} from './features/explorer/sourceManagement';
 
 export interface ServerJobStorageMetrics {
   enabled?: boolean;
@@ -181,7 +186,10 @@ async function transport<T>(path: string, init: RequestInit = {}): Promise<T> {
     const payload = body && typeof body === 'object' ? body as { error?: ApiErrorBody; code?: string; message?: string; detail?: string; requestId?: string; diagnostics?: unknown } : {};
     const detail = payload.error;
     const message = detail?.summary || detail?.message || detail?.detail || payload.message || payload.detail;
-    if (isInspectionQuery(path, init) && [401, 403, 404, 409].includes(response.status)) {
+    // A 401 must reach the active reader so it can show the session-expired
+    // state. Invalidating the package here aborts that in-flight query and
+    // replaces the useful 401 with an AbortError during the resulting rerender.
+    if (isInspectionQuery(path, init) && [403, 404, 409].includes(response.status)) {
       const packageMatch = /^packages\/([^/]+)\//.exec(path);
       if (packageMatch) inspectionCache.invalidatePackage(decodeURIComponent(packageMatch[1]));
     }
@@ -552,6 +560,11 @@ export const api = {
       direction: query.direction,
     }), { signal });
   },
+  listPackageFileIndex(packageId: string, query: { query?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<PackageFileIndexPage> {
+    return request<PackageFileIndexPage>('packages/' + encodeURIComponent(packageId) + '/resources/files' + queryString({
+      query: query.query, cursor: query.cursor, limit: query.limit,
+    }), { signal });
+  },
   getResource(identity: ResourceIdentity, signal?: AbortSignal): Promise<ResourceDetail> {
     return request<ResourceDetail>(resourcePath(identity), { signal });
   },
@@ -563,6 +576,89 @@ export const api = {
   },
   getPackageManifest(packageId: string, view: ManifestView, environment?: string, signal?: AbortSignal): Promise<ManifestProjection> {
     return request('packages/' + encodeURIComponent(packageId) + '/package-configuration/' + view + queryString({ environment }), { signal });
+  },
+  getPackageAuthoringSource(packageId: string, signal?: AbortSignal): Promise<AuthoringSourceProjection> {
+    return request('packages/' + encodeURIComponent(packageId) + '/authoring-source' + queryString({ type: 'manifest' }), { signal });
+  },
+  getPackageManifestDraftSource(packageId: string, draftId: string, signal?: AbortSignal): Promise<ManifestDraftSource> {
+    return request('packages/' + encodeURIComponent(packageId) + '/package-configuration/drafts/'
+      + encodeURIComponent(draftId) + '/source', { signal, cache: 'no-store' });
+  },
+  getManagedPackageAuthoringSource(packageId: string, query: PackageAuthoringSourceQuery, signal?: AbortSignal): Promise<ManagedAuthoringSource> {
+    return request('packages/' + encodeURIComponent(packageId) + '/authoring-source' + queryString({
+      type: query.kind,
+      resourceType: query.resourceType,
+      resourceId: query.resourceId,
+      path: query.path,
+      origin: query.origin,
+      referenceId: query.referenceId,
+      environment: query.environment,
+    }), { signal, cache: 'no-store' });
+  },
+  getCentralAuthoringSource(path: string, signal?: AbortSignal): Promise<ManagedAuthoringSource> {
+    return request('configuration/authoring-source' + queryString({ path }), { signal, cache: 'no-store' });
+  },
+  stageSourceChangeSet(domain: SourceDomain, scopeId: string, baseSourceRevision: string,
+    registryRevision: string | undefined, operations: SourceOperation[], signal?: AbortSignal): Promise<SourceChangeSet> {
+    const path = domain === 'PACKAGE_SOURCE'
+      ? 'packages/' + encodeURIComponent(scopeId) + '/change-sets'
+      : 'configuration/change-sets';
+    return postJson<SourceChangeSet>(path, {
+      baseSourceRevision,
+      ...(domain === 'PACKAGE_SOURCE' ? { registryRevision } : {}),
+      operations,
+    }, signal);
+  },
+  stagePackageSourceArchive(packageId: string, archive: File, signal?: AbortSignal): Promise<SourceChangeSet> {
+    return request<SourceChangeSet>('packages/' + encodeURIComponent(packageId) + '/change-sets/import', {
+      method: 'POST', body: archive, headers: { 'Content-Type': 'application/zip' }, signal,
+    });
+  },
+  async sourceChangeSetAction(domain: SourceDomain, scopeId: string, changeSetId: string,
+    action: SourceChangeAction, signal?: AbortSignal, impactAcknowledgement?: SourceImpactAcknowledgement): Promise<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }> {
+    const base = domain === 'PACKAGE_SOURCE'
+      ? 'packages/' + encodeURIComponent(scopeId) + '/change-sets'
+      : 'configuration/change-sets';
+    const result = await postJson<SourceChangeSet | SourcePublishResult | { discarded: boolean; changeSetId: string }>(
+      base + '/' + encodeURIComponent(changeSetId) + '/' + action,
+      action === 'publish' && domain === 'CENTRAL_RUNTIME_CONFIG' && impactAcknowledgement ? { impactAcknowledgement } : {}, signal);
+    if (action === 'publish' && 'published' in result && result.published) {
+      if (domain === 'PACKAGE_SOURCE') inspectionCache.invalidatePackage(scopeId);
+      else inspectionCache.clear();
+    }
+    return result;
+  },
+  getSourceHistory(domain: SourceDomain, scopeId: string, offset = 0, limit = 20, signal?: AbortSignal): Promise<SourceHistoryResponse> {
+    const base = domain === 'PACKAGE_SOURCE'
+      ? 'packages/' + encodeURIComponent(scopeId) + '/source-history'
+      : 'configuration/source-history';
+    return request<SourceHistoryResponse>(base + queryString({ offset, limit }), { signal, cache: 'no-store' });
+  },
+  getSourceHistoryDiff(domain: SourceDomain, scopeId: string, beforeSnapshotId: string, afterSnapshotId: string,
+    path?: string, signal?: AbortSignal, offset = 0, limit = 20): Promise<SourceHistoryDiffResponse> {
+    const base = domain === 'PACKAGE_SOURCE'
+      ? 'packages/' + encodeURIComponent(scopeId) + '/source-history/diff'
+      : 'configuration/source-history/diff';
+    return request<SourceHistoryDiffResponse>(base + queryString({ beforeSnapshotId, afterSnapshotId, path, offset, limit }), { signal, cache: 'no-store' });
+  },
+  stageSourceRestore(domain: SourceDomain, scopeId: string, snapshotId: string, expectedSourceRevision: string,
+    registryRevision?: string, signal?: AbortSignal): Promise<SourceChangeSet> {
+    const path = domain === 'PACKAGE_SOURCE'
+      ? 'packages/' + encodeURIComponent(scopeId) + '/source-history/restore'
+      : 'configuration/source-history/restore';
+    return postJson<SourceChangeSet>(path, {
+      snapshotId, expectedSourceRevision,
+      ...(domain === 'PACKAGE_SOURCE' && registryRevision ? { registryRevision } : {}),
+    }, signal);
+  },
+  generateTestcaseSnapshot(packageId: string, changeSetId: string, input: SourceSnapshotRequest,
+    signal?: AbortSignal): Promise<SourceChangeSet> {
+    return postJson('packages/' + encodeURIComponent(packageId) + '/change-sets/'
+      + encodeURIComponent(changeSetId) + '/generate-snapshot', input, signal);
+  },
+  getCentralConfigImpact(changeSetId: string, cursor?: string, signal?: AbortSignal): Promise<SourceImpactReport> {
+    return request<SourceImpactReport>('configuration/change-sets/'
+      + encodeURIComponent(changeSetId) + '/impact' + queryString({ cursor }), { signal, cache: 'no-store' });
   },
   stagePackageManifest(packageId: string, source: string, expectedManifestDigest: string, signal?: AbortSignal): Promise<ManifestDraft> {
     return postJson('packages/' + encodeURIComponent(packageId) + '/package-configuration/drafts', { source, expectedManifestDigest }, signal);

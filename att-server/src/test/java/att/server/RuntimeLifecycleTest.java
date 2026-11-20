@@ -6,8 +6,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -79,6 +81,113 @@ class RuntimeLifecycleTest {
             assertNotNull(DriverManager.getDriver("jdbc:h2:mem:test"));
         } finally {first.close();second.close();}
         try(JobStore reopened=new JobStore(config)){assertEquals("Persisted",reopened.schedule("S1").name);}
+    }
+    @Test void sourcePublicationAuditMigrationPersistsSnapshotAndValidationMetadata() throws Exception {
+        ServerConfig config=config();
+        Files.createDirectories(config.dataDir.resolve("db"));
+        String url="jdbc:h2:file:"+config.dataDir.resolve("db/att-server").toString().replace('\\','/')
+                +";DB_CLOSE_ON_EXIT=FALSE;AUTO_SERVER=FALSE;WRITE_DELAY=0";
+        DriverManager.registerDriver(org.h2.Driver.load());
+        try(java.sql.Connection connection=DriverManager.getConnection(url,"sa","");java.sql.Statement statement=connection.createStatement()) {
+            statement.execute("CREATE TABLE source_publication_audit (transaction_id VARCHAR(40) PRIMARY KEY, principal VARCHAR(256) NOT NULL, action VARCHAR(32) NOT NULL, domain VARCHAR(64) NOT NULL, scope_id VARCHAR(128) NOT NULL, outcome VARCHAR(32) NOT NULL, before_revision VARCHAR(64) NOT NULL, after_revision VARCHAR(64) NOT NULL, request_id VARCHAR(128), resources_json CLOB NOT NULL, created_at VARCHAR(40) NOT NULL)");
+            statement.execute("INSERT INTO source_publication_audit VALUES('T00000000000000000000000000000000','old-owner','OLD_PUBLISH','PACKAGE_SOURCE','p','COMMITTED','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',NULL,'[]','2026-01-01T00:00:00Z')");
+        }
+
+        SourceFileTransaction.AuditRecord record=new SourceFileTransaction.AuditRecord(
+                "T11111111111111111111111111111111","alice",ChangeSetPublisher.PACKAGE_SOURCE,"p",
+                "SOURCE_RESTORE_PUBLISH","COMMITTED",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","request-256",
+                List.of("load/sut-metrics/sources/runtime.yaml"),
+                "R00000000000000000000000000000000","R11111111111111111111111111111111",
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "NOT_APPLICABLE","2026-11-18T12:34:56Z","R22222222222222222222222222222222");
+        try(JobStore store=new JobStore(config)) {store.persistSourcePublicationAudit(record);}
+        DriverManager.registerDriver(org.h2.Driver.load());
+
+        try(java.sql.Connection connection=DriverManager.getConnection(url,"sa","");
+            java.sql.PreparedStatement query=connection.prepareStatement("SELECT before_snapshot_id,after_snapshot_id,validation_revision,activation_status,created_at,restored_from_snapshot_id FROM source_publication_audit WHERE transaction_id=?")) {
+            query.setString(1,record.transactionId);
+            try(java.sql.ResultSet row=query.executeQuery()) {
+                assertTrue(row.next());
+                assertEquals(record.beforeSnapshotId,row.getString(1));
+                assertEquals(record.afterSnapshotId,row.getString(2));
+                assertEquals(record.validationRevision,row.getString(3));
+                assertEquals("NOT_APPLICABLE",row.getString(4));
+                assertEquals(record.createdAt,row.getString(5));
+                assertEquals(record.restoredFromSnapshotId,row.getString(6));
+            }
+            try(java.sql.PreparedStatement old=connection.prepareStatement("SELECT before_snapshot_id,after_snapshot_id,validation_revision,activation_status,restored_from_snapshot_id FROM source_publication_audit WHERE transaction_id=?")) {
+                old.setString(1,"T00000000000000000000000000000000");
+                try(java.sql.ResultSet row=old.executeQuery()) {
+                    assertTrue(row.next());
+                    assertNull(row.getString(1));assertNull(row.getString(2));assertNull(row.getString(3));
+                    assertEquals("UNKNOWN",row.getString(4));
+                    assertNull(row.getString(5));
+                }
+            }
+        }
+    }
+    @Test void sourcePublicationAuditReplayReplacesCommittedOutcomeWithRollbackIdempotently() throws Exception {
+        ServerConfig config=config();
+        SourceFileTransaction.AuditRecord committed=new SourceFileTransaction.AuditRecord(
+                "T33333333333333333333333333333333","alice",ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                ChangeSetPublisher.CENTRAL_SCOPE_ID,"SOURCE_CHANGE_SET_PUBLISH","COMMITTED",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","request-rollback-audit",
+                List.of("config/config.yaml"),"R00000000000000000000000000000000",
+                "R11111111111111111111111111111111",null,"ACTIVE","2026-11-18T12:34:56Z");
+        try(JobStore store=new JobStore(config)) {
+            store.persistSourcePublicationAudit(committed);
+            SourceFileTransaction.AuditRecord rolledBack=committed.withOutcome("ROLLED_BACK")
+                    .withActivationStatus("FAILED");
+            store.persistSourcePublicationAudit(rolledBack);
+            store.persistSourcePublicationAudit(rolledBack); // Startup journal replay is idempotent.
+
+            DriverManager.registerDriver(org.h2.Driver.load());
+            String url="jdbc:h2:file:"+config.dataDir.resolve("db/att-server").toString().replace('\\','/')
+                    +";DB_CLOSE_ON_EXIT=FALSE;AUTO_SERVER=FALSE;WRITE_DELAY=0";
+            try(java.sql.Connection connection=DriverManager.getConnection(url,"sa","");
+                java.sql.PreparedStatement query=connection.prepareStatement(
+                        "SELECT outcome,activation_status FROM source_publication_audit WHERE transaction_id=?")) {
+                query.setString(1,committed.transactionId);
+                try(java.sql.ResultSet row=query.executeQuery()) {
+                    assertTrue(row.next());
+                    assertEquals("ROLLED_BACK",row.getString(1));
+                    assertEquals("FAILED",row.getString(2));
+                }
+            }
+            ChangeSetPublisher.HistoryBatch history=store.sourcePublicationHistory(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,0,
+                    ChangeSetPublisher.MAX_HISTORY_PAGE_SIZE);
+            assertEquals(0,history.total,"A rolled-back Runtime Config must not appear as a committed publication.");
+        }
+    }
+    @Test void sourcePublicationHistoryRetentionBoundsAuditRowsAndKeepsTheNewestSnapshotClosure() throws Exception {
+        ServerConfig config=config();
+        try(JobStore store=new JobStore(config)) {
+            for(int index=0;index<502;index++) {
+                String before="R"+String.format(java.util.Locale.ROOT,"%032X",index);
+                String after="R"+String.format(java.util.Locale.ROOT,"%032X",index+1);
+                store.persistSourcePublicationAudit(new SourceFileTransaction.AuditRecord(
+                        "T"+String.format(java.util.Locale.ROOT,"%032X",index),"alice",
+                        ChangeSetPublisher.PACKAGE_SOURCE,"p","SOURCE_PUBLISH","COMMITTED",
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        null,List.of("templates/history.yaml"),before,after,null,"NOT_APPLICABLE",
+                        Instant.ofEpochSecond(index).toString(),null));
+            }
+            Set<String> retained=store.pruneSourcePublicationHistory(ChangeSetPublisher.PACKAGE_SOURCE,"p",
+                    ChangeSetPublisher.MAX_HISTORY_RECORDS);
+            ChangeSetPublisher.HistoryBatch batch=store.sourcePublicationHistory(ChangeSetPublisher.PACKAGE_SOURCE,"p",0,
+                    ChangeSetPublisher.MAX_HISTORY_PAGE_SIZE);
+            assertEquals(ChangeSetPublisher.MAX_HISTORY_RECORDS,batch.total);
+            assertFalse(retained.contains("R00000000000000000000000000000000"));
+            assertFalse(retained.contains("R00000000000000000000000000000001"));
+            assertTrue(retained.contains("R00000000000000000000000000000002"));
+            assertTrue(retained.contains("R000000000000000000000000000001F6"));
+            assertEquals(Instant.ofEpochSecond(501).toString(),batch.records.get(0).createdAt);
+        }
     }
     @Test void corruptRecoveredJournalDoesNotBlockStartupAndReleasesResources() throws Exception {
         ServerConfig config=config();

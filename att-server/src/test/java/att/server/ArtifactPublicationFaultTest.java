@@ -24,8 +24,9 @@ class ArtifactPublicationFaultTest {
     @ValueSource(strings={"unverified", "ledger-failure", "quarantine-store-failure", "load"})
     void incompleteProofReleasesCapacityOnlyAfterDurableQuarantine(String failure) throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX Worker protocol fixture");
-        Path gate=temp.resolve("finish-worker");
-        String script="#!/bin/sh\nread request\nwhile [ ! -f '"+gate+"' ]; do sleep 0.02; done\n"
+        String script="#!/bin/sh\nIFS= read -r request || exit 2\n"
+                +"output=$(printf '%s' \"$request\" | sed -n 's/.*\"outputDirectory\":\"\\([^\"]*\\)\".*/\\1/p')\n"
+                +"while [ ! -f \"$output/finish-worker\" ]; do sleep 0.02; done\n"
                 +"printf '%s\\n' '{\"type\":\"RESULT\",\"status\":\"PASS\",\"exitCode\":0}'\n";
         String command="load".equals(failure)?"load":"run";
         ServerConfig config;
@@ -34,6 +35,7 @@ class ArtifactPublicationFaultTest {
             config=runtime.config;
             var request=ServerRuntime.JSON.createObjectNode().put("packageId","p");
             first=String.valueOf(runtime.submit(command,request,"user-a").get("jobId"));
+            Path gate=runtime.outputDirectoryForJob(first).resolve("finish-worker");
             Job job=runtime.jobs.get(first);
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
             while(job.processFence==null&&System.nanoTime()<deadline)Thread.sleep(10);
@@ -66,6 +68,7 @@ class ArtifactPublicationFaultTest {
             assertTrue(Files.isDirectory(runtime.outputDirectoryForJob(first)));
             if("ledger-failure".equals(failure))sql(config,"ALTER TABLE unavailable_worker_processes RENAME TO job_worker_processes");
             String second=String.valueOf(runtime.submit(command,request,"user-b").get("jobId"));
+            Files.writeString(runtime.outputDirectoryForJob(second).resolve("finish-worker"),"");
             awaitReady(runtime,second);
             job.finishedAt=Instant.now().minus(java.time.Duration.ofDays(config.jobRetentionDays+1L));
             runtime.store.update(job);runtime.cleanupExpiredJobs();
@@ -439,13 +442,14 @@ class ArtifactPublicationFaultTest {
 
     @Test void cancellationArchivesPartialOutputOnlyAfterTheSurvivingWriterIsStopped() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX Worker and detached-writer fixture");
-        Path writer = Files.writeString(temp.resolve("writer.sh"), "#!/bin/sh\ntrap '' TERM\n"
+        Files.createDirectories(temp.resolve("packages/p"));
+        Files.writeString(temp.resolve("packages/p/child-writer.sh"), "#!/bin/sh\ntrap '' TERM\n"
                 + "printf 'password=att-test-private-canary\\nbusiness=partial\\n' >> \"$1/case.log\"\n"
                 + "touch \"$1/child.ready\"\n"
                 + "while :; do printf 'business=partial\\n' >> \"$1/case.log\"; sleep 0.02; done\n");
         String launcher = "#!/bin/sh\nIFS= read -r request\n"
                 + "output=$(printf '%s' \"$request\" | sed 's/.*\"outputDirectory\":\"\\([^\"]*\\)\".*/\\1/')\n"
-                + "sh '" + writer + "' \"$output\" >/dev/null 2>&1 &\n"
+                + "sh ./child-writer.sh \"$output\" >/dev/null 2>&1 &\n"
                 + "echo $! > \"$output/child.pid\"\nwait\n";
         var child = new java.util.concurrent.atomic.AtomicReference<ProcessHandle>();
         AtomicInteger publications = new AtomicInteger();
@@ -462,7 +466,13 @@ class ArtifactPublicationFaultTest {
                 while ((!Files.exists(output.resolve("child.ready")) || !Files.exists(output.resolve("child.pid")))
                         && System.nanoTime() < deadline) Thread.sleep(10);
                 assertTrue(Files.exists(output.resolve("child.ready")));
-                child.set(ProcessHandle.of(Long.parseLong(Files.readString(output.resolve("child.pid")).trim())).orElseThrow());
+                Process worker = runtime.jobs.get(id).process;
+                long childDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (child.get() == null && System.nanoTime() < childDeadline) {
+                    child.set(processWithArgument(worker, "./child-writer.sh"));
+                    if (child.get() == null) Thread.sleep(10);
+                }
+                assertNotNull(child.get(), "The detached writer must be visible in the Worker process tree");
                 assertTrue(child.get().isAlive());
                 assertEquals("CANCELLED", runtime.cancel(id, "user-a"));
                 awaitReady(runtime, id);
@@ -480,10 +490,12 @@ class ArtifactPublicationFaultTest {
 
     @Test void queuedCancellationPublishesItsEmptyArchiveWithoutAReconciliationRetry() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX blocked Worker fixture");
-        Path started = temp.resolve("active.started");
-        String script = "#!/bin/sh\nread request\ntouch '" + started + "'\nexec sleep 60\n";
+        String script = "#!/bin/sh\nIFS= read -r request || exit 2\n"
+                +"output=$(printf '%s' \"$request\" | sed -n 's/.*\"outputDirectory\":\"\\([^\"]*\\)\".*/\\1/p')\n"
+                +"touch \"$output/active.started\"\nexec sleep 60\n";
         try (ServerRuntime runtime = runtime(ArtifactArchive::build, script, 1)) {
             String active = String.valueOf(runtime.submit("run", ServerRuntime.JSON.createObjectNode().put("packageId", "p"), "user-a").get("jobId"));
+            Path started = runtime.outputDirectoryForJob(active).resolve("active.started");
             try {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (!Files.exists(started) && System.nanoTime() < deadline) Thread.sleep(10);
@@ -538,6 +550,15 @@ class ArtifactPublicationFaultTest {
             Thread.sleep(10);
         } while (System.nanoTime() < deadline);
         fail("Archive did not become READY: " + runtime.artifactIndex(id));
+    }
+
+    private static ProcessHandle processWithArgument(Process process, String argument) {
+        if (process == null) return null;
+        return process.toHandle().descendants().filter(handle -> {
+            for (String value : handle.info().arguments().orElse(new String[0]))
+                if (argument.equals(value)) return true;
+            return false;
+        }).findFirst().orElse(null);
     }
 
     private static void awaitState(ServerRuntime runtime, String id, String state) throws Exception {

@@ -13,11 +13,11 @@ import java.util.function.BooleanSupplier;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
-/** End-to-end Job lifecycle checks for the optional one-shot execution pool. */
+/** End-to-end lifecycle checks for source-pinned cold Workers with the optional execution pool enabled. */
 class ExecutionWorkerRuntimeLifecycleTest {
     @TempDir Path temp;
 
-    @Test void warmWorkerLifecycleStopsTreesAndPersistsUnverifiedQuarantine() throws Exception {
+    @Test void sourcePinnedColdWorkerLifecycleStopsTreesAndPersistsUnverifiedQuarantine() throws Exception {
         assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),"Uses a POSIX child Tool fixture");
         Path allowed=Files.createDirectories(temp.resolve("allowed"));
         Path pkg=Files.createDirectories(allowed.resolve("p"));
@@ -26,9 +26,9 @@ class ExecutionWorkerRuntimeLifecycleTest {
         Path tools=Files.createDirectories(pkg.resolve("tools"));
         Path holdScript=tools.resolve("hold.sh");
         Files.writeString(holdScript,"#!/bin/sh\n"
-                +"printf '%s' \"$$\" > \"$ATT_ROOT_DIR/tools/child.pid\"\n"
-                +"touch \"$ATT_ROOT_DIR/tools/started\"\n"
-                +"exec sleep 60\n");
+                +"printf '0\\n' > \"$ATT_CASE_OUTPUT_DIR/heartbeat\"\n"
+                +"touch \"$ATT_CASE_OUTPUT_DIR/started\"\n"
+                +"count=0\nwhile :; do count=$((count+1)); printf '%s\\n' \"$count\" > \"$ATT_CASE_OUTPUT_DIR/heartbeat\"; sleep 0.02; done\n");
         holdScript.toFile().setExecutable(true);
         Files.writeString(Files.createDirectories(templates.resolve("HOLD")).resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: HOLD\ndescription: Long child Tool for Worker lifecycle tests\n"
                 +"actions:\n  hold:\n    type: tool\n    call: '#{hold()}'\n");
@@ -57,50 +57,48 @@ class ExecutionWorkerRuntimeLifecycleTest {
             runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
             awaitReadyWorkers(runtime,1,15);
             Job cancelled=submit(runtime,"HOLD");
-            await(()->cancelled.terminal()||Files.exists(tools.resolve("started")),20);
-            assertTrue(Files.exists(tools.resolve("started")),"HOLD Tool did not start; Job="+runtime.jobRecord(cancelled.id)
+            Path cancelledOutput=runtime.outputDirectoryForJob(cancelled.id);
+            await(()->cancelled.terminal()||outputHas(cancelledOutput,"started"),20);
+            assertTrue(outputHas(cancelledOutput,"started"),"HOLD Tool did not start; Job="+runtime.jobRecord(cancelled.id)
                     +", events="+runtime.events(cancelled.id).after(0));
-            assertEquals("warm",cancelled.workerDispatch,"The cancellation path must use a leased prewarm Worker");
+            assertEquals("cold",cancelled.workerDispatch,"A source-pinned cancellation must use the isolated cold Worker");
             long cancelledWorker=cancelled.workerPid.longValue();
-            long cancelledChild=Long.parseLong(Files.readString(tools.resolve("child.pid")));
             assertEquals("CANCELLED",runtime.cancel(cancelled.id,"alice"));
-            await(()->cancelled.terminal()&&!ProcessHandle.of(cancelledWorker).map(ProcessHandle::isAlive).orElse(false)
-                    &&!ProcessHandle.of(cancelledChild).map(ProcessHandle::isAlive).orElse(false),15);
+            await(()->cancelled.terminal()&&!ProcessHandle.of(cancelledWorker).map(ProcessHandle::isAlive).orElse(false),15);
+            assertHeartbeatStopped(cancelledOutput,"Cancelled child Tool must stop writing into its Job output");
             List<String> cancelledEvents=runtime.events(cancelled.id).after(0).stream().map(event->String.valueOf(event.get("event"))).toList();
             assertTrue(cancelledEvents.contains("result"),cancelledEvents.toString());
             awaitArchive(runtime,cancelled.id);
 
             awaitReadyWorkers(runtime,1,15);
-            Files.deleteIfExists(tools.resolve("started"));
             Job timedOut=submit(runtime,"TIMEOUT");
-            await(()->Files.exists(tools.resolve("started"))&&timedOut.workerPid!=null,20);
-            assertEquals("warm",timedOut.workerDispatch,"The action-timeout path must also use a one-shot prewarm Worker");
+            Path timeoutOutput=runtime.outputDirectoryForJob(timedOut.id);
+            await(()->outputHas(timeoutOutput,"started")&&timedOut.workerPid!=null,20);
+            assertEquals("cold",timedOut.workerDispatch,"A source-pinned timeout must use the isolated cold Worker");
             long timeoutWorker=timedOut.workerPid.longValue();
-            long timeoutChild=Long.parseLong(Files.readString(tools.resolve("child.pid")));
             await(()->timedOut.terminal(),20);
             assertNotEquals("PASS",timedOut.status,"The timed Tool must not be reported as a successful Job");
-            await(()->!ProcessHandle.of(timeoutWorker).map(ProcessHandle::isAlive).orElse(false)
-                    &&!ProcessHandle.of(timeoutChild).map(ProcessHandle::isAlive).orElse(false),15);
+            await(()->!ProcessHandle.of(timeoutWorker).map(ProcessHandle::isAlive).orElse(false),15);
+            assertHeartbeatStopped(timeoutOutput,"Timed-out child Tool must stop writing into its Job output");
             awaitArchive(runtime,timedOut.id);
             assertNotEquals(cancelledWorker,timeoutWorker,"A one-shot Worker PID cannot serve two Jobs");
 
             awaitReadyWorkers(runtime,1,15);
-            Files.deleteIfExists(tools.resolve("started"));
             Job uncertain=submit(runtime,"HOLD");
-            await(()->Files.exists(tools.resolve("started"))&&uncertain.workerPid!=null,20);
-            assertEquals("warm",uncertain.workerDispatch);
+            Path uncertainOutput=runtime.outputDirectoryForJob(uncertain.id);
+            await(()->outputHas(uncertainOutput,"started")&&uncertain.workerPid!=null,20);
+            assertEquals("cold",uncertain.workerDispatch,"A source-pinned uncertain cleanup must use the isolated cold Worker");
             long uncertainWorker=uncertain.workerPid.longValue();
-            long uncertainChild=Long.parseLong(Files.readString(tools.resolve("child.pid")));
             assertNotNull(uncertain.processFence);
             uncertain.processFence.unverified();
             assertEquals("CANCELLED",runtime.cancel(uncertain.id,"alice"));
-            await(()->!ProcessHandle.of(uncertainWorker).map(ProcessHandle::isAlive).orElse(false)
-                    &&!ProcessHandle.of(uncertainChild).map(ProcessHandle::isAlive).orElse(false),15);
+            await(()->!ProcessHandle.of(uncertainWorker).map(ProcessHandle::isAlive).orElse(false),15);
+            assertHeartbeatStopped(uncertainOutput,"Cancelled uncertain child Tool must stop writing into its Job output");
             long quarantineDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
             while(!runtime.store.workerQuarantined(uncertain.id)&&System.nanoTime()<quarantineDeadline) {
                 runtime.reconcileWorkerReleases();Thread.sleep(20);
             }
-            assertTrue(runtime.store.workerQuarantined(uncertain.id),"Unverified warm cleanup must be durably quarantined");
+            assertTrue(runtime.store.workerQuarantined(uncertain.id),"Unverified cold Worker cleanup must be durably quarantined");
             while(!"worker_unverified".equals(runtime.artifactIndex(uncertain.id).get("reason"))
                     &&System.nanoTime()<quarantineDeadline)Thread.sleep(20);
             assertEquals("worker_unverified",runtime.artifactIndex(uncertain.id).get("reason"));
@@ -110,7 +108,7 @@ class ExecutionWorkerRuntimeLifecycleTest {
             quarantinedJobId=uncertain.id;
         }
         try(ServerRuntime restarted=new ServerRuntime(poolConfig,libs.toString())) {
-            assertTrue(restarted.store.workerQuarantined(quarantinedJobId),"Warm-worker quarantine must survive Server restart");
+            assertTrue(restarted.store.workerQuarantined(quarantinedJobId),"Source-pinned Worker quarantine must survive Server restart");
             assertEquals("worker_unverified",restarted.artifactIndex(quarantinedJobId).get("reason"));
             assertFalse(Files.exists(restarted.artifactArchivePath(quarantinedJobId)));
             assertTrue(Files.isDirectory(restarted.outputDirectoryForJob(quarantinedJobId)));
@@ -161,5 +159,39 @@ class ExecutionWorkerRuntimeLifecycleTest {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(seconds);
         while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(20);
         assertTrue(condition.getAsBoolean(),"Lifecycle condition did not complete within "+seconds+" seconds");
+    }
+
+    private static void assertHeartbeatStopped(Path root,String message) throws Exception {
+        Path heartbeat=outputFile(root,"heartbeat");
+        if(heartbeat==null) {
+            Thread.sleep(250);
+            assertNull(outputFile(root,"heartbeat"),message+" (heartbeat reappeared after output cleanup)");
+            return;
+        }
+        String stoppedValue=readHeartbeatIfPresent(heartbeat);
+        Thread.sleep(250);
+        String laterValue=readHeartbeatIfPresent(heartbeat);
+        if(stoppedValue==null||laterValue==null) {
+            Thread.sleep(250);
+            assertNull(outputFile(root,"heartbeat"),message+" (heartbeat reappeared after output cleanup)");
+            return;
+        }
+        assertEquals(stoppedValue,laterValue,message);
+    }
+
+    private static String readHeartbeatIfPresent(Path heartbeat) throws Exception {
+        try { return Files.readString(heartbeat); }
+        catch(java.nio.file.NoSuchFileException cleanedUp) { return null; }
+    }
+
+    private static boolean outputHas(Path root,String name) {
+        return outputFile(root,name)!=null;
+    }
+
+    private static Path outputFile(Path root,String name) {
+        if(root==null||!Files.isDirectory(root))return null;
+        try(var files=Files.walk(root)) {
+            return files.filter(path->path.getFileName()!=null&&name.equals(path.getFileName().toString())).findFirst().orElse(null);
+        } catch(Exception unavailable) { return null; }
     }
 }

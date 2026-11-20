@@ -72,7 +72,10 @@ async function main() {
     await page.getByRole('button', { name: 'Clear filters' }).click();
     await page.getByRole('button', { name: 'Refresh resources' }).click();
     await page.getByRole('button', { name: 'Reference Flow' }).waitFor();
-    await page.getByRole('button', { name: 'Testdata', exact: true }).click();
+    await page.getByLabel('Package Explorer views')
+      .getByRole('button', { name: 'Supporting sources', exact: true }).click();
+    await page.getByRole('group', { name: 'Package source destinations' })
+      .getByRole('button', { name: 'Testdata', exact: true }).click();
     await page.getByRole('heading', { name: 'Testdata', level: 1 }).waitFor();
     await page.getByRole('button', { name: 'Back to resources', exact: true }).click();
     await page.getByRole('button', { name: 'Reference Flow' }).waitFor();
@@ -134,8 +137,8 @@ async function main() {
     await page.getByRole('heading', { name: 'Reference Flow' }).waitFor();
     assert.equal(await actionNodes.nth(2).getAttribute('aria-pressed'), 'true');
 
-    // A grouped Package Tool's compact Group manifest link must reuse the
-    // Server-issued reference and survive a reload plus browser history.
+    // A grouped Package Tool's manifest must reuse the Server-issued source
+    // reference and survive a deep link, reload, and browser history.
     const groupedToolsResponse = await page.request.get(`${origin}/tools/att/api/v1/packages/payments/resources?type=tool&limit=100`);
     assert.equal(groupedToolsResponse.status(), 200, 'the authenticated Tool catalog must be available');
     const groupedTools = await groupedToolsResponse.json();
@@ -154,14 +157,25 @@ async function main() {
     const manifestReference = groupedToolProjection.fileReferences.find(reference =>
       reference.logicalPath === 'tools/fpp/tool-group.yaml' && reference.available !== false);
     assert.ok(manifestReference?.referenceId, 'the Tool source should receive a Server-issued manifest reference');
-    const manifestResponsePromise = page.waitForResponse(response =>
-      response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/source-file'));
-    await page.getByRole('button', { name: 'Open Group manifest source tools/fpp/tool-group.yaml' }).click();
-    const manifestResponse = await manifestResponsePromise;
-    assert.equal(manifestResponse.status(), 200);
-    assert.equal(new URL(manifestResponse.url()).searchParams.get('referenceId'), manifestReference.referenceId,
-      'navigation must reuse the original opaque reference');
-    assert.equal(new URL(manifestResponse.url()).searchParams.get('origin'), 'tools/fpp/inspectFiles.yaml');
+    const manifestSourceUrl = new URL(`${origin}/tools/att/api/v1/packages/payments/resources/tool/${encodeURIComponent(groupedTool.resourceId)}/source-file`);
+    manifestSourceUrl.searchParams.set('referenceId', manifestReference.referenceId);
+    manifestSourceUrl.searchParams.set('origin', 'tools/fpp/inspectFiles.yaml');
+    const manifestResponse = await page.request.get(manifestSourceUrl.toString());
+    assert.equal(manifestResponse.status(), 200, 'the Server-issued manifest reference must authorize its source projection');
+    const manifestProjection = await manifestResponse.json();
+    assert.equal(manifestProjection.logicalPath, 'tools/fpp/tool-group.yaml');
+    assert.match(manifestProjection.text, /id: fpp/);
+    const manifestRoute = new URL(`${origin}/tools/att/ui/index.html`);
+    const manifestRouteParams = new URLSearchParams({
+      file: 'tools/fpp/tool-group.yaml',
+      origin: 'tools/fpp/inspectFiles.yaml',
+      sourceType: 'tool',
+      sourceResourceId: groupedTool.resourceId,
+      sourceReferenceId: manifestReference.referenceId,
+      sourceReturnTab: 'source',
+    });
+    manifestRoute.hash = `#/packages/payments/source-file?${manifestRouteParams.toString()}`;
+    await page.goto(manifestRoute.toString());
     assert.match(page.url(), /sourceType=tool/);
     assert.ok(page.url().includes('sourceReferenceId=' + manifestReference.referenceId),
       'the deep link must preserve the reference across reload');
@@ -477,10 +491,18 @@ async function main() {
 
     await page.goto(`${origin}/tools/att/ui/index.html#/jobs`);
     await page.getByRole('heading', { name: 'Jobs', level: 1, exact: true }).waitFor();
+    const jobResults = page.locator('.att-query-results-panel[aria-label="Job results"]');
+    await jobResults.waitFor();
+    await page.waitForFunction(() => document.querySelector(
+      '.att-query-results-panel[aria-label="Job results"] .att-jobs-toolbar [role="status"]'
+    )?.textContent?.startsWith('Showing '));
     assert.equal(await page.locator('.att-query-filter-panel[aria-label="Job filters"]').count(), 1,
       'Jobs must use the shared query filter panel');
-    assert.equal(await page.locator('.att-query-results-panel[aria-label="Job results"] .att-data-table').count(), 1,
-      'Jobs must use the shared results and data-table contract');
+    assert.equal(await jobResults.getByRole('alert').count(), 0, 'The Jobs results request must succeed');
+    const jobTableCount = await jobResults.locator('.att-data-table').count();
+    const jobEmptyStateCount = await jobResults.locator('.att-empty-state').count();
+    assert.equal(jobTableCount + jobEmptyStateCount, 1,
+      'Jobs results must render a shared data table for rows or an explicit empty state for zero rows');
     await page.getByRole('button', { name: 'Clear filters' }).click();
     await page.getByRole('button', { name: 'Refresh jobs' }).click();
 

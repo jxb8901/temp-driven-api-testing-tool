@@ -25,6 +25,42 @@ class SchemaMigrationGuidanceTest {
     }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { att.core.PathPresentation.configure(false, false); }
 
+    @Test void twoClassloadersCanHoldNonOverlappingLeasesWithoutAllowingCacheDeletion() throws Exception {
+        Path schema=SchemaFiles.resolve(root,"att-flow-v3.6.schema.json");
+        Path cacheRoot=schema.getParent().getParent();
+        Path leaseFile=null;
+        try(java.util.stream.Stream<Path> entries=Files.list(cacheRoot)) {
+            leaseFile=entries.filter(path->path.getFileName().toString().startsWith(".cache-use.lock-"))
+                    .findFirst().orElse(null);
+        }
+        assertNotNull(leaseFile,"The active schema classloader must hold its unique cache lease");
+        try(java.nio.channels.FileChannel second=java.nio.channels.FileChannel.open(leaseFile,
+                java.nio.file.StandardOpenOption.READ,java.nio.file.StandardOpenOption.WRITE)) {
+            // The Engine's own lease uses a distinct random nonzero byte range.
+            // Another classloader can take byte zero in the same JVM.
+            try(java.nio.channels.FileLock other=second.tryLock(0L,1L,true)) {
+                assertNotNull(other);
+                assertThrows(java.nio.channels.OverlappingFileLockException.class,
+                        ()->second.tryLock(0L,Long.MAX_VALUE,false),
+                        "The cache reaper must never acquire a whole-file exclusive lock while in use");
+            }
+        }
+    }
+
+    @Test void releasingServletClassloaderSchemaLeaseAllowsVerifiedReinitialization() throws Exception {
+        String initial=SchemaFiles.registryDigest();
+        Path initialSchema=SchemaFiles.resolve(root,"att-flow-v3.6.schema.json");
+        assertTrue(Files.isRegularFile(initialSchema));
+        SchemaFiles.releaseForClassLoaderShutdown();
+        assertEquals(initial,SchemaFiles.registryDigest(),
+                "A restarted classloader must verify the identical embedded schema registry");
+        assertEquals(initialSchema,SchemaFiles.resolve(root,"att-flow-v3.6.schema.json"));
+        // The shutdown path may be invoked again on a partially initialized context.
+        SchemaFiles.releaseForClassLoaderShutdown();
+        SchemaFiles.releaseForClassLoaderShutdown();
+        assertEquals(initial,SchemaFiles.registryDigest());
+    }
+
     @Test void currentAndHistoricalSchemasHaveSingleLocations() throws Exception {
         Path packageRoot = Paths.get("").toAbsolutePath().resolve("packages/default");
         Path flow31=SchemaFiles.resolve(packageRoot, "att-flow-v3.1.schema.json");

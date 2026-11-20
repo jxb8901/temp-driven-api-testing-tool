@@ -2,7 +2,7 @@
 
 <!-- att-doc-status: current release=4.3.1 -->
 
-The ATT 4.3.1 Local CLI run command is a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](unified-run.md).
+The ATT 4.4.0 Local CLI run command is a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](unified-run.md).
 
 ```sh
 ./att.sh run --all

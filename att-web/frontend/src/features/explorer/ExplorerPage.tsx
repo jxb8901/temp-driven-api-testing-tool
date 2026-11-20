@@ -4,9 +4,14 @@ import { AppShellContext } from '../../AppShell';
 import { inspectionCache } from '../../inspectionCache';
 import { useInspectionRefresh } from '../../useInspectionRefresh';
 import { ResourceTree, resourceKey } from './ResourceTree';
+import { SourceAuthoringWorkspace } from './SourceAuthoringWorkspace';
+import { PackageFileCatalog } from './PackageFileCatalog';
 import { SourceViewer } from './SourceViewer';
+import { TestcaseAuthoringWorkspace } from './TestcaseAuthoringWorkspace';
 import { ActionInspector } from './ActionInspector';
 import { CodeEditor } from '../code/CodeEditor';
+import { AuthoringWorkflow, type AuthoringStepState } from './AuthoringWorkflow';
+import { useAccessibleConfirmation } from './useAccessibleConfirmation';
 import { TypedSidecarForm } from './TypedSidecarForm';
 import type { DebugDraftRequest, Diagnostic, DraftResponse, ExplorerApi, ExplorerPageProps, JsonObject, PackageSutMetricsCatalog,
   PackageSutMetricsDraft, PackageSutMetricsDraftAction, PackageSutMetricsResource, PackageSutMetricsResourceKind,
@@ -322,6 +327,7 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
   registerUnsavedChanges: ExplorerPageProps['registerUnsavedChanges'];
 }) {
   const zh = locale === 'zh-Hant';
+  const { confirm: confirmAction, dialog: confirmationDialog } = useAccessibleConfirmation();
   const [catalog, setCatalog] = useState<PackageSutMetricsCatalog | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -350,6 +356,23 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
   const activeSource = newResource ? newResourceSource : resourceSource;
   const sourceDirty = !!newResource || (!!resource && resourceSource !== baselineSource);
   const hasUnpublishedChanges = sourceDirty || !!draft;
+  const workflowCurrent = draft
+    ? draft.state.toLowerCase() === 'reviewed' ? 'publish' : draft.state.toLowerCase() === 'validated' ? 'review' : 'validate'
+    : sourceDirty ? 'stage' : activeResource ? 'edit' : 'view';
+  const workflowIds = ['view', 'edit', 'stage', 'validate', 'review', 'publish'];
+  const workflowLabels = zh
+    ? ['檢視目錄', '編輯來源', '建立草稿', '驗證草稿', '檢閱差異', '發布']
+    : ['View catalog', 'Edit source', 'Create draft', 'Validate draft', 'Review diff', 'Publish'];
+  const workflowIndex = workflowIds.indexOf(workflowCurrent);
+  const workflowSteps = workflowIds.map((id, index) => {
+    let state: AuthoringStepState = index < workflowIndex ? 'complete' : index === workflowIndex ? 'current' : 'upcoming';
+    const blocked = stale || draft?.state.toLowerCase() === 'published';
+    if (blocked && index >= workflowIndex) state = 'blocked';
+    const reason = stale
+      ? (zh ? 'Package 或 Manifest revision 已變更；請重新載入來源與目錄。' : 'The Package or Manifest revision changed. Reload the source and catalog.')
+      : undefined;
+    return { id, label: workflowLabels[index], state, reason };
+  });
 
   useEffect(() => registerUnsavedChanges(hasUnpublishedChanges, 'unpublished Package SUT Metrics changes'),
     [hasUnpublishedChanges, registerUnsavedChanges]);
@@ -488,8 +511,11 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
     } finally { setNewResourceBusy(false); }
   };
 
-  const cancelNewResource = () => {
+  const cancelNewResource = async () => {
     if (draftBusy) return;
+    if (!await confirmAction({ title: zh ? '取消新增資源？' : 'Discard new resource?',
+      message: zh ? '移除本機新增的 SUT Metrics 資源草稿來源；Package inventory 尚未變更。' : 'Remove the local SUT Metrics resource draft source. The Package inventory has not changed.',
+      confirmLabel: zh ? '取消新增' : 'Discard resource', destructive: true })) return;
     setNewResource(null); setNewResourceSource(''); setNewResourceError('');
     setDraft(null); setDraftError(''); setDraftFailureDiagnostics([]); setDraftMessage(''); setStale(false);
   };
@@ -546,6 +572,13 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
     if (action === 'validate' && state !== 'draft') return;
     if (action === 'review' && (state !== 'validated' || draft.validation?.valid !== true)) return;
     if (action === 'publish' && (state !== 'reviewed' || !resourceCanEdit || catalog?.canEdit !== true)) return;
+    if (action === 'publish' && !await confirmAction({ title: zh ? '發布 SUT Metrics 資源？' : 'Publish SUT Metrics resource?',
+      message: zh ? `發布 ${activeResource?.path || '選取的來源'}，並更新 Package inventory。Environment: ${selectedEnvironment || '未選取'}。`
+        : `Publish ${activeResource?.path || 'the selected source'} and update the Package inventory. Environment: ${selectedEnvironment || 'not selected'}.`,
+      confirmLabel: zh ? '發布資源' : 'Publish resource' })) return;
+    if (action === 'discard' && !await confirmAction({ title: zh ? '捨棄 SUT Metrics 草稿？' : 'Discard SUT Metrics draft?',
+      message: zh ? `移除草稿 ${draft.draftId}；已發布的 Package 資源不變。` : `Remove draft ${draft.draftId}. The published Package resource stays unchanged.`,
+      confirmLabel: zh ? '捨棄草稿' : 'Discard draft', destructive: true })) return;
     const controller = new AbortController();
     setDraftBusy(true); setDraftError(''); setDraftFailureDiagnostics([]); setDraftMessage('');
     try {
@@ -637,6 +670,7 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
 
   return <details className="att-query-filter-panel att-package-sut-metrics" aria-label={zh ? 'Package SUT Metrics 目錄' : 'Package SUT Metrics catalog'}>
     <summary>{zh ? 'Package SUT Metrics' : 'Package SUT Metrics'}{loading ? (zh ? ' · 載入中…' : ' · Loading…') : total ? ` · ${total}` : ''}</summary>
+    {confirmationDialog}
     <section aria-label={zh ? 'Package SUT Metrics 目錄內容' : 'Package SUT Metrics catalog contents'}>
       <p>{zh
         ? `環境：${returnedEnvironment}。此處只顯示 Package inventory 明確列出的定義；本頁不會查詢 Metrics 來源。`
@@ -670,13 +704,16 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
           </section>
         ))}
       </div>}
-      {!loading && !error && catalog && <dl className="att-resource-meta att-package-sut-metrics-provenance">
-        <div><dt>{zh ? 'Manifest 摘要' : 'Manifest digest'}</dt><dd><code>{revisionLabel(catalog.manifestDigest)}</code></dd></div>
-        <div><dt>{zh ? 'Package revision' : 'Package revision'}</dt><dd><code>{revisionLabel(catalog.packageRevision)}</code></dd></div>
-        <div><dt>{zh ? 'Runtime Config revision' : 'Runtime Config revision'}</dt><dd><code>{revisionLabel(catalog.runtimeConfigRevision)}</code></dd></div>
-      </dl>}
-      {!loading && !error && catalog && resourceProvenance.length > 0 && <section className="att-source-file-references" aria-label={zh ? 'Package 資源來源資訊' : 'Package resource provenance'}>
-        <h3>{zh ? 'Package 資源來源資訊' : 'Package resource provenance'}</h3>
+      {!loading && !error && catalog && <details className="att-resource-meta att-package-sut-metrics-provenance">
+        <summary>{zh ? '進階 revision provenance' : 'Advanced revision provenance'}</summary>
+        <dl>
+          <div><dt>{zh ? 'Manifest 摘要' : 'Manifest digest'}</dt><dd><code>{revisionLabel(catalog.manifestDigest)}</code></dd></div>
+          <div><dt>{zh ? 'Package revision' : 'Package revision'}</dt><dd><code>{revisionLabel(catalog.packageRevision)}</code></dd></div>
+          <div><dt>{zh ? 'Runtime Config revision' : 'Runtime Config revision'}</dt><dd><code>{revisionLabel(catalog.runtimeConfigRevision)}</code></dd></div>
+        </dl>
+      </details>}
+      {!loading && !error && catalog && resourceProvenance.length > 0 && <details className="att-source-file-references">
+        <summary>{zh ? 'Package 資源來源資訊' : 'Package resource provenance'}</summary>
         <ul>{resourceProvenance.map((value, index) => {
           const item = packageCatalogResourceProvenance(value, index, zh);
           return <li key={`${item.kind}:${item.id}:${index}`}>
@@ -686,7 +723,7 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
             <span>SHA-256: <code>{item.digest}</code></span>
           </li>;
         })}</ul>
-      </section>}
+      </details>}
       {catalog && catalogCanEdit && <section className="att-source-file-references" aria-label={zh ? '建立 Package SUT Metrics 資源' : 'Create Package SUT Metrics resource'}>
         <h3>{zh ? '新增資源' : 'New resource'}</h3>
         <label>{zh ? '資源類型' : 'Resource kind'}
@@ -711,6 +748,7 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
         {!api.getPackageManifest && <p role="note">{zh ? '此 Server client 不支援讀取 Package Manifest。' : 'This Server client does not support reading the Package Manifest.'}</p>}
       </section>}
       {catalog && <section className="att-source-file-references" aria-label={zh ? 'Package SUT Metrics 資源編輯器' : 'Package SUT Metrics resource editor'}>
+        <AuthoringWorkflow label={zh ? 'SUT Metrics 來源發布工作流程' : 'SUT Metrics source publication workflow'} steps={workflowSteps} />
         <h3>{zh ? 'SUT Metrics 資源' : 'SUT Metrics resource'}</h3>
         {!activeSelection && <p>{zh ? '選取明確列出的 Metric Source、Group 或 Profile 以載入其來源。' : 'Select an explicitly listed Metric Source, Group, or Profile to load its source.'}</p>}
         {resourceLoading && !newResource && <p role="status" aria-busy="true">{zh ? '正在載入選取的 Package 資源…' : 'Loading selected Package resource…'}</p>}
@@ -721,27 +759,29 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
           <h4>{newResource ? (zh ? '新增' : 'New') : ''} {resourceLabel} · {activeResource.id}</h4>
           <dl className="att-resource-meta">
             <div><dt>{zh ? 'Package 路徑' : 'Package path'}</dt><dd><code>{activeResource.path}</code></dd></div>
-            <div><dt>{zh ? '資源摘要' : 'Resource digest'}</dt><dd><code>{activeResource.resourceDigest}</code></dd></div>
-            {newResource && <>
-              <div><dt>{zh ? '預期 Manifest 摘要' : 'Expected Manifest digest'}</dt><dd><code>{newResource.expectedManifestDigest}</code></dd></div>
-              <div><dt>{zh ? '候選 Manifest 路徑' : 'Candidate Manifest entry'}</dt><dd><code>{newResource.path}</code></dd></div>
-            </>}
+            {newResource && <div><dt>{zh ? '候選 Manifest 路徑' : 'Candidate Manifest entry'}</dt><dd><code>{newResource.path}</code></dd></div>}
           </dl>
+          <details>
+            <summary>{zh ? '進階資源 revision' : 'Advanced resource revision'}</summary>
+            <dl className="att-resource-meta">
+              <div><dt>{zh ? '資源摘要' : 'Resource digest'}</dt><dd><code>{activeResource.resourceDigest}</code></dd></div>
+              {newResource && <div><dt>{zh ? '預期 Manifest 摘要' : 'Expected Manifest digest'}</dt><dd><code>{newResource.expectedManifestDigest}</code></dd></div>}
+            </dl>
+          </details>
           {catalogCanEdit && activeResource.canEdit !== true && <p role="note">{zh ? '此資源目前不可編輯。' : 'This resource is currently read only.'}</p>}
           {stale && <p role="alert">{zh ? '資源 revision 已過期。請捨棄草稿並重新載入來源。' : 'The resource revision is stale. Discard the draft and reload its source.'}</p>}
-          <label>{zh ? `${resourceLabel} YAML` : `${resourceLabel} YAML`}
-            <textarea aria-label={`${resourceLabel} YAML`} value={activeSource} readOnly={!editorWritable}
-              onChange={event => updateActiveSource(event.currentTarget.value)} rows={16} maxLength={262144} spellCheck={false} />
-          </label>
+          <CodeEditor value={activeSource} language="yaml" label={`${resourceLabel} YAML`}
+            readOnly={!editorWritable} onChange={updateActiveSource} maxCharacters={262144} />
           {sourceDirty && !draft && <p role="status">{newResource
             ? (zh ? '新資源尚未列入 Package inventory。建立草稿以驗證資源及候選 Manifest。' : 'This resource is not in the Package inventory yet. Create a draft to validate both the resource and candidate Manifest.')
             : (zh ? '來源有尚未建立草稿的變更。建立草稿以進行驗證與發布。' : 'Source changes have not been staged. Create a draft to validate and publish them.')}</p>}
-          {sourceDirty && !draft && resourceEditable && <button type="button" disabled={draftBusy} onClick={() => {
-            if (newResource) cancelNewResource();
-            else {
-              setResourceSource(baselineSource); setDraftError(''); setDraftFailureDiagnostics([]);
-              if (stale) { setStale(false); setRequestVersion(value => value + 1); setResourceVersion(value => value + 1); }
-            }
+          {sourceDirty && !draft && resourceEditable && <button type="button" disabled={draftBusy} onClick={async () => {
+            if (newResource) { await cancelNewResource(); return; }
+            if (!await confirmAction({ title: zh ? '捨棄來源變更？' : 'Discard source edits?',
+              message: zh ? '放棄尚未建立伺服器草稿的編輯內容；已發布來源不變。' : 'Discard edits that have not been staged on the Server. Published source stays unchanged.',
+              confirmLabel: zh ? '捨棄來源變更' : 'Discard edits', destructive: true })) return;
+            setResourceSource(baselineSource); setDraftError(''); setDraftFailureDiagnostics([]);
+            if (stale) { setStale(false); setRequestVersion(value => value + 1); setResourceVersion(value => value + 1); }
           }}>
             {newResource ? (zh ? '取消新資源' : 'Cancel new resource') : (zh ? '捨棄來源變更' : 'Discard source edits')}
           </button>}
@@ -757,17 +797,21 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
           {draft && <section aria-label={zh ? 'Package SUT Metrics 草稿發布 Review' : 'Package SUT Metrics draft publication review'}>
             <h4>{zh ? '草稿狀態' : 'Draft state'}: {draft.state}</h4>
             {draft.expiresAt && <p>{zh ? '到期時間' : 'Expires'}: {draft.expiresAt}</p>}
-            {draft.expectedManifestDigest && <dl className="att-resource-meta">
-              <div><dt>{zh ? '預期 Manifest 摘要' : 'Expected Manifest digest'}</dt><dd><code>{draft.expectedManifestDigest}</code></dd></div>
-              <div><dt>{zh ? '候選 Manifest 摘要' : 'Candidate Manifest digest'}</dt><dd><code>{revisionLabel(draft.candidateManifestDigest)}</code></dd></div>
-              <div><dt>{zh ? '啟用順序' : 'Activation mode'}</dt><dd><code>{draft.activationMode === 'resource-then-manifest' ? draft.activationMode : '—'}</code></dd></div>
-            </dl>}
+            {draft.activationMode && <p>{zh ? '啟用順序' : 'Activation mode'}: {draft.activationMode === 'resource-then-manifest' ? draft.activationMode : '—'}</p>}
             {draft.validation && <p role="status">{draft.validation.valid === true
               ? (zh ? '驗證通過。' : 'Validation passed.')
               : (zh ? '驗證未通過。' : 'Validation did not pass.')}</p>}
-            {draft.validation?.resourceDigest && <p>{zh ? '候選資源摘要' : 'Validated resource digest'}: <code>{revisionLabel(draft.validation.resourceDigest)}</code></p>}
-            {draft.validation?.candidateManifestDigest && <p>{zh ? '驗證的候選 Manifest 摘要' : 'Validated candidate Manifest digest'}: <code>{revisionLabel(draft.validation.candidateManifestDigest)}</code></p>}
-            {draft.validation?.validationRevision && <p>{zh ? '驗證 revision' : 'Validation revision'}: <code>{revisionLabel(draft.validation.validationRevision)}</code></p>}
+            {(draft.expectedManifestDigest || draft.candidateManifestDigest || draft.validation?.resourceDigest
+              || draft.validation?.candidateManifestDigest || draft.validation?.validationRevision) && <details>
+              <summary>{zh ? '進階 revision provenance' : 'Advanced revision provenance'}</summary>
+              <dl className="att-resource-meta">
+                {draft.expectedManifestDigest && <div><dt>{zh ? '預期 Manifest 摘要' : 'Expected Manifest digest'}</dt><dd><code>{draft.expectedManifestDigest}</code></dd></div>}
+                {draft.candidateManifestDigest && <div><dt>{zh ? '候選 Manifest 摘要' : 'Candidate Manifest digest'}</dt><dd><code>{revisionLabel(draft.candidateManifestDigest)}</code></dd></div>}
+                {draft.validation?.resourceDigest && <div><dt>{zh ? '候選資源摘要' : 'Validated resource digest'}</dt><dd><code>{revisionLabel(draft.validation.resourceDigest)}</code></dd></div>}
+                {draft.validation?.candidateManifestDigest && <div><dt>{zh ? '驗證的候選 Manifest 摘要' : 'Validated candidate Manifest digest'}</dt><dd><code>{revisionLabel(draft.validation.candidateManifestDigest)}</code></dd></div>}
+                {draft.validation?.validationRevision && <div><dt>{zh ? '驗證 revision' : 'Validation revision'}</dt><dd><code>{revisionLabel(draft.validation.validationRevision)}</code></dd></div>}
+              </dl>
+            </details>}
             {validationDiagnostics.length > 0 && <ul aria-label={zh ? '驗證診斷' : 'Validation diagnostics'}>
               {validationDiagnostics.map((value, index) => { const diagnostic = packageSutMetricsDiagnostic(value, index); return <li key={diagnostic.key}>{diagnostic.text}</li>; })}
             </ul>}
@@ -795,9 +839,11 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
 
 export function ExplorerPage({ api, packageId, resourceRoute, environment,
   principalLabel = '', onResourceRouteChange, onJobAccepted, onPrincipalLabelChange, onOpenQuickLoad,
-  onRunTarget, onValidateTarget, onValidatePackage, onRunBatch, onScheduleDebug, onOpenConfigurationFile, onOpenTestdata, registerUnsavedChanges }: ExplorerPageProps) {
+  onRunTarget, onValidateTarget, onValidatePackage, onRunBatch, onScheduleDebug, onOpenConfigurationFile, onOpenTestdata, onOpenPackageConfiguration, registerUnsavedChanges,
+  canManagePackageSource = false }: ExplorerPageProps) {
   const workspace = useContext(AppShellContext);
   const locale = workspace?.uiLocale || 'en';
+  const { confirm: confirmRun, dialog: runConfirmationDialog } = useAccessibleConfirmation();
   const validationText = workspace?.uiLocale === 'zh-Hant'
     ? { case: '驗證案例', resource: '驗證', suite: '驗證套件集' }
     : { case: 'Validate Case', resource: 'Validate', suite: 'Validate Suite' };
@@ -807,6 +853,8 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
   const initialListState = useRef(savedExplorerList(packageId)).current;
   const [query, setQuery] = useState(initialListState.query);
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
+  const [listView, setListView] = useState<'resources' | 'support'>('resources');
+  const [newTestcaseOpen, setNewTestcaseOpen] = useState(false);
   const [sortKey, setSortKey] = useState<ResourceSortField>(initialListState.sortKey);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(initialListState.sortDirection);
   const [resources, setResources] = useState<ResourceSummary[]>([]);
@@ -1093,7 +1141,8 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
     const expiresAt = currentDraft?.expiresAt ? Date.parse(currentDraft.expiresAt) : Number.NaN;
     if (!currentDraft || !Number.isFinite(expiresAt) || expiresAt <= Date.now() + 15_000) currentDraft = await previewDebug();
     if (!currentDraft) return;
-    if (!window.confirm(`Run ${detail?.logicalId || detail?.name || identity.resourceId}?`)) return;
+    if (!await confirmRun({ title: 'Confirm Run', message: `Run ${detail?.logicalId || detail?.name || identity.resourceId} now?`,
+      confirmLabel: 'Run now', cancelLabel: 'Cancel' })) return;
     setSubmitLoading(true); setDebugError(''); setDebugStatus('Submitting Run…');
     try {
       const accepted = await (currentDraft.draftId.startsWith('R') && api.submitRun ? api.submitRun : api.submitDebug)({ packageId, draftId: currentDraft.draftId, principal: principal.trim() || undefined });
@@ -1117,7 +1166,8 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
 
   const runCase = async () => {
     if (!detail || detail.type !== 'case' || !detail.logicalId || !detail.provenance?.suite) return;
-    if (!window.confirm(`Run case ${detail.logicalId}?`)) return;
+    if (!await confirmRun({ title: 'Confirm Run', message: `Run Test Case ${detail.logicalId} now?`,
+      confirmLabel: 'Run now', cancelLabel: 'Cancel' })) return;
     setDetailError(''); setDetailLoading(true);
     try {
       const accepted = await api.runCase({ packageId, suite: String(detail.provenance.suite), caseId: detail.logicalId, environment: environment || undefined, principal: principal.trim() || undefined });
@@ -1157,16 +1207,35 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
   };
 
   return <main className="page-content att-explorer-page">
+    {runConfirmationDialog}
     <header className="att-explorer-page-heading">
-      <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>{identity ? 'Resource details' : 'Package Explorer'}</h1>
-        <p>{identity ? 'View the safe definition, source, and dependencies for this resource.' : 'Search, sort, and open resources. Choose an execution environment from the RUN or Quick LOAD editor.'}</p></div>
+      <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>{identity ? 'Resource details' : newTestcaseOpen ? 'New Testcase' : listView === 'support' ? 'Supporting Package sources' : 'Package Explorer'}</h1>
+        <p>{identity ? 'View the safe definition, source, and dependencies for this resource.' : newTestcaseOpen ? 'Create a new executable Testcase in this Package.' : listView === 'support'
+          ? 'Manage Package-owned supporting sources separately from executable resources.'
+          : 'Browse executable Package resources. Choose an execution environment from the RUN or Quick LOAD editor.'}</p></div>
     </header>
 
-    <PackageSutMetricsPanel api={api} packageId={packageId} environment={environment} refreshKey={resourceRefresh + inspectionRefresh}
-      locale={locale} registerUnsavedChanges={registerUnsavedChanges} />
-
     <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}${identity ? '' : ' att-query-workspace'}`}>
-      <aside className="att-explorer-navigation" aria-label="Resource navigation" hidden={Boolean(identity)}>
+      <aside className="att-explorer-navigation" aria-label="Resource navigation" hidden={Boolean(identity || newTestcaseOpen)}>
+        <nav className="att-explorer-view-nav" aria-label="Package Explorer views">
+          <button type="button" aria-pressed={listView === 'resources'} onClick={() => setListView('resources')}>Executable resources</button>
+          <button type="button" aria-pressed={listView === 'support'} onClick={() => setListView('support')}>Supporting sources</button>
+          {listView === 'resources' && canManagePackageSource && <button type="button" onClick={() => setNewTestcaseOpen(true)}>New Testcase</button>}
+        </nav>
+        <section className="att-explorer-supporting-sources" aria-label="Supporting Package sources" hidden={listView !== 'support'}>
+          <header><h2>Supporting Package sources</h2>
+            <p>These resources support execution and belong to the selected Package; they are not executable resource types.</p></header>
+          <div className="att-explorer-support-links" role="group" aria-label="Package source destinations">
+            {onOpenTestdata && <button type="button" className="button button-quiet" onClick={onOpenTestdata}>Testdata</button>}
+            {onOpenPackageConfiguration && <button type="button" className="button button-quiet" onClick={onOpenPackageConfiguration}>Package manifest</button>}
+          </div>
+          <PackageFileCatalog api={api} packageId={packageId} active={listView === 'support'} locale={locale}
+            onOpenFile={(path, origin, reference) => onOpenConfigurationFile?.(path, origin, reference)}
+            onOpenResource={(target, actionId) => onResourceRouteChange({ ...target, tab: 'definition', ...(actionId ? { actionId } : {}) })} />
+          <PackageSutMetricsPanel api={api} packageId={packageId} environment={environment} refreshKey={resourceRefresh + inspectionRefresh}
+            locale={locale} registerUnsavedChanges={registerUnsavedChanges} />
+        </section>
+        <section className="att-explorer-executable-resources" aria-label="Executable Package resources" hidden={listView !== 'resources'}>
         <section className="att-query-filter-panel" aria-label="Resource filters">
           <h2>Resources</h2>
           <div className="att-query-filter-grid">
@@ -1204,7 +1273,6 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
             <button className="button button-quiet" type="button" disabled={loadingResources} onClick={() => (inspectionCache.clear(), setResourceRefresh(value => value + 1))}>{locale === 'zh-Hant' ? '重新整理資源' : 'Refresh resources'}</button>
             {onValidatePackage && <button className="button button-quiet" type="button" title={validationHelp} onClick={onValidatePackage}>{validatePackageText}</button>}
             {onRunBatch && <button className="button button-primary" type="button" onClick={onRunBatch}>{locale === 'zh-Hant' ? '執行測試案例…' : 'Run Test Cases…'}</button>}
-            {onOpenTestdata && <button className="button button-quiet" type="button" onClick={onOpenTestdata}>Testdata</button>}
           </div>
         </section>
         <section className="att-query-results-panel" aria-label="Resource results">
@@ -1217,10 +1285,13 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
             onLoadMore={() => void loadMore()} scrollContainerRef={resourceListRef} onListScroll={handleListScroll} />
           <p className="att-explorer-total">{totalResources.toLocaleString()} {typeFilter === 'all' ? 'package resources' : typeFilter + ' resources'}</p>
         </section>
+        </section>
       </aside>
 
-      <section className="att-explorer-detail" aria-label="Resource details" hidden={!identity}>
-        {!identity && <div className="att-explorer-empty-state"><h2>Select a resource</h2><p>Choose a Case, Template, Flow, or Tool from the resource list.</p></div>}
+      <section className="att-explorer-detail" aria-label={newTestcaseOpen ? 'New Testcase authoring' : 'Resource details'} hidden={!identity && !newTestcaseOpen}>
+        {!identity && !newTestcaseOpen && <div className="att-explorer-empty-state"><h2>Select a resource</h2><p>Choose a Case, Template, Flow, or Tool from the resource list.</p></div>}
+        {!identity && newTestcaseOpen && <TestcaseAuthoringWorkspace key={`${packageId}:new-testcase`} api={api} packageId={packageId}
+          onBack={() => setNewTestcaseOpen(false)} registerUnsavedChanges={registerUnsavedChanges} />}
         {identity && <>
           <button className="button button-quiet" type="button" onClick={() => onResourceRouteChange(null)}>Back to resources</button>
           <header className="att-resource-title">
@@ -1270,7 +1341,17 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
                 : <CodeEditor value={detailText} language="json" label="Safe resource definition" readOnly sourcePath={detail?.sourcePath} fileReferences={[]} />}
           </section>
           {sourceIdentity && <section id="att-explorer-panel-source" role="tabpanel" aria-labelledby="att-explorer-tab-source" hidden={tab !== 'source'}>
-            <SourceViewer api={api} identity={sourceIdentity} available={detail?.sourceAvailable === true} active={tab === 'source'} resource={detail} onFileReference={onOpenConfigurationFile} locale={workspace?.uiLocale} />
+            {tab === 'source' && (sourceIdentity.type === 'case' ? <>
+              <SourceViewer api={api} identity={sourceIdentity} available={detail?.sourceAvailable === true} active resource={detail}
+                onFileReference={(path, origin, reference) => onOpenConfigurationFile?.(path, origin, reference)} locale={workspace?.uiLocale} />
+              <TestcaseAuthoringWorkspace key={`${packageId}:${sourceIdentity.resourceId}`} api={api} packageId={packageId} sourcePath={detail?.sourcePath}
+                registerUnsavedChanges={registerUnsavedChanges} />
+            </> : <SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId,
+                query: { kind: 'resource', resourceType: sourceIdentity.type, resourceId: sourceIdentity.resourceId },
+                label: `${sourceIdentity.type} source`, fallbackIdentity: sourceIdentity,
+                fallbackAvailable: detail?.sourceAvailable === true, allowFileOperations: true, allowCreate: true }}
+                registerUnsavedChanges={registerUnsavedChanges}
+                onOpenFileReference={(path, origin, reference) => onOpenConfigurationFile?.(path, origin, reference)} />)}
           </section>}
           <section id="att-explorer-panel-relations" role="tabpanel" aria-labelledby="att-explorer-tab-relations" hidden={tab !== 'relations'}>
             <div className="att-relation-columns">

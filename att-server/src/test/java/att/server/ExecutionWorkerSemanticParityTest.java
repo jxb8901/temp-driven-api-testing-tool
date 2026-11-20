@@ -2,6 +2,7 @@ package att.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import att.server.api.WorkerRequest;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -10,6 +11,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -20,11 +23,11 @@ import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Public Job semantics that must remain identical on cold and prewarmed one-shot dispatch. */
+/** Public Job semantics that must remain identical with the execution pool enabled or disabled. */
 class ExecutionWorkerSemanticParityTest {
     @TempDir Path temp;
 
-    @Test void warmAndColdRunAndDebugPassAndFailHaveEquivalentStateEventsAndReports() throws Exception {
+    @Test void poolEnabledAndDisabledRunAndDebugPassAndFailHaveEquivalentStateEventsAndReports() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("allowed"));
         Path pkg=Files.createDirectories(allowed.resolve("p"));
         Files.createDirectories(pkg.resolve("templates/SIMPLE"));
@@ -83,7 +86,81 @@ class ExecutionWorkerSemanticParityTest {
         assertEquals("cold",load.dispatch,"LOAD must keep the existing isolated cold one-shot path");
     }
 
-    @Test void warmAndColdRunAndDebugCancellationAndToolTimeoutHaveEquivalentTerminalEvidence() throws Exception {
+    @Test void revisionPublicationKeepsSourcePinnedRunAndDebugOnTheColdPath() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("published-allowed"));
+        Path pkg=Files.createDirectories(allowed.resolve("p"));
+        Path template=Files.createDirectories(pkg.resolve("templates/SIMPLE"));
+        Files.createDirectories(pkg.resolve("testcase"));
+        Files.writeString(template.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: SIMPLE\ndescription: Revision-pinned prewarm test\n"
+                +"actions:\n  message: {type: log, message: published-prewarm}\n");
+        Files.writeString(template.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
+        Path runtimeConfig=temp.resolve("published-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
+                +"testcase: {root: testcase}\ntemplates: {root: templates}\n");
+        try(XSSFWorkbook book=new XSSFWorkbook();var out=Files.newOutputStream(pkg.resolve("testcase/cases.xlsx"))) {
+            Sheet sheet=book.createSheet("Cases");Row header=sheet.createRow(0);
+            header.createCell(0).setCellValue("ID");header.createCell(1).setCellValue("Tags");header.createCell(2).setCellValue("Template");
+            Row row=sheet.createRow(1);row.createCell(0).setCellValue("C1");row.createCell(1).setCellValue("smoke");row.createCell(2).setCellValue("name: SIMPLE");
+            book.write(out);
+        }
+        Files.writeString(pkg.resolve("testcase/cases.yaml"),"schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n"
+                +"  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
+        new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(pkg,runtimeConfig,"SIT",
+                List.of(Path.of("testcase/cases.xlsx")),null,java.util.Set.of(),false));
+
+        Path libs=Files.createDirectories(temp.resolve("published-libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
+            ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+        Path data=temp.resolve("published-data"),serverConfig=temp.resolve("published-server.yaml");
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
+                +"  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  auth: {mode: local}\n"
+                +"  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"workers:\n  maxConcurrent: 1\n  queuedLimit: 1\n  heapMaxMb: 128\n"
+                +"  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [p]}\n"
+                +"packages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(pkg)+"}\n");
+
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            awaitReady(runtime,15);
+            publishTemplateRevision(runtime,pkg,"# published before RUN\n");
+            awaitReadyRoot(runtime,runtime.executionPackageRoot("p"),15);
+            var runDefinition=ServerRuntime.JSON.createObjectNode();
+            runDefinition.put("schemaVersion",RunDefinition.VERSION);runDefinition.put("executionType","run");runDefinition.put("packageId","p");
+            runDefinition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","case","id","cases.default.C1")));
+            runDefinition.set("options",ServerRuntime.JSON.valueToTree(Map.of("debug",false)));
+            Map<String,Object> runDraft=runtime.createRunDraft(runDefinition,"alice");
+            Map<String,Object> runAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",runDraft.get("draftId"))),"alice","alice");
+            String runId=String.valueOf(runAccepted.get("jobId"));
+            Job runJob=runtime.jobs.get(runId);
+            assertEquals(WorkerRequest.SOURCE_SNAPSHOT_PROTOCOL,runJob.request.protocolVersion,
+                    "Published source-pinned RUNs require a Worker that understands the snapshot contract");
+            assertNotNull(runJob.request.sourceSnapshotArchiveSha256);
+            Map<String,Object> runResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,runId);
+            assertEquals("PASS",((Map<?,?>)runResult.get("job")).get("status"),runResult.toString());
+            assertEquals("cold",workerDispatch(runResult),"A source-pinned RUN must use the isolated cold Worker after publication");
+
+            publishTemplateRevision(runtime,pkg,"# published before DEBUG\n");
+            awaitReadyRoot(runtime,runtime.executionPackageRoot("p"),15);
+            var debugDefinition=ServerRuntime.JSON.createObjectNode();debugDefinition.put("packageId","p");
+            debugDefinition.set("target",ServerRuntime.JSON.valueToTree(Map.of("type","template","id","SIMPLE")));
+            debugDefinition.set("input",ServerRuntime.JSON.createObjectNode());
+            Map<String,Object> debugDraft=runtime.createDebugDraft(debugDefinition,"alice");
+            Map<String,Object> debugAccepted=runtime.submitDebugDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",debugDraft.get("draftId"))),"alice");
+            String debugId=String.valueOf(debugAccepted.get("jobId"));
+            Job debugJob=runtime.jobs.get(debugId);
+            assertEquals(WorkerRequest.SOURCE_SNAPSHOT_PROTOCOL,debugJob.request.protocolVersion,
+                    "Published source-pinned DEBUGs require a Worker that understands the snapshot contract");
+            assertNotNull(debugJob.request.sourceSnapshotArchiveSha256);
+            Map<String,Object> debugResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,debugId);
+            assertEquals("PASS",((Map<?,?>)debugResult.get("job")).get("status"),debugResult.toString());
+            assertEquals("cold",workerDispatch(debugResult),"A source-pinned DEBUG must use the isolated cold Worker after publication");
+        }
+    }
+
+    @Test void poolEnabledAndDisabledRunAndDebugCancellationAndToolTimeoutHaveEquivalentTerminalEvidence() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name","").toLowerCase().contains("win"),
                 "Uses a POSIX child Tool fixture");
         Path allowed=Files.createDirectories(temp.resolve("lifecycle-allowed"));
@@ -93,8 +170,8 @@ class ExecutionWorkerSemanticParityTest {
         Path tools=Files.createDirectories(pkg.resolve("tools"));
         Path holdScript=tools.resolve("hold.sh");
         Files.writeString(holdScript,"#!/bin/sh\n"
-                +"printf '%s' \"$$\" > \"$ATT_ROOT_DIR/tools/child.pid\"\n"
-                +"touch \"$ATT_ROOT_DIR/tools/started\"\n"
+                +"printf '%s' \"$$\" > \"$ATT_CASE_OUTPUT_DIR/child.pid\"\n"
+                +"touch \"$ATT_CASE_OUTPUT_DIR/started\"\n"
                 +"exec sleep 60\n");
         holdScript.toFile().setExecutable(true);
         Files.writeString(Files.createDirectories(templates.resolve("HOLD")).resolve("template.yaml"),
@@ -102,7 +179,7 @@ class ExecutionWorkerSemanticParityTest {
                         +"actions:\n  hold: {type: tool, call: '#{hold()}'}\n");
         Files.writeString(Files.createDirectories(templates.resolve("TIMEOUT")).resolve("template.yaml"),
                 "schemaVersion: att-template/v3.6\nname: TIMEOUT\ndescription: Timeout parity fixture\n"
-                        +"actions:\n  hold: {type: tool, call: '#{hold()}', timeoutMs: 300}\n");
+                        +"actions:\n  hold: {type: tool, call: '#{hold()}', timeoutMs: 3000}\n");
         for(String template:List.of("HOLD","TIMEOUT"))
             Files.writeString(templates.resolve(template).resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
         Path runtimeConfig=temp.resolve("lifecycle-runtime/config/config.yaml");
@@ -119,31 +196,31 @@ class ExecutionWorkerSemanticParityTest {
         TerminalCapture coldCancel=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"HOLD",true,false,"cold-cancel");
         TerminalCapture warmCancel=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"HOLD",true,false,"warm-cancel");
         assertEquals("CANCELLED",coldCancel.status);
-        assertEquals("cold",coldCancel.dispatch);assertEquals("warm",warmCancel.dispatch);
+        assertEquals("cold",coldCancel.dispatch);assertEquals("cold",warmCancel.dispatch,"Source-pinned cancellation must use the isolated cold Worker");
         assertTerminalEquivalent(coldCancel,warmCancel,"Cancellation state, event, diagnostic, archive and history must match");
 
         TerminalCapture coldTimeout=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,false,"cold-timeout");
         TerminalCapture warmTimeout=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,false,"warm-timeout");
         assertNotEquals("PASS",coldTimeout.status);
-        assertEquals("cold",coldTimeout.dispatch);assertEquals("warm",warmTimeout.dispatch);
+        assertEquals("cold",coldTimeout.dispatch);assertEquals("cold",warmTimeout.dispatch,"Source-pinned timeout must use the isolated cold Worker");
         assertTerminalEquivalent(coldTimeout,warmTimeout,"Timeout state, event, diagnostic, archive and history must match");
 
         TerminalCapture coldDebugCancel=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"HOLD",true,true,"cold-debug-cancel");
         TerminalCapture warmDebugCancel=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"HOLD",true,true,"warm-debug-cancel");
         assertEquals("CANCELLED",coldDebugCancel.status);
-        assertEquals("cold",coldDebugCancel.dispatch);assertEquals("warm",warmDebugCancel.dispatch);
+        assertEquals("cold",coldDebugCancel.dispatch);assertEquals("cold",warmDebugCancel.dispatch,"Source-pinned DEBUG cancellation must use the isolated cold Worker");
         assertTerminalEquivalent(coldDebugCancel,warmDebugCancel,"DEBUG cancellation evidence must match across dispatch paths");
 
         TerminalCapture coldDebugTimeout=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,true,"cold-debug-timeout");
         TerminalCapture warmDebugTimeout=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,true,"warm-debug-timeout");
         assertNotEquals("PASS",coldDebugTimeout.status);
-        assertEquals("cold",coldDebugTimeout.dispatch);assertEquals("warm",warmDebugTimeout.dispatch);
+        assertEquals("cold",coldDebugTimeout.dispatch);assertEquals("cold",warmDebugTimeout.dispatch,"Source-pinned DEBUG timeout must use the isolated cold Worker");
         assertTerminalEquivalent(coldDebugTimeout,warmDebugTimeout,"DEBUG Tool-timeout evidence must match across dispatch paths");
     }
 
     private void assertEquivalent(String expectedStatus,RunCapture cold,RunCapture warm) {
         assertEquals("cold",cold.dispatch);
-        assertEquals("warm",warm.dispatch);
+        assertEquals("cold",warm.dispatch,"Jobs admitted with a source snapshot must use the isolated cold Worker");
         assertEquals(cold.status,warm.status);
         assertEquals(expectedStatus,warm.status);
         assertEquals(cold.exitCode,warm.exitCode);
@@ -288,8 +365,6 @@ class ExecutionWorkerSemanticParityTest {
 
     private TerminalCapture executeInterrupted(boolean enabled,Path allowed,Path pkg,Path runtimeConfig,Path libs,
                                                String template,boolean cancel,boolean debug,String name) throws Exception {
-        Path started=pkg.resolve("tools/started"),childPid=pkg.resolve("tools/child.pid");
-        Files.deleteIfExists(started);Files.deleteIfExists(childPid);
         Path data=temp.resolve(name+"-data"),serverConfig=temp.resolve(name+"-server.yaml");
         String pool=enabled?"  executionPool: {enabled: true, minIdle: 1, maxIdle: 1, heapBudgetMb: 128, packageIds: [p]}\n":"";
         Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
@@ -318,13 +393,15 @@ class ExecutionWorkerSemanticParityTest {
             }
             String id=String.valueOf(accepted.get("jobId"));
             Job job=runtime.jobs.get(id);
-            await(()->Files.exists(started)&&Files.exists(childPid)&&job.workerPid!=null,20);
+            Path output=data.resolve("jobs").resolve(id).resolve("output");
+            await(()->outputContains(output,"started")&&outputContains(output,"child.pid")&&job.workerPid!=null,20);
             long workerPid=job.workerPid;
-            long toolPid=Long.parseLong(Files.readString(childPid));
+            List<Long> workerDescendants=descendantPids(job.process);
+            if(cancel)assertFalse(workerDescendants.isEmpty(),"The Worker process tree must include its child Tool");
             if(cancel)assertEquals("CANCELLED",runtime.cancel(id,"alice"));
             Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,id);
             await(()->!ProcessHandle.of(workerPid).map(ProcessHandle::isAlive).orElse(false)
-                    &&!ProcessHandle.of(toolPid).map(ProcessHandle::isAlive).orElse(false),15);
+                    &&workerDescendants.stream().noneMatch(pid->ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)),15);
             awaitArchive(runtime,id,20);
             Map<?,?> row=(Map<?,?>)result.get("job");
             Map<?,?> performance=(Map<?,?>)row.get("performance");
@@ -364,6 +441,50 @@ class ExecutionWorkerSemanticParityTest {
         fail("The prewarm Worker did not become READY");
     }
 
+    private static void awaitReadyRoot(ServerRuntime runtime,Path expectedRoot,int seconds) throws Exception {
+        Path canonical=expectedRoot.toRealPath();
+        Field poolField=ServerRuntime.class.getDeclaredField("executionWorkers");poolField.setAccessible(true);
+        Object pool=poolField.get(runtime);Field ownedField=pool.getClass().getDeclaredField("owned");ownedField.setAccessible(true);
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(seconds);
+        while(System.nanoTime()<deadline) {
+            synchronized(pool) {
+                for(Object idle:(List<?>)ownedField.get(pool)) {
+                    Field rootField=idle.getClass().getDeclaredField("root");rootField.setAccessible(true);
+                    Field readyField=idle.getClass().getDeclaredField("readyNanos");readyField.setAccessible(true);
+                    Field retiredField=idle.getClass().getDeclaredField("retired");retiredField.setAccessible(true);
+                    Field processField=idle.getClass().getDeclaredField("process");processField.setAccessible(true);
+                    Process process=(Process)processField.get(idle);
+                    if(!retiredField.getBoolean(idle)&&readyField.getLong(idle)>0&&canonical.equals(rootField.get(idle))
+                            &&process!=null&&process.isAlive())return;
+                }
+            }
+            Thread.sleep(25);
+        }
+        fail("The prewarm Worker did not become READY for the current Package revision");
+    }
+
+    private static void publishTemplateRevision(ServerRuntime runtime,Path configuredRoot,String marker) throws Exception {
+        Field transactionField=ServerRuntime.class.getDeclaredField("sourceFileTransaction");transactionField.setAccessible(true);
+        SourceFileTransaction transaction=(SourceFileTransaction)transactionField.get(runtime);
+        Path active=runtime.packageRoot("p");
+        Path source=active.resolve("templates/SIMPLE/template.yaml");
+        byte[] before=Files.readAllBytes(source);
+        byte[] after=(new String(before,java.nio.charset.StandardCharsets.UTF_8)+marker).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Map<String,SourceFileTransaction.Write> writes=Map.of("templates/SIMPLE/template.yaml",
+                new SourceFileTransaction.Write("templates/SIMPLE/template.yaml",after,sha256(before)));
+        transaction.commit(ChangeSetPublisher.PACKAGE_SOURCE,"p",configuredRoot,"test-publisher",sha256(before),sha256(after),writes,()->{ });
+    }
+
+    private static String workerDispatch(Map<String,Object> result) {
+        Map<?,?> job=(Map<?,?>)result.get("job");
+        Map<?,?> performance=(Map<?,?>)job.get("performance");
+        return String.valueOf(performance.get("workerDispatch"));
+    }
+
+    private static String sha256(byte[] bytes) throws Exception {
+        return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
     private static void awaitArchive(ServerRuntime runtime,String id,int seconds) throws Exception {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(seconds);
         while(System.nanoTime()<deadline&& !"READY".equals(runtime.artifactIndex(id).get("archiveStatus")))Thread.sleep(20);
@@ -374,6 +495,16 @@ class ExecutionWorkerSemanticParityTest {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(seconds);
         while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(20);
         assertTrue(condition.getAsBoolean(),"Lifecycle condition did not complete within "+seconds+" seconds");
+    }
+
+    private static boolean outputContains(Path root,String fileName) {
+        if(!Files.isDirectory(root))return false;
+        try(var paths=Files.walk(root)) { return paths.anyMatch(path->path.getFileName().toString().equals(fileName)); }
+        catch(Exception unavailable) { return false; }
+    }
+
+    private static Path outputFile(Path root,String fileName) throws Exception {
+        try(var paths=Files.walk(root)) { return paths.filter(path->path.getFileName().toString().equals(fileName)).findFirst().orElseThrow(); }
     }
 
     private static JsonNode stableResult(Object raw) {
@@ -389,6 +520,11 @@ class ExecutionWorkerSemanticParityTest {
     private static String normalizeLog(String message) {
         return message.replaceAll("\\b[0-9]{8}-[0-9]{6}\\b","<run>")
                 .replaceAll("durationMs: ?[0-9]+","durationMs: <measured>");
+    }
+
+    private static List<Long> descendantPids(Process process) {
+        if(process==null)return List.of();
+        return process.toHandle().descendants().map(ProcessHandle::pid).toList();
     }
 
     private static void dropMeasuredDurations(JsonNode node) {

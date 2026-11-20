@@ -37,6 +37,10 @@ class ArtifactRecoveryTest {
             assertEquals(2,runtime.recoverArtifactArchives());
             assertEquals(0,runtime.recoverArtifactArchives(),"Each pass has a fixed budget and advances its cursor");
             assertEquals(64,runtime.recoverArtifactArchives(),"Capacity-rejected, unattempted publications remain eligible on the next cycle");
+            long failureDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
+            while(runtime.store.artifactRecoveryJobIds("",64).contains(id(2049))&&System.nanoTime()<failureDeadline)Thread.sleep(10);
+            assertFalse(runtime.store.artifactRecoveryJobIds("",64).contains(id(2049)),
+                    "The first missing-archive publication must reach its terminal failure before runtime shutdown");
             assertFalse(Files.exists(config.dataDir.resolve("jobs").resolve(id(1))),"READY history is never passed to the filesystem writer");
         }
         try(JobStore reopened=new JobStore(config)) {

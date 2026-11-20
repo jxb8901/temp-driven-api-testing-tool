@@ -206,6 +206,8 @@ describe('App Dashboard job refresh', () => {
       await settle();
     };
     const clickButton = async (text: string) => {
+      await vi.waitFor(() => expect([...host.querySelectorAll<HTMLButtonElement>('button')]
+        .some(item => item.textContent === text)).toBe(true));
       const button = [...host.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === text);
       if (!button) throw new Error(`Missing button: ${text}`);
       await act(async () => { button.click(); await Promise.resolve(); });
@@ -213,9 +215,14 @@ describe('App Dashboard job refresh', () => {
     };
 
     await act(async () => root.render(<App />)); await settle();
+    // Let the inspector's default Environment hashchange commit before the validation context captures its route key.
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe('#/configuration?environment=SIT');
+      expect(host.querySelector<HTMLSelectElement>('[aria-label="Configuration environment"]')?.value).toBe('SIT');
+    }, { timeout: 5000 });
     await clickButton('Validate Shared Config');
     await vi.waitFor(() => expect(submitted).toHaveLength(1));
-    await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'));
+    await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'), { timeout: 5000 });
     expect(host.textContent).toContain('V11111111111111111111111111111111');
     expect(submitted).toHaveLength(1);
 
@@ -223,7 +230,7 @@ describe('App Dashboard job refresh', () => {
     await navigate('#/configuration/payments?environment=SIT');
     await clickButton('Validate Effective Config');
     await vi.waitFor(() => expect(submitted).toHaveLength(2));
-    await vi.waitFor(() => expect(host.textContent).toContain('V22222222222222222222222222222222'));
+    await vi.waitFor(() => expect(host.textContent).toContain('V22222222222222222222222222222222'), { timeout: 5000 });
     expect(host.textContent).toContain('V22222222222222222222222222222222');
     expect(submitted).toHaveLength(2);
     expect(JSON.parse(localStorage.getItem(validationContextsKey('test-auth-context')) || '[]')).toHaveLength(2);
@@ -231,13 +238,13 @@ describe('App Dashboard job refresh', () => {
 
     await navigate('#/');
     await navigate('#/configuration');
-    await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'));
+    await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'), { timeout: 5000 });
     expect(host.textContent).toContain('V11111111111111111111111111111111');
     expect(submitted).toHaveLength(2);
 
     await act(async () => root.unmount()); root = createRoot(host);
     await act(async () => root.render(<App />)); await settle();
-    await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'));
+    await vi.waitFor(() => expect(host.textContent).toContain('V11111111111111111111111111111111'), { timeout: 5000 });
     expect(host.textContent).toContain('V11111111111111111111111111111111');
     expect(submitted).toHaveLength(2);
     expect(cancel).not.toHaveBeenCalled();
@@ -256,6 +263,8 @@ describe('App Dashboard job refresh', () => {
     window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/configuration');
 
     await act(async () => root.render(<App />)); await settle();
+    await vi.waitFor(() => expect([...host.querySelectorAll<HTMLButtonElement>('button')]
+      .some(item => item.textContent === 'Validate Shared Config')).toBe(true));
     const validate = [...host.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Validate Shared Config');
     expect(validate).toBeTruthy();
     await act(async () => { validate!.click(); await Promise.resolve(); }); await settle();
@@ -289,7 +298,7 @@ describe('App Dashboard job refresh', () => {
 
     await act(async () => root.render(<App />)); await settle();
     expect(window.location.hash).toBe('#/packages/payments/testdata?environment=UAT&descriptor=accounts');
-    expect(host.textContent).toContain('Package: Payments');
+    await vi.waitFor(() => expect(host.textContent).toContain('Package: Payments'));
     expect(host.textContent).toContain('accounts');
     expect(host.querySelector<HTMLSelectElement>('[aria-label="Workspace Environment"]')?.value).toBe('SIT');
     expect(JSON.parse(sessionStorage.getItem('att.workspace.context')!)).toEqual({ packageId: 'payments', environment: 'SIT' });

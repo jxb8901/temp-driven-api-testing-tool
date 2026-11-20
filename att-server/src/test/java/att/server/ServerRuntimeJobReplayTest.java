@@ -15,34 +15,45 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ServerRuntimeJobReplayTest {
     @TempDir Path temp;
-    private record Fixture(Path root,Path server,Path libs) {
+    private record Fixture(Path root,Path ownerRoot,Path server,Path libs) {
         ServerRuntime open() throws Exception {return new ServerRuntime(ServerConfig.load(server),libs.toString());}
         ServerRuntime open(ServerRuntimeTestSupport.MutableClock clock) throws Exception {return new ServerRuntime(ServerConfig.load(server),libs.toString(),ProcessBuilder::start,clock);}
     }
     private Fixture fixture() throws Exception {
-        Path root=Files.createDirectories(temp.resolve("unified-package"));
+        Path root=Files.createDirectories(temp.resolve("unified-package")).toRealPath();
         Files.createDirectories(root.resolve("testcase"));
-        Files.createDirectories(root.resolve("templates/SIMPLE"));Files.createDirectories(root.resolve("templates/BAD"));Files.createDirectories(root.resolve("templates/flows/simple"));
+        Files.createDirectories(root.resolve("templates/SIMPLE"));Files.createDirectories(root.resolve("templates/SNAPSHOT"));
+        Files.createDirectories(root.resolve("templates/BAD"));Files.createDirectories(root.resolve("templates/flows/simple"));
+        Files.createDirectories(root.resolve("files"));Files.createDirectories(root.resolve("testdata"));
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
-        Path runtimeConfig=temp.resolve("unified-runtime/config/config.yaml");Files.createDirectories(runtimeConfig.getParent());
-        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}, UAT: {}}\ntemplates: {root: templates}\ntestcase: {root: testcase}\n");
+        Path runtimeConfigDirectory=Files.createDirectories(temp.resolve("unified-runtime/config")).toRealPath();
+        Path runtimeConfig=runtimeConfigDirectory.resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.15\nenvironment: SIT\nenvironments: {SIT: {}, UAT: {}}\ntemplates: {root: templates}\ntestcase: {root: testcase}\n");
 
         Files.writeString(Files.createDirectories(root.resolve("tools")).resolve("version.yaml"),
                 "schemaVersion: att-tool/v1\nid: version\nname: Version\ndescription: Local runtime version\n"
                 +"command: ["+ServerRuntimeTestSupport.yaml(javaBin)+", '-version']\nstdoutFormat: text\narguments: {}\n");
         Files.writeString(root.resolve("templates/SIMPLE/template.yaml"),"schemaVersion: att-template/v3.6\nname: SIMPLE\ndescription: Unified RUN fixture\nactions:\n  show: {type: log, message: once}\n");
+        Files.writeString(root.resolve("templates/SNAPSHOT/template.yaml"),"schemaVersion: att-template/v3.6\nname: SNAPSHOT\ndescription: Source snapshot fixture\nactions:\n  show: {type: log, message: '&{../../files/value.txt}'}\n");
         Files.writeString(root.resolve("templates/BAD/template.yaml"),"schemaVersion: att-template/v3.6\nname: BAD\ndescription: Failed Case fixture\nactions:\n  check: {type: assert, assert: '#{1 == 2}'}\n");
-        Files.writeString(root.resolve("templates/flows/simple/flow.yaml"),"schemaVersion: att-flow/v3.6\nid: simple.flow.v1\nname: Simple flow\ndescription: Unified RUN flow\nactions:\n  show: {type: log, message: once}\n");
+        Files.writeString(root.resolve("templates/flows/simple/flow.yaml"),"schemaVersion: att-flow/v3.6\nid: simple.flow.v1\nname: Simple flow\ndescription: Unified RUN flow\nactions:\n  show: {type: log, message: '&{../../../files/value.txt}'}\n");
+        Files.writeString(root.resolve("files/value.txt"),"once");
+        Files.writeString(root.resolve("package.yaml"),"schemaVersion: att-package/v1\ntestdata:\n  descriptors: [testdata/base.yaml]\n  environments:\n    SIT: [testdata/sit.yaml]\n");
+        Files.writeString(root.resolve("testdata/base.yaml"),"schemaVersion: att-testdata/v1.0\nid: baseAccounts\nrecords: [{id: BASE}]\n");
+        Files.writeString(root.resolve("testdata/sit.yaml"),"schemaVersion: att-testdata/v1.0\nid: sitAccounts\nrecords: [{id: SIT}]\n");
+        Files.createDirectories(root.resolve("output"));
         Path workbook=root.resolve("testcase/cases.xlsx");
         try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();var out=Files.newOutputStream(workbook)) {
             var sheet=book.createSheet("Cases");String[] columns={"ID","Tags","Template"};var header=sheet.createRow(0);
@@ -53,47 +64,185 @@ class ServerRuntimeJobReplayTest {
         Files.writeString(root.resolve("testcase/cases.yaml"),"schemaVersion: att-sidecar/v2.2\nid: cases\nexcel:\n  sheet: default=Cases\n  caseId: ID\n  tags: Tags\nstages:\n  - key: main\n    template: Template\n    required: true\n");
         new att.api.DefaultAttService().snapshot(new att.api.SnapshotRequest(root,runtimeConfig,"SIT",List.of(workbook),null,java.util.Set.of(),false));
         Path server=temp.resolve("unified-server.yaml");
-        Files.writeString(server,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("unified-data"))+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)+"\n  auth: {mode: local}\n  inspection:\n    enabled: true\n    timeoutMs: 30000\n  inlineLoad: {enabled: true, maxDurationSeconds: 86400}\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(root)+"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(root)+"\n");
+        Path ownerRoot=temp.resolve("owner-package");
+        Files.writeString(server,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("unified-data"))+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)+"\n  auth: {mode: local}\n  centralConfigurationEditingEnabled: true\n  packageConfiguration: {sourceEditingEnabled: true}\n  inspection:\n    enabled: true\n    timeoutMs: 30000\n  inlineLoad: {enabled: true, maxDurationSeconds: 86400}\n  scheduling:\n    enabled: true\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 2\npackages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(root)+", "+ServerRuntimeTestSupport.yaml(ownerRoot)+"]\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(root)+"\n    owner: "+ServerRuntimeTestSupport.yaml(ownerRoot)+"\n");
         Path libs=Files.createDirectory(temp.resolve("unified-libs"));
         for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
         ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
 
         Files.createDirectories(root.resolve("load"));
         Files.writeString(root.resolve("load/smoke.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 1s}\n");
-        return new Fixture(root,server,libs);
+        Files.createDirectories(ownerRoot);
+        try(var paths=Files.walk(root)) {
+            for(Path source:(Iterable<Path>)paths::iterator) {
+                if(source.equals(root))continue;
+                Path target=ownerRoot.resolve(root.relativize(source));
+                if(Files.isDirectory(source))Files.createDirectories(target);
+                else Files.copy(source,target);
+            }
+        }
+        return new Fixture(root,ownerRoot,server,libs);
     }
-    private Path writeSutMetricsConfig(Fixture fixture,List<Map<String,Object>> sources,List<Map<String,Object>> profiles) throws Exception {
+    private Path writeSutMetricsConfig(Fixture fixture,boolean withPrometheus,Map<String,Object> metricSource,
+                                       Map<String,Object> profile) throws Exception {
         Path config=fixture.root.getParent().resolve("unified-runtime/config/config.yaml");
-        StringBuilder text=new StringBuilder("schemaVersion: att-config/v2.14\nenvironment: SIT\nenvironments: {SIT: {}, UAT: {}}\n"
-                +"templates: {root: templates}\ntestcase: {root: testcase}\nsutMetrics:\n");
-        appendYamlItems(text,"dataSources",sources);
-        appendYamlItems(text,"metricSources",List.of());
-        appendYamlItems(text,"groups",List.of());
-        appendYamlItems(text,"profiles",profiles);
+        Path runtimeRoot=config.getParent().getParent();
+        Path packageSources=Files.createDirectories(fixture.ownerRoot.resolve("load/sut-metrics/sources"));
+        Path packageProfiles=Files.createDirectories(fixture.ownerRoot.resolve("load/sut-metrics/profiles"));
+        String sourceId=String.valueOf(metricSource.get("id")),profileId=String.valueOf(profile.get("id"));
+        String sourcePath="load/sut-metrics/sources/"+sourceId+".yaml";
+        String profilePath="load/sut-metrics/profiles/"+profileId+".yaml";
+        Files.writeString(fixture.ownerRoot.resolve("package.yaml"),"schemaVersion: att-package/v2\n"
+                +"testdata:\n  descriptors: [testdata/base.yaml]\n  environments:\n    SIT: [testdata/sit.yaml]\n"
+                +"observability:\n  metricSources: ["+sourcePath+"]\n  profiles: ["+profilePath+"]\n");
+        Files.writeString(packageSources.resolve(sourceId+".yaml"),ServerRuntime.JSON.writeValueAsString(metricSource)+"\n");
+        Files.writeString(packageProfiles.resolve(profileId+".yaml"),ServerRuntime.JSON.writeValueAsString(profile)+"\n");
+        StringBuilder text=new StringBuilder("schemaVersion: att-config/v2.15\nenvironment: SIT\nenvironments: {SIT: {}, UAT: {}}\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
+        if(withPrometheus) {
+            Path dataSources=Files.createDirectories(runtimeRoot.resolve("config/sut-metrics"));
+            Files.writeString(dataSources.resolve("prom.yaml"),ServerRuntime.JSON.writeValueAsString(simplePrometheusSource())+"\n");
+            text.append("sutMetrics:\n  dataSources: [config/sut-metrics/prom.yaml]\n");
+        }
         Files.writeString(config,text.toString());
         return config;
     }
-    private static void appendYamlItems(StringBuilder text,String name,List<Map<String,Object>> items) throws Exception {
-        text.append("  ").append(name).append(":");
-        if(items.isEmpty()){text.append(" []\n");return;}
-        text.append('\n');
-        for(Map<String,Object> item:items)text.append("    - ").append(ServerRuntime.JSON.writeValueAsString(item)).append('\n');
+    private static void activateCentralConfig(ServerRuntime runtime,String candidate) throws Exception {
+        String actor="admin";
+        Path activeConfig=activeCentralConfig(runtime);
+        if(candidate.equals(Files.readString(activeConfig)))return;
+        String requestId="job-replay-central-config-"+UUID.randomUUID();
+        Map<String,String> current=runtime.changeSetPublisher.currentRevisions(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                ChangeSetPublisher.CENTRAL_SCOPE_ID,actor,true);
+        Map<String,Object> staged=runtime.changeSetPublisher.stage(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                ChangeSetPublisher.CENTRAL_SCOPE_ID,actor,true,current.get("baseSourceRevision"),null,
+                List.of(ChangeSetPublisher.OperationInput.replace("config/config.yaml",candidate.getBytes(StandardCharsets.UTF_8))),requestId);
+        String changeSetId=String.valueOf(staged.get("changeSetId"));
+        runtime.changeSetPublisher.validate(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                ChangeSetPublisher.CENTRAL_SCOPE_ID,actor,true,changeSetId,requestId);
+        runtime.changeSetPublisher.review(ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,
+                ChangeSetPublisher.CENTRAL_SCOPE_ID,actor,true,changeSetId,requestId);
+        var impact=runtime.configurationImpactReport(actor,changeSetId,null);
+        if(impact.providerState!=att.server.api.source.SourceManagementContracts.ProviderState.AVAILABLE) {
+            runtime.publishConfigurationChangeSet(actor,changeSetId,requestId,null);
+            throw new AssertionError("Central Config candidate published without an available impact report");
+        }
+        String freshness=ConfigImpactAnalyzer.freshnessFingerprint(impact.freshness);
+        var acknowledgement=new att.server.api.source.SourceManagementContracts.ImpactAcknowledgement(
+                freshness,actor,ConfigImpactAnalyzer.acknowledgementDigest(freshness,actor));
+        runtime.publishConfigurationChangeSet(actor,changeSetId,requestId,acknowledgement);
+    }
+    private static Path activeCentralConfig(ServerRuntime runtime) throws Exception {
+        return runtime.centralSourceRoot().resolve("config/config.yaml");
     }
     private static Map<String,Object> simplePrometheusSource() {
         return Map.of("schemaVersion","att-sut-metrics-source/v1","id","prom","name","Local Prometheus",
-                "url","http://127.0.0.1:1","readers",List.of("alice"),"readRoles",List.of());
+                "provider","PROMETHEUS","url","http://127.0.0.1:1","readers",List.of("alice"),"readRoles",List.of());
     }
-    private static Map<String,Object> simpleProfile(String id,String name,String query) {
-        return Map.of("schemaVersion","att-sut-metrics-profile/v1","id",id,"name",name,"kind","base","category","app",
-                "metrics",List.of(Map.of("id","requests","title","Requests","unit","count","kind","gauge","query",query)));
+    private static Map<String,Object> simplePrometheusMetricSource(String query) {
+        return Map.of("schemaVersion","att-sut-metrics-metric-source/v1","id","metric-app","name","Application requests",
+                "connection",Map.of("kind","DATA_SOURCE","id","prom"),
+                "fetch",Map.of("id","request-range","mode","prometheus-range","query",query,"parameters",Map.of(),"sampling","range","step","30s"),
+                "mapping",Map.of("labels",Map.of("retain",List.of()),"outputs",List.of(Map.of("id","requests","title","Requests",
+                        "unit","count","kind","gauge","metricName","requests"))),
+                "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576));
+    }
+    private static Map<String,Object> simplePackageProfile(String id,String metricSourceId) {
+        return Map.of("schemaVersion","att-sut-metrics-profile/v2","id",id,"name",id,
+                "metricSourceIds",List.of(metricSourceId),"groupIds",List.of(),
+                "allowedBindings",Map.of("environments",List.of("SIT"),"targets",List.of(Map.of("type","template","id","SIMPLE")),
+                        "tenants",List.of(),"parameters",Map.of()),
+                "budgets",Map.of("maxFetches",4,"maxObservations",512,"maxArtifactBytes",1048576));
+    }
+    private static Map<String,Object> packageToolMetricSource() {
+        return Map.of("schemaVersion","att-sut-metrics-metric-source/v1","id","business-tool","name","Business Tool",
+                "connection",Map.of("kind","PACKAGE_TOOL","id","version"),
+                "fetch",Map.of("id","tool-fetch","mode","package-tool","call","#{version()}","parameters",Map.of(),
+                        "sampling","afterDrain","sideEffectsAcknowledged",true),
+                "mapping",Map.of("labels",Map.of(),"outputs",List.of(Map.of("id","tool-version","title","Tool version",
+                        "unit","count","kind","gauge","column","VALUE"))),
+                "limits",Map.of("maxRows",64,"maxSeries",16,"maxSamples",1000,"maxArtifactBytes",1048576));
+    }
+    private static Map<String,Object> packageToolProfile() {
+        return Map.of("schemaVersion","att-sut-metrics-profile/v2","id","business-tool","name","Business Tool",
+                "metricSourceIds",List.of("business-tool"),"groupIds",List.of(),
+                "allowedBindings",Map.of("environments",List.of("SIT"),"targets",List.of(),"tenants",List.of(),"parameters",Map.of()),
+                "budgets",Map.of("maxFetches",4,"maxObservations",512,"maxArtifactBytes",1048576));
+    }
+    private static Map<String,Object> withQuery(Map<String,Object> source,String query) {
+        Map<String,Object> changed=ServerRuntime.JSON.convertValue(source,Map.class);
+        Map<String,Object> fetch=ServerRuntime.JSON.convertValue(changed.get("fetch"),Map.class);
+        fetch.put("query",query);changed.put("fetch",fetch);return changed;
+    }
+    private static String publishPackageMetricSource(ServerRuntime runtime,Map<String,Object> source) throws Exception {
+        String actor="owner",sourceId=String.valueOf(source.get("id")),requestId="job-replay-package-metrics-"+UUID.randomUUID();
+        String path="load/sut-metrics/sources/"+sourceId+".yaml";
+        Map<String,String> current=runtime.changeSetPublisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,"owner",actor,false);
+        Map<String,Object> staged=runtime.changeSetPublisher.stage(ChangeSetPublisher.PACKAGE_SOURCE,"owner",actor,false,
+                current.get("baseSourceRevision"),current.get("registryRevision"),List.of(ChangeSetPublisher.OperationInput.replace(
+                        path,(ServerRuntime.JSON.writeValueAsString(source)+"\n").getBytes(StandardCharsets.UTF_8))),requestId);
+        String changeSetId=String.valueOf(staged.get("changeSetId"));
+        runtime.changeSetPublisher.validate(ChangeSetPublisher.PACKAGE_SOURCE,"owner",actor,false,changeSetId,requestId);
+        runtime.changeSetPublisher.review(ChangeSetPublisher.PACKAGE_SOURCE,"owner",actor,false,changeSetId,requestId);
+        Map<String,Object> publication=runtime.changeSetPublisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,"owner",actor,false,changeSetId,requestId);
+        runtime.notifySourcePublished(ChangeSetPublisher.PACKAGE_SOURCE,"owner",publication,requestId);
+        return String.valueOf(publication.get("revision"));
+    }
+    private static SutMetricsService.BusinessCallContext packageCallContext(ServerRuntime runtime,String packageId,
+                                                                            Path packageRoot,String environment) throws Exception {
+        Path runtimeRoot=runtime.centralSourceRoot(),runtimePath=runtimeRoot.resolve("config/config.yaml");
+        att.config.FrameworkConfig framework=new att.config.FrameworkConfigLoader().loadDiscovery(
+                runtimePath,runtimeRoot,packageRoot,environment);
+        return new SutMetricsService.BusinessCallContext(packageId,packageRoot,runtimePath,runtimeRoot,environment,
+                null,null,java.util.Set.of(),List.of(),framework);
     }
     private static void users(ServerRuntime runtime) throws Exception {
         runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
         runtime.store.createAuthUser("bob","Bob","unused","USER","csrf");
+        runtime.store.createAuthUser("p","Package owner","unused","USER","csrf");
+        runtime.store.createAuthUser("owner","Package owner","unused","USER","csrf");
     }
     private static JsonNode submit(String draftId) {return ServerRuntime.JSON.valueToTree(Map.of("packageId","p","draftId",draftId));}
     private static long jobCount(ServerRuntime runtime,String principal) throws Exception {
         return ((Number)runtime.store.queryJobs(JobQuery.parse(Map.of(),principal)).get("total")).longValue();
+    }
+
+    private static void assertAcceptedFileClosure(Map<String,Object> job) {
+        assertEquals(Boolean.TRUE,job.get("sourceSnapshotAvailable"));
+        Map<?,?> provenance=(Map<?,?>)job.get("sourceProvenance");
+        assertNotNull(provenance);
+        Map<?,?> revisions=(Map<?,?>)provenance.get("revisions");
+        assertNotNull(revisions);
+        Map<?,?> packageSource=(Map<?,?>)revisions.get("packageSourceRevision");
+        Map<?,?> legacyBusinessSource=(Map<?,?>)revisions.get("businessSource");
+        Map<?,?> executionRevision=(Map<?,?>)revisions.get("executionRevisionDigest");
+        assertNotNull(packageSource);assertEquals("PACKAGE_SOURCE",packageSource.get("kind"));
+        assertNotNull(legacyBusinessSource);assertEquals(packageSource.get("revision"),legacyBusinessSource.get("revision"),
+                "The persisted businessSource alias remains consistent with Package source identity");
+        assertNotNull(executionRevision);assertEquals("EXECUTION_REVISION",executionRevision.get("kind"));
+        assertTrue(String.valueOf(executionRevision.get("revision")).matches("[a-f0-9]{64}"));
+        assertNotEquals(packageSource.get("revision"),executionRevision.get("revision"),
+                "Package source provenance must not substitute for the execution identity");
+        List<?> dependencies=(List<?>)provenance.get("dependencyClosure");assertNotNull(dependencies);
+        List<? extends Map<?,?>> plans=dependencies.stream().filter(Map.class::isInstance).map(value->(Map<?,?>)value)
+                .filter(value->"FILE".equals(String.valueOf(value.get("kind")))).toList();
+        assertEquals(2,plans.size(),"Each inbound Template or Flow caller must remain available in accepted provenance");
+        assertEquals(1,plans.stream().map(value->value.get("canonicalPath")).distinct().count(),
+                "Shared callers retain one canonical File identity");
+        assertTrue(plans.stream().allMatch(value->"files/value.txt".equals(value.get("canonicalPath"))));
+        assertEquals(1,plans.stream().map(value->value.get("sourceFingerprint")).distinct().count());
+        assertEquals(2,plans.stream().map(value->value.get("callSite")).distinct().count(),
+                "Distinct inbound callers are preserved in accepted dependency metadata");
+        assertTrue(plans.stream().allMatch(value->String.valueOf(value.get("sourceFingerprint")).matches("[a-f0-9]{64}")));
+        assertTrue(dependencies.stream().filter(Map.class::isInstance).map(Object::toString)
+                .anyMatch(value->value.contains("MANIFEST")&&value.contains("package.yaml")));
+        assertTrue(dependencies.stream().filter(Map.class::isInstance).map(Object::toString)
+                .anyMatch(value->value.contains("TESTDATA")&&value.contains("testdata/base.yaml")));
+        assertTrue(dependencies.stream().filter(Map.class::isInstance).map(Object::toString)
+                .anyMatch(value->value.contains("TESTDATA")&&value.contains("testdata/sit.yaml")),
+                "The accepted Environment overlay must be recorded with the shared base Testdata layer");
+        assertFalse(provenance.toString().contains("once"));assertFalse(provenance.toString().contains("BASE"));
+        assertTrue(provenance.toString().contains("SIT"),"Environment identity is allowed value-free provenance");
     }
 
     @Test void legacyRetainedExecutionSpecV1StillParses() throws Exception {
@@ -113,11 +262,12 @@ class ServerRuntimeJobReplayTest {
         fail("Job did not finish: "+id);
     }
     private static void awaitRunning(ServerRuntime runtime,String id) throws Exception {
-        Instant deadline=Instant.now().plusSeconds(15);
+        Instant deadline=Instant.now().plusSeconds(30);
         while(Instant.now().isBefore(deadline)) {
             String status=String.valueOf(runtime.jobRecord(id).get("status"));
             if("RUNNING".equals(status))return;
-            if(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(status))fail("Job finished before the source edit: "+status);
+            if(List.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(status))
+                fail("Job finished before the source edit: "+id+" status="+status);
             Thread.sleep(25);
         }
         fail("Job did not start before the source edit: "+id);
@@ -132,6 +282,115 @@ class ServerRuntimeJobReplayTest {
         fail("SUT Metrics collection did not finish: "+id);
         return Map.of();
     }
+
+    @Test void acceptedRunningAndQueuedJobsKeepPackageAndConfigAWhileNewJobUsesB() throws Exception {
+        Fixture fixture=fixture();String runningId,queuedId,newId;Path packageA,configA,packageB,configB;
+        Path runtimeConfig=temp.resolve("unified-runtime/config/config.yaml");
+        Path template=fixture.root.resolve("templates/SNAPSHOT/template.yaml");
+        String configSourceA=Files.readString(runtimeConfig);
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            JsonNode loadScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6","workloads",List.of(
+                    Map.of("id","hold-a","target",Map.of("type","template","id","SNAPSHOT"),"load",Map.of("users",1,"duration","8s"),
+                            "execution",Map.of("thinkTime","500ms")))));
+            var loadInput=ServerRuntime.JSON.createObjectNode();loadInput.put("packageId","p");loadInput.put("environment","SIT");loadInput.set("scenario",loadScenario);
+            Map<String,Object> loadDraft=runtime.createAdvancedLoadDraft(loadInput,"alice");
+            runningId=String.valueOf(runtime.submitAdvancedLoadDraft(submit(String.valueOf(loadDraft.get("draftId"))),"alice").get("jobId"));
+            awaitRunning(runtime,runningId);
+            Job running=runtime.jobs.get(runningId);assertNotNull(running);
+            assertExecutionRevisionAliases(running);
+            packageA=Path.of(running.request.packageRoot);configA=Path.of(running.request.config);
+
+            var runDefinition=ServerRuntime.JSON.createObjectNode();runDefinition.put("schemaVersion",RunDefinition.VERSION);runDefinition.put("executionType","run");runDefinition.put("packageId","p");runDefinition.put("environment","SIT");
+            runDefinition.putObject("options").put("debug",true);runDefinition.putObject("target").put("type","template").put("id","SNAPSHOT");runDefinition.putObject("input");
+            Map<String,Object> queuedDraft=runtime.createRunDraft(runDefinition,"alice");
+            queuedId=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(queuedDraft.get("draftId"))),"alice","alice").get("jobId"));
+            Job queued=runtime.jobs.get(queuedId);assertNotNull(queued);
+            assertExecutionRevisionAliases(queued);
+            assertEquals("QUEUED",queued.status,"The second accepted Job waits behind the running LOAD Worker");
+            assertEquals(packageA,Path.of(queued.request.packageRoot));assertEquals(configA,Path.of(queued.request.config));
+            assertAcceptedFileClosure(runtime.jobRecord(runningId));
+            assertAcceptedFileClosure(runtime.jobRecord(queuedId));
+
+            Path retainedFile=packageA.resolve("files/value.txt");
+            Path retainedConfig= configA;
+            Files.setPosixFilePermissions(retainedFile,java.util.EnumSet.of(
+                    java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                    java.nio.file.attribute.PosixFilePermission.OWNER_WRITE));
+            Files.setPosixFilePermissions(retainedConfig,java.util.EnumSet.of(
+                    java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                    java.nio.file.attribute.PosixFilePermission.OWNER_WRITE));
+            Files.writeString(retainedFile,"&{owner-mutated-after-acceptance}");
+            Files.writeString(retainedConfig,"owner-mutated-after-acceptance");
+
+            Files.writeString(template,"schemaVersion: att-template/v3.6\nname: SNAPSHOT\ndescription: Package B assertion fixture\nactions:\n  show: {type: log, message: '&{../../files/value.txt}'}\n");
+            Files.writeString(fixture.root.resolve("files/value.txt"),"new-B");
+            activateCentralConfig(runtime,configSourceA+"\n# central Config B\n");
+            Map<String,Object> newDraft=runtime.createRunDraft(runDefinition,"alice");
+            newId=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(newDraft.get("draftId"))),"alice","alice").get("jobId"));
+            Job newJob=runtime.jobs.get(newId);assertNotNull(newJob);
+            packageB=Path.of(newJob.request.packageRoot);configB=Path.of(newJob.request.config);
+            assertNotEquals(packageA,packageB);assertNotEquals(configA,configB);
+            assertTrue(Files.readString(packageA.resolve("templates/SNAPSHOT/template.yaml")).contains("files/value.txt"));
+            assertEquals("&{owner-mutated-after-acceptance}",Files.readString(packageA.resolve("files/value.txt")));
+            assertTrue(Files.readString(configA).contains("owner-mutated-after-acceptance"));
+            assertTrue(Files.readString(packageB.resolve("templates/SNAPSHOT/template.yaml")).contains("type: log"));
+            assertEquals("new-B",Files.readString(packageB.resolve("files/value.txt")));
+            assertTrue(Files.readString(configB).contains("central Config B"));
+
+            await(runtime,runningId);await(runtime,queuedId);await(runtime,newId);
+            assertEquals("PASS",runtime.jobRecord(runningId).get("status"),runtime.resultRecord(runningId).toString());
+            assertEquals("PASS",runtime.jobRecord(queuedId).get("status"),runtime.resultRecord(queuedId).toString());
+            assertEquals("PASS",runtime.jobRecord(newId).get("status"),runtime.resultRecord(newId).toString());
+            Path jobsDirectory=ServerConfig.load(fixture.server).dataDir.resolve("jobs");
+            String runningEvents=Files.readString(jobsDirectory.resolve(runningId).resolve("events.jsonl"));
+            String queuedEvents=Files.readString(jobsDirectory.resolve(queuedId).resolve("events.jsonl"));
+            String newEvents=Files.readString(jobsDirectory.resolve(newId).resolve("events.jsonl"));
+            assertTrue(runningEvents.contains("LOAD_START"),"The accepted running LOAD must execute");
+            assertTrue(queuedEvents.contains("once"),queuedEvents);
+            assertTrue(newEvents.contains("new-B"),newEvents);
+            assertFalse(runningEvents.contains("owner-mutated-after-acceptance"),"The running LOAD must not read changed source bytes");
+            assertFalse(queuedEvents.contains("owner-mutated-after-acceptance"),"The queued RUN must not read changed source bytes");
+            assertEquals(sourceRevision(runtime,runningId,"businessSource"),sourceRevision(runtime,queuedId,"businessSource"));
+            assertEquals(sourceRevision(runtime,runningId,"configSource"),sourceRevision(runtime,queuedId,"configSource"));
+            assertNotEquals(sourceRevision(runtime,runningId,"businessSource"),sourceRevision(runtime,newId,"businessSource"));
+            assertNotEquals(sourceRevision(runtime,runningId,"configSource"),sourceRevision(runtime,newId,"configSource"));
+        }
+        try(ServerRuntime restarted=fixture.open()) {
+            assertEquals(true,restarted.jobRecord(runningId).get("sourceSnapshotAvailable"));
+            assertEquals(true,restarted.jobRecord(queuedId).get("sourceSnapshotAvailable"));
+            assertNotNull(restarted.jobReplay(runningId,"alice").get("sourceProvenance"));
+            assertNotNull(restarted.jobReplay(queuedId,"alice").get("sourceProvenance"));
+            assertEquals("PASS",restarted.jobRecord(runningId).get("status"));
+            JobSourceClosureStore closures=new JobSourceClosureStore(ServerConfig.load(fixture.server).dataDir);
+            JobSourceClosureStore.SourceSnapshot accepted=closures.snapshotForOwner(
+                    JobSourceClosureStore.JOB_OWNER_PREFIX+runningId);
+            Files.write(accepted.archivePath,new byte[]{1,2,3});
+            Map<String,Object> unavailable=restarted.jobRecord(runningId);
+            assertEquals(Boolean.FALSE,unavailable.get("sourceSnapshotAvailable"));
+            Map<?,?> provenance=(Map<?,?>)unavailable.get("sourceProvenance");
+            assertEquals("UNAVAILABLE",provenance.get("snapshotState"));
+            assertNotNull(provenance.get("requiredAction"));
+        }
+    }
+
+    private static String sourceRevision(ServerRuntime runtime,String jobId,String kind) throws Exception {
+        Map<?,?> provenance=(Map<?,?>)runtime.jobRecord(jobId).get("sourceProvenance");
+        Map<?,?> revisions=(Map<?,?>)provenance.get("revisions");
+        return String.valueOf(((Map<?,?>)revisions.get(kind)).get("revision"));
+    }
+
+    private static void assertExecutionRevisionAliases(Job job) {
+        String executionRevision=job.request.expectedExecutionRevisionDigest;
+        assertNotNull(executionRevision);
+        assertEquals(executionRevision,job.request.expectedRevisionDigest,
+                "The legacy Worker request alias remains populated for rolling upgrades");
+        assertNotNull(job.request.configurationProvenance);
+        assertEquals(executionRevision,job.request.configurationProvenance.get("executionRevisionDigest"));
+        assertEquals(executionRevision,job.request.configurationProvenance.get("packageRevision"),
+                "The legacy configuration alias remains consistent with the execution identity");
+    }
+
     @Test void schedulePoliciesPreserveSourceAndAllowStaleMetadataEditsAcrossRestart() throws Exception {
         Fixture fixture=fixture();String strictId,pauseId,ignoreId,stored;
         ServerRuntimeTestSupport.MutableClock clock=new ServerRuntimeTestSupport.MutableClock(Instant.parse("2026-10-22T00:00:00Z"));
@@ -146,6 +405,8 @@ class ServerRuntimeJobReplayTest {
             LoadSchedule pause=runtime.createLoadSchedule(pauseRequest,"alice");pauseId=pause.id;
             var ignoreRequest=((com.fasterxml.jackson.databind.node.ObjectNode)request).deepCopy().put("packageChangePolicy","ignore");
             LoadSchedule ignore=runtime.createLoadSchedule(ignoreRequest,"alice");ignoreId=ignore.id;
+            assertNotNull(strict.sourceProvenance);
+            assertEquals(true,runtime.loadScheduleView(strict,"alice").get("sourceSnapshotAvailable"));
             Path unrelated=fixture.root.resolve("templates/BAD/template.yaml");String originalUnrelated=Files.readString(unrelated);
             Files.writeString(unrelated,originalUnrelated+"# unrelated change\n");
             Map<String,Object> blocked=runtime.triggerLoadSchedule(strictId,"alice");
@@ -158,16 +419,22 @@ class ServerRuntimeJobReplayTest {
             assertEquals("package-revision-changed",runtime.triggerLoadSchedule(pauseId,"alice").get("reason"));
             assertFalse(runtime.loadSchedule(pauseId).enabled);assertEquals("package-revision-changed",runtime.loadSchedule(pauseId).autoPauseReason);
             assertThrows(ServerRuntime.ScheduleSourceChangedException.class,()->runtime.setLoadScheduleEnabled(pauseId,true,"alice"));
+            assertNotNull(runtime.packageRoot("p"),"The configured Package root must remain registered after source refresh");
             Map<String,Object> accepted=runtime.triggerLoadSchedule(ignoreId,"alice");assertEquals("submitted",accepted.get("status"),accepted.toString());
-            await(runtime,String.valueOf(accepted.get("jobId")));
+            String acceptedId=String.valueOf(accepted.get("jobId"));
+            await(runtime,acceptedId);
+            assertEquals("PASS",runtime.jobRecord(acceptedId).get("status"),runtime.resultRecord(acceptedId).toString());
             assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
             assertEquals(ignore.runInput,runtime.loadSchedule(ignoreId).runInput);
             assertEquals(1,runtime.store.auditOutcomes("SCHEDULE_SOURCE_REVALIDATED").size());
             assertTrue(runtime.store.auditOutcomes("SCHEDULE_SOURCE_REVALIDATED").get(0).contains("stored="+stored));
             Files.writeString(unrelated,originalUnrelated);
             clock.advance(Duration.ofMinutes(16));
-            Map<String,Object> restored=runtime.triggerLoadSchedule(strictId,"alice");assertEquals("submitted",restored.get("status"),restored.toString());
+            Map<String,Object> restored=runtime.triggerLoadSchedule(strictId,"alice");
+            LoadSchedule afterRestore=runtime.loadSchedule(strictId);
+            assertEquals("submitted",restored.get("status"),restored+" expected="+stored+" current="+afterRestore.currentRevisionDigest+" sourceStatus="+afterRestore.sourceStatus);
             await(runtime,String.valueOf(restored.get("jobId")));
+            assertEquals("PASS",runtime.jobRecord(String.valueOf(restored.get("jobId"))).get("status"),runtime.resultRecord(String.valueOf(restored.get("jobId"))).toString());
             assertNull(runtime.loadSchedule(strictId).sourceStatus,"A successful execution after restoring the pinned package must clear current stale status");
             assertEquals(stored,runtime.loadSchedule(strictId).currentRevisionDigest);
             assertEquals(1,runtime.store.auditOutcomes("SCHEDULE_SOURCE_RESTORED").size());
@@ -175,11 +442,14 @@ class ServerRuntimeJobReplayTest {
         try(ServerRuntime runtime=fixture.open(clock)) {
             assertEquals("Renamed stale RUN",runtime.loadSchedule(strictId).name);
             assertFalse(runtime.loadSchedule(pauseId).enabled);assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
+            assertEquals(true,runtime.loadScheduleView(runtime.loadSchedule(strictId),"alice").get("sourceSnapshotAvailable"),
+                    "Schedule source leases must survive Server restart");
             Path target=fixture.root.resolve("templates/SIMPLE/template.yaml");
-            Files.writeString(target,Files.readString(target).replace("message: once","message: compatible latest target"));
+            Files.writeString(target,Files.readString(target).replace("&{../../files/value.txt}","compatible latest target"));
             clock.advance(Duration.ofMinutes(16));
             Map<String,Object> compatible=runtime.triggerLoadSchedule(ignoreId,"alice");assertEquals("submitted",compatible.get("status"),compatible.toString());
             await(runtime,String.valueOf(compatible.get("jobId")));
+            assertEquals("PASS",runtime.jobRecord(String.valueOf(compatible.get("jobId"))).get("status"),runtime.resultRecord(String.valueOf(compatible.get("jobId"))).toString());
             assertEquals(stored,runtime.loadSchedule(ignoreId).expectedRevisionDigest);
             clock.advance(Duration.ofMinutes(16));
             Files.delete(target);
@@ -282,14 +552,15 @@ class ServerRuntimeJobReplayTest {
                 Map<String,Object> review=runtime.createJobReplayDraft(original,"alice");
                 assertThrows(ServerRuntime.JobConflictException.class,()->runtime.submitRunDraft(submit(String.valueOf(review.get("draftId"))),"alice","alice"),
                         "Replay editor drafts must use the source Job confirmation intent to preserve lineage and idempotency");
-                var confirmation=ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId")));
-                assertThrows(IllegalArgumentException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",false,"intentId",review.get("intentId"))),"alice"));
+                assertNotNull(review.get("intentId"),"Runnable replay reviews include a confirmation intent");
+                var confirmation=replayConfirmation(review,true,null);
+                assertThrows(IllegalArgumentException.class,()->runtime.rerunJob(original,replayConfirmation(review,false,null),"alice"));
                 assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,confirmation,"bob"));
                 String rerun=String.valueOf(runtime.rerunJob(original,confirmation,"alice").get("jobId"));
                 assertNotEquals(original,rerun);assertEquals(rerun,runtime.rerunJob(original,confirmation,"alice").get("jobId"));await(runtime,rerun);
                 assertEquals(original,runtime.jobRecord(rerun).get("rerunOfJobId"));assertEquals(before.get("finishedAt"),runtime.jobRecord(original).get("finishedAt"));assertEquals(originalResult,runtime.store.get(original).get("resultJson"));
                 Map<String,Object> peerReview=runtime.createJobReplayDraft(original,"bob");
-                var peerConfirmation=ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",peerReview.get("intentId")));
+                var peerConfirmation=replayConfirmation(peerReview,true,null);
                 assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,peerConfirmation,"alice"));
                 String peerRerun=String.valueOf(runtime.rerunJob(original,peerConfirmation,"bob").get("jobId"));
                 await(runtime,peerRerun);
@@ -333,7 +604,7 @@ class ServerRuntimeJobReplayTest {
                 Map<String,Object> review=runtime.createJobReplayDraft(source,"bob");
                 assertNotNull(runtime.getJobReplayEditorDraft(source,String.valueOf(review.get("draftRef")),"bob"));
                 assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getJobReplayEditorDraft(source,String.valueOf(review.get("draftRef")),"alice"));
-                String id=String.valueOf(runtime.rerunJob(source,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"))),"bob").get("jobId"));await(runtime,id);
+            String id=String.valueOf(runtime.rerunJob(source,replayConfirmation(review,true,null),"bob").get("jobId"));await(runtime,id);
                 assertEquals("bob",runtime.jobRecord(id).get("executionPrincipal"));assertEquals(source,runtime.jobRecord(id).get("rerunOfJobId"));
                 assertEquals("load",runtime.jobRecord(id).get("executionType"));
                 Map<String,Object> scheduleReview=runtime.createJobReplayDraft(source,"alice");
@@ -347,12 +618,12 @@ class ServerRuntimeJobReplayTest {
             }
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice");
             runtime.store.setAuthActive("alice",false);
-            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"))),"alice"));
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,replayConfirmation(review,true,null),"alice"));
             runtime.store.setAuthActive("alice",true);
             Files.writeString(fixture.root.resolve("templates/SIMPLE/template.yaml"),"# changed\n",java.nio.file.StandardOpenOption.APPEND);
             ServerRuntime.JobConflictException mismatch=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.createJobReplayDraft(original,"alice"));
             assertEquals("ATT-SERVER-REPLAY-REVISION-CONFLICT",mismatch.code);
-            ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"))),"alice"));
+            ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.rerunJob(original,replayConfirmation(review,true,null),"alice"));
             assertEquals("ATT-SERVER-REPLAY-REVISION-CONFLICT",stale.code);
         }
     }
@@ -392,13 +663,16 @@ class ServerRuntimeJobReplayTest {
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.getJobReplayEditorDraft(original,draftRef,"bob"));
             assertApiError(apiRequest(runtime,"GET","/jobs/"+original+"/replay-draft/"+draftRef,"bob",Map.of()),404,"ATT-SERVER-NOT-FOUND");
             long jobsBeforeCrossOwnerSubmit=jobCount(runtime,"alice");
-            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),"bob"));
-            assertApiError(apiRequest(runtime,"POST","/jobs/"+original+"/rerun","bob",Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),404,"ATT-SERVER-NOT-FOUND");
+            assertNotNull(review.get("intentId"),"Runnable replay reviews include a confirmation intent");
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,replayConfirmation(review,true,"current"),"bob"));
+            assertApiError(apiRequest(runtime,"POST","/jobs/"+original+"/rerun","bob",
+                    ServerRuntime.JSON.convertValue(replayConfirmation(review,true,"current"),
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>() {})),404,"ATT-SERVER-NOT-FOUND");
             assertEquals(jobsBeforeCrossOwnerSubmit,jobCount(runtime,"alice"));
             assertThrows(IllegalArgumentException.class,()->runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current","overrides",Map.of("workloads",List.of(Map.of("id","smoke-a","load",Map.of("arrivalRate","2/s"))))))));
-            Map<String,Object> rerun=runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),"alice");
+            Map<String,Object> rerun=runtime.rerunJob(original,replayConfirmation(review,true,"current"),"alice");
             String rerunId=String.valueOf(rerun.get("jobId"));assertEquals(original,runtime.jobRecord(rerunId).get("rerunOfJobId"));
-            assertEquals(rerunId,runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",review.get("intentId"),"sourcePolicy","current")),"alice").get("jobId"));
+            assertEquals(rerunId,runtime.rerunJob(original,replayConfirmation(review,true,"current"),"alice").get("jobId"));
             JobExecutionSpec rerunSpec=JobExecutionSpec.parse(runtime.store.executionSpec(rerunId).get("spec"));
             assertEquals("current",rerunSpec.value.path("replay").path("sourcePolicy").asText());
             assertEquals(originalRevision,rerunSpec.value.path("replay").path("originalRevision").asText());
@@ -410,7 +684,8 @@ class ServerRuntimeJobReplayTest {
             Map<String,Object> staleReview=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
             long jobsBeforeStaleSubmit=jobCount(runtime,"alice");
             Files.writeString(fixture.root.resolve("templates/SIMPLE/template.yaml"),"# changed after validation\n",java.nio.file.StandardOpenOption.APPEND);
-            ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("confirm",true,"intentId",staleReview.get("intentId"),"sourcePolicy","current")),"alice"));
+            assertNotNull(staleReview.get("intentId"),"Runnable replay reviews include a confirmation intent");
+            ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,()->runtime.rerunJob(original,replayConfirmation(staleReview,true,"current"),"alice"));
             assertEquals("ATT-SERVER-REPLAY-DRAFT-STALE",stale.code);
             assertEquals(jobsBeforeStaleSubmit,jobCount(runtime,"alice"),"A stale validated replay must not create a Job");
             assertEquals(originalResult,runtime.store.get(original).get("resultJson"));
@@ -518,7 +793,7 @@ class ServerRuntimeJobReplayTest {
         }
     }
 
-    @Test void packageDefaultEnvironmentIsResolvedAgainAndMissingProfileBlocksReplay() throws Exception {
+    @Test void packageDefaultEnvironmentStaysActiveWhenBreakingCentralConfigChangeIsRejected() throws Exception {
         Fixture fixture=fixture();String original;
         Path packageYaml=fixture.root.resolve("package.yaml");Files.writeString(packageYaml,"schemaVersion: att-package/v1\ndefaultEnvironment: UAT\n");
         Path runtimeConfig=fixture.server.getParent().resolve("unified-runtime/config/config.yaml");
@@ -533,11 +808,13 @@ class ServerRuntimeJobReplayTest {
             assertEquals("UAT",runtime.store.get(original).get("environment"));
             assertEquals(1L,runtime.store.queryJobs(JobQuery.parse(Map.of("packageId","p","environment","UAT"),"alice")).get("total"));
             assertEquals(0L,runtime.store.queryJobs(JobQuery.parse(Map.of("environment","SIT"),"alice")).get("total"));
-            String config=Files.readString(runtimeConfig);Files.writeString(runtimeConfig,config.replace("environments: {SIT: {}, UAT: {}}","environments: {SIT: {}}"));
-            Map<String,Object> invalid=runtime.createJobReplayDraft(original,"alice",ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
-            assertEquals("invalid",invalid.get("validationState"));assertEquals("ATT-SERVER-REPLAY-VALIDATION-FAILED",invalid.get("errorCode"));
-            assertNull(invalid.get("intentId"));assertFalse(((List<?>)invalid.get("diagnostics")).isEmpty());
-            assertTrue(invalid.get("diagnostics").toString().toLowerCase(java.util.Locale.ROOT).contains("environment"),invalid.get("diagnostics").toString());
+            String config=Files.readString(runtimeConfig);
+            ChangeSetPublisher.Conflict rejected=assertThrows(ChangeSetPublisher.Conflict.class,
+                    ()->activateCentralConfig(runtime,config.replace("environments: {SIT: {}, UAT: {}}","environments: {SIT: {}}")));
+            assertEquals("ATT-CONFIG-IMPACT-STALE",rejected.code);
+            assertTrue(Files.readString(activeCentralConfig(runtime)).contains("UAT"),
+                    "A rejected central Config candidate must leave the active Environment available to the pinned Package");
+            assertEquals("UAT",runtime.jobRecord(original).get("environment"));
         }
     }
 
@@ -747,7 +1024,7 @@ class ServerRuntimeJobReplayTest {
         Files.writeString(fixture.server,Files.readString(fixture.server).replace("inlineLoad: {enabled: true}","inlineLoad: {enabled: false}"));
         try(ServerRuntime runtime=fixture.open()) {
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice");
-            JsonNode confirmation=ServerRuntime.JSON.valueToTree(Map.of("intentId",review.get("intentId"),"confirm",true));
+            JsonNode confirmation=replayConfirmation(review,true,null);
             String accepted=String.valueOf(runtime.rerunJob(original,confirmation,"alice").get("jobId"));await(runtime,accepted);
             runtime.store.deleteJob(accepted);
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.rerunJob(original,confirmation,"alice"));
@@ -755,16 +1032,17 @@ class ServerRuntimeJobReplayTest {
             assertThrows(ServerRuntime.NotFoundException.class,()->runtime.createJobReplayDraft(original,"alice"));
         }
     }
-    @Test void rerunKeepsTheOriginalSutMetricsSnapshotAfterProfileCatalogEdits() throws Exception {
+    @Test void rerunKeepsTheOriginalSutMetricsSnapshotAfterPackageMetricSourceEdits() throws Exception {
         Fixture fixture=fixture();
         String scenario="schemaVersion: att-load/v1.9\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 1s}\n"
-                +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: profile-app\n      source: prom\n      targets: [{id: sut-1, type: app}]\n  collection: {mode: post-run, before: 1m, after: 1m, step: 30s}\n  livePreview: {enabled: false}\n";
-        Files.writeString(fixture.root.resolve("load/smoke.yaml"),scenario);
-        Map<String,Object> profile=simpleProfile("profile-app","App","up");
-        writeSutMetricsConfig(fixture,List.of(simplePrometheusSource()),List.of(profile));
+                +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: profile-app\n      targetIds: [SIMPLE]\n  collection: {mode: post-run, before: 1m, after: 1m, step: 30s}\n  livePreview: {enabled: false}\n";
+        Files.writeString(fixture.ownerRoot.resolve("load/smoke.yaml"),scenario);
+        Map<String,Object> metricSource=simplePrometheusMetricSource("up");
+        Map<String,Object> profile=simplePackageProfile("profile-app","metric-app");
+        writeSutMetricsConfig(fixture,true,metricSource,profile);
         try(ServerRuntime runtime=fixture.open()) {
             users(runtime);
-            String original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","p","scenario","load/smoke.yaml")),"alice").get("jobId"));
+            String original=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of("packageId","owner","scenario","load/smoke.yaml")),"alice").get("jobId"));
             await(runtime,original);
             JsonNode retainedScenario=ServerRuntime.JSON.readTree(runtime.store.executionSpec(original).get("spec")).path("definition").path("scenario");
             assertTrue(retainedScenario.path("observability").isObject(),retainedScenario.toString());
@@ -780,46 +1058,39 @@ class ServerRuntimeJobReplayTest {
             String rerunId=String.valueOf(rerun.get("jobId"));
             assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(rerunId)).path("queries").get(0).path("query").asText());
 
-            Map<String,Object> changed=ServerRuntime.JSON.convertValue(profile,Map.class);
-            Map<String,Object> changedMetric=ServerRuntime.JSON.convertValue(((List<?>)changed.get("metrics")).get(0),Map.class);
-            changedMetric.put("query","down");changed.put("metrics",List.of(changedMetric));
-            writeSutMetricsConfig(fixture,List.of(simplePrometheusSource()),List.of(changed));
-            Map<String,Object> current=runtime.sutMetrics.resolveScenario(Map.of("schemaVersion","att-load-observability/v1",
-                    "collections",List.of(Map.of("profile","profile-app","source","prom",
-                            "targets",List.of(Map.of("id","sut-1","type","app")))),
-                    "collection",Map.of("mode","post-run","before","1m","after","1m","step","30s"),
-                    "livePreview",Map.of("enabled",false)),"alice",false);
-            assertEquals("down",ServerRuntime.JSON.valueToTree(current).path("queries").get(0).path("query").asText(),
-                    "A Runtime Config edit must hot-activate for new scenarios.");
+            Map<String,Object> changed=withQuery(metricSource,"down");
+            publishPackageMetricSource(runtime,changed);
+            String current=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of(
+                    "packageId","owner","scenario","load/smoke.yaml")),"alice").get("jobId"));
+            await(runtime,current);
+            assertEquals("down",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(current)).path("queries").get(0).path("query").asText(),
+                    "A Package Metric Source publication must apply to newly admitted Jobs.");
             assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(original)).path("queries").get(0).path("query").asText(),
-                    "Editing Runtime Config must not rewrite the original Job evidence.");
+                    "Editing the Package Metric Source must not rewrite the original Job evidence.");
             assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(rerunId)).path("queries").get(0).path("query").asText(),
-                    "Editing Runtime Config must not rewrite the rerun's pinned Job evidence.");
+                    "Editing the Package Metric Source must not rewrite the rerun's pinned Job evidence.");
         }
     }
     @Test void businessMetricCallsFailClosedWhenPinnedPackageOrRuntimeConfigChangesAfterAdmission() throws Exception {
         Fixture fixture=fixture();
         String scenario="schemaVersion: att-load/v1.9\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 5s}\n"
                 +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: business-tool\n      scope: job\n  collection: {mode: post-run, before: 1m, after: 1s, step: 15s}\n  livePreview: {enabled: false}\n";
-        Files.writeString(fixture.root.resolve("load/smoke.yaml"),scenario);
-        Path changedPackageFile=fixture.root.resolve("templates/BAD/template.yaml");
-        Map<String,Object> businessProfile=Map.of("schemaVersion","att-sut-metrics-profile/v1","id","business-tool","name","Business Tool",
-                "kind","base","category","db","metrics",List.of(Map.of("id","tool-version","title","Tool version",
-                        "unit","count","kind","gauge","sampling","afterDrain","call","#{version()}","sideEffectsAcknowledged",true)));
-        Path runtimeConfig=writeSutMetricsConfig(fixture,List.of(),List.of(businessProfile));
+        Files.writeString(fixture.ownerRoot.resolve("load/smoke.yaml"),scenario);
+        Path changedPackageFile=fixture.ownerRoot.resolve("templates/BAD/template.yaml");
+        Path runtimeConfig=writeSutMetricsConfig(fixture,false,packageToolMetricSource(),packageToolProfile());
         String originalTemplate=Files.readString(changedPackageFile);
         String originalConfig=Files.readString(runtimeConfig);
         try(ServerRuntime runtime=fixture.open()) {
             users(runtime);
             for(String revisionChange:List.of("runtime-config","package")) {
-                Files.writeString(runtimeConfig,originalConfig);
+                activateCentralConfig(runtime,originalConfig);
                 Files.writeString(changedPackageFile,originalTemplate);
                 String id=String.valueOf(runtime.submit("load",ServerRuntime.JSON.valueToTree(Map.of(
-                        "packageId","p","scenario","load/smoke.yaml")),"alice").get("jobId"));
+                        "packageId","owner","scenario","load/smoke.yaml")),"alice").get("jobId"));
                 awaitRunning(runtime,id);
-                if("runtime-config".equals(revisionChange))
-                    Files.writeString(runtimeConfig,originalConfig+"# changed after LOAD admission\n");
-                else Files.writeString(changedPackageFile,originalTemplate+"# changed after LOAD admission\n");
+                if("runtime-config".equals(revisionChange)) {
+                    activateCentralConfig(runtime,originalConfig+"# changed after LOAD admission\n");
+                } else Files.writeString(changedPackageFile,originalTemplate+"# changed after LOAD admission\n");
                 await(runtime,id);
                 Map<String,Object> manifest=awaitSutMetrics(runtime,id);
                 String expectedCode="runtime-config".equals(revisionChange)?"BUSINESS_CALL_CONFIG_CHANGED":"BUSINESS_CALL_PACKAGE_CHANGED";
@@ -839,15 +1110,16 @@ class ServerRuntimeJobReplayTest {
     @Test void newScheduleOccurrencesResolveCurrentProfilesWhileRerunsKeepTheDispatchedSnapshot() throws Exception {
         Fixture fixture=fixture();
         String scenario="schemaVersion: att-load/v1.9\nworkloads:\n  - id: smoke\n    target: {type: template, id: SIMPLE}\n    load: {users: 1, duration: 1s}\n"
-                +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: profile-app\n      source: prom\n      targets: [{id: sut-1, type: app}]\n  collection: {mode: post-run, before: 1m, after: 1m, step: 30s}\n  livePreview: {enabled: false}\n";
-        Files.writeString(fixture.root.resolve("load/smoke.yaml"),scenario);
-        Map<String,Object> profile=simpleProfile("profile-app","App","up");
-        writeSutMetricsConfig(fixture,List.of(simplePrometheusSource()),List.of(profile));
+                +"observability:\n  schemaVersion: att-load-observability/v1\n  collections:\n    - profile: profile-app\n      targetIds: [SIMPLE]\n  collection: {mode: post-run, before: 1m, after: 1m, step: 30s}\n  livePreview: {enabled: false}\n";
+        Files.writeString(fixture.ownerRoot.resolve("load/smoke.yaml"),scenario);
+        Map<String,Object> metricSource=simplePrometheusMetricSource("up");
+        Map<String,Object> profile=simplePackageProfile("profile-app","metric-app");
+        writeSutMetricsConfig(fixture,true,metricSource,profile);
         ServerRuntimeTestSupport.MutableClock clock=new ServerRuntimeTestSupport.MutableClock(Instant.parse("2026-10-22T00:00:00Z"));
         try(ServerRuntime runtime=fixture.open(clock)) {
             users(runtime);
             LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name","SUT snapshot schedule",
-                    "executionType","load","packageId","p","environment","SIT","scenario","load/smoke.yaml",
+                    "executionType","load","packageId","owner","environment","SIT","scenario","load/smoke.yaml",
                     "timezone","UTC","cron","0 2 * * *","enabled",false,"packageChangePolicy","ignore")),"alice");
 
             Map<String,Object> firstOccurrence=runtime.triggerLoadSchedule(schedule.id,"alice");
@@ -856,11 +1128,15 @@ class ServerRuntimeJobReplayTest {
             await(runtime,firstJob);
             assertEquals("up",ServerRuntime.JSON.valueToTree(runtime.sutMetrics.snapshotForExecution(firstJob)).path("queries").get(0).path("query").asText());
 
-            Map<String,Object> updatedProfile=ServerRuntime.JSON.convertValue(profile,Map.class);
-            Map<String,Object> updatedMetric=ServerRuntime.JSON.convertValue(((List<?>)updatedProfile.get("metrics")).get(0),Map.class);
-            updatedMetric.put("query","down");updatedProfile.put("metrics",List.of(updatedMetric));
-            writeSutMetricsConfig(fixture,List.of(simplePrometheusSource()),List.of(updatedProfile));
+            publishPackageMetricSource(runtime,withQuery(metricSource,"down"));
             clock.advance(Duration.ofMinutes(runtime.config.scheduling.minimumIntervalMinutes+1L));
+            Path registeredRoot=runtime.packageRegistry.snapshot().packages.get("owner");
+            assertNotNull(registeredRoot,"The Schedule's Package must remain registered after a Package Metric Source publication");
+            assertFalse(Files.isSymbolicLink(registeredRoot),"The Schedule's Package root must not become a symlink");
+            assertTrue(Files.isDirectory(registeredRoot,java.nio.file.LinkOption.NOFOLLOW_LINKS),
+                    "The Schedule's Package root must remain an available directory: "+registeredRoot);
+            assertEquals(registeredRoot.toRealPath(),registeredRoot,
+                    "The Schedule's Package root must remain canonical: "+registeredRoot);
             Map<String,Object> secondOccurrence=runtime.triggerLoadSchedule(schedule.id,"alice");
             assertEquals("submitted",secondOccurrence.get("status"),secondOccurrence.toString());
             String secondJob=String.valueOf(secondOccurrence.get("jobId"));
@@ -881,15 +1157,15 @@ class ServerRuntimeJobReplayTest {
     }
     @Test void sutMetricsCollectionLifecycleRecoversWhenTheServerRestarts() throws Exception {
         Fixture fixture=fixture();String pendingJob="J0000000000000083",collectingJob="J0000000000000084";
-        writeSutMetricsConfig(fixture,List.of(simplePrometheusSource()),List.of(simpleProfile("base","App","up")));
+        writeSutMetricsConfig(fixture,true,simplePrometheusMetricSource("up"),simplePackageProfile("base","metric-app"));
         try(ServerRuntime runtime=fixture.open()) {
-            Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base","source","prom",
-                            "targets",List.of(Map.of("id","sut-1","type","app")))),
+            Map<String,Object> scenario=Map.of("schemaVersion","att-load-observability/v1","collections",List.of(Map.of("profile","base","targetIds",List.of("SIMPLE"))),
                     "collection",Map.of("mode","post-run","step","30s","before","1m","after","1m"));
-            Map<String,Object> snapshot=runtime.sutMetrics.resolveScenario(scenario,"alice",false);
+            Map<String,Object> snapshot=runtime.sutMetrics.resolveScenario(scenario,"alice",false,
+                    packageCallContext(runtime,"owner",fixture.ownerRoot,"SIT"));
             for(String id:List.of(pendingJob,collectingJob)) {
                 Path jobDirectory=Files.createDirectories(runtime.config.dataDir.resolve("jobs").resolve(id).resolve("output")).getParent();
-                Job job=new Job(id,"load","p","alice",new att.server.api.WorkerRequest(),new JobEvents(jobDirectory.resolve("events.jsonl"),100));
+                Job job=new Job(id,"load","owner","alice",new att.server.api.WorkerRequest(),new JobEvents(jobDirectory.resolve("events.jsonl"),100));
                 job.status="PASS";job.finishedAt=Instant.now();runtime.store.insert(job,"{}");runtime.store.update(job);
                 runtime.sutMetrics.writeSnapshot(id,snapshot);
             }
@@ -919,7 +1195,8 @@ class ServerRuntimeJobReplayTest {
             Map<String,Object> review=runtime.createJobReplayDraft(original,"alice");
             assertEquals("run",ServerRuntime.JSON.valueToTree(review.get("definition")).path("executionType").asText());
             assertEquals(true,ServerRuntime.JSON.valueToTree(review.get("definition")).path("options").path("debug").asBoolean());
-            String id=String.valueOf(runtime.rerunJob(original,ServerRuntime.JSON.valueToTree(Map.of("intentId",review.get("intentId"),"confirm",true)),"alice").get("jobId"));await(runtime,id);
+            assertNotNull(review.get("intentId"),"Runnable replay reviews include a confirmation intent");
+            String id=String.valueOf(runtime.rerunJob(original,replayConfirmation(review,true,null),"alice").get("jobId"));await(runtime,id);
             assertEquals("run",runtime.jobRecord(id).get("command"));assertFalse(runtime.jobReplay(id,"alice").containsKey("originatingScheduleId"));
         }
     }
@@ -968,6 +1245,13 @@ class ServerRuntimeJobReplayTest {
         });
         if("POST".equals(method))servlet.doPost(request,responseProxy);else servlet.doGet(request,responseProxy);
         response.put("body",ServerRuntime.JSON.readTree(responseBytes.toByteArray()));return response;
+    }
+
+    private static JsonNode replayConfirmation(Map<String,Object> review,boolean confirm,String sourcePolicy) {
+        var body=ServerRuntime.JSON.createObjectNode();body.put("confirm",confirm);
+        Object intent=review.get("intentId");if(intent!=null)body.put("intentId",String.valueOf(intent));
+        if(sourcePolicy!=null)body.put("sourcePolicy",sourcePolicy);
+        return body;
     }
 
     private static <T>T servletProxy(Class<T> type,InvocationHandler handler) {

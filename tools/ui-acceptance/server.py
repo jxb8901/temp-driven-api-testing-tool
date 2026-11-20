@@ -718,7 +718,10 @@ class Handler(BaseHTTPRequestHandler):
             elif parts[-1] in {"debug-form", "debug"}:
                 self._json(200, {"target": {"type": resource_type, "id": resource_id}, "input": {"environment": "dev", "variables": {}}, "redacted": False})
             else:
-                self._json(200, {"resource": {"type": resource_type, "logicalId": resource_id, "state": "ready", "name": resource_id}, "definition": {"name": resource_id}, "diagnostics": []})
+                definition = {"name": resource_id}
+                if resource_type == "template" and resource_id == "checkout":
+                    definition = {"actions": {"submit": {"type": "tool", "call": "payments.submit.v1"}}}
+                self._json(200, {"resource": {"type": resource_type, "logicalId": resource_id, "state": "ready", "name": resource_id}, "definition": definition, "diagnostics": []})
             return
         else:
             self._json(404, {"error": {"code": "FIXTURE_NOT_FOUND", "summary": "No fixture route is defined."}})

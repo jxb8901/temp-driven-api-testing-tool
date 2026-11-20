@@ -50,10 +50,17 @@ class PackageToolRegistryTest {
         Path source = tool(pkg, "query.yaml", "schemaVersion: att-tool/v1\nid: query\nname: Query\n"
                 + "description: before\ncall: \"#{upper('X')}\"\narguments: {}\n");
         Path central = config();
-        String before = new FrameworkConfigLoader().load(central, temp, pkg, null).effectiveConfiguration().identity();
+        FrameworkConfigLoader loader = new FrameworkConfigLoader();
+        String before = loader.load(central, temp, pkg, null).effectiveConfiguration().identity();
+        Files.write(source, ("# presentation-only comment\n"
+                + "schemaVersion: att-tool/v1\nid: query\nname: Query\n"
+                + "description: before\ncall: \"#{upper('X')}\"\narguments: {}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        assertEquals(before, loader.load(central, temp, pkg, null).effectiveConfiguration().identity(),
+                "Package Tool comments do not change the semantic execution revision");
         Files.write(source, ("schemaVersion: att-tool/v1\nid: query\nname: Query\n"
                 + "description: after\ncall: \"#{upper('X')}\"\narguments: {}\n").getBytes(StandardCharsets.UTF_8));
-        String after = new FrameworkConfigLoader().load(central, temp, pkg, null).effectiveConfiguration().identity();
+        String after = loader.load(central, temp, pkg, null).effectiveConfiguration().identity();
         assertNotEquals(before, after);
     }
 

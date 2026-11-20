@@ -1,3 +1,11 @@
+# ATT 4.4.0 - release candidate (2026-11-18; acceptance pending)
+
+- Add Package registration and immutable source revision contracts, source authoring and Change Set publication, plus Studio source editors for Package files, Testcases, and Testdata (#250–#255).
+- Add source-pinned Job execution with an OS-enforced read-only boundary for accepted Package and Config trees; Linux requires `bubblewrap` and still needs hosted CI verification (#254).
+- Add Config impact analysis and activation fencing. Central Config activation remains fail-closed where a production file-backed activation guard is unavailable (#335).
+- Keep Epic #233 open. Source history/diff/restore and Package export (#256), integrated end-to-end acceptance and rollout documentation (#257), and Central Config SUT Metrics authoring (#382) remain outstanding.
+- Release acceptance is pending. Do not tag or publish until Linux isolation and exact-head hosted CI pass, and the remaining #233 acceptance items are resolved.
+
 # ATT 4.3.1 - release candidate (2026-11-16; not released)
 
 - Add versioned Metric Source, Metric Group, flat Profile, normalized Observation v2, Job snapshot v2, and execution payload v2 contracts with bounded schema validation and v1 compatibility readers (#374).
@@ -42,6 +50,12 @@
 - Remove duplicate legacy global Tool Groups after auditing their Package-owned equivalents, verify the default Package schema inventory, and fix shared Flow identity across Run, Debug, Quick Load, and Advanced Load (#368, #367).
 
 # Changelog
+
+# ATT 4.3.0 - 2026-11-06
+
+- Add hot-reloaded, deployment-controlled Package registration with atomic candidate validation, last-known-good retention, sanitized status, and content-addressable registry revisions (#250).
+- Expose read-only registry and source-scope contracts with separate Package, Manifest, Central Runtime Config, effective Config, and Engine schema revision identities; bind Package drafts and approvals to the registry revision.
+- Add shared Package and ADMIN Change Sets with bounded drafts, revision-fenced validation and review, File-resource-safe moves, journaled atomic publication and recovery, and fail-closed validator and Config pre-commit hooks (#252).
 
 # ATT 4.2.9 - 2026-11-05
 

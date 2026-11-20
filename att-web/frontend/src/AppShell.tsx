@@ -233,7 +233,7 @@ function DiscardChangesDialog({ navigation }: { navigation: RouteState }) {
       className="discard-dialog"
       aria-labelledby="discard-title"
       aria-describedby="discard-description"
-      onCancel={event => { event.preventDefault(); navigation.cancelNavigation(); }}
+      onCancel={event => { event.preventDefault(); if (!navigation.pendingNavigationBusy) navigation.cancelNavigation(); }}
     >
       <p className="eyebrow">Unsaved work</p>
       <h2 id="discard-title">Discard your changes?</h2>
@@ -242,9 +242,12 @@ function DiscardChangesDialog({ navigation }: { navigation: RouteState }) {
           ? 'You have unsaved ' + navigation.pendingDescription + '. If you continue, those changes will be lost.'
           : 'You have unsaved changes. If you continue, those changes will be lost.'}
       </p>
+      {navigation.pendingNavigationError && <p role="alert">{navigation.pendingNavigationError}</p>}
       <div className="dialog-actions">
-        <button ref={cancelRef} className="button button-quiet" type="button" onClick={navigation.cancelNavigation}>Stay on this page</button>
-        <button className="button button-danger" type="button" onClick={navigation.confirmNavigation}>Discard changes and continue</button>
+        <button ref={cancelRef} className="button button-quiet" type="button" onClick={navigation.cancelNavigation} disabled={navigation.pendingNavigationBusy}>Stay on this page</button>
+        <button className="button button-danger" type="button" onClick={navigation.confirmNavigation} disabled={navigation.pendingNavigationBusy}>
+          {navigation.pendingNavigationBusy ? 'Discarding staged work…' : 'Discard changes and continue'}
+        </button>
       </div>
     </dialog>
   );
@@ -628,7 +631,7 @@ export function AppShell({
               <span className="nav-icon" aria-hidden="true">⚙</span><span className="nav-label">Settings</span>
             </a>}
           </nav>
-          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.2.10'}</span></div>
+          <div className="sidebar-footer"><span>ATT Server</span><span className="sidebar-version">{versionData?.version || '4.4.0'}</span></div>
         </aside>
 
         <div className="app-frame">

@@ -70,6 +70,34 @@ class ExecutionWorkerPoolTest {
         for(Process process:started)assertFalse(process.isAlive());
     }
 
+    @Test void packagePublicationRetiresOldRevisionWorkerAndOnlyLeasesTheNewPinnedRoot() throws Exception {
+        ServerConfig config=config();
+        Path original=config.packages.get("p");
+        Path published=Files.createDirectories(temp.resolve("published-package-revision")).toRealPath();
+        AtomicReference<Path> currentRoot=new AtomicReference<>(original);
+        List<Process> started=new CopyOnWriteArrayList<>();
+        try(ExecutionWorkerPool pool=new ExecutionWorkerPool(config,id->builder(false),builder->{
+            Process process=builder.start();started.add(process);return process;
+        },()->"v1","a".repeat(64),id->currentRoot.get())) {
+            await(()->((Number)pool.metrics().get("ready")).intValue()==1);
+            ExecutionWorkerPool.Lease originalLease=pool.lease("p");
+            assertNotNull(originalLease);
+            assertEquals(original.toRealPath(),originalLease.root);
+            originalLease.transferred();originalLease.process.getOutputStream().close();assertTrue(originalLease.process.waitFor(5,TimeUnit.SECONDS));
+            await(()->((Number)pool.metrics().get("ready")).intValue()==1);
+
+            currentRoot.set(published);
+            assertFalse(pool.hasReadyCapacity("p"),"Old revision Workers cannot serve a newly published Package root");
+            await(()->((Number)pool.metrics().get("ready")).intValue()==1&&started.size()>=3);
+            ExecutionWorkerPool.Lease current=pool.lease("p");
+            assertNotNull(current,"The replacement Worker must be bound to the published revision");
+            assertEquals(published,current.root);
+            current.transferred();current.process.getOutputStream().close();assertTrue(current.process.waitFor(5,TimeUnit.SECONDS));
+        } finally {
+            for(Process process:started)if(process.isAlive()){process.destroyForcibly();process.waitFor(5,TimeUnit.SECONDS);}
+        }
+    }
+
     @Test void closeDoesNotStealTransferredJobOwnership() throws Exception {
         ServerConfig config=config();ExecutionWorkerPool pool=new ExecutionWorkerPool(config,id->builder(false),ProcessBuilder::start,()->"v1","a".repeat(64));
         ExecutionWorkerPool.Lease lease=null;

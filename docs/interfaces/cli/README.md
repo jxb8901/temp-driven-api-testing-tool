@@ -2,7 +2,7 @@
 
 # CLI interfaces
 
-ATT 4.3.1 ships the legacy Local CLI and the ATT Remote compatibility client.
+The ATT 4.4.0 candidate includes the legacy Local CLI and the ATT Remote compatibility client.
 
 | Interface | Status | Guide |
 |---|---|---|

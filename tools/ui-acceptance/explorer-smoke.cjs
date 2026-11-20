@@ -494,7 +494,10 @@ async function main() {
       'Shared Runtime Configuration must not own the Package Testdata catalog');
     await page.goto(`${base}#/packages/payments`);
     await page.getByRole('heading', { name: 'Package Explorer' }).waitFor();
-    await page.getByRole('button', { name: 'Testdata', exact: true }).click();
+    await page.getByLabel('Package Explorer views')
+      .getByRole('button', { name: 'Supporting sources', exact: true }).click();
+    await page.getByRole('group', { name: 'Package source destinations' })
+      .getByRole('button', { name: 'Testdata', exact: true }).click();
     await page.getByRole('heading', { name: 'Testdata', level: 1 }).waitFor();
     assert.match(page.url(), /#\/packages\/payments\/testdata(?:\?.*)?$/,
       'Package Testdata should be owned by the selected Package Explorer route');
@@ -564,9 +567,15 @@ async function main() {
 
     authFailure = true;
     await page.goto(`${base}#/packages/payments/resources/template/checkout`);
+    // A same-document hash navigation can reuse a prior safe-source projection.
+    // Reload to exercise the fresh 401 response rather than cached inspection data.
+    await page.reload();
     await page.getByRole('heading', { name: 'checkout' }).waitFor();
-    await page.getByRole('tab', { name: 'Visual' }).focus();
-    await page.keyboard.press('ArrowRight');
+    await page.getByRole('tab', { name: 'Visual', exact: true }).click();
+    const unauthorizedSource = page.waitForResponse(response =>
+      response.url().endsWith('/resources/template/checkout/source') && response.status() === 401);
+    await page.getByRole('tab', { name: 'Source', exact: true }).click();
+    await unauthorizedSource;
     await page.getByText('Your session has expired. Sign in again, then refresh safe source.').waitFor();
     assert.equal(await page.locator('body').innerText().then(text => text.includes('canary-401-secret')), false, 'auth errors must not expose response bodies');
     assert.deepEqual(pageErrors, [], 'Explorer interactions should not produce uncaught browser errors');

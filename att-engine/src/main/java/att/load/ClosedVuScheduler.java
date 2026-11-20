@@ -149,7 +149,7 @@ public final class ClosedVuScheduler implements LoadScheduler {
                 long next = nextWakeAt(users, now, elapsed, active, startedAt, inFlight);
                 long wait = cancelled.get() && inFlight > 0 ? Long.MAX_VALUE : Math.max(1L, next - now);
                 VuCompletion arrived;
-                try { arrived = timing.await(completions, wait); }
+                try { arrived = timing.await(completions, wait, inFlight > 0); }
                 catch (InterruptedException interrupted) {
                     if (!cancelled.get()) cancel();
                     Thread.interrupted();

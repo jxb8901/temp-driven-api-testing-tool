@@ -48,6 +48,12 @@
 .att-explorer-inspector { border-left: 1px solid var(--att-color-border, #cbd5e1); }
 .att-explorer-navigation > label,
 .att-explorer-inspector > label { display: grid; gap: var(--att-space-1, .25rem); margin-block: var(--att-space-2, .5rem); }
+.att-explorer-view-nav,
+.att-explorer-support-links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--att-space-2, .5rem); margin-block-end: var(--att-space-3, .75rem); }
+.att-explorer-view-nav [aria-pressed="true"] { color: var(--att-color-primary, #0866c6); border-color: color-mix(in srgb, var(--att-color-primary, #0866c6) 42%, var(--att-color-border, #cbd5e1)); font-weight: 650; }
+.att-explorer-supporting-sources,
+.att-explorer-executable-resources { display: grid; gap: var(--att-space-3, .75rem); min-width: 0; }
+.att-explorer-supporting-sources > header p { margin: 0; color: var(--att-color-muted, #526171); }
 .att-explorer-page input,
 .att-explorer-page select,
 .att-explorer-page textarea,

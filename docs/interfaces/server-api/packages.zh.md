@@ -1,6 +1,17 @@
-<!-- att-doc-status: current release=4.2.9 -->
+<!-- att-doc-status: current release=4.3.0 -->
 
 # Package 檢視 API
+
+## 可信任的 registry 與 source scope
+
+Server 只會從選定、由部署管理的 `att-server.yaml` 之 `packages.entries` 載入 Package 根目錄。Tomcat 持續服務時，Server 會監看原地編輯及原子替換；候選 mapping 必須整體通過 canonical 既存目錄及 `packages.allowedRoots` 驗證。無效或不穩定的候選設定會保留最後已知良好的 registry。`packages` 以外的設定變更會標示為需要重新啟動，不會部分套用。未註冊的目錄不會成為 Package。
+
+```http
+GET /api/v1/registry
+GET /api/v1/packages/payments/scope
+```
+
+`GET /registry` 回傳 `att-package-registry/v1`：content-addressable `revision`、單調遞增的 `generation`、reload 時間、`Ready` 或 `Invalid` 狀態、安全診斷，以及明確註冊的邏輯 Package ID 和 `Registered`、`Warming` 或 `Ready` 狀態。回應不會公開檔案系統路徑。`GET /packages/{packageId}/scope` 回傳 `att-source-scope/v1`，並區分 registry、Package source、Package Manifest、Central Runtime Config source、active effective Config、execution 及 embedded Engine schema 的 revision identity，以及安全的 environment/version metadata。`packageSourceRevision` 追蹤 Package 擁有的內容；`executionRevisionDigest` 綁定所選 Engine/schema、effective Config 與 Environment 的 execution 比對。Change Set 的 `baseSourceRevision` 是獨立的 aggregate optimistic-concurrency fence，不可代替上述兩種 identity。Versioned Source Management `RevisionSet` 會提供 typed `packageSourceRevision` 和 `executionRevisionDigest`；`businessSource` 保留為 Package source 的相容別名。此 API 僅供讀取；client 不能指定 source root。registry 變更後，以舊 registry revision 建立的 draft 和 approval 會被拒絕。已接受的 Job 會保留其已核准的 Package root 與輸入。
 
 ## 套件資源探索
 
@@ -45,6 +56,24 @@ GET /api/v1/packages/payments/resources/template/{resourceId}/source-file?refere
 
 無效清單參數會回傳 `400`；未知 package/resource 使用相同的 `404` 格式。過期 cursor 回傳 `409`，超大回應回傳 `413`，探索佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。錯誤回應使用既有的 `error.code`、`error.summary` 及 `requestId` 格式，不會包含實體路徑或 parser exception 訊息。
 
+## Lossless authoring-source reads
+
+上方的安全 source inspection 仍供獲授權的 USER operator 使用，並回傳既有的 redacted projection；該 projection 不可當作可寫入來源。Package authoring 使用獨立 endpoint，要求已驗證的 active USER，其 canonical login ID 必須與已登錄 Package ID 完全相同；`default` 永不允許編輯。本機 login ID 會先經 NFKC 正規化及 `Locale.ROOT` 小寫轉換，再限制為小寫 ASCII 字母、數字、點、底線及連字號。Trusted container/SSO principal 必須已使用相同 canonical 格式；source API 不會轉換大小寫或 Unicode，也不會合併 identity。亦必須啟用可信部署設定 `server.packageConfiguration.sourceEditingEnabled: true`。ADMIN 不會取得 Package USER operations 或 owner 權限；Package owner 亦不會取得 central configuration 權限。
+
+```http
+GET /api/v1/packages/{packageId}/authoring-source?type=manifest
+GET /api/v1/packages/{packageId}/authoring-source?type=resource&resourceType=template&resourceId={resourceId}
+GET /api/v1/packages/{packageId}/authoring-source?type=file&resourceType=template&resourceId={resourceId}&referenceId={opaque}
+GET /api/v1/packages/{packageId}/authoring-source?type=load&path=load%2Fscenario.yaml
+GET /api/v1/packages/{packageId}/authoring-source?type=testdata&resourceId={descriptorId}&environment=SIT
+GET /api/v1/packages/{packageId}/authoring-source?type=testcase&resourceId={readyCaseResourceId}&selector=sidecar
+GET /api/v1/configuration/authoring-source?path=config%2Fconfig.yaml
+```
+
+Package source 僅限固定 `package.yaml`、ready Template/Flow YAML、允許的 `load/*.yaml` 與 `load/*.yml`、已設定的 Package Testdata descriptor、由授權 Template/Flow 的靜態 `&{path}` reference 到達的合資格 UTF-8 文字檔，以及 ready indexed Testcase 的 YAML sidecar。Testcase request 必須提供已檢查 Case 的 `resourceId` 及固定 `selector=sidecar`；不接受 Package path。`file` request 必須重用安全 source inspection 簽發的不透明 reference 與 origin。Central source 僅限所選的 `config/config.yaml` Runtime Config 及其宣告的 YAML Helper/Tool descriptor；不允許 `att-server.yaml` 或敏感憑證／金鑰路徑。必須具有 active `SYSTEM_SETTINGS_WRITE` (ADMIN)，並啟用獨立部署 switch `server.centralConfigurationEditingEnabled: true`，預設為 `false`。
+
+成功回應包含完整 UTF-8 `text`、`logicalPath`、`present`、SHA-256 `revision` 及 quoted `sourceEtag`；HTTP `ETag` header 使用相同的內容 ETag。回應使用 `Cache-Control: private, no-store`。每次讀取都會重新檢查身份／角色、canonical root、registry、path allowlist、symlink、大小、UTF-8 及受保護秘密。即使關閉一般 masking，憑證與金鑰仍會 fail closed。不可使用 `redacted` query parameter。未驗證或無權限回傳 `401`／`403`；不可用或不允許的路徑回傳 `404`；來源／root 競態回傳 `409`；超出大小上限回傳 `413`。
+
 Package inspection 將不存在的選填 `templates/`、`testcase/` 及 `load/` 根目錄視為空 inventory。若根目錄存在但不是可讀目錄，或解析後超出 canonical Package，會回傳 HTTP `422 ATT-RESOURCE-ROOT-INVALID`，並以安全的 `field` 指出受影響根目錄。其他 Worker validation errors 回傳 `422 ATT-RESOURCE-VALIDATION-FAILED`；兩種回應都不會包含絕對路徑或 parser 細節。
 
 ## Package configuration inspection
@@ -73,8 +102,59 @@ Declared view 會回傳 schema version、安全的 global 欄位、已設定 pro
 
 Compare 預設比較 profile-sourced values；`includeInherited=true` 會一併包括 inherited/global values 及其來源。Section filter 會在分頁前套用。比較結果會列出可顯示的 effective 欄位及其來源。敏感欄位會以 `state: "hidden"` 和 `change: "hidden"` 回傳；回應不會洩露其值是否相同。系統不回傳絕對本機路徑、憑證、Server 自身的秘密或未限制的 descriptor 內容。關閉 masking 時，非憑證 URL 和 MQ host／port 可在 Effective／Compare 顯示；HTTP header maps 及 SSH host／user／port／identity-file 在各 view 始終受保護。啟用 masking 後，設定的操作欄位及路徑亦會遮蔽。
 
-`includeAllFields=true` 只適用於 effective 或 compare view，並加入其他非秘密 DB properties、evidence SQL／parameters 及平常會遮蔽的 DB 運作設定。Caller 必須具備 `server.inspection.configurationAdminRole`，local-auth mode 則必須是本地 `ADMIN`。回應不會快取並會寫入 audit log。Username、password、token、個人資料、HTTP header maps、MQ evidence payload、SSH 連線資料及 identity-file 路徑、已分類欄位及設定的敏感值仍會遮蔽。Source 保持安全淨化；Declared 只提供宣告狀態和數量。
+`includeAllFields=true` 只適用於 effective 或 compare view，並加入其他非秘密 DB properties、evidence SQL／parameters 及平常會遮蔽的 DB 運作設定。Caller 必須具備 active `SYSTEM_SETTINGS_WRITE` (ADMIN)。回應不會快取並會寫入 audit log。Username、password、token、個人資料、HTTP header maps、MQ evidence payload、SSH 連線資料及 identity-file 路徑、已分類欄位及設定的敏感值仍會遮蔽。Source 保持安全淨化；Declared 只提供宣告狀態和數量。
 
 `source` endpoint 在 `safe-package-files` policy 下可依 origin 解析合資格的 package-local 文字參照；`allowlist-only` 則要求既有 `server.inspection.safeTextSources` 精確 package-relative 路徑。連結請求必須包含已授權 parent source 回傳的 Server 不透明 `referenceId`；caller 自行提供 path 和 origin 並不足以授權。External scripts 只會透過設定 external root 下每 package 的 canonical 精確 allowlist 提供，且不會回傳其絕對路徑。這仍是有界 source endpoint，並非任意檔案瀏覽器。Testdata records endpoint 需要 effective descriptor ID。Literal records 使用 `limit` 1–100 分頁（UI 每次讀取 50 筆）。Generated descriptor 預設回傳 `state: "preview-required"` 且不含 records；只有明確設定 `previewGenerated=true` 才會回傳有界 generated preview。此 endpoint 使用相同身份、redaction policy、bounded inspection worker、source/response 大小、佇列和逾時限制。
 
 設定回應包含 `view`、`state`、可用時的 `schemaVersion` 及 `diagnostics`。分頁回應亦包含 `section`、`offset`、`limit`、`total` 及 `nextOffset`。無效設定會以 HTTP 200 回傳 `state: "invalid"` 及穩定診斷碼；格式錯誤的 profile 參數回傳 `400`。未知 package 回傳 `404`，超大回應回傳 `413`，檢查佇列已滿回傳 `503`，Inspector 逾時回傳 `504`。回應大小、佇列和逾時限制與資源探索相同。
+
+## Source history、diff 與 restore
+
+Package source history 與 Job artifacts 分開管理。Package owner 可讀取完整且允許的 source history；其他已驗證 Package operator 只會收到安全摘要。Central Runtime Config history 使用獨立 namespace，要求 active `SYSTEM_SETTINGS_WRITE` (ADMIN)。Package owner 權限撤銷後，不能再透過這些 route 讀取舊 source。所有成功回應均使用 `Cache-Control: private, no-store`。
+
+```http
+GET /api/v1/packages/{packageId}/source-history?offset=0&limit=50
+GET /api/v1/packages/{packageId}/source-history/diff?beforeSnapshotId={snapshotId}&afterSnapshotId={snapshotId}&offset=0&limit=50
+GET /api/v1/packages/{packageId}/source-history/diff?beforeSnapshotId={snapshotId}&afterSnapshotId={snapshotId}&path=load%2Fscenario.yaml
+POST /api/v1/packages/{packageId}/source-history/restore
+
+GET /api/v1/configuration/source-history?offset=0&limit=50
+GET /api/v1/configuration/source-history/diff?beforeSnapshotId={snapshotId}&afterSnapshotId={snapshotId}&path=config%2Fconfig.yaml
+POST /api/v1/configuration/source-history/restore
+```
+
+History 頁面按時間由新至舊排序。`offset` 從 0 開始；`limit` 預設為 50，接受 1–100。Owner/Admin history 包含 transaction 與 revision metadata、action、author、snapshot ID、允許的變更邏輯路徑、validation revision 及 activation status。非 owner 的 Package 摘要不包含路徑、author、snapshot ID 或 revision digest。不帶 `path` 的 diff endpoint 會分頁回傳變更的允許路徑及 bytes 數量。加入一個 logical `path` 可要求其文字 diff。只有通過受保護值檢查且大小受限的 UTF-8 文字會回傳內容；binary、超大、含受保護值或無法解析的內容只會回傳 metadata。File reference 仍是原始 source 文字。
+
+每個 source scope 最多保留最新的 500 筆已提交 transaction。History response 的 `retention` 物件提供 `transactionLimit`、`retainedTransactions`，及 `within_limit` 或 `cleanup_pending` 狀態。排程清理會移除超出範圍的 audit rows，以及不再被保留 history、active source pointer 或 Job/Schedule durable source lease 引用的 revision copies。超出保留範圍的舊 snapshot 可能無法再 Diff 或 Restore。過期的 private Change Set draft 至少每分鐘回收一次；crash recovery 會調和 transaction journals，定期 source-history sweep 也會移除遺留的 `.copy-*` revision directories。
+
+Restore 會以不可變 snapshot 為來源，針對目前 source revision 建立新的 Change Set；不會改寫所選 history entry，也不會更改已接受 Job 固定使用的 source。請使用 owner/Admin history 回傳的目前 revision；Package restore 亦須提供目前 Package registry revision：
+
+```json
+{
+  "snapshotId": "R0123456789ABCDEF0123456789ABCDEF",
+  "expectedSourceRevision": "<目前 source revision>",
+  "registryRevision": "<目前 Package registry revision>"
+}
+```
+
+Central Runtime Config 不需要 `registryRevision`。成功回應會提供新的 `changeSetId` 及 `restoredFromSnapshotId`；之後須使用既有 Change Set `validate`、`review` 及 `publish` actions。Package restore 使用 Package owner 權限邊界。Central Config restore 仍受目前 Config impact 和 publish gate 控制；gate 無法核准候選設定時會拒絕。Source 或 Package registry revision 已過時會回傳 `409`；無效、不可用或超出上限的 restore 會回傳安全錯誤，不會發布。
+
+History 與 diff 只接受文件列出的查詢參數；restore 僅接受上述欄位。API 不會公開實體 revision-store 路徑，也不提供不受限制的 Central Config 匯出。
+
+## Package ZIP 匯入
+
+Package owner 可將 ZIP 匯入為 private Change Set。匯入不會直接寫入已發布的 Package files 或 Runtime Config，並使用既有 Change Set validation、review 及 publication gates。
+
+```http
+POST /api/v1/packages/{packageId}/change-sets/import
+Content-Type: application/zip
+X-ATT-CSRF: {token}
+
+<raw ZIP request body>
+```
+
+Server 會先解析完整 archive，再 staging 任何檔案。每個 entry 會依目前 Package revision 轉成 `create` 或 `replace` operation。`201` 回應包含新的 `changeSetId` 及按路徑排序的 `changedFiles` preview。檢查 preview 後，依序呼叫一般 Change Set `validate`、`review` 及 `publish` endpoints。Source 或 registry revision 已過時會回傳 `409`；無效 archive 或不允許的 Package path 會回傳 `400`。被拒絕的 archive 不會建立 draft，也不會發布部分 entries。
+
+匯入上限為壓縮資料 16 MiB、32 個 entries、展開檔案總計 8 MiB、每檔案 4 MiB，以及 200:1 展開比例。Directory entries 必須為空。系統拒絕 traversal、absolute 或 drive-prefixed path、backslash、重複或大小寫衝突路徑、file/directory 衝突、symlink 與特殊檔案、不支援的 ZIP metadata，以及不一致或格式錯誤的 central directory。系統不會遞迴解開 nested archives。匯入路徑與內容仍會通過 Package Change Set allowlist 及檔案 validators；workbook entries 也會執行 archive 檢查。
+
+此 request 透過 Package 自己的 Change Set 匯入 Package source，不會匯入或匯出 Job Artifact ZIP、不會寫入其他 Package，也不會改動 global Runtime Config。API 不提供 Package source ZIP 匯出。

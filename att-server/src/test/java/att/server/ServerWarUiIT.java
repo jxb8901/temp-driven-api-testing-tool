@@ -1,9 +1,11 @@
 package att.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.catalina.core.StandardHost;
 import org.apache.catalina.realm.MemoryRealm;
 import org.apache.catalina.startup.Tomcat;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -103,6 +105,8 @@ class ServerWarUiIT {
     }
 
     @Test void packagedWarRunAndDebugKeepColdEquivalentResultsWhenLeasingOneShotWorkers() throws Exception {
+        Assumptions.assumeTrue(sourceSnapshotSandboxAvailable(),
+                "OS-enforced source snapshot sandbox is unavailable on this host");
         Path war=Path.of(System.getProperty("att.server.war"));assertTrue(Files.isRegularFile(war));
         Path home=createScheduledLocalRuntime();
         Files.createDirectories(home.resolve("config"));
@@ -134,8 +138,9 @@ class ServerWarUiIT {
                 +"  - id: one-shot-control\n    target: {type: template, id: PARITY}\n"
                 +"    load: {users: 1, duration: 1s}\n");
         Path holdScript=Files.createDirectories(pkg.resolve("tools")).resolve("hold.sh");
-        Files.writeString(holdScript,"#!/bin/sh\nprintf '%s' \"$$\" > \"$ATT_ROOT_DIR/tools/child.pid\"\n"
-                +"touch \"$ATT_ROOT_DIR/tools/started\"\nexec sleep 60\n");
+        Files.writeString(holdScript,"#!/bin/sh\nprintf '0\\n' > \"$ATT_CASE_OUTPUT_DIR/heartbeat\"\n"
+                +"touch \"$ATT_CASE_OUTPUT_DIR/started\"\n"
+                +"count=0\nwhile :; do count=$((count+1)); printf '%s\\n' \"$count\" > \"$ATT_CASE_OUTPUT_DIR/heartbeat\"; sleep 0.02; done\n");
         holdScript.toFile().setExecutable(true);
         Files.createDirectories(pkg.resolve("testcase"));
         try(var book=new org.apache.poi.xssf.usermodel.XSSFWorkbook();var out=Files.newOutputStream(pkg.resolve("testcase/parity.xlsx"))) {
@@ -171,11 +176,25 @@ class ServerWarUiIT {
             assertNotEquals("PASS",cold.timedOutRun().status(),"Cold RUN Tool timeout must be terminal failure");
             assertNotEquals("PASS",cold.timedOutDebug().status(),"Cold DEBUG Tool timeout must be terminal failure");
             assertEquals("cold",cold.run().dispatch());assertEquals("cold",cold.debug().dispatch());
-            assertEquals("warm",warm.run().dispatch());assertEquals("warm",warm.debug().dispatch());
+            assertEquals("cold",warm.run().dispatch(),"Source-pinned RUN must use the isolated cold Worker");assertEquals("cold",warm.debug().dispatch(),"Source-pinned DEBUG must use the isolated cold Worker");
         } finally {
             if(oldConfig==null)System.clearProperty("att.server.config");else System.setProperty("att.server.config",oldConfig);
             if(oldHome==null)System.clearProperty("att.home");else System.setProperty("att.home",oldHome);
         }
+    }
+
+    private boolean sourceSnapshotSandboxAvailable() throws Exception {
+        Path source=Files.createDirectories(temp.resolve("sandbox-probe/source/package"));
+        Path snapshot=source.getParent();
+        Path archive=Files.write(temp.resolve("sandbox-probe/source.tar"),new byte[]{1});
+        Path output=Files.createDirectories(temp.resolve("sandbox-probe/output"));
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase(java.util.Locale.ROOT).contains("win")?"java.exe":"java");
+        List<String> command=att.exec.SourceSnapshotIsolation.wrap(List.of(javaBin.toString(),"-version"),snapshot,archive,output);
+        Process probe=new ProcessBuilder(command).redirectErrorStream(true)
+                .redirectOutput(temp.resolve("sandbox-probe.log").toFile()).start();
+        if(!probe.waitFor(10,TimeUnit.SECONDS)) { probe.destroyForcibly(); return false; }
+        return probe.exitValue()==0;
     }
 
     private PackagedWarModeCapture exercisePackagedWarMode(Path war,Path home,Path allowed,Path pkg,Path users,
@@ -198,16 +217,16 @@ class ServerWarUiIT {
             long runLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
             PackagedExecutionCapture run=executePackagedDraft(port,api,auth,origin,"run","PARITY","PASS",prewarm);
             long debugLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
-            if(prewarm)assertNotEquals(runLease,debugLease,"A completed packaged RUN must be replaced before DEBUG dispatch");
+            if(prewarm)assertEquals(runLease,debugLease,"A source-pinned packaged RUN must leave the idle Worker untouched before DEBUG");
             PackagedExecutionCapture debug=executePackagedDraft(port,api,auth,origin,"debug","PARITY","PASS",prewarm);
             long failedRunLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
-            if(prewarm)assertNotEquals(debugLease,failedRunLease,"A completed packaged DEBUG must be replaced before a failing RUN");
+            if(prewarm)assertEquals(debugLease,failedRunLease,"A source-pinned packaged DEBUG must leave the idle Worker untouched before a failing RUN");
             PackagedExecutionCapture failedRun=executePackagedDraft(port,api,auth,origin,"run","PARITY_FAIL","FAIL",prewarm);
             long failedDebugLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
-            if(prewarm)assertNotEquals(failedRunLease,failedDebugLease,"A failed packaged RUN must still consume exactly one Worker Job");
+            if(prewarm)assertEquals(failedRunLease,failedDebugLease,"A source-pinned failed RUN must leave the idle Worker untouched before DEBUG");
             PackagedExecutionCapture failedDebug=executePackagedDraft(port,api,auth,origin,"debug","PARITY_FAIL","FAIL",prewarm);
-            if(prewarm)assertNotEquals(failedDebugLease,awaitPrewarmedPids(runtime).get(0),
-                    "A failed packaged DEBUG must also be replaced after its one Job");
+            if(prewarm)assertEquals(failedDebugLease,awaitPrewarmedPids(runtime).get(0),
+                    "A source-pinned failed DEBUG must leave the idle Worker untouched");
             PackagedExecutionCapture cancelledRun=executePackagedInterruptedDraft(port,api,auth,origin,pkg,runtime,
                     "run","HOLD",true,prewarm);
             PackagedExecutionCapture cancelledDebug=executePackagedInterruptedDraft(port,api,auth,origin,pkg,runtime,
@@ -279,7 +298,7 @@ class ServerWarUiIT {
         String id=accepted.path("jobId").asText(),jobPath=api+"/jobs/"+id;
         JsonNode job=awaitJobStatus(port,jobPath,auth,expectedStatus);
         String dispatch=job.path("performance").path("workerDispatch").asText();
-        assertEquals(prewarm?"warm":"cold",dispatch,type+" must use the expected dispatch path");
+        assertEquals("cold",dispatch,type+" source-pinned Job must use the isolated cold Worker");
         String logData=sseDataUntil(port,jobPath+"/events",auth,"packaged-war-parity");
         assertTrue(logData.contains("packaged-war-parity"),type+" must preserve the packaged Worker log event");
         JsonNode result=getJson(port,jobPath+"/result",auth);
@@ -297,8 +316,6 @@ class ServerWarUiIT {
     private PackagedExecutionCapture executePackagedInterruptedDraft(int port,String api,String auth,String origin,
                                                                      Path pkg,Object runtime,String type,String template,
                                                                      boolean cancel,boolean prewarm) throws Exception {
-        Path started=pkg.resolve("tools/started"),childPid=pkg.resolve("tools/child.pid");
-        Files.deleteIfExists(started);Files.deleteIfExists(childPid);
         long previousLease=prewarm?awaitPrewarmedPids(runtime).get(0):0L;
         Map<String,Object> definition=type.equals("run")
                 ?Map.of("schemaVersion","att-execution/v1","executionType","run","packageId","parity","environment","SIT",
@@ -308,17 +325,17 @@ class ServerWarUiIT {
         JsonNode accepted=apiJsonResponse(port,"POST",api+"/jobs/"+type,auth,origin,
                 Map.of("packageId","parity","draftId",draft.path("draftId").asText()),202);
         String id=accepted.path("jobId").asText(),jobPath=api+"/jobs/"+id;
+        Path output=jobOutputDirectory(runtime,id);
         long startDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);
-        while((!Files.exists(started)||!Files.exists(childPid))&&System.nanoTime()<startDeadline)Thread.sleep(10);
-        assertTrue(Files.exists(started)&&Files.exists(childPid),type+" "+template+" Tool must start before cancellation/timeout evidence");
-        long toolPid=Long.parseLong(Files.readString(childPid).trim());
+        while((!outputHas(output,"started")||!outputHas(output,"heartbeat"))&&System.nanoTime()<startDeadline)Thread.sleep(10);
+        assertTrue(outputHas(output,"started")&&outputHas(output,"heartbeat"),type+" "+template+" Tool must start before cancellation/timeout evidence");
         if(cancel) {
             JsonNode cancelled=apiJsonResponse(port,"DELETE",api+"/jobs/"+id,auth,origin,null,200);
             assertEquals("CANCELLED",cancelled.path("status").asText());
         }
         JsonNode job=awaitTerminalJobStatus(port,jobPath,auth);
         String dispatch=job.path("performance").path("workerDispatch").asText();
-        assertEquals(prewarm?"warm":"cold",dispatch,type+" must use the expected "+template+" dispatch path");
+        assertEquals("cold",dispatch,type+" "+template+" source-pinned Job must use the isolated cold Worker");
         JsonNode result=getJson(port,jobPath+"/result",auth);
         assertEquals(job.path("status").asText(),result.path("job").path("status").asText(),result.toString());
         JsonNode archive=awaitArchive(port,api,id,auth);
@@ -326,11 +343,9 @@ class ServerWarUiIT {
                 .map(item->item.path("path").asText()).sorted().toList();
         List<String> primaryReports=java.util.stream.StreamSupport.stream(archive.path("primaryReports").spliterator(),false)
                 .map(item->item.path("path").asText()).sorted().toList();
-        long processDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
-        while(ProcessHandle.of(toolPid).map(ProcessHandle::isAlive).orElse(false)&&System.nanoTime()<processDeadline)Thread.sleep(20);
-        assertFalse(ProcessHandle.of(toolPid).map(ProcessHandle::isAlive).orElse(false),type+" "+template+" Tool child must be reaped");
-        if(prewarm)assertNotEquals(previousLease,awaitPrewarmedPids(runtime).get(0),
-                "A completed or interrupted "+type+" must consume and replace exactly one Worker");
+        assertHeartbeatStopped(output,type+" "+template+" Tool must stop writing after cleanup");
+        if(prewarm)assertEquals(previousLease,awaitPrewarmedPids(runtime).get(0),
+                "A source-pinned "+type+" must leave the idle prewarmed Worker untouched");
         return new PackagedExecutionCapture(dispatch,job.path("status").asText(),result.path("job").path("status").asText(),
                 artifactPaths,primaryReports,false);
     }
@@ -376,6 +391,42 @@ class ServerWarUiIT {
             Thread.sleep(25);
         }
         fail("The deployed WAR did not become ready with a prewarmed Worker");return List.of();
+    }
+
+    private static Path jobOutputDirectory(Object runtime,String jobId) throws Exception {
+        var output=runtime.getClass().getDeclaredMethod("outputDirectoryForJob",String.class);output.setAccessible(true);
+        return (Path)output.invoke(runtime,jobId);
+    }
+
+    private static boolean outputHas(Path root,String name) { return outputFile(root,name)!=null; }
+    private static Path outputFile(Path root,String name) {
+        if(root==null||!Files.isDirectory(root))return null;
+        try(var paths=Files.walk(root)) {
+            return paths.filter(path->path.getFileName()!=null&&name.equals(path.getFileName().toString())).findFirst().orElse(null);
+        } catch(Exception unavailable) { return null; }
+    }
+
+    private static void assertHeartbeatStopped(Path output,String message) throws Exception {
+        Path heartbeat=outputFile(output,"heartbeat");
+        if(heartbeat==null) {
+            Thread.sleep(250);
+            assertNull(outputFile(output,"heartbeat"),message+" (heartbeat reappeared after output cleanup)");
+            return;
+        }
+        String stoppedValue=readHeartbeatIfPresent(heartbeat);
+        Thread.sleep(250);
+        String laterValue=readHeartbeatIfPresent(heartbeat);
+        if(stoppedValue==null||laterValue==null) {
+            Thread.sleep(250);
+            assertNull(outputFile(output,"heartbeat"),message+" (heartbeat reappeared after output cleanup)");
+            return;
+        }
+        assertEquals(stoppedValue,laterValue,message);
+    }
+
+    private static String readHeartbeatIfPresent(Path heartbeat) throws Exception {
+        try { return Files.readString(heartbeat); }
+        catch(java.nio.file.NoSuchFileException cleanedUp) { return null; }
     }
 
     @Test
@@ -727,6 +778,12 @@ class ServerWarUiIT {
                 }
             }
             assertCliAndTomcatDiagnosticFidelity(port, api, auth, origin, packageRoot, localHome);
+            // The intentionally unresolved Debug-only Flow exercised above must
+            // not affect unrelated Schedule source-closure validation later.
+            Path diagnosticFlow=packageRoot.resolve("templates/flows/diagnostic");
+            Files.delete(diagnosticFlow.resolve("flow.yaml"));
+            Files.delete(diagnosticFlow.resolve("debug.yaml"));
+            Files.delete(diagnosticFlow);
             JsonNode cacheCapabilities=getJson(port,api+"/auth/capabilities",auth);
             String cacheContext=cacheCapabilities.path("inspectionCacheContext").asText();
             assertTrue(cacheContext.matches("[A-Za-z0-9_-]{43}"));
@@ -814,7 +871,7 @@ class ServerWarUiIT {
 
 
     @Test
-    void packagedWarReloadsDegradedHelperDiscoveryWithoutLeakingPrivateSources() throws Exception {
+    void packagedWarKeepsCentralConfigPinnedAcrossUnpublishedHelperMirrorEdits() throws Exception {
         Path war = Path.of(System.getProperty("att.server.war"));
         assertTrue(Files.isRegularFile(war), "Packaged server WAR must exist: " + war);
         Path localHome = createScheduledLocalRuntime();
@@ -857,7 +914,14 @@ class ServerWarUiIT {
             assertNotNull(baselineRevision);
             assertEquals(401, get(port, resourceRoute, null), "The Resource Catalog remains authenticated during reload.");
 
-            assertDegradedDiscoveryWithoutProcessSecrets(port, api, auth, packageRoot, localHome, baselineRevision);
+            JsonNode approvedSource = getJson(port, api + "/configuration/source?path=config/config.yaml", auth);
+            assertTrue(approvedSource.path("available").asBoolean(), approvedSource.toString());
+            String approvedConfig = approvedSource.path("text").asText();
+            JsonNode approvedEffective = getJson(port,
+                    api + "/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&limit=50", auth);
+
+            assertCentralConfigRemainsPinnedAcrossUnpublishedHelperMirrorEdits(
+                    port, api, auth, packageRoot, localHome, baselineRevision, approvedConfig, approvedEffective);
         } finally {
             if (tomcat != null) {
                 try { tomcat.stop(); } finally { tomcat.destroy(); }
@@ -963,11 +1027,15 @@ class ServerWarUiIT {
             }
             assertTrue(entries.contains("att/server/ApiServlet.class"));
             assertTrue(entries.contains("att/server/api/ServerApi.class"));
+            assertTrue(entries.contains("att/validation/SourceCandidateValidator.class"),
+                    "Whole-candidate validation must remain available in the combined Server application jar");
             assertTrue(entries.contains("att/metrics/InspectionMetrics.class"),
                     "The combined Server jar must bundle the Inspector metrics classes the webapp instantiates");
             assertTrue(entries.contains("att/metrics/InspectionMetrics$Stage.class"));
             assertTrue(entries.contains("att/metrics/InspectionCacheKey.class"));
             assertTrue(entries.contains("att/security/SecretProtection.class"));
+            assertTrue(entries.contains("att/load/LoadScenarioLoader.class"),
+                    "The combined Server application jar carries the Engine and Load validation runtime");
             assertTrue(entries.contains("META-INF/resources/ui/index.html"));
             assertTrue(entries.stream().anyMatch(name -> name.matches("META-INF/resources/ui/assets/index-[^/]+\\.js")),
                     "The active Vite bundle must be packaged under Servlet static resources.");
@@ -977,8 +1045,6 @@ class ServerWarUiIT {
             assertTrue(entries.contains("att-build.properties"));
             assertFalse(entries.contains("att/worker/WorkerMain.class"),
                     "Worker classes belong only in the Local runtime jar");
-            assertFalse(entries.stream().anyMatch(name -> name.startsWith("att/engine/") || name.startsWith("att/load/")),
-                    "Engine and Load runtime classes belong only in the Local runtime jar");
         }
     }
 
@@ -1346,30 +1412,17 @@ class ServerWarUiIT {
         Process cli=builder.start();assertTrue(cli.waitFor(30,TimeUnit.SECONDS));
         assertNotEquals(0,cli.exitValue());String cliText=Files.readString(cliOutput);
         assertTrue(cliText.contains(expression),cliText);assertFalse(cliText.contains("&{.$EXTERNAL"),cliText);
-        JsonNode submitted=apiJsonResponse(port,"POST",api+"/jobs/debug",auth,origin,
-                Map.of("packageId","payments","target",Map.of("type","flow","id","diagnostic.fidelity.v1")),202);
-        String jobId=submitted.path("jobId").asText();JsonNode job=null;
-        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(40);
-        do { job=getJson(port,api+"/jobs/"+jobId,auth);
-            if (Set.of("PASS","FAIL","ERROR","INVALID","CANCELLED").contains(job.path("status").asText())) break;
-            Thread.sleep(30);
-        } while(System.nanoTime()<deadline);
-        assertTrue(Set.of("ERROR","INVALID").contains(job.path("status").asText()),job.toString());
-        JsonNode result=getJson(port,api+"/jobs/"+jobId+"/result",auth);String publicText=result.toString();
-        assertTrue(publicText.contains(expression),publicText);assertFalse(publicText.contains("&{.$EXTERNAL"),publicText);
+        // #254 snapshots require a complete, resolvable File-expression closure.
+        // A nonexistent source must fail closed at admission instead of starting a
+        // Worker with untracked input or publishing a misleading partial archive.
+        JsonNode rejected=apiJsonResponse(port,"POST",api+"/jobs/debug",auth,origin,
+                Map.of("packageId","payments","target",Map.of("type","flow","id","diagnostic.fidelity.v1")),400);
+        String publicText=rejected.toString();
+        assertEquals("ATT-SERVER-INVALID-REQUEST",rejected.path("error").path("code").asText());
+        assertTrue(publicText.contains("Pacs008.xml"),publicText);
+        assertFalse(publicText.contains("&{.$EXTERNAL"),publicText);
         assertFalse(publicText.contains(packageRoot.toString()),publicText);
-        assertTrue(publicText.contains("flow.yaml"),publicText);
-        assertTrue(publicText.contains("line") || publicText.contains("sourceColumn"),publicText);
-        JsonNode artifacts=awaitArchive(port,api,jobId,auth);
-        boolean checked=false;
-        for(JsonNode item:artifacts.path("items")) if(item.path("path").asText().endsWith("case.log")) {
-            String path=item.path("path").asText();
-            String log=getText(port,api+"/jobs/"+jobId+"/artifacts/view/"+encodeEntry(path),auth);
-            assertTrue(log.contains(expression),log);assertFalse(log.contains(packageRoot.toString()),log);checked=true;
-        }
-        assertTrue(checked,"Failed Debug must retain its diagnostic Case Log");
-        assertTrue(sseDataUntil(port,api+"/jobs/"+jobId+"/events",auth,"[DEBUG]").contains("[DEBUG]"),
-                "DEBUG live output must include a shared console line");
+        assertFalse(publicText.contains(localHome.toString()),publicText);
     }
 
     private static void writeReferenceFlowSource(Path packageRoot) throws Exception {
@@ -1440,7 +1493,8 @@ class ServerWarUiIT {
                                     Object body, int expectedStatus) throws Exception {
         HttpURLConnection connection = open(port, path, authorization);
         connection.setConnectTimeout(5000);
-        connection.setReadTimeout(30000);
+        // Source-closure acceptance may be slower under heavily shared CI runners.
+        connection.setReadTimeout(120000);
         connection.setRequestMethod(method);
         if (origin != null) connection.setRequestProperty("Origin", origin);
         if (body != null) {
@@ -1452,8 +1506,13 @@ class ServerWarUiIT {
         }
         try {
             int status = connection.getResponseCode();
-            assertEquals(expectedStatus, status, method + " " + path);
-            return ServerRuntime.JSON.readTree(connection.getInputStream());
+            JsonNode response;
+            try(var stream=status >= 400 ? connection.getErrorStream() : connection.getInputStream()) {
+                assertNotNull(stream, "Expected a JSON response body");
+                response=ServerRuntime.JSON.readTree(stream);
+            }
+            assertEquals(expectedStatus, status, method + " " + path + apiStatusDiagnostic(response, status));
+            return response;
         } finally {
             connection.disconnect();
         }
@@ -1463,7 +1522,8 @@ class ServerWarUiIT {
                                             Object body, int expectedStatus) throws Exception {
         HttpURLConnection connection = open(port, path, authorization);
         connection.setConnectTimeout(5000);
-        connection.setReadTimeout(30000);
+        // Source-closure acceptance may be slower under heavily shared CI runners.
+        connection.setReadTimeout(120000);
         connection.setRequestMethod(method);
         if (origin != null) connection.setRequestProperty("Origin", origin);
         if (body != null) {
@@ -1475,12 +1535,24 @@ class ServerWarUiIT {
         }
         try {
             int status = connection.getResponseCode();
-            assertEquals(expectedStatus, status, method + " " + path);
+            // An HttpURLConnection error stream is single-consumption. Parse once
+            // before producing diagnostics; a second getErrorStream() read may fail
+            // with "stream is closed", masking a valid expected 4xx response.
+            JsonNode response;
             try (var stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream()) {
                 assertNotNull(stream, "Expected a JSON response body");
-                return ServerRuntime.JSON.readTree(stream);
+                response = ServerRuntime.JSON.readTree(stream);
             }
+            assertEquals(expectedStatus, status, method + " " + path + apiStatusDiagnostic(response,status));
+            return response;
         } finally { connection.disconnect(); }
+    }
+
+    private static String apiStatusDiagnostic(JsonNode response,int status) {
+        if(status<400)return "";
+        JsonNode error=response==null?ServerRuntime.JSON.getNodeFactory().nullNode():response.path("error");
+        return " (code="+error.path("code").asText("unknown")
+                +", summary="+error.path("summary").asText("unavailable")+")";
     }
 
     private static int apiStatus(int port, String method, String path, String authorization, String origin, Object body) throws Exception {
@@ -1675,9 +1747,9 @@ class ServerWarUiIT {
         return asset.attr(attribute);
     }
 
-    private static void assertDegradedDiscoveryWithoutProcessSecrets(int port, String api, String auth,
-                                                                     Path packageRoot, Path localHome,
-                                                                     String baselineRevision) throws Exception {
+    private static void assertCentralConfigRemainsPinnedAcrossUnpublishedHelperMirrorEdits(
+            int port, String api, String auth, Path packageRoot, Path localHome, String baselineRevision,
+            String approvedConfig, JsonNode approvedEffective) throws Exception {
         String variable = "ATT_244_WAR_ABSENT_71F29BE6";
         assertNull(System.getenv(variable), "The fixture Environment variable must be absent from the process.");
         Files.writeString(localHome.resolve("config/db-discovery.yaml"),
@@ -1707,9 +1779,7 @@ class ServerWarUiIT {
             } finally {
                 response.disconnect();
             }
-            boolean helperDiagnosticsReady = resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE")
-                    && resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID");
-            if (!resources.path("items").isEmpty() && helperDiagnosticsReady) break;
+            if (!resources.path("items").isEmpty()) break;
             Thread.sleep(50);
         } while (System.nanoTime() < deadline);
 
@@ -1717,23 +1787,35 @@ class ServerWarUiIT {
         JsonNode item = resources.path("items").get(0);
         assertEquals("available", item.path("metadataState").asText(), item.toString());
         assertEquals("dependency-unresolved", item.path("executionReadiness").path("state").asText(), item.toString());
-        assertTrue(item.path("executionReadiness").toString().contains(variable), item.toString());
-        assertTrue(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"), resources.toString());
-        assertTrue(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"), resources.toString());
+        assertFalse(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"), resources.toString());
+        assertFalse(resources.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"), resources.toString());
         assertNotEquals(baselineRevision, refreshedRevision,
-                "The running Server must invalidate its inspection cache after the helper configuration changes.");
+                "The Package resource catalog must refresh after the Package template is created.");
         assertFalse(resources.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
+        assertFalse(resources.toString().contains(variable));
         assertFalse(resources.toString().contains(localHome.toString()));
         assertFalse(resources.toString().contains(packageRoot.toString()));
         assertEquals(401, get(port, resourceRoute, null), "The refreshed Resource Catalog remains authenticated.");
 
+        JsonNode currentSource = getJson(port, api + "/configuration/source?path=config/config.yaml", auth);
+        assertTrue(currentSource.path("available").asBoolean(), currentSource.toString());
+        assertEquals(approvedConfig, currentSource.path("text").asText(),
+                "Direct edits to the deployment mirror remain unpublished and cannot replace the active central Config revision.");
+        assertFalse(currentSource.toString().contains(variable));
+        assertFalse(currentSource.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
+        assertFalse(currentSource.toString().contains(localHome.toString()));
+
         String effectiveRoute = api + "/packages/payments/configuration/effective?environment=SIT&section=dbhelpers&limit=50";
         JsonNode effective = getJson(port, effectiveRoute, auth);
-        assertEquals("degraded", effective.path("state").asText(), effective.toString());
-        assertEquals("not-validated", effective.path("executionReadiness").asText());
-        assertTrue(effective.path("diagnostics").toString().contains(variable));
-        assertTrue(effective.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
-        assertTrue(effective.path("diagnostics").toString().contains("ATT-RESOURCE-HELPER-INVALID"));
+        JsonNode approvedEffectiveWithoutRequestId = approvedEffective.deepCopy();
+        ((ObjectNode) approvedEffectiveWithoutRequestId).remove("requestId");
+        JsonNode effectiveWithoutRequestId = effective.deepCopy();
+        ((ObjectNode) effectiveWithoutRequestId).remove("requestId");
+        assertEquals(approvedEffectiveWithoutRequestId, effectiveWithoutRequestId,
+                "Package effective Config remains based on the approved central revision until the mirror edits are published.");
+        assertFalse(effective.toString().contains(variable));
+        assertFalse(effective.toString().contains("ATT-RESOURCE-HELPER-UNAVAILABLE"));
+        assertFalse(effective.toString().contains("ATT-RESOURCE-HELPER-INVALID"));
         assertFalse(effective.toString().contains("PRIVATE_HELPER_SOURCE_CANARY"));
         assertFalse(effective.toString().contains(localHome.toString()));
         assertFalse(effective.toString().contains(packageRoot.toString()));

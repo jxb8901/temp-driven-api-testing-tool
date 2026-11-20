@@ -418,13 +418,15 @@ export function normalizeRouteHash(to: string | AppRoute): string {
 
 export interface NavigationGuardApi {
   navigate(to: string | AppRoute): boolean;
-  registerUnsavedChanges(isDirty: boolean, description?: string): () => void;
+  registerUnsavedChanges(isDirty: boolean, description?: string, onConfirmDiscard?: () => boolean | Promise<boolean>): () => void;
 }
 
 export interface RouteState extends NavigationGuardApi {
   route: AppRoute;
   pendingNavigation: string | null;
   pendingDescription: string;
+  pendingNavigationError?: string;
+  pendingNavigationBusy?: boolean;
   isDirty: boolean;
   confirmNavigation(): void;
   cancelNavigation(): void;
@@ -444,11 +446,14 @@ export function useRouteState(): RouteState {
   const [route, setRoute] = useState<AppRoute>(() => parseRoute(initialHash));
   const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
   const [pendingDescription, setPendingDescription] = useState('');
+  const [pendingNavigationError, setPendingNavigationError] = useState('');
+  const [pendingNavigationBusy, setPendingNavigationBusy] = useState(false);
   const [, setDirtyRevision] = useState(0);
   const committedHash = useRef(initialHash);
   const pendingHash = useRef<string | null>(null);
   const allowedHash = useRef<string | null>(null);
-  const dirtyEntries = useRef(new Map<symbol, string>());
+  const dirtyEntries = useRef(new Map<symbol, { description: string; onConfirmDiscard?: () => boolean | Promise<boolean> }>());
+  const confirmingRef = useRef(false);
   const isDirty = dirtyEntries.current.size > 0;
 
   useEffect(() => {
@@ -461,9 +466,9 @@ export function useRouteState(): RouteState {
     setRoute(parseRoute(canonical));
   }, [route]);
 
-  const registerUnsavedChanges = useCallback((dirty: boolean, description = 'unsaved changes') => {
+  const registerUnsavedChanges = useCallback((dirty: boolean, description = 'unsaved changes', onConfirmDiscard?: () => boolean | Promise<boolean>) => {
     const token = Symbol(description);
-    if (dirty) dirtyEntries.current.set(token, description);
+    if (dirty) dirtyEntries.current.set(token, { description, onConfirmDiscard });
     setDirtyRevision(value => value + 1);
     return () => {
       dirtyEntries.current.delete(token);
@@ -474,7 +479,8 @@ export function useRouteState(): RouteState {
   const showConfirmation = useCallback((target: string) => {
     pendingHash.current = target;
     setPendingNavigation(target);
-    setPendingDescription([...dirtyEntries.current.values()].join(', '));
+    setPendingDescription([...dirtyEntries.current.values()].map(entry => entry.description).join(', '));
+    setPendingNavigationError('');
   }, []);
 
   const navigate = useCallback((to: string | AppRoute) => {
@@ -496,25 +502,47 @@ export function useRouteState(): RouteState {
 
   const confirmNavigation = useCallback(() => {
     const target = pendingHash.current;
-    if (!target) return;
-    pendingHash.current = null;
-    setPendingNavigation(null);
-    setPendingDescription('');
-    dirtyEntries.current.clear();
-    setDirtyRevision(value => value + 1);
-    if (window.location.hash === target) {
-      committedHash.current = target;
-      setRoute(parseRoute(target));
-    } else {
-      allowedHash.current = target;
-      window.location.hash = target;
-    }
+    if (!target || confirmingRef.current) return;
+    confirmingRef.current = true;
+    setPendingNavigationBusy(true);
+    setPendingNavigationError('');
+    void (async () => {
+      try {
+        for (const entry of dirtyEntries.current.values()) {
+          if (entry.onConfirmDiscard && !await entry.onConfirmDiscard()) {
+            setPendingNavigationError('Could not discard all staged work. Review the error and try again.');
+            return;
+          }
+        }
+        if (pendingHash.current !== target) return;
+        pendingHash.current = null;
+        setPendingNavigation(null);
+        setPendingDescription('');
+        setPendingNavigationError('');
+        dirtyEntries.current.clear();
+        setDirtyRevision(value => value + 1);
+        if (window.location.hash === target) {
+          committedHash.current = target;
+          setRoute(parseRoute(target));
+        } else {
+          allowedHash.current = target;
+          window.location.hash = target;
+        }
+      } catch {
+        setPendingNavigationError('Could not discard all staged work. Review the error and try again.');
+      } finally {
+        confirmingRef.current = false;
+        setPendingNavigationBusy(false);
+      }
+    })();
   }, []);
 
   const cancelNavigation = useCallback(() => {
+    if (confirmingRef.current) return;
     pendingHash.current = null;
     setPendingNavigation(null);
     setPendingDescription('');
+    setPendingNavigationError('');
   }, []);
 
   useEffect(() => {
@@ -540,5 +568,6 @@ export function useRouteState(): RouteState {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, [showConfirmation]);
 
-  return { route, navigate, registerUnsavedChanges, pendingNavigation, pendingDescription, isDirty, confirmNavigation, cancelNavigation };
+  return { route, navigate, registerUnsavedChanges, pendingNavigation, pendingDescription, pendingNavigationError, pendingNavigationBusy,
+    isDirty, confirmNavigation, cancelNavigation };
 }

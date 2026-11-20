@@ -23,6 +23,16 @@ public final class ServerBootstrap implements ServletContextListener {
     }
     @Override public void contextDestroyed(ServletContextEvent event) {
         Object value=event.getServletContext().getAttribute(RUNTIME);
-        if(value instanceof ServerRuntime runtime)runtime.close();
+        try {
+            if(value instanceof ServerRuntime runtime)runtime.close();
+        } finally {
+            // Tomcat reloads this application under a fresh ClassLoader in the
+            // same JVM. Close the outgoing loader's schema cache use-lease so
+            // the new loader can safely initialize the matching trusted schemas.
+            try {att.validation.SchemaFiles.releaseForClassLoaderShutdown();}
+            catch(java.io.IOException failure) {
+                event.getServletContext().log("ATT trusted schema cache lease release failed during undeploy",failure);
+            }
+        }
     }
 }

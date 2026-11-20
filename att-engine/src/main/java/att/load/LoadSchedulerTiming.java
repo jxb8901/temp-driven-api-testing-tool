@@ -51,6 +51,21 @@ final class LoadSchedulerTiming {
         sleeper.sleep(millis);
     }
 
+    /**
+     * Virtual scheduler tests run their iterations on real worker threads. A pending
+     * worker must supply the next simulated completion/time advance: moving the
+     * injected clock to the run deadline while it executes can skip iterations,
+     * and a huge remaining wait can overflow that clock when the worker finishes.
+     * Production (real-time) scheduling still polls with its normal deadline.
+     */
+    <T> T await(BlockingQueue<T> completed, long millis, boolean pendingIteration) throws InterruptedException {
+        if (pendingIteration && !realtime) {
+            if (completed == null) throw new IllegalArgumentException("Completion queue is required");
+            return completed.take();
+        }
+        return await(completed, millis);
+    }
+
     <T> T await(BlockingQueue<T> completed, long millis) throws InterruptedException {
         if (completed == null) throw new IllegalArgumentException("Completion queue is required");
         if (realtime) return completed.poll(Math.max(0L, millis), TimeUnit.MILLISECONDS);

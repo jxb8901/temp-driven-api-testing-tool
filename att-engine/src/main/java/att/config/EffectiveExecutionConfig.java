@@ -32,6 +32,11 @@ public final class EffectiveExecutionConfig {
         return new EffectiveExecutionConfig(identity, origin, manifestDigest, globalDigest, fields, diagnostics, packageId);
     }
 
+    EffectiveExecutionConfig withIdentity(String replacement) {
+        return new EffectiveExecutionConfig(replacement, environmentOrigin, manifestDigest, globalDigest,
+                origins, diagnostics, registeredPackageId);
+    }
+
     /** Value-free evidence: no credentials, authored values or host filesystem coordinates. */
     public Map<String,Object> metadata(String environment) {
         Map<String,Object> result = new LinkedHashMap<String,Object>();

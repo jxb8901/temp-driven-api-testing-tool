@@ -1,6 +1,6 @@
 # ATT documentation
 
-This is the canonical documentation map for ATT 4.3.1. It separates task guidance from normative Reference contracts and identifies which interfaces are shipped, legacy-compatible or planned.
+This is the canonical documentation map for the ATT 4.4.0 release candidate. Acceptance is pending and this version is not released. The map separates task guidance from normative Reference contracts and identifies which interfaces are included, legacy-compatible or planned.
 
 ## Start here
 
@@ -35,6 +35,7 @@ The Quick Start is a current 4.3.1 workflow. Snapshot generation is explicit aut
 | Run a Template, Flow or Tool with diagnostics | [Debug Reference](reference/execution-modes/debug.md) |
 | Configure DB and MQ helpers | [DBHelper Reference](reference/resources/dbhelper.md) · [MQHelper Reference](reference/resources/mqhelper.md) |
 | Validate configuration or a Package | [Validation guide](guides/validate.md) · [Validation Reference](reference/validation-diagnostics.md) |
+| Edit and publish Package or shared Runtime Config source | [Studio source authoring guide](interfaces/studio/source-authoring.md) · [繁體中文指南](interfaces/studio/source-authoring.zh.md) |
 | Use ATT expressions and Context | [Expressions Reference](reference/expressions.md) · [Runtime Context Reference](reference/runtime-context.md) |
 | Choose one of the six LOAD modes | [Load model](concepts/load-model.md) · [Load Reference](reference/execution-modes/load.md) |
 | Run a Load test | [Load testing guide](guides/load-testing.md) |
@@ -58,7 +59,7 @@ The Quick Start is a current 4.3.1 workflow. Snapshot generation is explicit aut
 | Template, Flow and Tool execution | Current legacy debug | Current legacy remote debug | Current unified RUN | Standalone Debug remains a compatibility command |
 | LOAD | Current legacy load | Current legacy remote load | Current | Six workload shapes are documented in the Load model |
 | VALIDATE | Current local validate | Current remote validate | Current | Read-only checks; no business execution |
-| CLI vNext run, load, validate | Planned | Planned contract | Not a Studio or REST removal | The vNext grammar remains planned and is not part of ATT 4.3.1 |
+| CLI vNext run, load, validate | Planned | Planned contract | Not a Studio or REST removal | The vNext grammar remains planned and is not part of ATT 4.4.0 |
 | Jobs and Schedules | Not Local CLI resources | Current att remote Job management | Current Server lifecycle | Local Run IDs are not Server Job IDs |
 | #294 management CLI resources | Not available | Not part of vNext proposal | Server/Studio capabilities are separate | Future P3 proposal |
 
