@@ -1,0 +1,10 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.invalid-expression
+flow: payment.transfer.v1
+caseIdExpression: "${EXEC.INPUT.caseId}"
+dataSource:
+  type: inline
+  records:
+    - recordId: one
+      data:
+        caseId: one

@@ -1,0 +1,33 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.regression
+name: FPP Transfer Regression
+flow: payment.transfer.v1
+tags: [fpp, regression]
+caseIdExpression: "${DATA.caseKey}"
+dataSource:
+  type: inline
+  records:
+    - recordId: source-min
+      tags: [smoke]
+      data:
+        caseKey: minimum
+        debitAccount: "A001"
+        amount: 1
+        expectedStatus: SUCCESS
+    - recordId: source-zero
+      data:
+        caseKey: zero
+        debitAccount: "A002"
+        amount: 0
+        expectedStatus: REJECTED
+inputs:
+  debitAccount:
+    from: DATA.debitAccount
+  amount:
+    from: DATA.amount
+  expectedStatus:
+    from: DATA.expectedStatus
+  mode:
+    value: standard
+  optionalValue:
+    value: null

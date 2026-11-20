@@ -1,0 +1,17 @@
+# Shape-valid example. The future Resolver must reject case-folded source IDs
+# and caseIdExpression results; S01 schema validation does not check them.
+schemaVersion: att-testcase/v1
+id: fpp.transfer.duplicate-ids
+flow: payment.transfer.v1
+caseIdExpression: "${DATA.caseKey}"
+dataSource:
+  type: inline
+  records:
+    - recordId: CaseA
+      data:
+        caseKey: CaseA
+        amount: 1
+    - recordId: casea
+      data:
+        caseKey: casea
+        amount: 2

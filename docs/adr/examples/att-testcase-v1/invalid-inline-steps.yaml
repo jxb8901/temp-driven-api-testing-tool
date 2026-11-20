@@ -1,0 +1,7 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.invalid-steps
+flow: payment.transfer.v1
+inputs:
+  amount: 1
+steps:
+  - name: call

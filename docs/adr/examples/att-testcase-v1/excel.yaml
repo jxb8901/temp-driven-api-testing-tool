@@ -1,0 +1,17 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.excel
+name: FPP Transfer Excel Cases
+flow: payment.transfer.v1
+tags: [fpp, regression]
+caseIdExpression: "${DATA.stableKey}"
+dataSource:
+  type: excel
+  path: testdata/transfer-cases.xlsx
+  sheet: Cases
+  headerRows: 1
+  caseId: "Case ID"
+  tags: "Tags"
+  dataColumns: 'stableKey=Stable Key, debitAccount=Debit Account, amount=Amount, expectedStatus=Expected Status(yaml), note="備註,補充", payload="請求(yaml)"(yaml)'
+report:
+  format: xlsx
+  template: sourceWorkbook

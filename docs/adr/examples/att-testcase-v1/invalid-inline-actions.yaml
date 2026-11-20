@@ -1,0 +1,9 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.invalid-actions
+flow: payment.transfer.v1
+inputs:
+  amount: 1
+actions:
+  call:
+    type: http
+    method: GET

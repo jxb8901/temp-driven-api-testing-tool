@@ -22,6 +22,26 @@ def active_schemas(catalog):
     return {name: frozenset(versions) for name, versions in active.items()}
 
 
+def proposed_schemas(catalog):
+    if not re.search(r"(?m)^schemaVersion:\s*att-proposed-schema-catalog/v1\s*$", catalog):
+        raise ValueError("proposed schema catalog must declare att-proposed-schema-catalog/v1")
+    if not re.search(r"(?m)^status:\s*proposed\s*$", catalog):
+        raise ValueError("proposed schema catalog must declare status: proposed")
+    schemas = {}
+    for line in catalog.splitlines():
+        match = re.match(r"\s+(att-[a-z0-9-]+)/v([0-9]+(?:\.[0-9]+)*):\s*([A-Za-z0-9._-]+\.schema\.json)\s*$", line, re.I)
+        if not match:
+            continue
+        name, version, filename = match.groups()
+        filename_version = re.search(r"-v([0-9]+(?:\.[0-9]+)*)\.schema\.json$", filename, re.I)
+        if not filename_version or filename_version.group(1) != version:
+            raise ValueError("proposed schema catalog filename does not match %s/v%s" % (name, version))
+        schemas.setdefault(name.lower(), set()).add(version)
+    if not schemas:
+        raise ValueError("proposed schema catalog contains no schema files")
+    return {name: frozenset(versions) for name, versions in schemas.items()}
+
+
 def without_code(text):
     lines = []
     fence = None
@@ -325,6 +345,29 @@ def validate(root=ROOT):
     version = re.search(r"<version>([^<]+)</version>",
                         (root / "pom.xml").read_text(encoding="utf-8")).group(1).strip()
     active = active_schemas((root / "schemas/catalog.yaml").read_text(encoding="utf-8"))
+    proposed_catalog = root / "schemas/proposed/catalog.yaml"
+    if not proposed_catalog.is_file():
+        errors.append("missing schemas/proposed/catalog.yaml")
+        proposed = {}
+    else:
+        try:
+            proposed = proposed_schemas(proposed_catalog.read_text(encoding="utf-8"))
+            for name, versions in proposed.items():
+                if name in active:
+                    overlap = versions & active[name]
+                    if overlap:
+                        errors.append("schema is both proposed and active: %s/%s" %
+                                      (name, ", ".join("v" + value for value in sorted(overlap))))
+                for schema_version in versions:
+                    filename = name + "-v" + schema_version + ".schema.json"
+                    if not (proposed_catalog.parent / filename).is_file():
+                        errors.append("proposed schema catalog references missing file: schemas/proposed/%s" % filename)
+        except ValueError as exc:
+            errors.append(str(exc))
+            proposed = {}
+    known_schemas = {name: set(versions) for name, versions in active.items()}
+    for name, versions in proposed.items():
+        known_schemas.setdefault(name, set()).update(versions)
     manifest = root / "docs/reference-manifest.txt"
     items = [s.strip() for s in manifest.read_text(encoding="utf-8").splitlines()
              if s.strip() and not s.lstrip().startswith("#")]
@@ -378,7 +421,7 @@ def validate(root=ROOT):
                 or rel.startswith("examples/")):
             errors += [rel + ": " + e for e in chapter_label_errors(text)]
         try:
-            errors += [rel + ": " + e for e in stale_claims(text, active, version)]
+            errors += [rel + ": " + e for e in stale_claims(text, known_schemas, version)]
         except ValueError as exc:
             errors.append(rel + ": " + str(exc))
         if rel.startswith(("docs/reference/", "docs/reference.zh/")) and path.name != "README.md":

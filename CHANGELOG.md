@@ -1,3 +1,8 @@
+### S01 — Proposed Native Test Case contract (4.4.1 train)
+
+- Freeze the proposed `att-testcase/v1` field, typed input, stable ID, singleton/inline multi-record/Excel syntax, input projection precedence and `att-sidecar/v2.2` mapping compatibility; keep the proposal outside the active runtime schema catalog (#391).
+- Add proposed-schema catalog validation, valid/invalid fixtures, focused schema tests, bilingual contract documentation, and repairs for the #389 documentation-gate findings. Runtime discovery, resolution and execution remain follow-up work.
+
 # ATT 4.4.0 - release candidate (2026-11-18; acceptance pending)
 
 - Add Package registration and immutable source revision contracts, source authoring and Change Set publication, plus Studio source editors for Package files, Testcases, and Testdata (#250–#255).

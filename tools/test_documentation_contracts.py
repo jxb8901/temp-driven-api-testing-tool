@@ -6,7 +6,7 @@ from documentation_contracts import (active_schemas, stale_claims,
                                      chapter_label_errors, editorial_errors,
                                      chapter_reference_errors,
                                      editorial_source_files, standalone_markdown,
-                                     standalone_page_errors)
+                                     standalone_page_errors, proposed_schemas)
 from build_reference_manual import rebase_headings, assembly_heading_offset
 from verify_documentation import schema_contract_corpus
 
@@ -35,6 +35,28 @@ class DocumentationContractsTest(unittest.TestCase):
         self.assertEqual({"1", "2.1"}, set(active["att-validation"]))
         self.assertEqual([], stale_claims("att-validation/v1; att-validation/v2.1", active, VERSION))
         self.assertTrue(stale_claims("att-validation/v3", active, VERSION))
+
+    def test_proposed_catalog_tracks_schemas_without_promoting_them_to_active(self):
+        catalog = """schemaVersion: att-proposed-schema-catalog/v1
+status: proposed
+schemas:
+  att-testcase/v1: att-testcase-v1.schema.json
+"""
+        proposed = proposed_schemas(catalog)
+        self.assertEqual({"att-testcase": frozenset({"1"})}, proposed)
+        self.assertNotIn("att-testcase", self.active)
+        self.assertEqual([], stale_claims("att-testcase/v1", {**self.active, **proposed}, VERSION))
+
+    def test_proposed_catalog_requires_explicit_status_and_matching_filename(self):
+        valid = """schemaVersion: att-proposed-schema-catalog/v1
+status: proposed
+schemas:
+  att-testcase/v1: att-testcase-v1.schema.json
+"""
+        with self.assertRaisesRegex(ValueError, "status: proposed"):
+            proposed_schemas(valid.replace("status: proposed", "status: current"))
+        with self.assertRaisesRegex(ValueError, "filename does not match"):
+            proposed_schemas(valid.replace("att-testcase-v1.schema.json", "att-testcase-v2.schema.json"))
 
     def test_stale_schemas_in_normal_text_examples_and_filenames_fail(self):
         for text in ("schemaVersion: att-load/v1.2", "Load v1.2",

@@ -1,0 +1,10 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.invalid-columns
+flow: payment.transfer.v1
+dataSource:
+  type: excel
+  path: testdata/transfer-cases.xlsx
+  sheet: Cases
+  caseId: "Case ID"
+  dataColumns:
+    amount: Amount

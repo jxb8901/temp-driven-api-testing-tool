@@ -1,0 +1,6 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.invalid
+flow: payment.transfer.v1
+inputs:
+  amount: 1
+caseId: "${DATA.caseId}"
