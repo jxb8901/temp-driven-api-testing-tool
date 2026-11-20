@@ -448,7 +448,7 @@ class ArtifactPublicationFaultTest {
                 + "printf 'password=att-test-private-canary\\nbusiness=partial\\n' >> \"$1/case.log\"\n"
                 + "touch \"$1/child.ready\"\n"
                 + "while :; do printf 'business=partial\\n' >> \"$1/case.log\"; sleep 0.02; done\n");
-        String launcher = "#!/bin/sh\nIFS= read -r request\n"
+        String launcher = "#!/bin/sh\nfor argument do [ \"$argument\" = \"-version\" ] && exit 0; done\nIFS= read -r request\n"
                 + "output=$(printf '%s' \"$request\" | sed 's/.*\"outputDirectory\":\"\\([^\"]*\\)\".*/\\1/')\n"
                 + "sh ./child-writer.sh \"$output\" >/dev/null 2>&1 &\n"
                 + "echo $! > \"$output/child.pid\"\nwait\n";
@@ -491,7 +491,7 @@ class ArtifactPublicationFaultTest {
 
     @Test void queuedCancellationPublishesItsEmptyArchiveWithoutAReconciliationRetry() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(), "Uses a POSIX blocked Worker fixture");
-        String script = "#!/bin/sh\nIFS= read -r request || exit 2\n"
+        String script = "#!/bin/sh\nfor argument do [ \"$argument\" = \"-version\" ] && exit 0; done\nIFS= read -r request || exit 2\n"
                 +"output=$(printf '%s' \"$request\" | sed -n 's/.*\"outputDirectory\":\"\\([^\"]*\\)\".*/\\1/p')\n"
                 +"touch \"$output/active.started\"\nexec sleep 60\n";
         try (ServerRuntime runtime = runtime(ArtifactArchive::build, script, 1)) {
