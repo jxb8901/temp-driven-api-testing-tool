@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ServerRuntimePackageManifestTest {
@@ -19,13 +20,16 @@ class ServerRuntimePackageManifestTest {
         Files.writeString(template,"schemaVersion: att-template/v3.6\nname: FORM\ndescription: Manifest integration\nactions:\n  log:\n    type: log\n    message: hello\n");
         Files.createDirectories(pkg.resolve("testcase"));
         Path server=temp.resolve("server.yaml");
-        Files.writeString(server,"server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("data"))+"\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(config)+"\n"
+        Files.writeString(server,"server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("data"))+"\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(config)+"\n  auth: {mode: local}\n"
                 +"  packageConfiguration:\n    sourceEditingEnabled: true\n"+policy
                 +"  inlineLoad: {enabled: true}\n  scheduling: {enabled: true}\nworkers: {}\npackages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {owner: "+ServerRuntimeTestSupport.yaml(pkg)+"}\n");
         Path libs=Files.createDirectories(temp.resolve("libs"));
         for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
         ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
-        return new ServerRuntime(ServerConfig.load(server),libs.toString());
+        ServerRuntime runtime=new ServerRuntime(ServerConfig.load(server),libs.toString());
+        if(runtime.store.authUser("owner")==null)
+            runtime.auth.createUser("owner","Owner","manifest test owner password","USER");
+        return runtime;
     }
     @Test void stagesPrivateWorkerCandidateAndPublishesOnlyForRegisteredOwner() throws Exception {
         try(var runtime=runtime("")) {
@@ -43,6 +47,56 @@ class ServerRuntimePackageManifestTest {
             assertEquals("UAT",runtime.inspectPackageConfiguration("owner","effective",null,"alice").get("environment"));
             assertEquals(false,runtime.inspectPackageConfiguration("owner","declared",null,"alice").get("canEdit"));
             assertEquals(true,runtime.inspectPackageConfiguration("owner","declared",null,"owner").get("canEdit"));
+        }
+    }
+
+    @Test void containerPackageEditingRequiresTrustedUserCheckAndRechecksBeforeReturningRawMetrics() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("container-packages"));
+        Path shared=Files.createDirectories(allowed.resolve("fpp-common"));
+        Path admin=Files.createDirectories(allowed.resolve("admin"));
+        Files.createDirectories(shared.resolve("load/sut-metrics/sources"));
+        String manifest="schemaVersion: att-package/v2\nobservability:\n  metricSources: [load/sut-metrics/sources/cpu.yaml]\n  groups: []\n  profiles: []\n";
+        Files.writeString(shared.resolve("package.yaml"),manifest);
+        String metricSource="schemaVersion: att-sut-metrics-metric-source/v1\nid: cpu\nname: CPU\n"
+                +"connection: {kind: DATA_SOURCE, id: prometheus}\n"
+                +"fetch: {id: cpu-range, mode: prometheus-range, query: up, parameters: {}, sampling: range, step: 30s}\n"
+                +"mapping: {labels: {retain: [instance]}, outputs: [{id: up, title: Up, unit: count, kind: gauge, metricName: up}]}\n"
+                +"limits: {maxRows: 1024, maxSeries: 128, maxSamples: 10000, maxArtifactBytes: 1048576}\n";
+        Files.writeString(shared.resolve("load/sut-metrics/sources/cpu.yaml"),metricSource);
+        Path runtimeConfig=Files.createDirectories(temp.resolve("container-runtime/config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.15\nenvironment: SIT\nenvironments: {SIT: {}}\n");
+        Path serverConfig=temp.resolve("container-server.yaml");
+        Files.writeString(serverConfig,"server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("container-data"))+"\n"
+                +"  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
+                +"  authenticationRequired: true\n  auth: {mode: container}\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\nworkers: {}\npackages:\n"
+                +"  allowedRoots: ["+ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries:\n"
+                +"    fpp-common:\n      path: "+ServerRuntimeTestSupport.yaml(shared)+"\n      editors: [alice]\n"
+                +"    admin:\n      path: "+ServerRuntimeTestSupport.yaml(admin)+"\n      editors: [admin]\n");
+        Path libs=Files.createDirectories(temp.resolve("container-libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
+            ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+        try(var runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            assertFalse(runtime.canEditPackageContent("fpp-common","alice"),
+                    "Container identities cannot receive USER capability from isOperationalPrincipal alone");
+            assertFalse(runtime.canEditPackageContent("admin","admin"),
+                    "An ADMIN-only identity matching a Package ID is not an active USER");
+            assertTrue(runtime.withPackageSourceAuthority("alice",login->true,
+                    ()->runtime.canEditPackageContent("fpp-common","alice")));
+            assertFalse(runtime.withPackageSourceAuthority("alice",login->false,
+                    ()->runtime.canEditPackageContent("fpp-common","alice")));
+
+            AtomicInteger checks=new AtomicInteger();
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.withPackageSourceAuthority("alice",
+                    login->checks.incrementAndGet()==1,
+                    ()->runtime.packageSutMetricsResource("fpp-common","source","cpu","alice")),
+                    "A role revoked while raw source is read must suppress the response body");
+            assertEquals(2,checks.get(),"The USER capability is checked before and after reading source bytes");
+            Map<String,Object> allowedRead=runtime.withPackageSourceAuthority("alice",login->true,
+                    ()->runtime.packageSutMetricsResource("fpp-common","source","cpu","alice"));
+            assertEquals(metricSource,allowedRead.get("source"));
+            assertEquals(Boolean.TRUE,allowedRead.get("canEdit"));
         }
     }
     @Test void publishesSmallManifestInLargePackageAndStillFencesDeclaredDependencyChanges() throws Exception {

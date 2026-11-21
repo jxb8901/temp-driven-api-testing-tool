@@ -51,15 +51,19 @@ final class PackageRegistry implements AutoCloseable {
         final Instant loadedAt,lastAttemptAt,lastReloadAt;
         final Diagnostic diagnostic;
         final Map<String,Path> packages;
+        final Map<String,List<String>> editors;
         final List<Path> allowedRoots;
         final Map<String,String> packageStates;
 
         private Snapshot(long generation,String revision,String status,Instant loadedAt,Instant lastAttemptAt,
                          Instant lastReloadAt,Diagnostic diagnostic,Map<String,Path> packages,
-                         List<Path> allowedRoots,Map<String,String> packageStates) {
+                         Map<String,List<String>> editors,List<Path> allowedRoots,Map<String,String> packageStates) {
             this.generation=generation;this.revision=revision;this.status=status;this.loadedAt=loadedAt;
             this.lastAttemptAt=lastAttemptAt;this.lastReloadAt=lastReloadAt;this.diagnostic=diagnostic;
             this.packages=Collections.unmodifiableMap(new LinkedHashMap<>(packages));
+            Map<String,List<String>> editorCopy=new LinkedHashMap<>();
+            editors.forEach((id,users)->editorCopy.put(id,List.copyOf(users)));
+            this.editors=Collections.unmodifiableMap(editorCopy);
             this.allowedRoots=List.copyOf(allowedRoots);
             this.packageStates=Collections.unmodifiableMap(new LinkedHashMap<>(packageStates));
         }
@@ -117,11 +121,11 @@ final class PackageRegistry implements AutoCloseable {
         // ServerConfig has already validated this exact source document. Pin its digest so a
         // replacement between ServerConfig.load and construction remains an unevaluated change.
         lastEvaluatedDigest=config.sourceDigest;
-        String revision=revision(config.packages,config.allowedRoots);
+        String revision=revision(config.packages,config.packageEditors,config.allowedRoots);
         Map<String,String> states=new LinkedHashMap<>();config.packages.keySet().stream().sorted().forEach(id->states.put(id,"Registered"));
         Instant now=clock.instant();
         active=new AtomicReference<>(new Snapshot(1,revision,"Ready",now,now,now,null,
-                config.packages,config.allowedRoots,states));
+                config.packages,config.packageEditors,config.allowedRoots,states));
     }
 
     Snapshot snapshot() { return active.get(); }
@@ -221,13 +225,13 @@ final class PackageRegistry implements AutoCloseable {
                     ||state.equals(old.packageStates.get(packageId)))return;
             Map<String,String> states=new LinkedHashMap<>(old.packageStates);states.put(packageId,state);
             Snapshot updated=new Snapshot(old.generation,old.revision,old.status,old.loadedAt,old.lastAttemptAt,
-                    old.lastReloadAt,old.diagnostic,old.packages,old.allowedRoots,states);
+                    old.lastReloadAt,old.diagnostic,old.packages,old.editors,old.allowedRoots,states);
             if(active.compareAndSet(old,updated))return;
         }
     }
 
     private void install(ServerConfig.PackageRoots roots,Instant now) {
-        String revision=revision(roots.packages(),roots.allowedRoots());
+        String revision=revision(roots.packages(),roots.editors(),roots.allowedRoots());
         coordinator.apply(()->{
             Snapshot current=active.get();
             long generation=current.generation+(revision.equals(current.revision)?0:1);
@@ -238,7 +242,7 @@ final class PackageRegistry implements AutoCloseable {
                 states.put(entry.getKey(),state);
             });
             Snapshot next=new Snapshot(generation,revision,"Ready",now,now,now,null,
-                    roots.packages(),roots.allowedRoots(),states);
+                    roots.packages(),roots.editors(),roots.allowedRoots(),states);
             if(!current.revision.equals(next.revision))changeListener.beforeRegistryChange(current,next);
             active.set(next);
         });
@@ -249,7 +253,7 @@ final class PackageRegistry implements AutoCloseable {
             Snapshot old=active.get();
             if("Invalid".equals(old.status)&&old.diagnostic!=null&&old.diagnostic.code().equals(code))return;
             Snapshot invalid=new Snapshot(old.generation,old.revision,"Invalid",old.loadedAt,now,old.lastReloadAt,
-                    new Diagnostic(code,summary),old.packages,old.allowedRoots,old.packageStates);
+                    new Diagnostic(code,summary),old.packages,old.editors,old.allowedRoots,old.packageStates);
             if(active.compareAndSet(old,invalid))return;
         }
     }
@@ -329,9 +333,10 @@ final class PackageRegistry implements AutoCloseable {
         throw new IllegalArgumentException("unsupported config value");
     }
 
-    private static String revision(Map<String,Path> packages,List<Path> allowedRoots) {
+    private static String revision(Map<String,Path> packages,Map<String,List<String>> editors,List<Path> allowedRoots) {
         Map<String,Object> identity=new LinkedHashMap<>();
-        Map<String,String> entries=new TreeMap<>();packages.forEach((id,path)->entries.put(id,path.toString()));
+        Map<String,Object> entries=new TreeMap<>();packages.forEach((id,path)->entries.put(id,
+                Map.of("path",path.toString(),"editors",editors.getOrDefault(id,List.of()))));
         List<String> roots=allowedRoots.stream().map(Path::toString).sorted(Comparator.naturalOrder()).toList();
         identity.put("allowedRoots",roots);identity.put("entries",entries);
         try { return fingerprint(identity); }

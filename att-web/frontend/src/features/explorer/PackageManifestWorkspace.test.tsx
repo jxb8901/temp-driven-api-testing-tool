@@ -4,16 +4,22 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShellContext } from '../../AppShell';
 import { PackageManifestWorkspace } from './PackageManifestWorkspace';
-import type { ManifestDraft, ManifestProjection, PackageManifestApi } from './packageManifest';
+import type { ManifestDraft, ManifestProjection, ManifestView, PackageManifestApi } from './packageManifest';
 
 vi.mock('../code/CodeEditor', () => ({ CodeEditor: ({ value, label, readOnly, onChange }: { value: string; label: string; readOnly?: boolean; onChange?: (text: string) => void }) =>
   <textarea aria-label={label} value={value} readOnly={readOnly} onChange={event => onChange?.(event.target.value)} /> }));
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => { host = document.createElement('div');document.body.append(host);root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount());host.remove(); });
 const digest = 'a'.repeat(64);
 const authoringText = '# keep comments and ordering\nschemaVersion: att-package/v1\n\ndefaultEnvironment: SIT\n';
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>(resolvePromise => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
 function fixture(masked = false): PackageManifestApi {
   const projection: ManifestProjection = { packageId: 'owner', present: true, manifestDigest: digest, canEdit: true,
     environment: 'SIT', environmentOrigin: 'package', declared: { schemaVersion: 'att-package/v1' }, available: true,
@@ -48,6 +54,33 @@ function workflowStep(state: string, label: string): HTMLElement | undefined {
 }
 
 describe('Package Manifest publication', () => {
+  it('allows navigation while a clean Manifest projection read is pending', async () => {
+    const api=fixture();const pending=deferred<ManifestProjection>();
+    api.getPackageManifest=vi.fn(async () => pending.promise);
+    const register=vi.fn(() => () => {});
+    await act(async () => {root.render(<PackageManifestWorkspace api={api} packageId="owner" registerUnsavedChanges={register} />);});
+    expect(register).toHaveBeenCalledWith(false,'unpublished Package Manifest changes');
+    expect(register).not.toHaveBeenCalledWith(true,'unpublished Package Manifest changes',expect.any(Function));
+  });
+  it('blocks navigation while Manifest staging is in flight, then offers draft discard', async () => {
+    const api=fixture();const pending=deferred<ManifestDraft>();
+    api.stagePackageManifest=vi.fn(() => pending.promise);
+    let confirmDiscard: (() => boolean | Promise<boolean>) | undefined;
+    const register=vi.fn((_dirty: boolean,_description?: string,onConfirmDiscard?: () => boolean | Promise<boolean>) => {
+      confirmDiscard=onConfirmDiscard;return () => {};
+    });
+    await act(async () => {root.render(<PackageManifestWorkspace api={api} packageId="owner" registerUnsavedChanges={register} />);});
+    await click('Source');
+    await click('Create Manifest draft');
+    expect(api.stagePackageManifest).toHaveBeenCalledOnce();
+    expect(register).toHaveBeenLastCalledWith(true,'unpublished Package Manifest changes',expect.any(Function));
+    let allowed=true;
+    await act(async () => {allowed=await confirmDiscard?.() ?? true;});
+    expect(allowed).toBe(false);
+    await act(async () => {pending.resolve({draftId:'M123',packageId:'owner',expectedManifestDigest:digest,
+      expiresAt:'2026-10-25T01:00:00Z',state:'draft'});await pending.promise;});
+    expect(host.querySelector('[aria-label="Manifest publication review"]')).not.toBeNull();
+  });
   it('requires a staged, validated, reviewed candidate before publishing and refreshes afterward', async () => {
     const api = fixture();await render(api);
     expect(host.textContent).toContain('Resolved Environment: SIT');expect(host.textContent).toContain('Origin: package');
@@ -84,14 +117,52 @@ describe('Package Manifest publication', () => {
       editor.dispatchEvent(new Event('input',{bubbles:true}));
     });
     expect(button('Effective').disabled).toBe(true);expect(button('Refresh Package Configuration').disabled).toBe(true);
-    expect(register).toHaveBeenLastCalledWith(true,'unpublished Package Manifest changes');
+    expect(register).toHaveBeenLastCalledWith(true,'unpublished Package Manifest changes',expect.any(Function));
     expect(editor.value).toContain('UAT');await click('Discard source changes');
     expect(host.querySelector('[role="alertdialog"]')?.textContent).toContain('Package owner');
     await click('Discard edits');
     expect(editor.value).not.toContain('UAT');expect(button('Effective').disabled).toBe(false);
-    await click('Create Manifest draft');expect(register).toHaveBeenLastCalledWith(true,'unpublished Package Manifest changes');
+    await click('Create Manifest draft');expect(register).toHaveBeenLastCalledWith(true,'unpublished Package Manifest changes',expect.any(Function));
     await click('Discard Manifest draft');expect(host.querySelector('[role="alertdialog"]')?.textContent).toContain('staged Manifest source');
     await click('Discard draft');expect(register).toHaveBeenLastCalledWith(false,'unpublished Package Manifest changes');
+  });
+  it('discards a staged Manifest draft before allowing guarded navigation', async () => {
+    const api=fixture();
+    let confirmDiscard: (() => boolean | Promise<boolean>) | undefined;
+    const register=vi.fn((_dirty: boolean,_description?: string,onConfirmDiscard?: () => boolean | Promise<boolean>) => {
+      confirmDiscard=onConfirmDiscard;return () => {};
+    });
+    await act(async () => {root.render(<PackageManifestWorkspace api={api} packageId="owner" registerUnsavedChanges={register} />);});
+    await click('Source');await click('Create Manifest draft');
+    expect(host.querySelector('[aria-label="Manifest publication review"]')).not.toBeNull();
+    let allowed=false;
+    await act(async () => {allowed=await confirmDiscard?.() ?? false;});
+    expect(allowed).toBe(true);
+    expect(api.manifestDraftAction).toHaveBeenCalledWith('owner','M123','discard',expect.any(AbortSignal));
+    expect(host.querySelector('[aria-label="Manifest publication review"]')).toBeNull();
+  });
+  it('blocks navigation and clears the Manifest editor when navigation discard is revoked', async () => {
+    const api=fixture();let revoked=false;
+    const getProjection=api.getPackageManifest;
+    api.getPackageManifest=vi.fn(async (_packageId: string,view: ManifestView,environment?: string,signal?: AbortSignal) => {
+      const value=await getProjection('owner',view,environment,signal);
+      return revoked?{...value,canEdit:false,text:'redacted projection',redacted:true,authoringSourceUnavailable:true}:value;
+    });
+    api.manifestDraftAction=vi.fn(async () => {revoked=true;throw {status:403};});
+    let confirmDiscard: (() => boolean | Promise<boolean>) | undefined;
+    const register=vi.fn((_dirty: boolean,_description?: string,onConfirmDiscard?: () => boolean | Promise<boolean>) => {
+      confirmDiscard=onConfirmDiscard;return () => {};
+    });
+    await act(async () => {root.render(<PackageManifestWorkspace api={api} packageId="owner" registerUnsavedChanges={register} />);});
+    await click('Source');await click('Create Manifest draft');
+    expect(host.textContent).toContain('keep comments and ordering');
+    let allowed=true;
+    await act(async () => {allowed=await confirmDiscard?.() ?? true;});
+    expect(allowed).toBe(false);
+    expect(api.manifestDraftAction).toHaveBeenCalledWith('owner','M123','discard',expect.any(AbortSignal));
+    expect(host.querySelector('[aria-label="Manifest publication review"]')).toBeNull();
+    expect(host.textContent).not.toContain('keep comments and ordering');
+    expect((host.querySelector('textarea[aria-label="Package Manifest source"]') as HTMLTextAreaElement)?.readOnly).toBe(true);
   });
   it('allows navigation in a clean source view and locks it only while local edits or a draft exist', async () => {
     const api = fixture();const lock = vi.fn();
@@ -123,6 +194,26 @@ describe('Package Manifest publication', () => {
     expect(editor.value).toBe(authoringText);expect(editor.readOnly).toBe(false);
     expect(api.getPackageAuthoringSource).toHaveBeenCalledTimes(1);
   });
+  it('shows Manifest mutation controls to a non-owner trusted editor granted by the server', async () => {
+    const api=fixture();
+    const ownerProjection=await api.getPackageManifest('owner','effective');
+    api.getPackageManifest=vi.fn(async () => ({...ownerProjection,packageId:'common-one',canEdit:true}));
+    await act(async () => {root.render(<PackageManifestWorkspace api={api} packageId="common-one" />);});
+
+    await click('Source');
+    const editor=host.querySelector('textarea[aria-label="Package Manifest source"]') as HTMLTextAreaElement;
+    expect(editor.readOnly).toBe(false);
+    expect(button('Create Manifest draft').disabled).toBe(false);
+    await click('Create Manifest draft');
+    expect(api.getPackageManifest).toHaveBeenCalledWith('common-one','effective',undefined,expect.any(AbortSignal));
+    expect(api.getPackageAuthoringSource).toHaveBeenCalledWith('common-one',expect.any(AbortSignal));
+    expect(api.stagePackageManifest).toHaveBeenCalledWith('common-one',authoringText,digest,expect.any(AbortSignal));
+    await click('Validate Manifest draft');
+    await click('Review validated Manifest');
+    expect(api.manifestDraftAction).toHaveBeenCalledWith('common-one','M123','validate',expect.any(AbortSignal));
+    expect(api.manifestDraftAction).toHaveBeenCalledWith('common-one','M123','review',expect.any(AbortSignal));
+    expect(button('Publish reviewed Manifest').disabled).toBe(false);
+  });
   it('retains a reviewed draft on revision conflict and requires an explicit discard', async () => {
     const api = fixture();api.publishPackageManifest = vi.fn(async () => { throw { status: 409 }; });
     await render(api);await click('Source');await click('Create Manifest draft');await click('Validate Manifest draft');await click('Review validated Manifest');
@@ -135,6 +226,83 @@ describe('Package Manifest publication', () => {
     expect(workflowStep('blocked', 'Publish')?.textContent).toContain('Discard it, refresh, and stage a new candidate.');
     await click('Discard Manifest draft');await click('Discard draft');expect(host.querySelector('[aria-label="Manifest publication review"]')).toBeNull();
     expect(api.publishPackageManifest).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears loaded source, draft, and history when a trusted editor grant is revoked', async () => {
+    const api=fixture();let revoked=false;
+    const getProjection=api.getPackageManifest;
+    api.getPackageManifest=vi.fn(async (_packageId: string, _view: ManifestView, _environment?: string, _signal?: AbortSignal) => {
+      const value=await getProjection('owner','effective');
+      return revoked?{...value,canEdit:false,text:'redacted projection',redacted:true,authoringSourceUnavailable:true}:value;
+    });
+    api.getPackageManifestHistory=vi.fn(async () => ({items:[{manifestDigest:'c'.repeat(64),modifiedAt:'2026-10-25T00:00:00Z'}]}));
+    api.manifestDraftAction=vi.fn(async () => {revoked=true;throw {status:403};});
+    await render(api);await click('Source');await click('Load Manifest history');
+    expect(host.textContent).toContain('c'.repeat(12));
+    await click('Create Manifest draft');
+    expect((host.querySelector('textarea[aria-label="Candidate Package Manifest source"]') as HTMLTextAreaElement)?.value)
+      .toContain('keep comments');
+    await click('Validate Manifest draft');
+    expect(host.querySelector('[aria-label="Manifest publication review"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Manifest revision history"]')).toBeNull();
+    expect(host.textContent).not.toContain('keep comments and ordering');
+    expect(host.textContent).not.toContain(authoringText);
+    expect([...host.querySelectorAll('textarea')].some(editor=>editor.value.includes('keep comments'))).toBe(false);
+    expect(button('Create Manifest draft').disabled).toBe(true);
+    expect(host.textContent).toContain('Package source is read only for this account.');
+  });
+
+  it('clears privileged Manifest state when a refreshed projection no longer grants editing', async () => {
+    const api=fixture();let revoked=false;
+    const getProjection=api.getPackageManifest;
+    api.getPackageManifest=vi.fn(async (_packageId: string, view: ManifestView, environment?: string, signal?: AbortSignal) => {
+      const value=await getProjection('owner',view,environment,signal);
+      return revoked?{...value,canEdit:false,text:'redacted projection',redacted:true,authoringSourceUnavailable:true}:value;
+    });
+    api.getPackageManifestHistory=vi.fn(async () => ({items:[{manifestDigest:'c'.repeat(64),modifiedAt:'2026-10-25T00:00:00Z'}]}));
+    await render(api);await click('Source');await click('Load Manifest history');await click('Create Manifest draft');
+    expect(host.querySelector('[aria-label="Manifest publication review"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label="Manifest revision history"]')).not.toBeNull();
+    expect(host.textContent).toContain(authoringText);
+
+    revoked=true;
+    await act(async () => {root.render(<PackageManifestWorkspace api={{...api}} packageId="owner" />);});
+    expect(host.querySelector('[aria-label="Manifest publication review"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Manifest revision history"]')).toBeNull();
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Package Manifest source"]')?.value).toBe('redacted projection');
+    expect(host.textContent).not.toContain(authoringText);
+    expect(host.textContent).not.toContain('keep comments and ordering');
+    expect(button('Create Manifest draft').disabled).toBe(true);
+  });
+
+  it('clears Manifest state and refreshes the projection after raw authoring source returns 403', async () => {
+    const api=fixture();let revoked=false,rawSourceDenied=false;
+    const getProjection=api.getPackageManifest;
+    const getManifest=vi.fn(async (_packageId: string, view: ManifestView, environment?: string, signal?: AbortSignal) => {
+      const value=await getProjection('owner',view,environment,signal);
+      return revoked&&rawSourceDenied
+        ? {...value,canEdit:false,text:'redacted projection',redacted:true,authoringSourceUnavailable:true}
+        : value;
+    });
+    api.getPackageManifest=getManifest;
+    api.getPackageAuthoringSource=vi.fn(async () => {
+      if(revoked){rawSourceDenied=true;throw {status:403};}
+      return {available:true,present:true,logicalPath:'package.yaml',format:'yaml',text:authoringText,
+        sourceEtag:`\"sha256:${digest}\"`,revision:digest};
+    });
+    api.getPackageManifestHistory=vi.fn(async () => ({items:[{manifestDigest:'c'.repeat(64),modifiedAt:'2026-10-25T00:00:00Z'}]}));
+    await render(api);await click('Source');await click('Load Manifest history');await click('Create Manifest draft');
+    expect(api.getPackageAuthoringSource).toHaveBeenCalledTimes(1);
+    revoked=true;
+    const projectionCallsBeforeRevoke=getManifest.mock.calls.length;
+    await act(async () => {root.render(<PackageManifestWorkspace api={{...api}} packageId="owner" />);});
+    expect(api.getPackageAuthoringSource).toHaveBeenCalledTimes(2);
+    expect(getManifest.mock.calls.length).toBeGreaterThan(projectionCallsBeforeRevoke+2);
+    expect(host.querySelector('[aria-label="Manifest publication review"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Manifest revision history"]')).toBeNull();
+    expect(host.textContent).not.toContain(authoringText);
+    expect(host.textContent).not.toContain('keep comments and ordering');
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Package Manifest source"]')?.value).toBe('redacted projection');
   });
 
   it('shows the shared staged-to-published workflow for the Package source', async () => {

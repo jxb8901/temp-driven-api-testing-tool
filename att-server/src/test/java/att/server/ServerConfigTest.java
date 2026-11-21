@@ -8,6 +8,35 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ServerConfigTest {
+    @Test void packageEditorAssignmentsAreOptionalCanonicalAndCompatibleWithExistingRegistryEntries() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("editor-packages"));
+        Path owner=Files.createDirectory(allowed.resolve("alice"));
+        Path shared=Files.createDirectory(allowed.resolve("fpp-common"));
+        Path runtime=Files.createDirectories(temp.resolve("editor-runtime")).resolve("config.yaml");
+        Files.writeString(runtime,"engine: {}\n");
+        Path config=temp.resolve("editor-registry.yaml");
+        String prefix="server:\n  dataDir: "+yaml(temp.resolve("editor-data"))+"\n  runtimeConfigPath: "+yaml(runtime)+"\nworkers: {}\npackages:\n  allowedRoots: ["+yaml(allowed)+"]\n";
+        Files.writeString(config,prefix+"  entries:\n    alice: "+yaml(owner)+"\n    fpp-common:\n      path: "+yaml(shared)+"\n      editors: [bob, alice]\n");
+        ServerConfig parsed=ServerConfig.validateReadOnly(config);
+        assertEquals(List.of(),parsed.packageEditors.get("alice"));
+        assertEquals(List.of("alice","bob"),parsed.packageEditors.get("fpp-common"));
+
+        Files.writeString(config,prefix+"  entries:\n    - id: fpp-common\n      path: "+yaml(shared)+"\n      editors: [alice, bob]\n");
+        assertEquals(List.of("alice","bob"),ServerConfig.validateReadOnly(config).packageEditors.get("fpp-common"),
+                "The list form used by the deployment example retains the same trusted editor contract");
+
+        for(String entry:List.of(
+                "fpp-common:\n      path: "+yaml(shared)+"\n      editors: [Alice]",
+                "fpp-common:\n      path: "+yaml(shared)+"\n      editors: [alice, alice]",
+                "fpp-common:\n      path: "+yaml(shared)+"\n      editors: null",
+                "fpp-common:\n      path: "+yaml(shared)+"\n      editors: ['*']",
+                "fpp-common:\n      path: "+yaml(shared)+"\n      unexpected: true",
+                "fpp-common:\n      editors: [alice]")) {
+            Files.writeString(config,prefix+"  entries:\n    "+entry+"\n");
+            assertThrows(IllegalArgumentException.class,()->ServerConfig.validateReadOnly(config),entry);
+        }
+    }
+
     @Test void centralConfigurationSourceAuthoringIsAnIndependentOptIn() throws Exception {
         Path pkg=Files.createDirectories(temp.resolve("central-config-package")),file=temp.resolve("central-config-server.yaml");
         String tail="workers: {}\npackages:\n  allowedRoots: ["+yaml(pkg)+"]\n  entries: {p: "+yaml(pkg)+"}\n";

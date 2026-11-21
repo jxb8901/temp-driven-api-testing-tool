@@ -143,6 +143,8 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   const [access, setAccess] = useState<AccessState>(target.domain === 'CENTRAL_RUNTIME_CONFIG' && !canManageCentral ? 'denied' : 'checking');
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
   const [mode, setMode] = useState<EditMode>('view');
   const [content, setContent] = useState('');
   const [createPath, setCreatePath] = useState('');
@@ -254,7 +256,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
   useEffect(() => {
     if (!registerUnsavedChanges) return;
     return registerUnsavedChanges(isDirty, centralTarget ? 'Central Configuration source draft' : 'Package source draft',
-      draft ? discardDraftBeforeNavigation : undefined);
+      isDirty ? confirmDiscardBeforeNavigation : undefined);
   }, [registerUnsavedChanges, isDirty, centralTarget, draft]);
   useEffect(() => {
     onDirtyChange?.(isDirty);
@@ -374,6 +376,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     actionControllerRef.current?.abort();
     impactControllerRef.current?.abort(); impactControllerRef.current = null;
     setSource(null); setDraft(null); setPublished(null); setImpact(null); setAcknowledgedImpact(null); setImpactLoading(false);
+    setDiagnostics([]); setStatus('');
     setContent(''); setMode('view'); setCreatePath(''); setMovePath(''); setEditorBaseSourceRevision(''); setAccess('denied');
     setHistoryOpen(false);
     setPendingOperations([]); setRelatedPath(''); setRelatedContent(''); setRecoveryPending(false); setSuspended(false);
@@ -403,10 +406,18 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
     return target.domain === 'PACKAGE_SOURCE' ? target.packageId : 'central-runtime-config';
   }
 
+  async function confirmDiscardBeforeNavigation(): Promise<boolean> {
+    if (busyRef.current) {
+      setError('A source action is still running. Wait for it to finish before leaving this page.');
+      return false;
+    }
+    return discardDraftBeforeNavigation();
+  }
+
   async function discardDraftBeforeNavigation(): Promise<boolean> {
     const changeSetId = draft?.changeSetId;
     if (!changeSetId) return true;
-    if (busy || !api.sourceChangeSetAction) {
+    if (busyRef.current || !api.sourceChangeSetAction) {
       setError('The staged draft could not be discarded before leaving. Keep this page open and retry.');
       return false;
     }
@@ -425,6 +436,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       return true;
     } catch (reason) {
       setError(failureText(reason, 'discard the source draft before leaving'));
+      if (statusOf(reason) === 403) clearAfterRevocation();
       return false;
     } finally {
       if (actionControllerRef.current === controller) { actionControllerRef.current = null; setBusy(false); }
@@ -644,7 +656,10 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
       setDraft(staged); setPublished(null); setImpact(null); setDiagnostics([]); setMode('view');
       setStatus(`Imported ${archive.name} as draft ${staged.changeSetId}. Published files are unchanged until Validate, Review, and Publish complete.`);
     } catch (reason) {
-      if (!controller.signal.aborted) setError(failureText(reason, 'import Package ZIP'));
+      if (!controller.signal.aborted) {
+        setError(failureText(reason, 'import Package ZIP'));
+        if (statusOf(reason) === 403) clearAfterRevocation();
+      }
     } finally {
       if (actionControllerRef.current === controller) { actionControllerRef.current = null; setBusy(false); }
     }
@@ -833,7 +848,7 @@ export function SourceAuthoringWorkspace({ api, target, canManageCentral = false
 
     {loading && <p role="status" aria-busy="true">Loading complete authorized source…</p>}
     {access === 'denied' && packageTarget && <>
-      <p className="att-source-authoring-note">Owner editing is unavailable for this identity. The safe, redacted inspection projection remains separate and cannot be submitted as source.</p>
+      <p className="att-source-authoring-note">Package source editing is unavailable for this identity. The safe, redacted inspection projection remains separate and cannot be submitted as source.</p>
       {packageTarget.fallbackIdentity && <SourceViewer api={api} identity={packageTarget.fallbackIdentity}
         available={packageTarget.fallbackAvailable === true} active onFileReference={onOpenFileReference} />}
     </>}

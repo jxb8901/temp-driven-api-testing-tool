@@ -219,7 +219,7 @@ class ConfigImpactAnalyzerConcurrencyTest {
         Constructor<?> constructor = PackageRegistry.Snapshot.class.getDeclaredConstructors()[0];
         constructor.setAccessible(true);
         return (PackageRegistry.Snapshot) constructor.newInstance(1L, revision, "READY", Instant.now(), null,
-                null, null, packages, List.copyOf(packages.values()),
+                null, null, packages, Map.of(), List.copyOf(packages.values()),
                 packages.keySet().stream().collect(java.util.stream.Collectors.toMap(id -> id, id -> "READY")));
     }
 }

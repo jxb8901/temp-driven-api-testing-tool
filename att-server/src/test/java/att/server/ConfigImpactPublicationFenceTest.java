@@ -62,8 +62,8 @@ class ConfigImpactPublicationFenceTest {
     }
 
     @Test void packageSourceWriterStaysBlockedAcrossCentralPublicationFence() throws Exception {
-        Path packageRoot = Files.createDirectories(temp.resolve("packages/probe"));
-        Path centralRoot = Files.createDirectories(temp.resolve("runtime"));
+        Path packageRoot = Files.createDirectories(temp.resolve("packages/probe")).toRealPath();
+        Path centralRoot = Files.createDirectories(temp.resolve("runtime")).toRealPath();
         Path centralConfig = Files.createDirectories(centralRoot.resolve("config"));
         Path data = Files.createDirectories(temp.resolve("data"));
         byte[] before = "schemaVersion: att-package/v1\nmetadata: {name: before}\n".getBytes(StandardCharsets.UTF_8);

@@ -2,7 +2,8 @@
 
 - **狀態：** Proposed（提案中，尚未接受為已實作契約）
 - **日期：** 2026-11-20
-- **適用範圍：** ATT 下一代 Test Authoring；本文定義的是提案，不表示可供目前 runtime 使用
+- **適用範圍：** ATT 下一代 Test Authoring；非 4.4.1 已發佈功能；本文定義的是提案，不表示可供目前 runtime 使用
+- **Native Case schema：** S01 凍結 `att-testcase/v1` 欄位與身份契約；resolution／execution 仍未實作
 - **相關工作：** [Issue #388](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/388)、[Source Management #233](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/233)、[PR #386](https://github.com/jxb8901/temp-driven-api-testing-tool/pull/386)
 - **英文主文件：** [ADR-0001](0001-flow-centric-testcase-resolution.md)
 
@@ -183,9 +184,9 @@ View／Validate／Preview 不可改動 Source、產生有副作用的 Legacy Sna
 
 現有 **XLSX + Sidecar + XML Snapshot**、多 Stage Case、Template Target、CLI、Job／Schedule、報告必須繼續可用。Stage 的 `required`、`runWhen`、`onFailure`、Scope／Input Overlay、Rollback／Cleanup 和 Nested Flow Scope **不能假設等同普通 Flow Action**。未驗證等價前應保留 Legacy Adapter／Execution Path。
 
-必須重用現有 Package Source／Change Sets／Validate／Review／Publish／Revision／History／Restore 及不可變 Job Source Snapshot，不另建平行發佈系統。
+必須重用 4.4.1 的 Package Source／Change Sets／Validate／Review／Publish／Revision／History／Restore 及不可變 Job Source Snapshot，不另建平行發佈系統。
 
-**本 ADR 不要求現有 Source Management release 完成 Native Cases、Generator、Template／Stage 合併或 LOAD Case Target。** 屬於後續逐步演進方向。
+**本 ADR 不要求 PR #386／4.4.1 GA 完成 Native Cases、Generator、Template／Stage 合併或 LOAD Case Target。** 屬於後續逐步演進方向。
 
 ## 後續 ADR 評審仍需處理的問題
 

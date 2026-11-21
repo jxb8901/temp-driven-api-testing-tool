@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-20
-- **Scope:** Proposed next-generation ATT authoring, after the existing Source Management workflow
+- **Scope:** Next-generation ATT authoring (future; not shipped in 4.4.1)
 - **Native Case schema:** `att-testcase/v1` field and identity contract frozen by S01; resolution and execution remain unimplemented
 - **Related:** [Issue #388](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/388), [#233](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/233), [PR #386](https://github.com/jxb8901/temp-driven-api-testing-tool/pull/386)
 - **Translation:** [繁體中文版](0001-flow-centric-testcase-resolution.zh.md)
@@ -186,9 +186,9 @@ Preserve source ownership, authorization, confidentiality, revision consistency,
 
 Legacy path **must remain operational**: XLSX + `att-sidecar/v2.2` + canonical XML snapshot, multi-Stage Case execution, Template entry points, existing CLI/Job/Schedule/report IDs. Stage `required`/`runWhen`/`onFailure`, scope/overlays, rollback/cleanup, nested Flow state, retries, logs and events are **not automatically equivalent** to a plain nested Flow Action. Keep legacy execution via adapter until semantic equivalence is proven.
 
-Reuse the existing Package Source / Change Sets / Validate / Review / Publish / Revision / History / Restore workflow and immutable Job source closure. Do not create a second authoring/publishing subsystem.
+Reuse 4.4.1 Package Source / Change Sets / Validate / Review / Publish / Revision / History / Restore and immutable Job source closure. Do not create a second authoring/publishing subsystem.
 
-The Source Management release and PR #386 must not be blocked by delivering native Test Cases, dynamic generators, Flow/Template consolidation or new LOAD targets. This ADR guides follow-up implementation and compatibility review only.
+**ATT 4.4.1 GA and PR #386 must not be blocked** by delivering native Test Cases, dynamic generators, Flow/Template consolidation or new LOAD targets. This ADR guides post-4.4 implementation and pre-release compatibility review only.
 
 ## Open architecture questions after S01
 

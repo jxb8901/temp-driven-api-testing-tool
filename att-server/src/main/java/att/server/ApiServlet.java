@@ -136,8 +136,12 @@ public final class ApiServlet extends HttpServlet {
                 try {admin=systemAdminCapability(req,principal);}
                 catch(Exception unavailable){error(res,500,"ATT-SERVER-REQUEST-FAILED","The authorization request could not be completed",requestId);return;}
                 if(!requireSutMetricsReadAccess(req,res,requestId,principal))return;
-                Map<String,Object> response=runtime.packageSutMetricsCatalog(segment(path,2),req.getParameter("environment"),principal,admin);
-                response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return;
+                String actor=principalExact(req);
+                runtime.withPackageSourceAuthority(actor,
+                        login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),()->{
+                            Map<String,Object> response=runtime.packageSutMetricsCatalog(segment(path,2),req.getParameter("environment"),actor,admin);
+                            response.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,response);return null;
+                        });return;
             }
             if(path.matches("/packages/[^/]+/sut-metrics/resource")) {
                 if(!requireSutMetricsReadAccess(req,res,requestId,principal))return;
@@ -210,8 +214,22 @@ public final class ApiServlet extends HttpServlet {
                 else {DebugDraft response=ServerRuntime.JSON.convertValue(runtime.getDebugDraft(draftId,principal),DebugDraft.class);response.requestId=requestId;json(res,200,response);}
                 return;
             }
-            if("/packages".equals(path)){json(res,200,Map.of("items",runtime.packages(principalExact(req)),"requestId",requestId));return;}
-            if(path.startsWith("/packages/")){String id=segment(path,2);Map<String,Object> view=runtime.packageView(id,principalExact(req));view.put("requestId",requestId);json(res,200,view);return;}
+            if("/packages".equals(path)) {
+                String actor=principalExact(req);
+                runtime.withPackageSourceAuthority(actor,
+                        login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),()->{
+                            List<Map<String,Object>> items=runtime.packages(actor);
+                            json(res,200,Map.of("items",items,"requestId",requestId));return null;
+                        });return;
+            }
+            if(path.startsWith("/packages/")) {
+                String id=segment(path,2),actor=principalExact(req);
+                runtime.withPackageSourceAuthority(actor,
+                        login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),()->{
+                            Map<String,Object> view=runtime.packageView(id,actor);
+                            view.put("requestId",requestId);json(res,200,view);return null;
+                        });return;
+            }
             if("/jobs".equals(path)){
                 Map<String,String> parameters=new LinkedHashMap<>();
                 for(String key:List.of("offset","limit","principal","principalMode","submissionSource","executionPrincipal","executionPrincipalMode","executionPrincipalExact","scheduleOwner","scheduleOwnerMode","scheduleOwnerExact","triggeredBy","triggeredByMode","triggeredByExact","packageId","environment","executionType","status","from","to","search","sort","deletion","pinnedOnly","groupBy")) {
@@ -411,7 +429,16 @@ public final class ApiServlet extends HttpServlet {
             manifestPost(req,res,path,requestId,principalExact(req));return;
         }
         if(path.matches("/packages/[^/]+/sut-metrics/drafts(?:/[^/]+/(?:validate|review|publish|discard))?")) {
-            packageSutMetricsResourcePost(req,res,path,requestId,authorizationPrincipal);return;
+            try {
+                runtime.withPackageSourceAuthority(authorizationPrincipal,
+                        login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),()->{
+                            packageSutMetricsResourcePost(req,res,path,requestId,authorizationPrincipal);return null;
+                        });
+            } catch(Exception failure) {
+                error(res,500,"ATT-PACKAGE-SUT-METRICS-FAILED","Package SUT Metrics draft could not be completed",requestId);
+                getServletContext().log("ATT Package SUT Metrics draft failed id="+requestId,failure);
+            }
+            return;
         }
         if(path.matches("/jobs/[^/]+/artifacts/retry")){if(!checkOrigin(req,res,requestId,false))return;try{String id=segment(path,2);runtime.requireJobOwner(id,authorizationPrincipal);runtime.retryArtifactArchive(id);json(res,202,Map.of("archiveStatus","PENDING","requestId",requestId));return;}catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;}catch(IllegalArgumentException invalid){error(res,409,"ATT-SERVER-ARCHIVE-NOT-READY",safeDetail(invalid),requestId);return;}catch(Exception failure){error(res,500,"ATT-SERVER-REQUEST-FAILED","The archive retry could not be scheduled",requestId);return;}}
         if("/jobs/delete".equals(path)||"/jobs/pin".equals(path)||path.matches("/jobs/[^/]+/(pin|delete)")) {
@@ -1016,20 +1043,23 @@ public final class ApiServlet extends HttpServlet {
                     ?runtime.inspectDebugForm(packageId,kind,resourceId,req.getParameter("environment"),principal)
                     :"quick-load-form".equals(action)?runtime.inspectQuickLoadForm(packageId,kind,resourceId,req.getParameter("model"),req.getParameter("environment"),principal)
                     :runtime.inspectResource(packageId,action,kind,resourceId,query,limit,cursor,sort,direction,sourceOrigin,principal);
-            if("file-index".equals(action)) {
-                boolean canEdit=false;
-                try { runtime.changeSetPublisher.requirePackageSourceEditor(packageId,principal); canEdit=true; }
-                catch(Exception deniedOrUnavailable) { /* Readable safe inventory remains available without authoring rights. */ }
-                result.put("canEdit",Boolean.valueOf(canEdit));
-            }
             Object cacheRevision=result.remove("_cacheRevision");
             if(cacheRevision instanceof String)res.setHeader("X-ATT-Inspection-Revision",(String)cacheRevision);
             res.setHeader("Cache-Control","no-store");
+            if("file-index".equals(action)) {
+                runtime.withPackageSourceAuthority(principal,
+                        login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),()->{
+                            boolean canEdit;
+                            try {runtime.changeSetPublisher.requirePackageSourceEditor(packageId,principal);canEdit=true;}
+                            catch(Exception deniedOrUnavailable) {canEdit=false;}
+                            result.put("canEdit",Boolean.valueOf(canEdit));
+                            ResourceInspection.FilePage response=ServerRuntime.JSON.convertValue(result,ResourceInspection.FilePage.class);
+                            response.requestId=requestId;json(res,200,response);return null;
+                        });
+                return;
+            }
             if("list".equals(action)) {
                 ResourceInspection.Page response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Page.class);
-                response.requestId=requestId;json(res,200,response);
-            } else if("file-index".equals(action)) {
-                ResourceInspection.FilePage response=ServerRuntime.JSON.convertValue(result,ResourceInspection.FilePage.class);
                 response.requestId=requestId;json(res,200,response);
             } else if("detail".equals(action)) {
                 ResourceInspection.Detail response=ServerRuntime.JSON.convertValue(result,ResourceInspection.Detail.class);
@@ -1153,13 +1183,15 @@ public final class ApiServlet extends HttpServlet {
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;
         }
         try {
-            // Resolve registration first so unknown ids stay 404; content access itself remains owner-only.
+            // Resolve registration first so unknown IDs stay 404; content access itself remains editor-only.
             runtime.packageView(packageId,principal(req));
-            if(!runtime.canEditPackageContent(packageId,login)) {
-                error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);return;
-            }
-            Map<String,Object> result=runtime.withPackageSourceAuthority(login,
-                    id -> id.equals(principalExact(req))&&operatorCapability(req,id),() -> switch(kind==null?"":kind) {
+            runtime.withPackageSourceAuthority(login,
+                    id -> id.equals(principalExact(req))&&operatorCapability(req,id),() -> {
+                        if(!runtime.canEditPackageContent(packageId,login))throw new ServerRuntime.AuthoringSourceDeniedException();
+                        PackageRegistry.Snapshot admittedRegistry=runtime.packageRegistry.snapshot();
+                        java.nio.file.Path admittedRoot=admittedRegistry.packages.get(packageId);
+                        if(admittedRoot==null)throw new ServerRuntime.NotFoundException();
+                        Map<String,Object> result=switch(kind==null?"":kind) {
                         case "manifest" -> runtime.inspectAuthoringPackageSource(packageId,"manifest",null,null,null,null,null,null,login,null);
                         case "resource" -> runtime.inspectAuthoringPackageSource(packageId,"resource",resourceType,resourceId,null,null,null,null,login,null);
                         case "file" -> runtime.inspectAuthoringPackageSource(packageId,"file",resourceType,resourceId,null,origin,referenceId,null,login,null);
@@ -1167,14 +1199,16 @@ public final class ApiServlet extends HttpServlet {
                         case "testdata" -> runtime.inspectAuthoringPackageSource(packageId,"testdata",null,resourceId,null,null,null,req.getParameter("environment"),login,null);
                         case "testcase" -> runtime.inspectAuthoringPackageSource(packageId,"testcase",null,resourceId,null,null,null,null,login,sourceSelector);
                         default -> throw new ServerRuntime.NotFoundException();
+                    };
+                        PackageRegistry.Snapshot responseRegistry=runtime.packageRegistry.snapshot();
+                        if(!admittedRegistry.revision.equals(responseRegistry.revision)
+                                ||!admittedRoot.equals(responseRegistry.packages.get(packageId))
+                                ||!admittedRegistry.revision.equals(result.get("registryRevision")))
+                            throw new ServerRuntime.StaleDraftException();
+                        Object etag=result.get("sourceEtag");if(etag instanceof String)res.setHeader("ETag",(String)etag);
+                        result.put("requestId",requestId);json(res,200,result);return null;
                     });
-            // A trusted container role may change while the Worker reads. Recheck USER and exact owner at return.
-            if(!requireOperator(req,res,requestId))return;
-            if(!login.equals(principalExact(req))||!runtime.canEditPackageContent(packageId,login)) {
-                error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);return;
-            }
-            Object etag=result.get("sourceEtag");if(etag instanceof String)res.setHeader("ETag",(String)etag);
-            result.put("requestId",requestId);json(res,200,result);
+            return;
         } catch(ServerRuntime.AuthoringSourceDeniedException e){error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);}
           catch(ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
           catch(ServerRuntime.StaleDraftException e){error(res,409,"ATT-PACKAGE-SOURCE-CONFLICT","Package source changed while it was being read",requestId);}
@@ -1247,8 +1281,12 @@ public final class ApiServlet extends HttpServlet {
     private static boolean resourcePath(String path){return path.matches("/packages/[^/]+/resources(?:/.*)?");}
     private void packageSutMetricsResourceGet(HttpServletRequest req,HttpServletResponse res,String path,String requestId,String actor) throws IOException {
         try {
-            Map<String,Object> result=runtime.packageSutMetricsResource(segment(path,2),req.getParameter("kind"),req.getParameter("id"),actor);
-            result.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,result);
+            runtime.withPackageSourceAuthority(actor,
+                    login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),
+                    ()->{
+                        Map<String,Object> result=runtime.packageSutMetricsResource(segment(path,2),req.getParameter("kind"),req.getParameter("id"),actor);
+                        result.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,result);return null;
+                    });
         } catch(ServerRuntime.StaleCursorException stale){error(res,409,"ATT-PACKAGE-SUT-METRICS-STALE","Package SUT Metrics changed; refresh the inventory",requestId);}
           catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","Package SUT Metrics resource was not found",requestId);}
           catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
@@ -1500,31 +1538,32 @@ public final class ApiServlet extends HttpServlet {
             String domain=central?ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG:ChangeSetPublisher.PACKAGE_SOURCE;
             String scopeId=central?ChangeSetPublisher.CENTRAL_SCOPE_ID:segment(path,2);
             boolean diff=path.endsWith("/diff");
-            Map<String,Object> result;
             if(central) {
-                result=diff?runtime.changeSetPublisher.sourceHistoryDiff(domain,scopeId,actor,true,
+                Map<String,Object> result=diff?runtime.changeSetPublisher.sourceHistoryDiff(domain,scopeId,actor,true,
                         req.getParameter("beforeSnapshotId"),req.getParameter("afterSnapshotId"),req.getParameter("path"),offset,limit)
                         :runtime.changeSetPublisher.sourceHistory(domain,scopeId,actor,true,offset,limit);
+                result.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,result);
             } else {
-                result=runtime.withPackageSourceAuthority(actor,
+                runtime.withPackageSourceAuthority(actor,
                         login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),()->{
+                            Map<String,Object> result;
                             if(diff)try {
-                                return runtime.changeSetPublisher.sourceHistoryDiff(domain,scopeId,actor,false,
+                                result=runtime.changeSetPublisher.sourceHistoryDiff(domain,scopeId,actor,false,
                                         req.getParameter("beforeSnapshotId"),req.getParameter("afterSnapshotId"),
                                         req.getParameter("path"),offset,limit);
                             } catch(ChangeSetPublisher.Denied notOwner) {
                                 runtime.packageView(scopeId,actor);
-                                return runtime.changeSetPublisher.sourceHistoryDiffSummary(scopeId,
+                                result=runtime.changeSetPublisher.sourceHistoryDiffSummary(scopeId,
                                         req.getParameter("beforeSnapshotId"),req.getParameter("afterSnapshotId"));
                             }
-                            try{return runtime.changeSetPublisher.sourceHistory(domain,scopeId,actor,false,offset,limit);}
+                            else try {result=runtime.changeSetPublisher.sourceHistory(domain,scopeId,actor,false,offset,limit);}
                             catch(ChangeSetPublisher.Denied notOwner) {
                                 runtime.packageView(scopeId,actor); // Do not expose summaries for unregistered IDs.
-                                return runtime.changeSetPublisher.sourceHistorySummary(scopeId,offset,limit);
+                                result=runtime.changeSetPublisher.sourceHistorySummary(scopeId,offset,limit);
                             }
+                            result.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,result);return null;
                         });
             }
-            result.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,result);
         } catch(ChangeSetPublisher.Denied denied){error(res,403,central?"ATT-SERVER-FORBIDDEN":"ATT-PACKAGE-SOURCE-DENIED",
                 central?"SYSTEM_SETTINGS_WRITE is required":"Package source editing is not authorized",requestId);}
           catch(ChangeSetPublisher.Missing|ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","Source history was not found",requestId);}
@@ -1589,16 +1628,17 @@ public final class ApiServlet extends HttpServlet {
         String[] parts=path.split("/");String action=parts.length==4?"effective":parts[4];
         boolean privateDraftSource=parts.length==7&&"drafts".equals(parts[4])&&"source".equals(parts[6]);
         try {
-            Map<String,Object> result;
-            if(privateDraftSource) {
-                result=new java.util.LinkedHashMap<>(runtime.withPackageSourceAuthority(actor,
-                        login -> login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),
-                        () -> runtime.manifestPublisher.previewDraftSource(segment(path,2),actor,parts[5])));
-            } else if("history".equals(action))result=new java.util.LinkedHashMap<>(Map.of("items",runtime.withPackageSourceAuthority(actor,
-                    login -> login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),
-                    () -> runtime.manifestPublisher.history(segment(path,2),actor))));
-            else result=runtime.inspectPackageConfiguration(segment(path,2),action,req.getParameter("environment"),actor);
-            result.put("requestId",requestId);res.setHeader("Cache-Control",privateDraftSource?"private, no-store":"no-store");json(res,200,result);
+            runtime.withPackageSourceAuthority(actor,
+                    login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),()->{
+                        Map<String,Object> result;
+                        if(privateDraftSource) {
+                            result=new java.util.LinkedHashMap<>(runtime.manifestPublisher.previewDraftSource(segment(path,2),actor,parts[5]));
+                        } else if("history".equals(action))result=new java.util.LinkedHashMap<>(Map.of("items",
+                                runtime.manifestPublisher.history(segment(path,2),actor)));
+                        else result=runtime.inspectPackageConfiguration(segment(path,2),action,
+                                req.getParameter("environment"),actor);
+                        result.put("requestId",requestId);res.setHeader("Cache-Control",privateDraftSource?"private, no-store":"no-store");json(res,200,result);return null;
+                    });
         } catch(PackageManifestPublisher.Denied e){error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);}
           catch(PackageManifestPublisher.Missing|ServerRuntime.NotFoundException e){error(res,404,"ATT-SERVER-NOT-FOUND","Package source was not found",requestId);}
           catch(ServerRuntime.InspectionCapacityException e){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full",requestId);}

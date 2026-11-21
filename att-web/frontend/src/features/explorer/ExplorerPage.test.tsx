@@ -77,6 +77,12 @@ function setValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectEl
   });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>(resolvePromise => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
+
 function click(element: HTMLElement) { act(() => element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))); }
 
 function apiWith(overrides: Partial<ExplorerApi>): ExplorerApi {
@@ -104,6 +110,48 @@ async function prepareNewMetricSource(api: ExplorerApi): Promise<HTMLDetailsElem
   click(button('Prepare new resource'));
   await settle();
   return panel;
+}
+
+async function prepareSutMetricsNavigationDraft(
+  packageSutMetricsDraftAction: NonNullable<ExplorerApi['packageSutMetricsDraftAction']>,
+  createPackageSutMetricsDraft: NonNullable<ExplorerApi['createPackageSutMetricsDraft']> = async () => ({
+    draftId: 'D-NAVIGATION', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/db-health.yaml',
+    expectedResourceDigest: 'a'.repeat(64), state: 'draft',
+  }),
+  waitForStage = true,
+) {
+  const registerUnsavedChanges = vi.fn((
+    _dirty: boolean, _description?: string, _onConfirmDiscard?: () => boolean | Promise<boolean>,
+  ) => () => {});
+  const api = Object.assign(apiWith({}), {
+    getPackageSutMetricsCatalog: vi.fn(async () => ({
+      schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'UAT',
+      manifestDigest: 'c'.repeat(64), canEdit: true, metricSources: [{ id: 'db-health', name: 'Database health' }], groups: [], profiles: [],
+    })),
+    getPackageSutMetricsResource: vi.fn(async () => ({
+      packageId: 'payments', kind: 'source' as const, id: 'db-health', path: 'load/sut-metrics/sources/db-health.yaml',
+      resourceDigest: 'a'.repeat(64), source: 'token: editor-only-sut-secret\n', canEdit: true,
+    })),
+    createPackageSutMetricsDraft,
+    packageSutMetricsDraftAction,
+  });
+  await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+    registerUnsavedChanges={registerUnsavedChanges} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+  const panel = container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+  click(panel.querySelector('summary')!);
+  click(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')!);
+  await settle();
+  setValue(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!, 'token: changed-secret\n');
+  click(button('Create SUT Metrics draft'));
+  if (waitForStage) await settle();
+  return { api, panel, registerUnsavedChanges };
+}
+
+function navigationDiscardCallback(registerUnsavedChanges: ReturnType<typeof vi.fn>) {
+  const dirtyCall = [...registerUnsavedChanges.mock.calls].reverse().find(call => call[0]);
+  const callback = dirtyCall?.[2];
+  if (typeof callback !== 'function') throw new Error('Package SUT Metrics navigation discard callback was not registered');
+  return callback;
 }
 
 function resource(type: ResourceSummary['type'], resourceId: string, extra: Partial<ResourceSummary> = {}): ResourceSummary {
@@ -647,12 +695,214 @@ describe('Explorer page integration', () => {
     expect(panel.querySelector('.att-code-editor')).not.toBeNull();
     const editor = panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!;
     setValue(editor, 'enabled: false\n');
-    expect(registerUnsavedChanges).toHaveBeenCalledWith(true, 'unpublished Package SUT Metrics changes');
+    expect(registerUnsavedChanges).toHaveBeenCalledWith(true, 'unpublished Package SUT Metrics changes', expect.any(Function));
 
     click(button('Discard source edits'));
     await settle();
     expect((panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]'))?.value).toBe('enabled: true\n');
     expect(registerUnsavedChanges).toHaveBeenCalledWith(false, 'unpublished Package SUT Metrics changes');
+  });
+
+  it('discards a server-side Package SUT Metrics draft before allowing guarded navigation', async () => {
+    const packageSutMetricsDraftAction = vi.fn(async () => ({
+      draftId: 'D-NAVIGATION', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/db-health.yaml',
+      expectedResourceDigest: 'a'.repeat(64), state: 'discarded' as const,
+    }));
+    const { panel, registerUnsavedChanges } = await prepareSutMetricsNavigationDraft(packageSutMetricsDraftAction);
+    expect(panel.querySelector('[aria-label="Package SUT Metrics draft publication review"]')).not.toBeNull();
+    const confirmDiscard = navigationDiscardCallback(registerUnsavedChanges);
+    let allowed = false;
+    await act(async () => { allowed = await confirmDiscard(); });
+    await settle();
+
+    expect(packageSutMetricsDraftAction).toHaveBeenCalledWith('payments', 'D-NAVIGATION', 'discard', expect.any(AbortSignal));
+    expect(allowed).toBe(true);
+    expect(panel.querySelector('[aria-label="Package SUT Metrics draft publication review"]')).toBeNull();
+  });
+
+  it('blocks guarded navigation and clears privileged Package SUT Metrics state when draft discard returns 403', async () => {
+    const packageSutMetricsDraftAction = vi.fn(async () => { throw new ApiError('Forbidden', { status: 403 }); });
+    const { panel, registerUnsavedChanges } = await prepareSutMetricsNavigationDraft(packageSutMetricsDraftAction);
+    const dirtyRegistrationCount = registerUnsavedChanges.mock.calls.filter(call => call[0]).length;
+    const confirmDiscard = navigationDiscardCallback(registerUnsavedChanges);
+    let allowed = true;
+    await act(async () => { allowed = await confirmDiscard(); });
+
+    expect(packageSutMetricsDraftAction).toHaveBeenCalledOnce();
+    expect(allowed).toBe(false);
+    expect(registerUnsavedChanges.mock.calls.filter(call => call[0])).toHaveLength(dirtyRegistrationCount);
+    await settle();
+    expect(panel.querySelector('[aria-label="Package SUT Metrics draft publication review"]')).toBeNull();
+    expect(panel.querySelector('textarea[aria-label="Metric Source YAML"]')).toBeNull();
+    expect(panel.textContent).not.toContain('editor-only-sut-secret');
+    expect(panel.textContent).not.toContain('changed-secret');
+  });
+
+  it('blocks guarded navigation while a Package SUT Metrics draft staging request is in flight', async () => {
+    const pendingStage = deferred<{
+      draftId: string; packageId: string; resourcePath: string; expectedResourceDigest: string; state: 'draft';
+    }>();
+    const createPackageSutMetricsDraft = vi.fn(() => pendingStage.promise);
+    const packageSutMetricsDraftAction = vi.fn(async () => ({
+      draftId: 'D-NAVIGATION', packageId: 'payments', resourcePath: 'load/sut-metrics/sources/db-health.yaml',
+      expectedResourceDigest: 'a'.repeat(64), state: 'discarded' as const,
+    }));
+    const { registerUnsavedChanges } = await prepareSutMetricsNavigationDraft(
+      packageSutMetricsDraftAction, createPackageSutMetricsDraft, false,
+    );
+    const confirmDiscard = navigationDiscardCallback(registerUnsavedChanges);
+    let allowed = true;
+    await act(async () => { allowed = await confirmDiscard(); });
+
+    expect(allowed).toBe(false);
+    expect(packageSutMetricsDraftAction).not.toHaveBeenCalled();
+    await act(async () => {
+      pendingStage.resolve({ draftId: 'D-NAVIGATION', packageId: 'payments',
+        resourcePath: 'load/sut-metrics/sources/db-health.yaml', expectedResourceDigest: 'a'.repeat(64), state: 'draft' });
+      await pendingStage.promise;
+    });
+    await settle();
+  });
+
+  it('clears Package SUT Metrics source and draft when the editor grant is revoked', async () => {
+    const resourceDigest='a'.repeat(64);let revoked=false;let catalogCalls=0;
+    const getPackageSutMetricsCatalog=vi.fn(async () => {
+      catalogCalls++;
+      return {schemaVersion:'att-package-sut-metrics-catalog/v1',packageId:'payments',environment:'UAT',
+        manifestDigest:'c'.repeat(64),canEdit:!revoked,metricSources:[{id:'db-health',name:'Database health'}],groups:[],profiles:[]};
+    });
+    const getPackageSutMetricsResource=vi.fn(async () => ({packageId:'payments',kind:'source' as const,id:'db-health',
+      path:'load/sut-metrics/sources/db-health.yaml',resourceDigest,source:'token: editor-only-sut-secret\n',canEdit:true}));
+    const createPackageSutMetricsDraft=vi.fn(async () => ({draftId:'D-REVOKED',packageId:'payments',
+      resourcePath:'load/sut-metrics/sources/db-health.yaml',expectedResourceDigest:resourceDigest,state:'draft' as const}));
+    const packageSutMetricsDraftAction=vi.fn(async () => {revoked=true;throw new ApiError('Forbidden',{status:403});});
+    const api=Object.assign(apiWith({}),{getPackageSutMetricsCatalog,getPackageSutMetricsResource,
+      createPackageSutMetricsDraft,packageSutMetricsDraftAction});
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    const panel=container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    click(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')!);
+    await settle();
+    setValue(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!,'token: changed-secret\n');
+    click(button('Create SUT Metrics draft'));await settle();
+    expect(panel.querySelector('[aria-label="Package SUT Metrics draft publication review"]')).not.toBeNull();
+    click(button('Validate draft'));await settle();
+    expect(catalogCalls).toBeGreaterThanOrEqual(2);
+    expect(panel.querySelector('[aria-label="Package SUT Metrics draft publication review"]')).toBeNull();
+    expect(panel.querySelector('textarea[aria-label="Metric Source YAML"]')).toBeNull();
+    expect(panel.textContent).not.toContain('editor-only-sut-secret');
+    expect(panel.textContent).not.toContain('changed-secret');
+    expect(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')).toBeNull();
+    expect(panel.textContent).toContain('cannot view or edit this Package resource');
+  });
+
+  it('clears Package SUT Metrics editor state when a refreshed catalog removes the edit grant', async () => {
+    const resourceDigest='a'.repeat(64);let revoked=false;
+    const getPackageSutMetricsCatalog=vi.fn(async () => ({
+      schemaVersion:'att-package-sut-metrics-catalog/v1',packageId:'payments',environment:'UAT',
+      manifestDigest:'c'.repeat(64),canEdit:!revoked,metricSources:[{id:'db-health',name:'Database health'}],groups:[],profiles:[],
+    }));
+    const getPackageSutMetricsResource=vi.fn(async () => ({packageId:'payments',kind:'source' as const,id:'db-health',
+      path:'load/sut-metrics/sources/db-health.yaml',resourceDigest,source:'token: editor-only-sut-secret\n',canEdit:true}));
+    const createPackageSutMetricsDraft=vi.fn(async () => ({draftId:'D-REFRESH-REVOKED',packageId:'payments',
+      resourcePath:'load/sut-metrics/sources/db-health.yaml',expectedResourceDigest:resourceDigest,state:'draft' as const}));
+    const api=Object.assign(apiWith({}),{getPackageSutMetricsCatalog,getPackageSutMetricsResource,createPackageSutMetricsDraft});
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    const panel=container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    click(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')!);
+    await settle();
+    setValue(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!,'token: changed-secret\n');
+    click(button('Create SUT Metrics draft'));await settle();
+    expect(panel.querySelector('[aria-label="Package SUT Metrics draft publication review"]')).not.toBeNull();
+    expect(panel.textContent).toContain('changed-secret');
+
+    revoked=true;
+    act(() => inspectionCache.clear(true));
+    await settle();
+    expect(getPackageSutMetricsCatalog).toHaveBeenCalledTimes(2);
+    expect(panel.querySelector('[aria-label="Package SUT Metrics draft publication review"]')).toBeNull();
+    expect(panel.querySelector('textarea[aria-label="Metric Source YAML"]')).toBeNull();
+    expect(panel.textContent).not.toContain('editor-only-sut-secret');
+    expect(panel.textContent).not.toContain('changed-secret');
+    expect(panel.textContent).toContain('Database health');
+    expect(panel.querySelector('.att-package-sut-metrics-catalog-item')).not.toBeNull();
+  });
+
+  it('does not restore a prepared Metric Source when a pending Manifest GET resolves after edit access is revoked', async () => {
+    const manifestDigest = 'c'.repeat(64);
+    const pendingManifest = deferred<{
+      packageId: string; manifestDigest: string; present: boolean; canEdit: boolean;
+      available?: boolean; text?: string; redacted?: boolean;
+    }>();
+    let revoked = false;
+    const getPackageSutMetricsCatalog = vi.fn(async () => ({
+      schemaVersion: 'att-package-sut-metrics-catalog/v1', packageId: 'payments', environment: 'UAT',
+      manifestDigest, canEdit: !revoked, metricSources: [{ id: 'db-health', name: 'Database health' }], groups: [], profiles: [],
+    }));
+    let manifestSignal: AbortSignal | undefined;
+    const getPackageManifest = vi.fn((_packageId: string, _view: 'source', _environment: string | undefined, signal: AbortSignal | undefined) => {
+      manifestSignal = signal;
+      return pendingManifest.promise;
+    });
+    const createPackageSutMetricsDraft = vi.fn();
+    const api = Object.assign(apiWith({}), { getPackageSutMetricsCatalog, getPackageManifest, createPackageSutMetricsDraft });
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+
+    const panel = container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    setValue(panel.querySelector<HTMLInputElement>('input[aria-label="Resource ID"]')!, 'new-health');
+    click(button('Prepare new resource'));
+    expect(getPackageManifest).toHaveBeenCalledOnce();
+    expect(panel.textContent).toContain('Database health');
+
+    revoked = true;
+    act(() => inspectionCache.clear(true));
+    await settle();
+    expect(getPackageSutMetricsCatalog).toHaveBeenCalledTimes(2);
+    expect(manifestSignal?.aborted).toBe(true);
+    expect(panel.textContent).toContain('Database health');
+    expect(panel.querySelector('.att-package-sut-metrics-catalog-item')).not.toBeNull();
+    expect(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')).toBeNull();
+
+    await act(async () => {
+      pendingManifest.resolve({
+        packageId: 'payments', manifestDigest, present: true, canEdit: true, available: true, redacted: false,
+        text: 'schemaVersion: att-package/v2\nmetadata:\n  name: Payments\nobservability:\n  metricSources: []\n  groups: []\n  profiles: []\n# sensitive-manifest-canary\n',
+      });
+      await pendingManifest.promise;
+    });
+    await settle();
+
+    expect(panel.textContent).toContain('Database health');
+    expect(panel.textContent).not.toContain('sensitive-manifest-canary');
+    expect(panel.textContent).not.toContain('New Metric Source · new-health');
+    expect(panel.querySelector('textarea[aria-label="Metric Source YAML"]')).toBeNull();
+    expect(panel.querySelector('[aria-label="SUT Metrics source publication workflow"]')).not.toBeNull();
+  });
+
+  it.each([403, 404])('clears the Package SUT Metrics selection and refreshes capability after a source GET returns %i', async status => {
+    let revoked=false;
+    const catalogCalls=vi.fn(async () => ({schemaVersion:'att-package-sut-metrics-catalog/v1',packageId:'payments',
+      environment:'UAT',canEdit:!revoked,metricSources:[{id:'db-health',name:'Database health'}],groups:[],profiles:[]}));
+    const getPackageSutMetricsResource=vi.fn(async () => {revoked=true;throw new ApiError(status === 403 ? 'Forbidden' : 'Not found',{status});});
+    const api=Object.assign(apiWith({}),{getPackageSutMetricsCatalog:catalogCalls,getPackageSutMetricsResource});
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={() => () => {}} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    const panel=container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    click(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')!);
+    await settle();
+    expect(getPackageSutMetricsResource).toHaveBeenCalledTimes(1);
+    expect(catalogCalls).toHaveBeenCalledTimes(2);
+    expect(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')).toBeNull();
+    expect(panel.querySelector('[aria-label="SUT Metrics source publication workflow"]')).not.toBeNull();
+    expect(panel.querySelector('textarea[aria-label="Metric Source YAML"]')).toBeNull();
+    expect(panel.textContent).toContain('Database health');
+    expect(panel.textContent).toContain('cannot view or edit this Package resource');
   });
 
   it('validates, reviews, publishes, and refreshes an edited Package resource', async () => {
@@ -691,7 +941,7 @@ describe('Explorer page integration', () => {
     click(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')!);
     await settle();
     setValue(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!, 'enabled: false\n');
-    expect(registerUnsavedChanges).toHaveBeenCalledWith(true, 'unpublished Package SUT Metrics changes');
+    expect(registerUnsavedChanges).toHaveBeenCalledWith(true, 'unpublished Package SUT Metrics changes', expect.any(Function));
     click(button('Create SUT Metrics draft'));
     await settle();
     expect(createPackageSutMetricsDraft).toHaveBeenCalledWith('payments', {
@@ -708,6 +958,22 @@ describe('Explorer page integration', () => {
     expect(getPackageSutMetricsCatalog).toHaveBeenCalledTimes(2);
     expect(getPackageSutMetricsResource).toHaveBeenCalledTimes(2);
     expect(panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')?.value).toBe('enabled: false\n');
+  });
+
+  it('does not install an unsaved-changes guard for a clean SUT Metrics source read', async () => {
+    const pending=deferred<{packageId:string;kind:'source';id:string;path:string;resourceDigest:string;source:string;canEdit:boolean}>();
+    const getPackageSutMetricsCatalog=vi.fn(async () => ({schemaVersion:'att-package-sut-metrics-catalog/v1',
+      packageId:'payments',environment:'UAT',canEdit:true,metricSources:[{id:'db-health',name:'Database health'}],groups:[],profiles:[]}));
+    const getPackageSutMetricsResource=vi.fn(() => pending.promise);
+    const registerUnsavedChanges=vi.fn((_dirty:boolean,_description?:string) => () => {});
+    const api=Object.assign(apiWith({}),{getPackageSutMetricsCatalog,getPackageSutMetricsResource});
+    await render(<ExplorerPage api={api} packageId="payments" resourceRoute={null} environment="UAT"
+      registerUnsavedChanges={registerUnsavedChanges} onResourceRouteChange={() => {}} onJobAccepted={() => {}} />);
+    const panel=container.querySelector<HTMLDetailsElement>('.att-package-sut-metrics')!;
+    click(panel.querySelector('summary')!);
+    click(panel.querySelector<HTMLButtonElement>('button[aria-label="View Metric Source db-health"]')!);
+    expect(getPackageSutMetricsResource).toHaveBeenCalledOnce();
+    expect(registerUnsavedChanges).not.toHaveBeenCalledWith(true,'unpublished Package SUT Metrics changes',expect.any(Function));
   });
 
   it('shows bounded field diagnostics for a rejected validation and preserves source after draft discard', async () => {
@@ -754,7 +1020,7 @@ describe('Explorer page integration', () => {
     const editor = panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Metric Source YAML"]')!;
     expect(editor.readOnly).toBe(false);
     expect(editor.value).toBe('enabled: false\n');
-    expect(registerUnsavedChanges).toHaveBeenCalledWith(true, 'unpublished Package SUT Metrics changes');
+    expect(registerUnsavedChanges).toHaveBeenCalledWith(true, 'unpublished Package SUT Metrics changes', expect.any(Function));
     click(button('Discard source edits'));
     await settle();
     expect(registerUnsavedChanges).toHaveBeenCalledWith(false, 'unpublished Package SUT Metrics changes');

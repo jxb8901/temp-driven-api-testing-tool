@@ -38,7 +38,7 @@ async function installApi(page, state, unexpected) {
     const method = request.method();
 
     if (method === 'GET' && path === 'version') {
-      return send(route, { apiVersion: '1', version: '4.4.0', authMode: 'container', authenticationRequired: false });
+      return send(route, { apiVersion: '1', version: '4.4.1', authMode: 'container', authenticationRequired: false });
     }
     if (method === 'GET' && path === 'auth/capabilities') {
       return send(route, { capabilities: { operate: true, accountManage: false, systemSettingsWrite: false, configurationAdmin: false },
@@ -241,7 +241,7 @@ async function runBrowser(browserType, fixture) {
 
     state.revoked = true;
     await a.page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow')));
-    await a.page.getByText(/Owner editing is unavailable for this identity/).waitFor();
+    await a.page.getByText(/Package source editing is unavailable for this identity/).waitFor();
     assert.equal(await a.page.locator('.cm-content[contenteditable="true"]').count(), 0,
       'revoked source access must remove the editor');
     assert.equal((await a.page.locator('body').innerText()).includes('preserve-me'), false,
@@ -250,7 +250,7 @@ async function runBrowser(browserType, fixture) {
     assert.deepEqual(unexpected, [], `unexpected API routes for ${browserType.name()}`);
     assert.deepEqual(a.pageErrors, [], `page errors for stale editor in ${browserType.name()}`);
     assert.deepEqual(b.pageErrors, [], `page errors for publisher in ${browserType.name()}`);
-    console.log(`Source Authoring browser acceptance passed (${browserType.name()}): shared-revision two-editor publish, two-file candidate, validate/review/publish, stale-editor preservation and safe failure, history diff/restore gating, owner revocation clearing.`);
+    console.log(`Source Authoring browser acceptance passed (${browserType.name()}): shared-revision two-editor publish, two-file candidate, validate/review/publish, stale-editor preservation and safe failure, history diff/restore gating, editor revocation clearing.`);
   } finally {
     await contextA.close();
     await contextB.close();
@@ -266,7 +266,7 @@ async function installTestdataApi(page, state, unexpected) {
     const method = request.method();
 
     if (method === 'GET' && path === 'version')
-      return send(route, { apiVersion: '1', version: '4.4.0', authMode: 'container', authenticationRequired: false });
+      return send(route, { apiVersion: '1', version: '4.4.1', authMode: 'container', authenticationRequired: false });
     if (method === 'GET' && path === 'auth/capabilities')
       return send(route, { capabilities: { operate: true, accountManage: false, systemSettingsWrite: false, configurationAdmin: false },
         operate: true, accountManage: false, systemSettingsWrite: false, configurationAdmin: false,

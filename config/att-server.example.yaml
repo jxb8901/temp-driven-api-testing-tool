@@ -12,7 +12,7 @@ server:
   # Central Runtime Config owner authoring is disabled unless explicitly enabled.
   centralConfigurationEditingEnabled: false
   packageConfiguration:
-    # A Package owner is an active USER whose exact login ID matches a registered Package ID.
+    # Source editing requires an active USER who owns the Package ID or is listed in its registry editors.
     sourceEditingEnabled: false
   # Operations require a trusted Servlet Principal in userRole. adminRole is reserved for account and system administration.
   authorization:
@@ -144,3 +144,7 @@ packages:
     - /opt/att/packages
   entries:
     default: /opt/att/packages/default
+    fpp-common:
+      path: /opt/att/packages/fpp-common
+      # Trusted deployment-controlled active USER login IDs; these are not Package IDs or roles.
+      editors: [alice, bob]

@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.4.0 -->
+<!-- att-doc-status: current release=4.4.1 -->
 
 # Author and publish source in Studio
 
@@ -7,7 +7,7 @@ Use this guide to edit Package resources or shared Runtime Config in ATT Studio.
 ## Prerequisites
 
 - Sign in to the ATT Server that owns the selected Package or Runtime Config.
-- To edit a Package source, use an active account with source-editing access for that Package. The default `default` Package is not editable.
+- To edit a Package source, use an active `USER` account whose login matches the registered Package ID or appears in that Package's trusted registry `editors` list. The default `default` Package is not editable.
 - To edit shared Runtime Config, use an `ADMIN` account. The Server must have `server.centralConfigurationEditingEnabled: true`; changing this deployment setting requires a Server restart.
 - Keep related source files in the selected Package. Global Runtime Config owns shared Data Source connections and security policy; each Package owns its Metric Sources, Groups, and Profiles.
 - For Worker execution acceptance, use a supported isolation host: Linux with `bwrap` on `PATH` and user namespaces enabled, or macOS with `/usr/bin/sandbox-exec`. Worker execution fails closed when that boundary is unavailable; see [source change and Worker isolation contracts](../../system-design/source-change-contracts.md).
@@ -35,6 +35,8 @@ The Server owns authorization, validation, revision checks, and publication. `Pu
 6. To inspect revisions, load Manifest history. **Stage rollback** creates a new draft from a retained revision; validate, review, and publish that draft before it becomes current. The published revision digest is available under **Published Manifest revision (advanced)** after publication.
 
 If publication returns `409`, the source changed after the candidate was prepared. Discard the stale draft, refresh the Manifest, and reapply the changes to a new candidate.
+
+For example, Alice and Bob can stage separate changes against the same shared Package revision. If Alice publishes first, Bob's publish returns `409`. Bob should discard the stale draft, load the current source and history, reconcile the intended change onto the latest revision, then stage, validate, review, and publish a new candidate.
 
 ## Direct filesystem edits and published state
 
@@ -116,7 +118,7 @@ There is no configured aggregate disk quota for retained or pinned snapshots. Mo
 | Status | What to do |
 |---|---|
 | `401` | Sign in again, then reload the source. |
-| `403` | Ask the Package owner or Server administrator to verify your current role and source-editing policy. |
+| `403` | Ask a Package owner or assigned editor to verify the registry assignment, or ask the Server administrator to verify your role and source-editing policy. |
 | `409` | Reload the latest source, compare the retained draft or local text, and stage a new candidate. |
 | `413` | Reduce the source or upload to the Server's configured size limits. |
 | `422` | Read the validation diagnostics, correct the listed source, and validate again. |

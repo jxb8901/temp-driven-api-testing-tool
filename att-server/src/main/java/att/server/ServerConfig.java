@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,6 +38,7 @@ public final class ServerConfig {
     public final String authMode;
     public final Security security;
     public final Map<String, Path> packages;
+    public final Map<String, List<String>> packageEditors;
     public final List<Path> allowedRoots;
     public final List<Path> workerLibraryDirs;
     public final Inspection inspection;
@@ -55,7 +57,7 @@ public final class ServerConfig {
                          int workerHeapInitialMb, int workerHeapMaxMb, int maxRequestBytes,
                          int maxEventsPerJob, long maxEventJournalBytes, int maxArtifacts, boolean authenticationRequired,
                          boolean centralConfigurationEditingEnabled, String authMode, Security security, Map<String, Path> packages,
-                         List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection,
+                         Map<String,List<String>> packageEditors,List<Path> allowedRoots, List<Path> workerLibraryDirs, Inspection inspection,
                          ValidationRecords validationRecords, InlineLoad inlineLoad, Scheduling scheduling, Authorization authorization,
                          JobStorage jobStorage, LiveOutput liveOutput, ArchiveCompression archiveCompression, ExecutionPool executionPool,
                          PackageConfigurationPolicy packageConfiguration, String sourceDigest, Map<?,?> sourceDocument) {
@@ -68,6 +70,9 @@ public final class ServerConfig {
         this.maxEventJournalMemoryBytes=Math.max(1024L,
                 Math.min(JobEvents.MAX_RETAINED_MEMORY_BYTES,(128L*1024L*1024L)/retainedJobLimit));
         this.packages=Collections.unmodifiableMap(new LinkedHashMap<>(packages));
+        Map<String,List<String>> editorCopy=new LinkedHashMap<>();
+        packageEditors.forEach((id,editors)->editorCopy.put(id,List.copyOf(editors)));
+        this.packageEditors=Collections.unmodifiableMap(editorCopy);
         this.allowedRoots=List.copyOf(allowedRoots);
         this.workerLibraryDirs=List.copyOf(workerLibraryDirs);
         this.inspection=inspection;
@@ -184,7 +189,7 @@ public final class ServerConfig {
         }
         return new ServerConfig(configFile,realData,runtimeConfig,java,max,queue,load,stop,retention,heapInitial,heapMax,request,
                 events,eventJournalBytes,artifacts,authenticationRequired,centralConfigurationEditingEnabled,authMode,security,
-                resolved,allowed,workerLibraries,inspection,validationRecords,inlineLoad,scheduling,authorization,jobStorage,
+                resolved,packageRoots.editors(),allowed,workerLibraries,inspection,validationRecords,inlineLoad,scheduling,authorization,jobStorage,
                 liveOutput,archiveCompression,executionPool,PackageConfigurationPolicy.load(server.get("packageConfiguration")),
                 digest(sourceBytes),root);
     }
@@ -283,7 +288,7 @@ public final class ServerConfig {
     }
 
     /** Canonical, trusted roots selected from the deployment-controlled packages section. */
-    record PackageRoots(Map<String,Path> packages,List<Path> allowedRoots) { }
+    record PackageRoots(Map<String,Path> packages,Map<String,List<String>> editors,List<Path> allowedRoots) { }
 
     /** Validate an entire proposed Package Registry before a caller publishes it. */
     static PackageRoots validatePackageRoots(Object raw,Path dataDirectory,Path runtimeConfiguration,
@@ -292,7 +297,11 @@ public final class ServerConfig {
         for(Object key:packagesNode.keySet())if(!(key instanceof String name)||!Set.of("allowedRoots","entries").contains(name))
             throw new IllegalArgumentException("packages contains an unsupported registry setting");
         List<?> roots=list(packagesNode.get("allowedRoots"),"packages.allowedRoots");
-        Map<?,?> entries=packagesNode.get("entries")==null?Collections.emptyMap():map(packagesNode.get("entries"),"packages.entries");
+        Object rawEntries=packagesNode.get("entries");
+        Map<?,?> entries=rawEntries instanceof Map<?,?> mapping?mapping:Collections.emptyMap();
+        List<?> entryList=rawEntries instanceof List<?> list?list:null;
+        if(rawEntries!=null&&entryList==null&&!(rawEntries instanceof Map<?,?>))
+            throw new IllegalArgumentException("packages.entries must be a mapping or list");
         Path data=dataDirectory.toAbsolutePath().normalize();
         Path candidateData=canonicalFuturePath(data);
         Path runtime=runtimeConfiguration.toAbsolutePath().normalize();
@@ -309,10 +318,43 @@ public final class ServerConfig {
         }
         if(allowed.isEmpty())throw new IllegalArgumentException("packages.allowedRoots must contain at least one directory");
         Map<String,Path> resolved=new LinkedHashMap<>();
+        Map<String,List<String>> editorsByPackage=new LinkedHashMap<>();
+        List<Map.Entry<String,Object>> declarations=new ArrayList<>();
         for(Map.Entry<?,?> entry:entries.entrySet()) {
             String id=string(entry.getKey(),"package ID");
+            declarations.add(new java.util.AbstractMap.SimpleImmutableEntry<>(id,entry.getValue()));
+        }
+        if(entryList!=null) {
+            for(int index=0;index<entryList.size();index++) {
+                Map<?,?> declaration=map(entryList.get(index),"packages.entries["+index+"]");
+                for(Object key:declaration.keySet())if(!(key instanceof String name)||!Set.of("id","path","editors").contains(name))
+                    throw new IllegalArgumentException("packages.entries["+index+"] contains an unsupported setting");
+                String id=string(declaration.get("id"),"packages.entries["+index+"].id");
+                Map<String,Object> normalized=new LinkedHashMap<>();
+                if(declaration.containsKey("path"))normalized.put("path",declaration.get("path"));
+                if(declaration.containsKey("editors"))normalized.put("editors",declaration.get("editors"));
+                declarations.add(new java.util.AbstractMap.SimpleImmutableEntry<>(id,normalized));
+            }
+        }
+        for(Map.Entry<String,Object> entry:declarations) {
+            String id=entry.getKey();
             if(!id.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}"))throw new IllegalArgumentException("Invalid package ID");
-            Path packageRoot=trustedDirectory(string(entry.getValue(),"packages.entries."+id),"packages.entries."+id);
+            Object rawDeclaration=entry.getValue();
+            String pathField="packages.entries."+id;
+            Object rawPath=rawDeclaration;
+            Object rawEditors=null;
+            boolean editorsDeclared=false;
+            if(rawDeclaration instanceof Map<?,?> declaration) {
+                for(Object key:declaration.keySet())if(!(key instanceof String name)||!Set.of("path","editors").contains(name))
+                    throw new IllegalArgumentException(pathField+" contains an unsupported setting");
+                rawPath=declaration.get("path");
+                editorsDeclared=declaration.containsKey("editors");
+                rawEditors=declaration.get("editors");
+                pathField+=".path";
+            }
+            if(editorsDeclared&&rawEditors==null)
+                throw new IllegalArgumentException("packages.entries."+id+".editors must be a list of canonical user IDs");
+            Path packageRoot=trustedDirectory(string(rawPath,pathField),pathField);
             if(allowed.stream().noneMatch(packageRoot::startsWith))throw new IllegalArgumentException("Package root is outside packages.allowedRoots");
             if(packageRoot.startsWith(candidateData)||candidateData.startsWith(packageRoot))
                 throw new IllegalArgumentException("server.dataDir must be separate from configured package roots");
@@ -320,10 +362,33 @@ public final class ServerConfig {
                 throw new IllegalArgumentException("server.runtimeConfigPath and its config directory must be outside registered package roots");
             for(Path prior:resolved.values())if(packageRoot.startsWith(prior)||prior.startsWith(packageRoot))
                 throw new IllegalArgumentException("Package entries collide on overlapping directories");
+            if(resolved.containsKey(id))throw new IllegalArgumentException("Package entries contain a duplicate package ID");
             resolved.put(id,packageRoot);
+            editorsByPackage.put(id,packageEditors(rawEditors,"packages.entries."+id+".editors"));
         }
         if(resolved.isEmpty()&&!allowEmpty)throw new IllegalArgumentException("packages.entries must define at least one package ID");
-        return new PackageRoots(Collections.unmodifiableMap(new LinkedHashMap<>(resolved)),List.copyOf(allowed));
+        return new PackageRoots(Collections.unmodifiableMap(new LinkedHashMap<>(resolved)),
+                immutableEditors(editorsByPackage),List.copyOf(allowed));
+    }
+
+    private static Map<String,List<String>> immutableEditors(Map<String,List<String>> editors) {
+        Map<String,List<String>> result=new LinkedHashMap<>();
+        editors.forEach((id,users)->result.put(id,List.copyOf(users)));
+        return Collections.unmodifiableMap(result);
+    }
+
+    private static List<String> packageEditors(Object raw,String field) {
+        if(raw==null)return List.of();
+        List<?> values=list(raw,field);
+        if(values.size()>100)throw new IllegalArgumentException(field+" may contain at most 100 user IDs");
+        java.util.TreeSet<String> unique=new java.util.TreeSet<>();
+        for(Object value:values) {
+            String user=string(value,field+" entry");
+            if(!SourceAuthorizationPolicy.canonicalOwnerIdentity(user))
+                throw new IllegalArgumentException(field+" entries must be canonical trusted login IDs");
+            if(!unique.add(user))throw new IllegalArgumentException(field+" contains a duplicate or ambiguous user ID");
+        }
+        return List.copyOf(unique);
     }
 
     private static Path trustedDirectory(String value,String field) throws Exception {

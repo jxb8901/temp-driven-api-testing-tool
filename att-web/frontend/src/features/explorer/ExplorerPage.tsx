@@ -318,6 +318,11 @@ interface NewPackageSutMetricsResource extends PackageSutMetricsResource {
   expectedManifestDigest: string;
 }
 
+interface PendingPackageAuthoringRequest {
+  controller: AbortController;
+  epoch: number;
+}
+
 function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, locale, registerUnsavedChanges }: {
   api: ExplorerApi;
   packageId: string;
@@ -351,11 +356,35 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
   const [draftFailureDiagnostics, setDraftFailureDiagnostics] = useState<unknown[]>([]);
   const [draftMessage, setDraftMessage] = useState('');
   const [stale, setStale] = useState(false);
+  const [navigationCallbackActive, setNavigationCallbackActive] = useState(false);
+  const pendingAuthoringRequests = useRef(new Set<AbortController>());
+  const authoringRequestEpoch = useRef(0);
+  const navigationCallbackInProgress = useRef(false);
+  const navigationCallbackResetTimer = useRef<number | null>(null);
+  const invalidatePendingAuthoringRequests = useCallback(() => {
+    authoringRequestEpoch.current += 1;
+    for (const controller of pendingAuthoringRequests.current) controller.abort();
+    pendingAuthoringRequests.current.clear();
+  }, []);
+  const beginAuthoringRequest = useCallback((): PendingPackageAuthoringRequest => {
+    const controller = new AbortController();
+    pendingAuthoringRequests.current.add(controller);
+    return { controller, epoch: authoringRequestEpoch.current };
+  }, []);
+  const isCurrentAuthoringRequest = useCallback((request: PendingPackageAuthoringRequest) =>
+    !request.controller.signal.aborted && request.epoch === authoringRequestEpoch.current, []);
+  const finishAuthoringRequest = useCallback((request: PendingPackageAuthoringRequest) => {
+    pendingAuthoringRequests.current.delete(request.controller);
+  }, []);
   const activeResource = newResource || resource;
   const activeSelection = newResource ? { kind: newResource.kind, id: newResource.id } : selection;
   const activeSource = newResource ? newResourceSource : resourceSource;
   const sourceDirty = !!newResource || (!!resource && resourceSource !== baselineSource);
   const hasUnpublishedChanges = sourceDirty || !!draft;
+  const navigationStateRef = useRef({ api, packageId, sourceDirty, hasUnpublishedChanges, newResource,
+    resource, baselineSource, draft, draftBusy, newResourceBusy, resourceLoading });
+  navigationStateRef.current = { api, packageId, sourceDirty, hasUnpublishedChanges, newResource,
+    resource, baselineSource, draft, draftBusy, newResourceBusy, resourceLoading };
   const workflowCurrent = draft
     ? draft.state.toLowerCase() === 'reviewed' ? 'publish' : draft.state.toLowerCase() === 'validated' ? 'review' : 'validate'
     : sourceDirty ? 'stage' : activeResource ? 'edit' : 'view';
@@ -374,8 +403,81 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
     return { id, label: workflowLabels[index], state, reason };
   });
 
-  useEffect(() => registerUnsavedChanges(hasUnpublishedChanges, 'unpublished Package SUT Metrics changes'),
-    [hasUnpublishedChanges, registerUnsavedChanges]);
+  const clearPackageAuthoringState = useCallback((message = '', refreshCapability = false) => {
+    invalidatePendingAuthoringRequests();
+    setCatalog(current => current ? { ...current, canEdit: false } : null);
+    setSelection(null);setResource(null);setResourceSource('');setBaselineSource('');
+    setNewResource(null);setNewResourceSource('');setNewResourceError('');
+    setResourceLoading(false);setDraft(null);setDraftFailureDiagnostics([]);setDraftMessage('');setStale(false);
+    setNewResourceBusy(false);setDraftBusy(false);
+    setResourceError(message);setDraftError(message);
+    if (refreshCapability) {setRequestVersion(value => value + 1);setResourceVersion(value => value + 1);}
+  }, [invalidatePendingAuthoringRequests]);
+
+  useEffect(() => () => {
+    invalidatePendingAuthoringRequests();
+    if (navigationCallbackResetTimer.current !== null) window.clearTimeout(navigationCallbackResetTimer.current);
+  }, [invalidatePendingAuthoringRequests]);
+
+  const confirmDiscardForNavigation = useCallback(async () => {
+    const current = navigationStateRef.current;
+    if (navigationCallbackInProgress.current || current.draftBusy) return false;
+    if (!current.hasUnpublishedChanges) return true;
+
+    navigationCallbackInProgress.current = true;
+    setNavigationCallbackActive(true);
+    try {
+      if (current.draft) {
+        if (!current.api.packageSutMetricsDraftAction) {
+          setDraftError(zh ? '此 Server client 不支援捨棄 SUT Metrics 草稿。' : 'This Server client does not support discarding SUT Metrics drafts.');
+          return false;
+        }
+        const request = beginAuthoringRequest();
+        setDraftBusy(true);setDraftError('');setDraftFailureDiagnostics([]);setDraftMessage('');
+        try {
+          await current.api.packageSutMetricsDraftAction(current.packageId, current.draft.draftId, 'discard', request.controller.signal);
+          if (!isCurrentAuthoringRequest(request)) return false;
+          setDraft(null);setDraftFailureDiagnostics([]);setDraftMessage('');setStale(false);
+          return true;
+        } catch (failure) {
+          if (!isCurrentAuthoringRequest(request)) return false;
+          if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 403) {
+            clearPackageAuthoringState(packageSutMetricsError(failure, zh), true);
+          } else {
+            setDraftError(packageSutMetricsError(failure, zh));
+            setDraftFailureDiagnostics(packageSutMetricsFailureDiagnostics(failure));
+          }
+          return false;
+        } finally {
+          finishAuthoringRequest(request);
+          if (isCurrentAuthoringRequest(request)) setDraftBusy(false);
+        }
+      }
+
+      if (current.newResource) {
+        setNewResource(null);setNewResourceSource('');setNewResourceError('');
+      } else if (current.sourceDirty && current.resource) {
+        setResourceSource(current.baselineSource);
+      }
+      setDraftError('');setDraftFailureDiagnostics([]);setDraftMessage('');setStale(false);
+      return true;
+    } finally {
+      navigationCallbackResetTimer.current = window.setTimeout(() => {
+        navigationCallbackResetTimer.current = null;
+        navigationCallbackInProgress.current = false;
+        setNavigationCallbackActive(false);
+      }, 0);
+    }
+  }, [beginAuthoringRequest, clearPackageAuthoringState, finishAuthoringRequest, isCurrentAuthoringRequest, zh]);
+
+  const registerNavigationGuard = registerUnsavedChanges as (
+    dirty: boolean, description?: string, onConfirmDiscard?: () => boolean | Promise<boolean>
+  ) => () => void;
+  const navigationGuardActive = hasUnpublishedChanges || draftBusy || navigationCallbackActive;
+  useEffect(() => navigationGuardActive
+    ? registerNavigationGuard(true, 'unpublished Package SUT Metrics changes', confirmDiscardForNavigation)
+    : registerNavigationGuard(false, 'unpublished Package SUT Metrics changes'),
+  [confirmDiscardForNavigation, navigationGuardActive, registerNavigationGuard]);
 
   useEffect(() => {
     const load = api.getPackageSutMetricsCatalog;
@@ -389,23 +491,29 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
     setLoading(true);
     setError('');
     load(packageId, environment || undefined, controller.signal).then(value => {
-      if (!controller.signal.aborted) setCatalog(value);
-    }).catch(() => {
       if (!controller.signal.aborted) {
-        setCatalog(null);
+        if (value.canEdit !== true) clearPackageAuthoringState(packageSutMetricsError({status:403}, zh));
+        setCatalog(value);
+      }
+    }).catch(failure => {
+      if (!controller.signal.aborted) {
+        if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 403) {
+          clearPackageAuthoringState(packageSutMetricsError(failure, zh));setCatalog(null);
+        } else setCatalog(null);
         setError(zh ? '無法載入 Package SUT Metrics 目錄。請重試。' : 'The Package SUT Metrics catalog could not be loaded. Retry.');
       }
     }).finally(() => {
       if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
-  }, [api, packageId, environment, refreshKey, requestVersion, zh]);
+  }, [api, packageId, environment, refreshKey, requestVersion, zh, clearPackageAuthoringState]);
 
   useEffect(() => {
+    invalidatePendingAuthoringRequests();
     setSelection(null); setResource(null); setResourceSource(''); setBaselineSource(''); setNewResource(null);
-    setNewResourceSource(''); setNewResourceError(''); setDraft(null);
+    setNewResourceSource(''); setNewResourceError(''); setDraft(null);setNewResourceBusy(false);setDraftBusy(false);
     setResourceError(''); setDraftError(''); setDraftFailureDiagnostics([]); setDraftMessage(''); setStale(false);
-  }, [packageId, environment]);
+  }, [packageId, environment, invalidatePendingAuthoringRequests]);
 
   useEffect(() => {
     if (!selection) {
@@ -418,11 +526,12 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
       setResourceLoading(false);
       return;
     }
-    const controller = new AbortController();
+    const request = beginAuthoringRequest();
+    const { controller } = request;
     setResource(null); setResourceSource(''); setBaselineSource(''); setResourceLoading(true); setResourceError('');
     setDraft(null); setDraftError(''); setDraftFailureDiagnostics([]); setDraftMessage(''); setStale(false);
     load(packageId, selection.kind, selection.id, controller.signal).then(value => {
-      if (controller.signal.aborted) return;
+      if (!isCurrentAuthoringRequest(request)) return;
       const digestValid = typeof value.resourceDigest === 'string' && /^[a-f0-9]{64}$/i.test(value.resourceDigest);
       const path = packageRelativeCatalogPath(value.path);
       if (value.packageId !== packageId || value.kind !== selection.kind || value.id !== selection.id
@@ -430,16 +539,28 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
         setResourceError(zh ? '伺服器傳回的 Package 資源來源資料不完整。請重新載入目錄。' : 'The Server returned incomplete Package resource source metadata. Reload the catalog.');
         return;
       }
+      if (value.canEdit !== true) {
+        clearPackageAuthoringState();
+        return;
+      }
       const normalized = { ...value, path };
       setResource(normalized); setResourceSource(value.source); setBaselineSource(value.source);
     }).catch(failure => {
-      if (!controller.signal.aborted) {
-        setResource(null);
-        setResourceError(packageSutMetricsError(failure, zh));
+      if (isCurrentAuthoringRequest(request)) {
+        if (failure && typeof failure === 'object' && 'status' in failure
+          && [403, 404].includes(Number(failure.status)))
+          clearPackageAuthoringState(packageSutMetricsError(failure, zh), true);
+        else {
+          setResource(null);
+          setResourceError(packageSutMetricsError(failure, zh));
+        }
       }
-    }).finally(() => { if (!controller.signal.aborted) setResourceLoading(false); });
-    return () => controller.abort();
-  }, [api, packageId, selection?.kind, selection?.id, resourceVersion, zh]);
+    }).finally(() => {
+      finishAuthoringRequest(request);
+      if (isCurrentAuthoringRequest(request)) setResourceLoading(false);
+    });
+    return () => { controller.abort();finishAuthoringRequest(request); };
+  }, [api, packageId, selection?.kind, selection?.id, resourceVersion, zh, clearPackageAuthoringState]);
 
   const sources = Array.isArray(catalog?.metricSources) ? catalog.metricSources.slice(0, 128) : [];
   const groups = Array.isArray(catalog?.groups) ? catalog.groups.slice(0, 128) : [];
@@ -456,6 +577,11 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
   const selectedEnvironment = catalogText(catalog?.environment, environment);
   const resourceLabel = activeSelection ? packageSutMetricsResourceLabel(activeSelection.kind, zh) : '';
   const validationDiagnostics = Array.isArray(draft?.validation?.diagnostics) ? draft.validation.diagnostics.slice(0, 64) : [];
+  const clearPackageAuthoringStateOnForbidden = (failure: unknown): boolean => {
+    if (!failure || typeof failure !== 'object' || !('status' in failure) || Number(failure.status) !== 403) return false;
+    clearPackageAuthoringState(packageSutMetricsError(failure, zh), true);
+    return true;
+  };
 
   const selectResource = (kind: PackageSutMetricsResourceKind, id: string) => {
     if (selectionLocked) return;
@@ -473,12 +599,18 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
       setNewResourceError(zh ? '此 ID 已存在於 Package inventory。' : 'This ID already exists in the Package inventory.');
       return;
     }
-    const controller = new AbortController();
+    const request = beginAuthoringRequest();
+    const { controller } = request;
     setNewResourceBusy(true); setNewResourceError(''); setDraftError(''); setDraftFailureDiagnostics([]);
     try {
       const manifest = await api.getPackageManifest(packageId, 'source', undefined, controller.signal);
-      if (manifest.packageId !== packageId || manifest.canEdit !== true) {
+      if (!isCurrentAuthoringRequest(request)) return;
+      if (manifest.packageId !== packageId) {
         setNewResourceError(zh ? '建立資源需要此已註冊 Package 的來源編輯權限。' : 'Creating a resource requires source editing access for this registered Package.');
+        return;
+      }
+      if (manifest.canEdit !== true) {
+        clearPackageAuthoringState(packageSutMetricsError({status:403}, zh), true);
         return;
       }
       if (!manifest.present || manifest.redacted || manifest.available !== true || typeof manifest.text !== 'string') {
@@ -506,9 +638,15 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
       });
       setNewResourceSource(starter);
     } catch (failure) {
-      const message = failure instanceof Error ? failure.message : packageSutMetricsError(failure, zh);
-      setNewResourceError(message.slice(0, 512));
-    } finally { setNewResourceBusy(false); }
+      if (!isCurrentAuthoringRequest(request)) return;
+      if (!clearPackageAuthoringStateOnForbidden(failure)) {
+        const message = failure instanceof Error ? failure.message : packageSutMetricsError(failure, zh);
+        setNewResourceError(message.slice(0, 512));
+      }
+    } finally {
+      finishAuthoringRequest(request);
+      if (isCurrentAuthoringRequest(request)) setNewResourceBusy(false);
+    }
   };
 
   const cancelNewResource = async () => {
@@ -532,7 +670,8 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
       setDraftError(zh ? 'SUT Metrics 資源超出來源大小限制。' : 'The SUT Metrics resource exceeds the source size limit.');
       return;
     }
-    const controller = new AbortController();
+    const request = beginAuthoringRequest();
+    const { controller } = request;
     setDraftBusy(true); setDraftError(''); setDraftFailureDiagnostics([]); setDraftMessage('');
     try {
       const input: PackageSutMetricsResourceDraftInput = newResource ? {
@@ -544,6 +683,7 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
         expectedResourceDigest: activeResource.resourceDigest,
       };
       const next = await api.createPackageSutMetricsDraft(packageId, input, controller.signal);
+      if (!isCurrentAuthoringRequest(request)) return;
       const newManifestMatches = !newResource || (next.expectedManifestDigest === newResource.expectedManifestDigest
         && typeof next.candidateManifestDigest === 'string' && /^[a-f0-9]{64}$/i.test(next.candidateManifestDigest)
         && next.activationMode === 'resource-then-manifest');
@@ -560,10 +700,17 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
       setDraft(next);
       setDraftMessage(zh ? '草稿已建立；下一步請先驗證。' : 'Draft created. Validate it before review.');
     } catch (failure) {
-      if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 409) setStale(true);
-      setDraftError(packageSutMetricsError(failure, zh));
-      setDraftFailureDiagnostics(packageSutMetricsFailureDiagnostics(failure));
-    } finally { setDraftBusy(false); }
+      if (!isCurrentAuthoringRequest(request)) return;
+      const forbidden = clearPackageAuthoringStateOnForbidden(failure);
+      if (!forbidden) {
+        if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 409) setStale(true);
+        setDraftError(packageSutMetricsError(failure, zh));
+        setDraftFailureDiagnostics(packageSutMetricsFailureDiagnostics(failure));
+      }
+    } finally {
+      finishAuthoringRequest(request);
+      if (isCurrentAuthoringRequest(request)) setDraftBusy(false);
+    }
   };
 
   const actOnDraft = async (action: PackageSutMetricsDraftAction) => {
@@ -579,11 +726,12 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
     if (action === 'discard' && !await confirmAction({ title: zh ? '捨棄 SUT Metrics 草稿？' : 'Discard SUT Metrics draft?',
       message: zh ? `移除草稿 ${draft.draftId}；已發布的 Package 資源不變。` : `Remove draft ${draft.draftId}. The published Package resource stays unchanged.`,
       confirmLabel: zh ? '捨棄草稿' : 'Discard draft', destructive: true })) return;
-    const controller = new AbortController();
+    const request = beginAuthoringRequest();
+    const { controller } = request;
     setDraftBusy(true); setDraftError(''); setDraftFailureDiagnostics([]); setDraftMessage('');
     try {
       const next = await api.packageSutMetricsDraftAction(packageId, draft.draftId, action, controller.signal);
-      if (controller.signal.aborted) return;
+      if (!isCurrentAuthoringRequest(request)) return;
       if (action === 'publish') {
         const publishedResource = activeResource;
         const manifestIdentityMatches = !newResource || (draft.expectedManifestDigest === newResource.expectedManifestDigest
@@ -662,10 +810,17 @@ function PackageSutMetricsPanel({ api, packageId, environment, refreshKey, local
         ? (next.validation?.valid === true ? (zh ? '草稿驗證通過。' : 'Draft validation passed.') : (zh ? '驗證完成；請檢查診斷並修正來源。' : 'Validation completed. Review the diagnostics and update the source.'))
         : (zh ? '草稿已完成 Review，可發布。' : 'Draft review is complete and it can be published.'));
     } catch (failure) {
-      if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 409) setStale(true);
-      setDraftError(packageSutMetricsError(failure, zh));
-      setDraftFailureDiagnostics(packageSutMetricsFailureDiagnostics(failure));
-    } finally { setDraftBusy(false); }
+      if (!isCurrentAuthoringRequest(request)) return;
+      const forbidden = clearPackageAuthoringStateOnForbidden(failure);
+      if (!forbidden) {
+        if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 409) setStale(true);
+        setDraftError(packageSutMetricsError(failure, zh));
+        setDraftFailureDiagnostics(packageSutMetricsFailureDiagnostics(failure));
+      }
+    } finally {
+      finishAuthoringRequest(request);
+      if (isCurrentAuthoringRequest(request)) setDraftBusy(false);
+    }
   };
 
   return <details className="att-query-filter-panel att-package-sut-metrics" aria-label={zh ? 'Package SUT Metrics 目錄' : 'Package SUT Metrics catalog'}>
