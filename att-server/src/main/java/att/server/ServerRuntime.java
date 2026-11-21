@@ -1536,9 +1536,14 @@ final class ServerRuntime implements AutoCloseable {
                 else {recordWorkerExit(job,exit);finish(job,"ERROR",exit==0?3:exit);}
             }
             else if(!job.terminal()) {String state=exit==0?"PASS":"FAIL";finish(job,state,exit);}
-        } catch(InterruptedException e){Thread.currentThread().interrupt();stopWorkerTree(job);if(!job.terminal())finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");}
+        } catch(InterruptedException e){Thread.currentThread().interrupt();stopWorkerTree(job);if(!job.terminal()){
+              // Match clean EOF cancellation: requested cancel stays CANCELLED without a synthetic diagnostic.
+              if(job.cancelRequested)finishCancelled(job);
+              else finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");
+          }}
           catch(Exception e){stopWorkerTree(job);if(!job.terminal()){
-              if(job.cancelRequested)finishQuietly(job,"CANCELLED",143,"ATT-SERVER-CANCELLED","Worker was cancelled");
+              // Forced-stop IOException after cancel must match clean EOF cancel event order (no ATT-SERVER-CANCELLED).
+              if(job.cancelRequested)finishCancelled(job);
               else finishQuietly(job,"ERROR",3,"ATT-SERVER-WORKER-FAILED",safeMessage(e));
           }}
         finally {
@@ -7325,6 +7330,8 @@ final class ServerRuntime implements AutoCloseable {
             sutMetrics.jobFinished(j.id,window[0],window[1],loadExecutionPhaseWindows(j));
         }
     }
+    /** Requested cancel terminal state without a synthetic ATT-SERVER-CANCELLED diagnostic event. */
+    private void finishCancelled(Job j){try{finish(j,"CANCELLED",143);}catch(Exception ignored){j.status="CANCELLED";j.exitCode=143;j.finishedAt=Instant.now();}}
     private void finishQuietly(Job j,String status,int code,String diagnostic,String message){try{j.diagnosticJson=JSON.writeValueAsString(Map.of("code",diagnostic,"summary",message));append(j,"diagnostic",JSON.readValue(j.diagnosticJson,Map.class));finish(j,status,code);}catch(Exception ignored){j.status=status;j.exitCode=code;j.finishedAt=Instant.now();}}
     private Map<String,Object> append(Job j,String type,Map<String,?> data) throws Exception {
         return recordAppendedEvent(j,type,j.events.append(type,prepareEventPayload(j,type,data)));
