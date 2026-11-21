@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +22,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AttServiceTest {
     @TempDir Path temp;
+
+    @Test void nativeSuiteApiUsesTheSchemaTagLengthLimit() {
+        String tooLongTag=String.join("",Collections.nCopies(129,"x"));
+        assertThrows(IllegalArgumentException.class,()->new NativeCaseSuiteRunRequest(null,null,null,null,null,
+                "payments",Collections.singletonList("fpp.transfer"),Collections.<String>emptyList(),
+                Collections.singletonList(tooLongTag),Collections.<String>emptyList(),false,false,false,null));
+    }
+
     @Test void validationIsInvokableThroughTypedRequestWithoutCliArgumentsOrConsoleOutput() throws Exception {
         Path root=temp.resolve("package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates"));
         Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("tools"));
@@ -98,6 +107,100 @@ class AttServiceTest {
         assertTrue(Files.isRegularFile(runDirectory.resolve("ci/junit.xml")));
         assertEquals(runDirectory.resolve("configuration.json").toRealPath().toString(),
                 result.paths().get("configuration"));
+    }
+
+    @Test void implicitSuiteRunsEveryResolvedCaseFromOneDefinitionWithoutSuiteFile() throws Exception {
+        Path root = nativeSuitePackage("single-suite-package");
+        writeNativeDefinition(root, "fpp.transfer", "payment.transfer.v1", ""
+                + "- {recordId: first, data: {caseId: first, amount: 7}}\n"
+                + "- {recordId: second, data: {caseId: second, amount: 13}}\n"
+                + "- {recordId: third, data: {caseId: third, amount: 17}}\n");
+
+        RunResult result = new DefaultAttService().runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-suite-all", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, false, false, null));
+
+        assertEquals("PASS", result.status());
+        assertEquals(3L, result.summary().get("total"));
+        assertEquals(3, result.summary().get("resolved"));
+        assertEquals(3, result.summary().get("selected"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> cases = (List<Map<String,Object>>) result.summary().get("cases");
+        assertEquals(Arrays.asList("fpp.transfer.first", "fpp.transfer.second", "fpp.transfer.third"),
+                cases.stream().map(item -> String.valueOf(item.get("qualifiedCaseId"))).collect(java.util.stream.Collectors.toList()));
+        assertTrue(Files.isRegularFile(root.resolve("output/native-suite-all/run.yaml")));
+        assertFalse(Files.exists(root.resolve("suite.yaml")), "An implicit Suite must not require a suite file");
+    }
+
+    @Test void crossDefinitionSelectionRunsCasesFromDistinctFlowsAndKeysAggregateEvidence() throws Exception {
+        Path root = nativeSuitePackage("cross-suite-package");
+        writeNativeFlow(root, "payment.alpha.v1", "alpha=${EXEC.INPUT.amount}");
+        writeNativeFlow(root, "payment.zeta.v1", "zeta=${EXEC.INPUT.amount}");
+        writeNativeDefinition(root, "fpp.alpha", "payment.alpha.v1",
+                "- {recordId: first, data: {caseId: first, amount: 7}}\n"
+              + "- {recordId: spare, data: {caseId: spare, amount: 9}}\n");
+        writeNativeDefinition(root, "fpp.zeta", "payment.zeta.v1",
+                "- {recordId: third, data: {caseId: third, amount: 11}}\n");
+
+        RunResult result = new DefaultAttService().runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-suite-cross", "payments",
+                Arrays.asList("fpp.zeta", "fpp.alpha"), Arrays.asList("fpp.zeta.third", "fpp.alpha.first"),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), false, false, false, null));
+
+        assertEquals("PASS", result.status());
+        assertEquals(2L, result.summary().get("total"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> cases = (List<Map<String,Object>>) result.summary().get("cases");
+        assertEquals(Arrays.asList("fpp.alpha.first", "fpp.zeta.third"),
+                cases.stream().map(item -> String.valueOf(item.get("qualifiedCaseId"))).collect(java.util.stream.Collectors.toList()));
+        assertEquals(Arrays.asList("payment.alpha.v1", "payment.zeta.v1"),
+                cases.stream().map(item -> String.valueOf(item.get("flowId"))).collect(java.util.stream.Collectors.toList()));
+        assertEquals("fpp.alpha", cases.get(0).get("definitionId"));
+        assertEquals("fpp.zeta", cases.get(1).get("definitionId"));
+        Path runDirectory = root.resolve("output/native-suite-cross");
+        for (Map<String,Object> item : cases) {
+            Path caseLog = runDirectory.resolve("executions").resolve(String.valueOf(item.get("execId"))).resolve("case.log");
+            String content = new String(Files.readAllBytes(caseLog), StandardCharsets.UTF_8);
+            if ("fpp.alpha".equals(item.get("definitionId"))) assertTrue(content.contains("alpha=7"), content);
+            else assertTrue(content.contains("zeta=11"), content);
+        }
+        String manifest = new String(Files.readAllBytes(runDirectory.resolve("run.yaml")), StandardCharsets.UTF_8);
+        assertTrue(manifest.contains("targetType: nativeSuite"), manifest);
+        assertTrue(manifest.contains("definitionId: fpp.alpha"), manifest);
+        assertTrue(manifest.contains("definitionId: fpp.zeta"), manifest);
+        assertTrue(Files.isRegularFile(runDirectory.resolve("ci/summary.json")));
+        assertTrue(Files.isRegularFile(runDirectory.resolve("ci/junit.xml")));
+    }
+
+    private Path nativeSuitePackage(String name) throws Exception {
+        Path root = temp.resolve(name);
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("templates"));
+        Files.createDirectories(root.resolve("testcase"));
+        att.TestSchemas.install(root);
+        Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.12\noutputDirectory: output\n"
+                + "environment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        writeNativeFlow(root, "payment.transfer.v1", "transfer=${EXEC.INPUT.amount}");
+        return root;
+    }
+
+    private void writeNativeDefinition(Path root, String id, String flowId, String records) throws Exception {
+        Path definition = root.resolve("testcase").resolve(id.replace('.', '/')).resolve("testcase.yaml");
+        Files.createDirectories(definition.getParent());
+        StringBuilder yaml = new StringBuilder("schemaVersion: att-testcase/v1\nid: ").append(id)
+                .append("\nflow: ").append(flowId).append("\ncaseIdExpression: \"${DATA.caseId}\"\n")
+                .append("dataSource:\n  type: inline\n  records:\n");
+        for (String line : records.split("\\n")) if (!line.isEmpty()) yaml.append("    ").append(line).append('\n');
+        Files.write(definition, yaml.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void writeNativeFlow(Path root, String id, String message) throws Exception {
+        Path flow = root.resolve("templates/flows").resolve(id.replace('.', '/')).resolve("flow.yaml");
+        Files.createDirectories(flow.getParent());
+        Files.write(flow, ("schemaVersion: att-flow/v3.6\nid: " + id + "\nname: " + id
+                + "\ndescription: Native suite fixture\nactions:\n"
+                + "  show:\n    type: log\n    message: '" + message + "'\n")
+                .getBytes(StandardCharsets.UTF_8));
     }
 
     @Test void validationChecksIdentityFormatSyntaxBeforeAnyRunStarts() throws Exception {

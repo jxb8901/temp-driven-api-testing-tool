@@ -50,6 +50,14 @@ public class WorkerRequest {
     public List<String> nativeResolvedCaseIds;
     /** Exact package-relative testcase.yaml frozen by draft validation and included in the accepted source closure. */
     public String nativeCaseSourcePath;
+    /** Server-validated implicit Suite selectors; public callers cannot set these Worker fields directly. */
+    public List<String> nativeSuiteDefinitionIds;
+    public List<String> nativeSuiteQualifiedCaseIds;
+    public List<String> nativeSuiteTags;
+    public List<String> nativeSuiteExcludeTags;
+    public Boolean nativeSuiteAll;
+    /** Exact package-relative Definition sources frozen by Suite draft validation, keyed by Definition ID. */
+    public Map<String,String> nativeSuiteSourcePaths;
     public List<String> tags;
     public List<String> excludeTags;
     public Boolean all;

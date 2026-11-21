@@ -219,6 +219,82 @@ public final class DefaultAttService implements AttService {
         return new RunResult(result.runId(), result.status().name(), result.exitCode(), elapsed(started),
                 Collections.<att.validation.Diagnostic>emptyList(), runPaths, summary, failures);
     }
+
+    /** Runs a derived implicit Suite without creating an authored suite resource. */
+    public RunResult runNativeCaseSuite(NativeCaseSuiteRunRequest request) throws Exception {
+        if (request == null) throw new IllegalArgumentException("Native Case Suite Run request is required");
+        long started = System.nanoTime();
+        FrameworkConfig cfg = config(request);
+        Path testcaseSchema = att.validation.SchemaFiles.resolve(request.packageRoot(), "att-testcase-v1.schema.json");
+        att.testcase.TestCaseSuiteResolver resolver = new att.testcase.TestCaseSuiteResolver(testcaseSchema);
+        att.testcase.TestCaseSuiteResolutionResult resolution = resolver.resolve(request.packageRoot(),
+                request.packageId(), cfg.templatesRoot(), cfg.testcasesRoot(), request.definitionIds(),
+                request.qualifiedCaseIds(), request.tags(), request.excludeTags(), request.all(), null);
+        if (resolution.emptySelection()) {
+            Map<String,Object> summary = new LinkedHashMap<String,Object>();
+            summary.put("total", 0); summary.put("passed", 0); summary.put("failed", 0);
+            summary.put("error", 0); summary.put("skipped", 0); summary.put("invalid", 1);
+            summary.put("resolved", resolution.resolvedCount()); summary.put("selected", 0);
+            summary.put("definitions", resolution.toMap().get("definitions")); summary.put("cases", Collections.emptyList());
+            return new RunResult(request.runId() == null ? "" : request.runId(), "INVALID", 2,
+                    elapsed(started), resolution.diagnostics(), Collections.<String,String>emptyMap(),
+                    withConfiguration(summary, cfg));
+        }
+        String runId = request.runId();
+        if (runId == null || runId.trim().isEmpty()) {
+            String fallback = java.time.format.DateTimeFormatter.ofPattern(cfg.run().timestampFormat())
+                    .format(java.time.LocalDateTime.now());
+            Path source = request.packageRoot().resolve(resolution.definitions().get(0).sourceReference()).normalize();
+            runId = att.core.ExecutionIdentityFormat.runId(cfg.run().runIdFormat(), fallback,
+                    request.packageRoot(), "nativeSuite", source, java.time.Instant.now());
+        }
+        att.core.FrameworkEngine engine = new att.core.FrameworkEngine(request.packageRoot(), cfg);
+        att.core.RunSummary result = engine.runNativeCaseSuite(resolution, runId, request.outputDirectory(),
+                request.dryRun(), request.failFast(), request.observer());
+
+        Map<String,att.testcase.ResolvedTestCase> selectedById = new LinkedHashMap<String,att.testcase.ResolvedTestCase>();
+        for (att.testcase.ResolvedTestCase testCase : resolution.cases()) selectedById.put(testCase.qualifiedCaseId(), testCase);
+        List<Map<String,Object>> caseRows = new ArrayList<Map<String,Object>>();
+        List<Map<String,Object>> failures = new ArrayList<Map<String,Object>>();
+        for (att.core.TestResult item : result.results()) {
+            att.testcase.ResolvedTestCase selected = selectedById.get(item.caseId());
+            Map<String,Object> row = new LinkedHashMap<String,Object>();
+            row.put("caseId", item.caseId()); row.put("definitionId", item.definitionId());
+            row.put("localCaseId", selected == null ? null : selected.caseId());
+            row.put("qualifiedCaseId", item.qualifiedCaseId()); row.put("execId", item.executionId());
+            row.put("caseName", item.caseName()); row.put("status", item.status().name());
+            row.put("durationMs", item.duration().toMillis()); row.put("tags", item.tags());
+            if (selected != null) {
+                row.put("flowId", selected.flowId()); row.put("flowRevision", selected.flowRevision());
+                row.put("sourceReference", selected.sourceReference()); row.put("sourceRevision", selected.sourceRevision());
+                row.put("sourceRecordId", selected.sourceRecordId()); row.put("recordIndex", selected.recordIndex());
+                row.put("provenance", selected.sourceProvenance().toMap());
+            }
+            row.put("caseLog", item.caseLogPath() == null ? null : OperationResult.display(item.caseLogPath(), request.packageRoot()));
+            caseRows.add(row);
+            if (item.status() != att.core.ResultStatus.PASS && item.status() != att.core.ResultStatus.SKIPPED) {
+                Map<String,Object> failure = new LinkedHashMap<String,Object>();
+                failure.put("caseId", item.caseId()); failure.put("definitionId", item.definitionId());
+                failure.put("status", item.status().name()); failure.put("caseLog", row.get("caseLog")); failures.add(failure);
+            }
+        }
+        Map<String,Object> summary = new LinkedHashMap<String,Object>();
+        summary.put("total", result.total()); summary.put("passed", result.passed());
+        summary.put("failed", result.failed()); summary.put("error", result.error());
+        summary.put("skipped", result.skipped()); summary.put("invalid", result.invalid());
+        summary.put("resolved", resolution.resolvedCount()); summary.put("selected", resolution.selectedCount());
+        summary.put("definitions", resolution.toMap().get("definitions")); summary.put("cases", caseRows);
+        summary = withConfiguration(summary, cfg);
+        Path runDirectory = result.reportPath().getParent().getParent();
+        Map<String,String> runPaths = paths(
+                "report", OperationResult.display(result.reportPath(), request.packageRoot()),
+                "configuration", OperationResult.display(runDirectory.resolve("configuration.json"), request.packageRoot()),
+                "manifest", OperationResult.display(runDirectory.resolve("run.yaml"), request.packageRoot()),
+                "summary", OperationResult.display(runDirectory.resolve("ci/summary.json"), request.packageRoot()),
+                "junit", OperationResult.display(runDirectory.resolve("ci/junit.xml"), request.packageRoot()));
+        return new RunResult(result.runId(), result.status().name(), result.exitCode(), elapsed(started),
+                Collections.<att.validation.Diagnostic>emptyList(), runPaths, summary, failures);
+    }
     @Override public DebugResult debug(DebugRequest request) throws Exception {
         long serviceStarted=System.nanoTime();
         DebugStartupMetrics startupMetrics=request.startupMetrics();

@@ -738,12 +738,20 @@ final class ServerRuntime implements AutoCloseable {
             definition.set("scenario",scenario.deepCopy());
         } else {
             boolean nativeCase=input.path("nativeCaseDefinitionId").isTextual();
-            definition.put("schemaVersion",nativeCase?RunDefinition.NATIVE_CASE_VERSION:RunDefinition.VERSION);
+            boolean nativeSuite=input.path("nativeSuiteDefinitionIds").isArray();
+            definition.put("schemaVersion",nativeCase||nativeSuite?RunDefinition.NATIVE_CASE_VERSION:RunDefinition.VERSION);
             ObjectNode options=definition.putObject("options");options.put("debug","debug".equals(command)||input.path("diagnosticMode").asBoolean(false));
             if(nativeCase) {
                 ObjectNode target=definition.putObject("target");target.put("type","nativeCase");
                 target.put("definitionId",input.path("nativeCaseDefinitionId").asText());
                 ObjectNode selection=target.putObject("selection");selection.set("resolvedCaseIds",input.path("nativeResolvedCaseIds").deepCopy());
+                if(input.has("failFast"))options.set("failFast",input.get("failFast").deepCopy());
+                if(input.has("runId"))options.set("runId",input.get("runId").deepCopy());
+            } else if(nativeSuite) {
+                ObjectNode target=definition.putObject("target");target.put("type","nativeSuite");
+                target.set("definitionIds",input.path("nativeSuiteDefinitionIds").deepCopy());
+                ObjectNode selection=target.putObject("selection");
+                selection.set("qualifiedCaseIds",input.path("nativeSuiteQualifiedCaseIds").deepCopy());
                 if(input.has("failFast"))options.set("failFast",input.get("failFast").deepCopy());
                 if(input.has("runId"))options.set("runId",input.get("runId").deepCopy());
             } else if(input.path("target").isObject()) {
@@ -1123,8 +1131,8 @@ final class ServerRuntime implements AutoCloseable {
         if(!List.of("run","debug","load","validate").contains(command))throw new IllegalArgumentException("Unsupported job command");
         String packageId=required(input,"packageId");
         PackageRegistry.Snapshot registry=packageRegistry.snapshot();
-        if(!serverIssuedDraft&&"run".equals(command)&&"nativeCase".equals(input.path("target").path("type").asText()))
-            throw new IllegalArgumentException("Native Case RUN requires a validated /drafts/run request");
+        if(!serverIssuedDraft&&"run".equals(command)&&Set.of("nativeCase","nativeSuite").contains(input.path("target").path("type").asText()))
+            throw new IllegalArgumentException("Native Case and Suite RUNs require a validated /drafts/run request");
         LoadSchedule scheduledSource=null;String scheduledSourceOwner=null;JobSourceClosureStore.SourceSnapshot scheduledSnapshot=null;
         ScheduleSourceOverride sourceOverride=scheduleOccurrenceId==null?null:scheduledSourceOverrides.remove(scheduleOccurrenceId);
         if(sourceOverride!=null) {
@@ -1154,7 +1162,9 @@ final class ServerRuntime implements AutoCloseable {
                 ||input.has("expectedRevisionDigest")||input.has("expectedExecutionRevisionDigest")
                 ||input.has("expectedSchemaRegistryDigest")||input.has("draftResourceId")
                 ||input.has("configurationProvenance")||input.has("registeredPackageId")||input.has("sutMetricsSnapshot")
-                ||input.has("nativeCaseDefinitionId")||input.has("nativeResolvedCaseIds")||input.has("nativeCaseSourcePath")))
+                ||input.has("nativeCaseDefinitionId")||input.has("nativeResolvedCaseIds")||input.has("nativeCaseSourcePath")
+                ||input.has("nativeSuiteDefinitionIds")||input.has("nativeSuiteQualifiedCaseIds")
+                ||input.has("nativeSuiteSourcePaths")))
             throw new IllegalArgumentException("Inline execution fields require a server-issued draft");
         Map<String,Object> submittedSutSnapshot=null;
         if(input.has("sutMetricsSnapshot")) {
@@ -1233,6 +1243,15 @@ final class ServerRuntime implements AutoCloseable {
         request.runId=safeText(request.runId,128,"runId");request.debugId=safeText(request.debugId,128,"debugId");request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");
         request.scenario=safeRelative(request.scenario,"scenario");request.debugInput=safeRelative(request.debugInput,"debugInput");
         request.nativeCaseSourcePath=safeRelative(request.nativeCaseSourcePath,"nativeCaseSourcePath");
+        if(request.nativeSuiteSourcePaths!=null) {
+            Map<String,String> safeSources=new LinkedHashMap<>();
+            for(Map.Entry<String,String> entry:request.nativeSuiteSourcePaths.entrySet()) {
+                String definitionId=safeText(entry.getKey(),126,"nativeSuiteSourcePaths.definitionId");
+                String path=safeRelative(entry.getValue(),"nativeSuiteSourcePaths."+definitionId);
+                validatePackagePath(root,path,"nativeSuiteSourcePaths."+definitionId);safeSources.put(definitionId,path);
+            }
+            request.nativeSuiteSourcePaths=safeSources;
+        }
         request.unsafeFailureDetails=false;
         request.suites=safePaths(request.suites,"suites");
         validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
@@ -1246,6 +1265,17 @@ final class ServerRuntime implements AutoCloseable {
                 throw new IllegalArgumentException("Native Case RUN requires an exact server-validated v2 draft");
         } else if(request.nativeResolvedCaseIds!=null||request.nativeCaseSourcePath!=null) {
             throw new IllegalArgumentException("Native Case RUN fields require a server-validated v2 draft");
+        }
+        if(request.nativeSuiteDefinitionIds!=null) {
+            if(!serverIssuedDraft||!"run".equals(command)||request.nativeSuiteQualifiedCaseIds==null
+                    ||request.nativeSuiteQualifiedCaseIds.isEmpty()||request.nativeSuiteSourcePaths==null
+                    ||request.nativeSuiteSourcePaths.size()!=request.nativeSuiteDefinitionIds.size()
+                    ||!request.nativeSuiteSourcePaths.keySet().containsAll(request.nativeSuiteDefinitionIds)
+                    ||request.nativeCaseDefinitionId!=null||request.target!=null||request.caseIds!=null)
+                throw new IllegalArgumentException("Native Suite RUN requires an exact server-validated v2 draft");
+        } else if(request.nativeSuiteQualifiedCaseIds!=null||request.nativeSuiteTags!=null
+                ||request.nativeSuiteExcludeTags!=null||request.nativeSuiteAll!=null||request.nativeSuiteSourcePaths!=null) {
+            throw new IllegalArgumentException("Native Suite RUN fields require a server-validated v2 draft");
         }
         if("debug".equals(command)||("run".equals(command)&&request.target!=null))validateTarget(request.target);
         if("load".equals(command)&&request.target!=null)validateTarget(request.target);
@@ -3654,6 +3684,35 @@ final class ServerRuntime implements AutoCloseable {
             if(!(sourcePath instanceof String path)||path.isBlank())
                 throw new IllegalArgumentException("Native RUN validation did not retain its Definition source");
             input.put("nativeCaseSourcePath",safeRelative(path,"nativeCaseSourcePath"));
+        } else if(run.nativeSuiteTarget) {
+            WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
+            request.protocolVersion="att-worker/v1";request.command="inspect";request.packageRoot=root.toString();
+            request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.inspectionAction="native-suite-input";
+            request.config=workerConfigPath().toString();request.registeredPackageId=packageId;
+            request.packageRegistryRevision=registry.revision;
+            request.nativeSuiteDefinitionIds=run.nativeDefinitionIds;request.nativeSuiteQualifiedCaseIds=run.qualifiedCaseIds;
+            request.nativeSuiteTags=run.nativeSuiteTags;request.nativeSuiteExcludeTags=run.nativeSuiteExcludeTags;
+            request.nativeSuiteAll=run.nativeSuiteAll;
+            ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,packageId);
+            JSON.readerForUpdating(request).readValue(policy);
+            preview=executeInspection(root,request);revision=(String)preview.remove("revisionDigest");
+            Object selected=preview.get("selectedQualifiedCaseIds");
+            if(!(selected instanceof List<?> ids)||ids.isEmpty()||ids.size()>att.testcase.TestCaseSuiteResolver.MAX_SELECTED_CASES)
+                throw new IllegalArgumentException("Native Suite validation did not resolve a nonempty bounded selection");
+            input.set("nativeSuiteQualifiedCaseIds",JSON.valueToTree(selected));
+            input.put("nativeSuiteAll",false);input.set("nativeSuiteTags",JSON.createArrayNode());
+            input.set("nativeSuiteExcludeTags",JSON.createArrayNode());
+            Object sourcePaths=preview.remove("sourcePaths");
+            if(!(sourcePaths instanceof Map<?,?> paths)||paths.size()!=run.nativeDefinitionIds.size())
+                throw new IllegalArgumentException("Native Suite validation did not retain every Definition source");
+            Map<String,String> retainedPaths=new LinkedHashMap<>();
+            for(String definitionId:run.nativeDefinitionIds) {
+                Object path=paths.get(definitionId);
+                if(!(path instanceof String text)||text.isBlank())
+                    throw new IllegalArgumentException("Native Suite validation did not retain Definition source: "+definitionId);
+                retainedPaths.put(definitionId,safeRelative(text,"nativeSuiteSourcePaths."+definitionId));
+            }
+            input.set("nativeSuiteSourcePaths",JSON.valueToTree(retainedPaths));
         } else {
             WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
             request.protocolVersion="att-worker/v1";request.command="inspect";request.packageRoot=root.toString();
@@ -3737,13 +3796,21 @@ final class ServerRuntime implements AutoCloseable {
     private Map<String,Object> runDraftView(RunDraft draft) {
         Map<String,Object> view=new LinkedHashMap<>(draft.preview);
         boolean nativeCase=draft.workerInput.path("nativeCaseDefinitionId").isTextual();
-        view.put("draftId",draft.id);view.put("schemaVersion",nativeCase?RunDefinition.NATIVE_CASE_VERSION:RunDefinition.VERSION);view.put("executionType","run");
+        boolean nativeSuite=draft.workerInput.path("nativeSuiteDefinitionIds").isArray();
+        view.put("draftId",draft.id);view.put("schemaVersion",nativeCase||nativeSuite?RunDefinition.NATIVE_CASE_VERSION:RunDefinition.VERSION);view.put("executionType","run");
         view.put("packageId",draft.packageId);view.put("revisionDigest",draft.revision);view.put("expiresAt",draft.expiresAt.toString());
         if(nativeCase) {
             Map<String,Object> target=new LinkedHashMap<>();target.put("type","nativeCase");
             target.put("definitionId",draft.workerInput.path("nativeCaseDefinitionId").asText());
             view.put("target",target);
             view.put("selectedCaseIds",JSON.convertValue(draft.workerInput.path("nativeResolvedCaseIds"),List.class));
+        }
+        if(nativeSuite) {
+            Map<String,Object> target=new LinkedHashMap<>();target.put("type","nativeSuite");
+            target.put("definitionIds",JSON.convertValue(draft.workerInput.path("nativeSuiteDefinitionIds"),List.class));
+            target.put("selection",Map.of("qualifiedCaseIds",JSON.convertValue(draft.workerInput.path("nativeSuiteQualifiedCaseIds"),List.class)));
+            view.put("target",target);
+            view.put("selectedCaseIds",JSON.convertValue(draft.workerInput.path("nativeSuiteQualifiedCaseIds"),List.class));
         }
         Map<String,Object> options=new LinkedHashMap<>();options.put("debug",draft.workerInput.path("diagnosticMode").asBoolean());
         if(draft.workerInput.path("failFast").isBoolean())options.put("failFast",draft.workerInput.path("failFast").booleanValue());
@@ -5155,6 +5222,7 @@ final class ServerRuntime implements AutoCloseable {
         if(request==null)return;
         addSnapshotPath(paths,request.scenario);addSnapshotPath(paths,request.suiteDirectory);addSnapshotPath(paths,request.debugInput);
         addSnapshotPath(paths,request.nativeCaseSourcePath);
+        if(request.nativeSuiteSourcePaths!=null)for(String path:request.nativeSuiteSourcePaths.values())addSnapshotPath(paths,path);
         if(request.suites!=null)for(String path:request.suites)addSnapshotPath(paths,path);
     }
 
@@ -5535,7 +5603,7 @@ final class ServerRuntime implements AutoCloseable {
                             +" action="+String.valueOf(request.inspectionAction)+" code="+code);
             throw new InspectionValidationException(code,diagnostics);
         }
-        boolean draftInspection=("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"run-input".equals(request.inspectionAction)||"native-run-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
+        boolean draftInspection=("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"run-input".equals(request.inspectionAction)||"native-run-input".equals(request.inspectionAction)||"native-suite-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                 ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                 ||"load-templates".equals(request.inspectionAction)||"load-template-compose".equals(request.inspectionAction)
                 ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction)
@@ -6119,6 +6187,10 @@ final class ServerRuntime implements AutoCloseable {
             else if(schedule.runInput.get("nativeCaseDefinitionId") instanceof String definitionId) {
                 view.put("target",Map.of("type","nativeCase","definitionId",definitionId));
                 view.put("selectedCaseIds",schedule.runInput.get("nativeResolvedCaseIds"));
+            } else if(schedule.runInput.get("nativeSuiteDefinitionIds") instanceof List<?> definitionIds) {
+                view.put("target",Map.of("type","nativeSuite","definitionIds",definitionIds,
+                        "selection",Map.of("qualifiedCaseIds",schedule.runInput.get("nativeSuiteQualifiedCaseIds"))));
+                view.put("selectedCaseIds",schedule.runInput.get("nativeSuiteQualifiedCaseIds"));
             }
             else view.put("selectedCaseIds",schedule.runInput.get("caseIds"));
             Map<String,Object> runOptions=new LinkedHashMap<>();
@@ -6605,7 +6677,8 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=JSON.convertValue(schedule.runInput,WorkerRequest.class);
         request=applyWorkerPolicy(request);request.protocolVersion="att-worker/v1";request.command="inspect";
         request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.packageRoot=root.toString();
-        request.config=configPath.toString();request.inspectionAction=request.nativeCaseDefinitionId==null?"run-input":"native-run-input";
+        request.config=configPath.toString();request.inspectionAction=request.nativeSuiteDefinitionIds!=null?"native-suite-input":
+                request.nativeCaseDefinitionId==null?"run-input":"native-run-input";
         request.registeredPackageId=schedule.packageId;request.packageRegistryRevision=packageRegistry.snapshot().revision;
         ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,schedule.packageId);JSON.readerForUpdating(request).readValue(policy);
         Map<String,Object> inspected=executeInspection(root,request);
@@ -6614,6 +6687,11 @@ final class ServerRuntime implements AutoCloseable {
                     ||!(schedule.runInput.get("nativeResolvedCaseIds") instanceof List<?> saved)||!ids.equals(saved)
                     ||!java.util.Objects.equals(inspected.get("sourcePath"),schedule.runInput.get("nativeCaseSourcePath")))
                 throw new IllegalArgumentException("Scheduled Native Case RUN selection or source changed; review a replacement schedule");
+        } else if(request.nativeSuiteDefinitionIds!=null) {
+            if(!(inspected.get("selectedQualifiedCaseIds") instanceof List<?> ids)
+                    ||!(schedule.runInput.get("nativeSuiteQualifiedCaseIds") instanceof List<?> saved)||!ids.equals(saved)
+                    ||!java.util.Objects.equals(inspected.get("sourcePaths"),schedule.runInput.get("nativeSuiteSourcePaths")))
+                throw new IllegalArgumentException("Scheduled Native Suite RUN selection or source changed; review a replacement schedule");
         } else if(!(inspected.get("selectedCaseIds") instanceof List<?> ids)||!(schedule.runInput.get("caseIds") instanceof List<?> saved)
                 ||!new java.util.HashSet<>(ids).equals(new java.util.HashSet<>(saved)))
             throw new IllegalArgumentException("Scheduled RUN case selection changed; review a replacement schedule");

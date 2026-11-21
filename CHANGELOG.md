@@ -35,6 +35,12 @@
 - Pin the accepted Definition and Package source revision into the Job snapshot, reject stale drafts, and revalidate frozen selections for scheduled RUNs. Keep `att-execution/v1` Workbook/Sidecar selection and direct Template/Flow/Tool RUN behavior compatible. Native draft preview and fail-fast execution share S01 Definition/source order for multi-case selections.
 - This is a development candidate, not a release. V1 S02 scope is settled as inline resolution only; runtime Testdata bindings and generators remain future #388/S09 work. LOAD Case targets, Excel-backed native sources, and Debug/editor interoperability remain separate follow-ups. Do not bump the released product version or tag 4.5.0 before the release acceptance gates pass.
 
+# ATT 4.6.0 - development candidate (acceptance pending)
+
+- Add implicit Native Case Suite selection across one or more Test Case Definitions. Select all Cases, qualified Case IDs, or matching tags; exclude tags, preserve deterministic Definition/source order, and aggregate per-Case results through the existing RUN reports (#396).
+- Validate Suite selectors before execution, reject duplicate or stale identities and empty selections, and freeze the accepted qualified Case IDs and Definition source revisions in Server RUN drafts and Worker requests. Keep the legacy Workbook/Sidecar selection contract intact.
+- Do not introduce a persisted `suite.yaml` for these derived selections. LOAD Case targets, advanced Testdata/generator sources, and Debug interoperability remain deferred to #388 follow-ups S08/S09/S11. Keep #388 open, and do not bump POM versions or tag 4.6.0 before release acceptance.
+
 # ATT 4.4.0 - release candidate (2026-11-18; acceptance pending)
 
 - Add Package registration and immutable source revision contracts, source authoring and Change Set publication, plus Studio source editors for Package files, Testcases, and Testdata (#250–#255).
