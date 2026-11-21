@@ -52,7 +52,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 126,
-      "pattern": "^(?!(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\.|$))[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$",
+      "pattern": "^(?!.*(?:^|\\.)(?:[cC][oO][nN]|[pP][rR][nN]|[aA][uU][xX]|[nN][uU][lL]|[cC][oO][mM][1-9]|[lL][pP][tT][1-9])(?:\\.|$))[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$",
       "description": "Package-scoped, case-preserving ID. The path and filename are not part of identity."
     },
     "flowId": {
@@ -64,7 +64,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 128,
-      "pattern": "^(?!(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$)[A-Za-z0-9_-]+$",
+      "pattern": "^(?!(?:[cC][oO][nN]|[pP][rR][nN]|[aA][uU][xX]|[nN][uU][lL]|[cC][oO][mM][1-9]|[lL][pP][tT][1-9])$)[A-Za-z0-9_-]+$",
       "description": "One path-safe, case-preserving Resolved Case ID segment."
     },
     "caseIdExpression": {

@@ -40,9 +40,14 @@ class TestCaseDefinitionSchemaTest {
         assertInvalid(root, schema, "invalid-inline-steps.yaml");
         assertInvalid(root, schema, "invalid-empty-records.yaml");
         assertInvalid(root, schema, "invalid-flow-ref.yaml");
+        assertInvalid(root, schema, "invalid-unsupported-data-source-type.yaml");
         assertInvalid(root, schema, "invalid-data-columns-map.yaml");
         assertInvalid(root, schema, "invalid-runtime-input-root.yaml");
         assertInvalid(root, schema, "invalid-inline-report-template.yaml");
+        assertInvalid(root, schema, "invalid-reserved-case-id-lowercase.yaml");
+        assertInvalid(root, schema, "invalid-reserved-case-id-mixed-case.yaml");
+        assertInvalid(root, schema, "invalid-reserved-definition-id-lowercase.yaml");
+        assertInvalid(root, schema, "invalid-reserved-definition-id-mixed-case.yaml");
     }
 
     @Test void recordsDuplicateIdsAsFutureResolverSemantics() throws Exception {
