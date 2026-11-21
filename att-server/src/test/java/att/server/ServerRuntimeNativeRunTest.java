@@ -258,6 +258,114 @@ class ServerRuntimeNativeRunTest {
         }
     }
 
+    @Test void nativeCaseReplayStrictRejectsMutationAndCurrentRetainsSelectionWithLineage() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("allowed"));
+        Path packageRoot=Files.createDirectories(allowed.resolve("p"));
+        Path flow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+                .resolve("flow.yaml");
+        Files.createDirectories(packageRoot.resolve("testcase/payments/transfer"));
+        Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
+                +"description: Native Case replay fixture\nactions:\n"
+                +"  verify: {type: assert, assert: '#{${EXEC.INPUT.amount} <= 130}'}\n"
+                +"  log: {type: log, message: 'amount=${EXEC.INPUT.amount}'}\n");
+        Path definition=packageRoot.resolve("testcase/payments/transfer/testcase.yaml");
+        String originalDefinition=definitionYaml(7,13);
+        Files.writeString(definition,originalDefinition);
+
+        Path runtimeConfig=Files.createDirectories(temp.resolve("runtime/config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path data=temp.resolve("server-data"),serverConfig=temp.resolve("server.yaml");
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
+                +"\n  auth: {mode: local}\n  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"workers: {maxConcurrent: 1, queuedLimit: 2}\npackages:\n  allowedRoots: ["
+                +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
+        Path libs=Files.createDirectories(temp.resolve("libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
+            ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            Map<String,Object> acceptedDraft=runtime.createRunDraft(nativeRun("first"),"alice");
+            assertDraftSelection(acceptedDraft);
+            Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",acceptedDraft.get("draftId"))),"alice","alice");
+            String original=String.valueOf(accepted.get("jobId"));
+            Map<String,Object> originalResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,original);
+            assertEquals("PASS",((Map<?,?>)originalResult.get("job")).get("status"),originalResult.toString());
+            String originalRevision=JobExecutionSpec.parse(runtime.store.executionSpec(original).get("spec")).revision();
+            long jobsBeforeReplay=runtime.jobs.size();
+
+            Files.writeString(definition,definitionYaml(70,13));
+            ServerRuntime.JobConflictException strict=assertThrows(ServerRuntime.JobConflictException.class,
+                    ()->runtime.createJobReplayDraft(original,"alice",
+                            ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","strict"))),
+                    "Strict native Case replay must reject a mutated Package revision");
+            assertEquals("ATT-SERVER-REPLAY-REVISION-CONFLICT",strict.code);
+            assertEquals(jobsBeforeReplay,runtime.jobs.size(),"A rejected strict replay must not create a Job");
+
+            Map<String,Object> review=runtime.createJobReplayDraft(original,"alice",
+                    ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
+            assertEquals("att-job-replay-draft/v1",review.get("schemaVersion"));
+            assertEquals("current",review.get("sourcePolicy"));
+            assertEquals(original,review.get("sourceJobId"));
+            assertEquals(originalRevision,review.get("originalRevision"));
+            assertNotEquals(originalRevision,review.get("currentRevision"));
+            assertNotNull(review.get("intentId"),"A valid current-source native replay must include a confirmation intent");
+            assertEquals(List.of("first"),((Map<?,?>)review.get("preview")).get("selectedCaseIds"),
+                    "Current-source replay must retain the original local Case ID selection");
+            assertEquals("first",ServerRuntime.JSON.valueToTree(review.get("definition")).path("target")
+                    .path("selection").path("resolvedCaseIds").get(0).asText());
+
+            Map<String,Object> rerun=runtime.rerunJob(original,replayConfirmation(review,true,"current"),"alice");
+            String rerunId=String.valueOf(rerun.get("jobId"));
+            assertEquals(original,runtime.jobRecord(rerunId).get("rerunOfJobId"));
+            assertEquals(rerunId,runtime.rerunJob(original,replayConfirmation(review,true,"current"),"alice").get("jobId"),
+                    "Confirming the same replay intent is idempotent");
+            JobExecutionSpec rerunSpec=JobExecutionSpec.parse(runtime.store.executionSpec(rerunId).get("spec"));
+            assertEquals("current",rerunSpec.value.path("replay").path("sourcePolicy").asText());
+            assertEquals(originalRevision,rerunSpec.value.path("replay").path("originalRevision").asText());
+            assertEquals(review.get("currentRevision"),rerunSpec.value.path("replay").path("effectiveRevision").asText());
+            assertEquals(List.of("first"),runtime.jobs.get(rerunId).request.nativeResolvedCaseIds);
+            Map<String,Object> rerunResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,rerunId);
+            assertEquals("PASS",((Map<?,?>)rerunResult.get("job")).get("status"),rerunResult.toString());
+            try(ZipFile archive=new ZipFile(awaitArtifactArchive(runtime,rerunId).toFile())) {
+                List<String> caseLogs=new ArrayList<>();var entries=archive.entries();
+                while(entries.hasMoreElements()) {
+                    ZipEntry entry=entries.nextElement();
+                    if(!entry.isDirectory()&&entry.getName().endsWith("/case.log"))
+                        caseLogs.add(read(archive.getInputStream(entry)));
+                }
+                assertEquals(1,caseLogs.size(),"Current-source replay executes only the retained native Case");
+                assertTrue(caseLogs.get(0).matches("(?s).*\\bamount=70\\b.*"),
+                        "Current-source replay must execute the mutated Definition: "+caseLogs.get(0));
+                assertFalse(caseLogs.get(0).matches("(?s).*\\bamount=7\\b.*"),
+                        "Current-source replay must not reuse the original accepted amount: "+caseLogs.get(0));
+            }
+
+            Files.writeString(definition,definitionYamlWithoutFirst(13));
+            long jobsBeforeInvalid=runtime.jobs.size();
+            Map<String,Object> invalid=runtime.createJobReplayDraft(original,"alice",
+                    ServerRuntime.JSON.valueToTree(Map.of("sourcePolicy","current")));
+            assertEquals("invalid",invalid.get("validationState"));
+            assertEquals("ATT-SERVER-REPLAY-VALIDATION-FAILED",invalid.get("errorCode"));
+            assertNull(invalid.get("intentId"),
+                    "A removed selected Case must not receive a runnable confirmation intent");
+            assertEquals("first",ServerRuntime.JSON.valueToTree(invalid.get("definition")).path("target")
+                    .path("selection").path("resolvedCaseIds").get(0).asText(),
+                    "Invalid current-source replay retains the original selection instead of guessing another Case");
+            assertFalse(((List<?>)invalid.get("diagnostics")).isEmpty());
+            assertEquals(jobsBeforeInvalid,runtime.jobs.size(),
+                    "An invalid native Case replay review must not create a Job");
+            assertEquals(originalRevision,JobExecutionSpec.parse(runtime.store.executionSpec(original).get("spec")).revision(),
+                    "Replay validation must not rewrite the original Job execution spec");
+        }
+    }
+
     private static JsonNode nativeRun(String localCaseId) {
         return nativeRun("payments.transfer",localCaseId);
     }
@@ -313,6 +421,20 @@ class ServerRuntimeNativeRunTest {
                 +"    - recordId: first\n      data: {amount: "+firstAmount+"}\n"
                 +"    - recordId: second\n      data: {amount: "+secondAmount+"}\n"
                 +"inputs:\n  amount:\n    from: DATA.amount\n";
+    }
+
+    private static String definitionYamlWithoutFirst(int secondAmount) {
+        return "schemaVersion: att-testcase/v1\nid: payments.transfer\nname: Transfer\nflow: payments.transfer.v1\n"
+                +"dataSource:\n  type: inline\n  records:\n"
+                +"    - recordId: second\n      data: {amount: "+secondAmount+"}\n"
+                +"inputs:\n  amount:\n    from: DATA.amount\n";
+    }
+
+    private static JsonNode replayConfirmation(Map<String,Object> review,boolean confirm,String sourcePolicy) {
+        var body=ServerRuntime.JSON.createObjectNode();body.put("confirm",confirm);
+        Object intent=review.get("intentId");if(intent!=null)body.put("intentId",String.valueOf(intent));
+        if(sourcePolicy!=null)body.put("sourcePolicy",sourcePolicy);
+        return body;
     }
 
     private static String read(InputStream input) throws Exception {
