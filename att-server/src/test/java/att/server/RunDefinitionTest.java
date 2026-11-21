@@ -102,6 +102,21 @@ class RunDefinitionTest {
         assertThrows(IllegalArgumentException.class,()->parse(history));
         assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,history));
     }
+    @Test void nativeSuiteV2SchemaAndParserRejectIneffectiveSelectionAndC1Tags() throws Exception {
+        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
+        String empty=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],"
+                +"\"selection\":{\"all\":false}}}");
+        assertThrows(IllegalArgumentException.class,()->parse(empty));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                ()->att.validation.JsonSchemaVerifier.verifyJson(schema,empty));
+
+        String c1Tag="smoke"+String.valueOf((char)0x85);
+        String control=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],"
+                +"\"selection\":{\"tags\":[\""+c1Tag+"\"]}}}");
+        assertThrows(IllegalArgumentException.class,()->parse(control));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                ()->att.validation.JsonSchemaVerifier.verifyJson(schema,control));
+    }
     @Test void nativeSuiteV2QualifiedSelectorLimitMatchesThePublicSchema() throws Exception {
         java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
         String atLimit=nativeSuiteQualifiedIdsRequest(att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS);
