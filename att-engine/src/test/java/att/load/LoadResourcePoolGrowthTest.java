@@ -43,6 +43,11 @@ class LoadResourcePoolGrowthTest {
             second.get(2L, TimeUnit.SECONDS);
             assertEquals(2, peakFactories.get());
             assertEquals(2, pool.total());
+            // Borrow/release can briefly leave accounting unsettled under contention; wait for both returns.
+            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(1L);
+            while (System.nanoTime() < until && (pool.active() != 0 || pool.idle() != 2)) {
+                Thread.yield();
+            }
             assertEquals(2, pool.idle());
             assertEquals(0, pool.active());
         } finally {
