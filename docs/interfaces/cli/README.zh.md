@@ -2,7 +2,7 @@
 
 # CLI interfaces
 
-ATT 4.4.0 候選版本包括 legacy Local CLI 及 ATT Remote 相容用戶端。
+ATT 4.4.1 候選版本包括 legacy Local CLI 及 ATT Remote 相容用戶端。
 
 | Interface | 狀態 | 指南 |
 |---|---|---|

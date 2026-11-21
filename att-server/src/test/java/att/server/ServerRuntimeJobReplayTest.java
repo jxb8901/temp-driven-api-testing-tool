@@ -545,7 +545,7 @@ class ServerRuntimeJobReplayTest {
         while(Instant.now().isBefore(deadline)) {
             runtime.packageRegistry.pollNow();
             PackageRegistry.Snapshot snapshot=runtime.packageRegistry.snapshot();boolean matches=snapshot.packages.size()==entries.size();
-            for(Map.Entry<String,Path> entry:entries.entrySet())matches&=entry.getValue().toAbsolutePath().normalize()
+            for(Map.Entry<String,Path> entry:entries.entrySet())matches&=entry.getValue().toRealPath()
                     .equals(snapshot.packages.get(entry.getKey()));
             if(matches)return;
             Thread.sleep(50);

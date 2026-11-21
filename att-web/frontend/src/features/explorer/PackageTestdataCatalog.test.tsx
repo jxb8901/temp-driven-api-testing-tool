@@ -272,7 +272,46 @@ describe('PackageTestdataWorkspace', () => {
     expect(host.textContent).not.toContain('EXACT-STAGED-BYTES');
   });
 
-  it('keeps Testdata browsing available while withholding owner-only editing from non-owners', async () => {
+  it('blocks guarded navigation while a source Change Set is still being staged', async () => {
+    const { api, stageSourceChangeSet, sourceChangeSetAction } = guardedCatalogApi();
+    let releaseStage!: () => void;
+    const stageGate = new Promise<void>(resolve => { releaseStage = resolve; });
+    stageSourceChangeSet.mockImplementationOnce(async (_domain, _scope, baseSourceRevision, registryRevision, operations) => {
+      await stageGate;
+      return { changeSetId: 'cs-inflight', domain: 'PACKAGE_SOURCE', scopeId: 'payments', state: 'draft',
+        baseSourceRevision, registryRevision, changedFiles: operations.map(operation => ({
+          operation: operation.operation, path: operation.path, contentDiff: ['+ staged'],
+        })) };
+    });
+    const edited = 'schemaVersion: att-testdata/v1.0\nid: descriptor-a\nrecords: [{id: IN-FLIGHT} ]\n';
+    setInitialGuardedRoute();
+    await act(async () => root.render(<GuardedHarness api={api} />)); await flushRoute(); await flushRoute();
+    clickButton('Edit');
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]');
+    if (!editor) throw new Error('The default descriptor source editor was not rendered');
+    setInputValue(editor, edited);
+    clickButton('Add current file to candidate'); await confirmAction();
+    const stageButton = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Stage candidate (1 files)');
+    expect(stageButton?.disabled).toBe(false);
+    clickButton('Stage candidate (1 files)'); await flush();
+    expect(stageSourceChangeSet).toHaveBeenCalledTimes(1);
+
+    clickDescriptor('descriptor-b');
+    await confirmGuardNavigation();
+    expect(host.querySelector('output[aria-label="Current route"]')?.textContent).not.toContain('descriptor=descriptor-b');
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('source action is still running');
+    expect(sourceChangeSetAction).not.toHaveBeenCalled();
+
+    await act(async () => { releaseStage(); await stageGate; });
+    await flush(); await flush();
+    expect(host.textContent).toContain('Draft cs-inflight');
+    clickDescriptor('descriptor-b');
+    await confirmGuardNavigation();
+    expect(sourceChangeSetAction).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('output[aria-label="Current route"]')?.textContent).toContain('descriptor=descriptor-b');
+  });
+
+  it('keeps Testdata browsing available while withholding editing from non-editors', async () => {
     const managedSource = vi.fn(async () => ({
       available: true, present: true, logicalPath: 'testdata/accounts.yaml', format: 'yaml', text: 'records: []',
       sourceEtag: 'owner-etag', baseSourceRevision: 'owner-revision',

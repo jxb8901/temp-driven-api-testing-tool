@@ -822,7 +822,7 @@ final class ChangeSetPublisher implements AutoCloseable {
             draft.validationRevision = null;
             draft.validationRevisions = null;
             draft.reviewed = false;
-            audit.record(actor, "SOURCE_CHANGE_SET_SNAPSHOT_GENERATE", domain, scopeId,
+            audit.record(actor, "SOURCE_TESTCASE_SNAPSHOT_GEN", domain, scopeId,
                     auditDetail(requestId, "changeSetId=" + id + " workbook=" + workbook
                             + " snapshot=" + target + " outcome=GENERATED"));
             Map<String, Object> result = view(draft, "draft");

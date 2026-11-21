@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.4.0 -->
+<!-- att-doc-status: current release=4.4.1 -->
 
 # 在 Studio 編輯及發布來源
 
@@ -7,7 +7,7 @@
 ## 開始前
 
 - 登入擁有該 Package 或 Runtime Config 的 ATT Server。
-- 編輯 Package source 時，帳戶必須啟用並具有該 Package 的 source-editing 權限。`default` Package 不可編輯。
+- 編輯 Package source 時，使用 active `USER` account；login ID 必須與已登錄 Package ID 相同，或列於該 Package 的 trusted registry `editors`。`default` Package 不可編輯。
 - 編輯共用 Runtime Config 時，使用 `ADMIN` 帳戶。Server 必須啟用 `server.centralConfigurationEditingEnabled: true`；變更此部署設定需要重啟 Server。
 - 將相關 source 檔案放在所選 Package。Global Runtime Config 管理共用 Data Source connection 及 security policy；每個 Package 擁有自己的 Metric Sources、Groups 及 Profiles。
 - 執行 Worker acceptance 時，使用支援的隔離環境：Linux 必須在 `PATH` 提供 `bwrap` 並啟用 user namespace，或 macOS 必須提供 `/usr/bin/sandbox-exec`。若無法建立隔離邊界，Worker execution 會 fail closed；詳見 [source change 與 Worker isolation contract](../../system-design/source-change-contracts.md)。
@@ -35,6 +35,8 @@ Server 負責權限、validation、revision 檢查及 publication。`Published` 
 6. 載入 Manifest history 以檢查歷史 revision。**Stage rollback** 會以保留的 revision 建立新 draft；必須驗證、檢閱並發布後才會成為目前版本。發布後，可在 **Published Manifest revision (advanced)** 檢視 revision digest。
 
 若發布回傳 `409`，表示候選版本建立後 source 已變更。捨棄過期 draft、重新載入 Manifest，並將修改套用至新的候選版本。
+
+例如 Alice 與 Bob 可同時以共享 Package 的同一 revision 暫存不同修改。若 Alice 先發布，Bob 的舊 draft 在發布時會回傳 `409`。Bob 應捨棄舊 draft，載入目前 source 及 history，將預期修改整合至最新 revision，再建立、驗證、檢閱及發布新候選版本。
 
 ## 直接修改檔案與已發布狀態
 
@@ -116,7 +118,7 @@ Server 會在每個已登錄的 Package 或 central Config root 旁建立私人 
 | 狀態 | 處理方式 |
 |---|---|
 | `401` | 重新登入，再重新載入 source。 |
-| `403` | 請 Package owner 或 Server 管理員確認目前角色及 source-editing policy。 |
+| `403` | 請 Package owner 或 assigned editor 確認 registry assignment，或請 Server 管理員確認目前角色及 source-editing policy。 |
 | `409` | 載入最新 source，比較保留的 draft 或本機文字，再暫存新的候選版本。 |
 | `413` | 將 source 或 upload 縮減至 Server 設定的大小限制內。 |
 | `422` | 閱讀 validation diagnostics，修正指定 source 後再次驗證。 |

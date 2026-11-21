@@ -10,6 +10,7 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,6 +31,38 @@ class PackageRegistryTest {
             assertEquals(initial.revision,reformatted.revision);
             assertEquals(initial.generation,reformatted.generation);
             assertEquals(Set.of("alpha"),reformatted.packages.keySet());
+        }
+    }
+
+    @Test void editorGrantChangesAdvanceTheRegistryRevisionAndInvalidAssignmentsKeepLastKnownGood() throws Exception {
+        Fixture fixture=fixture();
+        try(PackageRegistry registry=new PackageRegistry(fixture.config,Clock.systemUTC(),Duration.ofMillis(15),Duration.ofMillis(300),
+                Runnable::run,(before,after)->{})) {
+            PackageRegistry.Snapshot initial=registry.snapshot();
+            assertEquals(List.of(),initial.editors.get("alpha"));
+            writeYaml(fixture,registryYaml(fixture,Map.of("alpha",fixture.alpha),Map.of("alpha",List.of("alice","bob"))));
+            settle(registry);
+            PackageRegistry.Snapshot granted=registry.snapshot();
+            assertEquals(initial.generation+1,granted.generation);
+            assertNotEquals(initial.revision,granted.revision);
+            assertEquals(List.of("alice","bob"),granted.editors.get("alpha"));
+            assertEquals(fixture.alpha.toRealPath(),granted.packages.get("alpha"));
+
+            writeYaml(fixture,registryYaml(fixture,Map.of("alpha",fixture.alpha),Map.of("alpha",List.of("alice"))));
+            settle(registry);
+            PackageRegistry.Snapshot revoked=registry.snapshot();
+            assertEquals(granted.generation+1,revoked.generation);
+            assertNotEquals(granted.revision,revoked.revision);
+            assertEquals(List.of("alice"),revoked.editors.get("alpha"));
+
+            String malformedNullEditors=registryYaml(fixture,Map.of("alpha",fixture.alpha),Map.of("alpha",List.of("alice")))
+                    .replace("editors: [alice]","editors: null");
+            writeYaml(fixture,malformedNullEditors);
+            settle(registry);
+            PackageRegistry.Snapshot invalid=registry.snapshot();
+            assertEquals("Invalid",invalid.status);
+            assertEquals(revoked.revision,invalid.revision);
+            assertEquals(List.of("alice"),invalid.editors.get("alpha"));
         }
     }
 
@@ -231,12 +264,21 @@ class PackageRegistryTest {
     }
 
     private String registryYaml(Fixture fixture,Map<String,Path> entries) {
+        return registryYaml(fixture,entries,Map.of());
+    }
+
+    private String registryYaml(Fixture fixture,Map<String,Path> entries,Map<String,List<String>> editors) {
         StringBuilder yaml=new StringBuilder("server:\n  dataDir: '").append(temp.resolve("data")).append("'\n  runtimeConfigPath: '")
                 .append(fixture.runtimeConfig).append("'\nworkers: {}\npackages:\n  allowedRoots: ['").append(fixture.packageRoot).append("']\n");
         if(entries.isEmpty())yaml.append("  entries: {}\n");
         else {
             yaml.append("  entries:\n");
-            entries.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry->yaml.append("    ").append(entry.getKey()).append(": '").append(entry.getValue()).append("'\n"));
+            entries.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry->{
+                List<String> assigned=editors.get(entry.getKey());
+                if(assigned==null||assigned.isEmpty())yaml.append("    ").append(entry.getKey()).append(": '").append(entry.getValue()).append("'\n");
+                else yaml.append("    ").append(entry.getKey()).append(":\n      path: '").append(entry.getValue())
+                        .append("'\n      editors: [").append(String.join(", ",assigned)).append("]\n");
+            });
         }
         return yaml.toString();
     }

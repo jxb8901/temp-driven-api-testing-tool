@@ -2028,6 +2028,7 @@ final class ServerRuntime implements AutoCloseable {
         return catalog;
     }
     Map<String,Object> packageSutMetricsResource(String packageId,String kind,String id,String principal) throws Exception {
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();
         Path root=packageRoot(packageId);if(root==null)throw new NotFoundException();validatePackageRoot(root);
         // Raw resource YAML can contain query expressions and Package implementation details. The
         // safe catalog endpoint applies Data Source reader policy; source text is limited to the
@@ -2063,9 +2064,13 @@ final class ServerRuntime implements AutoCloseable {
         att.config.PackageConfig.PackageMetricResource currentResource=current.get(id);
         if(currentResource==null||!resource.relativePath().equals(currentResource.relativePath())||!digest.equals(currentResource.digest()))
             throw new StaleCursorException();
+        if(!registry.revision.equals(packageRegistry.snapshot().revision))throw new StaleCursorException();
+        // The role or registry assignment may have changed while the file was read. Never return
+        // raw YAML with only canEdit=false; the source itself is privileged data.
+        if(!canEditPackageSource(packageId,principal))throw new NotFoundException();
         Map<String,Object> view=new LinkedHashMap<>();view.put("schemaVersion","att-package-sut-metrics-resource/v1");
         view.put("packageId",packageId);view.put("kind",kind);view.put("id",id);view.put("path",resource.relativePath());
-        view.put("resourceDigest",digest);view.put("source",source);view.put("canEdit",canEditPackageSource(packageId,principal));
+        view.put("resourceDigest",digest);view.put("source",source);view.put("canEdit",true);
         return view;
     }
     private static byte[] readBoundedPackageMetricResource(Path file) throws Exception {
@@ -2080,8 +2085,7 @@ final class ServerRuntime implements AutoCloseable {
         return bytes;
     }
     private boolean canEditPackageSource(String packageId,String principal) throws Exception {
-        return config.authenticationRequired&&config.packageConfiguration.sourceEditingEnabled&&principal!=null
-                &&principal.equals(packageId)&&isOperationalPrincipal(principal);
+        return canEditPackageContent(packageId,principal);
     }
     Map<String,Object> saveSutMetricSource(Map<String,Object> value) throws Exception { return sutMetrics.upsertSource(value); }
     Map<String,Object> saveSutMetricProfile(Map<String,Object> value) throws Exception { return sutMetrics.upsertProfile(value); }
@@ -5141,12 +5145,13 @@ final class ServerRuntime implements AutoCloseable {
         return att.server.api.ConfigurationSnapshot.copy((Map<?,?>)preview.get("configuration"));
     }
     private Path manifestEditableRoot(String packageId,String principal) throws Exception {
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+        Path root=registry.packages.get(packageId);
+        if(root==null)throw new PackageManifestPublisher.Missing();
         if(!canEditPackageContent(packageId,principal)) {
             store.audit(principal==null?"anonymous":principal,"PACKAGE_MANIFEST_DENIED",null,packageId,"source editing is not authorized");
             throw new PackageManifestPublisher.Denied();
         }
-        PackageRegistry.Snapshot registry=packageRegistry.snapshot();
-        Path root=registry.packages.get(packageId);
         Path registered=sourceFileTransaction.registeredRoot(ChangeSetPublisher.PACKAGE_SOURCE,packageId);
         if(root==null||registered==null||!root.equals(registered)
                 ||Files.isSymbolicLink(root)||!Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS)
@@ -5159,18 +5164,24 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     boolean canEditPackageContent(String packageId,String loginId) throws Exception {
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+        if(packageId==null||!registry.packages.containsKey(packageId))return false;
         boolean activeUser=false;
         if(config.authenticationRequired&&loginId!=null&&!loginId.isBlank()
                 &&!RequestIdentity.ANONYMOUS.equals(loginId)) {
             if("local".equals(config.authMode))activeUser=isActiveUserOperator(loginId);
             else {
                 PackageSourceAuthority authority=packageSourceAuthority.get();
+                // Do not infer USER status from an operational principal. In container auth
+                // modes that predicate intentionally includes ADMIN identities, while package
+                // editing is restricted to an active USER explicitly assigned to this package.
                 activeUser=authority!=null&&authority.loginId.equals(loginId)
-                        ?authority.activeUserCheck.isActiveUser(loginId):isOperationalPrincipal(loginId);
+                        &&authority.activeUserCheck.isActiveUser(loginId);
             }
         }
         return SourceAuthorizationPolicy.canEditPackageContent(config.authenticationRequired,
-                config.packageConfiguration.sourceEditingEnabled,packageId,loginId,activeUser);
+                config.packageConfiguration.sourceEditingEnabled,packageId,loginId,activeUser,
+                registry.editors.getOrDefault(packageId,List.of()));
     }
 
     <T> T withPackageSourceAuthority(String loginId,PackageSourceActiveUserCheck activeUserCheck,
