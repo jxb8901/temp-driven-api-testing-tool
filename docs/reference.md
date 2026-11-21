@@ -229,7 +229,7 @@ A Testcase is one normalized workbook row; Run creates one Case execution from e
 3. Validate the package with ./att.sh validate --package.
 4. Use [Debug](reference/execution-modes/debug.md) to isolate a Template, Flow, or Tool, then use [Run](reference/execution-modes/run.md) to create Case executions.
 
-The following sections define each authoring contract. See [Advanced workbook and Snapshot details](#advanced-workbook-and-snapshot-details) for formula cells, multi-row headers, and XML serialization.
+The workflow above describes legacy workbook authoring. The Native Test Case Definition workflow is documented below. See [Advanced workbook and Snapshot details](#advanced-workbook-and-snapshot-details) for formula cells, multi-row headers, and XML serialization.
 
 ### Distinguish Testcases from Case executions
 
@@ -250,9 +250,9 @@ This page explains the normal day-to-day workflow in the same order that data mo
 
 ### Native Test Case Definition
 
-The 4.5.0 development candidate registers `att-testcase/v1` and supports discovery, resolution, and RUN for singleton and multi-record inline Definitions through the Native Case CLI and validated Server draft flow. Excel-backed Definitions retain their S01 schema contract but require the S04 Excel adapter; they are not executable by this inline resolver. Existing workbook/Sidecar/Snapshot RUN remains supported.
+The 4.6.0 development candidate registers `att-testcase/v1` and supports discovery, resolution, and RUN for singleton, inline, and Excel-backed Definitions through the Native Case CLI and validated Server draft flow. The native Excel adapter reads a package-contained `.xlsx` workbook without modifying it, reuses the legacy Sidecar header and `dataColumns` mapping rules, and records workbook revision, sheet, row, and column provenance on each resolved Case. It accepts at most 32 MiB per workbook and 10,000 resolved rows; preview output remains bounded. It does not create or update the legacy XML Snapshot. Existing workbook/Sidecar/Snapshot RUN remains supported.
 
-The v1 contract defines a singleton inline Case with a complete typed `inputs` map and the fixed Resolved Case ID `default`, or a multi-record inline/Excel Data Source with stable source IDs. Definition IDs are Package-scoped, case-preserving dotted IDs; Resolved Case IDs are one path-safe segment. A `caseIdExpression` can override the resolved ID using only one `${DATA.key}` lookup. Empty, duplicate, malformed, missing, or colliding IDs and empty resolution results are errors; they never produce an all-PASS result.
+The v1 contract defines a singleton inline Case with a complete typed `inputs` map and the fixed Resolved Case ID `default`, or a multi-record inline/Excel Data Source with stable source IDs. Definition IDs are Package-scoped, case-preserving dotted IDs; Resolved Case IDs are one path-safe segment. Excel Case IDs must be literal text cells matching `[A-Za-z0-9_-]{1,128}`; formulas, numeric/date/boolean/error cells, blank markers, surrounding whitespace, reserved device names, and case-fold collisions are rejected. A `caseIdExpression` can override the resolved ID using only one `${DATA.key}` lookup. Empty, duplicate, malformed, missing, or colliding IDs and empty resolution results are errors; they never produce an all-PASS result.
 
 For data-driven Cases, omitted `inputs` means same-name projection from `DATA`; a supplied projection replaces that identity mapping and uses `{from: DATA.key}` or `{value: <typed value>}`. Excel `dataColumns` remains the `att-sidecar/v2.2` comma-separated string syntax, including aliases, `(yaml)` parsing, and quoted delimiters. Omitted or blank `dataColumns` selects no business columns into `DATA` (Case ID and tags selectors are never auto-exposed); declare `dataColumns` explicitly when Excel inputs are required. Excel `path` values must be portable Package-relative `.xlsx` paths. A source-workbook report template is only valid with an Excel source and always writes to a new workbook.
 
@@ -262,7 +262,7 @@ See the [active schema](../schemas/att-testcase-v1.schema.json), [single inline 
 
 #### Workbook, Sidecar, and Snapshot relationship
 
-Every `.xlsx` workbook requires a YAML sidecar and generated XML snapshot with the same basename in the same directory:
+In the legacy Workbook/Sidecar/Snapshot workflow, every `.xlsx` workbook requires a YAML sidecar and generated XML snapshot with the same basename in the same directory:
 
 ```text
 testcase/payment_regression.xlsx

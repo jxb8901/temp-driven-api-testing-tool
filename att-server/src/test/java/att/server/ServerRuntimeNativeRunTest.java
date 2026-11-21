@@ -1,6 +1,8 @@
 package att.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -35,6 +37,11 @@ class ServerRuntimeNativeRunTest {
         Path definition=packageRoot.resolve("testcase/payments/transfer/testcase.yaml");
         String original=definitionYaml(7,13);
         Files.writeString(definition,original);
+        Path excelDefinition=packageRoot.resolve("testcase/payments/excel/testcase.yaml");
+        Files.createDirectories(excelDefinition.getParent());
+        Files.writeString(excelDefinition,excelDefinitionYaml());
+        Path excelWorkbook=writeExcelWorkbook(packageRoot.resolve("testdata/native-cases.xlsx"));
+        byte[] originalExcel=Files.readAllBytes(excelWorkbook);
 
         Path runtimeConfig=Files.createDirectories(temp.resolve("runtime/config")).resolve("config.yaml");
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
@@ -152,6 +159,37 @@ class ServerRuntimeNativeRunTest {
                 assertTrue(runManifests.stream().anyMatch(name->name.contains("native-first")),
                         "The explicit runId is used for the native execution output");
             }
+
+            Map<String,Object> excelDraft=runtime.createRunDraft(nativeRun("payments.excel","beta"),"alice");
+            assertEquals(List.of("beta"),excelDraft.get("selectedCaseIds"));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> excelCases=(List<Map<String,Object>>)excelDraft.get("cases");
+            assertEquals(1,excelCases.size(),"Excel preview exposes only the explicitly selected Case");
+            assertEquals("payments.excel.beta",excelCases.get(0).get("qualifiedCaseId"));
+            assertEquals("beta",excelCases.get(0).get("sourceRecordId"));
+            Map<?,?> excelProvenance=(Map<?,?>)excelCases.get(0).get("provenance");
+            assertEquals("excel",excelProvenance.get("sourceType"));
+            assertEquals("Cases",excelProvenance.get("sheet"));
+            assertEquals(Integer.valueOf(3),excelProvenance.get("row"));
+            assertArrayEquals(originalExcel,Files.readAllBytes(excelWorkbook),"Native Excel draft validation must not mutate the source workbook");
+
+            Files.write(excelWorkbook,"changed after validation".getBytes(StandardCharsets.UTF_8));
+            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",excelDraft.get("draftId"))),"alice","alice"),
+                    "Changing the source workbook after preview makes the accepted draft stale");
+            Files.write(excelWorkbook,originalExcel);
+
+            Map<String,Object> acceptedExcelDraft=runtime.createRunDraft(nativeRun("payments.excel","beta"),"alice");
+            Map<String,Object> acceptedExcel=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",acceptedExcelDraft.get("draftId"))),"alice","alice");
+            String excelJobId=String.valueOf(acceptedExcel.get("jobId"));
+            Job excelJob=runtime.jobs.get(excelJobId);
+            assertEquals("payments.excel",excelJob.request.nativeCaseDefinitionId);
+            Path frozenExcel=Path.of(excelJob.request.sourceSnapshotDirectory).resolve("package/testdata/native-cases.xlsx");
+            assertArrayEquals(originalExcel,Files.readAllBytes(frozenExcel),"Accepted Native RUN must pin the exact workbook revision");
+            Map<String,Object> excelResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,excelJobId);
+            assertEquals("PASS",((Map<?,?>)excelResult.get("job")).get("status"),excelResult.toString());
+            assertNativeCaseStatus(runtime,excelJobId,"payments.excel.beta","PASS");
+            assertArrayEquals(originalExcel,Files.readAllBytes(excelWorkbook),"Native Excel RUN must leave the source workbook byte-identical");
 
             Files.writeString(definition,original);
             Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
@@ -435,6 +473,32 @@ class ServerRuntimeNativeRunTest {
         Object intent=review.get("intentId");if(intent!=null)body.put("intentId",String.valueOf(intent));
         if(sourcePolicy!=null)body.put("sourcePolicy",sourcePolicy);
         return body;
+    }
+
+    private static String excelDefinitionYaml() {
+        return "schemaVersion: att-testcase/v1\nid: payments.excel\nname: Excel cases\nflow: payments.transfer.v1\n"
+                +"dataSource:\n  type: excel\n  path: testdata/native-cases.xlsx\n  sheet: Cases\n"
+                +"  caseId: Case ID\n  dataColumns: amount=Amount\n"
+                +"inputs:\n  amount:\n    from: DATA.amount\n";
+    }
+
+    private static Path writeExcelWorkbook(Path path) throws Exception {
+        Files.createDirectories(path.getParent());
+        try(XSSFWorkbook workbook=new XSSFWorkbook()) {
+            org.apache.poi.ss.usermodel.Sheet sheet=workbook.createSheet("Cases");
+            Row header=sheet.createRow(0);
+            header.createCell(0).setCellValue("Case ID");
+            header.createCell(1).setCellValue("Amount");
+            String[] ids={"alpha","beta","gamma"};
+            int[] amounts={7,13,70};
+            for(int index=0;index<ids.length;index++) {
+                Row row=sheet.createRow(index+1);
+                row.createCell(0).setCellValue(ids[index]);
+                row.createCell(1).setCellValue(amounts[index]);
+            }
+            try(java.io.OutputStream output=Files.newOutputStream(path)){workbook.write(output);}
+        }
+        return path;
     }
 
     private static String read(InputStream input) throws Exception {

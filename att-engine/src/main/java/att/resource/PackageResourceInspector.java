@@ -10,6 +10,7 @@ import att.config.ToolConfig;
 import att.core.StageCaseData;
 import att.core.TestCase;
 import att.excel.ExcelTestSuiteLoader;
+import att.excel.ExcelDataSourceAdapter;
 import att.flow.FlowDefinition;
 import att.flow.FlowRegistry;
 import att.template.StageTemplate;
@@ -2604,6 +2605,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                     throw new ResourceLimitException("resourceInspector.maxNativeDefinitionTotalBytes",
                             MAX_NATIVE_DEFINITION_TOTAL_BYTES, totalBytes);
                 indexFile(index, resource.canonicalPath());
+                indexNativeExcelWorkbook(index, resource);
             }
         } catch (ResourceLimitException limit) {
             throw limit;
@@ -2611,6 +2613,25 @@ public final class PackageResourceInspector implements AutoCloseable {
             throw invalid;
         } catch (Exception error) {
             throw invalidResourceRoot("resources.testcaseRoot");
+        }
+    }
+
+    /** Adds native Excel source bytes to the package execution revision without loading legacy Sidecars. */
+    private void indexNativeExcelWorkbook(Index index, PackageResourceResolver.PackageResource definition) {
+        try {
+            Object parsed = YamlSupport.parse(new String(Files.readAllBytes(definition.canonicalPath()), StandardCharsets.UTF_8));
+            if (!(parsed instanceof Map<?,?>)) return;
+            Object rawSource = ((Map<?,?>) parsed).get("dataSource");
+            if (!(rawSource instanceof Map<?,?>)) return;
+            Map<?,?> source = (Map<?,?>) rawSource;
+            if (!"excel".equals(source.get("type")) || !(source.get("path") instanceof String)) return;
+            Path workbook = ExcelDataSourceAdapter.resolveWorkbookPath(resources, definition.logicalName(),
+                    (String) source.get("path"));
+            long size = Files.size(workbook);
+            if (size <= MAX_WORKBOOK_BYTES) indexFile(index, workbook);
+        } catch (Exception invalidOrUnavailableSource) {
+            // The native resolver owns user diagnostics for malformed or unsafe Excel mappings.
+            // A source that cannot be resolved here cannot be executed and is not revision input.
         }
     }
 

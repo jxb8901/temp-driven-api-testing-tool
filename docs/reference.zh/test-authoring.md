@@ -9,7 +9,7 @@ Testcase 是一個正規化 Workbook row；Run 會為每個選中的 row 建立�
 3. 使用 ./att.sh validate --package 驗證 package。
 4. 使用 [Debug](execution-modes/debug.md) 隔離 Template、Flow 或 Tool，再使用 [Run](execution-modes/run.md) 建立 Case execution。
 
-以下各節定義 authoring contract。公式單元格、多行表頭和 XML 序列化詳情見[進階 Workbook 與 Snapshot 細節](#進階-workbook-與-snapshot-細節)。
+以下各節定義 authoring contract。上面的工作流描述舊式 Workbook authoring；Native Test Case Definition 工作流見下節。公式單元格、多行表頭和 XML 序列化詳情見[進階 Workbook 與 Snapshot 細節](#進階-workbook-與-snapshot-細節)。
 
 ## 區分 Testcase 與 Case execution
 
@@ -30,9 +30,9 @@ Testcase 是一個正規化 Workbook row；Run 會為每個選中的 row 建立�
 
 ## Native Test Case Definition
 
-4.5.0 開發候選版已在 Engine 登錄 `att-testcase/v1`，並支援透過 Native Case CLI 及經驗證的 Server draft flow discovery、resolution 和 RUN singleton 與多筆 inline Definition。Excel Definition 保留 S01 的 schema 契約，但須等待 S04 Excel adapter，現時 inline resolver 不會執行 Excel source。現有 Workbook／Sidecar／Snapshot RUN 亦維持支援。
+4.6.0 開發候選版已在 Engine 登錄 `att-testcase/v1`，並支援透過 Native Case CLI 及經驗證的 Server draft flow discovery、resolution 和 RUN singleton、inline 與 Excel Definition。Native Excel adapter 只讀取 Package 內 `.xlsx`，沿用 Sidecar header、`dataColumns`、blank normalization 和安全 YAML cell parsing 規則，並在每個 resolved Case 保留 workbook revision、sheet、row 及 column provenance。每個 workbook 最多 32 MiB，最多解析 10,000 rows；preview 亦有上限。它不會建立或更新舊式 XML Snapshot。現有 Workbook／Sidecar／Snapshot RUN 亦維持支援。
 
-V1 契約定義兩種資料形態：含完整 typed `inputs` map、Resolved Case ID 固定為 `default` 的 singleton inline Case；或含穩定來源 ID 的多筆 inline／Excel Data Source。Definition ID 在 Package 範圍內唯一、保留大小寫並使用點號分段；Resolved Case ID 是單一 path-safe 段落。`caseIdExpression` 只可用單一 `${DATA.key}` lookup 覆蓋 resolved ID。空白、重複、格式錯誤、缺少或衝突的 ID，以及空的 resolution 結果都屬錯誤，不會當作全部 PASS。
+V1 契約定義兩種資料形態：含完整 typed `inputs` map、Resolved Case ID 固定為 `default` 的 singleton inline Case；或含穩定來源 ID 的多筆 inline／Excel Data Source。Definition ID 在 Package 範圍內唯一、保留大小寫並使用點號分段；Resolved Case ID 是單一 path-safe 段落。Excel Case ID 必須是符合 `[A-Za-z0-9_-]{1,128}` 的 literal text cell；公式、數字／日期／boolean／error cell、blank markers、前後空白、保留裝置名稱和 case-fold collision 都會被拒絕。`caseIdExpression` 只可用單一 `${DATA.key}` lookup 覆蓋 resolved ID。空白、重複、格式錯誤、缺少或衝突的 ID，以及空的 resolution 結果都屬錯誤，不會當作全部 PASS。
 
 Data-driven Case 省略 `inputs` 時，會把 `DATA` 同名映射到 Flow inputs；提供 projection 時，該 projection 會完全取代 identity mapping，只接受 `{from: DATA.key}` 或 `{value: <typed value>}`。Excel `dataColumns` 保留 `att-sidecar/v2.2` 逗號分隔字串語法，包括 alias、`(yaml)` parsing 和引號分隔符。省略或空白的 `dataColumns` 不會把任何業務欄選入 `DATA`（Case ID／tags selector 也不會自動暴露）；需要 Excel 輸入時必須明確宣告 `dataColumns`。Excel `path` 必須是可移植的 Package 相對 `.xlsx` 路徑。Source-workbook report template 只可用於 Excel Data Source，並永遠寫入新 Workbook。
 
@@ -42,7 +42,7 @@ Data-driven Case 省略 `inputs` 時，會把 `DATA` 同名映射到 Flow inputs
 
 ### Workbook、Sidecar 和 Snapshot 之間的關系
 
-每個 `.xlsx` Workbook 都要求有一個 YAML Sidecar 和一個生成的 XML Snapshot，它們必須具有相同的基名且位於同一目錄：
+在舊式 Workbook／Sidecar／Snapshot 工作流中，每個 `.xlsx` Workbook 都要求有一個 YAML Sidecar 和一個生成的 XML Snapshot，它們必須具有相同的基名且位於同一目錄：
 
 ```text
 testcase/payment_regression.xlsx

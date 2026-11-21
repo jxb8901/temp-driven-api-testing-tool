@@ -75,9 +75,11 @@ public final class TestCaseDefinition {
             Map<String,Object> source = new LinkedHashMap<String,Object>();
             source.putAll(dataSourceFields);
             source.put("type", dataSourceType);
-            List<Map<String,Object>> recordValues = new ArrayList<Map<String,Object>>();
-            for (SourceRecord record : records) recordValues.add(record.toMap());
-            source.put("records", Collections.unmodifiableList(recordValues));
+            if ("inline".equals(dataSourceType)) {
+                List<Map<String,Object>> recordValues = new ArrayList<Map<String,Object>>();
+                for (SourceRecord record : records) recordValues.add(record.toMap());
+                source.put("records", Collections.unmodifiableList(recordValues));
+            }
             result.put("dataSource", source);
             if (inputProjection != null) result.put("inputs", inputProjection);
         }

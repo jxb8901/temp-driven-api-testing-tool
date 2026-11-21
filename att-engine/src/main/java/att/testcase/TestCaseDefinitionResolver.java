@@ -1,6 +1,7 @@
 package att.testcase;
 
 import att.config.YamlSupport;
+import att.excel.ExcelDataSourceAdapter;
 import att.flow.FlowDefinition;
 import att.flow.FlowRegistry;
 import att.resource.PackageResourceResolver;
@@ -32,7 +33,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Bounded, deterministic resolver for the inline subset of att-testcase/v1.
+ * Bounded, deterministic resolver for the supported att-testcase/v1 source types.
  * It validates against the supplied active schema file and never executes a Flow.
  */
 public final class TestCaseDefinitionResolver {
@@ -205,20 +206,21 @@ public final class TestCaseDefinitionResolver {
                     Collections.<String,Object>emptyMap(), inputs, definition.tags(), dependencies,
                     CaseSourceProvenance.inline(sourceReference, null, null)));
         } else {
-            for (TestCaseDefinition.SourceRecord record : definition.records()) {
+            List<TestCaseDefinition.SourceRecord> sourceRecords = sourceRecords(definition, packageDirectory, sourceReference, options);
+            for (TestCaseDefinition.SourceRecord record : sourceRecords) {
                 checkCancelled(options);
                 String sourceId = record.recordId();
                 String sourceKey = asciiFold(sourceId);
-                if (!sourceIds.add(sourceKey)) throw invalid(sourceReference, "dataSource.records[" + record.index() + "].recordId",
-                        "Source record IDs collide under ASCII case folding");
-                String caseId = resolveCaseId(definition.caseIdExpression(), sourceId, record.data(), sourceReference, record.index());
-                if (!validCaseId(caseId)) throw invalid(sourceReference,
-                        "dataSource.records[" + record.index() + "].recordId", "Resolved Case ID must be a path-safe segment");
-                if (!caseIds.add(asciiFold(caseId))) throw invalid(sourceReference,
-                        "dataSource.records[" + record.index() + "].recordId", "Resolved Case IDs collide under ASCII case folding");
+                if (!sourceIds.add(sourceKey)) throw sourceInvalid(sourceReference, record, "dataSource.caseId",
+                        "Source record IDs collide under ASCII case folding", "caseId");
+                String caseId = resolveCaseId(definition.caseIdExpression(), sourceId, record.data(), sourceReference, record);
+                if (!validCaseId(caseId)) throw sourceInvalid(sourceReference, record, "dataSource.caseId",
+                        "Resolved Case ID must be a path-safe segment", caseIdColumn(record, definition.caseIdExpression()));
+                if (!caseIds.add(asciiFold(caseId))) throw sourceInvalid(sourceReference, record, "dataSource.caseId",
+                        "Resolved Case IDs collide under ASCII case folding", caseIdColumn(record, definition.caseIdExpression()));
                 String qualifiedId = definition.id() + "." + caseId;
                 if (qualifiedId.length() > 255) throw invalid(sourceReference, "id", "Qualified Case ID exceeds 255 ASCII characters");
-                Map<String,Object> inputs = projectInputs(definition.inputProjection(), record.data(), sourceReference, record.index());
+                Map<String,Object> inputs = projectInputs(definition.inputProjection(), record.data(), sourceReference, record);
                 List<String> tags = combineTags(definition.tags(), record.tags());
                 resolved.add(new ResolvedTestCase(packageId, definition.id(), caseId, definition.flowId(),
                         definition.name(), definition.description(), sourceReference, sourceRevision, sourceId,
@@ -254,8 +256,19 @@ public final class TestCaseDefinitionResolver {
         }
         Map<String,Object> dataSource = TestCaseValues.object(rawDataSource, "dataSource");
         String type = string(dataSource.get("type"), "dataSource.type");
-        if (!"inline".equals(type)) throw invalid(sourceReference, "dataSource.type",
-                "Only the inline Data Source is supported by this resolver; Excel is a separate adapter");
+        if (!"inline".equals(type) && !"excel".equals(type)) throw invalid(sourceReference, "dataSource.type",
+                "Unsupported Data Source type");
+        Map<String,Object> projection = document.containsKey("inputs")
+                ? TestCaseValues.immutableObject(document.get("inputs"), "inputs") : null;
+        Map<String,Object> dataSourceFields = new LinkedHashMap<String,Object>();
+        for (Map.Entry<String,Object> entry : dataSource.entrySet())
+            if (!"records".equals(entry.getKey())) dataSourceFields.put(entry.getKey(), entry.getValue());
+        if ("excel".equals(type)) {
+            // The Definition keeps its authored Excel mapping; resolved workbook rows are ephemeral source records.
+            return new TestCaseDefinition(id, name, description, flow, caseIdExpression, type,
+                    tags, null, projection, Collections.<TestCaseDefinition.SourceRecord>emptyList(),
+                    report, TestCaseValues.extensionFields(document), dataSourceFields);
+        }
         Object rawRecords = dataSource.get("records");
         if (!(rawRecords instanceof List<?>)) throw invalid(sourceReference, "dataSource.records", "Inline records must be a list");
         List<?> values = (List<?>) rawRecords;
@@ -270,13 +283,45 @@ public final class TestCaseDefinitionResolver {
                     TestCaseValues.extensionFields(record), CaseSourceProvenance.inline(sourceReference,
                     Integer.valueOf(index), recordId)));
         }
-        Map<String,Object> projection = document.containsKey("inputs")
-                ? TestCaseValues.immutableObject(document.get("inputs"), "inputs") : null;
-        Map<String,Object> dataSourceFields = new LinkedHashMap<String,Object>();
-        for (Map.Entry<String,Object> entry : dataSource.entrySet())
-            if (!"records".equals(entry.getKey())) dataSourceFields.put(entry.getKey(), entry.getValue());
         return new TestCaseDefinition(id, name, description, flow, caseIdExpression, type,
                 tags, null, projection, records, report, TestCaseValues.extensionFields(document), dataSourceFields);
+    }
+
+    private List<TestCaseDefinition.SourceRecord> sourceRecords(TestCaseDefinition definition, Path packageRoot,
+            String sourceReference, Options options) throws Exception {
+        if (!"excel".equals(definition.dataSourceType())) return definition.records();
+        Map<String,Object> source = definition.dataSourceFields();
+        String path = string(source.get("path"), "dataSource.path");
+        String sheet = string(source.get("sheet"), "dataSource.sheet");
+        String caseId = string(source.get("caseId"), "dataSource.caseId");
+        String tags = optionalString(source.get("tags"));
+        String dataColumns = optionalString(source.get("dataColumns"));
+        int headerRows = 1;
+        Object configuredHeaderRows = source.get("headerRows");
+        if (configuredHeaderRows != null) {
+            if (!(configuredHeaderRows instanceof Number))
+                throw invalid(sourceReference, "dataSource.headerRows", "Excel headerRows must be an integer");
+            double number = ((Number) configuredHeaderRows).doubleValue();
+            if (number != Math.rint(number) || number < 1 || number > Integer.MAX_VALUE)
+                throw invalid(sourceReference, "dataSource.headerRows", "Excel headerRows must be a positive integer");
+            headerRows = (int) number;
+        }
+        List<ExcelDataSourceAdapter.Record> loaded = ExcelDataSourceAdapter.load(new PackageResourceResolver(packageRoot),
+                sourceReference, path, sheet, headerRows, caseId, tags, dataColumns, options.maxRecords(),
+                options.cancellation());
+        List<TestCaseDefinition.SourceRecord> records = new ArrayList<TestCaseDefinition.SourceRecord>();
+        for (ExcelDataSourceAdapter.Record record : loaded) {
+            try {
+                records.add(new TestCaseDefinition.SourceRecord(record.recordId(), record.tags(), record.data(),
+                        record.index(), Collections.<String,Object>emptyMap(), record.provenance()));
+            } catch (RuntimeException failure) {
+                throw invalid(record.provenance().sourceReference(), "dataSource.dataColumns",
+                        "Excel row contains a value unsupported by att-testcase/v1: " + safeMessage(failure, "invalid value"))
+                        .withLocation(record.provenance().sourceReference(), "dataSource.dataColumns",
+                                record.provenance().sheet(), record.provenance().row(), null, null, null);
+            }
+        }
+        return records;
     }
 
     /** Ensures the Definition identity is unique across the Package's native testcase.yaml resources. */
@@ -513,7 +558,7 @@ public final class TestCaseDefinitionResolver {
     }
 
     private Map<String,Object> projectInputs(Map<String,Object> projection, Map<String,Object> data,
-            String sourceReference, int recordIndex) {
+            String sourceReference, TestCaseDefinition.SourceRecord record) {
         Map<String,Object> result = new LinkedHashMap<String,Object>();
         if (projection == null) {
             result.putAll(data);
@@ -528,9 +573,12 @@ public final class TestCaseDefinitionResolver {
                 if (!matcher.matches()) throw invalid(sourceReference, "inputs." + inputName + ".from",
                         "Only a direct DATA.key input binding is supported");
                 String key = matcher.group(1);
-                if (!data.containsKey(key)) throw invalid(sourceReference,
-                        "dataSource.records[" + recordIndex + "].data." + key,
-                        "A mapped Data Source key is missing");
+                if (!data.containsKey(key)) {
+                    if ("excel".equals(record.sourceProvenance().sourceType()))
+                        throw invalid(sourceReference, "inputs." + inputName + ".from", "A mapped Data Source key is missing");
+                    throw invalid(sourceReference, "dataSource.records[" + record.index() + "].data." + key,
+                            "A mapped Data Source key is missing");
+                }
                 result.put(inputName, data.get(key));
             } else if (binding.containsKey("value")) result.put(inputName, binding.get("value"));
             else throw invalid(sourceReference, "inputs." + inputName, "Input binding must contain from or value");
@@ -539,20 +587,51 @@ public final class TestCaseDefinitionResolver {
     }
 
     private String resolveCaseId(String expression, String sourceId, Map<String,Object> data,
-            String sourceReference, int index) {
+            String sourceReference, TestCaseDefinition.SourceRecord record) {
         if (expression == null) return sourceId;
         Matcher expressionMatcher = CASE_ID_EXPRESSION.matcher(expression);
         if (!expressionMatcher.matches()) throw invalid(sourceReference, "caseIdExpression", "Only a direct ${DATA.key} lookup is supported");
         String key = expressionMatcher.group(1);
-        if (!data.containsKey(key)) throw invalid(sourceReference,
-                "dataSource.records[" + index + "].data." + key, "Case ID source key is missing");
+        if (!data.containsKey(key)) {
+            if ("excel".equals(record.sourceProvenance().sourceType()))
+                throw invalid(sourceReference, "caseIdExpression", "Case ID source key is not mapped by dataColumns");
+            throw invalid(sourceReference, "dataSource.records[" + record.index() + "].data." + key,
+                    "Case ID source key is missing");
+        }
         Object value = data.get(key);
-        if (!(value instanceof String)) throw invalid(sourceReference,
-                "dataSource.records[" + index + "].data." + key, "Case ID source value must be a string");
+        if (!(value instanceof String)) throw sourceInvalid(sourceReference, record,
+                "dataSource.dataColumns." + key, "Case ID source value must be a string", key);
         String caseId = (String) value;
-        if (!validCaseId(caseId)) throw invalid(sourceReference,
-                "dataSource.records[" + index + "].data." + key, "Case ID source value is invalid");
+        if (!validCaseId(caseId)) throw sourceInvalid(sourceReference, record,
+                "dataSource.dataColumns." + key, "Case ID source value is invalid", key);
         return caseId;
+    }
+
+    private String caseIdColumn(TestCaseDefinition.SourceRecord record, String expression) {
+        if (expression == null) return "caseId";
+        Matcher matcher = CASE_ID_EXPRESSION.matcher(expression);
+        return matcher.matches() ? matcher.group(1) : "caseId";
+    }
+
+    private DiagnosticException sourceInvalid(String definitionReference, TestCaseDefinition.SourceRecord record,
+            String field, String detail, String columnAlias) {
+        CaseSourceProvenance provenance = record.sourceProvenance();
+        if (provenance != null && "excel".equals(provenance.sourceType())) {
+            Integer column = provenanceColumn(provenance, columnAlias);
+            return new DiagnosticException(DiagnosticCodes.TESTCASE_INVALID, "Test Case Resolution failed", detail,
+                    provenance.sourceReference(), field, provenance.sheet(), provenance.row(), column,
+                    null, null, "Correct the indicated Excel cell and retry Resolution.", null);
+        }
+        return invalid(definitionReference, "dataSource.records[" + record.index() + "].recordId", detail);
+    }
+
+    private Integer provenanceColumn(CaseSourceProvenance provenance, String alias) {
+        Object rawColumns = provenance.metadata().get("columns");
+        if (!(rawColumns instanceof Map<?,?>)) return null;
+        Map<?,?> columns = (Map<?,?>) rawColumns;
+        Object raw = "caseId".equals(alias) ? columns.get("caseId")
+                : ((columns.get("data") instanceof Map<?,?>) ? ((Map<?,?>) columns.get("data")).get(alias) : null);
+        return raw instanceof Number ? Integer.valueOf(((Number) raw).intValue()) : null;
     }
 
     private static String asciiFold(String value) {
