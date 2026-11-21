@@ -226,7 +226,8 @@ public final class VNextOptions {
                     if(id.length()>126||!id.matches("[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*")) throw invalid("--definition values must be valid native Definition IDs");
                     if(!definitions.add(id)) throw invalid("--definition values cannot contain duplicates");
                 }
-                if(b.qualifiedCaseIds.size()>10000) throw invalid("run native-suite accepts at most 10000 --qualified-case-id values");
+                if(b.qualifiedCaseIds.size()>att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS)
+                    throw invalid("run native-suite accepts at most "+att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS+" --qualified-case-id values");
                 for(String tag:b.tags) if(tag.length()>att.testcase.TestCaseSuiteResolver.MAX_TAG_LENGTH)
                     throw invalid("--tag values must not exceed "+att.testcase.TestCaseSuiteResolver.MAX_TAG_LENGTH+" characters");
                 for(String tag:b.excludeTags) if(tag.length()>att.testcase.TestCaseSuiteResolver.MAX_TAG_LENGTH)

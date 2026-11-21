@@ -28,7 +28,7 @@ public final class NativeCaseSuiteRunRequest extends AttRequest {
         if (packageId == null || packageId.trim().isEmpty()) throw new IllegalArgumentException("packageId is required");
         this.packageId = packageId;
         this.definitionIds = copy(definitionIds, "definitionIds", TestCaseSuiteResolver.MAX_DEFINITIONS);
-        this.qualifiedCaseIds = copy(qualifiedCaseIds, "qualifiedCaseIds", TestCaseSuiteResolver.MAX_RESOLVED_CASES);
+        this.qualifiedCaseIds = copy(qualifiedCaseIds, "qualifiedCaseIds", TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS);
         this.tags = copy(tags, "tags", 100, TestCaseSuiteResolver.MAX_TAG_LENGTH);
         this.excludeTags = copy(excludeTags, "excludeTags", 100, TestCaseSuiteResolver.MAX_TAG_LENGTH);
         if (this.definitionIds.isEmpty()) throw new IllegalArgumentException("At least one Definition ID is required");

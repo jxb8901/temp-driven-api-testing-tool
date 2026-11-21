@@ -102,6 +102,26 @@ class RunDefinitionTest {
         assertThrows(IllegalArgumentException.class,()->parse(history));
         assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,history));
     }
+    @Test void nativeSuiteV2QualifiedSelectorLimitMatchesThePublicSchema() throws Exception {
+        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
+        String atLimit=nativeSuiteQualifiedIdsRequest(att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS);
+        att.validation.JsonSchemaVerifier.verifyJson(schema,atLimit);
+        assertEquals(att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS,parse(atLimit).qualifiedCaseIds.size());
+
+        String overLimit=nativeSuiteQualifiedIdsRequest(att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS+1);
+        assertThrows(IllegalArgumentException.class,()->parse(overLimit));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                ()->att.validation.JsonSchemaVerifier.verifyJson(schema,overLimit));
+    }
+    private static String nativeSuiteQualifiedIdsRequest(int count) {
+        StringBuilder ids=new StringBuilder();
+        for(int index=0;index<count;index++) {
+            if(index>0)ids.append(',');
+            ids.append("\"fpp.transfer.case").append(index).append("\"");
+        }
+        return requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],"
+                +"\"selection\":{\"qualifiedCaseIds\":["+ids+"]}}");
+    }
     @Test void nativeCaseV2SchemaIsRegisteredInSourceAndEmbeddedRuntimeCatalogs() throws Exception {
         java.nio.file.Path rootCatalog=java.nio.file.Path.of("schemas/catalog.yaml");
         java.nio.file.Path runtimeCatalog=java.nio.file.Path.of("att-engine/src/main/resources/att-schemas/catalog.yaml");

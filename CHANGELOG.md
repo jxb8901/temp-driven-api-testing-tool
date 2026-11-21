@@ -38,6 +38,7 @@
 # ATT 4.6.0 - development candidate (acceptance pending)
 
 - Add implicit Native Case Suite selection across one or more Test Case Definitions. Select all Cases, qualified Case IDs, or matching tags; exclude tags, preserve deterministic Definition/source order, and aggregate per-Case results through the existing RUN reports (#396).
+- Align CLI, Engine, resolver, and Server explicit Qualified Case ID limits at 1,000; retain the separate 10,000 resolved-candidate scan bound for filtering.
 - Validate Suite selectors before execution, reject duplicate or stale identities and empty selections, and freeze the accepted qualified Case IDs and Definition source revisions in Server RUN drafts and Worker requests. Keep the legacy Workbook/Sidecar selection contract intact.
 - Do not introduce a persisted `suite.yaml` for these derived selections. LOAD Case targets, advanced Testdata/generator sources, and Debug interoperability remain deferred to #388 follow-ups S08/S09/S11. Keep #388 open, and do not bump POM versions or tag 4.6.0 before release acceptance.
 
