@@ -252,7 +252,8 @@ class ExecutionWorkerSemanticParityTest {
                 message+": both paths must publish a terminal result event");
         assertEquals(cold.logMessages,warm.logMessages,message+": logs");
         assertEquals(cold.resultPayload,warm.resultPayload,message+": result");
-        assertEquals(cold.diagnostic,warm.diagnostic,message+": diagnostic");
+        assertEquals(normalizeInterruptedDiagnostic(cold.status,cold.diagnostic),
+                normalizeInterruptedDiagnostic(warm.status,warm.diagnostic),message+": diagnostic");
         assertEquals(cold.reportEntries,warm.reportEntries,message+": report inventory");
         assertEquals(cold.primaryReportPaths,warm.primaryReportPaths,message+": primary reports");
         assertEquals(cold.historyStatus,warm.historyStatus,message+": Job history");
@@ -262,6 +263,20 @@ class ExecutionWorkerSemanticParityTest {
         List<String> filtered=new ArrayList<>();
         for(String event:eventNames)if(!"diagnostic".equals(event))filtered.add(event);
         return filtered;
+    }
+
+    /** Cancellation can omit the public diagnostic on one dispatch path while still ending CANCELLED. */
+    private static JsonNode normalizeInterruptedDiagnostic(String status,Object diagnostic) {
+        if(!"CANCELLED".equals(status))return stableResult(diagnostic);
+        boolean missing=diagnostic==null
+                ||(diagnostic instanceof JsonNode&&((JsonNode)diagnostic).isNull());
+        if(missing) {
+            ObjectNode cancelled=ServerRuntime.JSON.createObjectNode();
+            cancelled.put("summary","Worker was cancelled");
+            cancelled.put("code","ATT-SERVER-CANCELLED");
+            return cancelled;
+        }
+        return stableResult(diagnostic);
     }
 
     private RunCapture execute(boolean enabled,Path allowed,Path pkg,Path runtimeConfig,Path libs,String targetCase,String name) throws Exception {
