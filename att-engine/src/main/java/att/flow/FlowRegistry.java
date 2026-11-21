@@ -246,9 +246,11 @@ public final class FlowRegistry {
             if (schema == null) throw YamlSupport.locate(diagnostic, descriptor, field);
             throw YamlSupport.locateSchema(diagnostic, descriptor, schema.structuredViolations());
         } finally {
-            // Legacy non-snapshot execution still uses this descriptor's captured source
-            // when a nested Flow action reports a runtime validation diagnostic.
+            // Snapshot-mode captures are scoped to the validation pass. Non-snapshot loads promote
+            // the capture into YamlSupport's bounded process-wide map so nested runtime diagnostics
+            // keep source marks without retaining every descriptor in an unbounded ThreadLocal.
             if (snapshotMode) YamlSupport.clearSnapshotSource(descriptor);
+            else YamlSupport.promoteSnapshotSource(descriptor);
         }
         parsedCount++;
         if (!id.equals(flow.id())) throw new IllegalArgumentException("Flow descriptor id changed while compiling: expected " + id + " but found " + flow.id());

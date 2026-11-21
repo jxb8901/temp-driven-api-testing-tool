@@ -1,0 +1,11 @@
+schemaVersion: att-testcase/v1
+id: payments.from_excel
+flow: payment.transfer.v1
+dataSource:
+  type: excel
+  path: testdata/cases.xlsx
+  sheet: Cases
+  caseId: Case ID
+# inputs and dataColumns both omitted:
+# DATA has no business columns; identity projection yields an empty EXEC.INPUT map.
+# Case ID / tags selector columns are not auto-exposed as DATA keys.

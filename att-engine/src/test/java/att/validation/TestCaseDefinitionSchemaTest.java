@@ -34,6 +34,7 @@ class TestCaseDefinitionSchemaTest {
         assertValid(root, schema, "inline-single.yaml");
         assertValid(root, schema, "inline-multi.yaml");
         assertValid(root, schema, "excel.yaml");
+        assertValid(root, schema, "excel-omitted-data-columns.yaml");
 
         assertInvalid(root, schema, "invalid-ambiguous-case-id.yaml");
         assertInvalid(root, schema, "invalid-runtime-case-id-expression.yaml");
@@ -49,6 +50,16 @@ class TestCaseDefinitionSchemaTest {
         assertInvalid(root, schema, "invalid-reserved-case-id-mixed-case.yaml");
         assertInvalid(root, schema, "invalid-reserved-definition-id-lowercase.yaml");
         assertInvalid(root, schema, "invalid-reserved-definition-id-mixed-case.yaml");
+        assertInvalid(root, schema, "invalid-excel-path-empty-segment.yaml");
+        assertInvalid(root, schema, "invalid-excel-path-colon.yaml");
+        assertInvalid(root, schema, "invalid-excel-path-dot-segment.yaml");
+        assertInvalid(root, schema, "invalid-excel-path-control.yaml");
+        assertInvalid(root, schema, "invalid-excel-path-trailing-newline.yaml");
+        assertInvalid(root, schema, "invalid-definition-id-trailing-newline.yaml");
+        assertInvalid(root, schema, "invalid-definition-id-trailing-crlf.yaml");
+        assertInvalid(root, schema, "invalid-record-id-trailing-newline.yaml");
+        assertInvalid(root, schema, "invalid-flow-ref-trailing-newline.yaml");
+        assertInvalid(root, schema, "invalid-case-id-expression-trailing-newline.yaml");
     }
 
     @Test void keepsDuplicateIdsSyntacticallyValidForResolverRejection() throws Exception {

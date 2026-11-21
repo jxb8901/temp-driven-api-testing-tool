@@ -672,18 +672,20 @@ public final class WorkerMain {
                 ()->Thread.currentThread().isInterrupted());
         att.testcase.TestCaseResolutionResult resolution=resolver.resolveByDefinitionId(root,request.registeredPackageId,
                 effective.templatesRoot(),effective.testcasesRoot(),request.nativeCaseDefinitionId,options);
+        // Native RUN follows S01 Definition/source order for both draft preview and execution.
+        // Requested resolvedCaseIds are an unordered exact selection set; they must not reorder fail-fast.
+        java.util.List<att.testcase.ResolvedTestCase> selected=resolution.selectedCases();
         if(resolution.truncated()||resolution.selectedCount()!=request.nativeResolvedCaseIds.size()
-                ||resolution.cases().size()!=request.nativeResolvedCaseIds.size())
+                ||selected.size()!=request.nativeResolvedCaseIds.size())
             throw new IllegalArgumentException("Native RUN selection could not be resolved completely");
         if(request.nativeCaseSourcePath!=null&&!request.nativeCaseSourcePath.equals(resolution.sourceReference()))
             throw new IllegalArgumentException("Native RUN Definition source changed after draft validation");
-        java.util.Map<String,att.testcase.ResolvedTestCase> byId=new java.util.LinkedHashMap<String,att.testcase.ResolvedTestCase>();
-        for(att.testcase.ResolvedTestCase testCase:resolution.cases())byId.put(testCase.caseId(),testCase);
-        List<String> orderedIds=new ArrayList<String>(request.nativeResolvedCaseIds);
+        List<String> orderedIds=new ArrayList<String>();
         List<String> qualifiedIds=new ArrayList<String>();List<Map<String,Object>> cases=new ArrayList<Map<String,Object>>();
-        for(String id:orderedIds) {
-            att.testcase.ResolvedTestCase testCase=byId.get(id);
-            if(testCase==null)throw new IllegalArgumentException("Native RUN selection contains an unknown Case ID");
+        for(att.testcase.ResolvedTestCase testCase:selected) {
+            if(testCase==null||!uniqueLocal.contains(testCase.caseId()))
+                throw new IllegalArgumentException("Native RUN selection contains an unknown Case ID");
+            orderedIds.add(testCase.caseId());
             qualifiedIds.add(testCase.qualifiedCaseId());
             Map<String,Object> item=new LinkedHashMap<String,Object>();item.put("definitionId",testCase.definitionId());
             item.put("caseId",testCase.caseId());item.put("qualifiedCaseId",testCase.qualifiedCaseId());
@@ -696,6 +698,8 @@ public final class WorkerMain {
             for(att.testcase.ResolvedTestCase.FlowDependency dependency:testCase.dependencies())dependencies.add(dependency.toMap());
             item.put("dependencies",dependencies);cases.add(item);
         }
+        if(orderedIds.size()!=uniqueLocal.size())
+            throw new IllegalArgumentException("Native RUN selection could not be resolved completely");
         Map<String,Object> result=new LinkedHashMap<String,Object>();result.put("definitionId",resolution.definition().id());
         result.put("sourcePath",resolution.sourceReference());result.put("sourceRevision",resolution.sourceRevision());
         result.put("selectedCaseIds",orderedIds);result.put("qualifiedCaseIds",qualifiedIds);result.put("cases",cases);

@@ -1,0 +1,4 @@
+schemaVersion: att-testcase/v1
+id: "payments.case01\n"
+flow: payment.transfer.v1
+inputs: {}
