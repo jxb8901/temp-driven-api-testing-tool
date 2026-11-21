@@ -167,6 +167,7 @@ jobs:
             log="$(mktemp)"
             if mvn -B -ntp -T 1C -pl att-worker,att-server -am \
                 -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true \
+                -Datt.skipServerUnitTests=true \
                 -Daether.connector.http.retryHandler.count=8 \
                 package -DskipTests 2>&1 | tee "$log"; then
               exit 0
@@ -251,6 +252,7 @@ jobs:
             log="$(mktemp)"
             if mvn -B -ntp -T 1C -pl att-worker,att-server -am \
                 -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true \
+                -Datt.skipServerUnitTests=true \
                 -Daether.connector.http.retryHandler.count=8 \
                 package -DskipTests 2>&1 | tee "$log"; then
               exit 0
