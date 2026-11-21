@@ -114,6 +114,20 @@ class VNextOptionsTest {
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--all","--rerun-failed"}));
     }
 
+    @Test void nativeSuiteQualifiedSelectorLimitMatchesExecutionV2() {
+        java.util.List<String> atLimit=new java.util.ArrayList<String>();
+        atLimit.add("--local");atLimit.add("run");atLimit.add("native-suite");
+        atLimit.add("--definition");atLimit.add("fpp.transfer");
+        for(int index=0;index<att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS;index++) {
+            atLimit.add("--qualified-case-id");atLimit.add("fpp.transfer.case"+index);
+        }
+        assertEquals(att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS,
+                VNextOptions.parse(atLimit.toArray(new String[0])).qualifiedCaseIds().size());
+
+        atLimit.add("--qualified-case-id");atLimit.add("fpp.transfer.over-limit");
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(atLimit.toArray(new String[0])));
+    }
+
     @Test void directLoadRejectsInputUntilBothAdaptersSupportIt() {
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{
                 "--local","load","flow","PAYMENT.submit","--input","templates/flows/PAYMENT.submit/load.yaml"}));

@@ -25,9 +25,24 @@ class AttServiceTest {
 
     @Test void nativeSuiteApiUsesTheSchemaTagLengthLimit() {
         String tooLongTag=String.join("",Collections.nCopies(129,"x"));
-        assertThrows(IllegalArgumentException.class,()->new NativeCaseSuiteRunRequest(null,null,null,null,null,
+        assertThrows(IllegalArgumentException.class,()->new NativeCaseSuiteRunRequest(temp,null,null,null,null,
                 "payments",Collections.singletonList("fpp.transfer"),Collections.<String>emptyList(),
                 Collections.singletonList(tooLongTag),Collections.<String>emptyList(),false,false,false,null));
+    }
+
+    @Test void nativeSuiteApiQualifiedSelectorLimitMatchesExecutionV2() {
+        List<String> atLimit=new java.util.ArrayList<String>();
+        for(int index=0;index<att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS;index++)
+            atLimit.add("fpp.transfer.case"+index);
+        NativeCaseSuiteRunRequest request=new NativeCaseSuiteRunRequest(temp,null,null,null,null,
+                "payments",Collections.singletonList("fpp.transfer"),atLimit,Collections.<String>emptyList(),
+                Collections.<String>emptyList(),false,false,false,null);
+        assertEquals(att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS,request.qualifiedCaseIds().size());
+
+        atLimit.add("fpp.transfer.over-limit");
+        assertThrows(IllegalArgumentException.class,()->new NativeCaseSuiteRunRequest(temp,null,null,null,null,
+                "payments",Collections.singletonList("fpp.transfer"),atLimit,Collections.<String>emptyList(),
+                Collections.<String>emptyList(),false,false,false,null));
     }
 
     @Test void validationIsInvokableThroughTypedRequestWithoutCliArgumentsOrConsoleOutput() throws Exception {

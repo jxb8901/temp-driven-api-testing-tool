@@ -21,6 +21,8 @@ public final class TestCaseSuiteResolver {
     public static final int MAX_DEFINITIONS = 100;
     public static final int MAX_RESOLVED_CASES = 10000;
     public static final int MAX_SELECTED_CASES = TestCaseDefinitionResolver.MAX_PREVIEW_CASES;
+    /** Public explicit selector bound shared with the execution-v2 schema and Server parser. */
+    public static final int MAX_QUALIFIED_CASE_IDS = 1000;
     public static final int MAX_TAG_LENGTH = 128;
     private static final Pattern DEFINITION_ID = Pattern.compile("^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$");
     private static final Pattern LOCAL_CASE_ID = Pattern.compile("^[A-Za-z0-9_-]{1,128}$");
@@ -44,7 +46,7 @@ public final class TestCaseSuiteResolver {
             if (id.length() > 126 || !DEFINITION_ID.matcher(id).matches())
                 throw invalid("definitionIds contains an invalid Definition ID");
         }
-        List<String> selectedIds = unique(qualifiedCaseIds, "qualifiedCaseIds", MAX_RESOLVED_CASES);
+        List<String> selectedIds = unique(qualifiedCaseIds, "qualifiedCaseIds", MAX_QUALIFIED_CASE_IDS);
         List<String> includedTags = unique(tags, "tags", 100, MAX_TAG_LENGTH);
         List<String> excludedTags = unique(excludeTags, "excludeTags", 100, MAX_TAG_LENGTH);
         if (selectedIds.isEmpty() && includedTags.isEmpty() && !all)

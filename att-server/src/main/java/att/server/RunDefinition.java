@@ -77,7 +77,8 @@ final class RunDefinition {
                 JsonNode selection=target.get("selection");fields(selection,"all","qualifiedCaseIds","tags","excludeTags");
                 nativeSuiteAll=selection.has("all")&&bool(selection,"all");
                 if(selection.has("all")&&!selection.get("all").isBoolean())throw invalid("all must be boolean");
-                qualifiedCaseIds=textList(selection.get("qualifiedCaseIds"),"qualifiedCaseIds",1000);
+                qualifiedCaseIds=textList(selection.get("qualifiedCaseIds"),"qualifiedCaseIds",
+                        att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS);
                 nativeSuiteTags=textList(selection.get("tags"),"tags",100,att.testcase.TestCaseSuiteResolver.MAX_TAG_LENGTH);
                 nativeSuiteExcludeTags=textList(selection.get("excludeTags"),"excludeTags",100,att.testcase.TestCaseSuiteResolver.MAX_TAG_LENGTH);
                 if(!nativeSuiteAll&&qualifiedCaseIds.isEmpty()&&nativeSuiteTags.isEmpty())

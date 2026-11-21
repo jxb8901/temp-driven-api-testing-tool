@@ -114,6 +114,15 @@ class TestCaseSuiteResolverTest {
                 Collections.singletonList(tooLongTag), Collections.<String>emptyList(), false, null));
     }
 
+    @Test void explicitQualifiedSelectorLimitMatchesThePublicRequestBound() {
+        java.util.List<String> tooManyIds = new java.util.ArrayList<String>();
+        for (int index = 0; index <= att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS; index++)
+            tooManyIds.add("fpp.alpha.case" + index);
+        assertThrows(IllegalArgumentException.class, () -> resolver.resolve(packageRoot, "payments", templatesRoot,
+                Paths.get("testcase"), Collections.singletonList("fpp.alpha"), tooManyIds,
+                Collections.<String>emptyList(), Collections.<String>emptyList(), false, null));
+    }
+
     private static java.util.List<String> qualifiedIds(TestCaseSuiteResolutionResult result) {
         java.util.List<String> values = new java.util.ArrayList<String>();
         for (ResolvedTestCase testCase : result.cases()) values.add(testCase.qualifiedCaseId());
