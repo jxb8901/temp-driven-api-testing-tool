@@ -167,6 +167,61 @@ class TestCaseDefinitionResolverTest {
         assertEquals(Integer.valueOf(1), formulaId.column());
     }
 
+    @Test void rejectsNativeExcelYamlNonFiniteAndRecursiveValuesWithWorkbookCellLocations() throws Exception {
+        for (String yamlValue : Arrays.asList(".nan", ".inf", "-.inf")) {
+            Path workbook = writeExcelWorkbook("unsafe-yaml-native.xlsx");
+            updateExcelWorkbook(workbook, value -> value.getSheet("Cases").getRow(2).getCell(4).setCellValue(yamlValue));
+
+            DiagnosticException failure = assertThrows(DiagnosticException.class,
+                    () -> resolve(excelDefinition("testdata/unsafe-yaml-native.xlsx")));
+            assertEquals("testdata/unsafe-yaml-native.xlsx", failure.file());
+            assertEquals("dataSource.dataColumns.payload", failure.field());
+            assertEquals("Cases", failure.sheet());
+            assertEquals(Integer.valueOf(3), failure.row());
+            assertEquals(Integer.valueOf(5), failure.column());
+            assertTrue(failure.detail().contains("non-finite"), failure.detail());
+        }
+
+        Path recursiveWorkbook = writeExcelWorkbook("recursive-yaml-native.xlsx");
+        updateExcelWorkbook(recursiveWorkbook,
+                value -> value.getSheet("Cases").getRow(2).getCell(4).setCellValue("&loop [*loop]"));
+
+        DiagnosticException recursive = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/recursive-yaml-native.xlsx")));
+        assertEquals("testdata/recursive-yaml-native.xlsx", recursive.file());
+        assertEquals("dataSource.dataColumns.payload", recursive.field());
+        assertEquals("Cases", recursive.sheet());
+        assertEquals(Integer.valueOf(3), recursive.row());
+        assertEquals(Integer.valueOf(5), recursive.column());
+        assertTrue(recursive.detail().contains("recursive YAML alias"), recursive.detail());
+
+        StringBuilder aliasExpansion = new StringBuilder("a0: &a0 [");
+        for (int index = 0; index < 100; index++) {
+            if (index > 0) aliasExpansion.append(", ");
+            aliasExpansion.append(index);
+        }
+        aliasExpansion.append("]\n");
+        String previous = "a0";
+        for (int index = 1; index <= 20; index++) {
+            String current = "a" + index;
+            aliasExpansion.append(current).append(": &").append(current).append(" [*")
+                    .append(previous).append(", *").append(previous).append("]\n");
+            previous = current;
+        }
+        Path expandedWorkbook = writeExcelWorkbook("expanded-yaml-native.xlsx");
+        updateExcelWorkbook(expandedWorkbook,
+                value -> value.getSheet("Cases").getRow(2).getCell(4).setCellValue(aliasExpansion.toString()));
+
+        DiagnosticException expanded = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/expanded-yaml-native.xlsx")));
+        assertEquals("testdata/expanded-yaml-native.xlsx", expanded.file());
+        assertEquals("dataSource.dataColumns.payload", expanded.field());
+        assertEquals("Cases", expanded.sheet());
+        assertEquals(Integer.valueOf(3), expanded.row());
+        assertEquals(Integer.valueOf(5), expanded.column());
+        assertTrue(expanded.detail().contains("maximum value count"), expanded.detail());
+    }
+
     @Test void rejectsNativeExcelBlankWhitespaceReservedDuplicateAndResolvedIdCollisions() throws Exception {
         Path workbook = writeExcelWorkbook("invalid-identities.xlsx");
         updateExcelWorkbook(workbook, value -> value.getSheet("Cases").getRow(2).getCell(0).setCellValue("N/A"));
