@@ -4,6 +4,7 @@ package att.api;
 public interface AttService {
     RunResult run(RunRequest request) throws Exception;
     RunResult runNativeCases(NativeCaseRunRequest request) throws Exception;
+    RunResult runNativeCaseSuite(NativeCaseSuiteRunRequest request) throws Exception;
     DebugResult debug(DebugRequest request) throws Exception;
     LoadResult load(LoadRequest request) throws Exception;
     ValidateResult validate(ValidateRequest request) throws Exception;

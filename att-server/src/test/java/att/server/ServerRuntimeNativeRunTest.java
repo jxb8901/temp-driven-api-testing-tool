@@ -296,6 +296,106 @@ class ServerRuntimeNativeRunTest {
         }
     }
 
+    @Test void implicitSuiteDraftFreezesSelectionForJobsAndSchedules() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("suite-allowed"));
+        Path packageRoot=Files.createDirectories(allowed.resolve("p"));
+        Path transferFlow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+                .resolve("flow.yaml");
+        Path refundFlow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/refund/v1"))
+                .resolve("flow.yaml");
+        String flow="schemaVersion: att-flow/v3.6\nid: %s\nname: %s\ndescription: Native Suite fixture\nactions:\n"
+                +"  verify: {type: assert, assert: '#{\u0024{EXEC.INPUT.amount} <= 13}'}\n"
+                +"  log: {type: log, message: 'amount=\u0024{EXEC.INPUT.amount}'}\n";
+        Files.writeString(transferFlow,String.format(flow,"payments.transfer.v1","Transfer"));
+        Files.writeString(refundFlow,String.format(flow,"payments.refund.v1","Refund"));
+        Path transferDefinition=packageRoot.resolve("testcase/payments/transfer/testcase.yaml");
+        Path refundDefinition=packageRoot.resolve("testcase/payments/refund/testcase.yaml");
+        Files.createDirectories(transferDefinition.getParent());Files.createDirectories(refundDefinition.getParent());
+        Files.writeString(transferDefinition,definitionYaml(7,13));
+        Files.writeString(refundDefinition,"schemaVersion: att-testcase/v1\nid: payments.refund\nname: Refund\n"
+                +"flow: payments.refund.v1\ndataSource:\n  type: inline\n  records:\n"
+                +"    - recordId: refund1\n      data: {amount: 5}\ninputs:\n  amount:\n    from: DATA.amount\n");
+        Path runtimeConfig=Files.createDirectories(temp.resolve("suite-runtime/config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path data=temp.resolve("suite-data"),serverConfig=temp.resolve("suite-server.yaml");
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
+                +"\n  auth: {mode: local}\n  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"  scheduling: {enabled: true, minimumIntervalMinutes: 1, maxConcurrentRuns: 1}\n"
+                +"workers: {maxConcurrent: 1, queuedLimit: 2}\npackages:\n  allowedRoots: ["
+                +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
+        Path libs=Files.createDirectories(temp.resolve("suite-libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
+            ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            JsonNode body=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.transfer","payments.refund"),
+                            "selection",Map.of("qualifiedCaseIds",List.of("payments.transfer.first","payments.refund.refund1"))),
+                    "options",Map.of("debug",false,"failFast",true,"runId","native-suite-cross-flow")));
+            assertThrows(IllegalArgumentException.class,()->runtime.submit("run",body,"alice"),
+                    "Native Suite requests must pass through validated draft inspection");
+            Map<String,Object> draft=runtime.createRunDraft(body,"alice");
+            assertEquals(List.of("payments.refund.refund1","payments.transfer.first"),draft.get("selectedCaseIds"),
+                    "Qualified identities are ordered by Definition ID, regardless of request order");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> preview=(List<Map<String,Object>>)draft.get("cases");
+            assertEquals(List.of("payments.refund.v1","payments.transfer.v1"),preview.stream()
+                    .map(row->String.valueOf(row.get("flowId"))).toList());
+            Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",draft.get("draftId"))),"alice","alice");
+            String jobId=String.valueOf(accepted.get("jobId"));Job job=runtime.jobs.get(jobId);
+            assertEquals("native-suite-cross-flow",job.request.runId);
+            assertEquals(Map.of("payments.refund","testcase/payments/refund/testcase.yaml",
+                    "payments.transfer","testcase/payments/transfer/testcase.yaml"),job.request.nativeSuiteSourcePaths);
+            Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,jobId);
+            assertEquals("PASS",((Map<?,?>)result.get("job")).get("status"),result.toString());
+            @SuppressWarnings("unchecked") Map<String,Object> canonical=ServerRuntime.JSON.convertValue(result.get("result"),Map.class);
+            @SuppressWarnings("unchecked") Map<String,Object> summary=(Map<String,Object>)canonical.get("summary");
+            assertEquals(2,summary.get("total"));assertEquals(2,summary.get("passed"));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> cases=(List<Map<String,Object>>)summary.get("cases");
+            assertEquals(List.of("payments.refund.refund1","payments.transfer.first"),cases.stream()
+                    .map(row->String.valueOf(row.get("qualifiedCaseId"))).toList());
+            assertEquals(List.of("payments.refund.v1","payments.transfer.v1"),cases.stream()
+                    .map(row->String.valueOf(row.get("flowId"))).toList());
+
+            JsonNode scheduledBody=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.transfer","payments.refund"),
+                            "selection",Map.of("qualifiedCaseIds",List.of("payments.transfer.first","payments.refund.refund1"))),
+                    "options",Map.of("debug",false,"failFast",true,"runId","native-suite-scheduled")));
+            Map<String,Object> scheduledDraft=runtime.createRunDraft(scheduledBody,"alice");
+            LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name","Native Suite schedule",
+                    "packageId","p","executionType","run","draftId",scheduledDraft.get("draftId"),
+                    "timezone","UTC","cron","0 2 * * *","enabled",false)),"alice");
+            assertEquals(List.of("payments.refund.refund1","payments.transfer.first"),
+                    schedule.runInput.get("nativeSuiteQualifiedCaseIds"));
+            Map<String,Object> occurrence=runtime.triggerLoadSchedule(schedule.id,"alice");
+            assertEquals("submitted",occurrence.get("status"),occurrence.toString());
+            Map<String,Object> scheduledResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,
+                    String.valueOf(occurrence.get("jobId")));
+            assertEquals("PASS",((Map<?,?>)scheduledResult.get("job")).get("status"),scheduledResult.toString());
+
+            JsonNode staleBody=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.transfer","payments.refund"),
+                            "selection",Map.of("all",true)),
+                    "options",Map.of("debug",false,"runId","native-suite-stale")));
+            Map<String,Object> staleDraft=runtime.createRunDraft(staleBody,"alice");
+            int jobsBeforeStaleSubmit=runtime.jobs.size();
+            Files.writeString(refundDefinition,Files.readString(refundDefinition)+"\n# changed after suite draft\n");
+            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",staleDraft.get("draftId"))),"alice","alice"));
+            assertEquals(jobsBeforeStaleSubmit,runtime.jobs.size(),
+                    "A changed Definition must reject the complete Suite before creating a Job");
+        }
+    }
+
     @Test void nativeCaseReplayStrictRejectsMutationAndCurrentRetainsSelectionWithLineage() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("allowed"));
         Path packageRoot=Files.createDirectories(allowed.resolve("p"));

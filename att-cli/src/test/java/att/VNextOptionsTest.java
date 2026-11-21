@@ -86,6 +86,34 @@ class VNextOptionsTest {
                 "--resolved-case-id",""}));
     }
 
+    @Test void nativeSuiteRequiresExplicitDefinitionsAndUsesQualifiedSelectors() {
+        String[] selectedArgs={"--local","run","native-suite","--definition","fpp.alpha",
+                "--definition","fpp.zeta","--qualified-case-id","fpp.zeta.third",
+                "--qualified-case-id","fpp.alpha.first","--tag","smoke","--exclude-tag","skip"};
+        assertTrue(VNextOptions.isVNextRequest(selectedArgs));
+        VNextOptions selected=VNextOptions.parse(selectedArgs);
+        assertEquals("native-suite",selected.targetKind());
+        assertNull(selected.target());
+        assertEquals(java.util.Arrays.asList("fpp.alpha","fpp.zeta"),selected.definitionIds());
+        assertEquals(java.util.Arrays.asList("fpp.zeta.third","fpp.alpha.first"),selected.qualifiedCaseIds());
+        assertEquals(java.util.Collections.singleton("smoke"),selected.tags());
+        assertEquals(java.util.Collections.singleton("skip"),selected.excludeTags());
+
+        VNextOptions all=VNextOptions.parse(new String[]{"--server","sit","-p","payments","run","native-suite",
+                "--definition","fpp.transfer","--all"});
+        assertTrue(all.all());
+        assertEquals("payments",all.packageId());
+
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--all","--qualified-case-id","fpp.transfer.one"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--qualified-case-id","fpp.other.one"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","fpp.transfer","--all","--definition","fpp.transfer"}));
+        String longTag=String.join("",java.util.Collections.nCopies(129,"x"));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--tag",longTag}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--all","--exclude-tag",longTag}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--all","--rerun-failed"}));
+    }
+
     @Test void directLoadRejectsInputUntilBothAdaptersSupportIt() {
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{
                 "--local","load","flow","PAYMENT.submit","--input","templates/flows/PAYMENT.submit/load.yaml"}));

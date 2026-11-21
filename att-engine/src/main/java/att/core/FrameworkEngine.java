@@ -44,6 +44,8 @@ import att.testcase.CaseSourceProvenance;
 import att.testcase.ResolvedTestCase;
 import att.testcase.TestCaseDefinitionResolver;
 import att.testcase.TestCaseResolutionResult;
+import att.testcase.TestCaseSuiteResolutionResult;
+import att.testcase.TestCaseSuiteResolver;
 import att.excel.ExcelDataSourceAdapter;
 import att.resource.PackageResourceResolver;
 
@@ -68,8 +70,16 @@ public class FrameworkEngine {
     public RunSummary runNativeCases(TestCaseResolutionResult resolution, String requestedRunId,
             Path requestedOutputRoot, boolean dryRun, boolean failFast,
             att.api.ExecutionEventListener observer) throws Exception {
+        return runNativeCaseSuite(TestCaseSuiteResolutionResult.fromSingle(resolution), requestedRunId,
+                requestedOutputRoot, dryRun, failFast, observer);
+    }
+
+    /** Executes one bounded implicit Suite across one or more resolved native Definitions. */
+    public RunSummary runNativeCaseSuite(TestCaseSuiteResolutionResult resolution, String requestedRunId,
+            Path requestedOutputRoot, boolean dryRun, boolean failFast,
+            att.api.ExecutionEventListener observer) throws Exception {
         config.requireExecutionConfig();
-        List<ResolvedTestCase> selected = validateNativeResolution(resolution);
+        List<ResolvedTestCase> selected = validateNativeSuiteResolution(resolution);
         String runId = IdentifierValidator.runId(requestedRunId);
         Path outputRoot = requestedOutputRoot == null ? resolve(config.outputDirectory()) : resolve(requestedOutputRoot);
         Path runDirectory = IdentifierValidator.strictChild(outputRoot, runId, "Run directory");
@@ -91,7 +101,7 @@ public class FrameworkEngine {
 
             Instant runStarted = Instant.now();
             emitNativeEvent(observer, "RUN_STARTED", runId, null, "RUNNING", null,
-                    nativeIdentityData(resolution.definition().id(), resolution.sourceReference(), resolution.sourceRevision(), null));
+                    nativeSuiteIdentityData(resolution, null));
             att.template.DefaultBuiltInProvider runBuiltIns = new att.template.DefaultBuiltInProvider(new att.template.SequenceService());
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, config);
             att.exec.DbHelperExecutor dbHelperExecutor = new att.exec.DbHelperExecutor(projectRoot, config);
@@ -138,8 +148,7 @@ public class FrameworkEngine {
                     Collections.<att.validation.Diagnostic>emptyList(), nativeRunMetadata(resolution));
             writeLatest(outputRoot, runDirectory, runId, summary, runEnded);
             emitNativeEvent(observer, "RUN_FINISHED", runId, null, summary.status().name(),
-                    Duration.between(runStarted, runEnded).toMillis(), nativeIdentityData(
-                            resolution.definition().id(), resolution.sourceReference(), resolution.sourceRevision(), null));
+                    Duration.between(runStarted, runEnded).toMillis(), nativeSuiteIdentityData(resolution, null));
             return new RunSummary(results, html, runId);
         } finally {
             concurrencyGuard.close();
@@ -517,42 +526,51 @@ public class FrameworkEngine {
         }
     }
 
-    private List<ResolvedTestCase> validateNativeResolution(TestCaseResolutionResult resolution) {
-        if (resolution == null || resolution.definition() == null)
+    private List<ResolvedTestCase> validateNativeSuiteResolution(TestCaseSuiteResolutionResult resolution) {
+        if (resolution == null || resolution.definitions().isEmpty())
             throw new IllegalArgumentException("A resolved native Test Case Definition is required");
         if (resolution.truncated())
-            throw new IllegalArgumentException("A truncated Native Case preview cannot be executed; resolve the complete selection first");
+            throw new IllegalArgumentException("A truncated Native Case Suite cannot be executed; resolve the complete selection first");
         if (resolution.emptySelection() || resolution.selectedCount() == 0)
-            throw new IllegalArgumentException("Native Case selection is empty");
-        if (resolution.selectedCount() > TestCaseDefinitionResolver.MAX_PREVIEW_CASES)
-            throw new IllegalArgumentException("Native RUN supports at most " + TestCaseDefinitionResolver.MAX_PREVIEW_CASES + " selected Cases");
-        if (resolution.selectedCases().size() != resolution.selectedCount())
-            throw new IllegalArgumentException("Native Case resolution does not contain its complete selected Case set");
-        String definitionId = resolution.definition().id();
-        List<ResolvedTestCase> cases = new ArrayList<ResolvedTestCase>(resolution.selectedCases());
+            throw new IllegalArgumentException("Native Case Suite selection is empty");
+        if (resolution.selectedCount() > TestCaseSuiteResolver.MAX_SELECTED_CASES)
+            throw new IllegalArgumentException("Native RUN supports at most " + TestCaseSuiteResolver.MAX_SELECTED_CASES + " selected Cases");
+        Map<String,TestCaseResolutionResult> definitions = new LinkedHashMap<String,TestCaseResolutionResult>();
+        for (TestCaseResolutionResult definition : resolution.definitions()) {
+            if (definition == null || definition.definition() == null)
+                throw new IllegalArgumentException("Native Case Suite contains an incomplete Definition resolution");
+            if (definitions.put(definition.definition().id(), definition) != null)
+                throw new IllegalArgumentException("Native Case Suite contains a duplicate Definition ID");
+        }
+        List<ResolvedTestCase> cases = new ArrayList<ResolvedTestCase>(resolution.cases());
         Set<String> seen = new LinkedHashSet<String>();
         for (ResolvedTestCase testCase : cases) {
-            if (testCase == null || !definitionId.equals(testCase.definitionId())
-                    || !testCase.qualifiedCaseId().equals(definitionId + "." + testCase.caseId())
-                    || !resolution.sourceReference().equals(testCase.sourceReference())
-                    || !resolution.sourceRevision().equals(testCase.sourceRevision()))
+            TestCaseResolutionResult definition = testCase == null ? null : definitions.get(testCase.definitionId());
+            if (definition == null || !testCase.qualifiedCaseId().equals(testCase.definitionId() + "." + testCase.caseId())
+                    || !definition.sourceReference().equals(testCase.sourceReference())
+                    || !definition.sourceRevision().equals(testCase.sourceRevision()))
                 throw new IllegalArgumentException("Native Case resolution identity is inconsistent");
             if (!seen.add(testCase.qualifiedCaseId()))
                 throw new IllegalArgumentException("Native Case selection contains a duplicate Qualified Case ID: " + testCase.qualifiedCaseId());
         }
+        if (cases.size() != resolution.selectedCount())
+            throw new IllegalArgumentException("Native Case Suite does not contain its complete selected Case set");
         return cases;
     }
 
-    private List<Map<String,Object>> verifyNativeSources(TestCaseResolutionResult resolution,
+    private List<Map<String,Object>> verifyNativeSources(TestCaseSuiteResolutionResult resolution,
             List<ResolvedTestCase> cases, FlowRegistry flows) throws Exception {
         PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
         Map<String,Map<String,Object>> captured = new LinkedHashMap<String,Map<String,Object>>();
-        Path definition = resources.resolvePackageRelative(resolution.sourceReference(), PackageResourceResolver.Kind.FILE).canonicalPath();
-        byte[] definitionBytes = readNativeSource(definition, TestCaseDefinitionResolver.MAX_SOURCE_BYTES, "Native Test Case Definition");
-        String actualDefinitionRevision = sha256Bytes(definitionBytes);
-        if (!actualDefinitionRevision.equals(resolution.sourceRevision()))
-            throw new IllegalArgumentException("Native Test Case Definition changed after resolution; resolve again before RUN");
-        addNativeInput(captured, "test-case-definition", resolution.sourceReference(), resolution.sourceRevision());
+        for (TestCaseResolutionResult definitionResolution : resolution.definitions()) {
+            Path definition = resources.resolvePackageRelative(definitionResolution.sourceReference(), PackageResourceResolver.Kind.FILE).canonicalPath();
+            byte[] definitionBytes = readNativeSource(definition, TestCaseDefinitionResolver.MAX_SOURCE_BYTES, "Native Test Case Definition");
+            String actualDefinitionRevision = sha256Bytes(definitionBytes);
+            if (!actualDefinitionRevision.equals(definitionResolution.sourceRevision()))
+                throw new IllegalArgumentException("Native Test Case Definition changed after resolution; resolve again before RUN: "
+                        + definitionResolution.definition().id());
+            addNativeInput(captured, "test-case-definition", definitionResolution.sourceReference(), definitionResolution.sourceRevision());
+        }
 
         Map<String,String> dependencyRevisions = new LinkedHashMap<String,String>();
         for (ResolvedTestCase testCase : cases) {
@@ -659,6 +677,31 @@ public class FrameworkEngine {
         return data;
     }
 
+    private Map<String,Object> nativeSuiteIdentityData(TestCaseSuiteResolutionResult resolution,
+            ResolvedTestCase testCase) {
+        if (testCase != null) return nativeIdentityData(testCase.definitionId(), testCase.sourceReference(),
+                testCase.sourceRevision(), testCase);
+        if (!resolution.implicitSuite() && resolution.definitions().size() == 1) {
+            TestCaseResolutionResult definition = resolution.definitions().get(0);
+            return nativeIdentityData(definition.definition().id(), definition.sourceReference(), definition.sourceRevision(), null);
+        }
+        Map<String,Object> data = new LinkedHashMap<String,Object>();
+        data.put("targetType", "nativeSuite");
+        List<Map<String,Object>> definitions = new ArrayList<Map<String,Object>>();
+        List<String> definitionIds = new ArrayList<String>();
+        for (TestCaseResolutionResult definition : resolution.definitions()) {
+            definitionIds.add(definition.definition().id());
+            Map<String,Object> item = new LinkedHashMap<String,Object>();
+            item.put("definitionId", definition.definition().id());
+            item.put("sourceReference", definition.sourceReference());
+            item.put("sourceRevision", definition.sourceRevision());
+            definitions.add(item);
+        }
+        data.put("definitionIds", definitionIds);
+        data.put("definitions", definitions);
+        return data;
+    }
+
     private void emitNativeEvent(att.api.ExecutionEventListener observer, String event, String runId,
             String caseId, String status, Long durationMs, Map<String,Object> data) {
         if (observer == null) return;
@@ -685,13 +728,31 @@ public class FrameworkEngine {
                 Collections.<String>emptyList()).withRunPolicies(ciOutputs, "reject", false);
     }
 
-    private Map<String,Object> nativeRunMetadata(TestCaseResolutionResult resolution) {
+    private Map<String,Object> nativeRunMetadata(TestCaseSuiteResolutionResult resolution) {
         Map<String,Object> metadata = new LinkedHashMap<String,Object>();
-        metadata.put("executionType", "run"); metadata.put("targetType", "nativeCase");
-        metadata.put("packageId", resolution.selectedCases().get(0).packageId());
-        metadata.put("definitionId", resolution.definition().id());
-        metadata.put("sourceReference", resolution.sourceReference());
-        metadata.put("sourceRevision", resolution.sourceRevision());
+        metadata.put("executionType", "run");
+        metadata.put("targetType", resolution.implicitSuite() ? "nativeSuite" : "nativeCase");
+        metadata.put("packageId", resolution.cases().get(0).packageId());
+        List<Map<String,Object>> definitionValues = new ArrayList<Map<String,Object>>();
+        List<String> definitionIds = new ArrayList<String>();
+        for (TestCaseResolutionResult definition : resolution.definitions()) {
+            definitionIds.add(definition.definition().id());
+            Map<String,Object> value = new LinkedHashMap<String,Object>();
+            value.put("definitionId", definition.definition().id());
+            value.put("sourceReference", definition.sourceReference());
+            value.put("sourceRevision", definition.sourceRevision());
+            definitionValues.add(value);
+        }
+        metadata.put("definitionIds", definitionIds);
+        metadata.put("definitions", definitionValues);
+        if (resolution.definitions().size() == 1) {
+            TestCaseResolutionResult definition = resolution.definitions().get(0);
+            metadata.put("definitionId", definition.definition().id());
+            metadata.put("sourceReference", definition.sourceReference());
+            metadata.put("sourceRevision", definition.sourceRevision());
+        }
+        metadata.put("resolvedCaseCount", resolution.resolvedCount());
+        metadata.put("selectedCaseCount", resolution.selectedCount());
         return metadata;
     }
 

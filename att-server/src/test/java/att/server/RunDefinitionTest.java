@@ -85,6 +85,23 @@ class RunDefinitionTest {
         assertThrows(IllegalArgumentException.class,()->RunDefinition.parseRetained(ServerRuntime.JSON.readTree(request)));
         assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,request));
     }
+
+    @Test void nativeSuiteV2EnforcesSchemaTagLengthAndRejectsRerunHistoryIntent() throws Exception {
+        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
+        String tag128=String.join("",java.util.Collections.nCopies(128,"x"));
+        String valid=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":true,\"tags\":[\""+tag128+"\"]}}}");
+        att.validation.JsonSchemaVerifier.verifyJson(schema,valid);
+        assertEquals(tag128,parse(valid).nativeSuiteTags.get(0));
+
+        String tag129=tag128+"x";
+        String tooLong=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":true,\"tags\":[\""+tag129+"\"]}}}");
+        assertThrows(IllegalArgumentException.class,()->parse(tooLong));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,tooLong));
+
+        String history=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":true,\"rerunFailed\":true}}");
+        assertThrows(IllegalArgumentException.class,()->parse(history));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,history));
+    }
     @Test void nativeCaseV2SchemaIsRegisteredInSourceAndEmbeddedRuntimeCatalogs() throws Exception {
         java.nio.file.Path rootCatalog=java.nio.file.Path.of("schemas/catalog.yaml");
         java.nio.file.Path runtimeCatalog=java.nio.file.Path.of("att-engine/src/main/resources/att-schemas/catalog.yaml");

@@ -313,7 +313,8 @@ public final class WorkerMain {
                     ||"load-source".equals(request.inspectionAction)
                     ||"run-input".equals(request.inspectionAction)
                     ||"native-run-input".equals(request.inspectionAction)
-                    ||"native-case-preview".equals(request.inspectionAction));
+                    ||"native-case-preview".equals(request.inspectionAction)
+                    ||"native-suite-input".equals(request.inspectionAction));
             if(draftInspection) {
                 String safeMessage=DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message);
                 diagnostic.put("summary",safeMessage);
@@ -373,6 +374,20 @@ public final class WorkerMain {
         executionOutput=output==null?null:(output.isAbsolute()?output:root.resolve(output)).normalize();
         AttService service=new DefaultAttService();
         if("run".equals(r.command)&&r.expectedExecutionRevisionDigest!=null) verifyRevision(root,config,r);
+        if("run".equals(r.command)&&r.nativeSuiteDefinitionIds!=null) {
+            if(r.nativeSuiteQualifiedCaseIds==null||r.nativeSuiteQualifiedCaseIds.isEmpty()
+                    ||r.nativeSuiteSourcePaths==null||r.registeredPackageId==null)
+                throw new IllegalArgumentException("Native Suite RUN is missing its server-validated selection or source identity");
+            Map<String,Object> pinned=resolveNativeSuiteInput(r,root,config);
+            if(!r.nativeSuiteSourcePaths.equals(pinned.get("sourcePaths")))
+                throw new IllegalArgumentException("Native Suite Definition sources do not match the accepted source closure");
+            if(!r.nativeSuiteQualifiedCaseIds.equals(pinned.get("selectedQualifiedCaseIds")))
+                throw new IllegalArgumentException("Native Suite selection changed after draft validation");
+            return service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,config,r.environment,output,r.runId,
+                    r.registeredPackageId,r.nativeSuiteDefinitionIds,r.nativeSuiteQualifiedCaseIds,
+                    Collections.<String>emptyList(),Collections.<String>emptyList(),false,bool(r.dryRun),bool(r.failFast),
+                    event -> emitRunExecution(event,r.diagnosticMode)));
+        }
         if("run".equals(r.command)&&r.nativeCaseDefinitionId!=null) {
             if(r.nativeResolvedCaseIds==null||r.nativeResolvedCaseIds.isEmpty()||r.nativeCaseSourcePath==null)
                 throw new IllegalArgumentException("Native Case RUN is missing its server-validated selection or source identity");
@@ -569,6 +584,30 @@ public final class WorkerMain {
                     return flowValidation;
                 }
                 inspected.put("revisionDigest",revision);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
+            if("native-suite-input".equals(r.inspectionAction)) {
+                String revision=inspector.executionRevisionDigest();
+                Map<String,Object> inspected=resolveNativeSuiteInput(r,root,config);
+                java.util.Set<String> flowIds=new java.util.LinkedHashSet<String>();
+                for(Object value:(List<?>)inspected.get("cases")) {
+                    Map<?,?> item=(Map<?,?>)value;flowIds.add(String.valueOf(item.get("flowId")));
+                }
+                for(String flowId:flowIds) {
+                    ValidateResult flowValidation=service.validateSelectedResource(new ValidateRequest(root,config,r.environment,
+                            Collections.<Path>emptyList(),null,Collections.<String>emptySet(),Collections.<String>emptySet(),
+                            Collections.<String>emptySet(),false,"selected-resource"),"flow",flowId);
+                    if(flowValidation.exitCode()!=0) {
+                        for(att.validation.Diagnostic diagnostic:flowValidation.diagnostics()) {
+                            Map<String,Object> value=diagnostic.toMap();
+                            value.put("outcome",att.server.api.LimitOutcome.SUBMISSION_REJECTED.name());
+                            value.put("stage","validation");emit(WorkerEvent.Type.DIAGNOSTIC,value);
+                        }
+                        return flowValidation;
+                    }
+                }
+                inspector.verifyRevision(revision);inspected.put("revisionDigest",revision);
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
@@ -838,6 +877,50 @@ public final class WorkerMain {
         result.put("selectedCaseIds",orderedIds);result.put("qualifiedCaseIds",qualifiedIds);result.put("cases",cases);
         result.put("selectedCount",cases.size());result.put("truncated",Boolean.FALSE);
         return result;
+    }
+
+    private Map<String,Object> resolveNativeSuiteInput(WorkerRequest request,Path root,Path config) throws Exception {
+        if(request.nativeSuiteDefinitionIds==null||request.nativeSuiteDefinitionIds.isEmpty()
+                ||request.nativeSuiteDefinitionIds.size()>att.testcase.TestCaseSuiteResolver.MAX_DEFINITIONS
+                ||request.registeredPackageId==null)
+            throw new IllegalArgumentException("Native Suite RUN requires between 1 and 100 Definition IDs");
+        Path selectedConfig=RuntimeConfigPath.resolve(config,root);
+        att.config.FrameworkConfig effective=new att.config.FrameworkConfigLoader().load(selectedConfig,
+                RuntimeConfigPath.root(selectedConfig),root,request.environment);
+        att.testcase.TestCaseSuiteResolver resolver=new att.testcase.TestCaseSuiteResolver(
+                att.validation.SchemaFiles.resolve(root,"att-testcase-v1.schema.json"));
+        att.testcase.TestCaseSuiteResolutionResult resolution=resolver.resolve(root,request.registeredPackageId,
+                effective.templatesRoot(),effective.testcasesRoot(),request.nativeSuiteDefinitionIds,
+                request.nativeSuiteQualifiedCaseIds,request.nativeSuiteTags,request.nativeSuiteExcludeTags,
+                bool(request.nativeSuiteAll),()->Thread.currentThread().isInterrupted());
+        if(resolution.truncated())throw new IllegalArgumentException("Native Suite selection is truncated; narrow the source before execution");
+        if(resolution.emptySelection())throw new IllegalArgumentException("Native Suite selection is empty after applying the requested selectors");
+        Map<String,String> sourcePaths=new LinkedHashMap<String,String>();
+        Map<String,String> sourceRevisions=new LinkedHashMap<String,String>();
+        for(att.testcase.TestCaseResolutionResult definition:resolution.definitions()) {
+            sourcePaths.put(definition.definition().id(),definition.sourceReference());
+            sourceRevisions.put(definition.definition().id(),definition.sourceRevision());
+        }
+        List<String> selectedIds=new ArrayList<String>();List<Map<String,Object>> cases=new ArrayList<Map<String,Object>>();
+        for(att.testcase.ResolvedTestCase testCase:resolution.cases()) {
+            selectedIds.add(testCase.qualifiedCaseId());
+            Map<String,Object> item=new LinkedHashMap<String,Object>();item.put("definitionId",testCase.definitionId());
+            item.put("caseId",testCase.caseId());item.put("qualifiedCaseId",testCase.qualifiedCaseId());
+            item.put("flowId",testCase.flowId());item.put("flowRevision",testCase.flowRevision());
+            item.put("sourceReference",testCase.sourceReference());item.put("sourceRevision",testCase.sourceRevision());
+            if(testCase.sourceRecordId()!=null)item.put("sourceRecordId",testCase.sourceRecordId());
+            if(testCase.recordIndex()!=null)item.put("recordIndex",testCase.recordIndex());
+            item.put("tags",testCase.tags());item.put("provenance",testCase.sourceProvenance().toMap());
+            List<Map<String,Object>> dependencies=new ArrayList<Map<String,Object>>();
+            for(att.testcase.ResolvedTestCase.FlowDependency dependency:testCase.dependencies())dependencies.add(dependency.toMap());
+            item.put("dependencies",dependencies);cases.add(item);
+        }
+        Map<String,Object> result=new LinkedHashMap<String,Object>();
+        result.put("definitionIds",new ArrayList<String>(sourcePaths.keySet()));
+        result.put("sourcePaths",sourcePaths);result.put("sourceRevisions",sourceRevisions);
+        result.put("selectedQualifiedCaseIds",selectedIds);result.put("cases",cases);
+        result.put("resolvedCount",resolution.resolvedCount());result.put("selectedCount",selectedIds.size());
+        result.put("kind","ImplicitTestCaseSuite");return result;
     }
 
     private OperationResult validateVNext(WorkerRequest request,Path packageRoot,Path configPath) throws Exception {
