@@ -245,7 +245,11 @@ public final class FlowRegistry {
                     "Correct the indicated Flow descriptor field.");
             if (schema == null) throw YamlSupport.locate(diagnostic, descriptor, field);
             throw YamlSupport.locateSchema(diagnostic, descriptor, schema.structuredViolations());
-        } finally { YamlSupport.clearSnapshotSource(descriptor); }
+        } finally {
+            // Legacy non-snapshot execution still uses this descriptor's captured source
+            // when a nested Flow action reports a runtime validation diagnostic.
+            if (snapshotMode) YamlSupport.clearSnapshotSource(descriptor);
+        }
         parsedCount++;
         if (!id.equals(flow.id())) throw new IllegalArgumentException("Flow descriptor id changed while compiling: expected " + id + " but found " + flow.id());
         byId.put(id, flow);

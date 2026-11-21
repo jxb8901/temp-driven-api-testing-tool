@@ -7,7 +7,7 @@ schemas:
   att-load-bindings/v1: att-load-bindings-v1.schema.json
   att-load-template/v1: att-load-template-v1.schema.json
   att-schedule/v2: att-schedule-v2.schema.json
-  att-execution/v1: att-execution-v1.schema.json
+  historicalExecutionV1: history/att-execution-v1.schema.json
   att-execution/v2: att-execution-v2.schema.json
   att-testcase/v1: att-testcase-v1.schema.json
   att-debug/v1.2: att-debug-v1.2.schema.json

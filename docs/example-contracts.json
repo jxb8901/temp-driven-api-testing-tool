@@ -4,7 +4,7 @@
     {
       "id": "unified-run-draft",
       "source": "docs/reference/execution-modes/unified-run.md",
-      "schema": "att-execution/v1",
+      "schema": "att-execution/v2",
       "format": "json",
       "status": "current"
     },
