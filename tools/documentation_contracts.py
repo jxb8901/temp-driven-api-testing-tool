@@ -22,6 +22,74 @@ def active_schemas(catalog):
     return {name: frozenset(versions) for name, versions in active.items()}
 
 
+def proposed_schemas(catalog):
+    """Validate every proposed catalog entry; ignore only blank/comment lines."""
+    allowed_top = ("schemaVersion", "status", "schemas")
+    schemas = {}
+    seen_keys = set()
+    seen_top = set()
+    schema_version = None
+    status = None
+    in_schemas = False
+    for lineno, line in enumerate(catalog.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if re.match(r"^[^\s#]", line):
+            in_schemas = False
+            top = re.match(r"^([A-Za-z0-9_-]+)\s*:(.*)$", line)
+            if not top:
+                raise ValueError("proposed schema catalog has invalid top-level entry on line %s" % lineno)
+            key = top.group(1)
+            value = top.group(2).strip()
+            if key not in allowed_top:
+                raise ValueError("proposed schema catalog has unexpected field: %s" % key)
+            if key in seen_top:
+                raise ValueError("proposed schema catalog has duplicate field: %s" % key)
+            seen_top.add(key)
+            if key == "schemaVersion":
+                schema_version = value
+                if schema_version != "att-proposed-schema-catalog/v1":
+                    raise ValueError("proposed schema catalog must declare att-proposed-schema-catalog/v1")
+            elif key == "status":
+                status = value
+                if status != "proposed":
+                    raise ValueError("proposed schema catalog must declare status: proposed")
+            else:
+                if value:
+                    raise ValueError("proposed schema catalog schemas must be a mapping on line %s" % lineno)
+                in_schemas = True
+            continue
+        if not in_schemas:
+            raise ValueError("proposed schema catalog has unexpected indented entry on line %s" % lineno)
+        match = re.match(
+            r"^\s+(att-[a-z0-9-]+)/v([0-9]+(?:\.[0-9]+)*):\s*([A-Za-z0-9._-]+\.schema\.json)\s*$",
+            line, re.I)
+        if not match:
+            raise ValueError("proposed schema catalog has invalid schemas entry on line %s" % lineno)
+        name, version, filename = match.groups()
+        catalog_key = "%s/v%s" % (name.lower(), version)
+        if catalog_key in seen_keys:
+            raise ValueError("proposed schema catalog has duplicate entry: %s" % catalog_key)
+        seen_keys.add(catalog_key)
+        filename_version = re.search(r"-v([0-9]+(?:\.[0-9]+)*)\.schema\.json$", filename, re.I)
+        if not filename_version or filename_version.group(1) != version:
+            raise ValueError("proposed schema catalog filename does not match %s/v%s" % (name, version))
+        expected = "%s-v%s.schema.json" % (name.lower(), version)
+        if filename.lower() != expected:
+            raise ValueError("proposed schema catalog filename does not match %s/v%s" % (name, version))
+        schemas.setdefault(name.lower(), set()).add(version)
+    if schema_version is None:
+        raise ValueError("proposed schema catalog must declare att-proposed-schema-catalog/v1")
+    if status is None:
+        raise ValueError("proposed schema catalog must declare status: proposed")
+    if "schemas" not in seen_top:
+        raise ValueError("proposed schema catalog must declare schemas:")
+    if not schemas:
+        raise ValueError("proposed schema catalog contains no schema files")
+    return {name: frozenset(versions) for name, versions in schemas.items()}
+
+
 def without_code(text):
     lines = []
     fence = None
@@ -325,6 +393,29 @@ def validate(root=ROOT):
     version = re.search(r"<version>([^<]+)</version>",
                         (root / "pom.xml").read_text(encoding="utf-8")).group(1).strip()
     active = active_schemas((root / "schemas/catalog.yaml").read_text(encoding="utf-8"))
+    proposed_catalog = root / "schemas/proposed/catalog.yaml"
+    if not proposed_catalog.is_file():
+        errors.append("missing schemas/proposed/catalog.yaml")
+        proposed = {}
+    else:
+        try:
+            proposed = proposed_schemas(proposed_catalog.read_text(encoding="utf-8"))
+            for name, versions in proposed.items():
+                if name in active:
+                    overlap = versions & active[name]
+                    if overlap:
+                        errors.append("schema is both proposed and active: %s/%s" %
+                                      (name, ", ".join("v" + value for value in sorted(overlap))))
+                for schema_version in versions:
+                    filename = name + "-v" + schema_version + ".schema.json"
+                    if not (proposed_catalog.parent / filename).is_file():
+                        errors.append("proposed schema catalog references missing file: schemas/proposed/%s" % filename)
+        except ValueError as exc:
+            errors.append(str(exc))
+            proposed = {}
+    known_schemas = {name: set(versions) for name, versions in active.items()}
+    for name, versions in proposed.items():
+        known_schemas.setdefault(name, set()).update(versions)
     manifest = root / "docs/reference-manifest.txt"
     items = [s.strip() for s in manifest.read_text(encoding="utf-8").splitlines()
              if s.strip() and not s.lstrip().startswith("#")]
@@ -378,7 +469,7 @@ def validate(root=ROOT):
                 or rel.startswith("examples/")):
             errors += [rel + ": " + e for e in chapter_label_errors(text)]
         try:
-            errors += [rel + ": " + e for e in stale_claims(text, active, version)]
+            errors += [rel + ": " + e for e in stale_claims(text, known_schemas, version)]
         except ValueError as exc:
             errors.append(rel + ": " + str(exc))
         if rel.startswith(("docs/reference/", "docs/reference.zh/")) and path.name != "README.md":

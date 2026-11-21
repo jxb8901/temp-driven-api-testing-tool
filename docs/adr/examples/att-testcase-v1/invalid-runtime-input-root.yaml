@@ -1,0 +1,12 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.invalid-input-root
+flow: payment.transfer.v1
+dataSource:
+  type: inline
+  records:
+    - recordId: one
+      data:
+        amount: 1
+inputs:
+  amount:
+    from: EXEC.INPUT.amount

@@ -1,0 +1,6 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.empty
+flow: payment.transfer.v1
+dataSource:
+  type: inline
+  records: []

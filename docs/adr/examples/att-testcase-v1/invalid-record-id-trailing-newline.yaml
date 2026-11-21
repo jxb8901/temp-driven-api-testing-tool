@@ -1,0 +1,9 @@
+schemaVersion: att-testcase/v1
+id: payments.records
+flow: payment.transfer.v1
+dataSource:
+  type: inline
+  records:
+    - recordId: "case01\n"
+      data:
+        amount: 1

@@ -1,0 +1,5 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.invalid-flow
+flow: "${DATA.flow}"
+inputs:
+  amount: 1

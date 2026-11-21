@@ -1,0 +1,4 @@
+schemaVersion: att-proposed-schema-catalog/v1
+status: proposed
+schemas:
+  att-testcase/v1: att-testcase-v1.schema.json

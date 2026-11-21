@@ -2,11 +2,12 @@
 
 - **狀態：** Proposed（提案中，尚未接受為已實作契約）
 - **日期：** 2026-11-20
-- **適用範圍：** ATT 下一代 Test Authoring；非 4.4.1 已發佈功能
+- **適用範圍：** ATT 下一代 Test Authoring；非 4.4.1 已發佈功能；本文定義的是提案，不表示可供目前 runtime 使用
+- **Native Case schema：** S01 凍結 `att-testcase/v1` 欄位與身份契約；resolution／execution 仍未實作
 - **相關工作：** [Issue #388](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/388)、[Source Management #233](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/233)、[PR #386](https://github.com/jxb8901/temp-driven-api-testing-tool/pull/386)
 - **英文主文件：** [ADR-0001](0001-flow-centric-testcase-resolution.md)
 
-> **架構決策：** Test Case Definition 綁定 Flow、Data Source 及 Resolution Rules；Case Resolution 產生 **0..m 個 Resolved Test Cases**；RUN／LOAD 對選定的 Cases 執行。**產生案例與執行案例是不同的生命週期。**
+> **架構決策：** Test Case Definition 綁定 Flow、Data Source 及 Resolution Rules；長期模型可解析出 **0..m 個 Resolved Test Cases**，但零案例必須在 RUN 前成為驗證錯誤。RUN／LOAD 對選定的 Cases 執行。**產生案例與執行案例是不同的生命週期。**
 
 ## 背景與問題
 
@@ -24,8 +25,8 @@
 | --- | --- | --- |
 | **Action** | 一個操作或巢狀 Flow 呼叫 | Flow 內部 |
 | **Flow** | 可重用、有序的 Actions、Assertions、錯誤及清理邏輯 | 是：`flow.yaml` |
-| **Test Case Definition** | Flow 引用、Metadata、Data Source、資料映射／生成／過濾與 Case ID 規則 | 是：`testcase.yaml` + 內嵌／引用資料 |
-| **Data Source** | Inline YAML、Excel 靜態資料列、ATT Testdata 或未來的生成／轉換資料 | Definition 的一部分；不強制新增資源類型 |
+| **Test Case Definition** | Flow 引用、Metadata、Data Source、資料映射與 Case ID 規則；後續版本可增加生成／過濾 | 是：`testcase.yaml` + 內嵌／引用資料 |
+| **Data Source** | V1：Inline YAML 或 Excel 資料列；未來的版本化擴展可加入 ATT Testdata 或生成／轉換資料 | Definition 的一部分；不強制新增資源類型 |
 | **Resolved Test Case**（Case Instance） | 已解析、具體、可識別和可選取的案例身份，以及 Flow／Input Binding | **不是**新的檔案或 Resource Type |
 | **Test Suite** | 一個或多個 Definition 的 Resolved Cases 的選取或分組 | 預設可隱式形成，必要時才持久化 |
 | **Case Execution** | Resolved Case 的一次實際執行及 Result／Evidence | Runtime Record／Artifacts |
@@ -39,8 +40,8 @@
 ```text
 Flow
   + Test Case Definition (testcase.yaml)
-  + Data Source (Inline | Excel | ATT Testdata | Generator)
-  + Resolution Rules (Mapping / Expansion / Filter / Case ID)
+  + Data Source (V1: Inline | Excel；未來版本化擴展：其他來源)
+  + Resolution Rules (V1: Mapping / Case ID；未來版本可增加展開／過濾)
                    |
                    v
             Case Resolution
@@ -54,110 +55,68 @@ Flow
 
 `Resolve(Definition, ResolutionContext) → {ResolvedCase_1, ..., ResolvedCase_m}`
 
-同一 Definition 可包含 `n` 筆來源資料／生成規則，但最後產生 `m` 個 Cases，**m 不一定等於 n**：
+未來 Schema 版本或經獨立核准的版本化擴展可由 `n` 筆來源資料／規則產生 `m` 個 Cases。V1 不會過濾、展開或重排記錄：每筆來源記錄恰好產生一個 Resolved Case，並保留來源順序。沒有 Data Source 的單一 Inline Definition 會產生一個 `default` Case。例子：
 
 | Data Source | n | Resolution | m |
 | --- | ---: | --- | ---: |
-| Inline YAML 一組 Input | 1 | 不展開 | 1 |
-| Excel 有 100 行 | 100 | 全部選取 | 100 |
-| Excel 有 100 行 | 100 | 過濾剩 smoke | 20 |
-| 一條 Boundary Rule | 1 | 生成最大／最小及相鄰值 | 6 |
-| ATT Testdata 3 筆資料 | 3 | 每筆展開三個變體 | 9 |
-| 任意來源 | n | 全部被過濾 | 0 |
+| 沒有 Data Source 的單一 Inline Case（V1） | 1 | 使用 `default` ID | 1 |
+| Inline 記錄（V1） | 3 | 保留來源順序；不過濾或展開 | 3 |
+| Excel 靜態資料列（V1） | 100 | 保留來源順序；不過濾或展開 | 100 |
+| 未來版本化來源／規則 | 1 | Boundary-value 展開 | 6 |
+| 未來版本化來源／規則 | 100 | 過濾為 smoke | 20 |
 
-`m = 0` 必須有明確的空選取或錯誤政策，**不得把沒有執行任何案例視為全部 PASS**。Resolution 不可呼叫業務 Tool 或執行 Flow Actions。
+空來源或未來規則若會解析出零個案例，必須在 RUN 前成為驗證錯誤；不得視為成功的空選取或全部 PASS。Resolution 不可呼叫業務 Tool 或執行 Flow Actions。
 
 ### 案例身份與重現性
 
 必須區分：
 
 - **Definition ID：** 例如 `fpp.transfer.boundary`，標識持久的案例定義。
-- **Resolved Case ID：** 例如 `min_minus_1`，在 Definition 範圍內唯一。
-- **Qualified Case ID：** 例如 `fpp.transfer.boundary.min_minus_1`，按照 Package／Definition Namespace 規則構成跨案例唯一身份。
+- **來源記錄 ID：** Inline 記錄的 `recordId`，或 Excel 中由 `dataSource.caseId` 指定欄位的值；多筆來源必須提供，不可用行號代替。
+- **Resolved Case ID：** 一個路徑安全段落，例如 `min_minus_1`，在 Definition 範圍內唯一。
+- **Qualified Case ID：** `<definition-id>.<resolved-case-id>`，例如 `fpp.transfer.boundary.min_minus_1`。它是 Package 範圍的邏輯身份，不是檔案系統路徑，長度最多 255 個 ASCII 字元。
 - **Execution／Iteration ID：** 每次實際執行的唯一身份；同一 Case 可以有無數次執行。
 
-支援透過 **Case ID Expression** 或穩定 Source Key，在 **Resolution 時**用受限、可預測的資料上下文產生 ID。應驗證空 ID、重複、非法及衝突 ID。Excel 的物理行號不宜作為預設長期 Case 身份。
+`recordId` 是來源記錄身份；`caseIdExpression` 是可選的 Resolved Case ID 覆寫規則，兩者不可混為一談。支援透過 **Case ID Expression** 或穩定 Source Key，在 **Resolution 時**用受限、可預測的資料上下文產生 Resolved Case ID。若提供 expression，只能是單一 `${DATA.key}` 直接鍵查詢；函式、串接、巢狀路徑、`EXEC.*`、`META.*`、環境狀態及其他 runtime 值均非法。結果必須是非空、符合 Resolved Case ID 語法的字串。缺值、null、非字串、非法值、重複或相撞均為驗證錯誤。即使 expression 覆寫 Resolved Case ID，同一 Definition 內重複的 `recordId` 仍須拒絕；Excel 物理行號不可作為長期案例身份。
+
+V1 保留 Inline 記錄宣告順序及 Excel 工作表資料列順序，每筆記錄恰好解析成一個 Resolved Case。V1 不支援過濾或展開；空來源或任何會產生零個案例的解析結果，都必須在 RUN 前成為驗證錯誤，絕不可當作全部 PASS。
 
 相同 Case ID **不代表**每次執行都使用相同的動態 Input。例如 LOAD 的 Testdata 可依 Iteration 重新選取，但 Resolved Case ID 不變。精確重跑須保存已固定的來源／Flow／Data Revision、Generator 版本和 Seed、Resolved Binding，以及可保留的實際 Input 選取證據；並區分「按歷史固定資料重跑」與「以最新資料重新執行」。
 
 ### 多種 Data Source，共用 Resolution 模型
 
-#### 建議的 `att-testcase/v1` Schema 方向
+#### S01 凍結的 `att-testcase/v1` authoring contract
 
-以下為**提案中的最小 Schema**（欄位名稱與精確語法仍待後續 Schema Issue 凍結）。Excel Data Source 刻意復用 `att-sidecar/v2.2` 熟悉的欄位映射語彙，以降低遷移成本。
+S01 凍結欄位、型別與身份規則，但不代表支援 runtime resolution 或 execution。Schema 和範例位於 `schemas/proposed/` 及 `docs/adr/examples/att-testcase-v1/`；它們會通過文件/schema 驗證，但不加入 Engine 的 active schema catalog，也不能被 Package discovery、Resolver 或 RUN 執行。
 
-**Inline 單 Case（最簡）：**
+頂層包含 `schemaVersion`、Package 範圍的 `id`、可選 `name`／`description`／`tags`、靜態且 canonical 的版本化 `flow`，以及以下其中一種資料形態：
 
-```yaml
-schemaVersion: att-testcase/v1
-id: fpp.transfer.success
-name: FPP Transfer Success
-flow: payment.transfer.v1
-tags: [fpp, smoke]
-inputs:
-  debitAccount: "A001"
-  amount: 100
-  expectedStatus: SUCCESS
-```
+- **Singleton inline Case：** 必須提供 `inputs`；不可同時提供 `dataSource` 或 `caseIdExpression`；Resolved Case ID 固定為 `default`。`inputs` 是完整 `EXEC.INPUT` map，可使用字串、數字、boolean、null、list 和 object，空 map 亦有效。
+- **多筆 Data Source：** `dataSource.type` 為 `inline` 或 `excel`。Inline 每筆記錄必須有穩定 `recordId` 和 `data` map。Excel 以 `dataSource.caseId` 指定穩定 ID 欄的表頭，並指定 `.xlsx` 路徑和 `sheet`；`headerRows`、`tags`、`dataColumns` 可選。
 
-**Inline 多 Case：**
+提案中的 V1 契約只接受 `inline` 及 `excel` 兩種 Data Source type。Validator 必須把未知或未識別的 `dataSource.type` 當作 unsupported type 拒絕；`x-` 擴展欄位不會新增 Data Source type。以 ATT Testdata 作為案例生成來源、生成記錄及轉換記錄，都必須使用未來 Schema 版本或另行核准的版本化擴展。這些來源在套用 V1 binding 和 Case ID 規則前，必須先正規化成有序記錄，且每筆都有穩定記錄 ID、具型別的值、來源 revision 和 provenance。
 
-```yaml
-schemaVersion: att-testcase/v1
-id: fpp.transfer.boundary.inline
-flow: payment.transfer.v1
-dataSource:
-  type: inline
-  records:
-    - caseId: min
-      amount: 1
-      expectedStatus: SUCCESS
-    - caseId: zero
-      amount: 0
-      expectedStatus: REJECTED
-caseId: "${DATA.caseId}"
-inputs:
-  amount: "${DATA.amount}"
-  expectedStatus: "${DATA.expectedStatus}"
-```
+Definition ID 使用點號分隔的 `[A-Za-z0-9_-]+` 段落，長度最多 126 個 ASCII 字元；Resolved Case ID 使用 `[A-Za-z0-9_-]{1,128}`，不得包含路徑分隔符。ID 保留作者提供的大小寫，不會自動 trim 或轉小寫。Resolver 必須拒絕 Package 內以 ASCII case-folding 比較時相撞的 Definition ID，以及同一 Definition 內相撞的 Resolved Case ID；完整 Qualified Case ID 在 Package 內也必須 case-fold 唯一。任何輸出路徑映射均須另行定義並保持路徑 containment。Descriptor 的檔名和目錄只是位置；移動或改名不改變 Definition identity，修改 `id` 則代表新 Definition，不會遷移舊結果。
 
-**Excel Data Source（復用 sidecar 風格映射）：**
+`recordId` 是來源記錄 identity；`caseIdExpression` 是可選的 Resolved Case ID 覆蓋規則，兩者不可混為一談。Excel `dataSource.caseId` 是物理表頭選擇器；`caseIdExpression` 則只能是單一 `${DATA.key}` 直接鍵查詢，在 Resolution 時對 record `DATA` 求值。函式、串接、巢狀路徑、`EXEC.*`、`META.*` 及其他 runtime 值均非法。結果必須是非空、符合 Case ID 段落規則的字串。缺值、null、非字串、非法值、重複結果或衝突均為錯誤；不可用 Excel 行號當作身份。同一 Definition 內的 `recordId` 必須按 ASCII case-folding 唯一，即使 `caseIdExpression` 覆寫 Resolved Case ID 亦然；Resolved Case ID 同樣須在 Definition 內按 ASCII case-folding 唯一。提案中的 Schema 可驗證 ID 語法；重複來源 ID 和重複 expression 結果見[resolution-invalid 範例](examples/att-testcase-v1/resolution-invalid-duplicate-ids.yaml)。跨記錄及跨 Package 唯一性是未來 Resolver 的語義責任，S01 不包含 runtime enforcement。
 
-```yaml
-schemaVersion: att-testcase/v1
-id: fpp.transfer.regression
-name: FPP Transfer Regression
-flow: payment.transfer.v1
-tags: [fpp, regression]
-dataSource:
-  type: excel
-  path: testdata/transfer-cases.xlsx
-  sheet: Cases
-  headerRows: 1
-  caseId: "Case ID"                 # 復用 sidecar excel.caseId 概念
-  tags: "Tags"                      # 可選，復用 sidecar
-  dataColumns:                      # 完全復用 sidecar dataColumns 語法
-    debitAccount: Debit Account
-    amount: Amount
-    expectedStatus: Expected Status(yaml)
-    # 亦支援：note: "備註,補充"
-    #         payload: "請求(yaml)"(yaml)
-# inputs 可選：若省略，則 dataColumns 的 alias 直接成為 Flow inputs
-inputs:
-  debitAccount: "${DATA.debitAccount}"
-  amount: "${DATA.amount}"
-  expectedStatus: "${DATA.expectedStatus}"
-report:
-  format: xlsx
-  template: sourceWorkbook          # 可選；輸出永遠是新的 workbook
-```
+沒有 `inputs` 時，Data Source 的每個 `DATA` 鍵以同名 Flow input identity-mapped。提供 `inputs` 時，它是完整 projection，取代 identity projection，不是合併或 override 層。每個 projection 值必須是 `{from: DATA.key}` 或 `{value: <typed value>}`。來源鍵不存在為錯誤；來源值為 null 時保留 null。V1 沒有隱含 defaults、環境 overlay 或 override precedence。Flow input 填入 `EXEC.INPUT`，不初始化 `EXEC.VARS` 或 Debug bootstrap vars。
 
-主要復用點（來自 `att-sidecar/v2.2`）：
-- `headerRows`、`caseId`、`tags`，尤其是 `dataColumns`（包含 `alias=ColumnName`、`ColumnName(yaml)`、引號規則、空白／N/A 正規化）刻意保留。
-- Stage selector 欄位與 `stages[].dataColumns` **不適用**；Definition 直接綁定單一入口 Flow。
-- `(yaml)` 型別解析行為應與現有 sidecar 規則一致。
+Excel mapping 延用 `att-sidecar/v2.2`：`dataSource.caseId` 和 `tags` 是物理表頭 selector；`dataColumns` 是逗號分隔的 scalar string，不是 YAML map，語法沿用 `alias=ColumnName`、`ColumnName(yaml)`、雙引號保護逗號／等號及 quoted name 內的 doubled quote。`(yaml)` 安全解析 scalar/list/map。無 alias 時，trim 後的欄名就是 `DATA` key；無效 key 要明確指定 alias。`headerRows` 預設 1。
 
-單一 Definition 加上三行 Excel 通常形成三個 Resolved Cases，每個都執行同一 Flow。日後一條邊界值規則亦可產生 `min_minus_1`、`min`、`min_plus_1`、`max_minus_1`、`max`、`max_plus_1` 六個 Cases；具體 Generator 和 Expected Mapping 細節留待後續 Schema 設計。
+**省略或空白的 `dataColumns` 代表明確的空選取，不是隱式匯入全部欄位。** 行為等同 `ColumnSpecParser.dataColumns(null / "")`，因此 `DATA` 不含任何業務欄。Case ID 與可選 tags selector 欄只作 metadata 選取；V1 不會自動把它們或其他未映射表頭暴露成 `DATA` key。若需要 Excel 業務輸入，作者必須明確宣告 `dataColumns`。若同時省略 `inputs`，對空 `DATA` 做 identity projection 會得到空的 `EXEC.INPUT` map（合法）。若 `inputs` 已提供並引用不存在的 `DATA` key，仍屬 resolve-time 錯誤。見[excel-omitted-data-columns.yaml](examples/att-testcase-v1/excel-omitted-data-columns.yaml)。
+
+`dataSource.path` 必須是 Package 相對的可移植路徑：僅允許非空 ASCII `[A-Za-z0-9_-]` 路徑段、`/` 分隔，並以 `.xlsx`／`.XLSX` 結尾。提案 Schema 在語法層拒絕空段、`.`／`..`、反斜線、磁碟機／冒號形式、空白與控制字元。Schema 拒絕是必要條件但不足夠；Excel adapter 仍須在 Package root 下解析路徑，並拒絕逃逸或不安全的檔案系統形式。
+
+空白或 whitespace、`N/A`、`NA`、`NULL`、`NONE` 正規化為空字串；空白 `(yaml)` 不解析。Inline YAML 的 null 仍為 typed null。Excel tags 以逗號分隔；Definition 與 record tags 按來源順序合併並去重。缺少或重複欄位、重複 alias、錯誤 quoting、不安全路徑或不支援的 workbook 結構均須報錯；提案中的 Resolver 讀取來源 workbook 時不得修改它。Excel 資料列按工作表來源順序解析，每列恰好產生一個 Resolved Case。Stage selector 和 `stages[].dataColumns` 不適用；Definition 直接綁定一個入口 Flow。
+
+Excel Case ID 的 identity 規則比一般資料欄嚴格。`dataSource.caseId` 必須來自文字儲存格，並以現有 `DataFormatter(Locale.ROOT)` 方式讀取；公式、數字、日期、布林及錯誤儲存格均無效。空白儲存格，或經現有 `ValueNormalizer` 判定為空白標記的值（`N/A`、`NA`、`NULL`、`NONE`，忽略前後空白及 ASCII 大小寫），代表缺少 ID；該資料列必須報錯。其餘值保留原文及大小寫，不可 trim 或轉換大小寫。前後空白、控制字元、不符合 `[A-Za-z0-9_-]{1,128}` 的值及 Windows 保留裝置名稱（不分大小寫）均須拒絕。來源 ID 重複時按 ASCII case-folding 比較。`caseIdExpression` 可以產生不同的 Resolved Case ID，但不能免除來源 ID。Excel 行號只可作為診斷來源資訊，不可作為 ID。S04 必須加入儲存格型別、空白標記、空白字元、保留名稱及大小寫碰撞的回歸測試。
+
+`report` 只允許 `format: xlsx`；`template: sourceWorkbook` 只可與 Excel Data Source 一起使用，且只會複製來源為新的輸出 workbook。報告執行屬後續工作，不在 S01 runtime scope 內。
+
+Definition、Data Source、record 和 report object 可使用以 `x-` 為前綴的擴展欄位；其他未知欄位一律拒絕。Projection 和 binding 結構維持嚴格驗證。
+
+提案中的 V1 Schema 必須拒絕空白／格式錯誤 IDs、空 `records`、不支援或未知 Data Source type、動態 Flow ID、模糊的 Case ID 欄位、runtime-only ID expression、inline Actions／Steps、Excel `dataColumns` map、未知欄位及 inline Source Workbook report。Inline 和 Excel 記錄均按來源順序一對一解析；V1 不支援過濾或展開。空來源或零解析案例必須在 RUN 前成為驗證錯誤，不能當作全部 PASS。Schema-invalid 範例及未來 Resolver 的 resolution-invalid 重複 ID 範例見[英文 ADR 的驗證案例](0001-flow-centric-testcase-resolution.md#native-and-data-driven-authoring)。
 
 ### Test Suite 是選取集合
 
@@ -204,7 +163,7 @@ Excel 有兩個**邏輯上分離的角色**：
 ## Resolution 生命週期與安全約束
 
 - **Discovery／Preview：** 檢查來源和 Metadata；預覽或估算 Cases 及 IDs；大型／動態來源須有上限，不執行業務 I/O。
-- **Resolve／Prepare：** 資料映射、過濾、展開、Case ID 校驗、Flow Dependencies 驗證；固定所選 Cases、Source／Data Revision、Generator Seed 等。
+- **Resolve／Prepare：** V1 保留來源順序，套用資料映射和 Case ID 規則，並在 RUN 前拒絕空結果；驗證唯一性並固定所選 Cases 及 Source／Flow／Data／Dependency Closure。未來版本化擴展可加入過濾／展開及所需的 provenance、Seed 規則。
 - **Execute：** 使用已選的 Resolved Case Binding，依政策選取執行時 Testdata，記錄每次執行的 ID、Result 和 Evidence。
 
 View／Validate／Preview 不可改動 Source、產生有副作用的 Legacy Snapshot 或呼叫業務 Tool。Job 接受後的來源必須固定，不能被後續編輯影響。所有 Preview／Logs／Artifacts／Excel Report 須遵守權限、脫敏、容量與保留上限。
@@ -235,16 +194,15 @@ View／Validate／Preview 不可改動 Source、產生有副作用的 Legacy Sna
 
 **本 ADR 不要求 PR #386／4.4.1 GA 完成 Native Cases、Generator、Template／Stage 合併或 LOAD Case Target。** 屬於後續逐步演進方向。
 
-## 接受 ADR 前仍需處理的問題
+## 後續 ADR 評審仍需處理的問題
 
-1. `att-testcase/v1` 精確 Schema、Inputs／Defaults 的覆蓋優先級與 `EXEC.VARS` 初始化。（上方 Schema 方向為提案，供評審。）
-2. Case ID Expression 語法、命名空間、改名／移動時的身份穩定性，與 Legacy ID 的對應。
-3. `m = 0`、無效資料、Generator Seed／數量上限、動態外部資料與重跑保證。
-4. Resolution 何時進行、是否支援決定性的 Lazy／Bounded Enumeration、如何在 Job 接受前固定 Target。
-5. 跨 Definition 的持久 Suite Selection 是否需要額外 Descriptor。
-6. Resolved Case Targets 與既有 LOAD Workload／Mix 的映射及效率。
-7. 舊 Stage 與新 Flow Action 的 Input／Failure／Cleanup 語義相容性。
-8. Debug 轉為 Test Case、敏感 Input Evidence、Excel Report Layout 的精確契約。
+1. Legacy `workbookId.groupId.rowCaseId` 到 Native Definition／Case identity 的遷移及歷史重跑行為。
+2. Generator seed／上限、外部或非決定性來源及精確重跑保證。
+3. Eager 與決定性 bounded/lazy Resolution，以及何時固定選定 Target 集合。
+4. 若跨 Definition 使用持久 Suite selection，其表示方式。
+5. 將已選 Case Target 映射到既有 LOAD workload/mix，同時保持直接 Flow／Template／Tool 行為。
+6. Stage scope/failure/cleanup 與 Flow Action 語義的精確兼容性，以及 Template 到 Flow 的轉換。
+7. Debug 轉換為 Case、敏感 input evidence 及可選 Excel report template 的細節。
 
 狀態保持 **Proposed**，待架構評審及首階段實作契約確定後才轉為 **Accepted**。
 
@@ -252,7 +210,7 @@ View／Validate／Preview 不可改動 Source、產生有副作用的 Legacy Sna
 
 - Inline Definition → 1 Resolved Case → 1 次 RUN Execution。
 - Excel 3 行 → 3 個可獨立選取的 Cases，個別 Result／Rerun、可選新 Workbook Report。
-- 一條 Boundary Rule → 6 個穩定 IDs；資料過濾／展開的 n→m 和 m=0 政策。
+- 未來版本化擴展：一條 Boundary Rule → 6 個穩定 IDs；過濾／展開呈現 n→m。零案例必須在 RUN 前成為驗證錯誤。
 - LOAD 選定 1 Case × 100 Iterations → **1 Case ID、100 Execution IDs**；每次 Testdata 不同亦不改 Case 身份。
 - LOAD 選定 3 Cases，各執行 100 次 → **3 Cases、300 Executions**；Weighted Mix 報告實際 Target 分布。
 - Legacy 五 Stage Case（Prepare、Invoke、Verify、Rollback、Cleanup）及 Job／Schedule／Snapshot／報告相容無回歸。

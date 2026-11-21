@@ -3,10 +3,11 @@
 - **Status:** Proposed
 - **Date:** 2026-11-20
 - **Scope:** Next-generation ATT authoring (future; not shipped in 4.4.1)
+- **Native Case schema:** `att-testcase/v1` field and identity contract frozen by S01; resolution and execution remain unimplemented
 - **Related:** [Issue #388](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/388), [#233](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/233), [PR #386](https://github.com/jxb8901/temp-driven-api-testing-tool/pull/386)
 - **Translation:** [繁體中文版](0001-flow-centric-testcase-resolution.zh.md)
 
-> **Decision:** A Test Case Definition binds reusable Flow logic to a Data Source and resolution rules. Resolution generates **0..m Resolved Test Cases**; RUN/LOAD executes selected cases. Case generation and execution are different lifecycles.
+> **Decision:** A Test Case Definition binds reusable Flow logic to a Data Source and resolution rules. The long-term model may resolve **0..m Resolved Test Cases**; a zero-case result is a validation error before RUN. RUN/LOAD executes selected cases. Case generation and execution are different lifecycles.
 
 ## Context
 
@@ -14,7 +15,7 @@ ATT's established authoring path is **XLSX + att-sidecar/v2.2 + generated XML sn
 
 Existing Flow definitions already contain ordered Actions and nested Flow calls; Debug can execute a Flow with temporary input, and LOAD already repeats Flow/Template/Tool targets. Introducing an independent Steps model would duplicate the same execution language.
 
-This ADR sets **future architecture direction**, not a claim that native testcase YAML, Case Resolution, generators, or LOAD Resolved Case targets already exist.
+This ADR sets **future architecture direction**, not a claim that native testcase YAML, Case Resolution, generators, or LOAD Resolved Case targets are executable. S01 freezes the `att-testcase/v1` authoring contract in a proposed schema bundle; runtime discovery and resolution remain follow-up work.
 
 ## Decision
 
@@ -24,8 +25,8 @@ This ADR sets **future architecture direction**, not a claim that native testcas
 | --- | --- | --- |
 | **Action** | One operation or nested Flow invocation | Part of Flow |
 | **Flow** | Ordered reusable executable Actions, assertions, error/cleanup handling | Yes: `flow.yaml` |
-| **Test Case Definition** | Flow reference, metadata, Data Source, mapping/generation/filtering and Case ID rule | Yes: `testcase.yaml` + inline/referenced data |
-| **Data Source** | Inline YAML, XLSX rows, existing ATT Testdata or future generated/transformed records | Part of Definition; not automatically a new resource category |
+| **Test Case Definition** | Flow reference, metadata, Data Source, mapping and Case ID rule; later versions may add generation/filtering | Yes: `testcase.yaml` + inline/referenced data |
+| **Data Source** | V1: inline YAML or XLSX rows; future versioned extensions may add ATT Testdata or generated/transformed records | Part of Definition; not automatically a new resource category |
 | **Resolved Test Case** (Case Instance) | A concrete, identifiable and selectable logical case with bound Flow and inputs | **No**: derived normalized model, not `instance.yaml` |
 | **Test Suite** | Implicit or explicit selection/grouping of Resolved Cases, possibly from multiple Definitions | Optional persistent descriptor only if necessary |
 | **Case Execution** | One actual attempt of a Resolved Case with its own ID, status, timing and evidence | Runtime record/artifacts |
@@ -39,8 +40,8 @@ There is **no separate Steps/Step Group source type or DSL**. A Flow contains Ac
 ```text
 Flow
   + Test Case Definition (testcase.yaml)
-  + Data Source (inline | Excel | ATT Testdata | future generator)
-  + Resolution Rules (mapping, expansion, filtering, Case ID)
+  + Data Source (V1: inline | Excel; future versioned extensions: other sources)
+  + Resolution Rules (V1: mapping and Case ID; future versions may add expansion/filtering)
        |
        v
     Case Resolution  ---> 0..m Resolved Test Cases
@@ -54,109 +55,81 @@ Formally:
 
 `Resolve(Definition, ResolutionContext) → {ResolvedCase_1, ..., ResolvedCase_m}`
 
-A Definition with `n` source records/rules may produce `m` cases, **not necessarily n**. For example:
+A later schema version or separately approved versioned extension may produce `m` cases from `n` source records/rules. V1 does not filter, expand, or reorder records: it produces exactly one Resolved Case per source record, in source order. A single inline Definition without a Data Source produces one `default` Case. For example:
 
 | Data Source | n | Resolution | m |
 | --- | ---: | --- | ---: |
-| One inline input map | 1 | No expansion | 1 |
-| Excel static rows | 100 | No expansion | 100 |
-| Excel static rows | 100 | Filter to smoke | 20 |
-| Boundary-value rule | 1 | Minimum/maximum with adjacent values | 6 |
-| ATT Testdata records | 3 | Three variants per record | 9 |
-| Any source | n | Everything filtered | 0 |
+| One inline Case without a Data Source (V1) | 1 | Use `default` ID | 1 |
+| Inline records (V1) | 3 | Preserve source order; no filtering or expansion | 3 |
+| Excel static rows (V1) | 100 | Preserve source order; no filtering or expansion | 100 |
+| Future versioned source/rule | 1 | Boundary-value expansion | 6 |
+| Future versioned source/rule | 100 | Filter to smoke | 20 |
 
-An empty selection must have an explicit non-PASS status/policy; **zero executions are not an all-PASS result**. Resolution is bounded and may not call business Tools.
+An empty source, or any future rule that would resolve to zero cases, is a validation error before RUN; it is never a successful empty selection or an all-PASS result. Resolution is bounded and may not call business Tools.
 
 ### Identity and reproducibility
 
-Distinct identities:
-- **Definition ID:** `fpp.transfer.boundary`.
-- **Resolved Case ID:** `min_minus_1`, unique within a Definition.
-- **Qualified Case ID:** such as `fpp.transfer.boundary.min_minus_1`, unique under defined Package/Definition namespace rules.
-- **Execution/Iteration ID:** unique to each attempt; one Case ID may have arbitrarily many executions.
+The contract separates these identities:
 
-A Case ID expression, or a stable source record key, is evaluated **during Resolution** using a safe deterministic record context. Do not default to physical Excel row numbers as durable identity. Validate blanks, duplicates, conflicts and unsafe IDs.
+- **Definition ID:** a case-preserving, dotted identifier such as `fpp.transfer.boundary`, unique within a Package. It is the identity; the descriptor's filename and directory are not.
+- **Source record ID:** `recordId` for an inline record or the Excel column selected by `dataSource.caseId`. It is required for multi-record sources and is not a row number.
+- **Resolved Case ID:** one path-safe segment, such as `min_minus_1`, unique within its Definition.
+- **Qualified Case ID:** `<definition-id>.<resolved-case-id>`, such as `fpp.transfer.boundary.min_minus_1`. It is a Package-scoped logical identity, not a filesystem path, and is at most 255 ASCII characters.
+- **Execution/Iteration ID:** unique to each attempt; one Case ID may have many executions.
+
+Definition IDs use dotted `[A-Za-z0-9_-]+` segments and are at most 126 ASCII characters. Resolved Case IDs use `[A-Za-z0-9_-]{1,128}` and contain no path separator. IDs preserve their authored case; the resolver rejects ASCII case-folded Definition ID collisions within a Package and Resolved Case ID collisions within a Definition. The resulting Qualified Case IDs must also be unique under ASCII case folding within the Package. It never silently lowercases or trims an ID. Moving or renaming the descriptor path does not change its Definition ID; changing the `id` creates a new logical Definition and does not migrate prior results. Qualified IDs are namespace composition, not storage paths; any output-path mapping must be separately defined and preserve containment boundaries.
+
+For a single inline Definition with no Data Source, the Resolved Case ID is `default`. For inline records, use `recordId`; for Excel, use the selected `dataSource.caseId` column. `caseIdExpression`, when present, overrides that source ID. Its V1 grammar is exactly one `${DATA.key}` lookup. It is evaluated during Resolution against one direct key in the source record; functions, concatenation, nested lookup, `EXEC.*`, `META.*`, environment state and other runtime-only values are invalid. The result must be a nonblank string matching the Resolved Case ID grammar. Missing, null, non-string, invalid or duplicate results are validation errors. Do not default to physical Excel row numbers.
+
+The proposed schema contract enforces each ID's syntax and requires at least one inline record. Cross-record and cross-Definition uniqueness is a Resolver semantic check, not runtime behavior delivered by S01; a future Resolver must reject ASCII case-folded ID collisions and duplicate ASCII case-folded `recordId` values within a Definition, even when `caseIdExpression` overrides the resolved IDs. The resolution-invalid fixture demonstrates case-variant collisions for both source and resolved IDs. V1 preserves the declared inline record order and Excel data-row order, with exactly one Resolved Case per record. V1 has no filter or expansion rule. Empty sources and any resolution that would produce zero cases are validation errors before RUN, never all-PASS results.
 
 The same Case ID does **not** imply the same input values in every execution: runtime Testdata selection can change by execution while case identity stays constant. Historical/exact replay needs pinned source/Flow/data revisions, generator version/parameters/seed, the resolved binding and permitted per-execution Testdata evidence. Distinguish exact-source replay from rerunning against latest data.
 
 ### Native and data-driven authoring
 
-#### Proposed `att-testcase/v1` schema direction
+#### Frozen `att-testcase/v1` authoring contract
 
-The following is a **proposed minimal schema** for review (field names and exact grammar remain open until a follow-up schema issue freezes them). Excel Data Source deliberately reuses the familiar `att-sidecar/v2.2` column-mapping vocabulary to reduce migration cost.
+S01 freezes the field and type contract without claiming runtime support. The schema and examples live under `schemas/proposed/` and `docs/adr/examples/att-testcase-v1/`; documentation and schema tests validate them, but the Engine's active schema registry does not embed the proposal. A Definition cannot yet be discovered, resolved or executed.
 
-**Inline single-case (simplest):**
+The top-level fields are `schemaVersion`, Package-scoped `id`, optional `name`, `description` and `tags`, a static versioned `flow`, and exactly one of:
 
-```yaml
-schemaVersion: att-testcase/v1
-id: fpp.transfer.success
-name: FPP Transfer Success
-flow: payment.transfer.v1
-tags: [fpp, smoke]
-inputs:
-  debitAccount: "A001"
-  amount: 100
-  expectedStatus: SUCCESS
-```
+- A single inline Case: `inputs` is required, `dataSource` and `caseIdExpression` are absent, and the Resolved Case ID is `default`.
+- A multi-record Data Source: `dataSource` is `inline` or `excel`. `recordId` or the Excel `caseId` column supplies a stable source ID; optional `caseIdExpression` derives the Resolved Case ID from the record's `DATA` map.
 
-**Inline multi-case:**
+The proposed V1 contract accepts only the `inline` and `excel` Data Source types. A validator must reject an unknown or unrecognized `dataSource.type` as unsupported; an `x-` extension property does not add a Data Source type. ATT Testdata as a case-generation source, generated records, and transformed records require a future schema version or a separately approved, versioned extension. Each such source must first normalize to ordered records with a stable record ID, typed values, and source revision/provenance before V1-style binding and Case ID rules can apply.
 
-```yaml
-schemaVersion: att-testcase/v1
-id: fpp.transfer.boundary.inline
-flow: payment.transfer.v1
-dataSource:
-  type: inline
-  records:
-    - caseId: min
-      amount: 1
-      expectedStatus: SUCCESS
-    - caseId: zero
-      amount: 0
-      expectedStatus: REJECTED
-caseId: "${DATA.caseId}"
-inputs:
-  amount: "${DATA.amount}"
-  expectedStatus: "${DATA.expectedStatus}"
-```
+The examples are [inline single](examples/att-testcase-v1/inline-single.yaml), [inline multi](examples/att-testcase-v1/inline-multi.yaml), [Excel](examples/att-testcase-v1/excel.yaml), and [Excel with omitted `dataColumns`](examples/att-testcase-v1/excel-omitted-data-columns.yaml). Proposed-schema-invalid fixtures cover empty records, ambiguous `caseId`, runtime-only references, inline Actions/Steps, dynamic Flow IDs, map-shaped Excel `dataColumns`, unsafe Excel paths, and incompatible report templates. A separate [resolution-invalid duplicate-ID fixture](examples/att-testcase-v1/resolution-invalid-duplicate-ids.yaml) documents the future Resolver rule.
 
-**Excel Data Source (reuses sidecar-style mapping):**
+`flow` must be a static canonical Flow ID ending in `.vN`, such as `payment.transfer.v1`; the Flow registry must resolve it. The schema rejects expression-based Flow IDs and unknown top-level fields, including `actions` and `steps`. Flow existence and dependency checks remain resolver responsibilities.
 
-```yaml
-schemaVersion: att-testcase/v1
-id: fpp.transfer.regression
-name: FPP Transfer Regression
-flow: payment.transfer.v1
-tags: [fpp, regression]
-dataSource:
-  type: excel
-  path: testdata/transfer-cases.xlsx
-  sheet: Cases
-  headerRows: 1
-  caseId: "Case ID"                 # reuses sidecar excel.caseId concept
-  tags: "Tags"                      # optional, reuses sidecar
-  dataColumns:                      # reuses sidecar dataColumns syntax exactly
-    debitAccount: Debit Account
-    amount: Amount
-    expectedStatus: Expected Status(yaml)
-    # also supports: note: "備註,補充"
-    #                payload: "請求(yaml)"(yaml)
-# inputs optional: if omitted, dataColumns aliases become Flow inputs directly
-inputs:
-  debitAccount: "${DATA.debitAccount}"
-  amount: "${DATA.amount}"
-  expectedStatus: "${DATA.expectedStatus}"
-report:
-  format: xlsx
-  template: sourceWorkbook          # optional; output is always a new workbook
-```
+Definition, Data Source, record and report objects accept extension properties prefixed with `x-`; all other unknown properties are rejected. The projection and binding shapes remain strict.
+
+#### Input binding and precedence
+
+For a single inline Case, `inputs` is the complete `EXEC.INPUT` map and accepts typed YAML values, including `null`, booleans, numbers, strings, arrays and objects. It is required but may be empty. A missing key is absent; an explicit `null` remains a typed null.
+
+For a Data Source, `DATA` is the normalized record before Flow binding. If `inputs` is omitted, the resolver copies each `DATA` key to the same Flow input name. If `inputs` is present, it is the complete projection and replaces identity projection; it is not merged with it. Each projected value is either `{from: DATA.key}` or `{value: <typed value>}`. A missing source key is an error; a present `null` remains null. V1 defines no implicit defaults, environment overlays or override precedence. Flow inputs populate `EXEC.INPUT`; they do not initialize `EXEC.VARS` or Debug bootstrap variables.
+
+#### Excel mapping and type compatibility
+
+`dataSource.caseId` and `dataSource.tags` select physical Excel headers. `caseIdExpression` is a separate resolved-ID rule. `dataColumns` is the existing `att-sidecar/v2.2` comma-separated **string**, not a YAML map. Reuse `ColumnSpecParser.dataColumns` semantics: `alias=ColumnName`, `ColumnName(yaml)`, case-sensitive header names, double-quoted commas or equals, and doubled quotes inside a quoted name. The terminal `(yaml)` suffix requests safe YAML scalar/list/map parsing. If no alias is given, the trimmed column selector is also the `DATA` key; use an alias when the header is not a valid V1 data key.
+
+**Omitted or blank `dataColumns` is explicit-empty, not implicit-all-columns.** It reuses `ColumnSpecParser.dataColumns(null / "")` and therefore selects no business columns into `DATA`. The Case ID selector column and optional tags selector column are metadata selectors only; V1 never auto-exposes them (or any other unmapped worksheet header) as `DATA` keys. Authors who need Excel business inputs must declare `dataColumns` explicitly. When `inputs` is also omitted, identity projection of that empty `DATA` map yields an empty `EXEC.INPUT` map, which is valid. Present `inputs` projections that reference missing `DATA` keys remain resolve-time errors. See [excel-omitted-data-columns.yaml](examples/att-testcase-v1/excel-omitted-data-columns.yaml).
+
+`dataSource.path` is a Package-relative portable path: nonempty ASCII `[A-Za-z0-9_-]` components separated by `/`, ending in `.xlsx` / `.XLSX`. The proposed schema rejects empty segments, `.` / `..`, backslashes, drive/colon forms, spaces, and control characters at the syntax layer. Schema rejection is necessary but not sufficient: the Excel adapter must still resolve the path under the Package root and reject escapes or unsafe filesystem forms.
+
+The proposed Excel adapter preserves the existing displayed-cell and blank-marker contract: empty/whitespace-only cells and `N/A`, `NA`, `NULL`, or `NONE` normalize to an empty string; blank `(yaml)` cells stay empty and are not parsed. Inline YAML `null` remains a typed null. Excel `tags` values use comma-separated tags; Definition and record tags combine in source order with duplicates removed. Missing mapped columns, duplicate aliases, malformed quoting, unsafe paths and unsupported workbook structures are validation errors. The proposed resolver reads the workbook without modifying it.
+
+Excel Case IDs have stricter identity rules than ordinary data columns. Read `dataSource.caseId` from a literal text cell using the existing `DataFormatter(Locale.ROOT)` extraction; formula, numeric, date, boolean and error cells are invalid. A blank cell or a value recognized as blank by the existing `ValueNormalizer` (`N/A`, `NA`, `NULL`, or `NONE`, ignoring surrounding whitespace and ASCII case) is a missing ID and is an error for a data row. For every other value, preserve the exact text and case: do not trim or case-normalize it. Reject leading/trailing whitespace, controls, values outside `[A-Za-z0-9_-]{1,128}`, and Windows reserved device names (case-insensitive). Check duplicate source IDs using ASCII case folding. `caseIdExpression` may derive a different Resolved Case ID, but it does not remove the required source ID. Physical row numbers are diagnostic provenance only, never an ID. S04 must cover these rules with cell-type, blank-marker, whitespace, reserved-name and collision regressions.
+
+The optional `report` object supports `format: xlsx`; `template: sourceWorkbook` requests a copy of the Excel Data Source as a new output workbook and is invalid for inline data. Report generation is a later workstream. No report writes back to its source workbook.
 
 Key reuse points from `att-sidecar/v2.2`:
-- `headerRows`, `caseId`, `tags`, and especially `dataColumns` (including `alias=ColumnName`, `ColumnName(yaml)`, quoting rules, and blank/N/A normalization) are intentionally preserved.
+- `headerRows`, physical `caseId` and `tags` selectors, and especially scalar-string `dataColumns` (including `alias=ColumnName`, `ColumnName(yaml)`, quoting rules, and blank/N/A normalization) are intentionally preserved.
 - Stage selector columns and `stages[].dataColumns` do **not** apply; the Definition binds a single entry Flow.
 - `(yaml)` type parsing behavior should match existing sidecar rules.
 
-One Definition plus three Excel rows usually resolves into **three Cases**, all calling the same Flow. One boundary-value rule may resolve into six Cases using a documented generated key/expected-value policy. Static Excel rows, inline input, ATT Testdata, and future generated/filtered/transformed data share **one conceptual Resolution contract**; advanced generators and all source types need not ship in V1.
+One Definition plus three Excel rows resolves into **three Cases**, all calling the same Flow, in worksheet order. V1 inline records follow their declared order and resolve one-to-one; V1 has no filtering or expansion. The architecture may add ATT Testdata, generated, transformed, filtered, or expanded sources only through a future schema version or separately approved versioned extension. Such sources must normalize to ordered records with stable IDs, typed values, and source revision/provenance before case binding.
 
 **Distinguish data used for case generation from runtime Testdata binding.** Data selected per LOAD iteration (workload/user/iteration scope) does **not** generate new Resolved Cases.
 
@@ -192,7 +165,7 @@ Excel may provide input data **and optionally** a workbook-shaped report layout.
 ## Lifecycle and invariants
 
 - **Discovery/Preview:** inspect definitions and source metadata; show selected/estimated case IDs with bounded previews; no business I/O.
-- **Resolve/Prepare:** apply mapping, filtering/expansion and Case ID rules; validate uniqueness; pin selected Case targets and source/Flow/data/dependency closure plus seed where applicable.
+- **Resolve/Prepare:** in V1, preserve source order, apply mapping and Case ID rules, and reject empty results before RUN; validate uniqueness and pin selected Case targets and source/Flow/data/dependency closure. A future versioned extension may add filtering/expansion and its associated provenance and seed rules.
 - **Execute:** invoke bound Flow, resolve any intentionally deferred runtime Testdata, produce distinct execution IDs/results/evidence.
 
 Preserve source ownership, authorization, confidentiality, revision consistency, bounded generation, and safe output. Source changes after Job acceptance must not change queued/running work. View/Validate/Preview cannot mutate source, silently regenerate XML, or invoke business Tools. Large/lazy resolution may be introduced only with determinism and snapshot guarantees; **lazy enumeration does not mean regenerating Case IDs on every LOAD iteration**.
@@ -221,16 +194,15 @@ Reuse 4.4.1 Package Source / Change Sets / Validate / Review / Publish / Revisio
 
 **ATT 4.4.1 GA and PR #386 must not be blocked** by delivering native Test Cases, dynamic generators, Flow/Template consolidation or new LOAD targets. This ADR guides post-4.4 implementation and pre-release compatibility review only.
 
-## Open questions before acceptance
+## Open architecture questions after S01
 
-1. Exact `att-testcase/v1` schema and input/default precedence, especially bootstrap `EXEC.VARS`. (Schema direction above is a proposal for review.)
-2. Case ID expression grammar, namespace, stable identity under edits/moves, migration of legacy `workbookId.groupId.rowCaseId`.
-3. Zero-case handling, invalid-record policy, generator seed/limits, external/non-deterministic sources and precise replay guarantees.
-4. Eager vs deterministic bounded/lazy Resolution; when/where selected target sets are pinned.
-5. Persistent Suite selection representation if needed across Definitions.
-6. Mapping selected Case targets into existing LOAD workload/mix without changing direct Flow/Template/Tool behavior.
-7. Exact compatibility of Stage scope/failure/cleanup vs Flow Action semantics, and Template-to-Flow transition.
-8. Debug-to-Case conversion details, confidential input evidence and optional Excel report template behavior.
+1. Migration of legacy `workbookId.groupId.rowCaseId` into native Definition/Case identities and historical replay behavior.
+2. Generator seed/limits, external or nondeterministic sources, and precise replay guarantees.
+3. Eager versus deterministic bounded/lazy Resolution; when and where selected target sets are pinned.
+4. Persistent Suite selection representation if needed across Definitions.
+5. Mapping selected Case targets into existing LOAD workload/mix without changing direct Flow/Template/Tool behavior.
+6. Exact compatibility of Stage scope/failure/cleanup versus Flow Action semantics, and Template-to-Flow transition.
+7. Debug-to-Case conversion details, confidential input evidence and optional Excel report template behavior.
 
 These are delegated to focused follow-up design/issues. Status remains **Proposed** until review and first-implementation contracts are agreed.
 
@@ -238,7 +210,7 @@ These are delegated to focused follow-up design/issues. Status remains **Propose
 
 - Inline Definition → one Resolved Case → one RUN execution.
 - Excel three rows → three uniquely selectable Cases, independent results/replay and optional new output workbook.
-- One boundary rule → six stable Cases; filtering/expansion demonstrates n→m and m=0 policy.
+- Future versioned extension: one boundary rule → six stable Cases; filtering/expansion demonstrates n→m. A result of zero cases is a validation error before RUN.
 - LOAD one selected Case × 100 iterations → **one Case ID, 100 execution IDs**, even when per-iteration Testdata changes.
 - LOAD three selected Cases × 100 iterations each → **3 Cases, 300 executions**; weighted mix reports actual unequal counts.
 - Legacy five-Stage workbook, rollback/cleanup, source snapshots, Job/Schedule/Debug/LOAD compatibility and evidence remain unchanged.

@@ -1,0 +1,8 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.invalid-report-template
+flow: payment.transfer.v1
+inputs:
+  amount: 1
+report:
+  format: xlsx
+  template: sourceWorkbook
