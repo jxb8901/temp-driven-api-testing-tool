@@ -158,16 +158,22 @@ jobs:
           echo "ATT_HOME=$RUNNER_TEMP/att-server-test-home" >> "$GITHUB_ENV"
 
       # Parallel CI jobs can trip Maven Central HTTP 429 before tests start.
-      # Warm the shared Server reactor dependencies with longer backoff first.
+      # Warm via reactor package (not dependency:resolve) so unpublished att:*
+      # sibling modules are built locally instead of fetched from Central.
       - name: Warm Server Maven dependencies with Central retry
         run: |
           set -euo pipefail
           for attempt in 1 2 3 4; do
+            log="$(mktemp)"
             if mvn -B -ntp -T 1C -pl att-worker,att-server -am \
                 -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true \
                 -Daether.connector.http.retryHandler.count=8 \
-                dependency:resolve; then
+                package -DskipTests 2>&1 | tee "$log"; then
               exit 0
+            fi
+            if ! grep -Eq '429 Too Many Requests|Could not transfer artifact|Connection reset|Remote host terminated the handshake' "$log"; then
+              echo "Warm failed without a Maven Central transfer error; not retrying"
+              exit 1
             fi
             echo "Maven Central warm attempt ${attempt} failed; backing off before retry"
             sleep $((attempt * 15))
@@ -236,16 +242,22 @@ jobs:
           echo "ATT_HOME=$RUNNER_TEMP/att-server-test-home" >> "$GITHUB_ENV"
 
       # Parallel CI jobs can trip Maven Central HTTP 429 before tests start.
-      # Warm the shared Server reactor dependencies with longer backoff first.
+      # Warm via reactor package (not dependency:resolve) so unpublished att:*
+      # sibling modules are built locally instead of fetched from Central.
       - name: Warm Server Maven dependencies with Central retry
         run: |
           set -euo pipefail
           for attempt in 1 2 3 4; do
+            log="$(mktemp)"
             if mvn -B -ntp -T 1C -pl att-worker,att-server -am \
                 -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true \
                 -Daether.connector.http.retryHandler.count=8 \
-                dependency:resolve; then
+                package -DskipTests 2>&1 | tee "$log"; then
               exit 0
+            fi
+            if ! grep -Eq '429 Too Many Requests|Could not transfer artifact|Connection reset|Remote host terminated the handshake' "$log"; then
+              echo "Warm failed without a Maven Central transfer error; not retrying"
+              exit 1
             fi
             echo "Maven Central warm attempt ${attempt} failed; backing off before retry"
             sleep $((attempt * 15))
