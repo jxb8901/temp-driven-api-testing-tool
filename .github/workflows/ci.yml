@@ -157,6 +157,23 @@ jobs:
           cp -R config/. "$RUNNER_TEMP/att-server-test-home/config/"
           echo "ATT_HOME=$RUNNER_TEMP/att-server-test-home" >> "$GITHUB_ENV"
 
+      # Parallel CI jobs can trip Maven Central HTTP 429 before tests start.
+      # Warm the shared Server reactor dependencies with longer backoff first.
+      - name: Warm Server Maven dependencies with Central retry
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4; do
+            if mvn -B -ntp -T 1C -pl att-worker,att-server -am \
+                -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true \
+                -Daether.connector.http.retryHandler.count=8 \
+                dependency:resolve; then
+              exit 0
+            fi
+            echo "Maven Central warm attempt ${attempt} failed; backing off before retry"
+            sleep $((attempt * 15))
+          done
+          exit 1
+
       - name: Verify all Server unit tests with isolated parallel JVMs
         # Each test class gets a separate JVM, isolating Tomcat, global properties,
         # authentication state and temporary database files. Tests within a class
@@ -217,6 +234,23 @@ jobs:
           mkdir -p "$RUNNER_TEMP/att-server-test-home/config"
           cp -R config/. "$RUNNER_TEMP/att-server-test-home/config/"
           echo "ATT_HOME=$RUNNER_TEMP/att-server-test-home" >> "$GITHUB_ENV"
+
+      # Parallel CI jobs can trip Maven Central HTTP 429 before tests start.
+      # Warm the shared Server reactor dependencies with longer backoff first.
+      - name: Warm Server Maven dependencies with Central retry
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4; do
+            if mvn -B -ntp -T 1C -pl att-worker,att-server -am \
+                -Datt.skipJava8ModuleTests=true -Datt.skipFrontendUnitTests=true \
+                -Daether.connector.http.retryHandler.count=8 \
+                dependency:resolve; then
+              exit 0
+            fi
+            echo "Maven Central warm attempt ${attempt} failed; backing off before retry"
+            sleep $((attempt * 15))
+          done
+          exit 1
 
       - name: Verify long-running Server process and publication tests
         env:
