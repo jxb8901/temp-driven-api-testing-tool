@@ -138,7 +138,7 @@ public final class FlowRegistry {
     }
     /** Returns the indexed descriptor for a discovered ID without compiling it. */
     public Path descriptorPath(String id) { return descriptors.get(id); }
-    /** Returns a defensive copy of the exact captured descriptor bytes, when snapshot mode is active. */
+    /** Returns a defensive copy of the exact descriptor bytes used to compile a loaded Flow. */
     public byte[] descriptorBytes(String id) {
         Path descriptor = descriptors.get(id);
         if (descriptor == null) return null;
@@ -245,7 +245,13 @@ public final class FlowRegistry {
                     "Correct the indicated Flow descriptor field.");
             if (schema == null) throw YamlSupport.locate(diagnostic, descriptor, field);
             throw YamlSupport.locateSchema(diagnostic, descriptor, schema.structuredViolations());
-        } finally { if (snapshotMode) YamlSupport.clearSnapshotSource(descriptor); }
+        } finally {
+            // Snapshot-mode captures are scoped to the validation pass. Non-snapshot loads promote
+            // the capture into YamlSupport's bounded process-wide map so nested runtime diagnostics
+            // keep source marks without retaining every descriptor in an unbounded ThreadLocal.
+            if (snapshotMode) YamlSupport.clearSnapshotSource(descriptor);
+            else YamlSupport.promoteSnapshotSource(descriptor);
+        }
         parsedCount++;
         if (!id.equals(flow.id())) throw new IllegalArgumentException("Flow descriptor id changed while compiling: expected " + id + " but found " + flow.id());
         byId.put(id, flow);
@@ -255,10 +261,13 @@ public final class FlowRegistry {
     private FlowDefinition load(Path descriptor) throws Exception {
         Map<String, Object> map;
         {
-            byte[] snapshot = sourceSnapshots.get(descriptor.toAbsolutePath().normalize());
-            Object loaded = snapshotMode
-                    ? (snapshot == null ? null : YamlSupport.load(descriptor, snapshot))
-                    : YamlSupport.load(descriptor);
+            Path key = descriptor.toAbsolutePath().normalize();
+            byte[] snapshot = sourceSnapshots.get(key);
+            if (snapshot == null && !snapshotMode) {
+                snapshot = Files.readAllBytes(descriptor);
+                sourceSnapshots.put(key, snapshot.clone());
+            }
+            Object loaded = snapshot == null ? null : YamlSupport.load(descriptor, snapshot);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Flow must be a YAML map: " + descriptor);
             map = objectMap((Map<?, ?>) loaded);
         }

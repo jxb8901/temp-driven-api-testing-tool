@@ -541,16 +541,21 @@ class ServerRuntimeJobReplayTest {
         for(Map.Entry<String,Path> entry:entries.entrySet())candidate.append("    ").append(entry.getKey()).append(": ")
                 .append(ServerRuntimeTestSupport.yaml(entry.getValue())).append('\n');
         Files.writeString(fixture.server,candidate.toString());
+        Map<String,Path> canonicalEntries=new java.util.LinkedHashMap<>();
+        for(Map.Entry<String,Path> entry:entries.entrySet())canonicalEntries.put(entry.getKey(),entry.getValue().toRealPath());
         Instant deadline=Instant.now().plusSeconds(15);
         while(Instant.now().isBefore(deadline)) {
             runtime.packageRegistry.pollNow();
-            PackageRegistry.Snapshot snapshot=runtime.packageRegistry.snapshot();boolean matches=snapshot.packages.size()==entries.size();
-            for(Map.Entry<String,Path> entry:entries.entrySet())matches&=entry.getValue().toAbsolutePath().normalize()
+            PackageRegistry.Snapshot snapshot=runtime.packageRegistry.snapshot();boolean matches=snapshot.packages.size()==canonicalEntries.size();
+            for(Map.Entry<String,Path> entry:canonicalEntries.entrySet())matches&=entry.getValue()
                     .equals(snapshot.packages.get(entry.getKey()));
             if(matches)return;
             Thread.sleep(50);
         }
-        fail("Package Registry did not apply the requested change");
+        PackageRegistry.Snapshot snapshot=runtime.packageRegistry.snapshot();
+        fail("Package Registry did not apply the requested change (status="+snapshot.status+", diagnostic="
+                +(snapshot.diagnostic==null?"none":snapshot.diagnostic.code()+": "+snapshot.diagnostic.summary())
+                +", packages="+snapshot.packages+", expected="+canonicalEntries+")");
     }
 
     private static void rewriteSnapshotAsLegacyV1(Path archivePath,Path dataDirectory,String leaseId) throws Exception {

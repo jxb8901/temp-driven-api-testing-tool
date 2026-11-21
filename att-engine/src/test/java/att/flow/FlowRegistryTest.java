@@ -144,6 +144,22 @@ class FlowRegistryTest {
         assertTrue(invalidUse.getMessage().contains("Flow use") || invalidUse.getMessage().contains("pattern"), invalidUse.getMessage());
     }
 
+    @Test void nonSnapshotLoadsDoNotAccumulateThreadLocalYamlCapturesAcrossDescriptors() throws Exception {
+        att.config.YamlSupport.clearSnapshotSources();
+        for (int index = 0; index < 40; index++) {
+            flow("retained-" + index, valid("common.retained" + index + ".v1", "note", "${CASE.value}"));
+        }
+        FlowRegistry registry = new FlowRegistry(root, root.resolve("templates"), false);
+        for (int index = 0; index < 40; index++) {
+            assertEquals("common.retained" + index + ".v1", registry.get("common.retained" + index + ".v1").id());
+            assertEquals(0, att.config.YamlSupport.snapshotSourceCount(),
+                    "Successful non-snapshot Flow loads must clear ThreadLocal captures after promotion");
+        }
+        Path first = root.resolve("templates/flows/retained-0/flow.yaml").toAbsolutePath().normalize();
+        assertNotNull(att.config.YamlSupport.location(first, "id", null),
+                "Promoted captures remain available through the bounded process-wide source map");
+    }
+
     private String valid(String id, String actionId, String expression) {
         return "schemaVersion: att-flow/v3.4\nid: " + id + "\nname: Test\ndescription: Test Flow\nactions:\n  "
                 + actionId + ": {type: assign, name: " + actionId + "Value, expression: '" + expression + "'}\n";

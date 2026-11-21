@@ -8,9 +8,10 @@ import static org.junit.jupiter.api.Assertions.*;
 class RunDefinitionTest {
     private static RunDefinition parse(String body) throws Exception {return RunDefinition.parse(ServerRuntime.JSON.readTree(body));}
     private static String request(String body){return "{\"schemaVersion\":\"att-execution/v1\",\"executionType\":\"run\",\"packageId\":\"payments\","+body+"}";}
+    private static String requestV2(String body){return "{\"schemaVersion\":\"att-execution/v2\",\"executionType\":\"run\",\"packageId\":\"payments\","+body+"}";}
 
     @Test void publishedSchemaAcceptsTheSameTargetAndSelectionShapes() throws Exception {
-        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v1.schema.json");
+        java.nio.file.Path schema=java.nio.file.Path.of("schemas/history/att-execution-v1.schema.json");
         for(String body:List.of(request("\"target\":{\"type\":\"case\",\"id\":\"A\"}"),
                 request("\"target\":{\"type\":\"flow\",\"id\":\"f\"},\"input\":{}"),
                 request("\"selection\":{\"tags\":[\"smoke\"]}"))) {
@@ -22,6 +23,76 @@ class RunDefinitionTest {
             assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,body));
             assertThrows(IllegalArgumentException.class,()->parse(body));
         }
+    }
+    @Test void nativeCaseV2UsesAnExplicitDefinitionAndLocalCaseSelector() throws Exception {
+        String body=requestV2("\"target\":{\"type\":\"nativeCase\",\"definitionId\":\"payments.transfer\",\"selection\":{\"resolvedCaseIds\":[\"valid\",\"invalid\"]}},\"options\":{\"debug\":true,\"failFast\":true,\"runId\":\"native-smoke-2026\"}");
+        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
+        att.validation.JsonSchemaVerifier.verifyJson(schema,body);
+        RunDefinition run=parse(body);
+        assertTrue(run.nativeCaseTarget);assertFalse(run.resourceTarget);
+        assertEquals("payments.transfer",run.nativeDefinitionId);
+        assertEquals(List.of("valid","invalid"),run.resolvedCaseIds);
+        assertTrue(run.debug);assertTrue(run.workerInput.path("failFast").asBoolean());
+        assertEquals("native-smoke-2026",run.workerInput.path("runId").asText());
+        assertFalse(run.workerInput.has("caseIds"),"Native local IDs must not become legacy Workbook Case IDs");
+
+        // A dotted ID can independently exist in the legacy namespace; the explicit discriminator keeps both meanings stable.
+        RunDefinition legacy=parse(request("\"target\":{\"type\":\"case\",\"id\":\"payments.transfer.valid\"}"));
+        assertFalse(legacy.nativeCaseTarget);assertEquals("payments.transfer.valid",legacy.workerInput.path("caseIds").get(0).asText());
+        RunDefinition v2Legacy=parse(requestV2("\"target\":{\"type\":\"case\",\"id\":\"payments.transfer.valid\"}"));
+        assertFalse(v2Legacy.nativeCaseTarget);assertEquals("payments.transfer.valid",v2Legacy.workerInput.path("caseIds").get(0).asText());
+        String flowBody=requestV2("\"target\":{\"type\":\"flow\",\"id\":\"payment.transfer.v1\"},\"input\":{},\"options\":{\"runId\":\"native-smoke-2026\"}");
+        att.validation.JsonSchemaVerifier.verifyJson(schema,flowBody);
+        assertTrue(parse(flowBody).resourceTarget,"v2 retains existing resource RUN targets");
+        assertEquals("native-smoke-2026",parse(flowBody).workerInput.path("runId").asText());
+        assertThrows(IllegalArgumentException.class,()->parse(request("\"target\":{\"type\":\"case\",\"id\":\"A\"},\"options\":{\"runId\":\"native-smoke-2026\"}")),
+                "The v2 runId option must not expand the v1 contract");
+        String selectionBody=requestV2("\"selection\":{\"caseIds\":[\"payments.transfer.valid\"]}");
+        att.validation.JsonSchemaVerifier.verifyJson(schema,selectionBody);
+        assertEquals("payments.transfer.valid",parse(selectionBody).workerInput.path("caseIds").get(0).asText());
+        String c1ControlRunId="native-"+String.valueOf((char)0x85)+"run";
+        for(String runId:List.of("../unsafe","CON","native-run."," native-run","native-run ",c1ControlRunId)) {
+            String invalidRequestBody=requestV2("\"target\":{\"type\":\"nativeCase\",\"definitionId\":\"payments.transfer\",\"selection\":{\"resolvedCaseIds\":[\"valid\"]}},\"options\":{\"runId\":\""+runId+"\"}");
+            assertThrows(IllegalArgumentException.class,()->parse(invalidRequestBody),runId);
+            assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                    ()->att.validation.JsonSchemaVerifier.verifyJson(schema,invalidRequestBody),runId);
+        }
+    }
+    @Test void nativeCaseV2RejectsMalformedOrAmbiguousSelections() throws Exception {
+        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
+        String validTarget="\"target\":{\"type\":\"nativeCase\",\"definitionId\":\"payments.transfer\",\"selection\":{\"resolvedCaseIds\":[\"valid\"]}}";
+        att.validation.JsonSchemaVerifier.verifyJson(schema,requestV2(validTarget));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->
+                att.validation.JsonSchemaVerifier.verifyJson(java.nio.file.Path.of("schemas/history/att-execution-v1.schema.json"),request(validTarget)));
+        assertThrows(IllegalArgumentException.class,()->parse(request(validTarget)),"v1 must not acquire native selector semantics");
+        for(String body:List.of(
+                "\"target\":{\"type\":\"nativeCase\",\"definitionId\":\"payments.transfer\",\"selection\":{\"resolvedCaseIds\":[]}}",
+                "\"target\":{\"type\":\"nativeCase\",\"definitionId\":\"payments.transfer\",\"selection\":{\"resolvedCaseIds\":[\"valid\",\"valid\"]}}",
+                "\"target\":{\"type\":\"nativeCase\",\"definitionId\":\"payments.transfer\",\"selection\":{\"resolvedCaseIds\":[\"bad.id\"]}}",
+                "\"target\":{\"type\":\"nativeCase\",\"definitionId\":\"payments.transfer\",\"selection\":{\"resolvedCaseIds\":[\"CON\"]}}",
+                "\"target\":{\"type\":\"nativeCase\",\"definitionId\":\"payments.con\",\"selection\":{\"resolvedCaseIds\":[\"valid\"]}}",
+                validTarget+",\"selection\":{\"caseIds\":[\"payments.transfer.valid\"]}",
+                validTarget+",\"input\":{}")) {
+            String request=requestV2(body);
+            assertThrows(IllegalArgumentException.class,()->parse(request),body);
+            assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,request),body);
+        }
+        StringBuilder oversized=new StringBuilder("\"target\":{\"type\":\"nativeCase\",\"definitionId\":\"payments.transfer\",\"selection\":{\"resolvedCaseIds\":[");
+        for(int i=0;i<1001;i++){if(i>0)oversized.append(',');oversized.append("\"C").append(i).append("\"");}
+        oversized.append("]}}");
+        String request=requestV2(oversized.toString());
+        assertThrows(IllegalArgumentException.class,()->parse(request));
+        assertThrows(IllegalArgumentException.class,()->RunDefinition.parseRetained(ServerRuntime.JSON.readTree(request)));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,request));
+    }
+    @Test void nativeCaseV2SchemaIsRegisteredInSourceAndEmbeddedRuntimeCatalogs() throws Exception {
+        java.nio.file.Path rootCatalog=java.nio.file.Path.of("schemas/catalog.yaml");
+        java.nio.file.Path runtimeCatalog=java.nio.file.Path.of("att-engine/src/main/resources/att-schemas/catalog.yaml");
+        assertEquals(java.nio.file.Files.readString(rootCatalog),java.nio.file.Files.readString(runtimeCatalog));
+        assertTrue(java.nio.file.Files.readString(rootCatalog).contains("  att-execution/v2: att-execution-v2.schema.json"));
+        assertTrue(java.nio.file.Files.readString(runtimeCatalog).contains("  att-execution/v2: att-execution-v2.schema.json"));
+        assertEquals(java.nio.file.Files.readString(java.nio.file.Path.of("schemas/att-execution-v2.schema.json")),
+                java.nio.file.Files.readString(java.nio.file.Path.of("att-engine/src/main/resources/att-schemas/att-execution-v2.schema.json")));
     }
     @Test void publishedScheduleSchemaDiscriminatesTriggersAndExecutionTypes() throws Exception {
         java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-schedule-v2.schema.json");
@@ -74,7 +145,8 @@ class RunDefinitionTest {
                 "\"selection\":{\"all\":true},\"principal\":\"admin\"",
                 "\"target\":{\"type\":\"tool\",\"id\":\"t\"},\"input\":{},\"options\":{\"failFast\":true}"))
             assertThrows(IllegalArgumentException.class,()->parse(request(body)),body);
-        assertThrows(IllegalArgumentException.class,()->parse(request("\"selection\":{\"all\":true}").replace("att-execution/v1","att-execution/v2")));
+        RunDefinition v2Selection=parse(requestV2("\"selection\":{\"all\":true}"));
+        assertFalse(v2Selection.nativeCaseTarget);assertTrue(v2Selection.workerInput.path("all").asBoolean());
     }
 
     @Test void retainedFrozenCasesUseTheResolvedBatchLimitWithoutChangingThePublicSelectorLimit() {

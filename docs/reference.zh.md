@@ -18,7 +18,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [編寫並執行 Testcase](#編寫並執行-testcase)
   - [區分 Testcase 與 Case execution](#區分-testcase-與-case-execution)
   - [編寫契約](#編寫契約)
-  - [提案中的 Native Test Case 契約](#提案中的-native-test-case-契約)
+  - [Native Test Case Definition](#native-test-case-definition)
   - [Workbook](#workbook)
   - [Stage](#stage)
   - [Template](#template)
@@ -248,15 +248,15 @@ Testcase 是一個正規化 Workbook row；Run 會為每個選中的 row 建立�
 | Testcase/Stage business input | EXEC.INPUT |
 | 跨 Action mutable state | EXEC.VARS |
 
-### 提案中的 Native Test Case 契約
+### Native Test Case Definition
 
-S01 凍結了供未來 Native Test Case 使用的 `att-testcase/v1` 提案。Schema 和範例會由文件/schema 驗證檢查，但此格式尚未加入 Engine 的 active schema catalog，現時不能 discovery、resolution 或 RUN。上文的 Workbook／Sidecar／Snapshot 流程仍是可執行的 Testcase 工作流。
+4.5.0 開發候選版已在 Engine 登錄 `att-testcase/v1`，並支援透過 Native Case CLI 及經驗證的 Server draft flow discovery、resolution 和 RUN singleton 與多筆 inline Definition。Excel Definition 保留 S01 的 schema 契約，但須等待 S04 Excel adapter，現時 inline resolver 不會執行 Excel source。現有 Workbook／Sidecar／Snapshot RUN 亦維持支援。
 
-此提案定義兩種資料形態：含完整 typed `inputs` map、Resolved Case ID 固定為 `default` 的 singleton inline Case；或含穩定來源 ID 的多筆 inline／Excel Data Source。Definition ID 在 Package 範圍內唯一、保留大小寫並使用點號分段；Resolved Case ID 是單一 path-safe 段落。`caseIdExpression` 只可用單一 `${DATA.key}` lookup 覆蓋 resolved ID。空白、重複、格式錯誤、缺少或衝突的 ID，以及空的 resolution 結果都屬錯誤，不會當作全部 PASS。
+V1 契約定義兩種資料形態：含完整 typed `inputs` map、Resolved Case ID 固定為 `default` 的 singleton inline Case；或含穩定來源 ID 的多筆 inline／Excel Data Source。Definition ID 在 Package 範圍內唯一、保留大小寫並使用點號分段；Resolved Case ID 是單一 path-safe 段落。`caseIdExpression` 只可用單一 `${DATA.key}` lookup 覆蓋 resolved ID。空白、重複、格式錯誤、缺少或衝突的 ID，以及空的 resolution 結果都屬錯誤，不會當作全部 PASS。
 
 Data-driven Case 省略 `inputs` 時，會把 `DATA` 同名映射到 Flow inputs；提供 projection 時，該 projection 會完全取代 identity mapping，只接受 `{from: DATA.key}` 或 `{value: <typed value>}`。Excel `dataColumns` 保留 `att-sidecar/v2.2` 逗號分隔字串語法，包括 alias、`(yaml)` parsing 和引號分隔符。Source-workbook report template 只可用於 Excel Data Source，並永遠寫入新 Workbook。
 
-完整契約和驗證界線見[提案 Schema](../schemas/proposed/att-testcase-v1.schema.json)、[Singleton inline 範例](adr/examples/att-testcase-v1/inline-single.yaml)、[多筆 inline 範例](adr/examples/att-testcase-v1/inline-multi.yaml)、[Excel 範例](adr/examples/att-testcase-v1/excel.yaml)及[ADR-0001](adr/0001-flow-centric-testcase-resolution.zh.md)。
+完整契約和驗證界線見[active Schema](../schemas/att-testcase-v1.schema.json)、[Singleton inline 範例](adr/examples/att-testcase-v1/inline-single.yaml)、[多筆 inline 範例](adr/examples/att-testcase-v1/inline-multi.yaml)、[Excel 範例](adr/examples/att-testcase-v1/excel.yaml)及[ADR-0001](adr/0001-flow-centric-testcase-resolution.zh.md)。
 
 ### Workbook
 
@@ -983,7 +983,7 @@ ATT 4.4.0 將功能性單次執行統一為 **RUN**，支援 Case、Template、F
 
 ```json
 {
-  "schemaVersion": "att-execution/v1",
+  "schemaVersion": "att-execution/v2",
   "executionType": "run",
   "packageId": "payments",
   "environment": "SIT",
@@ -995,7 +995,10 @@ ATT 4.4.0 將功能性單次執行統一為 **RUN**，支援 Case、Template、F
 
 將 `payments`、`SIT`、`PAYMENT` 換成已設定的套件值。檢閱安全預覽後，向 `POST /api/v1/jobs/run` 提交 `{"packageId":"payments","draftId":"R..."}`。工作沿用現有狀態、取消、事件、結果和 artifact 路徑。開啟頁面或切換模式不會提交工作。
 
-請求遵循 `schemas/att-execution-v1.schema.json`。未知欄位、混合 target/selection 的請求均會被拒絕。Draft 有效期為十分鐘，綁定驗證身分及套件 revision。套件改變後必須重新驗證。無效輸入回傳 HTTP 400、不可用 draft 回傳 404、revision 改變回傳 409、工作或 draft 容量已滿回傳 429。Inspection 的容量、時間及大小限制仍然生效。
+<!-- att-docs:historical -->
+舊版 RUN request 使用 `schemas/history/att-execution-v1.schema.json`；新的 Native Case target 使用 `att-execution/v2`。
+<!-- /att-docs:historical -->
+未知欄位及混合 target/selection 的請求均會被拒絕。Draft 有效期為十分鐘，綁定驗證身分及套件 revision。套件改變後必須重新驗證。無效輸入回傳 HTTP 400、不可用 draft 回傳 404、revision 改變回傳 409、工作或 draft 容量已滿回傳 429。Inspection 的容量、時間及大小限制仍然生效。
 
 單一 Case 使用 `target:{"type":"case","id":"payments.default.PAY001"}`，並省略 `input`。Case 沿用 Excel/sidecar 綁定。Template、Flow、Tool 保留 Debug sidecar 的省略、明確 null、literal、expression、vars 和 Tool arguments 語義；不會將 Case 參數轉成Resource輸入。
 
@@ -1003,6 +1006,7 @@ ATT 4.4.0 將功能性單次執行統一為 **RUN**，支援 Case、Template、F
 
 以明確 selection 取代 target 和 input：
 
+<!-- att-docs:historical -->
 ```json
 {
   "schemaVersion": "att-execution/v1",
@@ -1018,6 +1022,7 @@ ATT 4.4.0 將功能性單次執行統一為 **RUN**，支援 Case、Template、F
   "options": {"debug": true, "failFast": false}
 }
 ```
+<!-- /att-docs:historical -->
 
 `suites` 與 `suiteDirectory` 互斥；後者選取套件內的 group 目錄。Case/tag 篩選沿用 CLI 交集規則，任一要求的 tag 可匹配，excludeTags 則排除匹配 Case。`all:true` 表示套件選取。陣列必須非空、不重複，最多 1000 個值。驗證會解析並固定最多 10000 個 Case ID；空選取不會退回執行全部 Case。
 
@@ -1069,7 +1074,9 @@ LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 sc
 | `/load-schedules`、`jobType:load/debug` | 共用 scheduler 相容路徑，保留既有定義 |
 | `/jobs/...`、既有 Studio 工作/結果連結 | 保留共用 history、取消、事件與結果路徑 |
 
+<!-- att-docs:historical -->
 此 release 不會移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.6；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
+<!-- /att-docs:historical -->
 
 持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
 
@@ -3634,7 +3641,8 @@ Maintainer implementation sequencing、scheduler internals、resource-owner deta
 | Artifact | 現行 schema |
 |---|---|
 | 排程建立 | att-schedule/v2 |
-| RUN 定義 | att-execution/v1 |
+| RUN 定義 | att-execution/v2 |
+| Native Test Case Definition | att-testcase/v1 |
 | Global configuration | att-config/v2.15 |
 | Package Manifest | att-package/v2 |
 | Testdata descriptor | att-testdata/v1.0 |

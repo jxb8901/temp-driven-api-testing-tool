@@ -47,6 +47,13 @@ schemas:
         self.assertNotIn("att-testcase", self.active)
         self.assertEqual([], stale_claims("att-testcase/v1", {**self.active, **proposed}, VERSION))
 
+    def test_proposed_catalog_can_be_empty_after_all_schemas_are_promoted(self):
+        catalog = """schemaVersion: att-proposed-schema-catalog/v1
+status: proposed
+schemas: {}
+"""
+        self.assertEqual({}, proposed_schemas(catalog))
+
     def test_proposed_catalog_requires_explicit_status_and_matching_filename(self):
         valid = """schemaVersion: att-proposed-schema-catalog/v1
 status: proposed
