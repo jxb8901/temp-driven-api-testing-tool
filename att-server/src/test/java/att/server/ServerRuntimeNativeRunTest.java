@@ -195,6 +195,69 @@ class ServerRuntimeNativeRunTest {
         }
     }
 
+    @Test void reversedMultiCaseSelectionUsesSourceOrderForPreviewAndFailFast() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("allowed"));
+        Path packageRoot=Files.createDirectories(allowed.resolve("p"));
+        Path flow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+                .resolve("flow.yaml");
+        Files.createDirectories(packageRoot.resolve("testcase/payments/transfer"));
+        Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
+                +"description: Reversed selection fail-fast fixture\nactions:\n"
+                +"  verify: {type: assert, assert: '#{${EXEC.INPUT.amount} <= 12}'}\n"
+                +"  log: {type: log, message: 'amount=${EXEC.INPUT.amount}'}\n");
+        Path definition=packageRoot.resolve("testcase/payments/transfer/testcase.yaml");
+        Files.writeString(definition,definitionYaml(70,13));
+
+        Path runtimeConfig=Files.createDirectories(temp.resolve("runtime/config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path data=temp.resolve("server-data"),serverConfig=temp.resolve("server.yaml");
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
+                +"\n  auth: {mode: local}\n  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"workers: {maxConcurrent: 1, queuedLimit: 2}\npackages:\n  allowedRoots: ["
+                +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
+        Path libs=Files.createDirectories(temp.resolve("libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
+            ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            JsonNode reversed=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeCase",
+                    "definitionId","payments.transfer","selection",Map.of("resolvedCaseIds",List.of("second","first"))),
+                    "options",Map.of("debug",false,"failFast",true,"runId","native-reversed")));
+            Map<String,Object> draft=runtime.createRunDraft(reversed,"alice");
+            assertEquals(List.of("first","second"),draft.get("selectedCaseIds"),
+                    "Draft preview must expose S01 Definition/source order, not request order");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> cases=(List<Map<String,Object>>)draft.get("cases");
+            assertEquals(List.of("first","second"),
+                    List.of(String.valueOf(cases.get(0).get("caseId")),String.valueOf(cases.get(1).get("caseId"))));
+
+            Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",draft.get("draftId"))),"alice","alice");
+            String jobId=String.valueOf(accepted.get("jobId"));
+            assertEquals(List.of("first","second"),runtime.jobs.get(jobId).request.nativeResolvedCaseIds);
+            Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,jobId);
+            assertEquals("FAIL",((Map<?,?>)result.get("job")).get("status"),result.toString());
+            try(ZipFile archive=new ZipFile(awaitArtifactArchive(runtime,jobId).toFile())) {
+                List<String> caseTrees=new ArrayList<>();var entries=archive.entries();
+                while(entries.hasMoreElements()) {
+                    ZipEntry entry=entries.nextElement();
+                    if(!entry.isDirectory()&&entry.getName().endsWith("/case.yaml"))
+                        caseTrees.add(read(archive.getInputStream(entry)));
+                }
+                assertEquals(1,caseTrees.size(),"failFast must stop after the first source-order failure");
+                assertTrue(caseTrees.get(0).contains("qualifiedCaseId: payments.transfer.first"),caseTrees.get(0));
+                assertTrue(caseTrees.get(0).contains("status: FAIL"),caseTrees.get(0));
+                assertFalse(caseTrees.get(0).contains("payments.transfer.second"),caseTrees.get(0));
+            }
+        }
+    }
+
     private static JsonNode nativeRun(String localCaseId) {
         return nativeRun("payments.transfer",localCaseId);
     }

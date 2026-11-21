@@ -3645,8 +3645,11 @@ final class ServerRuntime implements AutoCloseable {
             JSON.readerForUpdating(request).readValue(policy);
             preview=executeInspection(root,request);revision=(String)preview.remove("revisionDigest");
             Object selected=preview.get("selectedCaseIds");
-            if(!(selected instanceof List<?> ids)||!ids.equals(run.resolvedCaseIds))
+            if(!(selected instanceof List<?> ids)||ids.isEmpty()
+                    ||!sameUniqueStrings(ids,run.resolvedCaseIds))
                 throw new IllegalArgumentException("Native RUN validation did not preserve the exact selected Case IDs");
+            // Pin the S01 Definition/source execution order returned by inspection, not request order.
+            input.set("nativeResolvedCaseIds",JSON.valueToTree(selected));
             Object sourcePath=preview.remove("sourcePath");
             if(!(sourcePath instanceof String path)||path.isBlank())
                 throw new IllegalArgumentException("Native RUN validation did not retain its Definition source");
@@ -7077,6 +7080,20 @@ final class ServerRuntime implements AutoCloseable {
         String normalizedLeft=left==null||left.isBlank()?null:left.trim();
         String normalizedRight=right==null||right.isBlank()?null:right.trim();
         return java.util.Objects.equals(normalizedLeft,normalizedRight);
+    }
+    /** Exact string-set equality that ignores order; rejects null/blank/duplicate values. */
+    private static boolean sameUniqueStrings(List<?> left,List<String> right) {
+        if(left==null||right==null||left.size()!=right.size())return false;
+        java.util.LinkedHashSet<String> expected=new java.util.LinkedHashSet<String>();
+        for(String value:right) {
+            if(value==null||value.isBlank()||!expected.add(value))return false;
+        }
+        if(expected.size()!=right.size())return false;
+        java.util.LinkedHashSet<String> actual=new java.util.LinkedHashSet<String>();
+        for(Object value:left) {
+            if(!(value instanceof String text)||text.isBlank()||!actual.add(text))return false;
+        }
+        return actual.equals(expected);
     }
     private static java.time.ZoneId scheduleZone(String timezone) {
         try{java.time.ZoneId zone=java.time.ZoneId.of(timezone);if(!java.time.ZoneId.getAvailableZoneIds().contains(timezone))throw new IllegalArgumentException();return zone;}

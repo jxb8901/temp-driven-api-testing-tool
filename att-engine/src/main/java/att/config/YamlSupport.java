@@ -149,6 +149,30 @@ public final class YamlSupport {
         if (snapshots.isEmpty()) SNAPSHOT_SOURCES.remove();
     }
 
+    /**
+     * Moves a ThreadLocal snapshot capture into the bounded process-wide source map, then clears the
+     * ThreadLocal entry. Non-snapshot Flow parsing uses this so nested runtime diagnostics keep source
+     * marks without retaining unbounded per-thread captures across reused worker threads.
+     */
+    public static void promoteSnapshotSource(Path file) {
+        if (file == null) return;
+        Path key = file.toAbsolutePath().normalize();
+        YamlSource source = snapshotSource(file);
+        if (source != null) synchronized (SOURCES) { SOURCES.put(key, source); }
+        clearSnapshotSource(file);
+    }
+
+    /** Number of captured snapshot sources retained by the calling thread (for lifecycle regressions). */
+    public static int snapshotSourceCount() {
+        Map<Path,YamlSource> snapshots = SNAPSHOT_SOURCES.get();
+        return snapshots == null ? 0 : snapshots.size();
+    }
+
+    /** Clears every ThreadLocal snapshot capture for the calling thread. */
+    public static void clearSnapshotSources() {
+        SNAPSHOT_SOURCES.remove();
+    }
+
     private static Map<Path,YamlSource> snapshotSources() {
         Map<Path,YamlSource> snapshots = SNAPSHOT_SOURCES.get();
         if (snapshots == null) {

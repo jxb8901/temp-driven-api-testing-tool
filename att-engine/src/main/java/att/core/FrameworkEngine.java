@@ -524,10 +524,10 @@ public class FrameworkEngine {
             throw new IllegalArgumentException("Native Case selection is empty");
         if (resolution.selectedCount() > TestCaseDefinitionResolver.MAX_PREVIEW_CASES)
             throw new IllegalArgumentException("Native RUN supports at most " + TestCaseDefinitionResolver.MAX_PREVIEW_CASES + " selected Cases");
-        if (resolution.cases().size() != resolution.selectedCount())
+        if (resolution.selectedCases().size() != resolution.selectedCount())
             throw new IllegalArgumentException("Native Case resolution does not contain its complete selected Case set");
         String definitionId = resolution.definition().id();
-        List<ResolvedTestCase> cases = new ArrayList<ResolvedTestCase>(resolution.cases());
+        List<ResolvedTestCase> cases = new ArrayList<ResolvedTestCase>(resolution.selectedCases());
         Set<String> seen = new LinkedHashSet<String>();
         for (ResolvedTestCase testCase : cases) {
             if (testCase == null || !definitionId.equals(testCase.definitionId())
@@ -658,7 +658,7 @@ public class FrameworkEngine {
     private Map<String,Object> nativeRunMetadata(TestCaseResolutionResult resolution) {
         Map<String,Object> metadata = new LinkedHashMap<String,Object>();
         metadata.put("executionType", "run"); metadata.put("targetType", "nativeCase");
-        metadata.put("packageId", resolution.cases().get(0).packageId());
+        metadata.put("packageId", resolution.selectedCases().get(0).packageId());
         metadata.put("definitionId", resolution.definition().id());
         metadata.put("sourceReference", resolution.sourceReference());
         metadata.put("sourceRevision", resolution.sourceRevision());

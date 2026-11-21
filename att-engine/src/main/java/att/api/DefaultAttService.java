@@ -177,7 +177,7 @@ public final class DefaultAttService implements AttService {
         summary.put("failed", result.failed()); summary.put("error", result.error());
         summary.put("skipped", result.skipped()); summary.put("invalid", result.invalid());
         Map<String,att.testcase.ResolvedTestCase> selectedById = new LinkedHashMap<String,att.testcase.ResolvedTestCase>();
-        for (att.testcase.ResolvedTestCase testCase : resolution.cases())
+        for (att.testcase.ResolvedTestCase testCase : resolution.selectedCases())
             selectedById.put(testCase.qualifiedCaseId(), testCase);
         List<Map<String,Object>> caseRows = new ArrayList<Map<String,Object>>();
         List<Map<String,Object>> failures = new ArrayList<Map<String,Object>>();
