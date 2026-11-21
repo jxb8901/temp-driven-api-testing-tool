@@ -12,6 +12,7 @@ final class JobListIdentity {
         if(definition==null||!definition.isObject())return Map.of();
         if("load".equals(definition.path("executionType").asText()))return load(definition.path("scenario"));
         JsonNode target=definition.path("target");
+        if("nativeCase".equals(target.path("type").asText()))return nativeCases(target);
         Map<String,String> single=target(target);
         if(!single.isEmpty())return identity(single.get("type"),single.get("id"),List.of(single),List.of(single.get("type"),single.get("id")));
         JsonNode cases=definition.path("selection").path("caseIds");
@@ -76,6 +77,10 @@ final class JobListIdentity {
                 for(JsonNode entry:workload.path("mix"))addTarget(out,entry.path("target"));
             }
         } else {
+            if("nativeCase".equals(definition.path("target").path("type").asText())) {
+                addNativeTargets(out,definition.path("target"));
+                return out;
+            }
             addTarget(out,definition.path("target"));
             for(JsonNode id:definition.path("selection").path("caseIds")) {
                 String value=text(id);if(!value.isBlank())out.add(Map.of("type","case","id",value));
@@ -85,6 +90,27 @@ final class JobListIdentity {
     }
     private static void addTarget(Set<Map<String,String>> out,JsonNode value) {
         Map<String,String> member=target(value);if(!member.isEmpty())out.add(member);
+    }
+    private static Map<String,Object> nativeCases(JsonNode target) {
+        String definitionId=text(target.path("definitionId"));JsonNode selected=target.path("selection").path("resolvedCaseIds");
+        if(definitionId.isBlank()||!selected.isArray()||selected.isEmpty())return Map.of();
+        List<String> qualified=new ArrayList<>();List<Map<String,String>> preview=new ArrayList<>();
+        for(JsonNode local:selected) {
+            String id=text(local);if(id.isBlank())continue;
+            String value=definitionId+"."+id;qualified.add(value);
+            if(preview.size()<32)preview.add(Map.of("type","nativeCase","id",value));
+        }
+        if(qualified.isEmpty())return Map.of();
+        Collections.sort(qualified);
+        if(qualified.size()==1)return identity("nativeCase",qualified.get(0),preview,List.of("nativeCase",qualified.get(0)));
+        Map<String,Object> result=identity("nativeCases",qualified.size()+" selected",preview,qualified);
+        result.put("bindingCount",qualified.size());result.put("definitionId",definitionId);return result;
+    }
+    private static void addNativeTargets(Set<Map<String,String>> out,JsonNode target) {
+        String definitionId=text(target.path("definitionId"));
+        for(JsonNode local:target.path("selection").path("resolvedCaseIds")) {
+            String id=text(local);if(!definitionId.isBlank()&&!id.isBlank())out.add(Map.of("type","nativeCase","id",definitionId+"."+id));
+        }
     }
     private static Map<String,Object> identity(String type,String id,List<Map<String,String>> targets,Object signature) {
         Map<String,Object> out=new LinkedHashMap<>();out.put("type",type);out.put("id",id);out.put("targets",targets);

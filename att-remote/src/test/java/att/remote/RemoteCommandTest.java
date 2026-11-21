@@ -115,6 +115,100 @@ class RemoteCommandTest {
         assertTrue(client.getPaths.contains("/auth/capabilities"));assertFalse(client.getPaths.contains("/packages"));
     }
 
+    @Test void nativeCaseVNextUsesAdvertisedV2DraftAndSubmitLifecycle() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public JsonNode get(String path)throws RemoteException {
+                if("/version".equals(path)) {
+                    ObjectNode version=RemoteHttpClient.JSON.createObjectNode().put("apiVersion",ServerApi.VERSION);
+                    version.putArray("unifiedRunVersions").add("att-execution/v1").add("att-execution/v2");return version;
+                }
+                return super.get(path);
+            }
+            @Override public JsonNode post(String path,JsonNode body)throws RemoteException {
+                posts++;postPaths.add(path);postBodies.add(body.deepCopy());lastPath=path;lastBody=body.deepCopy();requests.add(body.deepCopy());
+                if("/drafts/run".equals(path))return RemoteHttpClient.JSON.createObjectNode().put("draftId","R0123456789ABCDEF0123456789ABCDEF");
+                return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");
+            }
+        };
+        String plan="{\"command\":\"run\",\"targetKind\":\"native-case\",\"target\":\"payments.transfer\","
+                +"\"packageId\":\"payments\",\"environment\":\"SIT\",\"runId\":\"native-smoke-2026\","
+                +"\"resolvedCaseIds\":[\"valid\",\"declined\"],\"failFast\":true}";
+        int exit=RemoteCommand.run(new String[]{"--server","https://example.invalid","--format","json","vnext",plan},
+                java.util.Collections.<String,String>emptyMap(),null,null,(profile,password,username,provider)->client);
+
+        assertEquals(0,exit);
+        assertEquals(Arrays.asList("/drafts/run","/jobs/run"),client.postPaths);
+        JsonNode definition=client.postBodies.get(0);
+        assertEquals("att-execution/v2",definition.path("schemaVersion").asText());
+        assertEquals("nativeCase",definition.path("target").path("type").asText());
+        assertEquals("payments.transfer",definition.path("target").path("definitionId").asText());
+        assertEquals(Arrays.asList("valid","declined"),Arrays.asList(
+                definition.path("target").path("selection").path("resolvedCaseIds").get(0).asText(),
+                definition.path("target").path("selection").path("resolvedCaseIds").get(1).asText()));
+        assertEquals("SIT",definition.path("environment").asText());
+        assertTrue(definition.path("options").path("failFast").asBoolean());
+        assertEquals("native-smoke-2026",definition.path("options").path("runId").asText());
+        assertFalse(definition.has("selection"));
+        assertFalse(definition.has("caseIds"));
+        JsonNode submission=client.postBodies.get(1);
+        assertEquals("payments",submission.path("packageId").asText());
+        assertEquals("R0123456789ABCDEF0123456789ABCDEF",submission.path("draftId").asText());
+        assertFalse(submission.has("caseIds"));
+    }
+
+    @Test void nativeCaseVNextRequiresServerToAdvertiseV2BeforeCreatingDraft() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public JsonNode get(String path)throws RemoteException {
+                if("/version".equals(path))return RemoteHttpClient.JSON.createObjectNode().put("apiVersion",ServerApi.VERSION).put("unifiedRunVersion","att-execution/v1");
+                return super.get(path);
+            }
+        };
+        String plan="{\"command\":\"run\",\"targetKind\":\"native-case\",\"target\":\"payments.transfer\","
+                +"\"packageId\":\"payments\",\"resolvedCaseIds\":[\"valid\"]}";
+        ByteArrayOutputStream stderr=new ByteArrayOutputStream();PrintStream previous=System.err;int exit;
+        try {
+            System.setErr(new PrintStream(stderr,true,"UTF-8"));
+            exit=RemoteCommand.run(new String[]{"--server","https://example.invalid","--format","json","vnext",plan},
+                    java.util.Collections.<String,String>emptyMap(),null,null,(profile,password,username,provider)->client);
+        } finally { System.setErr(previous); }
+        assertEquals(4,exit);
+        assertEquals(0,client.posts);
+        assertTrue(new String(stderr.toByteArray(),StandardCharsets.UTF_8).contains("does not advertise att-execution/v2"));
+    }
+
+    @Test void nativeCaseDryRunValidatesDraftAndDoesNotSubmitJob() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public JsonNode get(String path)throws RemoteException {
+                if("/version".equals(path)) {
+                    ObjectNode version=RemoteHttpClient.JSON.createObjectNode().put("apiVersion",ServerApi.VERSION);
+                    version.putArray("unifiedRunVersions").add("att-execution/v2");return version;
+                }
+                return super.get(path);
+            }
+            @Override public JsonNode post(String path,JsonNode body)throws RemoteException {
+                posts++;postPaths.add(path);postBodies.add(body.deepCopy());lastPath=path;lastBody=body.deepCopy();
+                return RemoteHttpClient.JSON.createObjectNode().put("draftId","R0123456789ABCDEF0123456789ABCDEF")
+                        .put("revisionDigest","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                        .put("selectedCount",1);
+            }
+        };
+        ByteArrayOutputStream stdout=new ByteArrayOutputStream();PrintStream previous=System.out;int exit;
+        String plan="{\"command\":\"run\",\"targetKind\":\"native-case\",\"target\":\"payments.transfer\","
+                +"\"packageId\":\"payments\",\"resolvedCaseIds\":[\"valid\"],\"dryRun\":true}";
+        try {
+            System.setOut(new PrintStream(stdout,true,"UTF-8"));
+            exit=RemoteCommand.run(new String[]{"--server","https://example.invalid","--format","json","vnext",plan},
+                    java.util.Collections.<String,String>emptyMap(),null,null,(profile,password,username,provider)->client);
+        } finally { System.setOut(previous); }
+        assertEquals(0,exit);
+        assertEquals(java.util.Collections.singletonList("/drafts/run"),client.postPaths);
+        assertFalse(client.postBodies.get(0).path("options").has("dryRun"));
+        JsonNode preview=RemoteHttpClient.JSON.readTree(new String(stdout.toByteArray(),StandardCharsets.UTF_8));
+        assertFalse(preview.path("submitted").asBoolean(true));
+        assertEquals("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",preview.path("preview").path("revisionDigest").asText());
+        assertEquals(0,client.jobReads);
+    }
+
     @Test void vNextValidationFailuresStayOnStdoutAsAttValidationReports() throws Exception {
         assertVNextValidationFailure(new RemoteException("ATT Server rejected authorization (HTTP 403), password=topsecret, path /srv/private/config.yaml"),4,"PARTIAL","ATT-REMOTE-VALIDATION-FORBIDDEN");
         assertVNextValidationFailure(new RemoteException("ATT Server rejected validation request (HTTP 400)",2),2,"INVALID","ATT-REMOTE-VALIDATION-REJECTED");
@@ -158,7 +252,7 @@ class RemoteCommandTest {
     }
 
     private static class MockClient extends RemoteHttpClient {
-        JsonNode lastBody;final java.util.ArrayList<JsonNode> requests=new java.util.ArrayList<JsonNode>();final java.util.ArrayList<String> cursors=new java.util.ArrayList<String>();final java.util.ArrayList<String> getPaths=new java.util.ArrayList<String>();
+        JsonNode lastBody;final java.util.ArrayList<JsonNode> requests=new java.util.ArrayList<JsonNode>();final java.util.ArrayList<String> postPaths=new java.util.ArrayList<String>();final java.util.ArrayList<JsonNode> postBodies=new java.util.ArrayList<JsonNode>();final java.util.ArrayList<String> cursors=new java.util.ArrayList<String>();final java.util.ArrayList<String> getPaths=new java.util.ArrayList<String>();
         int posts,eventOpens,jobReads;String lastPath;MockClient()throws RemoteException{super(new ServerProfile("mock","https://example.invalid",null,null,false),null);}
         @Override public JsonNode post(String path,JsonNode body)throws RemoteException {posts++;lastPath=path;lastBody=body;requests.add(body.deepCopy());return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");}
         @Override public JsonNode get(String path)throws RemoteException {

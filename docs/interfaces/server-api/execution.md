@@ -2,6 +2,41 @@
 
 # RUN and LOAD APIs
 
+## Native Test Case RUN (att-execution/v2; planned 4.5.0)
+
+This contract is planned for the 4.5.0 development train and remains subject to its release acceptance gate. Use it only with a Server that advertises v2 support. Native inline Test Cases use an explicit `nativeCase` target. `definitionId` identifies a Package Definition under the configured Package Test Case root (default `testcase/`); `resolvedCaseIds` contains one or more unique local Case IDs (up to 1,000). The Server resolves and validates the exact selection in a draft. Do not send Native Case fields to a direct `/jobs/run` request or translate local IDs into legacy Workbook `caseIds`.
+
+Create a validated draft:
+
+```http
+POST /api/v1/drafts/run
+Content-Type: application/json
+
+{
+  "schemaVersion": "att-execution/v2",
+  "executionType": "run",
+  "packageId": "payments",
+  "environment": "SIT",
+  "target": {
+    "type": "nativeCase",
+    "definitionId": "payments.transfer",
+    "selection": {"resolvedCaseIds": ["first"]}
+  },
+  "options": {"debug": false, "failFast": true, "runId": "native-smoke-2026"}
+}
+```
+
+Review the safe preview and its selected Case identities/provenance, then submit only the returned draft ID:
+
+```http
+POST /api/v1/jobs/run
+Content-Type: application/json
+
+{"packageId":"payments","draftId":"R0123456789ABCDEF0123456789ABCDEF"}
+```
+
+The draft pins the Definition and Package revision. A source change before submission makes the draft stale; after acceptance, the Worker reads the immutable Job source snapshot. Results use the existing Job, event, cancellation, and artifact routes, with Definition, Qualified Case, local Case, and execution identities in the evidence. In v2, `options.runId` is an optional ATT output Run ID and is preserved in the accepted Worker request. Existing `att-execution/v1` Workbook/Sidecar selection and direct Template/Flow/Tool targets keep their behavior. `GET /api/v1/version` retains `unifiedRunVersion: att-execution/v1` and also advertises `unifiedRunVersions`, including v2 when supported.
+
 ## Target-scoped Debug and drafts
 
 Debug form, Quick Load form, Load policy, and draft endpoints use the same resolved identity as the rest of the API. In anonymous mode, drafts created by one caller are available to every other anonymous caller. Use a resource ID from the Package Resource Explorer; Cases cannot be Debug or Quick Load targets.

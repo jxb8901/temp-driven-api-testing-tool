@@ -15,6 +15,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -31,8 +32,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Bounded, deterministic resolver for the proposed att-testcase/v1 inline contract.
- * It validates against the supplied proposed schema file and never executes a Flow.
+ * Bounded, deterministic resolver for the inline subset of att-testcase/v1.
+ * It validates against the supplied active schema file and never executes a Flow.
  */
 public final class TestCaseDefinitionResolver {
     public static final int MAX_SOURCE_BYTES = 1024 * 1024;
@@ -56,12 +57,12 @@ public final class TestCaseDefinitionResolver {
 
     private final Path schemaFile;
 
-    public TestCaseDefinitionResolver(Path proposedSchemaFile) {
-        if (proposedSchemaFile == null) throw new IllegalArgumentException("The proposed Test Case schema file is required");
-        this.schemaFile = proposedSchemaFile.toAbsolutePath().normalize();
+    public TestCaseDefinitionResolver(Path activeSchemaFile) {
+        if (activeSchemaFile == null) throw new IllegalArgumentException("The active Test Case schema file is required");
+        this.schemaFile = activeSchemaFile.toAbsolutePath().normalize();
         if (Files.isSymbolicLink(this.schemaFile)
                 || !Files.isRegularFile(this.schemaFile, LinkOption.NOFOLLOW_LINKS))
-            throw new IllegalArgumentException("The proposed Test Case schema file is unavailable");
+            throw new IllegalArgumentException("The active Test Case schema file is unavailable");
     }
 
     /** Resolves an existing package-relative Definition after proving its path remains package-local. */
@@ -79,6 +80,81 @@ public final class TestCaseDefinitionResolver {
         byte[] bytes = readBounded(resource.canonicalPath(), MAX_SOURCE_BYTES, "Test Case Definition source");
         return resolve(decodeUtf8(bytes, resource.logicalName()), resource.logicalName(), packageId,
                 packageRoot, templatesRoot, options);
+    }
+
+    /**
+     * Discovers one native Definition by its case-preserving ID under the configured
+     * Test Case root, then resolves that contained source.
+     * The bounded scan validates package-wide ID uniqueness before returning a
+     * path, so callers never turn a Definition ID into an untrusted path.
+     */
+    public TestCaseResolutionResult resolveByDefinitionId(Path packageRoot, String packageId,
+            Path templatesRoot, Path testcasesRoot, String definitionId, Options suppliedOptions) throws Exception {
+        Options options = suppliedOptions == null ? Options.defaults() : suppliedOptions;
+        validatePackageId(packageId, definitionId);
+        validateDefinitionId(definitionId, definitionId);
+
+        PackageResourceResolver resources = new PackageResourceResolver(packageRoot);
+        Path configuredTestcaseRoot = testcasesRoot == null ? Paths.get("testcase") : testcasesRoot;
+        Path testcaseRootPath = configuredTestcaseRoot.isAbsolute()
+                ? configuredTestcaseRoot : resources.packageRoot().resolve(configuredTestcaseRoot);
+        Path testcaseCandidate = resources.internalCandidate(testcaseRootPath);
+        if (!Files.exists(testcaseCandidate, LinkOption.NOFOLLOW_LINKS))
+            throw invalid(definitionId, "id", "Definition ID was not found under the configured testcase.root");
+        if (Files.isSymbolicLink(testcaseCandidate)
+                || !Files.isDirectory(testcaseCandidate, LinkOption.NOFOLLOW_LINKS))
+            throw invalid(definitionId, "id", "Package testcase root must be a regular non-symlink directory");
+        Path testcaseRoot = resources.fromInternalPath(testcaseCandidate, PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
+
+        Path match = null;
+        Map<String,String> idsByFoldedValue = new LinkedHashMap<String,String>();
+        int entries = 0;
+        int definitions = 0;
+        long definitionBytes = 0L;
+        try (Stream<Path> paths = Files.walk(testcaseRoot)) {
+            java.util.Iterator<Path> iterator = paths.iterator();
+            while (iterator.hasNext()) {
+                checkCancelled(options);
+                Path path = iterator.next();
+                if (++entries > MAX_PACKAGE_IDENTITY_ENTRIES)
+                    throw invalid(definitionId, "id", "Package Test Case discovery exceeds its entry limit");
+                if (Files.isSymbolicLink(path))
+                    throw invalid(definitionId, "id", "Package testcase resources must not contain symbolic links");
+                if (!"testcase.yaml".equals(path.getFileName().toString())) continue;
+                if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                    throw invalid(definitionId, "id", "Package testcase.yaml resources must be regular files");
+                PackageResourceResolver.PackageResource resource;
+                try { resource = resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE); }
+                catch (Exception failure) { throw invalid(definitionId, "id", "A Package testcase.yaml resource is outside the Package"); }
+                if (++definitions > MAX_PACKAGE_TEST_CASE_DEFINITIONS)
+                    throw invalid(definitionId, "id", "Package has too many native Test Case Definitions to discover");
+                long sourceSize = Files.size(resource.canonicalPath());
+                if (sourceSize > MAX_SOURCE_BYTES)
+                    throw invalid(resource.logicalName(), "definition", "Package Test Case Definition source exceeds its size limit");
+                definitionBytes += sourceSize;
+                if (definitionBytes > MAX_PACKAGE_IDENTITY_BYTES)
+                    throw invalid(definitionId, "id", "Package Test Case discovery exceeds its source-size limit");
+                String candidateId = readDefinitionId(resource.canonicalPath(), resource.logicalName(), options);
+                validateDefinitionId(candidateId, resource.logicalName());
+                String folded = asciiFold(candidateId);
+                String previous = idsByFoldedValue.put(folded, resource.logicalName());
+                if (previous != null) {
+                    throw DiagnosticException.of(DiagnosticCodes.TESTCASE_INVALID,
+                            "Package Test Case Definition IDs are ambiguous",
+                            "Definition ID '" + candidateId + "' collides under ASCII case folding between '"
+                                    + previous + "' and '" + resource.logicalName() + "'.",
+                            "Assign each testcase.yaml a unique case-preserving ID within this Package.")
+                            .withLocation(resource.logicalName(), "id", null, null, null, null, null);
+                }
+                if (definitionId.equals(candidateId)) {
+                    match = resource.canonicalPath();
+                }
+            }
+        }
+        checkCancelled(options);
+        if (match == null)
+            throw invalid(definitionId, "id", "Definition ID was not found under the configured testcase.root");
+        return resolve(match, packageId, resources.packageRoot(), templatesRoot, options);
     }
 
     /** Resolves a source snapshot, which can come from an immutable Package revision or an editor draft. */

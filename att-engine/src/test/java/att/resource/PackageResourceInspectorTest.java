@@ -625,6 +625,29 @@ class PackageResourceInspectorTest {
                 "Engine build identity remains bound to the composite execution revision");
     }
 
+    @Test void nativeDefinitionContentChangesExecutionRevisionWithoutAddingWorkbookCaseResources() throws Exception {
+        Path root = packageWithTemplate("native-definition-execution-revision", "NATIVE", "description: revision fixture");
+        Path definition = root.resolve("testcase/fpp/transfer/testcase.yaml");
+        Files.createDirectories(definition.getParent());
+        writeUtf8(definition, "schemaVersion: att-testcase/v1\nid: fpp.transfer\nflow: payment.transfer.v1\ninputs: {amount: 7}\n");
+        String initial;
+        try (PackageResourceInspector inspector = new PackageResourceInspector(root,
+                root.resolve("config/config.yaml"), "SIT", Collections.<String>emptyList(), 65536, 262144)) {
+            initial = inspector.executionRevisionDigest();
+            @SuppressWarnings("unchecked")
+            List<Map<String,Object>> caseResources = (List<Map<String,Object>>) inspector.inspect(
+                    "list", "case", null, null, 0, 50).get("items");
+            assertTrue(caseResources.isEmpty(), "Native definitions stay out of legacy Workbook Case indexing");
+        }
+
+        writeUtf8(definition, "schemaVersion: att-testcase/v1\nid: fpp.transfer\nflow: payment.transfer.v1\ninputs: {amount: 13}\n");
+        try (PackageResourceInspector inspector = new PackageResourceInspector(root,
+                root.resolve("config/config.yaml"), "SIT", Collections.<String>emptyList(), 65536, 262144)) {
+            assertNotEquals(initial, inspector.executionRevisionDigest(),
+                    "Accepted native RUN Jobs become stale when Definition source changes");
+        }
+    }
+
     private Map<String,String> revisionProbe(Path root,Path config,String engineCommit) throws Exception {
         String javaExecutable=Paths.get(System.getProperty("java.home"),"bin","java").toString();
         Path buildInfo=Files.createDirectories(temp.resolve("build-info-"+engineCommit));

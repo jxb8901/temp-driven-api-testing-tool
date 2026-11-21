@@ -88,6 +88,10 @@ public final class PackageResourceInspector implements AutoCloseable {
     private static final long MAX_TOTAL_WORKBOOK_BYTES = 128L * 1024L * 1024L;
     private static final int MAX_CONFIG_BYTES = 1024 * 1024;
     private static final long MAX_WORKBOOK_BYTES = 32L * 1024L * 1024L;
+    private static final int MAX_NATIVE_DEFINITION_SCAN_ENTRIES = 50000;
+    private static final int MAX_NATIVE_DEFINITIONS = 2000;
+    private static final long MAX_NATIVE_DEFINITION_BYTES = 1024L * 1024L;
+    private static final long MAX_NATIVE_DEFINITION_TOTAL_BYTES = 32L * 1024L * 1024L;
     private static final long MAX_REVISION_BYTES = 256L * 1024L * 1024L;
     private static final int MAX_PACKAGE_SOURCE_FILES = 20000;
     private static final int MAX_YAML_CANDIDATES = 20000;
@@ -2491,6 +2495,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                 ? config.testcasesRoot() : packageRoot.resolve(config.testcasesRoot());
         testcasesRoot = optionalPackageDirectory(testcasesRoot, "resources.testcaseRoot");
         if (testcasesRoot == null) return;
+        indexNativeCaseSources(index, testcasesRoot);
         List<Path> workbooks = new ArrayList<Path>();
         try (Stream<Path> paths = Files.walk(testcasesRoot)) {
             paths.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
@@ -2568,6 +2573,44 @@ public final class PackageResourceInspector implements AutoCloseable {
                 catch (Exception ignored) { continue; }
                 index.add(invalidSuite(logical, "Workbook or sidecar could not be inspected"));
             }
+        }
+    }
+
+    /** Pins native Definition YAML in the execution revision without adding Workbook Case resources. */
+    private void indexNativeCaseSources(Index index, Path testcasesRoot) {
+        int entries = 0;
+        int definitions = 0;
+        long totalBytes = 0L;
+        try (Stream<Path> paths = Files.walk(testcasesRoot)) {
+            java.util.Iterator<Path> iterator = paths.iterator();
+            while (iterator.hasNext()) {
+                Path path = iterator.next();
+                if (++entries > MAX_NATIVE_DEFINITION_SCAN_ENTRIES)
+                    throw new ResourceLimitException("resourceInspector.maxNativeDefinitionScanEntries",
+                            MAX_NATIVE_DEFINITION_SCAN_ENTRIES, entries);
+                if (!"testcase.yaml".equals(path.getFileName().toString())) continue;
+                if (Files.isSymbolicLink(path) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                    throw invalidResourceRoot("resources.testcaseRoot");
+                PackageResourceResolver.PackageResource resource = resources.fromInternalPath(path, PackageResourceResolver.Kind.FILE);
+                long size = Files.size(resource.canonicalPath());
+                if (size > MAX_NATIVE_DEFINITION_BYTES)
+                    throw new ResourceLimitException("resourceInspector.maxNativeDefinitionBytes",
+                            MAX_NATIVE_DEFINITION_BYTES, size);
+                if (++definitions > MAX_NATIVE_DEFINITIONS)
+                    throw new ResourceLimitException("resourceInspector.maxNativeDefinitions",
+                            MAX_NATIVE_DEFINITIONS, definitions);
+                totalBytes += size;
+                if (totalBytes > MAX_NATIVE_DEFINITION_TOTAL_BYTES)
+                    throw new ResourceLimitException("resourceInspector.maxNativeDefinitionTotalBytes",
+                            MAX_NATIVE_DEFINITION_TOTAL_BYTES, totalBytes);
+                indexFile(index, resource.canonicalPath());
+            }
+        } catch (ResourceLimitException limit) {
+            throw limit;
+        } catch (InvalidResourceRootException invalid) {
+            throw invalid;
+        } catch (Exception error) {
+            throw invalidResourceRoot("resources.testcaseRoot");
         }
     }
 

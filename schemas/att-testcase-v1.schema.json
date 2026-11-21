@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:att:schema:testcase:v1",
+  "title": "ATT Test Case Definition v1",
+  "description": "Native Test Case authoring contract. Runtime adapters support Data Source types independently.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "flow"],
+  "properties": {
+    "schemaVersion": {"const": "att-testcase/v1"},
+    "id": {"$ref": "#/$defs/definitionId"},
+    "name": {"type": "string", "minLength": 1},
+    "description": {"type": "string"},
+    "tags": {"$ref": "#/$defs/tags"},
+    "flow": {"$ref": "#/$defs/flowId"},
+    "inputs": {"$ref": "#/$defs/directInputs"},
+    "dataSource": {
+      "oneOf": [
+        {"$ref": "#/$defs/inlineDataSource"},
+        {"$ref": "#/$defs/excelDataSource"}
+      ]
+    },
+    "caseIdExpression": {"$ref": "#/$defs/caseIdExpression"},
+    "report": {"$ref": "#/$defs/report"}
+  },
+  "oneOf": [
+    {
+      "required": ["inputs"],
+      "not": {"anyOf": [{"required": ["dataSource"]}, {"required": ["caseIdExpression"]}]}
+    },
+    {"required": ["dataSource"]}
+  ],
+  "allOf": [
+    {
+      "if": {"required": ["dataSource"]},
+      "then": {"properties": {"inputs": {"$ref": "#/$defs/inputProjection"}}}
+    },
+    {
+      "if": {
+        "required": ["report"],
+        "properties": {"report": {"required": ["template"], "properties": {"template": {"const": "sourceWorkbook"}}}}
+      },
+      "then": {
+        "required": ["dataSource"],
+        "properties": {"dataSource": {"$ref": "#/$defs/excelDataSource"}}
+      }
+    }
+  ],
+  "patternProperties": {"^x-": {}},
+  "additionalProperties": false,
+  "$defs": {
+    "definitionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 126,
+      "pattern": "^(?!.*(?:^|\\.)(?:[cC][oO][nN]|[pP][rR][nN]|[aA][uU][xX]|[nN][uU][lL]|[cC][oO][mM][1-9]|[lL][pP][tT][1-9])(?:\\.|(?![\\s\\S])))[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*(?![\\s\\S])",
+      "description": "Package-scoped, case-preserving ID. The path and filename are not part of identity."
+    },
+    "flowId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*\\.v[1-9][0-9]*(?![\\s\\S])",
+      "description": "Static canonical Flow ID; it must resolve in the Package Flow registry."
+    },
+    "caseSegment": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?!(?:[cC][oO][nN]|[pP][rR][nN]|[aA][uU][xX]|[nN][uU][lL]|[cC][oO][mM][1-9]|[lL][pP][tT][1-9])(?![\\s\\S]))[A-Za-z0-9_-]+(?![\\s\\S])",
+      "description": "One path-safe, case-preserving Resolved Case ID segment."
+    },
+    "caseIdExpression": {
+      "type": "string",
+      "pattern": "^\\$\\{DATA\\.[A-Za-z_][A-Za-z0-9_-]*\\}(?![\\s\\S])",
+      "description": "One direct DATA key lookup evaluated during resolution; no runtime roots or expression functions."
+    },
+    "tags": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "inputName": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,127}(?![\\s\\S])"},
+    "directInputs": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/inputName"},
+      "additionalProperties": {}
+    },
+    "inputProjection": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/inputName"},
+      "additionalProperties": {"$ref": "#/$defs/inputBinding"}
+    },
+    "inputBinding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["from"],
+          "properties": {"from": {"type": "string", "pattern": "^DATA\\.[A-Za-z_][A-Za-z0-9_-]*(?![\\s\\S])"}},
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["value"],
+          "properties": {"value": {}},
+          "additionalProperties": false
+        }
+      ]
+    },
+    "recordData": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/inputName"},
+      "additionalProperties": {}
+    },
+    "inlineRecord": {
+      "type": "object",
+      "required": ["recordId", "data"],
+      "properties": {
+        "recordId": {"$ref": "#/$defs/caseSegment"},
+        "tags": {"$ref": "#/$defs/tags"},
+        "data": {"$ref": "#/$defs/recordData"}
+      },
+      "patternProperties": {"^x-": {}},
+      "additionalProperties": false
+    },
+    "inlineDataSource": {
+      "type": "object",
+      "required": ["type", "records"],
+      "properties": {
+        "type": {"const": "inline"},
+        "records": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/inlineRecord"}}
+      },
+      "patternProperties": {"^x-": {}},
+      "additionalProperties": false
+    },
+    "excelDataSource": {
+      "type": "object",
+      "required": ["type", "path", "sheet", "caseId"],
+      "properties": {
+        "type": {"const": "excel"},
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.[Xx][Ll][Ss][Xx](?![\\s\\S])",
+          "description": "Package-relative portable path: nonempty ASCII [A-Za-z0-9_-] components, forward slashes only, ending in .xlsx. Schema syntax rejection is necessary but not sufficient; the Excel adapter must still enforce Package-root containment and reject unsafe filesystem resolution."
+        },
+        "sheet": {"type": "string", "minLength": 1},
+        "headerRows": {"type": "integer", "minimum": 1},
+        "caseId": {"type": "string", "minLength": 1},
+        "tags": {"type": "string", "minLength": 1},
+        "dataColumns": {
+          "type": "string",
+          "description": "Explicit att-sidecar/v2.2 comma-separated column mapping. Omitted or blank means no DATA business columns (Case ID and tags selector columns are never auto-exposed as DATA)."
+        }
+      },
+      "patternProperties": {"^x-": {}},
+      "additionalProperties": false
+    },
+    "report": {
+      "type": "object",
+      "required": ["format"],
+      "properties": {
+        "format": {"const": "xlsx"},
+        "template": {"const": "sourceWorkbook"}
+      },
+      "patternProperties": {"^x-": {}},
+      "additionalProperties": false
+    }
+  }
+}

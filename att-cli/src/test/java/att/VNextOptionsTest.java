@@ -61,6 +61,31 @@ class VNextOptionsTest {
         assertEquals("suite",VNextOptions.parse(new String[]{"run","suite","testcase/A.xlsx"}).targetKind());
     }
 
+    @Test void nativeCaseUsesExplicitLocalResolvedIdsAndLeavesLegacyCaseSelectorAlone() {
+        assertTrue(VNextOptions.isVNextRequest(new String[]{"run","native-case","payments.transfer","--resolved-case-id","valid"}));
+        VNextOptions nativeCase=VNextOptions.parse(new String[]{"--local","-p","payments","run","native-case","payments.transfer",
+                "--resolved-case-id","valid","--resolved-case-id","declined"});
+        assertEquals("native-case",nativeCase.targetKind());
+        assertEquals("payments.transfer",nativeCase.target());
+        assertEquals(java.util.Arrays.asList("valid","declined"),nativeCase.resolvedCaseIds());
+        VNextOptions remotePreview=VNextOptions.parse(new String[]{"--server","sit","-p","payments","run","native-case","payments.transfer",
+                "--resolved-case-id","valid","--dry-run"});
+        assertTrue(remotePreview.dryRun());
+
+        VNextOptions legacy=VNextOptions.parse(new String[]{"run","case","payments.transfer.valid"});
+        assertEquals("case",legacy.targetKind());
+        assertTrue(legacy.resolvedCaseIds().isEmpty());
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-case","payments.transfer"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-case","payments.transfer",
+                "--resolved-case-id","valid","--resolved-case-id","valid"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-case","payments.transfer",
+                "--resolved-case-id","valid","--case","payments.transfer.valid"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","case","payments.transfer.valid",
+                "--resolved-case-id","valid"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-case","payments.transfer",
+                "--resolved-case-id",""}));
+    }
+
     @Test void directLoadRejectsInputUntilBothAdaptersSupportIt() {
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{
                 "--local","load","flow","PAYMENT.submit","--input","templates/flows/PAYMENT.submit/load.yaml"}));

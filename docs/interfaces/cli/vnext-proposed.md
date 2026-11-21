@@ -15,7 +15,7 @@ att [--local | --server <profile|url>] [-p <packageId>] [-e <profile>] \
 
 | Command | Example | Behavior |
 |---|---|---|
-| `run` | `att --local -p payments run case quickStart.default.QS001` | Run a Case, Suite workbook, all Cases, Template, Flow, or Tool; Local runs synchronously. |
+| `run` | `att --local -p payments run case quickStart.default.QS001` | Run a legacy Case, Suite workbook, all Cases, Template, Flow, or Tool; Local runs synchronously. Native inline Cases use the explicit [Native Case RUN command](#native-case-run). |
 | `load` | `att --server sit -p payments load flow PAYMENT.submit --arrival-rate 5/s --duration 2m` | Run a Flow, Template, Tool, or authored Load Scenario through the existing Load Engine. |
 | `validate config` | `att --local -p payments -e SIT validate config` | Check shared Runtime Config and the selected Package's effective Config and Testdata references without business I/O. |
 | `validate package` | `att --server sit -p payments validate package` | Check the full registered Package inventory and static dependencies. |
@@ -26,7 +26,11 @@ att [--local | --server <profile|url>] [-p <packageId>] [-e <profile>] \
 
 Validation is read-only: it does not execute Tools, send Load traffic, probe DB/MQ systems, or modify Config, Package files, or outputs. Human output has hierarchical `PASS`/`FAIL`/`WARN`/`SKIP` sections. `--format json` emits one `att-validation/v1` report on stdout. Exit codes are `0` for PASS, `1` for functional RUN/LOAD failure, `2` for invalid input or validation failure, `3` for execution error/cancellation, and `4` for Remote transport or untrusted-result failure. Persistent Local Job management and background submission are outside this proposed grammar.
 
-Common vNext options are `-p, --package`, `-e, --env`, `--format`, `--quiet`, `--verbose`, `--help`, and `--version`. `--config <path>` is Local-only. RUN selection options include `--suite`, `--suite-dir`, `--case` (also `--case-id`), `--tag`, `--exclude-tag`, `--all`, `--rerun-failed`, `--dry-run` (Case/Suite RUN only), `--fail-fast`, `--run-id`, and Local-only `--output-dir`. Template, Flow, and Tool RUN reject `--dry-run` and accept `--input <path>`; resource RUN and LOAD accept repeatable `--set`. Direct LOAD rejects `--input`. LOAD accepts `--users` or `--arrival-rate` plus `--ramp-up`, `--warmup`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--users` and `--arrival-rate` cannot be combined. Unsupported options and invalid combinations fail before submission or traffic.
+Common vNext options are `-p, --package`, `-e, --env`, `--format`, `--quiet`, `--verbose`, `--help`, and `--version`. `--config <path>` is Local-only. RUN selection options include `--suite`, `--suite-dir`, `--case` (also `--case-id`), `--tag`, `--exclude-tag`, `--all`, `--rerun-failed`, `--dry-run` (Case/Suite/Native Case RUN), `--fail-fast`, `--run-id`, and Local-only `--output-dir`. Template, Flow, and Tool RUN reject `--dry-run` and accept `--input <path>`; resource RUN and LOAD accept repeatable `--set`. Direct LOAD rejects `--input`. LOAD accepts `--users` or `--arrival-rate` plus `--ramp-up`, `--warmup`, `--duration`, `--ramp-down`, `--think-time`, `--max-concurrent`, and `--overload-policy`. `--users` and `--arrival-rate` cannot be combined. Unsupported options and invalid combinations fail before submission or traffic.
+
+### Native Case RUN
+
+Native RUN uses `run native-case <definitionId> --resolved-case-id <localCaseId>` and accepts the selector repeatedly (1–1000 unique IDs). The IDs are local to the selected Definition. This explicit target keeps `run case <id>` and `--case` reserved for Workbook/Sidecar Cases; dotted IDs are not used to infer a target type. Local `--dry-run` resolves and validates the selected Cases without executing their Flows. Remote Native RUN requires a Server that advertises `att-execution/v2`; the client creates a validated RUN draft and submits that draft, never a raw legacy `/jobs/run` selection. Remote `--run-id` is carried as `options.runId` through the validated draft and accepted Worker request. Remote `--dry-run` creates a validated draft preview and skips submission.
 
 ### Migrate existing commands
 
@@ -53,6 +57,7 @@ The vNext syntax puts backend and Package selection before one of the three comm
 ./att.sh --server sit validate config
 ./att.sh --server sit -p payments -e UAT validate config
 ./att.sh --server sit -p payments validate package
+./att.sh --server sit -p payments run native-case payments.transfer --resolved-case-id valid --resolved-case-id declined
 ./att.sh --server sit validate --all --format json
 ```
 

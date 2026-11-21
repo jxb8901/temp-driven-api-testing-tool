@@ -26,6 +26,8 @@ public class TestResult {
     private final String workbookId;
     private final String groupId;
     private final List<String> tags;
+    private final String definitionId;
+    private final String qualifiedCaseId;
     /** Optional structured case-level diagnostic retained for runtime/report consumers. */
     private final att.validation.Diagnostic diagnostic;
 
@@ -47,6 +49,15 @@ public class TestResult {
     public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path caseLogPath,
                       List<ValidationResult> validations, String workbookId, String groupId, List<String> tags,
                       att.validation.Diagnostic diagnostic, String executionId) {
+        this(caseId, caseName, status, duration, expected, actual, caseLogPath, validations, workbookId, groupId,
+                tags, diagnostic, executionId, null, caseId);
+    }
+
+    /** Creates a result with explicit Native Case identity while leaving Workbook and group identities empty. */
+    public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path caseLogPath,
+                      List<ValidationResult> validations, String workbookId, String groupId, List<String> tags,
+                      att.validation.Diagnostic diagnostic, String executionId, String definitionId,
+                      String qualifiedCaseId) {
         this.caseId = caseId;
         this.executionId = executionId == null || executionId.isEmpty() ? caseId : executionId;
         this.caseName = caseName;
@@ -60,6 +71,8 @@ public class TestResult {
         this.groupId = groupId == null ? "" : groupId;
         this.tags = tags == null ? Collections.<String>emptyList() : new ArrayList<String>(tags);
         this.diagnostic = diagnostic;
+        this.definitionId = definitionId;
+        this.qualifiedCaseId = qualifiedCaseId == null ? caseId : qualifiedCaseId;
     }
 
     public String caseId() { return caseId; }
@@ -76,10 +89,13 @@ public class TestResult {
     public String workbookId() { return workbookId; }
     public String groupId() { return groupId; }
     public List<String> tags() { return Collections.unmodifiableList(tags); }
+    public String definitionId() { return definitionId; }
+    public String qualifiedCaseId() { return qualifiedCaseId; }
     public att.validation.Diagnostic diagnostic() { return diagnostic; }
     public TestResult relocate(Path from, Path to) {
         Path relocated = caseLogPath != null && caseLogPath.startsWith(from) ? to.resolve(from.relativize(caseLogPath)) : caseLogPath;
-        return new TestResult(caseId, caseName, status, duration, expected, actual, relocated, validations, workbookId, groupId, tags, diagnostic, executionId);
+        return new TestResult(caseId, caseName, status, duration, expected, actual, relocated, validations, workbookId, groupId,
+                tags, diagnostic, executionId, definitionId, qualifiedCaseId);
     }
     private static String inferred(String caseId, int index) {
         if (caseId == null) return "";
