@@ -17,7 +17,7 @@ class TestCaseDefinitionSchemaTest {
     private static final String SCHEMA_VERSION = "att-testcase/v1";
 
     @Test void validatesProposedExamplesWithoutRegisteringTheContractAtRuntime() throws Exception {
-        Path root = Paths.get("").toAbsolutePath();
+        Path root = repositoryRoot();
         Path proposed = root.resolve("schemas/proposed");
         Path schema = proposed.resolve("att-testcase-v1.schema.json");
         String proposedCatalog = read(proposed.resolve("catalog.yaml"));
@@ -62,7 +62,7 @@ class TestCaseDefinitionSchemaTest {
     }
 
     @Test void recordsDuplicateIdsAsFutureResolverSemantics() throws Exception {
-        Path root = Paths.get("").toAbsolutePath();
+        Path root = repositoryRoot();
         Path schema = root.resolve("schemas/proposed/att-testcase-v1.schema.json");
         Path fixture = root.resolve("docs/adr/examples/att-testcase-v1/resolution-invalid-duplicate-ids.yaml");
         Object parsed = YamlSupport.load(fixture);
@@ -89,6 +89,23 @@ class TestCaseDefinitionSchemaTest {
         assertEquals(firstResolvedId.toLowerCase(Locale.ROOT), secondResolvedId.toLowerCase(Locale.ROOT));
     }
 
+    @Test void rejectsMixedCaseWindowsDeviceNamesInDefinitionAndCaseIds() throws Exception {
+        Path root = repositoryRoot();
+        Path schema = root.resolve("schemas/proposed/att-testcase-v1.schema.json");
+        for (String id : new String[]{"con.fixture", "PRn.fixture", "Com1.fixture", "lPt9.fixture"}) {
+            String document = "schemaVersion: att-testcase/v1\nid: " + id
+                    + "\nflow: payment.transfer.v1\ninputs: {}\n";
+            assertThrows(IllegalArgumentException.class, () ->
+                    JsonSchemaVerifier.verify(schema, YamlSupport.parse(document)), id);
+        }
+        for (String recordId : new String[]{"con", "PRN", "Com1", "lpt9"}) {
+            String document = "schemaVersion: att-testcase/v1\nid: fpp.reserved\nflow: payment.transfer.v1\n"
+                    + "dataSource:\n  type: inline\n  records:\n    - recordId: " + recordId + "\n      data: {key: value}\n";
+            assertThrows(IllegalArgumentException.class, () ->
+                    JsonSchemaVerifier.verify(schema, YamlSupport.parse(document)), recordId);
+        }
+    }
+
     private static void assertValid(Path root, Path schema, String fixture) throws Exception {
         Path document = root.resolve("docs/adr/examples/att-testcase-v1").resolve(fixture);
         JsonSchemaVerifier.verify(schema, YamlSupport.load(document));
@@ -102,5 +119,14 @@ class TestCaseDefinitionSchemaTest {
 
     private static String read(Path path) throws Exception {
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+    }
+
+    private static Path repositoryRoot() {
+        Path directory = Paths.get("").toAbsolutePath().normalize();
+        while (directory != null) {
+            if (Files.isRegularFile(directory.resolve("schemas/proposed/att-testcase-v1.schema.json"))) return directory;
+            directory = directory.getParent();
+        }
+        throw new IllegalStateException("Could not locate repository root for proposed Test Case schema");
     }
 }

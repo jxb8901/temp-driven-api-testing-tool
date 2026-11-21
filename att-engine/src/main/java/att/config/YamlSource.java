@@ -12,10 +12,30 @@ public final class YamlSource {
     private final String file;
     private final Map<String, SourceLocation> locations = new LinkedHashMap<String, SourceLocation>();
     private final Map<String, ScalarNode> scalars = new LinkedHashMap<String, ScalarNode>();
+    private final List<String> capturedLines;
 
     YamlSource(Path file, Node root) {
+        this(file, root, null);
+    }
+
+    YamlSource(Path file, Node root, String capturedText) {
         this.file = file.toString();
+        this.capturedLines = lines(capturedText);
         if (root != null) index(root, "", Collections.newSetFromMap(new IdentityHashMap<Node, Boolean>()));
+    }
+
+    List<String> capturedLines() { return capturedLines; }
+
+    private static List<String> lines(String text) {
+        if (text == null) return null;
+        List<String> result = new ArrayList<String>();
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.StringReader(text))) {
+            String line;
+            while ((line = reader.readLine()) != null) result.add(line);
+        } catch (java.io.IOException impossible) {
+            throw new IllegalStateException("StringReader unexpectedly failed", impossible);
+        }
+        return Collections.unmodifiableList(result);
     }
 
     private void index(Node node, String pointer, Set<Node> ancestors) {

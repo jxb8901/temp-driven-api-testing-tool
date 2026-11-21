@@ -15,6 +15,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.LinkedHashSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -28,6 +30,9 @@ public final class FlowRegistry {
     private final Map<String, FlowDefinition> byId = new LinkedHashMap<String, FlowDefinition>();
     private final Map<String, Path> descriptors = new LinkedHashMap<String, Path>();
     private final List<Path> descriptorsWithoutId = new ArrayList<Path>();
+    private final Map<Path, byte[]> sourceSnapshots;
+    private final Set<Path> capturedTemplateDescriptors;
+    private final boolean snapshotMode;
     private final boolean frozen;
     private int parsedCount;
 
@@ -36,9 +41,33 @@ public final class FlowRegistry {
     }
 
     public FlowRegistry(Path projectRoot, Path templatesRoot, boolean validateAll) throws Exception {
+        this(projectRoot, templatesRoot, validateAll, null, null);
+    }
+
+    /**
+     * Builds a registry from captured Flow bytes and the same snapshot's Template descriptor paths.
+     * Both collections must represent the complete descriptor metadata captured for the Flow tree.
+     */
+    public FlowRegistry(Path projectRoot, Path templatesRoot, boolean validateAll,
+                        Map<Path, byte[]> capturedSources, Set<Path> capturedTemplateDescriptors) throws Exception {
         PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
         this.projectRoot = resources.packageRoot();
         this.frozen = false;
+        this.snapshotMode = capturedSources != null;
+        if (snapshotMode && capturedTemplateDescriptors == null)
+            throw new IllegalArgumentException("Captured Template descriptor metadata is required with Flow source snapshots");
+        if (!snapshotMode && capturedTemplateDescriptors != null && !capturedTemplateDescriptors.isEmpty())
+            throw new IllegalArgumentException("Captured Template descriptors require captured Flow source snapshots");
+        this.sourceSnapshots = new LinkedHashMap<Path, byte[]>();
+        if (capturedSources != null) for (Map.Entry<Path, byte[]> entry : capturedSources.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) throw new IllegalArgumentException("Flow source snapshot is invalid");
+            this.sourceSnapshots.put(entry.getKey().toAbsolutePath().normalize(), entry.getValue().clone());
+        }
+        this.capturedTemplateDescriptors = new LinkedHashSet<Path>();
+        if (capturedTemplateDescriptors != null) for (Path descriptor : capturedTemplateDescriptors) {
+            if (descriptor == null) throw new IllegalArgumentException("Template descriptor snapshot is invalid");
+            this.capturedTemplateDescriptors.add(descriptor.toAbsolutePath().normalize());
+        }
         Path templates = templatesRoot.isAbsolute() ? templatesRoot : projectRoot.resolve(templatesRoot);
         Path canonicalTemplates = resources.internalCandidate(templates);
         if (Files.exists(canonicalTemplates)) {
@@ -48,7 +77,23 @@ public final class FlowRegistry {
         this.root = Files.exists(flowCandidate)
                 ? resources.fromInternalPath(flowCandidate, PackageResourceResolver.Kind.DIRECTORY).canonicalPath()
                 : flowCandidate;
-        if (Files.exists(root)) {
+        if (snapshotMode) {
+            if (Files.exists(root, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                    && (Files.isSymbolicLink(root) || !Files.isDirectory(root, java.nio.file.LinkOption.NOFOLLOW_LINKS)))
+                throw new IllegalArgumentException("Flow root must be a non-symlink directory: " + root);
+            indexDescriptors();
+            if (validateAll) {
+                if (!descriptorsWithoutId.isEmpty()) {
+                    Path descriptor = descriptorsWithoutId.get(0);
+                    throw att.validation.DiagnosticException.of(att.validation.DiagnosticCodes.TEMPLATE_INVALID,
+                            "Flow descriptor has no static canonical id", descriptor.toString(),
+                            "Add an id ending in .vN; dynamic Flow ids are not supported.")
+                            .withLocation(descriptor.toString(), "id", null, null, null, null, null);
+                }
+                for (String id : new ArrayList<String>(descriptors.keySet())) loadId(id);
+                validateGraph();
+            }
+        } else if (Files.exists(root)) {
             if (Files.isSymbolicLink(root) || !Files.isDirectory(root)) throw new IllegalArgumentException("Flow root must be a non-symlink directory: " + root);
             indexDescriptors();
             if (validateAll) {
@@ -73,6 +118,9 @@ public final class FlowRegistry {
         this.descriptorsWithoutId.clear();
         this.parsedCount = compiled.size();
         this.frozen = true;
+        this.snapshotMode = false;
+        this.sourceSnapshots = Collections.emptyMap();
+        this.capturedTemplateDescriptors = Collections.emptySet();
     }
 
     public FlowDefinition get(String id) {
@@ -90,6 +138,13 @@ public final class FlowRegistry {
     }
     /** Returns the indexed descriptor for a discovered ID without compiling it. */
     public Path descriptorPath(String id) { return descriptors.get(id); }
+    /** Returns a defensive copy of the exact captured descriptor bytes, when snapshot mode is active. */
+    public byte[] descriptorBytes(String id) {
+        Path descriptor = descriptors.get(id);
+        if (descriptor == null) return null;
+        byte[] captured = sourceSnapshots.get(descriptor.toAbsolutePath().normalize());
+        return captured == null ? null : captured.clone();
+    }
     public int size() { return byId.size(); }
     public int parsedCount() { return parsedCount; }
 
@@ -121,27 +176,50 @@ public final class FlowRegistry {
 
     private void indexDescriptors() throws Exception {
         List<Path> files = new ArrayList<Path>();
-        try (Stream<Path> paths = Files.walk(root)) {
-            java.util.Iterator<Path> iterator = paths.filter(path -> path.getFileName().toString().equals("flow.yaml")).iterator();
-            while (iterator.hasNext()) files.add(iterator.next());
+        if (snapshotMode) {
+            for (Path path : sourceSnapshots.keySet()) {
+                Path normalized = path.toAbsolutePath().normalize();
+                if (!normalized.startsWith(root.toAbsolutePath().normalize())
+                        || !"flow.yaml".equals(normalized.getFileName().toString()))
+                    throw new IllegalArgumentException("Captured Flow descriptor is outside the Flow root");
+                files.add(normalized);
+            }
+            for (Path path : capturedTemplateDescriptors) {
+                Path normalized = path.toAbsolutePath().normalize();
+                if (!normalized.startsWith(root.toAbsolutePath().normalize())
+                        || !"template.yaml".equals(normalized.getFileName().toString()))
+                    throw new IllegalArgumentException("Captured Template descriptor is outside the Flow root");
+            }
+        } else {
+            try (Stream<Path> paths = Files.walk(root)) {
+                java.util.Iterator<Path> iterator = paths.filter(path -> path.getFileName().toString().equals("flow.yaml")).iterator();
+                while (iterator.hasNext()) files.add(iterator.next());
+            }
         }
         Collections.sort(files);
         for (Path descriptor : files) {
-            if (Files.isSymbolicLink(descriptor) || !Files.isRegularFile(descriptor, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            if (!snapshotMode && (Files.isSymbolicLink(descriptor) || !Files.isRegularFile(descriptor, java.nio.file.LinkOption.NOFOLLOW_LINKS)))
                 throw att.validation.DiagnosticException.of(att.validation.DiagnosticCodes.PATH_INVALID,
                         "Unsafe Flow descriptor", "Flow descriptor must be a regular non-symlink file: " + descriptor,
                         "Use a regular flow.yaml below the package templates/flows directory.").withLocation(descriptor.toString(), "flow", null, null, null, null, null);
-            Path real = descriptor.toRealPath();
-            if (!real.startsWith(root.toRealPath()))
+            Path real = snapshotMode ? descriptor : descriptor.toRealPath();
+            Path allowedRoot = snapshotMode ? root.toAbsolutePath().normalize() : root.toRealPath();
+            if (!real.startsWith(allowedRoot))
                 throw att.validation.DiagnosticException.of(att.validation.DiagnosticCodes.PATH_INVALID,
                         "Flow descriptor escapes Flow root", "resolvedPath=" + real + ", allowedRoot=" + root,
                         "Keep Flow descriptors below templates/flows.").withLocation(descriptor.toString(), "flow", null, null, null, null, null);
-            if (Files.isRegularFile(descriptor.getParent().resolve("template.yaml")))
+            Path templateDescriptor = descriptor.getParent().resolve("template.yaml").toAbsolutePath().normalize();
+            boolean hasTemplate = snapshotMode
+                    ? capturedTemplateDescriptors.contains(templateDescriptor)
+                    : Files.isRegularFile(templateDescriptor);
+            if (hasTemplate)
                 throw att.validation.DiagnosticException.of(att.validation.DiagnosticCodes.TEMPLATE_INVALID,
                         "Directory contains both template.yaml and flow.yaml", descriptor.getParent().toString(),
                         "Split the directory so it contains either a Template or a Flow descriptor.")
                         .withLocation(descriptor.toString(), "flow", null, null, null, null, null);
-            String text = new String(Files.readAllBytes(descriptor), java.nio.charset.StandardCharsets.UTF_8);
+            byte[] bytes = sourceSnapshots.get(descriptor.toAbsolutePath().normalize());
+            if (bytes == null) bytes = Files.readAllBytes(descriptor);
+            String text = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
             Matcher header = Pattern.compile("(?m)^id:[ \\t]*([A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*\\.v[1-9][0-9]*)[ \\t]*(?:#.*)?$").matcher(text);
             if (!header.find()) { descriptorsWithoutId.add(descriptor); continue; }
             String id = header.group(1);
@@ -167,7 +245,7 @@ public final class FlowRegistry {
                     "Correct the indicated Flow descriptor field.");
             if (schema == null) throw YamlSupport.locate(diagnostic, descriptor, field);
             throw YamlSupport.locateSchema(diagnostic, descriptor, schema.structuredViolations());
-        }
+        } finally { if (snapshotMode) YamlSupport.clearSnapshotSource(descriptor); }
         parsedCount++;
         if (!id.equals(flow.id())) throw new IllegalArgumentException("Flow descriptor id changed while compiling: expected " + id + " but found " + flow.id());
         byId.put(id, flow);
@@ -177,7 +255,10 @@ public final class FlowRegistry {
     private FlowDefinition load(Path descriptor) throws Exception {
         Map<String, Object> map;
         {
-            Object loaded = YamlSupport.load(descriptor);
+            byte[] snapshot = sourceSnapshots.get(descriptor.toAbsolutePath().normalize());
+            Object loaded = snapshotMode
+                    ? (snapshot == null ? null : YamlSupport.load(descriptor, snapshot))
+                    : YamlSupport.load(descriptor);
             if (!(loaded instanceof Map)) throw new IllegalArgumentException("Flow must be a YAML map: " + descriptor);
             map = objectMap((Map<?, ?>) loaded);
         }
