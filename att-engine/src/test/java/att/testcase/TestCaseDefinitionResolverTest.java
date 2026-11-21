@@ -12,6 +12,7 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -216,7 +217,10 @@ class TestCaseDefinitionResolverTest {
         assertEquals(2, truncated.resolvedCount());
         assertEquals(2, truncated.selectedCount());
         assertTrue(truncated.truncated());
+        assertEquals(2, truncated.selectedCases().size());
         assertEquals("fpp.inline.first", truncated.cases().get(0).qualifiedCaseId());
+        assertEquals("fpp.inline.second", truncated.selectedCases().get(1).qualifiedCaseId());
+        assertEquals(truncated.cases(), truncated.previewCases());
 
         TestCaseDefinitionResolver.Options empty = new TestCaseDefinitionResolver.Options(10, 10,
                 Collections.<String>emptySet(), null);
@@ -224,10 +228,71 @@ class TestCaseDefinitionResolverTest {
                 packageRoot, templatesRoot, empty);
         assertTrue(none.emptySelection());
         assertEquals(0, none.cases().size());
+        assertEquals(0, none.selectedCases().size());
         assertEquals(DiagnosticCodes.SELECTION_EMPTY, none.diagnostics().get(0).code());
         assertThrows(DiagnosticException.class, () -> resolver.resolve(source, "testcase/multi.yaml", "payments",
                 packageRoot, templatesRoot, new TestCaseDefinitionResolver.Options(10, 10,
                         Collections.singleton("fpp.inline.not-found"), null)));
+    }
+
+    @Test void keepsCompleteSelectedPlanWhenPreviewIsTruncatedAboveOneThousandCases() throws Exception {
+        int total = TestCaseDefinitionResolver.MAX_PREVIEW_CASES + 1;
+        StringBuilder records = new StringBuilder("dataSource:\n  type: inline\n  records:\n");
+        for (int index = 0; index < total; index++) {
+            records.append("    - {recordId: row").append(index)
+                    .append(", data: {key: Case").append(index).append(", secret: value-").append(index).append("}}\n");
+        }
+        TestCaseDefinitionResolver.Options options = new TestCaseDefinitionResolver.Options(
+                total, TestCaseDefinitionResolver.MAX_PREVIEW_CASES, null, null);
+        TestCaseResolutionResult result = resolver.resolve(inline(records.toString()), "testcase/large-set.yaml",
+                "payments", packageRoot, templatesRoot, options);
+
+        assertEquals(total, result.resolvedCount());
+        assertEquals(total, result.selectedCount());
+        assertEquals(total, result.selectedCases().size());
+        assertEquals(TestCaseDefinitionResolver.MAX_PREVIEW_CASES, result.previewCases().size());
+        assertTrue(result.truncated());
+        assertEquals("fpp.inline.row0", result.selectedCases().get(0).qualifiedCaseId());
+        assertEquals("fpp.inline.row" + (total - 1),
+                result.selectedCases().get(total - 1).qualifiedCaseId());
+        assertEquals("value-" + (total - 1), result.selectedCases().get(total - 1).data().get("secret"));
+        assertEquals(total, ((List<?>) result.toSelectedPlanMap().get("cases")).size());
+        assertEquals(TestCaseDefinitionResolver.MAX_PREVIEW_CASES,
+                ((List<?>) result.toMap().get("cases")).size());
+    }
+
+    @Test void previewMapOmitsUnselectedRawRecordsForZeroPreviewAndSubsetSelection() throws Exception {
+        String source = inline("dataSource:\n  type: inline\n  records:\n"
+                + "    - {recordId: first, data: {key: One, secret: hidden-first}}\n"
+                + "    - {recordId: second, data: {key: Two, secret: hidden-second}}\n");
+
+        TestCaseResolutionResult zeroPreview = resolver.resolve(source, "testcase/multi.yaml", "payments",
+                packageRoot, templatesRoot, new TestCaseDefinitionResolver.Options(10, 0, null, null));
+        Map<String,Object> zeroMap = zeroPreview.toMap();
+        assertEquals(0, zeroPreview.previewCases().size());
+        assertEquals(2, zeroPreview.selectedCases().size());
+        assertEquals("TestCaseDefinitionSummary", ((Map<?,?>) zeroMap.get("definition")).get("kind"));
+        assertEquals(Integer.valueOf(2), ((Map<?,?>) ((Map<?,?>) zeroMap.get("definition")).get("dataSource")).get("recordCount"));
+        assertFalse(zeroMap.toString().contains("hidden-first"));
+        assertFalse(zeroMap.toString().contains("hidden-second"));
+        assertFalse(zeroMap.toString().contains("records"));
+        assertTrue(zeroPreview.definition().toMap().toString().contains("hidden-first"),
+                "Authoring definition() retains full source; only the preview DTO redacts it");
+
+        TestCaseResolutionResult subset = resolver.resolve(source, "testcase/multi.yaml", "payments",
+                packageRoot, templatesRoot, new TestCaseDefinitionResolver.Options(10, 10,
+                        Collections.singleton("fpp.inline.second"), null));
+        Map<String,Object> subsetMap = subset.toMap();
+        assertEquals(1, subset.selectedCases().size());
+        assertEquals(1, subset.previewCases().size());
+        assertEquals("fpp.inline.second", subset.previewCases().get(0).qualifiedCaseId());
+        assertTrue(subsetMap.toString().contains("hidden-second"));
+        assertFalse(subsetMap.toString().contains("hidden-first"));
+        assertFalse(((Map<?,?>) subsetMap.get("definition")).containsKey("records"));
+        Map<?,?> selectedPlan = subset.toSelectedPlanMap();
+        assertEquals("TestCaseSelectedPlan", selectedPlan.get("kind"));
+        assertEquals(1, ((List<?>) selectedPlan.get("cases")).size());
+        assertFalse(selectedPlan.toString().contains("hidden-first"));
     }
 
     @Test void enforcesRecordAndCancellationBounds() throws Exception {

@@ -431,7 +431,8 @@ public final class TestCaseDefinitionResolver {
                 null, null, null, null, "Select at least one resolved Case before execution."));
         int previewCount = Math.min(selected.size(), options.previewLimit());
         List<ResolvedTestCase> preview = selected.subList(0, previewCount);
-        return new TestCaseResolutionResult(definition, sourceReference, sourceRevision, preview,
+        // selected remains the complete bounded execution plan; preview is presentation-only.
+        return new TestCaseResolutionResult(definition, sourceReference, sourceRevision, selected, preview,
                 resolved.size(), selected.size(), selected.size() > previewCount, diagnostics);
     }
 
@@ -625,7 +626,11 @@ public final class TestCaseDefinitionResolver {
         return count;
     }
 
-    /** Selection and preview controls. Values are copied at construction and never alter source order. */
+    /**
+     * Selection and preview controls. Values are copied at construction and never alter source order.
+     * {@code previewLimit} only truncates the presentation preview; {@link TestCaseResolutionResult#selectedCases()}
+     * always retains the complete bounded selection up to {@code maxRecords}.
+     */
     public static final class Options {
         private final int maxRecords;
         private final int previewLimit;
