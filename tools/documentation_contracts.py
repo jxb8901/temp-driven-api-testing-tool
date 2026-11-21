@@ -23,20 +23,56 @@ def active_schemas(catalog):
 
 
 def proposed_schemas(catalog):
+    """Validate every proposed catalog entry; ignore only blank/comment lines."""
     if not re.search(r"(?m)^schemaVersion:\s*att-proposed-schema-catalog/v1\s*$", catalog):
         raise ValueError("proposed schema catalog must declare att-proposed-schema-catalog/v1")
     if not re.search(r"(?m)^status:\s*proposed\s*$", catalog):
         raise ValueError("proposed schema catalog must declare status: proposed")
+
+    allowed_top = {"schemaVersion", "status", "schemas"}
     schemas = {}
-    for line in catalog.splitlines():
-        match = re.match(r"\s+(att-[a-z0-9-]+)/v([0-9]+(?:\.[0-9]+)*):\s*([A-Za-z0-9._-]+\.schema\.json)\s*$", line, re.I)
-        if not match:
+    seen_keys = set()
+    in_schemas = False
+    saw_schemas = False
+    for lineno, line in enumerate(catalog.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
+        if re.match(r"^[^\s#]", line):
+            in_schemas = False
+            top = re.match(r"^([A-Za-z0-9_-]+)\s*:", line)
+            if not top:
+                raise ValueError("proposed schema catalog has invalid top-level entry on line %s" % lineno)
+            key = top.group(1)
+            if key not in allowed_top:
+                raise ValueError("proposed schema catalog has unexpected field: %s" % key)
+            if key == "schemas":
+                if stripped != "schemas:":
+                    raise ValueError("proposed schema catalog schemas must be a mapping on line %s" % lineno)
+                saw_schemas = True
+                in_schemas = True
+            continue
+        if not in_schemas:
+            raise ValueError("proposed schema catalog has unexpected indented entry on line %s" % lineno)
+        match = re.match(
+            r"^\s+(att-[a-z0-9-]+)/v([0-9]+(?:\.[0-9]+)*):\s*([A-Za-z0-9._-]+\.schema\.json)\s*$",
+            line, re.I)
+        if not match:
+            raise ValueError("proposed schema catalog has invalid schemas entry on line %s" % lineno)
         name, version, filename = match.groups()
+        catalog_key = "%s/v%s" % (name.lower(), version)
+        if catalog_key in seen_keys:
+            raise ValueError("proposed schema catalog has duplicate entry: %s" % catalog_key)
+        seen_keys.add(catalog_key)
         filename_version = re.search(r"-v([0-9]+(?:\.[0-9]+)*)\.schema\.json$", filename, re.I)
         if not filename_version or filename_version.group(1) != version:
             raise ValueError("proposed schema catalog filename does not match %s/v%s" % (name, version))
+        expected = "%s-v%s.schema.json" % (name.lower(), version)
+        if filename.lower() != expected:
+            raise ValueError("proposed schema catalog filename does not match %s/v%s" % (name, version))
         schemas.setdefault(name.lower(), set()).add(version)
+    if not saw_schemas:
+        raise ValueError("proposed schema catalog must declare schemas:")
     if not schemas:
         raise ValueError("proposed schema catalog contains no schema files")
     return {name: frozenset(versions) for name, versions in schemas.items()}

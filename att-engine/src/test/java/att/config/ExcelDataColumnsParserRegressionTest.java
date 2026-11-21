@@ -39,6 +39,20 @@ class ExcelDataColumnsParserRegressionTest {
     }
 
     @Test
+    void omittedOrBlankDataColumnsSelectNoBusinessColumns() throws Exception {
+        Path fixture = Paths.get("").toAbsolutePath().normalize()
+                .resolve("docs/adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml");
+        Map<?, ?> definition = (Map<?, ?>) YamlSupport.load(fixture);
+        Map<?, ?> dataSource = (Map<?, ?>) definition.get("dataSource");
+
+        assertTrue(!dataSource.containsKey("dataColumns"));
+        assertTrue(!definition.containsKey("inputs"));
+        assertEquals(Arrays.asList(), keys(ColumnSpecParser.dataColumns(null)));
+        assertEquals(Arrays.asList(), keys(ColumnSpecParser.dataColumns("")));
+        assertEquals(Arrays.asList(), keys(ColumnSpecParser.dataColumns("   ")));
+    }
+
+    @Test
     void rejectsDuplicateAliasesAndMalformedQuotes() {
         IllegalArgumentException duplicate = assertThrows(IllegalArgumentException.class,
                 () -> ColumnSpecParser.dataColumns("alias=First, alias=Second"));

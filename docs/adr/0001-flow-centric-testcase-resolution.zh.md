@@ -102,7 +102,13 @@ Definition ID 使用點號分隔的 `[A-Za-z0-9_-]+` 段落，長度最多 126 �
 
 沒有 `inputs` 時，Data Source 的每個 `DATA` 鍵以同名 Flow input identity-mapped。提供 `inputs` 時，它是完整 projection，取代 identity projection，不是合併或 override 層。每個 projection 值必須是 `{from: DATA.key}` 或 `{value: <typed value>}`。來源鍵不存在為錯誤；來源值為 null 時保留 null。V1 沒有隱含 defaults、環境 overlay 或 override precedence。Flow input 填入 `EXEC.INPUT`，不初始化 `EXEC.VARS` 或 Debug bootstrap vars。
 
-Excel mapping 延用 `att-sidecar/v2.2`：`dataSource.caseId` 和 `tags` 是物理表頭 selector；`dataColumns` 是逗號分隔的 scalar string，不是 YAML map，語法沿用 `alias=ColumnName`、`ColumnName(yaml)`、雙引號保護逗號／等號及 quoted name 內的 doubled quote。`(yaml)` 安全解析 scalar/list/map。無 alias 時，trim 後的欄名就是 `DATA` key；無效 key 要明確指定 alias。`headerRows` 預設 1。空白或 whitespace、`N/A`、`NA`、`NULL`、`NONE` 正規化為空字串；空白 `(yaml)` 不解析。Inline YAML 的 null 仍為 typed null。Excel tags 以逗號分隔；Definition 與 record tags 按來源順序合併並去重。缺少或重複欄位、重複 alias、錯誤 quoting、不安全路徑或不支援的 workbook 結構均須報錯；提案中的 Resolver 讀取來源 workbook 時不得修改它。Excel 資料列按工作表來源順序解析，每列恰好產生一個 Resolved Case。Stage selector 和 `stages[].dataColumns` 不適用；Definition 直接綁定一個入口 Flow。
+Excel mapping 延用 `att-sidecar/v2.2`：`dataSource.caseId` 和 `tags` 是物理表頭 selector；`dataColumns` 是逗號分隔的 scalar string，不是 YAML map，語法沿用 `alias=ColumnName`、`ColumnName(yaml)`、雙引號保護逗號／等號及 quoted name 內的 doubled quote。`(yaml)` 安全解析 scalar/list/map。無 alias 時，trim 後的欄名就是 `DATA` key；無效 key 要明確指定 alias。`headerRows` 預設 1。
+
+**省略或空白的 `dataColumns` 代表明確的空選取，不是隱式匯入全部欄位。** 行為等同 `ColumnSpecParser.dataColumns(null / "")`，因此 `DATA` 不含任何業務欄。Case ID 與可選 tags selector 欄只作 metadata 選取；V1 不會自動把它們或其他未映射表頭暴露成 `DATA` key。若需要 Excel 業務輸入，作者必須明確宣告 `dataColumns`。若同時省略 `inputs`，對空 `DATA` 做 identity projection 會得到空的 `EXEC.INPUT` map（合法）。若 `inputs` 已提供並引用不存在的 `DATA` key，仍屬 resolve-time 錯誤。見[excel-omitted-data-columns.yaml](examples/att-testcase-v1/excel-omitted-data-columns.yaml)。
+
+`dataSource.path` 必須是 Package 相對的可移植路徑：僅允許非空 ASCII `[A-Za-z0-9_-]` 路徑段、`/` 分隔，並以 `.xlsx`／`.XLSX` 結尾。提案 Schema 在語法層拒絕空段、`.`／`..`、反斜線、磁碟機／冒號形式、空白與控制字元。Schema 拒絕是必要條件但不足夠；Excel adapter 仍須在 Package root 下解析路徑，並拒絕逃逸或不安全的檔案系統形式。
+
+空白或 whitespace、`N/A`、`NA`、`NULL`、`NONE` 正規化為空字串；空白 `(yaml)` 不解析。Inline YAML 的 null 仍為 typed null。Excel tags 以逗號分隔；Definition 與 record tags 按來源順序合併並去重。缺少或重複欄位、重複 alias、錯誤 quoting、不安全路徑或不支援的 workbook 結構均須報錯；提案中的 Resolver 讀取來源 workbook 時不得修改它。Excel 資料列按工作表來源順序解析，每列恰好產生一個 Resolved Case。Stage selector 和 `stages[].dataColumns` 不適用；Definition 直接綁定一個入口 Flow。
 
 Excel Case ID 的 identity 規則比一般資料欄嚴格。`dataSource.caseId` 必須來自文字儲存格，並以現有 `DataFormatter(Locale.ROOT)` 方式讀取；公式、數字、日期、布林及錯誤儲存格均無效。空白儲存格，或經現有 `ValueNormalizer` 判定為空白標記的值（`N/A`、`NA`、`NULL`、`NONE`，忽略前後空白及 ASCII 大小寫），代表缺少 ID；該資料列必須報錯。其餘值保留原文及大小寫，不可 trim 或轉換大小寫。前後空白、控制字元、不符合 `[A-Za-z0-9_-]{1,128}` 的值及 Windows 保留裝置名稱（不分大小寫）均須拒絕。來源 ID 重複時按 ASCII case-folding 比較。`caseIdExpression` 可以產生不同的 Resolved Case ID，但不能免除來源 ID。Excel 行號只可作為診斷來源資訊，不可作為 ID。S04 必須加入儲存格型別、空白標記、空白字元、保留名稱及大小寫碰撞的回歸測試。
 

@@ -3,6 +3,7 @@
 - Add trusted shared Package editors for online edits, ZIP imports, Testcase snapshot publication, Manifest publication, and source history; access remains limited to active USER identities, grants remain Package-scoped, and grant or root changes invalidate outstanding drafts (#387).
 - Freeze the proposed `att-testcase/v1` field, typed input, stable ID, singleton/inline multi-record/Excel syntax, input projection precedence and `att-sidecar/v2.2` mapping compatibility; keep the proposal outside the active runtime schema catalog (#391).
 - Add proposed-schema catalog validation, valid/invalid fixtures, focused schema tests, bilingual contract documentation, and repairs for the #389 documentation-gate findings. Runtime discovery, resolution and execution remain follow-up work.
+- Clarify that omitted Excel `dataColumns` selects an empty `DATA` map, harden the portable Excel path grammar, and reject malformed additional proposed-catalog entries (#400).
 - Release acceptance is pending. Do not tag or publish until shared-editor publication, revocation, history, and exact-head hosted CI gates pass.
 
 # ATT 4.4.0 - release candidate (2026-11-18; acceptance pending)

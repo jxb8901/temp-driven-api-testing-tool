@@ -138,13 +138,17 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(/|$)).+\\.[Xx][Ll][Ss][Xx]$"
+          "pattern": "^(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.[Xx][Ll][Ss][Xx]$",
+          "description": "Package-relative portable path: nonempty ASCII [A-Za-z0-9_-] components, forward slashes only, ending in .xlsx. Schema syntax rejection is necessary but not sufficient; the Excel adapter must still enforce Package-root containment and reject unsafe filesystem resolution."
         },
         "sheet": {"type": "string", "minLength": 1},
         "headerRows": {"type": "integer", "minimum": 1},
         "caseId": {"type": "string", "minLength": 1},
         "tags": {"type": "string", "minLength": 1},
-        "dataColumns": {"type": "string"}
+        "dataColumns": {
+          "type": "string",
+          "description": "Explicit att-sidecar/v2.2 comma-separated column mapping. Omitted or blank means no DATA business columns (Case ID and tags selector columns are never auto-exposed as DATA)."
+        }
       },
       "patternProperties": {"^x-": {}},
       "additionalProperties": false

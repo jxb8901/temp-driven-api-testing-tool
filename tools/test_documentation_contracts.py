@@ -58,6 +58,30 @@ schemas:
         with self.assertRaisesRegex(ValueError, "filename does not match"):
             proposed_schemas(valid.replace("att-testcase-v1.schema.json", "att-testcase-v2.schema.json"))
 
+    def test_proposed_catalog_rejects_malformed_additional_entries(self):
+        catalog = """schemaVersion: att-proposed-schema-catalog/v1
+status: proposed
+schemas:
+  att-testcase/v1: att-testcase-v1.schema.json
+  att-testcase/v2: ../outside.schema.json
+"""
+        with self.assertRaisesRegex(ValueError, "invalid schemas entry"):
+            proposed_schemas(catalog)
+        with self.assertRaisesRegex(ValueError, "unexpected field"):
+            proposed_schemas("""schemaVersion: att-proposed-schema-catalog/v1
+status: proposed
+schemas:
+  att-testcase/v1: att-testcase-v1.schema.json
+extra: true
+""")
+        with self.assertRaisesRegex(ValueError, "duplicate entry"):
+            proposed_schemas("""schemaVersion: att-proposed-schema-catalog/v1
+status: proposed
+schemas:
+  att-testcase/v1: att-testcase-v1.schema.json
+  att-testcase/v1: att-testcase-v1.schema.json
+""")
+
     def test_stale_schemas_in_normal_text_examples_and_filenames_fail(self):
         for text in ("schemaVersion: att-load/v1.2", "Load v1.2",
                      "schemas/att-config-v2.9.schema.json", "ATT 3.6.2", "att-load/v1.5"):

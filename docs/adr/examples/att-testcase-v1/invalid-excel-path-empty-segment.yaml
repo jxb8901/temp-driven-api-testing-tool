@@ -1,0 +1,8 @@
+schemaVersion: att-testcase/v1
+id: payments.bad_path_empty
+flow: payment.transfer.v1
+dataSource:
+  type: excel
+  path: testdata//cases.xlsx
+  sheet: Cases
+  caseId: Case ID

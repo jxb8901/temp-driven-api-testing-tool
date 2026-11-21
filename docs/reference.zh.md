@@ -254,9 +254,9 @@ S01 凍結了供未來 Native Test Case 使用的 `att-testcase/v1` 提案。Sch
 
 此提案定義兩種資料形態：含完整 typed `inputs` map、Resolved Case ID 固定為 `default` 的 singleton inline Case；或含穩定來源 ID 的多筆 inline／Excel Data Source。Definition ID 在 Package 範圍內唯一、保留大小寫並使用點號分段；Resolved Case ID 是單一 path-safe 段落。`caseIdExpression` 只可用單一 `${DATA.key}` lookup 覆蓋 resolved ID。空白、重複、格式錯誤、缺少或衝突的 ID，以及空的 resolution 結果都屬錯誤，不會當作全部 PASS。
 
-Data-driven Case 省略 `inputs` 時，會把 `DATA` 同名映射到 Flow inputs；提供 projection 時，該 projection 會完全取代 identity mapping，只接受 `{from: DATA.key}` 或 `{value: <typed value>}`。Excel `dataColumns` 保留 `att-sidecar/v2.2` 逗號分隔字串語法，包括 alias、`(yaml)` parsing 和引號分隔符。Source-workbook report template 只可用於 Excel Data Source，並永遠寫入新 Workbook。
+Data-driven Case 省略 `inputs` 時，會把 `DATA` 同名映射到 Flow inputs；提供 projection 時，該 projection 會完全取代 identity mapping，只接受 `{from: DATA.key}` 或 `{value: <typed value>}`。Excel `dataColumns` 保留 `att-sidecar/v2.2` 逗號分隔字串語法，包括 alias、`(yaml)` parsing 和引號分隔符。省略或空白的 `dataColumns` 不會把任何業務欄選入 `DATA`（Case ID／tags selector 也不會自動暴露）；需要 Excel 輸入時必須明確宣告 `dataColumns`。Excel `path` 必須是可移植的 Package 相對 `.xlsx` 路徑。Source-workbook report template 只可用於 Excel Data Source，並永遠寫入新 Workbook。
 
-完整契約和驗證界線見[提案 Schema](../schemas/proposed/att-testcase-v1.schema.json)、[Singleton inline 範例](adr/examples/att-testcase-v1/inline-single.yaml)、[多筆 inline 範例](adr/examples/att-testcase-v1/inline-multi.yaml)、[Excel 範例](adr/examples/att-testcase-v1/excel.yaml)及[ADR-0001](adr/0001-flow-centric-testcase-resolution.zh.md)。
+完整契約和驗證界線見[提案 Schema](../schemas/proposed/att-testcase-v1.schema.json)、[Singleton inline 範例](adr/examples/att-testcase-v1/inline-single.yaml)、[多筆 inline 範例](adr/examples/att-testcase-v1/inline-multi.yaml)、[Excel 範例](adr/examples/att-testcase-v1/excel.yaml)、[省略 `dataColumns` 的 Excel 範例](adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml)及[ADR-0001](adr/0001-flow-centric-testcase-resolution.zh.md)。
 
 ### Workbook
 
