@@ -213,12 +213,13 @@ class AttServiceTest {
                 +"  show: {type: log, message: completed-before-cleanup}\n"
                 +"  send:\n    type: tool\n    call: \"#{mq.broker.send(queue='REQUEST.Q', payload='completed-before-cleanup')}\"\n").getBytes("UTF-8"));
         Path scenario=root.resolve("load/scenario.yaml");
+        // Keep duration above MQ helper startup jitter so CI still records completed>0 before teardown fails.
         Files.write(scenario,("schemaVersion: att-load/v1.9\nworkloads:\n"
                 +"  - id: cleanup-a\n    target: {type: template, id: SIMPLE}\n"
-                +"    load: {users: 1, duration: 100ms}\n    execution: {thinkTime: 0ms}\n"
+                +"    load: {users: 1, duration: 500ms}\n    execution: {thinkTime: 0ms}\n"
                 +"    thresholds: {p95: '<= 5000ms'}\n"
                 +"  - id: cleanup-b\n    target: {type: template, id: SIMPLE}\n"
-                +"    load: {users: 1, duration: 100ms}\n    execution: {thinkTime: 0ms}\n"
+                +"    load: {users: 1, duration: 500ms}\n    execution: {thinkTime: 0ms}\n"
                 +"    thresholds: {p95: '<= 5000ms'}\n"
                 +"evidence: {mode: metrics}\n").getBytes("UTF-8"));
 
