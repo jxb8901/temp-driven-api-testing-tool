@@ -82,6 +82,30 @@ schemas:
   att-testcase/v1: att-testcase-v1.schema.json
 """)
 
+    def test_proposed_catalog_rejects_duplicate_top_level_fields(self):
+        with self.assertRaisesRegex(ValueError, "duplicate field: status"):
+            proposed_schemas("""schemaVersion: att-proposed-schema-catalog/v1
+status: proposed
+schemas:
+  att-testcase/v1: att-testcase-v1.schema.json
+status: active
+""")
+        with self.assertRaisesRegex(ValueError, "duplicate field: schemas"):
+            proposed_schemas("""schemaVersion: att-proposed-schema-catalog/v1
+status: proposed
+schemas:
+  att-testcase/v1: att-testcase-v1.schema.json
+schemas:
+  att-testcase/v2: att-testcase-v2.schema.json
+""")
+        with self.assertRaisesRegex(ValueError, "duplicate field: schemaVersion"):
+            proposed_schemas("""schemaVersion: att-proposed-schema-catalog/v1
+status: proposed
+schemaVersion: att-proposed-schema-catalog/v2
+schemas:
+  att-testcase/v1: att-testcase-v1.schema.json
+""")
+
     def test_stale_schemas_in_normal_text_examples_and_filenames_fail(self):
         for text in ("schemaVersion: att-load/v1.2", "Load v1.2",
                      "schemas/att-config-v2.9.schema.json", "ATT 3.6.2", "att-load/v1.5"):

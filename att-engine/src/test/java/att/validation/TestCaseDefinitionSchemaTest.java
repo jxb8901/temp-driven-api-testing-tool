@@ -53,6 +53,12 @@ class TestCaseDefinitionSchemaTest {
         assertInvalid(root, schema, "invalid-excel-path-colon.yaml");
         assertInvalid(root, schema, "invalid-excel-path-dot-segment.yaml");
         assertInvalid(root, schema, "invalid-excel-path-control.yaml");
+        assertInvalid(root, schema, "invalid-excel-path-trailing-newline.yaml");
+        assertInvalid(root, schema, "invalid-definition-id-trailing-newline.yaml");
+        assertInvalid(root, schema, "invalid-definition-id-trailing-crlf.yaml");
+        assertInvalid(root, schema, "invalid-record-id-trailing-newline.yaml");
+        assertInvalid(root, schema, "invalid-flow-ref-trailing-newline.yaml");
+        assertInvalid(root, schema, "invalid-case-id-expression-trailing-newline.yaml");
     }
 
     @Test void recordsDuplicateIdsAsFutureResolverSemantics() throws Exception {

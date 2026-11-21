@@ -24,32 +24,40 @@ def active_schemas(catalog):
 
 def proposed_schemas(catalog):
     """Validate every proposed catalog entry; ignore only blank/comment lines."""
-    if not re.search(r"(?m)^schemaVersion:\s*att-proposed-schema-catalog/v1\s*$", catalog):
-        raise ValueError("proposed schema catalog must declare att-proposed-schema-catalog/v1")
-    if not re.search(r"(?m)^status:\s*proposed\s*$", catalog):
-        raise ValueError("proposed schema catalog must declare status: proposed")
-
-    allowed_top = {"schemaVersion", "status", "schemas"}
+    allowed_top = ("schemaVersion", "status", "schemas")
     schemas = {}
     seen_keys = set()
+    seen_top = set()
+    schema_version = None
+    status = None
     in_schemas = False
-    saw_schemas = False
     for lineno, line in enumerate(catalog.splitlines(), 1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         if re.match(r"^[^\s#]", line):
             in_schemas = False
-            top = re.match(r"^([A-Za-z0-9_-]+)\s*:", line)
+            top = re.match(r"^([A-Za-z0-9_-]+)\s*:(.*)$", line)
             if not top:
                 raise ValueError("proposed schema catalog has invalid top-level entry on line %s" % lineno)
             key = top.group(1)
+            value = top.group(2).strip()
             if key not in allowed_top:
                 raise ValueError("proposed schema catalog has unexpected field: %s" % key)
-            if key == "schemas":
-                if stripped != "schemas:":
+            if key in seen_top:
+                raise ValueError("proposed schema catalog has duplicate field: %s" % key)
+            seen_top.add(key)
+            if key == "schemaVersion":
+                schema_version = value
+                if schema_version != "att-proposed-schema-catalog/v1":
+                    raise ValueError("proposed schema catalog must declare att-proposed-schema-catalog/v1")
+            elif key == "status":
+                status = value
+                if status != "proposed":
+                    raise ValueError("proposed schema catalog must declare status: proposed")
+            else:
+                if value:
                     raise ValueError("proposed schema catalog schemas must be a mapping on line %s" % lineno)
-                saw_schemas = True
                 in_schemas = True
             continue
         if not in_schemas:
@@ -71,7 +79,11 @@ def proposed_schemas(catalog):
         if filename.lower() != expected:
             raise ValueError("proposed schema catalog filename does not match %s/v%s" % (name, version))
         schemas.setdefault(name.lower(), set()).add(version)
-    if not saw_schemas:
+    if schema_version is None:
+        raise ValueError("proposed schema catalog must declare att-proposed-schema-catalog/v1")
+    if status is None:
+        raise ValueError("proposed schema catalog must declare status: proposed")
+    if "schemas" not in seen_top:
         raise ValueError("proposed schema catalog must declare schemas:")
     if not schemas:
         raise ValueError("proposed schema catalog contains no schema files")

@@ -1,0 +1,10 @@
+schemaVersion: att-testcase/v1
+id: payments.bad_expr
+flow: payment.transfer.v1
+caseIdExpression: "${DATA.caseKey}\n"
+dataSource:
+  type: inline
+  records:
+    - recordId: case01
+      data:
+        caseKey: case01
