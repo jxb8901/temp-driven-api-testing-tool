@@ -37,8 +37,8 @@ def proposed_schemas(catalog):
         if not filename_version or filename_version.group(1) != version:
             raise ValueError("proposed schema catalog filename does not match %s/v%s" % (name, version))
         schemas.setdefault(name.lower(), set()).add(version)
-    if not schemas:
-        raise ValueError("proposed schema catalog contains no schema files")
+    if not schemas and not re.search(r"(?m)^schemas:\s*(?:\{\s*\})?\s*$", catalog):
+        raise ValueError("proposed schema catalog must declare a schemas mapping")
     return {name: frozenset(versions) for name, versions in schemas.items()}
 
 

@@ -44,6 +44,12 @@ public class WorkerRequest {
     public List<String> suites;
     public String suiteDirectory;
     public List<String> caseIds;
+    /** Server-validated native RUN selector; never accepted directly from public /jobs/run requests. */
+    public String nativeCaseDefinitionId;
+    /** Definition-local Case IDs selected by a validated att-execution/v2 draft. */
+    public List<String> nativeResolvedCaseIds;
+    /** Exact package-relative testcase.yaml frozen by draft validation and included in the accepted source closure. */
+    public String nativeCaseSourcePath;
     public List<String> tags;
     public List<String> excludeTags;
     public Boolean all;

@@ -68,7 +68,7 @@ public final class RemoteCommand {
             JsonNode version=client.get("/version");
             if(!version.path("apiVersion").isTextual()||!ServerApi.VERSION.equals(version.path("apiVersion").asText()))throw new RemoteException("ATT Server API is missing or unsupported; client supports API v"+ServerApi.VERSION);
             if("ping".equals(op)){JsonNode health=client.get("/health");if("json".equals(format))System.out.println(health.toString());else System.out.println("ATT Server "+profile.url+": "+health.path("status").asText("UNKNOWN"));return 0;}
-            if("vnext".equals(op)){if(command.size()!=2)throw new IllegalArgumentException("Invalid typed vNext command plan");JsonNode plan;try{plan=RemoteHttpClient.JSON.readTree(command.get(1));}catch(Exception invalid){throw new IllegalArgumentException("Invalid typed vNext command plan");}if(plan==null||!plan.isObject())throw new IllegalArgumentException("Invalid typed vNext command plan");return runVNext(client,plan,format);}
+            if("vnext".equals(op)){if(command.size()!=2)throw new IllegalArgumentException("Invalid typed vNext command plan");JsonNode plan;try{plan=RemoteHttpClient.JSON.readTree(command.get(1));}catch(Exception invalid){throw new IllegalArgumentException("Invalid typed vNext command plan");}if(plan==null||!plan.isObject())throw new IllegalArgumentException("Invalid typed vNext command plan");return runVNext(client,plan,format,version);}
             if("version".equals(op)){if("json".equals(format))System.out.println(version.toString());else System.out.println("ATT Server "+version.path("version").asText("unknown")+" (API v"+version.path("apiVersion").asText()+")");return 0;}
             if("packages".equals(op))return packages(client,command,format);
             if("package".equals(op))return packageView(client,command,format);
@@ -202,7 +202,7 @@ public final class RemoteCommand {
         return c.get("/jobs/"+id+"/result");
     }
 
-    private static int runVNext(RemoteHttpClient c,JsonNode plan,String format)throws Exception {
+    private static int runVNext(RemoteHttpClient c,JsonNode plan,String format,JsonNode serverVersion)throws Exception {
         String command=plan.path("command").asText("");
         if("validate".equals(command)) {
             JsonNode report=c.post("/validation",plan);
@@ -234,7 +234,38 @@ public final class RemoteCommand {
             else {ObjectNode value=body.putObject("target");value.put("type",targetKind);value.put("id",target);}
             JsonNode load=plan.path("load");if(load.isObject())body.set("load",load.deepCopy());
         }
-        JsonNode accepted=c.post("/jobs/"+command,body);String id=accepted.path("jobId").asText("");
+        JsonNode accepted;
+        if("run".equals(command)&&"native-case".equals(targetKind)) {
+            boolean dryRun=plan.path("dryRun").asBoolean(false);
+            JsonNode versions=serverVersion.path("unifiedRunVersions");
+            if(!versions.isArray()||!containsText(versions,"att-execution/v2"))
+                throw new RemoteException("ATT Server does not advertise att-execution/v2; Native Case RUN is unavailable on this Server");
+            ObjectNode nativeDefinition=RemoteHttpClient.JSON.createObjectNode();
+            nativeDefinition.put("schemaVersion","att-execution/v2");nativeDefinition.put("executionType","run");
+            nativeDefinition.put("packageId",packageId);copyText(plan,nativeDefinition,"environment");
+            ObjectNode nativeTarget=nativeDefinition.putObject("target");nativeTarget.put("type","nativeCase");
+            nativeTarget.put("definitionId",target);
+            JsonNode selected=plan.get("resolvedCaseIds");
+            if(selected==null||!selected.isArray()||selected.isEmpty()||selected.size()>1000)
+                throw new IllegalArgumentException("Native Case RUN requires between 1 and 1000 resolved Case IDs");
+            java.util.Set<String> uniqueCaseIds=new java.util.HashSet<String>();
+            for(JsonNode value:selected) {
+                if(!value.isTextual()||value.asText().trim().isEmpty()||value.asText().length()>255
+                        ||value.asText().chars().anyMatch(Character::isISOControl)||!uniqueCaseIds.add(value.asText()))
+                    throw new IllegalArgumentException("Native Case RUN contains an invalid or duplicate resolved Case ID");
+            }
+            nativeTarget.putObject("selection").set("resolvedCaseIds",selected.deepCopy());
+            ObjectNode nativeOptions=nativeDefinition.putObject("options");nativeOptions.put("debug",false);
+            if(plan.path("failFast").asBoolean(false))nativeOptions.put("failFast",true);
+            copyText(plan,nativeOptions,"runId");
+            JsonNode draft=c.post("/drafts/run",nativeDefinition);
+            String draftId=draft.path("draftId").asText("");
+            if(!draftId.matches("R[0-9A-F]{32}"))throw new RemoteException("ATT Server returned an invalid Native Case RUN draft ID");
+            if(dryRun)return printNativeCasePreview(draft,plan,format);
+            ObjectNode submission=RemoteHttpClient.JSON.createObjectNode();submission.put("packageId",packageId);submission.put("draftId",draftId);
+            accepted=c.post("/jobs/run",submission);
+        } else accepted=c.post("/jobs/"+command,body);
+        String id=accepted.path("jobId").asText("");
         if(!id.matches("J[A-F0-9]{16}"))throw new RemoteException("ATT Server accepted a job without a valid job ID");
         JsonNode result;
         try {result=awaitResult(c,id,format,plan.path("quiet").asBoolean(false),plan.path("verbose").asBoolean(false));} catch(Exception failure){throw new RemoteException("Job "+id+" was accepted, but following it failed: "+safe(failure)+". Recover with `att remote watch "+id+"` or `att remote result "+id+"`.",failure);}
@@ -258,6 +289,22 @@ public final class RemoteCommand {
         }
         return exit;
     }
+    private static int printNativeCasePreview(JsonNode draft,JsonNode plan,String format) throws Exception {
+        if("json".equals(format)) {
+            ObjectNode preview=RemoteHttpClient.JSON.createObjectNode();preview.put("schemaVersion","att-operation/v1");
+            preview.put("backend","SERVER");preview.put("command","run");preview.put("targetKind","native-case");
+            copyText(plan,preview,"target");copyText(plan,preview,"packageId");copyText(plan,preview,"environment");
+            preview.put("status","VALIDATED");preview.put("exitCode",0);preview.put("submitted",false);preview.set("preview",draft.deepCopy());
+            System.out.println(preview.toString());
+        } else {
+            System.out.println("RUN VALIDATED (not submitted)");
+            System.out.println("Definition: "+plan.path("target").asText());
+            System.out.println("Package: "+plan.path("packageId").asText());
+            if(draft.has("revisionDigest"))System.out.println("Revision: "+draft.path("revisionDigest").asText());
+            System.out.println("Preview: "+draft.toPrettyString());
+        }
+        return 0;
+    }
     private static int terminalExitCode(JsonNode value)throws RemoteException {
         JsonNode job=value.path("job");if(!job.isObject())throw new RemoteException("ATT Server result response is missing its job");
         ApiStatus status=parseStatus(job.path("status").asText(null));if(!status.isTerminal())throw new RemoteException("ATT Server has not produced a terminal result");
@@ -265,6 +312,7 @@ public final class RemoteCommand {
         JsonNode canonical=value.path("result");if(canonical.isObject()&&canonical.has("exitCode")){int serverCode=canonical.path("exitCode").asInt(-1);if(serverCode<0||serverCode>3)throw new RemoteException("ATT Server returned an unsupported ATT exit code");code=serverCode;}return code;
     }
     private static void copyText(JsonNode source,ObjectNode target,String name){JsonNode v=source.get(name);if(v!=null&&v.isTextual()&&!v.asText().isEmpty())target.set(name,v.deepCopy());}
+    private static boolean containsText(JsonNode values,String expected){for(JsonNode value:values)if(value.isTextual()&&expected.equals(value.asText()))return true;return false;}
     private static void copyArray(JsonNode source,ObjectNode target,String name){JsonNode v=source.get(name);if(v!=null&&v.isArray()&&v.size()>0)target.set(name,v.deepCopy());}
     private static void copyLogicalPath(JsonNode source,ObjectNode target,String from,String to){JsonNode v=source.get(from);if(v!=null&&v.isTextual())target.put(to,logicalPath(v.asText(),to));}
     private static void renderValidation(JsonNode report,int depth) {

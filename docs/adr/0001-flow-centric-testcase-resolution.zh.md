@@ -14,7 +14,7 @@
 
 目前 `att-flow/v3.6` 已具備有序 Actions 與巢狀 Flow；Debug 可利用 `att-debug/v1.2` 的 Input 獨立執行 Flow；LOAD 已能重複執行 Flow、Template、Tool Target。因此下一代模型應**重用 Flow**，而不是另外發明 Steps 執行語言。
 
-本文記錄**未來的架構方向**；不能視為 `att-testcase/v1`、Case Resolver、動態 Generator 或 LOAD Case Target 已經實作。
+本文記錄架構方向及分階段實作範圍。S03 已在 4.5.0 開發候選版登錄 `att-testcase/v1`，並沿用既有 Flow infrastructure 實作 inline Definition discovery、resolution 和 RUN。Excel resolution、Testdata／Generator、LOAD target、Studio 編輯及 Debug interoperability 仍屬後續工作。
 
 ## 決策
 
@@ -86,22 +86,22 @@ V1 保留 Inline 記錄宣告順序及 Excel 工作表資料列順序，每筆�
 
 #### S01 凍結的 `att-testcase/v1` authoring contract
 
-S01 凍結欄位、型別與身份規則，但不代表支援 runtime resolution 或 execution。Schema 和範例位於 `schemas/proposed/` 及 `docs/adr/examples/att-testcase-v1/`；它們會通過文件/schema 驗證，但不加入 Engine 的 active schema catalog，也不能被 Package discovery、Resolver 或 RUN 執行。
+S01 凍結欄位、型別與身份規則；S03 已把 schema 登錄至 Engine active registry，並支援 inline Definition discovery、resolution 和 execution。Schema 和範例位於 `schemas/` 及 `docs/adr/examples/att-testcase-v1/`。現時 resolver 可執行 singleton 和 inline records；Excel 契約仍待 S04 adapter（#394）支援。
 
 頂層包含 `schemaVersion`、Package 範圍的 `id`、可選 `name`／`description`／`tags`、靜態且 canonical 的版本化 `flow`，以及以下其中一種資料形態：
 
 - **Singleton inline Case：** 必須提供 `inputs`；不可同時提供 `dataSource` 或 `caseIdExpression`；Resolved Case ID 固定為 `default`。`inputs` 是完整 `EXEC.INPUT` map，可使用字串、數字、boolean、null、list 和 object，空 map 亦有效。
 - **多筆 Data Source：** `dataSource.type` 為 `inline` 或 `excel`。Inline 每筆記錄必須有穩定 `recordId` 和 `data` map。Excel 以 `dataSource.caseId` 指定穩定 ID 欄的表頭，並指定 `.xlsx` 路徑和 `sheet`；`headerRows`、`tags`、`dataColumns` 可選。
 
-提案中的 V1 契約只接受 `inline` 及 `excel` 兩種 Data Source type。Validator 必須把未知或未識別的 `dataSource.type` 當作 unsupported type 拒絕；`x-` 擴展欄位不會新增 Data Source type。以 ATT Testdata 作為案例生成來源、生成記錄及轉換記錄，都必須使用未來 Schema 版本或另行核准的版本化擴展。這些來源在套用 V1 binding 和 Case ID 規則前，必須先正規化成有序記錄，且每筆都有穩定記錄 ID、具型別的值、來源 revision 和 provenance。
+V1 schema 只接受 `inline` 及 `excel` 兩種 Data Source type。Validator 必須把未知或未識別的 `dataSource.type` 當作 unsupported type 拒絕；`x-` 擴展欄位不會新增 Data Source type。以 ATT Testdata 作為案例生成來源、生成記錄及轉換記錄，都必須使用未來 Schema 版本或另行核准的版本化擴展。這些來源在套用 V1 binding 和 Case ID 規則前，必須先正規化成有序記錄，且每筆都有穩定記錄 ID、具型別的值、來源 revision 和 provenance。
 
 Definition ID 使用點號分隔的 `[A-Za-z0-9_-]+` 段落，長度最多 126 個 ASCII 字元；Resolved Case ID 使用 `[A-Za-z0-9_-]{1,128}`，不得包含路徑分隔符。ID 保留作者提供的大小寫，不會自動 trim 或轉小寫。Resolver 必須拒絕 Package 內以 ASCII case-folding 比較時相撞的 Definition ID，以及同一 Definition 內相撞的 Resolved Case ID；完整 Qualified Case ID 在 Package 內也必須 case-fold 唯一。任何輸出路徑映射均須另行定義並保持路徑 containment。Descriptor 的檔名和目錄只是位置；移動或改名不改變 Definition identity，修改 `id` 則代表新 Definition，不會遷移舊結果。
 
-`recordId` 是來源記錄 identity；`caseIdExpression` 是可選的 Resolved Case ID 覆蓋規則，兩者不可混為一談。Excel `dataSource.caseId` 是物理表頭選擇器；`caseIdExpression` 則只能是單一 `${DATA.key}` 直接鍵查詢，在 Resolution 時對 record `DATA` 求值。函式、串接、巢狀路徑、`EXEC.*`、`META.*` 及其他 runtime 值均非法。結果必須是非空、符合 Case ID 段落規則的字串。缺值、null、非字串、非法值、重複結果或衝突均為錯誤；不可用 Excel 行號當作身份。同一 Definition 內的 `recordId` 必須按 ASCII case-folding 唯一，即使 `caseIdExpression` 覆寫 Resolved Case ID 亦然；Resolved Case ID 同樣須在 Definition 內按 ASCII case-folding 唯一。提案中的 Schema 可驗證 ID 語法；重複來源 ID 和重複 expression 結果見[resolution-invalid 範例](examples/att-testcase-v1/resolution-invalid-duplicate-ids.yaml)。跨記錄及跨 Package 唯一性是未來 Resolver 的語義責任，S01 不包含 runtime enforcement。
+`recordId` 是來源記錄 identity；`caseIdExpression` 是可選的 Resolved Case ID 覆蓋規則，兩者不可混為一談。Excel `dataSource.caseId` 是物理表頭選擇器；`caseIdExpression` 則只能是單一 `${DATA.key}` 直接鍵查詢，在 Resolution 時對 record `DATA` 求值。函式、串接、巢狀路徑、`EXEC.*`、`META.*` 及其他 runtime 值均非法。結果必須是非空、符合 Case ID 段落規則的字串。缺值、null、非字串、非法值、重複結果或衝突均為錯誤；不可用 Excel 行號當作身份。同一 Definition 內的 `recordId` 必須按 ASCII case-folding 唯一，即使 `caseIdExpression` 覆寫 Resolved Case ID 亦然；Resolved Case ID 同樣須在 Definition 內按 ASCII case-folding 唯一。Active schema 會驗證 ID 語法；S03 inline Resolver 會拒絕同一 Definition 內的重複來源 ID、重複 expression 結果，以及 Package 內 Definition ID 的大小寫碰撞。重複 ID fixture 見[resolution-invalid 範例](examples/att-testcase-v1/resolution-invalid-duplicate-ids.yaml)。Excel row identity collision 由 S04 adapter 負責。
 
 沒有 `inputs` 時，Data Source 的每個 `DATA` 鍵以同名 Flow input identity-mapped。提供 `inputs` 時，它是完整 projection，取代 identity projection，不是合併或 override 層。每個 projection 值必須是 `{from: DATA.key}` 或 `{value: <typed value>}`。來源鍵不存在為錯誤；來源值為 null 時保留 null。V1 沒有隱含 defaults、環境 overlay 或 override precedence。Flow input 填入 `EXEC.INPUT`，不初始化 `EXEC.VARS` 或 Debug bootstrap vars。
 
-Excel mapping 延用 `att-sidecar/v2.2`：`dataSource.caseId` 和 `tags` 是物理表頭 selector；`dataColumns` 是逗號分隔的 scalar string，不是 YAML map，語法沿用 `alias=ColumnName`、`ColumnName(yaml)`、雙引號保護逗號／等號及 quoted name 內的 doubled quote。`(yaml)` 安全解析 scalar/list/map。無 alias 時，trim 後的欄名就是 `DATA` key；無效 key 要明確指定 alias。`headerRows` 預設 1。空白或 whitespace、`N/A`、`NA`、`NULL`、`NONE` 正規化為空字串；空白 `(yaml)` 不解析。Inline YAML 的 null 仍為 typed null。Excel tags 以逗號分隔；Definition 與 record tags 按來源順序合併並去重。缺少或重複欄位、重複 alias、錯誤 quoting、不安全路徑或不支援的 workbook 結構均須報錯；提案中的 Resolver 讀取來源 workbook 時不得修改它。Excel 資料列按工作表來源順序解析，每列恰好產生一個 Resolved Case。Stage selector 和 `stages[].dataColumns` 不適用；Definition 直接綁定一個入口 Flow。
+Excel mapping 延用 `att-sidecar/v2.2`：`dataSource.caseId` 和 `tags` 是物理表頭 selector；`dataColumns` 是逗號分隔的 scalar string，不是 YAML map，語法沿用 `alias=ColumnName`、`ColumnName(yaml)`、雙引號保護逗號／等號及 quoted name 內的 doubled quote。`(yaml)` 安全解析 scalar/list/map。無 alias 時，trim 後的欄名就是 `DATA` key；無效 key 要明確指定 alias。`headerRows` 預設 1。空白或 whitespace、`N/A`、`NA`、`NULL`、`NONE` 正規化為空字串；空白 `(yaml)` 不解析。Inline YAML 的 null 仍為 typed null。Excel tags 以逗號分隔；Definition 與 record tags 按來源順序合併並去重。缺少或重複欄位、重複 alias、錯誤 quoting、不安全路徑或不支援的 workbook 結構均須報錯；S04 Excel adapter 讀取來源 workbook 時不得修改它。Excel 資料列按工作表來源順序解析，每列恰好產生一個 Resolved Case。Stage selector 和 `stages[].dataColumns` 不適用；Definition 直接綁定一個入口 Flow。
 
 Excel Case ID 的 identity 規則比一般資料欄嚴格。`dataSource.caseId` 必須來自文字儲存格，並以現有 `DataFormatter(Locale.ROOT)` 方式讀取；公式、數字、日期、布林及錯誤儲存格均無效。空白儲存格，或經現有 `ValueNormalizer` 判定為空白標記的值（`N/A`、`NA`、`NULL`、`NONE`，忽略前後空白及 ASCII 大小寫），代表缺少 ID；該資料列必須報錯。其餘值保留原文及大小寫，不可 trim 或轉換大小寫。前後空白、控制字元、不符合 `[A-Za-z0-9_-]{1,128}` 的值及 Windows 保留裝置名稱（不分大小寫）均須拒絕。來源 ID 重複時按 ASCII case-folding 比較。`caseIdExpression` 可以產生不同的 Resolved Case ID，但不能免除來源 ID。Excel 行號只可作為診斷來源資訊，不可作為 ID。S04 必須加入儲存格型別、空白標記、空白字元、保留名稱及大小寫碰撞的回歸測試。
 
@@ -109,7 +109,7 @@ Excel Case ID 的 identity 規則比一般資料欄嚴格。`dataSource.caseId` 
 
 Definition、Data Source、record 和 report object 可使用以 `x-` 為前綴的擴展欄位；其他未知欄位一律拒絕。Projection 和 binding 結構維持嚴格驗證。
 
-提案中的 V1 Schema 必須拒絕空白／格式錯誤 IDs、空 `records`、不支援或未知 Data Source type、動態 Flow ID、模糊的 Case ID 欄位、runtime-only ID expression、inline Actions／Steps、Excel `dataColumns` map、未知欄位及 inline Source Workbook report。Inline 和 Excel 記錄均按來源順序一對一解析；V1 不支援過濾或展開。空來源或零解析案例必須在 RUN 前成為驗證錯誤，不能當作全部 PASS。Schema-invalid 範例及未來 Resolver 的 resolution-invalid 重複 ID 範例見[英文 ADR 的驗證案例](0001-flow-centric-testcase-resolution.md#native-and-data-driven-authoring)。
+V1 Schema 必須拒絕空白／格式錯誤 IDs、空 `records`、不支援或未知 Data Source type、動態 Flow ID、模糊的 Case ID 欄位、runtime-only ID expression、inline Actions／Steps、Excel `dataColumns` map、未知欄位及 inline Source Workbook report。Inline 和 Excel 記錄均按來源順序一對一解析；V1 不支援過濾或展開。空來源或零解析案例必須在 RUN 前成為驗證錯誤，不能當作全部 PASS。Schema-invalid 範例及 S03 Resolver 的 resolution-invalid 重複 ID 範例見[英文 ADR 的驗證案例](0001-flow-centric-testcase-resolution.md#native-and-data-driven-authoring)。
 
 ### Test Suite 是選取集合
 

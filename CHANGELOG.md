@@ -3,6 +3,13 @@
 - Freeze the proposed `att-testcase/v1` field, typed input, stable ID, singleton/inline multi-record/Excel syntax, input projection precedence and `att-sidecar/v2.2` mapping compatibility; keep the proposal outside the active runtime schema catalog (#391).
 - Add proposed-schema catalog validation, valid/invalid fixtures, focused schema tests, bilingual contract documentation, and repairs for the #389 documentation-gate findings. Runtime discovery, resolution and execution remain follow-up work.
 
+# ATT 4.5.0 - development candidate (acceptance pending)
+
+- Promote `att-testcase/v1` from the S01 proposal bundle into the active Engine schema registry; S03 implements singleton and inline-record resolution/RUN, while Excel source execution remains S04 work.
+- Add the bounded Native Test Case Definition resolver and explicit `att-execution/v2` Native Case RUN targets in local CLI, remote CLI, and the validated Server draft flow. Preserve explicit `--run-id` values across Remote draft validation, Job acceptance, scheduled execution, and native output. Execute selected inline Cases through the existing Flow runner and preserve Definition, Qualified Case, local Case, execution, Flow, and source provenance in result evidence (#392, #393).
+- Pin the accepted Definition and Package source revision into the Job snapshot, reject stale drafts, and revalidate frozen selections for scheduled RUNs. Keep `att-execution/v1` Workbook/Sidecar selection and direct Template/Flow/Tool RUN behavior compatible.
+- This is a development candidate, not a release. The S02 Testdata-binding acceptance conflict remains unresolved; LOAD Case targets, Excel-backed native sources, Testdata/generator bindings, and Debug/editor interoperability remain follow-ups. Do not bump the released product version or tag 4.5.0 before the release acceptance gates pass.
+
 # ATT 4.4.0 - release candidate (2026-11-18; acceptance pending)
 
 - Add Package registration and immutable source revision contracts, source authoring and Change Set publication, plus Studio source editors for Package files, Testcases, and Testdata (#250–#255).

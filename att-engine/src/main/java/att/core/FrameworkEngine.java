@@ -16,6 +16,9 @@ import att.template.StageTemplate;
 import att.template.StageTemplateLoader;
 import att.template.StageTemplateRunner;
 import att.template.UnifiedTemplateEngine;
+import att.template.TemplateAction;
+import att.flow.FlowDefinition;
+import att.flow.FlowRegistry;
 import att.report.HtmlReportGenerator;
 import att.report.CiReportWriter;
 import att.Version;
@@ -37,6 +40,10 @@ import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import att.testcase.ResolvedTestCase;
+import att.testcase.TestCaseDefinitionResolver;
+import att.testcase.TestCaseResolutionResult;
+import att.resource.PackageResourceResolver;
 
 /**
  * Coordinates the V2 run, stage and action execution flow.
@@ -53,6 +60,88 @@ public class FrameworkEngine {
     public RunSummary run(ExecutionOptions options) throws Exception {
         config.requireExecutionConfig();
         return run(options, Collections.<att.validation.Diagnostic>emptyList());
+    }
+
+    /** Executes one complete bounded Native Case resolution using the normal RUN Flow runner. */
+    public RunSummary runNativeCases(TestCaseResolutionResult resolution, String requestedRunId,
+            Path requestedOutputRoot, boolean dryRun, boolean failFast,
+            att.api.ExecutionEventListener observer) throws Exception {
+        config.requireExecutionConfig();
+        List<ResolvedTestCase> selected = validateNativeResolution(resolution);
+        String runId = IdentifierValidator.runId(requestedRunId);
+        Path outputRoot = requestedOutputRoot == null ? resolve(config.outputDirectory()) : resolve(requestedOutputRoot);
+        Path runDirectory = IdentifierValidator.strictChild(outputRoot, runId, "Run directory");
+        if (Files.exists(runDirectory))
+            throw new IllegalArgumentException("Run ID already exists: " + runId + " (" + runDirectory + "). Choose a different --run-id.");
+
+        // Capture every source identity before creating output. A changed Definition or Flow
+        // invalidates the resolution instead of executing inputs from one revision against another.
+        FlowRegistry flows = new FlowRegistry(projectRoot, config.templatesRoot(), false);
+        List<Map<String,Object>> inputs = verifyNativeSources(resolution, selected, flows);
+
+        RunConcurrencyGuard concurrencyGuard = RunConcurrencyGuard.acquire(outputRoot, "reject", new Runnable() { @Override public void run() { } });
+        try {
+            Files.createDirectories(outputRoot);
+            try { Files.createDirectory(runDirectory); }
+            catch (java.nio.file.FileAlreadyExistsException e) {
+                throw new IllegalArgumentException("Run ID already exists: " + runId + " (" + runDirectory + "). Choose a different --run-id.", e);
+            }
+
+            Instant runStarted = Instant.now();
+            emitNativeEvent(observer, "RUN_STARTED", runId, null, "RUNNING", null,
+                    nativeIdentityData(resolution.definition().id(), resolution.sourceReference(), resolution.sourceRevision(), null));
+            att.template.DefaultBuiltInProvider runBuiltIns = new att.template.DefaultBuiltInProvider(new att.template.SequenceService());
+            ToolInvoker toolInvoker = new ToolInvoker(projectRoot, config);
+            att.exec.DbHelperExecutor dbHelperExecutor = new att.exec.DbHelperExecutor(projectRoot, config);
+            att.exec.MqHelperExecutor mqHelperExecutor = new att.exec.MqHelperExecutor(projectRoot, config);
+            att.exec.HttpHelperExecutor httpHelperExecutor = new att.exec.HttpHelperExecutor(projectRoot, config);
+            UnifiedTemplateEngine templateEngine = new UnifiedTemplateEngine(toolInvoker, dbHelperExecutor,
+                    mqHelperExecutor, httpHelperExecutor, runBuiltIns);
+            List<TestResult> results = new ArrayList<TestResult>();
+            boolean stopRun = false;
+            try {
+                for (ResolvedTestCase testCase : selected) {
+                    if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("Native RUN was cancelled");
+                    TestResult result = runNativeCase(testCase, runId, runStarted, runDirectory, templateEngine,
+                            flows, dbHelperExecutor, dryRun, observer);
+                    results.add(result);
+                    appendEvent(runDirectory, runId, result);
+                    if (failFast && (result.status() == ResultStatus.FAIL || result.status() == ResultStatus.ERROR
+                            || result.status() == ResultStatus.INVALID)) {
+                        stopRun = true;
+                    }
+                    if (stopRun) break;
+                }
+            } finally {
+                try { dbHelperExecutor.close(); }
+                finally { httpHelperExecutor.close(); }
+            }
+            if (results.isEmpty()) throw new IllegalArgumentException("Native Case selection is empty after execution");
+
+            Instant runEnded = Instant.now();
+            RunSummary summary = new RunSummary(results, runDirectory, runId);
+            Path html = new HtmlReportGenerator().generate(runDirectory, runId, summary, runStarted, runEnded,
+                    config.report().htmlCaseLogInlineLimitBytes());
+            String inputManifestHash = sha256Bytes(new Yaml().dump(inputs).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            Set<String> ciOutputs = new LinkedHashSet<String>(java.util.Arrays.asList("junit", "json"));
+            new CiReportWriter().write(runDirectory, runId, config.environment(), summary, runStarted, runEnded,
+                    config.report().junitCaseLogEmbedThresholdBytes(), inputManifestHash,
+                    Collections.<att.validation.Diagnostic>emptyList(), ciOutputs);
+            JsonSchemaVerifier.verifyJson(SchemaFiles.resolve(projectRoot, "att-ci-summary-v2.1.schema.json"),
+                    runDirectory.resolve("ci/summary.json"));
+            verifyJunit(runDirectory.resolve("ci/junit.xml"));
+            att.config.ConfigurationEvidence.write(runDirectory, config);
+            ExecutionOptions manifestOptions = nativeManifestOptions(runId, requestedOutputRoot, dryRun, failFast, ciOutputs);
+            writeManifest(runDirectory, runId, results, runStarted, runEnded, html, manifestOptions, inputs,
+                    Collections.<att.validation.Diagnostic>emptyList(), nativeRunMetadata(resolution));
+            writeLatest(outputRoot, runDirectory, runId, summary, runEnded);
+            emitNativeEvent(observer, "RUN_FINISHED", runId, null, summary.status().name(),
+                    Duration.between(runStarted, runEnded).toMillis(), nativeIdentityData(
+                            resolution.definition().id(), resolution.sourceReference(), resolution.sourceRevision(), null));
+            return new RunSummary(results, html, runId);
+        } finally {
+            concurrencyGuard.close();
+        }
     }
 
     /** Read-only early check used before validation/progress output; buildPlan rechecks to close the race window. */
@@ -319,6 +408,281 @@ public class FrameworkEngine {
         }
     }
 
+    private TestResult runNativeCase(ResolvedTestCase testCase, String runId, Instant runStartedAt,
+            Path runDirectory, UnifiedTemplateEngine templateEngine, FlowRegistry flows,
+            att.exec.DbHelperExecutor dbHelperExecutor, boolean dryRun,
+            att.api.ExecutionEventListener observer) throws Exception {
+        Instant started = Instant.now();
+        String executionId = nativeExecutionId(runId, testCase.qualifiedCaseId());
+        Path executionsDirectory = runDirectory.resolve("executions");
+        Files.createDirectories(executionsDirectory);
+        Path caseOutputDir = IdentifierValidator.strictChild(executionsDirectory, executionId, "Native Case execution directory");
+        Files.createDirectory(caseOutputDir);
+        Path caseLogPath = caseOutputDir.resolve("case.log");
+        Map<String,Object> identity = nativeIdentityData(testCase.definitionId(), testCase.sourceReference(),
+                testCase.sourceRevision(), testCase);
+        identity.put("executionId", executionId);
+        emitNativeEvent(observer, "CASE_STARTED", runId, testCase.qualifiedCaseId(), "RUNNING", null, identity);
+
+        java.util.function.Consumer<String> mirror = observer == null ? null : new java.util.function.Consumer<String>() {
+            @Override public void accept(String text) {
+                observer.onEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.CASE_LOG, runId,
+                        testCase.qualifiedCaseId(), null, null, null, null, text, identity));
+            }
+        };
+        try (CaseExecutionLog caseLog = new CaseExecutionLog(caseLogPath, config.caseLogYamlAnchors(), mirror)) {
+            caseLog.setProjectRoot(projectRoot);
+            CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, executionId,
+                    runId, runDirectory, caseLogPath, "testcase", started.toString(), runStartedAt.toString());
+            context.setProject(projectRoot);
+            context.put("CASE.environment", config.environment());
+            context.replaceInputValues(testCase.inputs());
+            caseLog.append("CASE", context.caseTree());
+
+            List<ValidationResult> validations = new ArrayList<ValidationResult>();
+            boolean dbFinalized = false;
+            dbHelperExecutor.beginCase();
+            try {
+                if (dryRun) {
+                    caseLog.append("STAGE RUN", mapOfNative("status", "SKIPPED", "flowId", testCase.flowId()));
+                } else {
+                    FlowDefinition flow = flows.get(testCase.flowId());
+                    if (flow == null) throw new IllegalArgumentException("Resolved Flow is unavailable: " + testCase.flowId());
+                    Map<String,Object> actionData = new LinkedHashMap<String,Object>();
+                    actionData.put("id", "run"); actionData.put("type", "flow"); actionData.put("use", testCase.flowId());
+                    actionData.put("description", testCase.name() == null ? "Native Case Flow" : testCase.name());
+                    TemplateAction flowAction = new TemplateAction("run", actionData);
+                    Path definitionDirectory = projectRoot.resolve(testCase.sourceReference()).normalize().getParent();
+                    StageTemplate nativeWrapper = new StageTemplate("Native Case", definitionDirectory,
+                            Collections.singletonList(flowAction));
+                    StageTemplateRunner runner = new StageTemplateRunner(templateEngine, flows);
+                    StageCaseData stage = new StageCaseData("run", nativeWrapper.name(), Collections.<String,Object>emptyMap());
+                    context.beginStage(stage, nativeWrapper.name(), nativeWrapper.directory());
+                    caseLog.append("STAGE RUN", mapOfNative("flowId", testCase.flowId(), "status", "RUNNING"));
+                    List<ValidationResult> flowResults = runner.execute("run", nativeWrapper, context, caseLog);
+                    validations.addAll(flowResults);
+                    ResultStatus flowStatus = aggregate(flowResults);
+                    context.finishStage(flowStatus.name(), Duration.between(started, Instant.now()).toMillis());
+                    for (ValidationResult actionResult : flowResults) {
+                        Map<String,Object> actionIdentity = new LinkedHashMap<String,Object>(identity);
+                        actionIdentity.put("flowId", testCase.flowId());
+                        actionIdentity.put("detail", actionResult.message());
+                        emitNativeEvent(observer, "ACTION_FINISHED", runId, testCase.qualifiedCaseId(),
+                                actionResult.status().name(), null, actionIdentity);
+                    }
+                }
+                validations.addAll(dbHelperExecutor.finishCase(context, caseLog));
+                dbFinalized = true;
+                ResultStatus status = dryRun ? ResultStatus.SKIPPED
+                        : validations.isEmpty() ? ResultStatus.PASS : aggregate(validations);
+                context.put("CASE.status", status.name());
+                context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
+                writeCaseTree(caseOutputDir, context, caseLog);
+                TestResult result = new TestResult(testCase.qualifiedCaseId(), nativeCaseName(testCase), status,
+                        Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations),
+                        caseLogPath, validations, "", "", testCase.tags(), null, executionId,
+                        testCase.definitionId(), testCase.qualifiedCaseId());
+                identity.put("executionId", executionId);
+                emitNativeEvent(observer, "CASE_FINISHED", runId, testCase.qualifiedCaseId(), status.name(),
+                        result.duration().toMillis(), identity);
+                return result;
+            } catch (Exception e) {
+                att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
+                String errorMessage = typed == null ? message(e) : typed.format();
+                try { caseLog.append("ERROR", errorMessage); }
+                catch (Exception logError) { errorMessage += "; Case-log write failed: " + message(logError); }
+                if (context.hasActiveStage()) {
+                    try { context.finishStage(ResultStatus.ERROR.name(), Duration.between(started, Instant.now()).toMillis()); }
+                    catch (Exception stageError) { errorMessage += "; Stage finalization failed: " + message(stageError); }
+                }
+                context.put("CASE.status", ResultStatus.ERROR.name());
+                context.put("CASE.error", errorMessage);
+                if (typed != null) context.put("CASE.errorDiagnostic", typed.toDiagnostic().toMap());
+                context.put("CASE.durationMs", Duration.between(started, Instant.now()).toMillis());
+                try { writeCaseTree(caseOutputDir, context, caseLog); }
+                catch (Exception treeError) { errorMessage += "; Case evidence write failed: " + message(treeError); }
+                Duration duration = Duration.between(started, Instant.now());
+                TestResult result = new TestResult(testCase.qualifiedCaseId(), nativeCaseName(testCase), ResultStatus.ERROR,
+                        duration, "", errorMessage, caseLogPath, validations, "", "", testCase.tags(),
+                        typed == null ? null : typed.toDiagnostic(), executionId, testCase.definitionId(),
+                        testCase.qualifiedCaseId());
+                emitNativeEvent(observer, "CASE_FINISHED", runId, testCase.qualifiedCaseId(), ResultStatus.ERROR.name(),
+                        duration.toMillis(), identity);
+                return result;
+            } finally {
+                if (!dbFinalized && !dryRun) dbHelperExecutor.abortCase();
+            }
+        }
+    }
+
+    private List<ResolvedTestCase> validateNativeResolution(TestCaseResolutionResult resolution) {
+        if (resolution == null || resolution.definition() == null)
+            throw new IllegalArgumentException("A resolved native Test Case Definition is required");
+        if (resolution.truncated())
+            throw new IllegalArgumentException("A truncated Native Case preview cannot be executed; resolve the complete selection first");
+        if (resolution.emptySelection() || resolution.selectedCount() == 0)
+            throw new IllegalArgumentException("Native Case selection is empty");
+        if (resolution.selectedCount() > TestCaseDefinitionResolver.MAX_PREVIEW_CASES)
+            throw new IllegalArgumentException("Native RUN supports at most " + TestCaseDefinitionResolver.MAX_PREVIEW_CASES + " selected Cases");
+        if (resolution.cases().size() != resolution.selectedCount())
+            throw new IllegalArgumentException("Native Case resolution does not contain its complete selected Case set");
+        String definitionId = resolution.definition().id();
+        List<ResolvedTestCase> cases = new ArrayList<ResolvedTestCase>(resolution.cases());
+        Set<String> seen = new LinkedHashSet<String>();
+        for (ResolvedTestCase testCase : cases) {
+            if (testCase == null || !definitionId.equals(testCase.definitionId())
+                    || !testCase.qualifiedCaseId().equals(definitionId + "." + testCase.caseId())
+                    || !resolution.sourceReference().equals(testCase.sourceReference())
+                    || !resolution.sourceRevision().equals(testCase.sourceRevision()))
+                throw new IllegalArgumentException("Native Case resolution identity is inconsistent");
+            if (!seen.add(testCase.qualifiedCaseId()))
+                throw new IllegalArgumentException("Native Case selection contains a duplicate Qualified Case ID: " + testCase.qualifiedCaseId());
+        }
+        return cases;
+    }
+
+    private List<Map<String,Object>> verifyNativeSources(TestCaseResolutionResult resolution,
+            List<ResolvedTestCase> cases, FlowRegistry flows) throws Exception {
+        PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
+        Map<String,Map<String,Object>> captured = new LinkedHashMap<String,Map<String,Object>>();
+        Path definition = resources.resolvePackageRelative(resolution.sourceReference(), PackageResourceResolver.Kind.FILE).canonicalPath();
+        byte[] definitionBytes = readNativeSource(definition, TestCaseDefinitionResolver.MAX_SOURCE_BYTES, "Native Test Case Definition");
+        String actualDefinitionRevision = sha256Bytes(definitionBytes);
+        if (!actualDefinitionRevision.equals(resolution.sourceRevision()))
+            throw new IllegalArgumentException("Native Test Case Definition changed after resolution; resolve again before RUN");
+        addNativeInput(captured, "test-case-definition", resolution.sourceReference(), resolution.sourceRevision());
+
+        Map<String,String> dependencyRevisions = new LinkedHashMap<String,String>();
+        for (ResolvedTestCase testCase : cases) {
+            String priorRootRevision = dependencyRevisions.putIfAbsent(testCase.flowId(), testCase.flowRevision());
+            if (priorRootRevision != null && !priorRootRevision.equals(testCase.flowRevision()))
+                throw new IllegalArgumentException("Native Case Flow revision changed between selected Cases");
+            for (ResolvedTestCase.FlowDependency dependency : testCase.dependencies()) {
+                String previous = dependencyRevisions.putIfAbsent(dependency.id(), dependency.revision());
+                if (previous != null && !previous.equals(dependency.revision()))
+                    throw new IllegalArgumentException("Native Case Flow dependency has conflicting revisions: " + dependency.id());
+            }
+        }
+        for (Map.Entry<String,String> entry : dependencyRevisions.entrySet()) {
+            FlowDefinition flow = flows.get(entry.getKey());
+            if (flow == null) throw new IllegalArgumentException("Resolved Flow is unavailable: " + entry.getKey());
+            byte[] sourceBytes = flows.descriptorBytes(entry.getKey());
+            if (sourceBytes == null || !entry.getValue().equals(sha256Bytes(sourceBytes)))
+                throw new IllegalArgumentException("Native Case Flow changed after resolution; resolve again before RUN: " + entry.getKey());
+            Path sourcePath = flows.descriptorPath(entry.getKey());
+            String logicalPath = resources.fromInternalPath(sourcePath, PackageResourceResolver.Kind.FILE).logicalName();
+            boolean referenced = false;
+            for (ResolvedTestCase testCase : cases) for (ResolvedTestCase.FlowDependency dependency : testCase.dependencies())
+                if (dependency.id().equals(entry.getKey()) && dependency.sourceReference().equals(logicalPath)) referenced = true;
+            if (!referenced) throw new IllegalArgumentException("Native Case Flow source identity changed after resolution: " + entry.getKey());
+            for (TemplateAction action : flow.actions()) if ("flow".equalsIgnoreCase(action.type())) flows.validateInvocation(action);
+            addNativeInput(captured, "flow", logicalPath, entry.getValue());
+        }
+        return new ArrayList<Map<String,Object>>(captured.values());
+    }
+
+    private byte[] readNativeSource(Path source, int maximumBytes, String label) throws Exception {
+        if (Files.isSymbolicLink(source) || !Files.isRegularFile(source, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            throw new IllegalArgumentException(label + " source is unavailable");
+        long size = Files.size(source);
+        if (size > maximumBytes) throw new IllegalArgumentException(label + " source exceeds its size limit");
+        try (java.io.InputStream input = Files.newInputStream(source, java.nio.file.LinkOption.NOFOLLOW_LINKS);
+             java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream((int) size)) {
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) >= 0) {
+                if (output.size() + count > maximumBytes) throw new IllegalArgumentException(label + " source exceeds its size limit");
+                output.write(buffer, 0, count);
+            }
+            return output.toByteArray();
+        }
+    }
+
+    private void addNativeInput(Map<String,Map<String,Object>> inputs, String kind, String path, String digest) {
+        String key = kind + "\n" + path;
+        if (inputs.containsKey(key)) return;
+        Map<String,Object> item = new LinkedHashMap<String,Object>();
+        item.put("kind", kind); item.put("path", path); item.put("sha256", digest);
+        inputs.put(key, item);
+    }
+
+    private String nativeExecutionId(String runId, String qualifiedCaseId) throws Exception {
+        return "native-" + sha256Bytes((runId + "\n" + qualifiedCaseId).getBytes(java.nio.charset.StandardCharsets.UTF_8)).substring(0, 24);
+    }
+
+    private String nativeCaseName(ResolvedTestCase testCase) {
+        return testCase.name() == null || testCase.name().trim().isEmpty()
+                ? testCase.qualifiedCaseId() : testCase.name();
+    }
+
+    private Map<String,Object> nativeIdentityData(String definitionId, String sourceReference,
+            String sourceRevision, ResolvedTestCase testCase) {
+        Map<String,Object> data = new LinkedHashMap<String,Object>();
+        data.put("targetType", "nativeCase"); data.put("definitionId", definitionId);
+        data.put("sourceReference", sourceReference); data.put("sourceRevision", sourceRevision);
+        if (testCase != null) {
+            data.put("localCaseId", testCase.caseId());
+            data.put("qualifiedCaseId", testCase.qualifiedCaseId());
+            data.put("flowId", testCase.flowId()); data.put("flowRevision", testCase.flowRevision());
+            data.put("sourceRecordId", testCase.sourceRecordId()); data.put("recordIndex", testCase.recordIndex());
+        }
+        return data;
+    }
+
+    private void emitNativeEvent(att.api.ExecutionEventListener observer, String event, String runId,
+            String caseId, String status, Long durationMs, Map<String,Object> data) {
+        if (observer == null) return;
+        Map<String,Object> fields = new LinkedHashMap<String,Object>(data == null
+                ? Collections.<String,Object>emptyMap() : data);
+        fields.put("event", event);
+        observer.onEvent(new att.api.ExecutionEvent(att.api.ExecutionEvent.Type.PROGRESS, runId, caseId,
+                "run".equals(event) ? "run" : null, null, status, durationMs, null, fields));
+    }
+
+    private Map<String,Object> mapOfNative(Object... values) {
+        Map<String,Object> result = new LinkedHashMap<String,Object>();
+        for (int index = 0; index + 1 < values.length; index += 2)
+            result.put(String.valueOf(values[index]), values[index + 1]);
+        return result;
+    }
+
+    private ExecutionOptions nativeManifestOptions(String runId, Path outputRoot, boolean dryRun,
+            boolean failFast, Set<String> ciOutputs) {
+        return ExecutionOptions.forApi("run", projectRoot.resolve("config/config.yaml"), config.environment(),
+                Collections.<Path>emptyList(), null, Collections.<String>emptySet(), Collections.<String>emptySet(),
+                Collections.<String>emptySet(), runId, false, false, dryRun, failFast, outputRoot,
+                "selected", null, null, null, false, null, null, null, null, null, null, null, null, null, null,
+                Collections.<String>emptyList()).withRunPolicies(ciOutputs, "reject", false);
+    }
+
+    private Map<String,Object> nativeRunMetadata(TestCaseResolutionResult resolution) {
+        Map<String,Object> metadata = new LinkedHashMap<String,Object>();
+        metadata.put("executionType", "run"); metadata.put("targetType", "nativeCase");
+        metadata.put("packageId", resolution.cases().get(0).packageId());
+        metadata.put("definitionId", resolution.definition().id());
+        metadata.put("sourceReference", resolution.sourceReference());
+        metadata.put("sourceRevision", resolution.sourceRevision());
+        return metadata;
+    }
+
+    private void verifyJunit(Path junitFile) throws Exception {
+        javax.xml.validation.SchemaFactory schemaFactory = javax.xml.validation.SchemaFactory.newInstance(javax.xml.XMLConstants.W3C_XML_SCHEMA_NS_URI);
+        schemaFactory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        schemaFactory.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        att.validation.SchemaFiles.SchemaResource junitSchema = att.validation.SchemaFiles.readSchema(
+                att.validation.SchemaFiles.resolve(projectRoot, "att-junit-v2.1.xsd"));
+        javax.xml.validation.Schema compiledSchema;
+        try (java.io.InputStream schemaBytes = new java.io.ByteArrayInputStream(junitSchema.bytes())) {
+            javax.xml.transform.stream.StreamSource schemaSource = new javax.xml.transform.stream.StreamSource(schemaBytes);
+            schemaSource.setSystemId(junitSchema.identity());
+            compiledSchema = schemaFactory.newSchema(schemaSource);
+        }
+        javax.xml.validation.Validator validator = compiledSchema.newValidator();
+        validator.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        validator.setProperty(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        validator.validate(new javax.xml.transform.stream.StreamSource(junitFile.toFile()));
+    }
+
     private boolean shouldRunStage(StageConfig stage, boolean hasPriorFailure, boolean stoppedByFailure) {
         String runWhen = stage.runWhen();
         if ("always".equalsIgnoreCase(runWhen)) {
@@ -467,11 +831,20 @@ public class FrameworkEngine {
     }
 
     private void writeManifest(Path runDirectory, String runId, List<TestResult> results, Instant startedAt, Instant endedAt, Path reportPath, ExecutionOptions options, List<Map<String, Object>> inputs, List<att.validation.Diagnostic> validationDiagnostics) throws Exception {
+        writeManifest(runDirectory, runId, results, startedAt, endedAt, reportPath, options, inputs,
+                validationDiagnostics, null);
+    }
+
+    private void writeManifest(Path runDirectory, String runId, List<TestResult> results, Instant startedAt,
+            Instant endedAt, Path reportPath, ExecutionOptions options, List<Map<String, Object>> inputs,
+            List<att.validation.Diagnostic> validationDiagnostics, Map<String,Object> nativeRunMetadata) throws Exception {
         Map<String, Object> history = new LinkedHashMap<String, Object>();
         history.put("schemaVersion", Version.RUN_SCHEMA);
         Map<String, Object> att = new LinkedHashMap<String, Object>(); att.put("version", Version.PRODUCT); att.put("buildTime", Version.BUILD_TIME); att.put("gitCommit", Version.GIT_COMMIT); history.put("att", att);
         Map<String, Object> runtime = new LinkedHashMap<String, Object>(); runtime.put("javaVersion", System.getProperty("java.version")); runtime.put("javaVendor", System.getProperty("java.vendor")); runtime.put("osName", System.getProperty("os.name")); runtime.put("osVersion", System.getProperty("os.version")); runtime.put("osArchitecture", System.getProperty("os.arch")); runtime.put("locale", java.util.Locale.getDefault().toLanguageTag()); runtime.put("timezone", java.util.TimeZone.getDefault().getID()); history.put("runtime", runtime);
-        Map<String, Object> run = new LinkedHashMap<String, Object>(); run.put("id", runId); run.put("state", "COMPLETE"); run.put("environment", config.environment()); run.put("startedAt", startedAt.toString()); run.put("endedAt", endedAt.toString()); history.put("run", run);
+        Map<String, Object> run = new LinkedHashMap<String, Object>(); run.put("id", runId); run.put("state", "COMPLETE"); run.put("environment", config.environment()); run.put("startedAt", startedAt.toString()); run.put("endedAt", endedAt.toString());
+        if (nativeRunMetadata != null) run.putAll(nativeRunMetadata);
+        history.put("run", run);
         List<Map<String, Object>> diagnosticMaps = new ArrayList<Map<String, Object>>(); for (att.validation.Diagnostic diagnostic : validationDiagnostics) diagnosticMaps.add(diagnostic.toMap());
         Map<String, Object> validation = new LinkedHashMap<String, Object>(); validation.put("mode", options.validationScope()); validation.put("diagnostics", diagnosticMaps); history.put("validation", validation);
         history.put("inputs", inputs);
@@ -489,6 +862,11 @@ public class FrameworkEngine {
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("caseId", result.caseId());
             item.put("execId", result.executionId());
+            if (result.definitionId() != null) {
+                item.put("definitionId", result.definitionId());
+                item.put("localCaseId", result.qualifiedCaseId().substring(result.definitionId().length() + 1));
+                item.put("qualifiedCaseId", result.qualifiedCaseId());
+            }
             item.put("caseName", result.caseName());
             item.put("workbookId", result.workbookId());
             item.put("groupId", result.groupId());

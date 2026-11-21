@@ -5,7 +5,8 @@
 | Artifact | 現行 schema |
 |---|---|
 | 排程建立 | att-schedule/v2 |
-| RUN 定義 | att-execution/v1 |
+| RUN 定義 | att-execution/v1, att-execution/v2 |
+| Native Test Case Definition | att-testcase/v1 |
 | Global configuration | att-config/v2.15 |
 | Package Manifest | att-package/v2 |
 | Testdata descriptor | att-testdata/v1.0 |

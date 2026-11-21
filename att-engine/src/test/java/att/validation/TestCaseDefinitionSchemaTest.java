@@ -16,19 +16,20 @@ import static org.junit.jupiter.api.Assertions.*;
 class TestCaseDefinitionSchemaTest {
     private static final String SCHEMA_VERSION = "att-testcase/v1";
 
-    @Test void validatesProposedExamplesWithoutRegisteringTheContractAtRuntime() throws Exception {
+    @Test void validatesExamplesAndRegistersTheContractConsumedByNativeRun() throws Exception {
         Path root = repositoryRoot();
-        Path proposed = root.resolve("schemas/proposed");
-        Path schema = proposed.resolve("att-testcase-v1.schema.json");
-        String proposedCatalog = read(proposed.resolve("catalog.yaml"));
+        Path schema = root.resolve("schemas/att-testcase-v1.schema.json");
+        String proposedCatalog = read(root.resolve("schemas/proposed/catalog.yaml"));
         String sourceCatalog = read(root.resolve("schemas/catalog.yaml"));
         String engineCatalog = read(root.resolve("att-engine/src/main/resources/att-schemas/catalog.yaml"));
+        Path embeddedSchema = root.resolve("att-engine/src/main/resources/att-schemas/att-testcase-v1.schema.json");
 
         assertTrue(proposedCatalog.contains("status: proposed"));
-        assertTrue(proposedCatalog.contains(SCHEMA_VERSION + ": att-testcase-v1.schema.json"));
-        assertFalse(sourceCatalog.contains(SCHEMA_VERSION));
-        assertFalse(engineCatalog.contains(SCHEMA_VERSION));
-        assertThrows(DiagnosticException.class, () -> SchemaFiles.resolveVersion(root, SCHEMA_VERSION));
+        assertFalse(proposedCatalog.contains(SCHEMA_VERSION + ": att-testcase-v1.schema.json"));
+        assertTrue(sourceCatalog.contains(SCHEMA_VERSION + ": att-testcase-v1.schema.json"));
+        assertTrue(engineCatalog.contains(SCHEMA_VERSION + ": att-testcase-v1.schema.json"));
+        assertEquals(read(schema), read(embeddedSchema), "Native RUN consumes the active schema through the embedded trusted registry");
+        assertEquals(read(embeddedSchema), read(SchemaFiles.resolveVersion(root, SCHEMA_VERSION)));
 
         assertValid(root, schema, "inline-single.yaml");
         assertValid(root, schema, "inline-multi.yaml");
@@ -50,13 +51,13 @@ class TestCaseDefinitionSchemaTest {
         assertInvalid(root, schema, "invalid-reserved-definition-id-mixed-case.yaml");
     }
 
-    @Test void recordsDuplicateIdsAsFutureResolverSemantics() throws Exception {
+    @Test void keepsDuplicateIdsSyntacticallyValidForResolverRejection() throws Exception {
         Path root = repositoryRoot();
-        Path schema = root.resolve("schemas/proposed/att-testcase-v1.schema.json");
+        Path schema = root.resolve("schemas/att-testcase-v1.schema.json");
         Path fixture = root.resolve("docs/adr/examples/att-testcase-v1/resolution-invalid-duplicate-ids.yaml");
         Object parsed = YamlSupport.load(fixture);
 
-        // JSON Schema checks each ID's syntax. Cross-record uniqueness belongs to the future Resolver.
+        // JSON Schema checks ID syntax; the inline Resolver enforces cross-record uniqueness.
         assertDoesNotThrow(() -> JsonSchemaVerifier.verify(schema, parsed));
         Map<?, ?> definition = (Map<?, ?>) parsed;
         Map<?, ?> source = (Map<?, ?>) definition.get("dataSource");
@@ -80,7 +81,7 @@ class TestCaseDefinitionSchemaTest {
 
     @Test void rejectsMixedCaseWindowsDeviceNamesInDefinitionAndCaseIds() throws Exception {
         Path root = repositoryRoot();
-        Path schema = root.resolve("schemas/proposed/att-testcase-v1.schema.json");
+        Path schema = root.resolve("schemas/att-testcase-v1.schema.json");
         for (String id : new String[]{"con.fixture", "PRn.fixture", "Com1.fixture", "lPt9.fixture"}) {
             String document = "schemaVersion: att-testcase/v1\nid: " + id
                     + "\nflow: payment.transfer.v1\ninputs: {}\n";
@@ -113,9 +114,9 @@ class TestCaseDefinitionSchemaTest {
     private static Path repositoryRoot() {
         Path directory = Paths.get("").toAbsolutePath().normalize();
         while (directory != null) {
-            if (Files.isRegularFile(directory.resolve("schemas/proposed/att-testcase-v1.schema.json"))) return directory;
+            if (Files.isRegularFile(directory.resolve("schemas/att-testcase-v1.schema.json"))) return directory;
             directory = directory.getParent();
         }
-        throw new IllegalStateException("Could not locate repository root for proposed Test Case schema");
+        throw new IllegalStateException("Could not locate repository root for active Test Case schema");
     }
 }
