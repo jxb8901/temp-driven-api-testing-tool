@@ -11,6 +11,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -51,8 +53,25 @@ class ServerRuntimeNativeRunTest {
             ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
         ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
 
-        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+        CountDownLatch acceptedWorkerLaunch=new CountDownLatch(1),releaseAcceptedWorker=new CountDownLatch(1);
+        ServerConfig loadedServerConfig=ServerConfig.load(serverConfig);
+        Path materializedSnapshots=loadedServerConfig.dataDir.resolve("job-source-closures/materialized").normalize();
+        ServerRuntime.WorkerProcessLauncher processLauncher=builder->{
+            Path workingDirectory=builder.directory()==null?null:builder.directory().toPath().toAbsolutePath().normalize();
+            if(workingDirectory!=null&&workingDirectory.startsWith(materializedSnapshots)) {
+                acceptedWorkerLaunch.countDown();
+                try {
+                    if(!releaseAcceptedWorker.await(10,TimeUnit.SECONDS))
+                        throw new java.io.IOException("Timed out waiting to release the source-snapshot Worker");
+                } catch(InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();throw new java.io.IOException("Interrupted before Worker launch",interrupted);
+                }
+            }
+            return builder.start();
+        };
+        try(ServerRuntime runtime=new ServerRuntime(loadedServerConfig,libs.toString(),processLauncher)) {
             runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            runtime.store.createAuthUser("bob","Bob","unused","USER","csrf");
             int jobsBeforeDirectRequest=runtime.jobs.size();
             assertThrows(IllegalArgumentException.class,()->runtime.submit("run",nativeRun("first"),"alice"),
                     "A Native Case target must not bypass the validated draft endpoint");
@@ -82,6 +101,12 @@ class ServerRuntimeNativeRunTest {
             Map<String,Object> acceptedDraft=runtime.createRunDraft(nativeRun("first"),"alice");
             assertDraftSelection(acceptedDraft);
             assertEquals("native-first",((Map<?,?>)acceptedDraft.get("options")).get("runId"));
+            int jobsBeforeUnauthorizedSubmit=runtime.jobs.size();
+            assertThrows(ServerRuntime.NotFoundException.class,()->runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",acceptedDraft.get("draftId"))),"bob","bob"),
+                    "A different active user must not submit Alice's validated Native Case draft");
+            assertEquals(jobsBeforeUnauthorizedSubmit,runtime.jobs.size(),
+                    "An unauthorized Native Case draft submission must not create a Job");
             String revision=String.valueOf(acceptedDraft.get("revisionDigest"));
             Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
                     Map.of("packageId","p","draftId",acceptedDraft.get("draftId"))),"alice","alice");
@@ -96,13 +121,17 @@ class ServerRuntimeNativeRunTest {
             assertTrue(Files.isRegularFile(frozenDefinition),"Native Definition must be present in the accepted source snapshot");
             assertEquals(original,Files.readString(frozenDefinition));
 
-            // Mutate the live Package after admission; the Worker must execute the frozen Definition.
+            // Stop the accepted Worker immediately before process start, mutate the live Package,
+            // then prove the Worker executes the frozen Definition rather than the live file.
+            assertTrue(acceptedWorkerLaunch.await(10,TimeUnit.SECONDS),
+                    "The accepted cold Worker must reach the launch barrier before the live Definition changes");
             Files.writeString(definition,definitionYaml(70,130));
+            releaseAcceptedWorker.countDown();
             Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,jobId);
             assertEquals("PASS",((Map<?,?>)result.get("job")).get("status"),result.toString());
             assertTrue(runtime.events(jobId).after(0).stream().anyMatch(event->"result".equals(event.get("event"))));
 
-            try(ZipFile archive=new ZipFile(runtime.artifactArchivePath(jobId).toFile())) {
+            try(ZipFile archive=new ZipFile(awaitArtifactArchive(runtime,jobId).toFile())) {
                 List<String> caseTrees=new ArrayList<>(),caseLogs=new ArrayList<>(),runManifests=new ArrayList<>();
                 var entries=archive.entries();
                 while(entries.hasMoreElements()) {
@@ -125,6 +154,10 @@ class ServerRuntimeNativeRunTest {
             }
 
             Files.writeString(definition,original);
+            Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
+                    +"description: Native Case FAIL outcome fixture\nactions:\n"
+                    +"  verify: {type: assert, assert: '#{${EXEC.INPUT.amount} <= 12}'}\n"
+                    +"  log: {type: log, message: 'amount=${EXEC.INPUT.amount}'}\n");
             Map<String,Object> scheduledDraft=runtime.createRunDraft(nativeRun("second"),"alice");
             LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name","Native Case schedule",
                     "packageId","p","executionType","run","draftId",scheduledDraft.get("draftId"),
@@ -136,15 +169,68 @@ class ServerRuntimeNativeRunTest {
             assertEquals("native-second",runtime.jobs.get(scheduledJobId).request.runId,
                     "The scheduled Native RUN retains its selected runId");
             Map<String,Object> scheduledResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,scheduledJobId);
-            assertEquals("PASS",((Map<?,?>)scheduledResult.get("job")).get("status"),scheduledResult.toString());
+            assertEquals("FAIL",((Map<?,?>)scheduledResult.get("job")).get("status"),scheduledResult.toString());
+            assertNativeCaseStatus(runtime,scheduledJobId,"payments.transfer.second","FAIL");
+
+            Path errorFlow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/error/v1"))
+                    .resolve("flow.yaml");
+            Files.writeString(errorFlow,"schemaVersion: att-flow/v3.6\nid: payments.error.v1\nname: Error outcome\n"
+                    +"description: Native Case ERROR outcome fixture\nactions:\n  call:\n    type: tool\n"
+                    +"    call: \"#{upper('ok')}\"\n    assert: >-\n      ${output.result.missing} == 'OK'\n");
+            Path errorDefinition=packageRoot.resolve("testcase/payments/error/testcase.yaml");
+            Files.createDirectories(errorDefinition.getParent());
+            Files.writeString(errorDefinition,"schemaVersion: att-testcase/v1\nid: payments.error\nname: Error outcome\n"
+                    +"flow: payments.error.v1\ndataSource:\n  type: inline\n  records:\n"
+                    +"    - recordId: error\n      data: {amount: 7}\ninputs:\n  amount:\n    from: DATA.amount\n");
+            Map<String,Object> errorDraft=runtime.createRunDraft(nativeRun("payments.error","error"),"alice");
+            assertEquals(List.of("error"),errorDraft.get("selectedCaseIds"));
+            Map<String,Object> errorAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",errorDraft.get("draftId"))),"alice","alice");
+            String errorJobId=String.valueOf(errorAccepted.get("jobId"));
+            Map<String,Object> errorResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,errorJobId);
+            assertEquals("ERROR",((Map<?,?>)errorResult.get("job")).get("status"),errorResult.toString());
+            assertNativeCaseStatus(runtime,errorJobId,"payments.error.error","ERROR");
+        } finally {
+            releaseAcceptedWorker.countDown();
         }
     }
 
     private static JsonNode nativeRun(String localCaseId) {
+        return nativeRun("payments.transfer",localCaseId);
+    }
+
+    private static JsonNode nativeRun(String definitionId,String localCaseId) {
         return ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
                 "executionType","run","packageId","p","target",Map.of("type","nativeCase",
-                "definitionId","payments.transfer","selection",Map.of("resolvedCaseIds",List.of(localCaseId))),
+                "definitionId",definitionId,"selection",Map.of("resolvedCaseIds",List.of(localCaseId))),
                 "options",Map.of("debug",false,"failFast",true,"runId","native-"+localCaseId)));
+    }
+
+    private static void assertNativeCaseStatus(ServerRuntime runtime,String jobId,String qualifiedCaseId,String status)
+            throws Exception {
+        try(ZipFile archive=new ZipFile(awaitArtifactArchive(runtime,jobId).toFile())) {
+            List<String> caseTrees=new ArrayList<>();var entries=archive.entries();
+            while(entries.hasMoreElements()) {
+                ZipEntry entry=entries.nextElement();
+                if(!entry.isDirectory()&&entry.getName().endsWith("/case.yaml"))
+                    caseTrees.add(read(archive.getInputStream(entry)));
+            }
+            assertEquals(1,caseTrees.size(),"One explicitly selected Native Case should produce canonical evidence");
+            assertTrue(caseTrees.get(0).contains("qualifiedCaseId: "+qualifiedCaseId),caseTrees.get(0));
+            assertTrue(caseTrees.get(0).contains("status: "+status),caseTrees.get(0));
+        }
+    }
+
+    private static Path awaitArtifactArchive(ServerRuntime runtime,String jobId) throws Exception {
+        long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+        Map<String,Object> index=runtime.artifactIndex(jobId,0,1);
+        while(!"READY".equals(index.get("archiveStatus"))&&System.nanoTime()<deadline) {
+            if("FAILED".equals(index.get("archiveStatus")))fail("Artifact publication failed for "+jobId+": "+index);
+            Thread.sleep(25);
+            index=runtime.artifactIndex(jobId,0,1);
+        }
+        assertEquals("READY",index.get("archiveStatus"),"Native RUN evidence must be published before inspection");
+        return runtime.artifactArchivePath(jobId);
     }
 
     private static void assertDraftSelection(Map<String,Object> draft) {

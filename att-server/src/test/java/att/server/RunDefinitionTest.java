@@ -11,7 +11,7 @@ class RunDefinitionTest {
     private static String requestV2(String body){return "{\"schemaVersion\":\"att-execution/v2\",\"executionType\":\"run\",\"packageId\":\"payments\","+body+"}";}
 
     @Test void publishedSchemaAcceptsTheSameTargetAndSelectionShapes() throws Exception {
-        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v1.schema.json");
+        java.nio.file.Path schema=java.nio.file.Path.of("schemas/history/att-execution-v1.schema.json");
         for(String body:List.of(request("\"target\":{\"type\":\"case\",\"id\":\"A\"}"),
                 request("\"target\":{\"type\":\"flow\",\"id\":\"f\"},\"input\":{}"),
                 request("\"selection\":{\"tags\":[\"smoke\"]}"))) {
@@ -63,7 +63,7 @@ class RunDefinitionTest {
         String validTarget="\"target\":{\"type\":\"nativeCase\",\"definitionId\":\"payments.transfer\",\"selection\":{\"resolvedCaseIds\":[\"valid\"]}}";
         att.validation.JsonSchemaVerifier.verifyJson(schema,requestV2(validTarget));
         assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->
-                att.validation.JsonSchemaVerifier.verifyJson(java.nio.file.Path.of("schemas/att-execution-v1.schema.json"),request(validTarget)));
+                att.validation.JsonSchemaVerifier.verifyJson(java.nio.file.Path.of("schemas/history/att-execution-v1.schema.json"),request(validTarget)));
         assertThrows(IllegalArgumentException.class,()->parse(request(validTarget)),"v1 must not acquire native selector semantics");
         for(String body:List.of(
                 "\"target\":{\"type\":\"nativeCase\",\"definitionId\":\"payments.transfer\",\"selection\":{\"resolvedCaseIds\":[]}}",
