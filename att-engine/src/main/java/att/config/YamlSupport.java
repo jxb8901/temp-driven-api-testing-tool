@@ -12,7 +12,9 @@ import att.validation.SourceLocation;
 import java.nio.file.Path;
 import java.nio.file.Files;
 import java.io.Reader;
+import java.io.StringReader;
 import java.io.IOException;
+import java.nio.charset.CodingErrorAction;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -40,15 +42,50 @@ public final class YamlSupport {
     private static final Map<Path, YamlSource> SOURCES = new LinkedHashMap<Path, YamlSource>(128, .75f, true) {
         @Override protected boolean removeEldestEntry(Map.Entry<Path, YamlSource> eldest) { return size() > 4096; }
     };
+    private static final ThreadLocal<Map<Path,YamlSource>> SNAPSHOT_SOURCES = new ThreadLocal<Map<Path,YamlSource>>();
 
     /** Safe construction plus source capture in a single YAML parse. */
     public static Object load(Path file) throws IOException {
+        clearSnapshotSource(file);
+        long size = Files.size(file);
+        return load(file, Files.newBufferedReader(file, java.nio.charset.StandardCharsets.UTF_8), size);
+    }
+
+    /** Safe construction from an already captured byte snapshot, preserving its exact source revision. */
+    public static Object load(Path file, byte[] bytes) throws IOException {
+        if (bytes == null) throw new IllegalArgumentException("YAML source bytes are required");
+        String sourceText;
+        try {
+            sourceText = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+        } catch (java.nio.charset.CharacterCodingException failure) {
+            clearSnapshotSource(file);
+            throw failure;
+        }
+        Path key = file.toAbsolutePath().normalize();
+        Map<Path,YamlSource> snapshots = snapshotSources();
+        snapshots.put(key, new YamlSource(file, null, sourceText));
         long inspectionStarted = System.nanoTime();
-        att.metrics.InspectionMetrics.JVM.add(att.metrics.InspectionMetrics.Stage.READ_BYTES,Files.size(file));
+        att.metrics.InspectionMetrics.JVM.add(att.metrics.InspectionMetrics.Stage.READ_BYTES, bytes.length);
+        SourceConstructor constructor = new SourceConstructor(options());
+        try (Reader reader = new StringReader(sourceText)) {
+            Object value = new Yaml(constructor).load(reader);
+            snapshots.put(key, new YamlSource(file, constructor.root, sourceText));
+            return value;
+        } finally {
+            att.metrics.InspectionMetrics.JVM.record(att.metrics.InspectionMetrics.Stage.YAML_PARSE, System.nanoTime() - inspectionStarted);
+        }
+    }
+
+    private static Object load(Path file, Reader input, long sourceBytes) throws IOException {
+        long inspectionStarted = System.nanoTime();
+        att.metrics.InspectionMetrics.JVM.add(att.metrics.InspectionMetrics.Stage.READ_BYTES, sourceBytes);
         Path key = file.toAbsolutePath().normalize();
         synchronized (SOURCES) { SOURCES.remove(key); }
         SourceConstructor constructor = new SourceConstructor(options());
-        try (Reader reader = Files.newBufferedReader(file, java.nio.charset.StandardCharsets.UTF_8)) {
+        try (Reader reader = input) {
             Object value = new Yaml(constructor).load(reader);
             YamlSource source = new YamlSource(file, constructor.root);
             synchronized (SOURCES) { SOURCES.put(key, source); }
@@ -59,21 +96,22 @@ public final class YamlSupport {
     }
 
     public static SourceLocation location(Path file, String field, Throwable failure) {
+        YamlSource source = snapshotSource(file);
+        if (source == null) synchronized (SOURCES) { source = SOURCES.get(file.toAbsolutePath().normalize()); }
+        java.util.List<String> capturedLines = source == null ? null : source.capturedLines();
         // Parser errors already have precise physical marks, even when no document was constructed.
         java.util.Set<Throwable> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Throwable, Boolean>());
         for (Throwable cause = failure; cause != null && seen.add(cause); cause = cause.getCause()) {
             if (cause instanceof MarkedYAMLException) {
                 org.yaml.snakeyaml.error.Mark mark = ((MarkedYAMLException) cause).getProblemMark();
-                if (mark != null) return withExcerpt(YamlSource.range(file.toString(), mark, mark), file, field);
+                if (mark != null) return withExcerpt(YamlSource.range(file.toString(), mark, mark), file, field, capturedLines);
             }
         }
-        synchronized (SOURCES) {
-            YamlSource source = SOURCES.get(file.toAbsolutePath().normalize());
-            if (source == null) return null;
+        if (source != null) {
             att.template.ExpressionSyntaxException syntax = att.template.ExpressionSyntaxException.find(failure);
             SourceLocation range = source.location(field);
             try {
-                java.util.List<String> lines = Files.readAllLines(file, java.nio.charset.StandardCharsets.UTF_8);
+                java.util.List<String> lines = lines(file, capturedLines);
                 String reference = syntax == null ? diagnosticReference(failure, source.scalarValue(field)) : null;
                 int offset = syntax == null
                         ? (reference == null ? -1 : source.scalarValue(field).indexOf(reference))
@@ -84,15 +122,43 @@ public final class YamlSupport {
                         SourceLocation physical = source.blockScalarTextLocation(field, reference, lines);
                         if (physical != null) location = physical;
                     }
-                    return withExcerpt(location, file, field, source.isBlockScalar(field) ? range : null);
+                    return withExcerpt(location, file, field, source.isBlockScalar(field) ? range : null, lines);
                 }
                 if (source.isBlockScalar(field)) {
                     SourceLocation body = source.blockScalarBodyLocation(field, lines);
-                    return withExcerpt(body == null ? range : body, file, field, range);
+                    return withExcerpt(body == null ? range : body, file, field, range, lines);
                 }
             } catch (IOException ignored) { /* Retain the captured scalar range. */ }
-            return withExcerpt(range, file, field);
+            return withExcerpt(range, file, field, capturedLines);
         }
+        return null;
+    }
+
+    /** Clears the calling thread's captured source metadata after its snapshot has been validated. */
+    public static void clearSnapshotSource(Path file) {
+        if (file == null) return;
+        Map<Path,YamlSource> snapshots = SNAPSHOT_SOURCES.get();
+        if (snapshots == null) return;
+        snapshots.remove(file.toAbsolutePath().normalize());
+        if (snapshots.isEmpty()) SNAPSHOT_SOURCES.remove();
+    }
+
+    private static Map<Path,YamlSource> snapshotSources() {
+        Map<Path,YamlSource> snapshots = SNAPSHOT_SOURCES.get();
+        if (snapshots == null) {
+            snapshots = new LinkedHashMap<Path,YamlSource>();
+            SNAPSHOT_SOURCES.set(snapshots);
+        }
+        return snapshots;
+    }
+
+    private static YamlSource snapshotSource(Path file) {
+        Map<Path,YamlSource> snapshots = SNAPSHOT_SOURCES.get();
+        return snapshots == null ? null : snapshots.get(file.toAbsolutePath().normalize());
+    }
+
+    private static java.util.List<String> lines(Path file, java.util.List<String> captured) throws IOException {
+        return captured == null ? Files.readAllLines(file, java.nio.charset.StandardCharsets.UTF_8) : captured;
     }
 
     private static String diagnosticReference(Throwable failure, String scalar) {
@@ -115,9 +181,14 @@ public final class YamlSupport {
     }
 
     private static SourceLocation withExcerpt(SourceLocation location, Path file, String field) {
+        return withExcerpt(location, file, field, (java.util.List<String>) null);
+    }
+
+    private static SourceLocation withExcerpt(SourceLocation location, Path file, String field,
+                                              java.util.List<String> capturedLines) {
         if (location == null || field == null || sensitive(field)) return location;
         try {
-            java.util.List<String> lines = Files.readAllLines(file, java.nio.charset.StandardCharsets.UTF_8);
+            java.util.List<String> lines = lines(file, capturedLines);
             String line = location.line() <= lines.size() ? lines.get(location.line() - 1) : null;
             // Inline YAML maps may contain secrets in neighbouring fields.
             return line == null || sensitive(line) ? location : new SourceLocation(location.file(), location.line(), location.column(),
@@ -126,10 +197,16 @@ public final class YamlSupport {
     }
 
     private static SourceLocation withExcerpt(SourceLocation location, Path file, String field, SourceLocation blockRange) {
-        if (location == null || blockRange == null || field == null || sensitive(field)) return withExcerpt(location, file, field);
+        return withExcerpt(location, file, field, blockRange, null);
+    }
+
+    private static SourceLocation withExcerpt(SourceLocation location, Path file, String field,
+                                              SourceLocation blockRange, java.util.List<String> capturedLines) {
+        if (location == null || blockRange == null || field == null || sensitive(field))
+            return withExcerpt(location, file, field, capturedLines);
         final int maxLines = 12;
         try {
-            java.util.List<String> lines = Files.readAllLines(file, java.nio.charset.StandardCharsets.UTF_8);
+            java.util.List<String> lines = lines(file, capturedLines);
             int first = Math.max(blockRange.line(), location.line() - maxLines / 2);
             if (first + maxLines - 1 < location.line()) first = location.line() - maxLines + 1;
             int last = Math.min(blockRange.endLine(), Math.min(lines.size(), first + maxLines - 1));

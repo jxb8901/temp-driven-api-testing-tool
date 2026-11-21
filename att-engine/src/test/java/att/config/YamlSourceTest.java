@@ -12,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.nio.charset.CharacterCodingException;
 import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -47,6 +48,32 @@ class YamlSourceTest {
                 "Invalid config", cause, path.toString(), "$", "Correct duplicate keys."), path, "$");
         assertEquals(2, error.source().line()); assertEquals(1, error.source().column());
         assertTrue(error.format().contains("line=2"));
+    }
+
+    @Test void capturedYamlBytesRejectMalformedUtf8InsteadOfReplacingThem() throws Exception {
+        Path path = root.resolve("captured-invalid-utf8.yaml");
+        byte[] invalid = new byte[] {'k', 'e', 'y', ':', ' ', (byte) 0xc3, 0x28, '\n'};
+
+        Exception failure = assertThrows(Exception.class, () -> YamlSupport.load(path, invalid));
+        Throwable cause = failure;
+        while (cause != null && !(cause instanceof CharacterCodingException)) cause = cause.getCause();
+        assertNotNull(cause, "Malformed UTF-8 must be reported by the strict decoder");
+    }
+
+    @Test void snapshotDiagnosticsUseCapturedTextInsteadOfTheLivePath() throws Exception {
+        Path path = write("captured.yaml", "name: live-value\n");
+        byte[] captured = "name: captured-value\n".getBytes(StandardCharsets.UTF_8);
+
+        YamlSupport.load(path, captured);
+        write("captured.yaml", "name: changed-after-capture\n");
+        DiagnosticException error = YamlSupport.locate(DiagnosticException.of(DiagnosticCodes.CONFIG_INVALID,
+                "Invalid snapshot", "Captured field is invalid", "Correct the source field.")
+                .withLocation(path.toString(), "name", null, null, null, null, null), path, "name");
+
+        assertNotNull(error.source());
+        assertEquals(1, error.source().line());
+        assertEquals("name: captured-value", error.source().excerpt());
+        YamlSupport.clearSnapshotSource(path);
     }
 
     @Test void invalidToolCallPointsToItsPackageDescriptor() throws Exception {
