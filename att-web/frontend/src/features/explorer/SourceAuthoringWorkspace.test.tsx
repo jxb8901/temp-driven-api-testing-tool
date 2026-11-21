@@ -8,6 +8,7 @@ import { ChangedFiles, SourceAuthoringWorkspace } from './SourceAuthoringWorkspa
 import type { ExplorerApi } from './types';
 import type { SourceImpactReport, SourceOperation } from './sourceManagement';
 
+
 vi.mock('../code/CodeEditor', () => ({
   CodeEditor: ({ value, label, readOnly = true, onChange, maxCharacters = 200_000 }: { value: string; label: string; readOnly?: boolean; onChange?: (value: string) => void; maxCharacters?: number }) => {
     const displayed = value.length > maxCharacters ? value.slice(0, maxCharacters) : value;
@@ -207,6 +208,7 @@ describe('SourceAuthoringWorkspace', () => {
     expect(action.mock.calls.map(call => call[3])).toEqual(['validate', 'review']);
     expect(button('Publish').disabled).toBe(false);
     click(button('Publish')); await settle();
+    await vi.waitFor(() => expect(action.mock.calls.some(call => call[3] === 'publish')).toBe(true));
     const publishCall = action.mock.calls.find(call => call[3] === 'publish');
     expect(publishCall?.[5]).toEqual(expect.objectContaining({ freshnessFingerprint: expect.any(String) }));
     expect(publishCall?.[5]).not.toHaveProperty('actor');
@@ -656,6 +658,7 @@ describe('SourceAuthoringWorkspace', () => {
     expect(button('Publish').disabled).toBe(false);
     expect(host.querySelector('input[aria-label="Acknowledge current Config impact"]')).toBeNull();
     click(button('Publish')); await settle();
+    await vi.waitFor(() => expect(action.mock.calls.some(call => call[3] === 'publish')).toBe(true));
     const publishCall = action.mock.calls.find(call => call[3] === 'publish');
     expect(publishCall?.[5]).toEqual(expect.objectContaining({ freshnessFingerprint: expect.any(String) }));
     expect(publishCall?.[5]).not.toHaveProperty('actor');
