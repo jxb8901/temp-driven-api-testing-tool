@@ -25,11 +25,12 @@ function useLabel(use: PackageFileIndexUse): string {
   return `${use.label} (${use.type})${calls.length ? ` · ${calls.join(', ')}` : ''}`;
 }
 
-export function PackageFileCatalog({ api, packageId, onOpenFile, onOpenResource, active = true, locale = 'en' }: {
+export function PackageFileCatalog({ api, packageId, onOpenFile, onOpenResource, onOpenNativeTestCase, active = true, locale = 'en' }: {
   api: ExplorerApi;
   packageId: string;
   onOpenFile(path: string, origin: string | undefined, reference: ResourceSourceReference): void;
   onOpenResource?(identity: Omit<ResourceIdentity, 'packageId'>, actionId?: string): void;
+  onOpenNativeTestCase?(path: string): void;
   active?: boolean;
   locale?: 'en' | 'zh-Hant';
 }) {
@@ -119,6 +120,7 @@ export function PackageFileCatalog({ api, packageId, onOpenFile, onOpenResource,
       : locale === 'zh-Hant' ? '找不到被參照的 Package 檔案。' : 'No referenced Package files were found.'}</p>}
     {files.length > 0 && <ul className="att-package-file-list">{files.map(file => {
       const firstAvailable = file.uses.find(use => use.available && use.referenceId);
+      const nativeTestCase = /(?:^|\/)testcase\.ya?ml$/i.test(file.path);
       return <li key={file.path}><div><code>{file.path}</code><small>{file.uses.length} referencing resource{file.uses.length === 1 ? '' : 's'}</small>
         <ul>{file.uses.map(use => <li key={`${use.type}:${use.resourceId}`}>
           {onOpenResource ? <button type="button" className="att-file-catalog-reference" onClick={() => {
@@ -127,7 +129,9 @@ export function PackageFileCatalog({ api, packageId, onOpenFile, onOpenResource,
           }}>{useLabel(use)}</button> : <span>{useLabel(use)}</span>}
           {!use.available && <span> · {use.reason || 'file content unavailable'}</span>}
         </li>)}</ul></div>
-        {firstAvailable ? <button type="button" onClick={() => onOpenFile(file.path, firstAvailable.originPath,
+        {nativeTestCase && onOpenNativeTestCase
+          ? <button type="button" onClick={() => onOpenNativeTestCase(file.path)}>{locale === 'zh-Hant' ? '開啟 Native Test Case' : 'Open Native Test Case'}</button>
+          : firstAvailable ? <button type="button" onClick={() => onOpenFile(file.path, firstAvailable.originPath,
           { type: firstAvailable.type, resourceId: firstAvailable.resourceId, referenceId: firstAvailable.referenceId! })}>Open file</button>
           : <span role="status">{file.reason || 'Unavailable'}</span>}
       </li>;

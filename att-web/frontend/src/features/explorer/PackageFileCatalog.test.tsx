@@ -86,6 +86,19 @@ describe('PackageFileCatalog', () => {
     expect(listResources).not.toHaveBeenCalled();
   });
 
+  it('opens indexed native Test Case definitions in the dedicated editor', async () => {
+    const onOpenNativeTestCase = vi.fn();
+    const api = { listPackageFileIndex: vi.fn(async () => ({ items: [{ path: 'testcase/refund/testcase.yaml', available: true, uses: [] }],
+      total: 1, nextCursor: null, packageRevision: 'a'.repeat(64), canEdit: true,
+      coverage: { state: 'COMPLETE' as const, complete: true, resourcesScanned: 1, resourcesIncomplete: 0, referenceSetsTruncated: 0 },
+    })) } as unknown as ExplorerApi;
+    await act(async () => root.render(<PackageFileCatalog api={api} packageId="payments" onOpenFile={() => {}}
+      onOpenNativeTestCase={onOpenNativeTestCase} />));
+    await settle();
+    click(button('Open Native Test Case'));
+    expect(onOpenNativeTestCase).toHaveBeenCalledWith('testcase/refund/testcase.yaml');
+  });
+
   it('localizes complete and partial index coverage with explicit read access state', async () => {
     const api = { listPackageFileIndex: vi.fn(async () => ({ items: [], total: 0, nextCursor: null,
       packageRevision: 'a'.repeat(64), canEdit: false,

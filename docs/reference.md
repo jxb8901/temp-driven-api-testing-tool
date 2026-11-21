@@ -258,6 +258,16 @@ For data-driven Cases, omitted `inputs` means same-name projection from `DATA`; 
 
 See the [active schema](../schemas/att-testcase-v1.schema.json), [single inline example](adr/examples/att-testcase-v1/inline-single.yaml), [multi-record inline example](adr/examples/att-testcase-v1/inline-multi.yaml), [Excel example](adr/examples/att-testcase-v1/excel.yaml), [Excel omitted-`dataColumns` example](adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml), and [ADR-0001](adr/0001-flow-centric-testcase-resolution.md) for the complete contract and validation boundary.
 
+#### Author in Studio
+
+In Explorer, choose **New native Test Case** or open an indexed `testcase.yaml`. The guided editor sets the Package-scoped Definition ID, name, tags, canonical Flow, typed inputs, and either one Case or inline records. Advanced YAML remains available for fields outside the guided form. New files must be placed under the Package's configured `resources.testcaseRoot` (default `testcase/`).
+
+**Preview / Resolve** provides a browser-side design-time view capped at 100 KiB and 1,000 Cases. It shows qualified IDs, source record provenance, tags, and typed inputs with sensitive-key values masked. This preview does not freeze a Job selection; server-side Change Set validation is authoritative, and RUN resolves the published Package source again.
+
+Use **Add to Change Set** to stage a create or replacement through the existing Package source workflow: Draft → Validate → Review → Publish. The current Package source stays active until Publish. After publication, preview the latest source and select the Case IDs to validate and submit a RUN. Native Case RUN is available only when the Server advertises `att-execution/v2`; the Server validates and freezes the source and selected IDs for the Job.
+
+The editor can author the S01 Excel Data Source mapping fields, but row preview and resolution remain unavailable until the S04 adapter is integrated. Studio does not open or modify the workbook in this state. Use the existing Workbook/Sidecar editor for legacy suites.
+
 ### Workbook
 
 #### Workbook, Sidecar, and Snapshot relationship

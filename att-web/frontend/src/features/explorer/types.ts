@@ -417,6 +417,7 @@ export interface ExplorerApi {
   }>;
   getDebugForm(identity: ResourceIdentity, environment?: string, signal?: AbortSignal): Promise<DebugFormResponse>;
   previewRun?(input: import('../run/RunPage').RunDefinition, signal?: AbortSignal): Promise<DraftResponse>;
+  supportsNativeCaseRun?(): boolean;
   submitRun?(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob>;
   previewDebug(input: DebugDraftRequest, signal?: AbortSignal): Promise<DraftResponse>;
   submitDebug(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob>;

@@ -6,6 +6,7 @@
 - This is a development candidate, not a release. Do not bump POM versions, tag, or publish from this analysis slice.
 
 # ATT 4.4.1 - release candidate (2026-11-21; acceptance pending)
+### S01 — Proposed Native Test Case contract (4.4.1 train)
 
 - Add trusted shared Package editors for online edits, ZIP imports, Testcase snapshot publication, Manifest publication, and source history; access remains limited to active USER identities, grants remain Package-scoped, and grant or root changes invalidate outstanding drafts (#387).
 - Add a focused Server integration covering shared-editor publish against accepted/queued/running Jobs and pinned Schedules, plus no elevated ADMIN/Central rights from editor grants; document the remaining deployed multi-role operator acceptance matrix (#387).
@@ -15,8 +16,10 @@
 - Require absolute end-of-input for proposed identity/path patterns and reject duplicate proposed-catalog top-level fields (#400).
 - Release acceptance is pending. Do not tag or publish until shared-editor publication, revocation, history, exact-head hosted CI, and the deployed multi-role operator matrix pass.
 
-# ATT 4.6.0 - development candidate (S04 acceptance pending)
+# ATT 4.6.0 - development candidate (acceptance pending)
 
+- Add the Studio Native Test Case editor, bounded resolved-case preview, and selected-case RUN flow. Author Definitions through the existing revision-fenced Package Change Set Draft → Validate → Review → Publish lifecycle; native RUN is enabled only when the Server advertises `att-execution/v2` (#395).
+- Keep Excel-backed Test Case authoring fields available while gating workbook row resolution and preview on the S04 adapter (#394). This is a development candidate; do not bump POM versions or tag 4.6.0 before the release acceptance gates pass.
 - Add a bounded, read-only Excel Data Source adapter for native `att-testcase/v1` Definitions. Reuse the legacy Sidecar header resolver, `dataColumns` parser, blank normalization, and safe YAML cell parsing; preserve source order, literal Case ID rules, typed values, selected Case behavior, and workbook/sheet/row/column revision provenance (#394).
 - Preflight native Excel ZIP archives to 256 entries, 32 MiB per expanded entry, and 64 MiB total expanded data; cap selected worksheets at 100,000 physical rows before iteration and reject non-finite, recursive, or over-bounded YAML cell values (#394).
 - Run native Excel-backed Cases through the existing resolver and Native Case RUN path without generating or modifying the legacy XML Snapshot. Keep the existing Stage/Sidecar/Snapshot workbook execution path unchanged.
