@@ -18,6 +18,7 @@
 # ATT 4.6.0 - development candidate (S04 acceptance pending)
 
 - Add a bounded, read-only Excel Data Source adapter for native `att-testcase/v1` Definitions. Reuse the legacy Sidecar header resolver, `dataColumns` parser, blank normalization, and safe YAML cell parsing; preserve source order, literal Case ID rules, typed values, selected Case behavior, and workbook/sheet/row/column revision provenance (#394).
+- Preflight native Excel ZIP archives to 256 entries, 32 MiB per expanded entry, and 64 MiB total expanded data; cap selected worksheets at 100,000 physical rows before iteration and reject non-finite, recursive, or over-bounded YAML cell values (#394).
 - Run native Excel-backed Cases through the existing resolver and Native Case RUN path without generating or modifying the legacy XML Snapshot. Keep the existing Stage/Sidecar/Snapshot workbook execution path unchanged.
 - This is a development candidate; the released product version remains unchanged and no POM version was bumped. LOAD integration, Testdata/generator bindings, and Debug/editor interoperability remain separate #388 follow-ups.
 

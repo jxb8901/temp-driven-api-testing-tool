@@ -215,9 +215,11 @@ public final class TestCaseDefinitionResolver {
                         "Source record IDs collide under ASCII case folding", "caseId");
                 String caseId = resolveCaseId(definition.caseIdExpression(), sourceId, record.data(), sourceReference, record);
                 if (!validCaseId(caseId)) throw sourceInvalid(sourceReference, record, "dataSource.caseId",
-                        "Resolved Case ID must be a path-safe segment", caseIdColumn(record, definition.caseIdExpression()));
+                        "Resolved Case ID must be a path-safe segment", caseIdColumn(record, definition.caseIdExpression()),
+                        definition.caseIdExpression() != null);
                 if (!caseIds.add(asciiFold(caseId))) throw sourceInvalid(sourceReference, record, "dataSource.caseId",
-                        "Resolved Case IDs collide under ASCII case folding", caseIdColumn(record, definition.caseIdExpression()));
+                        "Resolved Case IDs collide under ASCII case folding", caseIdColumn(record, definition.caseIdExpression()),
+                        definition.caseIdExpression() != null);
                 String qualifiedId = definition.id() + "." + caseId;
                 if (qualifiedId.length() > 255) throw invalid(sourceReference, "id", "Qualified Case ID exceeds 255 ASCII characters");
                 Map<String,Object> inputs = projectInputs(definition.inputProjection(), record.data(), sourceReference, record);
@@ -600,10 +602,10 @@ public final class TestCaseDefinitionResolver {
         }
         Object value = data.get(key);
         if (!(value instanceof String)) throw sourceInvalid(sourceReference, record,
-                "dataSource.dataColumns." + key, "Case ID source value must be a string", key);
+                "dataSource.dataColumns." + key, "Case ID source value must be a string", key, true);
         String caseId = (String) value;
         if (!validCaseId(caseId)) throw sourceInvalid(sourceReference, record,
-                "dataSource.dataColumns." + key, "Case ID source value is invalid", key);
+                "dataSource.dataColumns." + key, "Case ID source value is invalid", key, true);
         return caseId;
     }
 
@@ -615,9 +617,14 @@ public final class TestCaseDefinitionResolver {
 
     private DiagnosticException sourceInvalid(String definitionReference, TestCaseDefinition.SourceRecord record,
             String field, String detail, String columnAlias) {
+        return sourceInvalid(definitionReference, record, field, detail, columnAlias, false);
+    }
+
+    private DiagnosticException sourceInvalid(String definitionReference, TestCaseDefinition.SourceRecord record,
+            String field, String detail, String columnAlias, boolean mappedDataColumn) {
         CaseSourceProvenance provenance = record.sourceProvenance();
         if (provenance != null && "excel".equals(provenance.sourceType())) {
-            Integer column = provenanceColumn(provenance, columnAlias);
+            Integer column = provenanceColumn(provenance, columnAlias, mappedDataColumn);
             return new DiagnosticException(DiagnosticCodes.TESTCASE_INVALID, "Test Case Resolution failed", detail,
                     provenance.sourceReference(), field, provenance.sheet(), provenance.row(), column,
                     null, null, "Correct the indicated Excel cell and retry Resolution.", null);
@@ -625,12 +632,14 @@ public final class TestCaseDefinitionResolver {
         return invalid(definitionReference, "dataSource.records[" + record.index() + "].recordId", detail);
     }
 
-    private Integer provenanceColumn(CaseSourceProvenance provenance, String alias) {
+    private Integer provenanceColumn(CaseSourceProvenance provenance, String alias, boolean mappedDataColumn) {
         Object rawColumns = provenance.metadata().get("columns");
         if (!(rawColumns instanceof Map<?,?>)) return null;
         Map<?,?> columns = (Map<?,?>) rawColumns;
-        Object raw = "caseId".equals(alias) ? columns.get("caseId")
-                : ((columns.get("data") instanceof Map<?,?>) ? ((Map<?,?>) columns.get("data")).get(alias) : null);
+        Object raw = mappedDataColumn
+                ? ((columns.get("data") instanceof Map<?,?>) ? ((Map<?,?>) columns.get("data")).get(alias) : null)
+                : ("caseId".equals(alias) ? columns.get("caseId")
+                        : ((columns.get("data") instanceof Map<?,?>) ? ((Map<?,?>) columns.get("data")).get(alias) : null));
         return raw instanceof Number ? Integer.valueOf(((Number) raw).intValue()) : null;
     }
 

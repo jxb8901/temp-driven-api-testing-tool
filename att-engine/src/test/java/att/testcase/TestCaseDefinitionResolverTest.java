@@ -20,6 +20,8 @@ import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -222,6 +224,23 @@ class TestCaseDefinitionResolverTest {
         assertTrue(expanded.detail().contains("maximum value count"), expanded.detail());
     }
 
+    @Test void caseIdExpressionAliasCaseIdPointsToMappedExcelColumn() throws Exception {
+        Path workbook = writeExcelWorkbook("caseid-alias-native.xlsx");
+        updateExcelWorkbook(workbook,
+                value -> value.getSheet("Cases").getRow(3).getCell(2).setCellValue("alpha"));
+        String yaml = excelDefinition("testdata/caseid-alias-native.xlsx")
+                .replace("${DATA.stableKey}", "${DATA.caseId}")
+                .replace("stableKey=Stable Key", "caseId=Stable Key");
+
+        DiagnosticException failure = assertThrows(DiagnosticException.class,
+                () -> resolve(yaml));
+        assertEquals("dataSource.caseId", failure.field());
+        assertEquals("Cases", failure.sheet());
+        assertEquals(Integer.valueOf(4), failure.row());
+        assertEquals(Integer.valueOf(3), failure.column(),
+                "An expression alias named caseId identifies the mapped DATA column, not the source-ID column");
+    }
+
     @Test void rejectsNativeExcelBlankWhitespaceReservedDuplicateAndResolvedIdCollisions() throws Exception {
         Path workbook = writeExcelWorkbook("invalid-identities.xlsx");
         updateExcelWorkbook(workbook, value -> value.getSheet("Cases").getRow(2).getCell(0).setCellValue("N/A"));
@@ -310,6 +329,40 @@ class TestCaseDefinitionResolverTest {
         assertTrue(tooLarge.detail().contains("32 MiB"));
     }
 
+    @Test void preflightsNativeExcelArchiveAndPhysicalWorksheetRowLimits() throws Exception {
+        Path tooManyEntries = packageRoot.resolve("testdata/too-many-entries.xlsx");
+        writeExpandedZip(tooManyEntries, att.excel.ExcelDataSourceAdapter.MAX_WORKBOOK_ZIP_ENTRIES + 1, 0L);
+        DiagnosticException entryLimit = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/too-many-entries.xlsx")));
+        assertEquals("dataSource.path", entryLimit.field());
+        assertTrue(entryLimit.detail().contains("ZIP entry limit"));
+
+        Path oversizedEntry = packageRoot.resolve("testdata/oversized-entry.xlsx");
+        writeExpandedZip(oversizedEntry, 1,
+                att.excel.ExcelDataSourceAdapter.MAX_WORKBOOK_UNCOMPRESSED_ENTRY_BYTES + 1L);
+        DiagnosticException entryBytes = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/oversized-entry.xlsx")));
+        assertEquals("dataSource.path", entryBytes.field());
+        assertTrue(entryBytes.detail().contains("uncompressed entry limit"));
+
+        Path oversizedArchive = packageRoot.resolve("testdata/oversized-expanded-archive.xlsx");
+        long expandedEntryBytes = att.excel.ExcelDataSourceAdapter.MAX_WORKBOOK_UNCOMPRESSED_BYTES / 3L + 1L;
+        writeExpandedZip(oversizedArchive, 3, expandedEntryBytes);
+        DiagnosticException archiveBytes = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/oversized-expanded-archive.xlsx")));
+        assertEquals("dataSource.path", archiveBytes.field());
+        assertTrue(archiveBytes.detail().contains("total uncompressed ZIP limit"));
+
+        Path tooManyRows = writeExcelWorkbook("too-many-rows.xlsx");
+        updateExcelWorkbook(tooManyRows, value -> value.getSheet("Cases")
+                .createRow(att.excel.ExcelDataSourceAdapter.MAX_WORKSHEET_ROWS).createCell(0).setCellValue("unused"));
+        DiagnosticException rowLimit = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/too-many-rows.xlsx")));
+        assertEquals("Cases", rowLimit.sheet());
+        assertEquals(Integer.valueOf(att.excel.ExcelDataSourceAdapter.MAX_WORKSHEET_ROWS + 1), rowLimit.row());
+        assertTrue(rowLimit.detail().contains("physical row limit"));
+    }
+
     private String excelDefinition(String workbookPath) {
         return "schemaVersion: att-testcase/v1\n"
                 + "id: fpp.transfer.excel\nflow: payment.transfer.v1\n"
@@ -356,6 +409,24 @@ class TestCaseDefinitionResolverTest {
         try (java.io.InputStream input = Files.newInputStream(path); XSSFWorkbook workbook = new XSSFWorkbook(input)) {
             update.accept(workbook);
             try (java.io.OutputStream output = Files.newOutputStream(path)) { workbook.write(output); }
+        }
+    }
+
+    private void writeExpandedZip(Path path, int entryCount, long expandedEntryBytes) throws Exception {
+        Files.createDirectories(path.getParent());
+        byte[] buffer = new byte[8192];
+        Arrays.fill(buffer, (byte) 'A');
+        try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(path))) {
+            for (int index = 0; index < entryCount; index++) {
+                output.putNextEntry(new ZipEntry("entry-" + index));
+                long remaining = expandedEntryBytes;
+                while (remaining > 0L) {
+                    int count = (int) Math.min(buffer.length, remaining);
+                    output.write(buffer, 0, count);
+                    remaining -= count;
+                }
+                output.closeEntry();
+            }
         }
     }
 

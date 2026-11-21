@@ -38,11 +38,17 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /** Read-only, bounded adapter from one native Test Case Excel Data Source to resolved source rows. */
 public final class ExcelDataSourceAdapter {
     public static final long MAX_WORKBOOK_BYTES = 32L * 1024L * 1024L;
+    public static final int MAX_WORKBOOK_ZIP_ENTRIES = 256;
+    public static final long MAX_WORKBOOK_UNCOMPRESSED_ENTRY_BYTES = 32L * 1024L * 1024L;
+    public static final long MAX_WORKBOOK_UNCOMPRESSED_BYTES = 64L * 1024L * 1024L;
     public static final int MAX_HEADER_ROWS = 86400;
+    public static final int MAX_WORKSHEET_ROWS = 100000;
     private static final int MAX_YAML_VALUE_DEPTH = 64;
     private static final int MAX_YAML_VALUE_NODES = 100000;
 
@@ -71,6 +77,7 @@ public final class ExcelDataSourceAdapter {
                     null, null, null, failure);
         }
         String workbookRevision = sha256(bytes);
+        preflightWorkbookArchive(bytes, workbookReference);
 
         List<DataColumnConfig> dataColumns;
         try {
@@ -93,7 +100,12 @@ public final class ExcelDataSourceAdapter {
             Sheet sheet = workbook.getSheet(sheetName);
             if (sheet == null) throw invalid(workbookReference, "dataSource.sheet",
                     "Configured Excel sheet does not exist: " + sheetName, sheetName, null, null, null);
-            if (sheet.getLastRowNum() < headerRows - 1)
+            int lastRowIndex = sheet.getLastRowNum();
+            if ((long) lastRowIndex + 1L > MAX_WORKSHEET_ROWS)
+                throw invalid(workbookReference, "dataSource", "Excel worksheet exceeds the "
+                        + MAX_WORKSHEET_ROWS + " physical row limit", sheetName,
+                        Integer.valueOf(MAX_WORKSHEET_ROWS + 1), null, null);
+            if (lastRowIndex < headerRows - 1)
                 throw invalid(workbookReference, "dataSource.headerRows",
                         "Configured Excel header rows do not exist", sheetName, null, null, null);
 
@@ -229,6 +241,43 @@ public final class ExcelDataSourceAdapter {
                 output.write(buffer, 0, read);
             }
             return output.toByteArray();
+        }
+    }
+
+    /** Checks expanded XLSX ZIP content before POI materializes its workbook object graph. */
+    private static void preflightWorkbookArchive(byte[] bytes, String workbookReference) {
+        int entries = 0;
+        long totalExpanded = 0L;
+        try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(bytes))) {
+            byte[] buffer = new byte[8192];
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                if (++entries > MAX_WORKBOOK_ZIP_ENTRIES)
+                    throw invalid(workbookReference, "dataSource.path", "Excel workbook exceeds the "
+                            + MAX_WORKBOOK_ZIP_ENTRIES + " ZIP entry limit", null, null, null, null);
+                long entryExpanded = 0L;
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    if (read == 0) continue;
+                    entryExpanded += read;
+                    totalExpanded += read;
+                    if (entryExpanded > MAX_WORKBOOK_UNCOMPRESSED_ENTRY_BYTES)
+                        throw invalid(workbookReference, "dataSource.path", "Excel workbook ZIP entry exceeds the "
+                                + "32 MiB uncompressed entry limit", null, null, null, null);
+                    if (totalExpanded > MAX_WORKBOOK_UNCOMPRESSED_BYTES)
+                        throw invalid(workbookReference, "dataSource.path", "Excel workbook exceeds the "
+                                + "64 MiB total uncompressed ZIP limit", null, null, null, null);
+                }
+                input.closeEntry();
+            }
+            if (entries == 0)
+                throw invalid(workbookReference, "dataSource.path", "Excel Data Source is not a valid XLSX ZIP archive",
+                        null, null, null, null);
+        } catch (DiagnosticException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            throw invalid(workbookReference, "dataSource.path", "Excel Data Source is not a valid or supported XLSX archive",
+                    null, null, null, failure);
         }
     }
 
