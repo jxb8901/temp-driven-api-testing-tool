@@ -44,19 +44,30 @@ dataSource:
   type: inline
   records:
     - recordId: first
-      data: {id: R-001, password: secret-one}
+      data: {id: R-001}
     - recordId: second
-      data: {id: R-002, password: secret-two}
+      data: {id: R-002}
 `;
     const getSource = vi.fn(async (_packageId: string, query: { kind: string }, _signal?: AbortSignal) => query.kind === 'manifest'
       ? { available: true, present: true, logicalPath: 'package.yaml', format: 'yaml', text: 'schemaVersion: att-package/v2\nresources:\n  testcaseRoot: testcase\n', sourceEtag: 'e', revision: 'r', baseSourceRevision: 'base-1', registryRevision: 'registry-1' }
       : { available: true, present: true, logicalPath: 'testcase/refund/testcase.yaml', format: 'yaml', text: definition, sourceEtag: 'e', revision: 'r', baseSourceRevision: 'base-1', registryRevision: 'registry-1' });
+    const previewNative = vi.fn(async () => ({ kind: 'NativeTestCasePreview', valid: true, sourceType: 'inline',
+      sourceReference: 'testcase/refund/testcase.yaml', definitionRevision: 'def-revision', packageSourceRevision: 'base-1',
+      registryRevision: 'registry-1', resolvedCount: 2, selectedCount: 2, previewCount: 2, truncated: false,
+      diagnostics: [], cases: [
+        { qualifiedCaseId: 'payments.refund.R-001', caseId: 'R-001', definitionId: 'payments.refund', flowId: 'checkout.v1',
+          tags: [], inputs: { id: 'R-001', password: '[REDACTED]' }, redacted: true,
+          provenance: { sourceType: 'inline', sourceReference: 'testcase/refund/testcase.yaml', recordId: 'first', recordIndex: 0 } },
+        { qualifiedCaseId: 'payments.refund.R-002', caseId: 'R-002', definitionId: 'payments.refund', flowId: 'checkout.v1',
+          tags: [], inputs: { id: 'R-002', password: '[REDACTED]' }, redacted: true,
+          provenance: { sourceType: 'inline', sourceReference: 'testcase/refund/testcase.yaml', recordId: 'second', recordIndex: 1 } },
+      ] }));
     const previewRun = vi.fn(async () => ({ draftId: 'R-native', expiresAt: '2099-01-01T00:00:00Z' }));
     const submitRun = vi.fn(async () => ({ jobId: 'J-native' }));
     const onJobAccepted = vi.fn();
     const api = {
       listResources: vi.fn(async () => ({ items: [{ type: 'flow', resourceId: 'f1', logicalId: 'checkout.v1', name: 'Checkout' }], total: 1 })),
-      getManagedPackageAuthoringSource: getSource,
+      getManagedPackageAuthoringSource: getSource, previewNativeTestCase: previewNative,
       supportsNativeCaseRun: vi.fn(() => true), previewRun, submitRun,
     } as unknown as ExplorerApi;
 
@@ -64,11 +75,12 @@ dataSource:
       <NativeTestCaseAuthoringWorkspace api={api} packageId="payments" sourcePath="testcase/refund/testcase.yaml" onJobAccepted={onJobAccepted} />
     </AppShellContext.Provider>));
     await settle();
-    act(() => button('Preview / Resolve').click());
+    await act(async () => button('Preview / Resolve').click());
     expect(host.textContent).toContain('2 resolved Case(s)');
     expect(host.textContent).toContain('payments.refund.R-001');
+    expect(previewNative).toHaveBeenCalledWith('payments', { path: 'testcase/refund/testcase.yaml', source: definition }, expect.any(AbortSignal));
     const preview = host.querySelector<HTMLElement>('[aria-label="Resolved Case design-time preview"]');
-    expect(preview?.textContent).toContain('sensitive keys are redacted');
+    expect(preview?.textContent).toContain('redacted by Server policy');
     expect(preview?.textContent).not.toContain('secret-one');
     expect(preview?.textContent).not.toContain('secret-two');
 
@@ -97,14 +109,81 @@ dataSource:
         available: true, present: true, logicalPath: query.kind === 'manifest' ? 'package.yaml' : 'testcase/a/testcase.yaml', format: 'yaml',
         text: query.kind === 'manifest' ? 'resources:\n  testcaseRoot: testcase\n'
           : 'schemaVersion: att-testcase/v1\nid: a\nflow: checkout.v1\ninputs: {}\n', sourceEtag: 'e', revision: 'r', baseSourceRevision: 'base-1', registryRevision: 'registry-1',
-      })), supportsNativeCaseRun: vi.fn(() => false), previewRun: vi.fn(), submitRun: vi.fn(),
+      })), previewNativeTestCase: vi.fn(async () => ({ kind: 'NativeTestCasePreview', valid: true, sourceType: 'direct',
+        sourceReference: 'testcase/a/testcase.yaml', definitionRevision: 'd', packageSourceRevision: 'base-1', registryRevision: 'registry-1',
+        resolvedCount: 1, selectedCount: 1, previewCount: 1, truncated: false, diagnostics: [], cases: [{
+          qualifiedCaseId: 'a.default', caseId: 'default', definitionId: 'a', flowId: 'checkout.v1', tags: [], inputs: {},
+          provenance: { sourceType: 'inline', sourceReference: 'testcase/a/testcase.yaml' },
+        }] })), supportsNativeCaseRun: vi.fn(() => false), previewRun: vi.fn(), submitRun: vi.fn(),
     } as unknown as ExplorerApi;
     await act(async () => root.render(<AppShellContext.Provider value={context()}>
       <NativeTestCaseAuthoringWorkspace api={api} packageId="payments" sourcePath="testcase/a/testcase.yaml" />
     </AppShellContext.Provider>));
-    await settle(); act(() => button('Preview / Resolve').click());
+    await settle(); await act(async () => button('Preview / Resolve').click());
     const run = button('Validate selected Cases for RUN');
     expect(run.disabled).toBe(true);
     expect(host.textContent).toContain('att-execution/v2');
+  });
+
+  it('shows read-only Excel provenance and maps one selected row to Native RUN', async () => {
+    const definition = `schemaVersion: att-testcase/v1\nid: excel-cases\nflow: checkout.v1\ncaseIdExpression: "\${DATA.id}"\ndataSource:\n  type: excel\n  path: testcase/cases.xlsx\n  sheet: Cases\n  headerRows: 1\n  caseId: ID\n  dataColumns: id=ID, amount=Amount\n`;
+    const previewNative = vi.fn(async () => ({ kind: 'NativeTestCasePreview', valid: true, sourceType: 'excel',
+      sourceReference: 'testcase/excel-cases/testcase.yaml', definitionRevision: 'def-e', packageSourceRevision: 'package-e',
+      registryRevision: 'registry-e', workbookRevision: 'workbook-e', resolvedCount: 2, selectedCount: 2, previewCount: 2,
+      truncated: false, diagnostics: [], cases: [
+        { qualifiedCaseId: 'excel-cases.case-1', caseId: 'case-1', definitionId: 'excel-cases', flowId: 'checkout.v1',
+          tags: [], inputs: { amount: 10 }, provenance: { sourceType: 'excel', sourceReference: 'testcase/cases.xlsx', sheet: 'Cases', row: 2, recordId: 'case-1', recordIndex: 0 } },
+        { qualifiedCaseId: 'excel-cases.case-2', caseId: 'case-2', definitionId: 'excel-cases', flowId: 'checkout.v1',
+          tags: [], inputs: { amount: 20 }, provenance: { sourceType: 'excel', sourceReference: 'testcase/cases.xlsx', sheet: 'Cases', row: 3, recordId: 'case-2', recordIndex: 1 } },
+      ] }));
+    const previewRun = vi.fn(async () => ({ draftId: 'R-excel', expiresAt: '2099-01-01T00:00:00Z' }));
+    const api = {
+      listResources: vi.fn(async () => ({ items: [{ type: 'flow', resourceId: 'f1', logicalId: 'checkout.v1' }], total: 1 })),
+      getManagedPackageAuthoringSource: vi.fn(async (_packageId: string, query: { kind: string }) => ({
+        available: true, present: true, logicalPath: query.kind === 'manifest' ? 'package.yaml' : 'testcase/excel-cases/testcase.yaml',
+        format: 'yaml', text: query.kind === 'manifest' ? 'resources:\n  testcaseRoot: testcase\n' : definition,
+        sourceEtag: 'e', revision: 'r', baseSourceRevision: 'package-e', registryRevision: 'registry-e',
+      })),
+      previewNativeTestCase: previewNative, supportsNativeCaseRun: vi.fn(() => true), previewRun,
+      submitRun: vi.fn(),
+    } as unknown as ExplorerApi;
+    await act(async () => root.render(<AppShellContext.Provider value={context()}>
+      <NativeTestCaseAuthoringWorkspace api={api} packageId="payments" sourcePath="testcase/excel-cases/testcase.yaml" />
+    </AppShellContext.Provider>));
+    await settle(); await act(async () => button('Preview / Resolve').click());
+    expect(host.textContent).toContain('Workbook revision:');
+    expect(host.textContent).toContain('Cases row 2');
+    const checkboxes = [...host.querySelectorAll<HTMLInputElement>('.att-native-case-preview-list input[type="checkbox"]')];
+    expect(checkboxes).toHaveLength(2);
+    act(() => checkboxes[0].click());
+    await act(async () => button('Validate selected Cases for RUN').click());
+    expect(previewRun).toHaveBeenCalledWith(expect.objectContaining({
+      target: { type: 'nativeCase', definitionId: 'excel-cases', selection: { resolvedCaseIds: ['case-2'] } },
+    }), expect.any(AbortSignal));
+  });
+
+  it('surfaces structured Excel row and column diagnostics without previewing a Run draft', async () => {
+    const definition = `schemaVersion: att-testcase/v1\nid: excel-errors\nflow: checkout.v1\ndataSource:\n  type: excel\n  path: testcase/cases.xlsx\n  sheet: Cases\n  caseId: ID\n  dataColumns: amount=Amount\n`;
+    const previewNative = vi.fn(async () => ({ kind: 'NativeTestCasePreview', valid: false, sourceType: 'invalid',
+      sourceReference: 'testcase/excel-errors/testcase.yaml', packageSourceRevision: 'package-e', registryRevision: 'registry-e',
+      resolvedCount: 0, selectedCount: 0, previewCount: 0, truncated: false, cases: [],
+      diagnostics: [{ code: 'ATT-TESTCASE-INVALID', summary: 'Excel cell is invalid', field: 'dataSource.dataColumns.amount',
+        sheet: 'Cases', row: 9, column: 3, suggestion: 'Correct the indicated cell.' }] }));
+    const previewRun = vi.fn();
+    const api = {
+      listResources: vi.fn(async () => ({ items: [{ type: 'flow', resourceId: 'f1', logicalId: 'checkout.v1' }], total: 1 })),
+      getManagedPackageAuthoringSource: vi.fn(async (_packageId: string, query: { kind: string }) => ({
+        available: true, present: true, logicalPath: query.kind === 'manifest' ? 'package.yaml' : 'testcase/excel-errors/testcase.yaml',
+        format: 'yaml', text: query.kind === 'manifest' ? 'resources:\n  testcaseRoot: testcase\n' : definition,
+        sourceEtag: 'e', revision: 'r', baseSourceRevision: 'package-e', registryRevision: 'registry-e',
+      })), previewNativeTestCase: previewNative, previewRun,
+    } as unknown as ExplorerApi;
+    await act(async () => root.render(<AppShellContext.Provider value={context()}>
+      <NativeTestCaseAuthoringWorkspace api={api} packageId="payments" sourcePath="testcase/excel-errors/testcase.yaml" />
+    </AppShellContext.Provider>));
+    await settle(); await act(async () => button('Preview / Resolve').click());
+    expect(host.textContent).toContain('row 9'); expect(host.textContent).toContain('column 3');
+    expect(host.textContent).toContain('dataSource.dataColumns.amount');
+    expect(previewRun).not.toHaveBeenCalled();
   });
 });

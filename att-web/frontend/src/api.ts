@@ -7,6 +7,7 @@ import type {
   DebugFormResponse, EffectiveConfigurationQuery, PackageSutMetricsCatalog, PackageSutMetricsDraft,
   PackageFileIndexPage, PackageSutMetricsDraftAction, PackageSutMetricsResource, PackageSutMetricsResourceDraftInput,
   PackageSutMetricsResourceKind, ResourceDetail, ResourceIdentity, SourceProjection, TestdataRecordsResponse,
+  NativeTestCasePreviewResponse,
   ResourcePage, ResourceQuery,
 } from './features/explorer/types';
 import type {
@@ -597,6 +598,9 @@ export const api = {
       referenceId: query.referenceId,
       environment: query.environment,
     }), { signal, cache: 'no-store' });
+  },
+  previewNativeTestCase(packageId: string, input: { path: string; source: string }, signal?: AbortSignal): Promise<NativeTestCasePreviewResponse> {
+    return postJson<NativeTestCasePreviewResponse>('packages/' + encodeURIComponent(packageId) + '/native-testcase-preview', input, signal);
   },
   getCentralAuthoringSource(path: string, signal?: AbortSignal): Promise<ManagedAuthoringSource> {
     return request('configuration/authoring-source' + queryString({ path }), { signal, cache: 'no-store' });

@@ -42,11 +42,11 @@ See the [active schema](../../schemas/att-testcase-v1.schema.json), [single inli
 
 In Explorer, choose **New native Test Case** or open an indexed `testcase.yaml`. The guided editor sets the Package-scoped Definition ID, name, tags, canonical Flow, typed inputs, and either one Case or inline records. Advanced YAML remains available for fields outside the guided form. New files must be placed under the Package's configured `resources.testcaseRoot` (default `testcase/`).
 
-**Preview / Resolve** provides a browser-side design-time view capped at 100 KiB and 1,000 Cases. It shows qualified IDs, source record provenance, tags, and typed inputs with sensitive-key values masked. This preview does not freeze a Job selection; server-side Change Set validation is authoritative, and RUN resolves the published Package source again.
+**Preview / Resolve** sends the current editor candidate and Package-relative `testcase.yaml` path to the authenticated Server. The Server checks the exact USER/editor authority and Package source revisions, then resolves the candidate through the bounded Test Case resolver and S04 Excel adapter. Preview output is capped at 1,000 Cases and returns the Package source revision, Definition revision, and workbook revision when applicable. Excel row errors include sheet, row, and column locations. Typed inputs use the Server's configured redaction policy. Preview does not create a Job or RunDraft, write Package source, or modify a workbook; RUN validation resolves and freezes the selected Case IDs again.
 
 Use **Add to Change Set** to stage a create or replacement through the existing Package source workflow: Draft → Validate → Review → Publish. The current Package source stays active until Publish. After publication, preview the latest source and select the Case IDs to validate and submit a RUN. Native Case RUN is available only when the Server advertises `att-execution/v2`; the Server validates and freezes the source and selected IDs for the Job.
 
-The editor can author the S01 Excel Data Source mapping fields, but row preview and resolution remain unavailable until the S04 adapter is integrated. Studio does not open or modify the workbook in this state. Use the existing Workbook/Sidecar editor for legacy suites.
+Excel-backed definitions use the same read-only S04 adapter as native resolution, with row and column diagnostics shown in Studio. The existing Workbook/Sidecar editor remains available for legacy suites.
 
 ## Workbook
 

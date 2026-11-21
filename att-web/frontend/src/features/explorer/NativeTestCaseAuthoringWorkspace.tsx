@@ -5,9 +5,8 @@ import type { RunDefinition } from '../run/RunPage';
 import { AuthoringWorkflow } from './AuthoringWorkflow';
 import { SourceAuthoringWorkspace, type SourceAuthoringInitialCandidate } from './SourceAuthoringWorkspace';
 import { useAccessibleConfirmation } from './useAccessibleConfirmation';
-import type { ExplorerApi, ResourceSummary } from './types';
+import type { ExplorerApi, NativeTestCasePreviewResponse, ResourceSummary } from './types';
 import type { ManagedAuthoringSource } from './sourceManagement';
-import { previewNativeTestCase, type NativeCasePreviewResult } from './nativeTestCasePreview';
 import './native-testcase-authoring.css';
 
 const MAX_FLOW_PAGES = 20;
@@ -91,7 +90,7 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
   const [flows, setFlows] = useState<ResourceSummary[]>([]);
   const [flowsLoaded, setFlowsLoaded] = useState(false);
   const [flowError, setFlowError] = useState(false);
-  const [preview, setPreview] = useState<NativeCasePreviewResult | null>(null);
+  const [preview, setPreview] = useState<NativeTestCasePreviewResponse | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [candidate, setCandidate] = useState<SourceAuthoringInitialCandidate | null>(null);
   const [candidatePath, setCandidatePath] = useState('');
@@ -111,11 +110,9 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
   const records = Array.isArray(dataSource?.records) ? dataSource.records : [];
   const dirty = Boolean(source !== loadedSource || runBusy);
   const isNewSource = !activeSourcePath;
-  const availableFlows = useMemo(() => flowsLoaded ? new Set(flows.map(item => item.logicalId).filter((id): id is string => Boolean(id))) : undefined,
-    [flows, flowsLoaded]);
   const sourceReadOnly = sourceState !== 'ready' || Boolean(activeSourcePath && !sourceInfo?.present);
   const sourceCurrent = Boolean(activeSourcePath && source === loadedSource && !candidate && sourceState === 'ready');
-  const previewValid = Boolean(preview && preview.cases.length && preview.diagnostics.length === 0);
+  const previewValid = Boolean(preview?.valid && preview.cases.length && preview.diagnostics.length === 0);
   const selectedCases = preview?.cases.filter(item => selected.includes(item.caseId)) || [];
 
   useEffect(() => {
@@ -190,7 +187,7 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
         setSourceState('error'); setError('This Server does not expose the Package Change Set revision contract.'); return;
       }
       try {
-        const managed = await api.getManagedPackageAuthoringSource(packageId, { kind: 'file', path: activeSourcePath }, controller.signal);
+        const managed = await api.getManagedPackageAuthoringSource(packageId, { kind: 'native-testcase', path: activeSourcePath }, controller.signal);
         if (cancelled) return;
         if (!managed.available || !managed.present || !managed.baseSourceRevision || !managed.registryRevision
           || !/(?:^|\/)testcase\.ya?ml$/i.test(managed.logicalPath)) {
@@ -258,13 +255,33 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
     setSource(document.toString({ lineWidth: 0 })); setError(''); clearPreview();
   }
 
-  function runDesignPreview() {
+  async function runDesignPreview() {
+    if (!api.previewNativeTestCase) {
+      setError('This Server does not expose bounded Native Test Case preview.'); setStatus(''); return;
+    }
+    const targetPath = actualPath.trim();
+    if (!safeRelativePath(targetPath) || !targetPath.endsWith('/testcase.yaml')
+        || testcaseRootState !== 'ready' || !(targetPath === `${testcaseRoot}/testcase.yaml` || targetPath.startsWith(`${testcaseRoot}/`))) {
+      setError(`Enter a safe Package-relative testcase.yaml under the configured resources.testcaseRoot (${testcaseRoot}/).`); setStatus(''); return;
+    }
+    const generation = ++requestGeneration.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController(); controllerRef.current = controller;
     setServerDraft(null);
-    const result = previewNativeTestCase(source, availableFlows);
-    setPreview(result);
-    setSelected(result.diagnostics.length ? [] : result.cases.map(item => item.caseId));
-    setStatus(result.diagnostics.length ? 'Design-time preview found issues. Correct them, then preview again.'
-      : `Design-time preview resolved ${result.cases.length} case(s). RUN will resolve the current Package source again.`);
+    setPreview(null); setSelected([]); setError(''); setStatus('Resolving the candidate against the current Package source with the bounded Server adapter…');
+    try {
+      const result = await api.previewNativeTestCase(packageId, { path: targetPath, source }, controller.signal);
+      if (controller.signal.aborted || generation !== requestGeneration.current) return;
+      setPreview(result);
+      setSelected(result.valid && result.diagnostics.length === 0 ? result.cases.map(item => item.caseId) : []);
+      setStatus(result.valid
+        ? `Server preview resolved ${result.resolvedCount} case(s)${result.truncated ? `; showing the first ${result.previewCount}` : ''}. RUN resolves and freezes the selected IDs again.`
+        : 'Server preview found source issues. Correct them, then preview again.');
+    } catch (reason) {
+      if (!controller.signal.aborted && generation === requestGeneration.current) {
+        setPreview(null); setSelected([]); setError(safeRequestError(reason, 'preview Native Test Case')); setStatus('');
+      }
+    }
   }
 
   async function stageDefinition() {
@@ -289,7 +306,7 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
       setError('This Server does not expose the Package Change Set revision contract.'); setStatus(''); return;
     }
     try {
-      const managed = await api.getManagedPackageAuthoringSource(packageId, { kind: 'file', path: targetPath }, controller.signal);
+      const managed = await api.getManagedPackageAuthoringSource(packageId, { kind: 'native-testcase', path: targetPath }, controller.signal);
       if (controller.signal.aborted || generation !== requestGeneration.current) return;
       if (!managed.available || !managed.baseSourceRevision || !managed.registryRevision) {
         setError('The Server did not provide a complete Package source revision and registration revision.'); setStatus(''); return;
@@ -435,7 +452,7 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
         </>}
 
         {excel && <section className="att-native-excel-source" aria-label="Excel Data Source mapping">
-          <p role="note">Excel rows are read only. Resolution and row diagnostics become available when the S04 adapter is integrated.</p>
+          <p role="note">The Server opens the Package workbook read only through the bounded S04 adapter. Preview does not write to the workbook.</p>
           <label>Workbook path<input aria-label="Excel workbook path" list="att-native-case-excel-paths" value={String(dataSource?.path || '')}
             disabled={sourceReadOnly || advanced} onChange={event => editNested('dataSource', 'path', event.currentTarget.value)} />
             <datalist id="att-native-case-excel-paths">{excelPaths.map(item => <option key={item} value={item} />)}</datalist></label>
@@ -474,26 +491,37 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
 
       {preview && <section className="att-native-case-preview" aria-label="Resolved Case design-time preview">
         <h3>Resolved Case preview</h3>
-        <p role="note">Design-time preview only. It does not freeze a Job selection; the Server resolves and freezes the selected Case IDs again during RUN validation.</p>
-        {preview.diagnostics.length > 0 && <ul role="alert">{preview.diagnostics.map((message, index) => <li key={`${index}:${message}`}>{message}</li>)}</ul>}
-        {preview.sourceType === 'excel' && <p role="status">No workbook was read or changed by this browser preview.</p>}
+        <p role="note">Read only design-time preview. It does not create a Job or freeze a Job selection; RUN validation resolves the selected Case IDs again.</p>
+        <p>Package source revision: <code>{preview.packageSourceRevision || 'unavailable'}</code>
+          {preview.definitionRevision && <> · Candidate Definition revision: <code>{preview.definitionRevision}</code></>}
+          {preview.workbookRevision && <> · Workbook revision: <code>{preview.workbookRevision}</code></>}</p>
+        {preview.diagnostics.length > 0 && <ul role="alert">{preview.diagnostics.map((diagnostic, index) => {
+          const location = [diagnostic.sheet && `sheet ${diagnostic.sheet}`, diagnostic.row != null && `row ${diagnostic.row}`,
+            diagnostic.column != null && `column ${diagnostic.column}`].filter(Boolean).join(', ');
+          return <li key={`${index}:${diagnostic.code || diagnostic.summary || 'diagnostic'}`}>
+            <strong>{diagnostic.summary || diagnostic.code || 'Test Case preview issue'}</strong>
+            {location && <span> · {location}</span>}{diagnostic.field && <span> · {diagnostic.field}</span>}
+            {diagnostic.detail && <p>{diagnostic.detail}</p>}{diagnostic.suggestion && <p>{diagnostic.suggestion}</p>}
+          </li>;
+        })}</ul>}
+        {preview.sourceType === 'excel' && <p role="status">Workbook rows were resolved by the read only S04 adapter.</p>}
         {preview.cases.length > 0 && <>
           <div className="att-native-case-preview-toolbar">
-            <strong>{preview.cases.length} resolved Case(s)</strong>
+            <strong>{preview.resolvedCount} resolved Case(s){preview.truncated ? ` · showing ${preview.previewCount}` : ''}</strong>
             <button type="button" onClick={() => setSelected(selected.length === preview.cases.length ? [] : preview.cases.map(item => item.caseId))}
               disabled={preview.diagnostics.length > 0}>{selected.length === preview.cases.length ? 'Clear selection' : 'Select all'}</button>
           </div>
-          <ul className="att-native-case-preview-list">{preview.cases.map(item => <li key={item.qualifiedId}>
+          <ul className="att-native-case-preview-list">{preview.cases.map(item => <li key={item.qualifiedCaseId}>
             <label><input type="checkbox" checked={selected.includes(item.caseId)} disabled={preview.diagnostics.length > 0}
               onChange={event => { const checked = event.currentTarget.checked; setSelected(current => checked
                 ? [...current, item.caseId] : current.filter(id => id !== item.caseId)); }} />
-              <strong>{item.qualifiedId}</strong></label>
-            <p>Flow <code>{item.flow}</code> · {item.provenance.kind === 'inline'
-              ? `Inline record ${item.provenance.recordIndex} · ${item.provenance.recordId}` : 'Definition inputs'}</p>
+              <strong>{item.qualifiedCaseId}</strong></label>
+            <p>Flow <code>{item.flowId}</code> · {item.provenance.sourceType === 'excel'
+              ? `${item.provenance.sheet || 'Workbook'} row ${item.provenance.row ?? 'unknown'}`
+              : item.provenance.recordIndex != null ? `Inline record ${item.provenance.recordIndex + 1}${item.provenance.recordId ? ` · ${item.provenance.recordId}` : ''}` : 'Definition inputs'}</p>
             <p>Tags: {item.tags.length ? item.tags.join(', ') : 'none'}</p>
-            <details><summary>Typed input values (sensitive keys are redacted)</summary><pre>{JSON.stringify(item.inputs, null, 2)}</pre></details>
+            <details><summary>Typed input values ({item.redacted ? 'some values are redacted by Server policy' : 'Server policy applied'})</summary><pre>{JSON.stringify(item.inputs, null, 2)}</pre></details>
           </li>)}</ul>
-          {preview.sourceType === 'excel' && null}
           {previewValid && <div className="att-native-case-run-actions">
             <button type="button" className="button button-quiet" onClick={() => void validateRun()}
               disabled={!selectedCases.length || !sourceCurrent || runBusy || !api.previewRun || !api.supportsNativeCaseRun?.()}

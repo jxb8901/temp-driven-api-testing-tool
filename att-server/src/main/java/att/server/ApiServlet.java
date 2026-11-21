@@ -356,6 +356,9 @@ public final class ApiServlet extends HttpServlet {
             res.setHeader("Cache-Control","private, no-store");
         if(path.startsWith("/auth/")){authPost(req,res,path,requestId);return;}
         if(authorizationPrincipal==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","An authenticated Servlet Principal is required",requestId);return;}
+        if(path.matches("/packages/[^/]+/native-testcase-preview")) {
+            packageNativeTestCasePreviewPost(req,res,path,requestId);return;
+        }
         if(path.matches("/admin/sut-metrics/(?:sources|profiles|metric-sources|groups|sources/[^/]+/test|profiles/preview)")) {
             if(!requireSystemAdmin(req,res,requestId))return;
             if(!checkOrigin(req,res,requestId,false))return;
@@ -1182,6 +1185,10 @@ public final class ApiServlet extends HttpServlet {
                 ||req.getParameter("environment")!=null)) {
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;
         }
+        if("native-testcase".equals(kind)&&(resourceType!=null||resourceId!=null||origin!=null||referenceId!=null
+                ||req.getParameter("environment")!=null)) {
+            error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);return;
+        }
         try {
             // Resolve registration first so unknown IDs stay 404; content access itself remains editor-only.
             runtime.packageView(packageId,principal(req));
@@ -1198,6 +1205,7 @@ public final class ApiServlet extends HttpServlet {
                         case "load" -> runtime.inspectAuthoringPackageSource(packageId,"load",null,null,sourcePath,null,null,null,login,null);
                         case "testdata" -> runtime.inspectAuthoringPackageSource(packageId,"testdata",null,resourceId,null,null,null,req.getParameter("environment"),login,null);
                         case "testcase" -> runtime.inspectAuthoringPackageSource(packageId,"testcase",null,resourceId,null,null,null,null,login,sourceSelector);
+                        case "native-testcase" -> runtime.inspectAuthoringPackageSource(packageId,"native-testcase",null,null,sourcePath,null,null,null,login,null);
                         default -> throw new ServerRuntime.NotFoundException();
                     };
                         PackageRegistry.Snapshot responseRegistry=runtime.packageRegistry.snapshot();
@@ -1217,6 +1225,45 @@ public final class ApiServlet extends HttpServlet {
           catch(ServerRuntime.InspectionResponseTooLargeException e){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Package source exceeds the configured size limit",requestId);}
           catch(IllegalArgumentException e){error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);}
           catch(Exception e){error(res,500,"ATT-SERVER-REQUEST-FAILED","The package source request could not be completed",requestId);}
+    }
+    private void packageNativeTestCasePreviewPost(HttpServletRequest req,HttpServletResponse res,String path,String requestId)throws IOException {
+        res.setHeader("Cache-Control","private, no-store");res.setHeader("X-Content-Type-Options","nosniff");
+        String login=principalExact(req);
+        if(login==null){error(res,401,"ATT-SERVER-AUTHENTICATION-REQUIRED","Authentication is required",requestId);return;}
+        if(!isJson(req.getContentType())){error(res,415,"ATT-SERVER-UNSUPPORTED-MEDIA-TYPE","Content-Type must be application/json",requestId);return;}
+        if(!checkOrigin(req,res,requestId,false))return;
+        try {
+            int limit=Math.min(runtime.config.maxRequestBytes,att.testcase.TestCaseDefinitionResolver.MAX_SOURCE_BYTES+8192);
+            byte[] bytes=readBoundedBody(req.getInputStream(),limit);
+            if(bytes.length>limit){error(res,413,"ATT-SERVER-REQUEST-TOO-LARGE","Native Test Case preview request exceeds its size limit",requestId);return;}
+            JsonNode input;
+            try{input=ServerRuntime.JSON.readTree(bytes);}catch(JsonProcessingException malformed){throw new IllegalArgumentException("Request body is not valid JSON");}
+            if(input==null||!input.isObject())throw new IllegalArgumentException("A JSON object is required");
+            java.util.Iterator<String> fields=input.fieldNames();while(fields.hasNext())
+                if(!Set.of("path","source").contains(fields.next()))throw new IllegalArgumentException("Native Test Case preview accepts only path and source");
+            String relativePath=text(input,"path"),source=text(input,"source");
+            String packageId=segment(path,2);
+            runtime.packageView(packageId,principal(req));
+            if(!runtime.canEditPackageContent(packageId,login)) {
+                error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);return;
+            }
+            Map<String,Object> result=runtime.withPackageSourceAuthority(login,
+                    id->id.equals(principalExact(req))&&operatorCapability(req,id),
+                    ()->runtime.previewNativeTestCase(packageId,relativePath,source,login));
+            if(!requireOperator(req,res,requestId))return;
+            if(!login.equals(principalExact(req))||!runtime.canEditPackageContent(packageId,login)) {
+                error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);return;
+            }
+            result.put("requestId",requestId);json(res,200,result);
+        } catch(ServerRuntime.AuthoringSourceDeniedException denied){error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);}
+          catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","Package Test Case preview was not found",requestId);}
+          catch(ServerRuntime.StaleDraftException stale){error(res,409,"ATT-PACKAGE-SOURCE-CONFLICT","Package source changed while the preview was being resolved",requestId);}
+          catch(ServerRuntime.InspectionCapacityException full){error(res,503,"ATT-SERVER-INSPECTION-CAPACITY","Package inspection capacity is full; retry shortly",requestId);}
+          catch(ServerRuntime.InspectionTimeoutException timeout){error(res,504,"ATT-SERVER-INSPECTION-TIMEOUT","Package inspection exceeded its time limit",requestId);}
+          catch(ServerRuntime.InspectionResponseTooLargeException oversized){error(res,413,"ATT-SERVER-INSPECTION-RESPONSE-TOO-LARGE","Native Test Case preview exceeded the configured response limit",requestId);}
+          catch(ServerRuntime.DraftValidationException invalid){error(res,422,"ATT-TESTCASE-INVALID","Native Test Case preview failed validation",requestId,invalid.diagnostics);}
+          catch(IllegalArgumentException invalid){error(res,400,"ATT-SERVER-INVALID-REQUEST",safeDetail(invalid),requestId);}
+          catch(Exception failure){error(res,500,"ATT-NATIVE-TESTCASE-PREVIEW-FAILED","Native Test Case preview could not be completed",requestId);getServletContext().log("ATT Native Test Case preview failed id="+requestId,failure);}
     }
     private void centralAuthoringSourceGet(HttpServletRequest req,HttpServletResponse res,String requestId)throws IOException {
         res.setHeader("Cache-Control","private, no-store");res.setHeader("X-Content-Type-Options","nosniff");

@@ -310,7 +310,8 @@ public final class WorkerMain {
                     ||"load-detail".equals(request.inspectionAction)
                     ||"load-source".equals(request.inspectionAction)
                     ||"run-input".equals(request.inspectionAction)
-                    ||"native-run-input".equals(request.inspectionAction));
+                    ||"native-run-input".equals(request.inspectionAction)
+                    ||"native-case-preview".equals(request.inspectionAction));
             if(draftInspection) {
                 String safeMessage=DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message);
                 diagnostic.put("summary",safeMessage);
@@ -321,6 +322,9 @@ public final class WorkerMain {
                 if(typed.detail()!=null)diagnostic.put("detail",DiagnosticSanitizer.redactText(typed.detail()));
                 if(typed.file()!=null)diagnostic.put("file",DiagnosticSanitizer.redactText(typed.file()));
                 if(typed.field()!=null)diagnostic.put("field",DiagnosticSanitizer.redactText(typed.field()));
+                if(typed.sheet()!=null)diagnostic.put("sheet",DiagnosticSanitizer.redactText(typed.sheet()));
+                if(typed.row()!=null)diagnostic.put("row",typed.row());
+                if(typed.column()!=null)diagnostic.put("column",typed.column());
                 if(typed.suggestion()!=null)diagnostic.put("suggestion",DiagnosticSanitizer.redactText(typed.suggestion()));
                 if(typed.source()!=null) {
                     diagnostic.put("sourceFile",DiagnosticSanitizer.redactText(typed.source().file()));
@@ -430,6 +434,7 @@ public final class WorkerMain {
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
             if("cli-validation".equals(r.inspectionAction)) return validateVNext(r,root,config);
+            if("native-case-preview".equals(r.inspectionAction)) return previewNativeTestCase(r,root,config);
             if("authoring-source".equals(r.inspectionAction)) {
                 int maxSourceBytes=r.maxSourceBytes==null?65536:r.maxSourceBytes;
                 int maxResponseBytes=r.maxResponseBytes==null?262144:r.maxResponseBytes;
@@ -456,6 +461,9 @@ public final class WorkerMain {
                     case "testcase":
                         source=resourceInspector(root,config,r).inspectAuthoringTestcaseSource(
                                 r.inspectionResourceId,r.authoringSourceSelector);
+                        break;
+                    case "native-testcase":
+                        source=resourceInspector(root,config,r).inspectAuthoringNativeTestcaseSource(r.inspectionPath);
                         break;
                     case "central":
                         source=new PackageConfigurationInspector(root,config,maxResponseBytes,
@@ -648,6 +656,129 @@ public final class WorkerMain {
                     Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
         }
         throw new IllegalArgumentException("Unsupported Worker command: "+r.command);
+    }
+
+    private OperationResult previewNativeTestCase(WorkerRequest request,Path root,Path config) throws Exception {
+        String source=request.nativeCasePreviewSource;
+        String sourcePath=request.inspectionPath;
+        if(source==null||sourcePath==null||source.length()==0)
+            throw new IllegalArgumentException("Native Test Case preview requires a source path and candidate YAML");
+        if(source.getBytes(StandardCharsets.UTF_8).length>att.testcase.TestCaseDefinitionResolver.MAX_SOURCE_BYTES)
+            throw new IllegalArgumentException("Native Test Case Definition source exceeds its size limit");
+        if(sourcePath.length()>1024||!sourcePath.equals(sourcePath.trim())||sourcePath.startsWith("/")
+                ||sourcePath.indexOf('\\')>=0||sourcePath.contains("//")||sourcePath.matches("^[A-Za-z]:.*")
+                ||sourcePath.contains("\u0000")||java.util.Arrays.stream(sourcePath.split("/",-1))
+                        .anyMatch(part->part.isEmpty()||".".equals(part)||"..".equals(part))
+                ||!sourcePath.endsWith("/testcase.yaml"))
+            throw new IllegalArgumentException("Native Test Case preview path must be a safe Package-relative testcase.yaml");
+        if(request.registeredPackageId==null||request.registeredPackageId.isBlank())
+            throw new IllegalArgumentException("Native Test Case preview requires a registered Package");
+
+        Path selectedConfig=RuntimeConfigPath.resolve(config,root);
+        att.config.FrameworkConfig effective=new att.config.FrameworkConfigLoader().load(selectedConfig,
+                RuntimeConfigPath.root(selectedConfig),root,request.environment);
+        att.resource.PackageResourceResolver resources=new att.resource.PackageResourceResolver(root);
+        Path testcaseRoot=effective.testcasesRoot().isAbsolute()?effective.testcasesRoot():root.resolve(effective.testcasesRoot());
+        Path safeTestcaseRoot=resources.internalCandidate(testcaseRoot);
+        Path candidate=resources.internalCandidate(root.resolve(sourcePath));
+        if(!candidate.startsWith(safeTestcaseRoot)||candidate.equals(safeTestcaseRoot)
+                ||!"testcase.yaml".equals(candidate.getFileName().toString()))
+            throw new IllegalArgumentException("Native Test Case preview path is outside the configured testcase root");
+        String logicalPath=resources.packageRoot().relativize(candidate).toString().replace('\\','/');
+        if(!sourcePath.equals(logicalPath))
+            throw new IllegalArgumentException("Native Test Case preview path must use its canonical Package-relative spelling");
+
+        att.testcase.TestCaseDefinitionResolver resolver=new att.testcase.TestCaseDefinitionResolver(
+                att.validation.SchemaFiles.resolve(root,"att-testcase-v1.schema.json"));
+        att.testcase.TestCaseDefinitionResolver.Options options=new att.testcase.TestCaseDefinitionResolver.Options(
+                att.testcase.TestCaseDefinitionResolver.MAX_RECORDS,att.testcase.TestCaseDefinitionResolver.MAX_PREVIEW_CASES,
+                null,()->Thread.currentThread().isInterrupted());
+        try {
+            att.testcase.TestCaseResolutionResult resolution=resolver.resolve(source,logicalPath,
+                    request.registeredPackageId,root,effective.templatesRoot(),options);
+            Map<String,Object> result=new LinkedHashMap<String,Object>();
+            result.put("kind","NativeTestCasePreview");result.put("valid",Boolean.TRUE);
+            result.put("sourceType",resolution.definition().dataSourceType()==null?"direct":resolution.definition().dataSourceType());
+            result.put("sourceReference",resolution.sourceReference());result.put("definitionRevision",resolution.sourceRevision());
+            result.put("resolvedCount",Integer.valueOf(resolution.resolvedCount()));
+            result.put("selectedCount",Integer.valueOf(resolution.selectedCount()));
+            result.put("previewCount",Integer.valueOf(resolution.previewCases().size()));
+            result.put("truncated",Boolean.valueOf(resolution.truncated()));
+            List<Map<String,Object>> cases=new ArrayList<Map<String,Object>>();
+            att.resource.PackageConfigurationInspector projector=new att.resource.PackageConfigurationInspector(root,
+                    selectedConfig,request.maxResponseBytes==null?262144:request.maxResponseBytes,
+                    !Boolean.FALSE.equals(request.redactionEnabled),request.sensitivePaths,request.sensitiveFieldPatterns);
+            String workbookRevision=null;
+            for(att.testcase.ResolvedTestCase testCase:resolution.previewCases()) {
+                boolean[] redacted=new boolean[]{false};
+                Object safeInputs=projector.projectPackageValue(testCase.inputs(),
+                        "testcase."+testCase.definitionId()+".cases["+cases.size()+"].inputs",redacted);
+                Map<String,Object> item=new LinkedHashMap<String,Object>();
+                item.put("qualifiedCaseId",testCase.qualifiedCaseId());item.put("caseId",testCase.caseId());
+                item.put("definitionId",testCase.definitionId());item.put("flowId",testCase.flowId());
+                item.put("tags",testCase.tags());item.put("inputs",safeInputs);item.put("redacted",Boolean.valueOf(redacted[0]));
+                Map<String,Object> provenance=new LinkedHashMap<String,Object>();
+                provenance.put("sourceType",testCase.sourceProvenance().sourceType());
+                provenance.put("sourceReference",testCase.sourceProvenance().sourceReference());
+                if(testCase.sourceRecordId()!=null)provenance.put("recordId",testCase.sourceRecordId());
+                if(testCase.recordIndex()!=null)provenance.put("recordIndex",testCase.recordIndex());
+                if(testCase.sourceProvenance().sheet()!=null)provenance.put("sheet",testCase.sourceProvenance().sheet());
+                if(testCase.sourceProvenance().row()!=null)provenance.put("row",testCase.sourceProvenance().row());
+                if(!testCase.sourceProvenance().metadata().isEmpty()) {
+                    Map<String,Object> metadata=new LinkedHashMap<String,Object>(testCase.sourceProvenance().metadata());
+                    Object revision=metadata.get("workbookSha256");
+                    if(workbookRevision==null&&revision instanceof String)workbookRevision=(String)revision;
+                    provenance.put("metadata",metadata);
+                }
+                item.put("provenance",provenance);cases.add(item);
+            }
+            result.put("cases",cases);
+            if(workbookRevision!=null)result.put("workbookRevision",workbookRevision);
+            result.put("diagnostics",Collections.emptyList());
+            return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                    Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",result));
+        } catch(att.validation.DiagnosticException invalid) {
+            return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                    Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",
+                    nativeCasePreviewFailure(invalid,root,sourcePath)));
+        } catch(IllegalArgumentException invalid) {
+            Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-TESTCASE-INVALID");
+            diagnostic.put("summary",safePreviewText(invalid.getMessage(),root));
+            diagnostic.put("file",sourcePath);diagnostic.put("field","definition");
+            diagnostic.put("suggestion","Correct the Test Case source and retry Preview / Resolve.");
+            Map<String,Object> result=new LinkedHashMap<String,Object>();result.put("kind","NativeTestCasePreview");
+            result.put("valid",Boolean.FALSE);result.put("sourceType","invalid");result.put("sourceReference",sourcePath);
+            result.put("cases",Collections.emptyList());
+            result.put("resolvedCount",Integer.valueOf(0));result.put("selectedCount",Integer.valueOf(0));
+            result.put("previewCount",Integer.valueOf(0));result.put("truncated",Boolean.FALSE);
+            result.put("diagnostics",Collections.singletonList(diagnostic));
+            return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                    Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",result));
+        }
+    }
+
+    private Map<String,Object> nativeCasePreviewFailure(att.validation.DiagnosticException failure,Path root,String fallbackPath) {
+        att.validation.DiagnosticException safe=failure.forPackage(root);
+        Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code",safe.code());
+        diagnostic.put("summary",safePreviewText(safe.summary(),root));
+        if(safe.detail()!=null)diagnostic.put("detail",safePreviewText(safe.detail(),root));
+        if(safe.file()!=null)diagnostic.put("file",safePreviewText(safe.file(),root));
+        if(safe.field()!=null)diagnostic.put("field",safePreviewText(safe.field(),root));
+        if(safe.sheet()!=null)diagnostic.put("sheet",safePreviewText(safe.sheet(),root));
+        if(safe.row()!=null)diagnostic.put("row",safe.row());
+        if(safe.column()!=null)diagnostic.put("column",safe.column());
+        if(safe.suggestion()!=null)diagnostic.put("suggestion",safePreviewText(safe.suggestion(),root));
+        Map<String,Object> result=new LinkedHashMap<String,Object>();result.put("kind","NativeTestCasePreview");
+        result.put("valid",Boolean.FALSE);result.put("sourceType","invalid");result.put("sourceReference",fallbackPath);
+        result.put("cases",Collections.emptyList());
+        result.put("resolvedCount",Integer.valueOf(0));result.put("selectedCount",Integer.valueOf(0));
+        result.put("previewCount",Integer.valueOf(0));result.put("truncated",Boolean.FALSE);
+        result.put("diagnostics",Collections.singletonList(diagnostic));return result;
+    }
+
+    private String safePreviewText(String value,Path root) {
+        String text=DiagnosticSanitizer.redactText(value==null?"Test Case preview failed":value);
+        return DiagnosticSanitizer.redactAbsolutePaths(text,root);
     }
 
     private Map<String,Object> resolveNativeRunInput(WorkerRequest request,Path root,Path config) throws Exception {

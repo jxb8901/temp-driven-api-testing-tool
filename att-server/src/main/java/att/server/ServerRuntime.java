@@ -5285,6 +5285,42 @@ final class ServerRuntime implements AutoCloseable {
         } finally {admissionLifecycle.readLock().unlock();}
     }
 
+    Map<String,Object> previewNativeTestCase(String packageId,String path,String source,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(!canEditPackageContent(packageId,principal))throw new AuthoringSourceDeniedException();
+        if(path==null||source==null||source.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                >att.testcase.TestCaseDefinitionResolver.MAX_SOURCE_BYTES)
+            throw new IllegalArgumentException("Native Test Case preview source is missing or too large");
+        if(path.length()>1024||!path.equals(path.trim())||path.startsWith("/")||path.indexOf('\\')>=0
+                ||path.contains("//")||path.matches("^[A-Za-z]:.*")||!path.endsWith("/testcase.yaml")
+                ||java.util.Arrays.stream(path.split("/",-1)).anyMatch(part->part.isEmpty()||".".equals(part)||"..".equals(part)))
+            throw new IllegalArgumentException("A safe Package-relative testcase.yaml path is required");
+        admissionLifecycle.readLock().lock();
+        try {
+            PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+            Path root=pinPackageRoot(registry,packageId);
+            if(root==null)throw new NotFoundException();
+            validatePackageRoot(root);root=root.toRealPath();
+            Map<String,String> before=changeSetPublisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,
+                    packageId,principal,false);
+            if(!registry.revision.equals(before.get("registryRevision")))throw new StaleDraftException();
+            WorkerRequest request=inspectionRequest(packageId,root,null);
+            request.inspectionAction="native-case-preview";request.inspectionPath=path;
+            request.nativeCasePreviewSource=source;
+            Map<String,Object> inspected=executeInspection(root,request);
+            PackageRegistry.Snapshot current=packageRegistry.snapshot();
+            if(!registry.revision.equals(current.revision)||!root.equals(packageRoot(packageId))
+                    ||!canEditPackageContent(packageId,principal))throw new StaleDraftException();
+            Map<String,String> after=changeSetPublisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,
+                    packageId,principal,false);
+            if(!before.equals(after)||!registry.revision.equals(packageRegistry.snapshot().revision)
+                    ||!root.equals(packageRoot(packageId)))throw new StaleDraftException();
+            inspected.put("packageSourceRevision",after.get("baseSourceRevision"));
+            inspected.put("registryRevision",after.get("registryRevision"));
+            return inspected;
+        } finally {admissionLifecycle.readLock().unlock();}
+    }
+
     Map<String,Object> inspectAuthoringCentralSource(String logicalPath,String principal) throws Exception {
         if(!config.centralConfigurationEditingEnabled)throw new NotFoundException();
         Path root=centralSourceRoot();
@@ -5503,7 +5539,7 @@ final class ServerRuntime implements AutoCloseable {
                 ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                 ||"load-templates".equals(request.inspectionAction)||"load-template-compose".equals(request.inspectionAction)
                 ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction)
-                ||"load-detail".equals(request.inspectionAction);
+                ||"load-detail".equals(request.inspectionAction)||"native-case-preview".equals(request.inspectionAction);
         if(draftInspection&&("WORKER_REQUEST_INVALID".equals(workerError)
                 ||workerError!=null&&(workerError.startsWith("ATT-DEBUG")||workerError.startsWith("ATT-LOAD"))
                 ||envelope.get("diagnostics") instanceof List&&!((List<?>)envelope.get("diagnostics")).isEmpty())) {
@@ -5512,7 +5548,7 @@ final class ServerRuntime implements AutoCloseable {
             if(rawDiagnostics instanceof List)for(Object raw:(List<?>)rawDiagnostics)if(raw instanceof Map) {
                 @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
                 Map<String,Object> safe=new LinkedHashMap<String,Object>();
-                for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId")) {
+                for(String key:List.of("code","summary","detail","field","file","sheet","suggestion","resourceId","sourceFile","packageId")) {
                     Object item=value.get(key);
                     if(item instanceof String) {
                         String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
@@ -5520,7 +5556,7 @@ final class ServerRuntime implements AutoCloseable {
                         safe.put(key,text);
                     }
                 }
-                for(String key:List.of("line","column","sourceColumn"))if(value.get(key) instanceof Number)safe.put(key,value.get(key));
+                for(String key:List.of("line","row","column","sourceColumn"))if(value.get(key) instanceof Number)safe.put(key,value.get(key));
                 if(!safe.isEmpty())diagnostics.add(safe);
             }
             if(diagnostics.isEmpty()) {

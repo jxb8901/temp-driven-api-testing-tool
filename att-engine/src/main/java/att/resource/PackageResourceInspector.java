@@ -327,6 +327,28 @@ public final class PackageResourceInspector implements AutoCloseable {
         return result;
     }
 
+    /** Reads one bounded Package-relative native Definition for its owner-authorized Studio editor. */
+    public Map<String,Object> inspectAuthoringNativeTestcaseSource(String relativePath) throws Exception {
+        if(relativePath==null||relativePath.length()>1024||!relativePath.equals(relativePath.trim())
+                ||relativePath.startsWith("/")||relativePath.indexOf('\\')>=0||relativePath.contains("//")
+                ||relativePath.matches("^[A-Za-z]:.*")||!relativePath.endsWith("/testcase.yaml"))
+            throw new ResourceNotFoundException();
+        for(String segment:relativePath.split("/",-1))
+            if(segment.isEmpty()||".".equals(segment)||"..".equals(segment))throw new ResourceNotFoundException();
+        FrameworkConfig effective=frameworkConfig();
+        Path configured=effective.testcasesRoot().isAbsolute()?effective.testcasesRoot():packageRoot.resolve(effective.testcasesRoot());
+        Path safeRoot=resources.internalCandidate(configured);
+        Path candidate=resources.internalCandidate(packageRoot.resolve(relativePath));
+        if(candidate.equals(safeRoot)||!candidate.startsWith(safeRoot)||!"testcase.yaml".equals(candidate.getFileName().toString()))
+            throw new ResourceNotFoundException();
+        String logical=resources.packageRoot().relativize(candidate).toString().replace('\\','/');
+        if(!logical.equals(relativePath))throw new ResourceNotFoundException();
+        if(!Files.exists(candidate,LinkOption.NOFOLLOW_LINKS))return AuthoringSourceSupport.absent(logical);
+        PackageResourceResolver.PackageResource selected=resources.fromInternalPath(candidate,PackageResourceResolver.Kind.FILE);
+        return AuthoringSourceSupport.read(packageRoot,selected.canonicalPath(),selected.logicalName(),maxSourceBytes,
+                sensitivePaths,sensitiveFieldPatterns);
+    }
+
     /** Returns a complete allowed UTF-8 file only when it is statically referenced by the selected Template/Flow. */
     public Map<String,Object> inspectAuthoringSourceFile(String type,String resourceId,String referenceId,
                                                           String sourceOriginPath) throws Exception {

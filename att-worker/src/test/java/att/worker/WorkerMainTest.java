@@ -98,6 +98,48 @@ class WorkerMainTest {
         assertEquals(sidecar,terminal.path("result").path("summary").path("inspection").path("text").asText());
     }
 
+    @Test void nativeCasePreviewWorkerUsesReadOnlyExcelAdapterAndReturnsStructuredDiagnostics() throws Exception {
+        Path root=temp.resolve("native-case-preview-worker");
+        Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("templates/flows/checkout/v1"));
+        Files.createDirectories(root.resolve("testcase/native"));copyTree(Paths.get("schemas"),root.resolve("schemas"));
+        Path config=root.resolve("config/config.yaml");
+        Files.writeString(config,"schemaVersion: att-config/v2.15\nenvironment: SIT\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
+        Files.writeString(root.resolve("templates/flows/checkout/v1/flow.yaml"),
+                "schemaVersion: att-flow/v3.6\nid: checkout.v1\nname: Checkout\ndescription: preview\nactions:\n"
+                        +"  record: {type: log, message: preview-must-not-execute}\n");
+        Path workbookPath=root.resolve("testcase/native/cases.xlsx");
+        writeNativePreviewWorkbook(workbookPath,"case-1",false);
+        byte[] originalWorkbook=Files.readAllBytes(workbookPath);
+        String definition="schemaVersion: att-testcase/v1\nid: native.case\nflow: checkout.v1\n"
+                +"caseIdExpression: \"${DATA.id}\"\ndataSource:\n  type: excel\n"
+                +"  path: testcase/native/cases.xlsx\n  sheet: Cases\n  headerRows: 1\n  caseId: ID\n"
+                +"  dataColumns: id=ID, token=Token\n";
+        Map<String,Object> request=nativePreviewWorkerRequest(root,config,definition);
+        JsonNode valid=runWorkerInspection(request);
+        JsonNode inspected=valid.path("result").path("summary").path("inspection");
+        assertTrue(inspected.path("valid").asBoolean(),inspected.toString());
+        assertEquals("excel",inspected.path("sourceType").asText());
+        assertEquals("Cases",inspected.path("cases").path(0).path("provenance").path("sheet").asText());
+        assertEquals(2,inspected.path("cases").path(0).path("provenance").path("row").asInt());
+        assertEquals("[REDACTED_SECRET]",inspected.path("cases").path(0).path("inputs").path("token").asText());
+        assertTrue(inspected.path("cases").path(0).path("redacted").asBoolean());
+        assertEquals(sha256(originalWorkbook),inspected.path("workbookRevision").asText());
+        assertArrayEquals(originalWorkbook,Files.readAllBytes(workbookPath));
+
+        Path invalidWorkbook=root.resolve("testcase/native/invalid-cases.xlsx");
+        writeNativePreviewWorkbook(invalidWorkbook,"case-1",true);
+        Map<String,Object> invalidRequest=nativePreviewWorkerRequest(root,config,
+                definition.replace("testcase/native/cases.xlsx","testcase/native/invalid-cases.xlsx"));
+        JsonNode invalid=runWorkerInspection(invalidRequest).path("result").path("summary").path("inspection");
+        JsonNode diagnostic=invalid.path("diagnostics").path(0);
+        assertFalse(invalid.path("valid").asBoolean(),invalid.toString());
+        assertEquals("Cases",diagnostic.path("sheet").asText());
+        assertEquals(2,diagnostic.path("row").asInt());
+        assertEquals(1,diagnostic.path("column").asInt());
+        assertFalse(invalid.toString().contains("native-preview-secret-canary"));
+    }
+
     @Test void missingCheckpointIsMarkedDegradedAfterExpectedInterval() throws Exception {
         try(WorkerMain.CheckpointProjection projection=new WorkerMain.CheckpointProjection(temp,"missing")) {
             Map<String,Object> progress=new java.util.LinkedHashMap<String,Object>();progress.put("elapsedMs",331_000L);
@@ -721,6 +763,47 @@ class WorkerMainTest {
         assertEquals(((Number)direct.summary().get("passed")).longValue(),cliResult.get("passed").asLong());
         assertFalse(cliResult.has("status")); assertFalse(cliResult.has("executionId"));
         assertTrue(cliResult.get("report").asText().endsWith("/cli-run/report/index.html"));
+    }
+
+    private JsonNode runWorkerInspection(Map<String,Object> request) throws Exception {
+        Process process=new ProcessBuilder(Paths.get(System.getProperty("java.home"),"bin",isWindows()?"java.exe":"java").toString(),
+                "-cp",System.getProperty("java.class.path"),WorkerMain.class.getName()).start();
+        process.getOutputStream().write(mapper.writeValueAsBytes(request));process.getOutputStream().close();
+        String stdout=read(process.getInputStream()),stderr=read(process.getErrorStream());
+        assertEquals(0,process.waitFor(),stderr+"\n"+stdout);
+        JsonNode terminal=null;
+        for(String line:stdout.trim().split("\\R")) {
+            JsonNode event=mapper.readTree(line);if("RESULT".equals(event.path("type").asText()))terminal=event;
+        }
+        assertNotNull(terminal,stdout);return terminal;
+    }
+
+    private Map<String,Object> nativePreviewWorkerRequest(Path root,Path config,String definition) {
+        return fields("protocolVersion","att-worker/v1","jobId","native-preview-worker","command","inspect",
+                "packageRoot",root.toString(),"config",config.toString(),"registeredPackageId","alice",
+                "inspectionAction","native-case-preview","inspectionPath","testcase/native/testcase.yaml",
+                "nativeCasePreviewSource",definition,"maxSourceBytes",1048576,"maxResponseBytes",262144,
+                "safeTextSources",Collections.emptyList(),"externalTextSources",Collections.emptyList(),
+                "externalSourceRoots",Collections.emptyList(),"redactionEnabled",true,
+                "sensitivePaths",Collections.emptyList(),"sensitiveFieldPatterns",Collections.emptyList());
+    }
+
+    private void writeNativePreviewWorkbook(Path path,String caseId,boolean numericCaseId) throws Exception {
+        Files.createDirectories(path.getParent());
+        try(Workbook workbook=new XSSFWorkbook();java.io.OutputStream output=Files.newOutputStream(path)) {
+            Sheet sheet=workbook.createSheet("Cases");Row header=sheet.createRow(0);
+            header.createCell(0).setCellValue("ID");header.createCell(1).setCellValue("Token");
+            Row row=sheet.createRow(1);
+            if(numericCaseId)row.createCell(0).setCellValue(17);else row.createCell(0).setCellValue(caseId);
+            row.createCell(1).setCellValue("native-preview-secret-canary");workbook.write(output);
+        }
+    }
+
+    private static String sha256(byte[] bytes) throws Exception {
+        byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+        StringBuilder result=new StringBuilder(digest.length*2);
+        for(byte value:digest)result.append(String.format(java.util.Locale.ROOT,"%02x",value&0xff));
+        return result.toString();
     }
 
     private static Map<String,Object> fields(Object... values) { Map<String,Object> result=new java.util.LinkedHashMap<String,Object>(); for(int i=0;i+1<values.length;i+=2)result.put(String.valueOf(values[i]),values[i+1]); return result; }

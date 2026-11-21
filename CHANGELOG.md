@@ -18,7 +18,8 @@
 
 # ATT 4.6.0 - development candidate (acceptance pending)
 
-- Add the Studio Native Test Case editor, bounded resolved-case preview, and selected-case RUN flow. Author Definitions through the existing revision-fenced Package Change Set Draft → Validate → Review → Publish lifecycle; native RUN is enabled only when the Server advertises `att-execution/v2` (#395).
+- Add the Studio Native Test Case editor and bounded, read-only Server preview for candidate YAML and Excel-backed Cases. Enforce Package source authority/revision checks, redact typed inputs, and surface workbook revision plus sheet/row/column diagnostics without creating a Job/RunDraft or modifying source/workbooks (#395).
+- Preserve inline Preview, Case selection, and validated Native Case RUN through the revision-fenced Package Change Set Draft → Validate → Review → Publish lifecycle; RUN is enabled only when the Server advertises `att-execution/v2` (#395).
 - Keep Excel-backed Test Case authoring fields available while gating workbook row resolution and preview on the S04 adapter (#394). This is a development candidate; do not bump POM versions or tag 4.6.0 before the release acceptance gates pass.
 - Add a bounded, read-only Excel Data Source adapter for native `att-testcase/v1` Definitions. Reuse the legacy Sidecar header resolver, `dataColumns` parser, blank normalization, and safe YAML cell parsing; preserve source order, literal Case ID rules, typed values, selected Case behavior, and workbook/sheet/row/column revision provenance (#394).
 - Preflight native Excel ZIP archives to 256 entries, 32 MiB per expanded entry, and 64 MiB total expanded data; cap selected worksheets at 100,000 physical rows before iteration and reject non-finite, recursive, or over-bounded YAML cell values (#394).
