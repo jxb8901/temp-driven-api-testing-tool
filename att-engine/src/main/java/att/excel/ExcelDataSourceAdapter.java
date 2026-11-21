@@ -48,6 +48,8 @@ public final class ExcelDataSourceAdapter {
     public static final long MAX_WORKBOOK_UNCOMPRESSED_ENTRY_BYTES = 32L * 1024L * 1024L;
     public static final long MAX_WORKBOOK_UNCOMPRESSED_BYTES = 64L * 1024L * 1024L;
     public static final int MAX_HEADER_ROWS = 86400;
+    /** Maximum rectangular header cells visited while projecting a native Excel source. */
+    public static final long MAX_HEADER_CELLS = 1000000L;
     public static final int MAX_WORKSHEET_ROWS = 100000;
     private static final int MAX_YAML_VALUE_DEPTH = 64;
     private static final int MAX_YAML_VALUE_NODES = 100000;
@@ -111,7 +113,21 @@ public final class ExcelDataSourceAdapter {
 
             DataFormatter formatter = new DataFormatter(Locale.ROOT);
             Map<String,Integer> columns;
-            try { columns = ExcelHeaderResolver.columns(sheet, headerRows, formatter); }
+            int maxHeaderColumns = ExcelHeaderResolver.maxColumns(sheet, headerRows);
+            long headerCells = (long) headerRows * (long) maxHeaderColumns;
+            if (headerCells > MAX_HEADER_CELLS)
+                throw invalid(workbookReference, "dataSource.headerRows",
+                        "Excel header range exceeds the " + MAX_HEADER_CELLS
+                                + " cell scan budget (" + headerRows + " rows by " + maxHeaderColumns + " columns)",
+                        sheetName, Integer.valueOf(headerRows), Integer.valueOf(maxHeaderColumns), null);
+            try { columns = ExcelHeaderResolver.columns(sheet, headerRows, formatter, maxHeaderColumns); }
+            catch (ExcelHeaderResolver.DuplicateHeaderException failure) {
+                String detail = "Excel headers are invalid: " + safeMessage(failure)
+                        + " (first occurrence at row " + failure.firstRow() + ", column " + failure.firstColumn()
+                        + "; duplicate at row " + failure.duplicateRow() + ", column " + failure.duplicateColumn() + ")";
+                throw invalid(workbookReference, "dataSource", detail, sheetName,
+                        Integer.valueOf(failure.duplicateRow()), Integer.valueOf(failure.duplicateColumn()), failure);
+            }
             catch (RuntimeException failure) {
                 throw invalid(workbookReference, "dataSource", "Excel headers are invalid: " + safeMessage(failure),
                         sheetName, null, null, failure);

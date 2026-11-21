@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -167,6 +168,22 @@ class TestCaseDefinitionResolverTest {
                 () -> resolve(excelDefinition("testdata/formula-id-native.xlsx")));
         assertEquals(Integer.valueOf(3), formulaId.row());
         assertEquals(Integer.valueOf(1), formulaId.column());
+    }
+
+    @Test void reportsDuplicateNativeExcelHeadersAtBothPhysicalColumns() throws Exception {
+        Path workbook = writeExcelWorkbook("duplicate-headers-native.xlsx");
+        updateExcelWorkbook(workbook,
+                value -> value.getSheet("Cases").getRow(1).getCell(2).setCellValue("Case ID"));
+
+        DiagnosticException duplicate = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/duplicate-headers-native.xlsx")));
+
+        assertEquals("testdata/duplicate-headers-native.xlsx", duplicate.file());
+        assertEquals("Cases", duplicate.sheet());
+        assertEquals(Integer.valueOf(2), duplicate.row());
+        assertEquals(Integer.valueOf(3), duplicate.column());
+        assertTrue(duplicate.detail().contains("first occurrence at row 2, column 1"), duplicate.detail());
+        assertTrue(duplicate.detail().contains("duplicate at row 2, column 3"), duplicate.detail());
     }
 
     @Test void rejectsNativeExcelYamlNonFiniteAndRecursiveValuesWithWorkbookCellLocations() throws Exception {
@@ -363,6 +380,23 @@ class TestCaseDefinitionResolverTest {
         assertTrue(rowLimit.detail().contains("physical row limit"));
     }
 
+    @Test void rejectsSparseNativeExcelHeaderRangeOverScanBudgetWithSourceCoordinates() throws Exception {
+        Path workbook = packageRoot.resolve("testdata/sparse-header-budget.xlsx");
+        writeSparseHeaderWorkbook(workbook);
+        String yaml = excelDefinition("testdata/sparse-header-budget.xlsx")
+                .replace("headerRows: 2", "headerRows: " + att.excel.ExcelDataSourceAdapter.MAX_HEADER_ROWS);
+
+        DiagnosticException budget = assertThrows(DiagnosticException.class, () -> resolve(yaml));
+
+        assertEquals("testdata/sparse-header-budget.xlsx", budget.file());
+        assertEquals("dataSource.headerRows", budget.field());
+        assertEquals("Cases", budget.sheet());
+        assertEquals(Integer.valueOf(att.excel.ExcelDataSourceAdapter.MAX_HEADER_ROWS), budget.row());
+        assertEquals(Integer.valueOf(16384), budget.column(), "XFD is Excel column 16,384");
+        assertTrue(budget.detail().contains("cell scan budget"), budget.detail());
+        assertTrue(budget.detail().contains("1000000"), budget.detail());
+    }
+
     private String excelDefinition(String workbookPath) {
         return "schemaVersion: att-testcase/v1\n"
                 + "id: fpp.transfer.excel\nflow: payment.transfer.v1\n"
@@ -428,6 +462,48 @@ class TestCaseDefinitionResolverTest {
                 output.closeEntry();
             }
         }
+    }
+
+    private void writeSparseHeaderWorkbook(Path path) throws Exception {
+        Files.createDirectories(path.getParent());
+        try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(path))) {
+            writeZipEntry(output, "[Content_Types].xml",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+                    + "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
+                    + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+                    + "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>"
+                    + "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
+                    + "</Types>");
+            writeZipEntry(output, "_rels/.rels",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                    + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>"
+                    + "</Relationships>");
+            writeZipEntry(output, "xl/workbook.xml",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" "
+                    + "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
+                    + "<sheets><sheet name=\"Cases\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>");
+            writeZipEntry(output, "xl/_rels/workbook.xml.rels",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                    + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
+                    + "</Relationships>");
+            writeZipEntry(output, "xl/worksheets/sheet1.xml",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
+                    + "<dimension ref=\"A1:XFD86400\"/><sheetData>"
+                    + "<row r=\"1\"><c r=\"XFD1\" t=\"inlineStr\"><is><t>Case ID</t></is></c></row>"
+                    + "<row r=\"86400\"><c r=\"A86400\" t=\"inlineStr\"><is><t></t></is></c></row>"
+                    + "</sheetData></worksheet>");
+        }
+    }
+
+    private void writeZipEntry(ZipOutputStream output, String name, String value) throws Exception {
+        output.putNextEntry(new ZipEntry(name));
+        output.write(value.getBytes(StandardCharsets.UTF_8));
+        output.closeEntry();
     }
 
     @Test void discoversOneCasePreservingDefinitionIdUnderThePackageTestcaseRoot() throws Exception {
