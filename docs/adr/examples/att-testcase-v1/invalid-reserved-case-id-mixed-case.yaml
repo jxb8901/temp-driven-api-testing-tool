@@ -1,0 +1,8 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.case-mixed-case
+flow: payment.transfer.v1
+dataSource:
+  type: inline
+  records:
+    - recordId: cOm1
+      data: {}

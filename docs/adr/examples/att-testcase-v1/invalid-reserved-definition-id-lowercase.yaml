@@ -1,0 +1,4 @@
+schemaVersion: att-testcase/v1
+id: fpp.con.transfer
+flow: payment.transfer.v1
+inputs: {}

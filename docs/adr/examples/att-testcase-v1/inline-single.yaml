@@ -1,0 +1,13 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.success
+name: FPP Transfer Success
+flow: payment.transfer.v1
+tags: [fpp, smoke]
+inputs:
+  debitAccount: "A001"
+  amount: 100
+  expectedStatus: SUCCESS
+  enabled: true
+  optionalNote: null
+  options:
+    attempts: [1, 2]

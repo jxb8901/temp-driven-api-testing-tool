@@ -18,6 +18,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [Author and run a Testcase](#author-and-run-a-testcase)
   - [Distinguish Testcases from Case executions](#distinguish-testcases-from-case-executions)
   - [Authoring contracts](#authoring-contracts)
+  - [Proposed native Test Case contract](#proposed-native-test-case-contract)
   - [Workbook](#workbook)
   - [Stage](#stage)
   - [Template](#template)
@@ -246,6 +247,16 @@ This page explains the normal day-to-day workflow in the same order that data mo
 | External capability | Resource |
 | Testcase/Stage business input | EXEC.INPUT |
 | Cross-Action mutable state | EXEC.VARS |
+
+### Proposed native Test Case contract
+
+S01 freezes a proposed `att-testcase/v1` authoring contract for future native Test Cases. The schema and examples are checked by documentation/schema validation, but the format is not in the Engine's active schema catalog and cannot yet be discovered, resolved, or run. Existing workbook/Sidecar/Snapshot authoring above remains the executable Testcase workflow.
+
+The proposal defines a singleton inline Case with a complete typed `inputs` map and the fixed Resolved Case ID `default`, or a multi-record inline/Excel Data Source with stable source IDs. Definition IDs are Package-scoped, case-preserving dotted IDs; Resolved Case IDs are one path-safe segment. A `caseIdExpression` can override the resolved ID using only one `${DATA.key}` lookup. Empty, duplicate, malformed, missing, or colliding IDs and empty resolution results are errors; they never produce an all-PASS result.
+
+For data-driven Cases, omitted `inputs` means same-name projection from `DATA`; a supplied projection replaces that identity mapping and uses `{from: DATA.key}` or `{value: <typed value>}`. Excel `dataColumns` remains the `att-sidecar/v2.2` comma-separated string syntax, including aliases, `(yaml)` parsing, and quoted delimiters. Omitted or blank `dataColumns` selects no business columns into `DATA` (Case ID and tags selectors are never auto-exposed); declare `dataColumns` explicitly when Excel inputs are required. Excel `path` values must be portable Package-relative `.xlsx` paths. A source-workbook report template is only valid with an Excel source and always writes to a new workbook.
+
+See the [proposed schema](../schemas/proposed/att-testcase-v1.schema.json), [single inline example](adr/examples/att-testcase-v1/inline-single.yaml), [multi-record inline example](adr/examples/att-testcase-v1/inline-multi.yaml), [Excel example](adr/examples/att-testcase-v1/excel.yaml), [Excel omitted-`dataColumns` example](adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml), and [ADR-0001](adr/0001-flow-centric-testcase-resolution.md) for the complete contract and validation boundary.
 
 ### Workbook
 

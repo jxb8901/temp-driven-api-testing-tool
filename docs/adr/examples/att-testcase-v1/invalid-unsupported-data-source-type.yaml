@@ -1,0 +1,5 @@
+schemaVersion: att-testcase/v1
+id: fpp.transfer.generated
+flow: payment.transfer.v1
+dataSource:
+  type: generated
