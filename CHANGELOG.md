@@ -1,3 +1,8 @@
+# ATT 4.4.1 - release candidate (2026-11-21; acceptance pending)
+
+- Add trusted shared Package editors for online edits, ZIP imports, Testcase snapshot publication, Manifest publication, and source history; access remains limited to active USER identities, grants remain Package-scoped, and grant or root changes invalidate outstanding drafts (#387).
+- Release acceptance is pending. Do not tag or publish until shared-editor publication, revocation, history, and exact-head hosted CI gates pass.
+
 # ATT 4.4.0 - release candidate (2026-11-18; acceptance pending)
 
 - Add Package registration and immutable source revision contracts, source authoring and Change Set publication, plus Studio source editors for Package files, Testcases, and Testdata (#250–#255).

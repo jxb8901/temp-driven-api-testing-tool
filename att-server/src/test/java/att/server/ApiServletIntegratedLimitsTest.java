@@ -42,6 +42,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -1784,6 +1785,350 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void packagePrivilegedReadsKeepRegistryAuthorityThroughResponseSerialization() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("package-response-boundary-packages"));
+        Path packageRoot=Files.createDirectories(packages.resolve("shared"));
+        Files.createDirectories(packageRoot.resolve("testcase"));Files.createDirectories(packageRoot.resolve("templates"));
+        Files.createDirectories(packageRoot.resolve("files"));Files.createDirectories(packageRoot.resolve("load/sut-metrics/sources"));
+        String manifest="schemaVersion: att-package/v2\nmetadata: {name: Shared Package}\n"
+                +"# authoring-boundary-marker\nobservability:\n  metricSources: [load/sut-metrics/sources/cpu.yaml]\n  groups: []\n  profiles: []\n";
+        Files.writeString(packageRoot.resolve("package.yaml"),manifest);
+        String metricSource="schemaVersion: att-sut-metrics-metric-source/v1\nid: cpu\nname: CPU\n"
+                +"connection: {kind: DATA_SOURCE, id: prom-main}\n"
+                +"fetch: {id: cpu-range, mode: prometheus-range, query: raw-metric-boundary-marker, parameters: {}, sampling: range, step: 30s}\n"
+                +"mapping: {labels: {retain: []}, outputs: [{id: up, title: Up, unit: count, kind: gauge, metricName: up}]}\n"
+                +"limits: {maxRows: 1024, maxSeries: 128, maxSamples: 10000, maxArtifactBytes: 1048576}\n";
+        Files.writeString(packageRoot.resolve("load/sut-metrics/sources/cpu.yaml"),metricSource);
+        Path runtimeConfig=sharedRuntimeConfig("package-response-boundary-runtime");
+        Path serverFile=temp.resolve("package-response-boundary-server.yaml");
+        Path data=temp.resolve("package-response-boundary-data");
+        String configured="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n"
+                +"  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
+                +"  authenticationRequired: true\n  auth: {mode: local}\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\n  inspection: {enabled: true}\nworkers: {}\npackages:\n"
+                +"  allowedRoots: ["+ServerRuntimeTestSupport.yaml(packages)+"]\n  entries:\n"
+                +"    shared:\n      path: "+ServerRuntimeTestSupport.yaml(packageRoot)+"\n      editors: [alice, bob]\n";
+        Files.writeString(serverFile,configured);
+        Path libs=workerLibraries("package-response-boundary-libs");
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverFile),libs.toString())) {
+            runtime.auth.createUser("alice","Alice","response-boundary Alice password","USER");
+            runtime.auth.createUser("bob","Bob","response-boundary Bob password","USER");
+            runtime.packageRegistry.close(); // Registry transitions below are driven deterministically by the test.
+            ApiServlet servlet=servlet(runtime);
+
+            Captured first=invokeAsContentType(servlet,"alice","POST","/packages/shared/change-sets/import",
+                    Collections.emptyMap(),packageZip("files/history-race.txt","history-before-boundary-marker\n"),"application/zip");
+            assertEquals(201,first.status,first.bodyText());
+            String firstId=ServerRuntime.JSON.readTree(first.body()).path("changeSetId").asText();
+            for(String action:List.of("validate","review"))
+                assertEquals(200,invokeAs(servlet,"alice","POST","/packages/shared/change-sets/"+firstId+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8)).status);
+            assertEquals(200,invokeAs(servlet,"alice","POST","/packages/shared/change-sets/"+firstId+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8)).status);
+            JsonNode firstHistory=ServerRuntime.JSON.readTree(invokeAs(servlet,"alice","GET","/packages/shared/source-history",
+                    Collections.emptyMap(),new byte[0]).body());
+            String beforeSnapshot=firstHistory.path("items").path(0).path("afterSnapshotId").asText();
+            Captured second=invokeAsContentType(servlet,"alice","POST","/packages/shared/change-sets/import",
+                    Collections.emptyMap(),packageZip("files/history-race.txt","history-after-boundary-marker\n"),"application/zip");
+            assertEquals(201,second.status,second.bodyText());
+            String secondId=ServerRuntime.JSON.readTree(second.body()).path("changeSetId").asText();
+            for(String action:List.of("validate","review"))
+                assertEquals(200,invokeAs(servlet,"alice","POST","/packages/shared/change-sets/"+secondId+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8)).status);
+            assertEquals(200,invokeAs(servlet,"alice","POST","/packages/shared/change-sets/"+secondId+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8)).status);
+            JsonNode secondHistory=ServerRuntime.JSON.readTree(invokeAs(servlet,"alice","GET","/packages/shared/source-history",
+                    Collections.emptyMap(),new byte[0]).body());
+            String afterSnapshot=secondHistory.path("items").path(0).path("afterSnapshotId").asText();
+            assertTrue(beforeSnapshot.matches("R[A-F0-9]{32}"));assertTrue(afterSnapshot.matches("R[A-F0-9]{32}"));
+            Map<String,String> diffParameters=Map.of("beforeSnapshotId",beforeSnapshot,"afterSnapshotId",afterSnapshot,
+                    "path","files/history-race.txt");
+
+            String expectedManifest=PackageManifestPublisher.digest(manifest.getBytes(StandardCharsets.UTF_8));
+            String candidate=manifest+"# draft-source-boundary-marker\n";
+            Captured draftResponse=invokeAs(servlet,"alice","POST","/packages/shared/package-configuration/drafts",
+                    Collections.emptyMap(),ServerRuntime.JSON.writeValueAsBytes(Map.of("source",candidate,
+                            "expectedManifestDigest",expectedManifest)));
+            assertEquals(200,draftResponse.status,draftResponse.bodyText());
+            String manifestDraftId=ServerRuntime.JSON.readTree(draftResponse.body()).path("draftId").asText();
+            assertTrue(runtime.canEditPackageContent("shared","alice"),"Alice remains an assigned active USER editor");
+            assertEquals(candidate,runtime.manifestPublisher.previewDraftSource("shared","alice",manifestDraftId).get("source"),
+                    "The staged draft must remain present before the servlet read");
+            Captured manifestDraftSource=invokeAs(servlet,"alice","GET",
+                    "/packages/shared/package-configuration/drafts/"+manifestDraftId+"/source",Collections.emptyMap(),new byte[0]);
+            assertEquals(200,manifestDraftSource.status,manifestDraftSource.bodyText());
+            assertTrue(manifestDraftSource.bodyText().contains("draft-source-boundary-marker"),manifestDraftSource.bodyText());
+
+            String current=configured;
+            current=assertRegistryRevocationWaitsForProtectedResponse(runtime,servlet,serverFile,current,
+                    "/packages/shared/package-configuration/drafts/"+manifestDraftId+"/source",Collections.emptyMap(),
+                    "draft-source-boundary-marker");
+            current=assertRegistryRevocationWaitsForProtectedResponse(runtime,servlet,serverFile,current,
+                    "/packages/shared/authoring-source",Map.of("type","manifest"),"authoring-boundary-marker");
+            current=assertRegistryRevocationWaitsForProtectedResponse(runtime,servlet,serverFile,current,
+                    "/packages/shared/source-history/diff",diffParameters,"history-after-boundary-marker");
+            assertRegistryRevocationWaitsForProtectedResponse(runtime,servlet,serverFile,current,
+                    "/packages/shared/sut-metrics/resource",Map.of("kind","source","id","cpu"),"raw-metric-boundary-marker");
+        }
+    }
+
+    @Test void trustedEditorsSharePackageEditingAcrossScopesAndRevocationInvalidatesZipDrafts() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("shared-editor-packages"));
+        Path alicePackage=createPackage(packages.resolve("alice"));
+        Path commonOne=createPackage(packages.resolve("common-one"));
+        Path commonTwo=createPackage(packages.resolve("common-two"));
+        Path adminPackage=createPackage(packages.resolve("admin"));
+        Path runtimeConfig=sharedRuntimeConfig("shared-editor-runtime");
+        Path serverFile=temp.resolve("shared-editor-server.yaml");
+        Path data=temp.resolve("shared-editor-data");
+        String configured="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n"
+                +"  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
+                +"  authenticationRequired: true\n  auth: {mode: local}\n"
+                +"  centralConfigurationEditingEnabled: true\n  packageConfiguration: {sourceEditingEnabled: true}\n"
+                +"  inspection: {enabled: true}\nworkers: {}\npackages:\n"
+                +"  allowedRoots: ["+ServerRuntimeTestSupport.yaml(packages)+"]\n  entries:\n"
+                +"    alice: "+ServerRuntimeTestSupport.yaml(alicePackage)+"\n"
+                +"    common-one:\n      path: "+ServerRuntimeTestSupport.yaml(commonOne)+"\n      editors: [alice]\n"
+                +"    common-two:\n      path: "+ServerRuntimeTestSupport.yaml(commonTwo)+"\n      editors: [alice, bob]\n"
+                +"    admin:\n      path: "+ServerRuntimeTestSupport.yaml(adminPackage)+"\n      editors: [admin]\n";
+        Files.writeString(serverFile,configured);
+        Path libs=workerLibraries("shared-editor-libs");
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverFile),libs.toString())) {
+            runtime.auth.createUser("alice","Alice","shared package editor password","USER");
+            runtime.auth.createUser("bob","Bob","unassigned package user password","USER");
+            runtime.auth.createUser("admin","Admin","shared package admin password","ADMIN");
+            ApiServlet servlet=servlet(runtime);
+
+            Captured alicePackages=invokeAs(servlet,"alice","GET","/packages",Collections.emptyMap(),new byte[0]);
+            assertEquals(200,alicePackages.status,new String(alicePackages.body(),StandardCharsets.UTF_8));
+            JsonNode packageItems=ServerRuntime.JSON.readTree(alicePackages.body()).path("items");
+            Map<String,Boolean> capabilities=new HashMap<>();
+            for(JsonNode item:packageItems)capabilities.put(item.path("packageId").asText(),item.path("canEditPackageContent").asBoolean());
+            assertEquals(Boolean.TRUE,capabilities.get("alice"),"The editor keeps ownership of their registered Package");
+            assertEquals(Boolean.TRUE,capabilities.get("common-one"));
+            assertEquals(Boolean.TRUE,capabilities.get("common-two"),"One USER may be assigned to multiple Package IDs");
+            assertEquals(Boolean.FALSE,capabilities.get("admin"),"An explicit editor list does not grant ADMIN identities Package USER capability");
+
+            Captured sharedSource=invokeAs(servlet,"alice","GET","/packages/common-one/authoring-source",
+                    Map.of("type","manifest"),new byte[0]);
+            assertEquals(200,sharedSource.status,new String(sharedSource.body(),StandardCharsets.UTF_8));
+            assertEquals(200,invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Map.of("type","manifest"),new byte[0]).status,
+                    "The registered owner retains the existing private Package editing rule");
+            Captured bobPackages=invokeAs(servlet,"bob","GET","/packages",Collections.emptyMap(),new byte[0]);
+            assertEquals(200,bobPackages.status,bobPackages.bodyText());
+            JsonNode bobCommonTwo=null;
+            for(JsonNode item:ServerRuntime.JSON.readTree(bobPackages.body()).path("items"))
+                if("common-two".equals(item.path("packageId").asText()))bobCommonTwo=item;
+            assertNotNull(bobCommonTwo,bobPackages.bodyText());
+            assertTrue(bobCommonTwo.path("canEditPackageContent").asBoolean(),
+                    "A second explicitly assigned USER receives the package edit capability");
+            Captured bobSharedSource=invokeAs(servlet,"bob","GET","/packages/common-two/authoring-source",
+                    Map.of("type","manifest"),new byte[0]);
+            assertEquals(200,bobSharedSource.status,bobSharedSource.bodyText());
+            assertEquals(403,invokeAs(servlet,"bob","GET","/packages/alice/authoring-source",
+                    Map.of("type","manifest"),new byte[0]).status,
+                    "An unassigned USER cannot edit another user's private Package");
+            assertEquals(403,invokeAs(servlet,"bob","GET","/packages/common-one/authoring-source",
+                    Map.of("type","manifest"),new byte[0]).status,"An unassigned USER cannot read full authoring source");
+            assertEquals(403,invokeAsAdmin(servlet,"admin","GET","/packages/admin/authoring-source",
+                    Map.of("type","manifest"),new byte[0]).status,"An ADMIN whose login matches a Package ID remains denied");
+            assertEquals(403,invokeAs(servlet,"alice","GET","/configuration/authoring-source",
+                    Map.of("path","config/config.yaml"),new byte[0]).status,
+                    "Package editor grants do not imply CENTRAL_RUNTIME_CONFIG or SYSTEM_SETTINGS_WRITE");
+
+            Captured fileIndex=invokeAs(servlet,"alice","GET","/packages/common-one/resources/files",
+                    Collections.emptyMap(),new byte[0]);
+            assertEquals(200,fileIndex.status,new String(fileIndex.body(),StandardCharsets.UTF_8));
+            assertTrue(ServerRuntime.JSON.readTree(fileIndex.body()).path("canEdit").asBoolean());
+            Captured readOnlyIndex=invokeAs(servlet,"bob","GET","/packages/common-one/resources/files",
+                    Collections.emptyMap(),new byte[0]);
+            assertEquals(200,readOnlyIndex.status,new String(readOnlyIndex.body(),StandardCharsets.UTF_8));
+            assertFalse(ServerRuntime.JSON.readTree(readOnlyIndex.body()).path("canEdit").asBoolean());
+            assertEquals(403,invokeAsContentType(servlet,"bob","POST","/packages/common-one/change-sets/import",
+                    Collections.emptyMap(),packageZip("files/unassigned-bob.txt","must remain private\n"),"application/zip").status,
+                    "An active USER without a common-one editor assignment cannot import a ZIP change set");
+            assertFalse(Files.exists(commonOne.resolve("files/unassigned-bob.txt")));
+
+            byte[] firstArchive=packageZip("files/shared-editor.txt","published by assigned editor\n");
+            Captured imported=invokeAsContentType(servlet,"alice","POST","/packages/common-two/change-sets/import",
+                    Collections.emptyMap(),firstArchive,"application/zip");
+            assertEquals(201,imported.status,new String(imported.body(),StandardCharsets.UTF_8));
+            String importedId=ServerRuntime.JSON.readTree(imported.body()).path("changeSetId").asText();
+            for(String action:List.of("validate","review"))
+                assertEquals(200,invokeAs(servlet,"alice","POST","/packages/common-two/change-sets/"+importedId+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8)).status);
+            assertEquals(200,invokeAs(servlet,"alice","POST","/packages/common-two/change-sets/"+importedId+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8)).status);
+            assertEquals("published by assigned editor\n",Files.readString(commonTwo.resolve("files/shared-editor.txt")));
+            Captured editorHistory=invokeAs(servlet,"alice","GET","/packages/common-two/source-history",
+                    Collections.emptyMap(),new byte[0]);
+            assertEquals(200,editorHistory.status,new String(editorHistory.body(),StandardCharsets.UTF_8));
+            assertTrue(new String(editorHistory.body(),StandardCharsets.UTF_8).contains("files/shared-editor.txt"),
+                    "An assigned editor can read full source history for that Package");
+
+            String sharedBaselineSnapshot=ServerRuntime.JSON.readTree(editorHistory.body())
+                    .path("items").path(0).path("afterSnapshotId").asText();
+            assertTrue(sharedBaselineSnapshot.matches("R[A-F0-9]{32}"),editorHistory.bodyText());
+            Captured aliceRace=invokeAsContentType(servlet,"alice","POST","/packages/common-two/change-sets/import",
+                    Collections.emptyMap(),packageZip("files/alice-race.txt","published by Alice\n"),"application/zip");
+            Captured bobRace=invokeAsContentType(servlet,"bob","POST","/packages/common-two/change-sets/import",
+                    Collections.emptyMap(),packageZip("files/bob-race.txt","must lose stale publish\n"),"application/zip");
+            assertEquals(201,aliceRace.status,aliceRace.bodyText());
+            assertEquals(201,bobRace.status,bobRace.bodyText());
+            String aliceRaceId=ServerRuntime.JSON.readTree(aliceRace.body()).path("changeSetId").asText();
+            String bobRaceId=ServerRuntime.JSON.readTree(bobRace.body()).path("changeSetId").asText();
+            assertEquals(ServerRuntime.JSON.readTree(aliceRace.body()).path("baseSourceRevision").asText(),
+                    ServerRuntime.JSON.readTree(bobRace.body()).path("baseSourceRevision").asText(),
+                    "Both assigned editors stage against the same source revision");
+            for(String id:List.of(aliceRaceId,bobRaceId))for(String action:List.of("validate","review")) {
+                String actor=id.equals(aliceRaceId)?"alice":"bob";
+                Captured prepared=invokeAs(servlet,actor,"POST","/packages/common-two/change-sets/"+id+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+                assertEquals(200,prepared.status,prepared.bodyText());
+            }
+            Captured alicePublished=invokeAs(servlet,"alice","POST","/packages/common-two/change-sets/"+aliceRaceId+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(200,alicePublished.status,alicePublished.bodyText());
+            Captured bobStale=invokeAs(servlet,"bob","POST","/packages/common-two/change-sets/"+bobRaceId+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(409,bobStale.status,bobStale.bodyText());
+            assertTrue(Files.exists(commonTwo.resolve("files/alice-race.txt")));
+            assertFalse(Files.exists(commonTwo.resolve("files/bob-race.txt")),
+                    "A second assigned editor cannot publish a Change Set prepared against stale source");
+
+            JsonNode historyBeforeRestore=ServerRuntime.JSON.readTree(invokeAs(servlet,"bob","GET",
+                    "/packages/common-two/source-history",Collections.emptyMap(),new byte[0]).body());
+            Captured restore=invokeAs(servlet,"bob","POST","/packages/common-two/source-history/restore",
+                    Collections.emptyMap(),ServerRuntime.JSON.writeValueAsBytes(Map.of(
+                            "snapshotId",sharedBaselineSnapshot,
+                            "expectedSourceRevision",historyBeforeRestore.path("currentSourceRevision").asText(),
+                            "registryRevision",historyBeforeRestore.path("registryRevision").asText())));
+            assertEquals(201,restore.status,restore.bodyText());
+            String restoreId=ServerRuntime.JSON.readTree(restore.body()).path("changeSetId").asText();
+            for(String action:List.of("validate","review")) {
+                Captured prepared=invokeAs(servlet,"bob","POST","/packages/common-two/change-sets/"+restoreId+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+                assertEquals(200,prepared.status,prepared.bodyText());
+            }
+            Captured restored=invokeAs(servlet,"bob","POST","/packages/common-two/change-sets/"+restoreId+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(200,restored.status,restored.bodyText());
+            assertEquals("published by assigned editor\n",Files.readString(commonTwo.resolve("files/shared-editor.txt")));
+            assertFalse(Files.exists(commonTwo.resolve("files/alice-race.txt")),
+                    "An assigned editor can restore the shared Package source to its retained snapshot");
+            JsonNode restoredHistory=ServerRuntime.JSON.readTree(invokeAs(servlet,"alice","GET",
+                    "/packages/common-two/source-history",Collections.emptyMap(),new byte[0]).body());
+            assertEquals("SOURCE_RESTORE_PUBLISH",restoredHistory.path("items").path(0).path("action").asText());
+            assertEquals(sharedBaselineSnapshot,restoredHistory.path("items").path(0).path("restoredFromSnapshotId").asText());
+
+            byte[] revocationArchive=packageZip("files/revoked-before-publish.txt","must remain private\n");
+            Captured revocationImport=invokeAsContentType(servlet,"alice","POST","/packages/common-one/change-sets/import",
+                    Collections.emptyMap(),revocationArchive,"application/zip");
+            assertEquals(201,revocationImport.status,new String(revocationImport.body(),StandardCharsets.UTF_8));
+            String revocationId=ServerRuntime.JSON.readTree(revocationImport.body()).path("changeSetId").asText();
+            for(String action:List.of("validate","review"))
+                assertEquals(200,invokeAs(servlet,"alice","POST","/packages/common-one/change-sets/"+revocationId+"/"+action,
+                        Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8)).status);
+            String previousRegistryRevision=runtime.packageRegistry.snapshot().revision;
+            Files.writeString(serverFile,configured.replace("editors: [alice]","editors: []"));
+            long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while(previousRegistryRevision.equals(runtime.packageRegistry.snapshot().revision)&&System.nanoTime()<deadline)
+                Thread.sleep(20);
+            assertNotEquals(previousRegistryRevision,runtime.packageRegistry.snapshot().revision,
+                    "Changing trusted editors advances the live Package registry revision");
+            assertTrue(runtime.packageRegistry.snapshot().editors.get("common-one").isEmpty());
+
+            assertEquals(403,invokeAs(servlet,"alice","GET","/packages/common-one/authoring-source",
+                    Map.of("type","manifest"),new byte[0]).status);
+            assertEquals(403,invokeAsContentType(servlet,"alice","POST","/packages/common-one/change-sets/import",
+                    Collections.emptyMap(),revocationArchive,"application/zip").status);
+            Captured stalePublish=invokeAs(servlet,"alice","POST","/packages/common-one/change-sets/"+revocationId+"/publish",
+                    Collections.emptyMap(),"{}".getBytes(StandardCharsets.UTF_8));
+            assertTrue(stalePublish.status==403||stalePublish.status==409,
+                    "Revocation must deny or stale an outstanding Change Set: "+new String(stalePublish.body(),StandardCharsets.UTF_8));
+            assertFalse(Files.exists(commonOne.resolve("files/revoked-before-publish.txt")));
+            Captured revokedHistory=invokeAs(servlet,"alice","GET","/packages/common-one/source-history",
+                    Collections.emptyMap(),new byte[0]);
+            assertEquals(200,revokedHistory.status);
+            assertFalse(new String(revokedHistory.body(),StandardCharsets.UTF_8).contains("files/shared-editor.txt"),
+                    "Revoked editors receive only the safe history summary");
+            assertEquals(200,invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Map.of("type","manifest"),new byte[0]).status,
+                    "Revoking shared assignments does not remove the USER's own Package ownership");
+        }
+    }
+
+    private String assertRegistryRevocationWaitsForProtectedResponse(ServerRuntime runtime,ApiServlet servlet,
+            Path serverFile,String grantedConfiguration,String path,Map<String,String> parameters,
+            String expectedResponseMarker) throws Exception {
+        assertTrue(grantedConfiguration.contains("editors: [alice, bob]"),grantedConfiguration);
+        String revokedConfiguration=grantedConfiguration.replace("editors: [alice, bob]","editors: [bob]");
+        assertNotEquals(grantedConfiguration,revokedConfiguration);
+        String admittedRevision=runtime.packageRegistry.snapshot().revision;
+        CountDownLatch responseWriting=new CountDownLatch(1),allowResponse=new CountDownLatch(1);
+        Captured response=new Captured(responseWriting,allowResponse);
+        ExecutorService executor=Executors.newFixedThreadPool(2);
+        try {
+            Future<Captured> request=executor.submit(()->invokeAsCaptured(servlet,"GET",path,parameters,new byte[0],
+                    "alice",null,false,"application/json",response));
+            assertTrue(responseWriting.await(10,TimeUnit.SECONDS),"The authorized response did not reach JSON serialization: "+path);
+            if(response.status!=200) {
+                allowResponse.countDown();
+                request.get(5,TimeUnit.SECONDS);
+            }
+            assertEquals(200,response.status,"The privileged response should succeed before its serialization is paused: "+path
+                    +"; body="+response.bodyText());
+            Files.writeString(serverFile,revokedConfiguration);
+            runtime.packageRegistry.pollNow();
+            Field pendingSince=PackageRegistry.class.getDeclaredField("pendingSince");pendingSince.setAccessible(true);
+            pendingSince.set(runtime.packageRegistry,Instant.EPOCH);
+            CountDownLatch reloadStarted=new CountDownLatch(1);
+            AtomicReference<Thread> reloadThread=new AtomicReference<>();
+            Future<?> registryUpdate=executor.submit(()->{reloadThread.set(Thread.currentThread());reloadStarted.countDown();runtime.packageRegistry.pollNow();return null;});
+            assertTrue(reloadStarted.await(5,TimeUnit.SECONDS));
+            Field lifecycleField=ServerRuntime.class.getDeclaredField("admissionLifecycle");lifecycleField.setAccessible(true);
+            ReentrantReadWriteLock lifecycle=(ReentrantReadWriteLock)lifecycleField.get(runtime);
+            assertTrue(lifecycle.getReadLockCount()>0,"The response must retain registry read authority while its body is serialized: "+path);
+            long queueDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            Thread writer=reloadThread.get();
+            while(writer!=null&&!lifecycle.hasQueuedThread(writer)&&!registryUpdate.isDone()
+                    &&System.nanoTime()<queueDeadline)Thread.yield();
+            assertTrue(writer!=null&&lifecycle.hasQueuedThread(writer),
+                    "The registry reload must be queued behind response serialization before the response is released: "+path
+                            +"; readers="+lifecycle.getReadLockCount()+"; done="+registryUpdate.isDone()
+                            +"; writerState="+(writer==null?"missing":writer.getState())
+                            +"; writerStack="+(writer==null?"missing":java.util.Arrays.toString(writer.getStackTrace())));
+            assertFalse(registryUpdate.isDone(),"A registry revoke must wait for response serialization: "+path);
+            assertEquals(admittedRevision,runtime.packageRegistry.snapshot().revision,
+                    "The old capability remains installed until the authorized response finishes: "+path);
+            allowResponse.countDown();
+            Captured completed=request.get(10,TimeUnit.SECONDS);
+            registryUpdate.get(10,TimeUnit.SECONDS);
+            assertEquals(200,completed.status,completed.bodyText());
+            assertTrue(completed.bodyText().contains(expectedResponseMarker),completed.bodyText());
+            assertNotEquals(admittedRevision,runtime.packageRegistry.snapshot().revision);
+            assertFalse(runtime.packageRegistry.snapshot().editors.get("shared").contains("alice"));
+
+            Captured afterRevoke=invokeAs(servlet,"alice","GET",path,parameters,new byte[0]);
+            if(path.endsWith("/source-history/diff")) {
+                assertEquals(200,afterRevoke.status,afterRevoke.bodyText());
+                assertFalse(afterRevoke.bodyText().contains(expectedResponseMarker),afterRevoke.bodyText());
+                assertEquals(false,ServerRuntime.JSON.readTree(afterRevoke.body()).path("items").path(0).path("contentAvailable").asBoolean());
+            } else if(path.endsWith("/sut-metrics/resource"))assertEquals(404,afterRevoke.status,afterRevoke.bodyText());
+            else assertEquals(403,afterRevoke.status,afterRevoke.bodyText());
+
+            String restoredConfiguration=revokedConfiguration.replace("editors: [bob]","editors: [alice, bob]");
+            Files.writeString(serverFile,restoredConfiguration);
+            runtime.packageRegistry.pollNow();pendingSince.set(runtime.packageRegistry,Instant.EPOCH);
+            runtime.packageRegistry.pollNow();
+            assertTrue(runtime.packageRegistry.snapshot().editors.get("shared").contains("alice"));
+            return restoredConfiguration;
+        } finally {
+            allowResponse.countDown();executor.shutdownNow();executor.awaitTermination(5,TimeUnit.SECONDS);
+        }
+    }
+
     private static JsonNode assertChangeSetSchema(com.networknt.schema.JsonSchema schema,Captured response,int status) throws Exception {
         assertEquals(status,response.status,new String(response.body(),StandardCharsets.UTF_8));
         assertEquals("private, no-store",response.headers.get("Cache-Control"));
@@ -2207,6 +2552,12 @@ class ApiServletIntegratedLimitsTest {
 
     private Captured invokeAsContentType(ApiServlet servlet,String method,String path,Map<String,String> parameters,
                                          byte[] body,String login,Set<String> roles,boolean admin,String contentType) throws Exception {
+        return invokeAsCaptured(servlet,method,path,parameters,body,login,roles,admin,contentType,new Captured());
+    }
+
+    private Captured invokeAsCaptured(ApiServlet servlet,String method,String path,Map<String,String> parameters,
+                                      byte[] body,String login,Set<String> roles,boolean admin,String contentType,
+                                      Captured response) throws Exception {
         ServletContext context=servlet.getServletContext();
         HttpServletRequest request=proxy(HttpServletRequest.class,(self,called,args)->{
             switch(called.getName()) {
@@ -2226,7 +2577,6 @@ class ApiServletIntegratedLimitsTest {
                 default: return defaultValue(called.getReturnType());
             }
         });
-        Captured response=new Captured();
         HttpServletResponse httpResponse=proxy(HttpServletResponse.class,(self,called,args)->{
             if("setStatus".equals(called.getName()))response.status=(Integer)args[0];
             if("getOutputStream".equals(called.getName()))return response.stream;
@@ -2324,11 +2674,24 @@ class ApiServletIntegratedLimitsTest {
         final ByteArrayOutputStream output=new ByteArrayOutputStream();
         final Map<String,String> headers=new HashMap<String,String>();
         int status=200;
+        private final CountDownLatch writeStarted,allowWrite;
+        private final AtomicInteger writes=new AtomicInteger();
+        Captured(){this(null,null);}
+        Captured(CountDownLatch writeStarted,CountDownLatch allowWrite) {
+            this.writeStarted=writeStarted;this.allowWrite=allowWrite;
+        }
+        private void waitForWriteGate() throws java.io.IOException {
+            if(writeStarted==null||writes.getAndIncrement()!=0)return;
+            writeStarted.countDown();
+            try {
+                if(!allowWrite.await(10,TimeUnit.SECONDS))throw new java.io.IOException("Timed out waiting for the test response gate");
+            } catch(InterruptedException interrupted) {Thread.currentThread().interrupt();throw new java.io.IOException(interrupted);}
+        }
         final ServletOutputStream stream=new ServletOutputStream() {
             @Override public boolean isReady(){return true;}
             @Override public void setWriteListener(WriteListener listener) { }
-            @Override public void write(int value){output.write(value);}
-            @Override public void write(byte[] bytes,int offset,int length){output.write(bytes,offset,length);}
+            @Override public void write(int value) throws java.io.IOException {waitForWriteGate();output.write(value);}
+            @Override public void write(byte[] bytes,int offset,int length) throws java.io.IOException {waitForWriteGate();output.write(bytes,offset,length);}
         };
         byte[] body(){return output.toByteArray();}
         String bodyText(){return new String(body(),StandardCharsets.UTF_8);}

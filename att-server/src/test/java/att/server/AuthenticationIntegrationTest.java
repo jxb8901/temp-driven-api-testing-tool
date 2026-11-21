@@ -20,6 +20,8 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -125,7 +127,9 @@ class AuthenticationIntegrationTest {
         Path data=temp.resolve("manifest-data");Path config=Files.writeString(temp.resolve("manifest-server.yaml"),
                 "server:\n  dataDir: "+yaml(data)+"\n  auth: {mode: local}\n  centralConfigurationEditingEnabled: true\n  security: {checkCrossOrigin: true}\n"
                 +"  packageConfiguration: {sourceEditingEnabled: true}\n  inspection: {redaction: {sensitiveFieldPatterns: [\"^opaqueConfigValue$\"]}}\n"
-                +"workers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries: {owner: "+yaml(pkg)+", admin: "+yaml(adminPackage)+"}\n");
+                +"workers: {}\npackages:\n  allowedRoots: ["+yaml(packages)+"]\n  entries:\n"
+                +"    owner:\n      path: "+yaml(pkg)+"\n      editors: [editor, admin]\n"
+                +"    admin: "+yaml(adminPackage)+"\n");
         System.setProperty("att.server.config",config.toString());
         Path users=Files.writeString(temp.resolve("manifest-users.xml"),"<tomcat-users></tomcat-users>");
         Tomcat tomcat=start(users,appDirectory("manifest-http"));
@@ -135,11 +139,12 @@ class AuthenticationIntegrationTest {
             String bootstrap=ServerRuntime.JSON.writeValueAsString(Map.of("token",Files.readString(data.resolve("bootstrap-admin.token")).strip(),"loginId","admin","displayName","Admin","password",password));
             assertEquals(201,send(client,port,"POST","/att/api/v1/auth/bootstrap",origin,null,bootstrap).statusCode());
             ManifestSession admin=manifestLogin(client,port,"admin",password);
-            for(String login:List.of("owner","other")) {
+            for(String login:List.of("owner","editor","other")) {
                 String body=ServerRuntime.JSON.writeValueAsString(Map.of("loginId",login,"displayName",login,"password",password,"role","USER"));
                 assertEquals(201,sendWithCookie(client,port,"POST","/att/api/v1/auth/users",admin.cookie,origin,admin.csrf,body).statusCode());
             }
-            ManifestSession owner=manifestLogin(client,port,"owner",password),other=manifestLogin(client,port,"other",password);
+            ManifestSession owner=manifestLogin(client,port,"owner",password),editor=manifestLogin(client,port,"editor",password),
+                    other=manifestLogin(client,port,"other",password);
             String base="/att/api/v1/packages/owner/package-configuration";
             assertEquals(401,send(client,port,"GET",base+"/source",null,null,null).statusCode());
             HttpResponse<String> source=sendWithCookie(client,port,"GET",base+"/source",owner.cookie,null,null,null);
@@ -294,6 +299,126 @@ class AuthenticationIntegrationTest {
             JsonNode secondHistoryPageBody=ServerRuntime.JSON.readTree(secondHistoryPage.body());
             assertEquals(1,secondHistoryPageBody.path("items").size());assertFalse(secondHistoryPageBody.path("hasMore").asBoolean());
             assertEquals(publication.path("transactionId").asText(),secondHistoryPageBody.path("items").get(0).path("transactionId").asText());
+
+            HttpResponse<String> editorPackages=sendWithCookie(client,port,"GET","/att/api/v1/packages",editor.cookie,null,null,null);
+            assertEquals(200,editorPackages.statusCode(),editorPackages.body());
+            JsonNode editorPackage=null;
+            for(JsonNode item:ServerRuntime.JSON.readTree(editorPackages.body()).path("items"))
+                if("owner".equals(item.path("packageId").asText()))editorPackage=item;
+            assertNotNull(editorPackage,editorPackages.body());
+            assertTrue(editorPackage.path("canEditPackageContent").asBoolean(),
+                    "An active USER explicitly assigned to a Package receives the edit capability");
+
+            HttpResponse<String> editorManifestSource=sendWithCookie(client,port,"GET",base+"/source",editor.cookie,null,null,null);
+            assertEquals(200,editorManifestSource.statusCode(),editorManifestSource.body());
+            String editorOriginalDigest=ServerRuntime.JSON.readTree(editorManifestSource.body()).path("manifestDigest").asText();
+            assertEquals(PackageManifestPublisher.digest(original.getBytes(StandardCharsets.UTF_8)),editorOriginalDigest);
+            String editorCandidate=original+"# published by assigned editor\n";
+            String editorDraftBody=ServerRuntime.JSON.writeValueAsString(Map.of("source",editorCandidate,
+                    "expectedManifestDigest",editorOriginalDigest));
+            assertEquals(403,sendWithCookie(client,port,"POST",base+"/drafts",other.cookie,origin,other.csrf,editorDraftBody).statusCode(),
+                    "An unassigned USER cannot stage Manifest edits");
+            assertEquals(403,sendWithCookie(client,port,"POST",base+"/drafts",admin.cookie,origin,admin.csrf,editorDraftBody).statusCode(),
+                    "An ADMIN listed as an editor does not receive Package USER edit authority");
+            HttpResponse<String> editorStaged=sendWithCookie(client,port,"POST",base+"/drafts",editor.cookie,origin,editor.csrf,editorDraftBody);
+            assertEquals(200,editorStaged.statusCode(),editorStaged.body());
+            String editorDraftId=ServerRuntime.JSON.readTree(editorStaged.body()).path("draftId").asText();
+            for(String action:List.of("validate","review")) {
+                HttpResponse<String> response=sendWithCookie(client,port,"POST",base+"/drafts/"+editorDraftId+"/"+action,
+                        editor.cookie,origin,editor.csrf,"{}");
+                assertEquals(200,response.statusCode(),response.body());
+            }
+            HttpResponse<String> editorPublished=sendWithCookie(client,port,"POST",base+"/drafts/"+editorDraftId+"/publish",
+                    editor.cookie,origin,editor.csrf,"{}");
+            assertEquals(200,editorPublished.statusCode(),editorPublished.body());
+            assertEquals(editorCandidate,Files.readString(pkg.resolve("package.yaml")));
+            JsonNode editorManifestHistory=ServerRuntime.JSON.readTree(sendWithCookie(client,port,"GET",base+"/history",
+                    editor.cookie,null,null,null).body()).path("items");
+            assertTrue(java.util.stream.StreamSupport.stream(editorManifestHistory.spliterator(),false)
+                    .anyMatch(item->editorOriginalDigest.equals(item.path("manifestDigest").asText())),
+                    "The assigned editor can inspect shared Manifest revision history");
+            String editorCandidateDigest=PackageManifestPublisher.digest(editorCandidate.getBytes(StandardCharsets.UTF_8));
+            String editorRollbackBody=ServerRuntime.JSON.writeValueAsString(Map.of("revision",editorOriginalDigest,
+                    "expectedManifestDigest",editorCandidateDigest));
+            HttpResponse<String> editorRollback=sendWithCookie(client,port,"POST",base+"/rollback",editor.cookie,
+                    origin,editor.csrf,editorRollbackBody);
+            assertEquals(200,editorRollback.statusCode(),editorRollback.body());
+            String editorRollbackId=ServerRuntime.JSON.readTree(editorRollback.body()).path("draftId").asText();
+            for(String action:List.of("validate","review"))
+                assertEquals(200,sendWithCookie(client,port,"POST",base+"/drafts/"+editorRollbackId+"/"+action,
+                        editor.cookie,origin,editor.csrf,"{}").statusCode());
+            HttpResponse<String> editorRestored=sendWithCookie(client,port,"POST",base+"/drafts/"+editorRollbackId+"/publish",
+                    editor.cookie,origin,editor.csrf,"{}");
+            assertEquals(200,editorRestored.statusCode(),editorRestored.body());
+            assertEquals(original,Files.readString(pkg.resolve("package.yaml")),
+                    "The assigned editor can publish a rollback from shared Manifest history");
+
+            HttpResponse<String> editorCaseList=sendWithCookie(client,port,"GET","/att/api/v1/packages/owner/resources?type=case",
+                    editor.cookie,null,null,null);
+            assertEquals(200,editorCaseList.statusCode(),editorCaseList.body());
+            String editorCaseResourceId=null;
+            for(JsonNode item:ServerRuntime.JSON.readTree(editorCaseList.body()).path("items"))
+                if("ready".equals(item.path("state").asText()))editorCaseResourceId=item.path("resourceId").asText();
+            assertNotNull(editorCaseResourceId,editorCaseList.body());
+            String editorTestcaseSourcePath="/att/api/v1/packages/owner/authoring-source?type=testcase&resourceId="
+                    +editorCaseResourceId+"&selector=sidecar";
+            HttpResponse<String> editorTestcaseSource=sendWithCookie(client,port,"GET",editorTestcaseSourcePath,
+                    editor.cookie,null,null,null);
+            assertEquals(200,editorTestcaseSource.statusCode(),editorTestcaseSource.body());
+            JsonNode editorTestcaseSourceBody=ServerRuntime.JSON.readTree(editorTestcaseSource.body());
+            assertEquals(sidecar,editorTestcaseSourceBody.path("text").asText());
+            assertEquals(403,sendWithCookie(client,port,"GET",editorTestcaseSourcePath,other.cookie,null,null,null).statusCode(),
+                    "An unassigned USER cannot read raw Testcase sidecars");
+            assertEquals(403,sendWithCookie(client,port,"GET",editorTestcaseSourcePath,admin.cookie,null,null,null).statusCode(),
+                    "An ADMIN listed as an editor cannot read raw Testcase sidecars");
+
+            byte[] candidateWorkbookBytes;
+            try(Workbook candidateWorkbook=new XSSFWorkbook(new ByteArrayInputStream(Files.readAllBytes(workbookPath)));
+                ByteArrayOutputStream output=new ByteArrayOutputStream()) {
+                candidateWorkbook.getSheet("Cases").getRow(1).getCell(2).setCellValue("published by shared editor");
+                candidateWorkbook.write(output);candidateWorkbookBytes=output.toByteArray();
+            }
+            String editorChangeSetPath="/att/api/v1/packages/owner/change-sets";
+            Map<String,Object> workbookOperation=Map.of("operation","replace","path","testcase/cases.xlsx",
+                    "contentBase64",Base64.getEncoder().encodeToString(candidateWorkbookBytes));
+            Map<String,Object> editorChangeSetBody=Map.of("baseSourceRevision",editorTestcaseSourceBody.path("baseSourceRevision").asText(),
+                    "registryRevision",editorTestcaseSourceBody.path("registryRevision").asText(),"operations",List.of(workbookOperation));
+            String editorChangeSetJson=ServerRuntime.JSON.writeValueAsString(editorChangeSetBody);
+            assertEquals(403,sendWithCookie(client,port,"POST",editorChangeSetPath,other.cookie,origin,other.csrf,
+                    editorChangeSetJson).statusCode(),"An unassigned USER cannot stage Testcase workbook changes");
+            assertEquals(403,sendWithCookie(client,port,"POST",editorChangeSetPath,admin.cookie,origin,admin.csrf,
+                    editorChangeSetJson).statusCode(),"An ADMIN cannot stage Testcase workbook changes");
+            HttpResponse<String> editorChangeSet=sendWithCookie(client,port,"POST",editorChangeSetPath,editor.cookie,
+                    origin,editor.csrf,editorChangeSetJson);
+            assertEquals(201,editorChangeSet.statusCode(),editorChangeSet.body());
+            String editorChangeSetId=ServerRuntime.JSON.readTree(editorChangeSet.body()).path("changeSetId").asText();
+            String snapshotBody=ServerRuntime.JSON.writeValueAsString(Map.of(
+                    "expectedSourceRevision",editorTestcaseSourceBody.path("baseSourceRevision").asText(),
+                    "workbookPath","testcase/cases.xlsx",
+                    "expectedWorkbookHash",sha256Bytes(candidateWorkbookBytes),
+                    "expectedSidecarHash",sha256Bytes(sidecar.getBytes(StandardCharsets.UTF_8))));
+            HttpResponse<String> generatedSnapshot=sendWithCookie(client,port,"POST",editorChangeSetPath+"/"+editorChangeSetId+"/generate-snapshot",
+                    editor.cookie,origin,editor.csrf,snapshotBody);
+            assertEquals(200,generatedSnapshot.statusCode(),generatedSnapshot.body());
+            assertEquals("testcase/cases.xml",ServerRuntime.JSON.readTree(generatedSnapshot.body()).path("snapshotPath").asText());
+            for(String action:List.of("validate","review")) {
+                HttpResponse<String> response=sendWithCookie(client,port,"POST",editorChangeSetPath+"/"+editorChangeSetId+"/"+action,
+                        editor.cookie,origin,editor.csrf,"{}");
+                assertEquals(200,response.statusCode(),response.body());
+            }
+            HttpResponse<String> testcasePublished=sendWithCookie(client,port,"POST",editorChangeSetPath+"/"+editorChangeSetId+"/publish",
+                    editor.cookie,origin,editor.csrf,"{}");
+            assertEquals(200,testcasePublished.statusCode(),testcasePublished.body());
+            assertArrayEquals(candidateWorkbookBytes,Files.readAllBytes(workbookPath));
+            String publishedSnapshot=Files.readString(pkg.resolve("testcase/cases.xml"));
+            assertTrue(publishedSnapshot.contains("published by shared editor"),publishedSnapshot);
+
+            assertEquals(200,sendWithCookie(client,port,"DELETE","/att/api/v1/auth/users/editor",admin.cookie,
+                    origin,admin.csrf,"{}").statusCode(),"Disabling a granted editor invalidates the active account");
+            assertEquals(401,sendWithCookie(client,port,"GET","/att/api/v1/auth/me",editor.cookie,null,null,null).statusCode());
+            assertEquals(401,sendWithCookie(client,port,"GET",base+"/source",editor.cookie,null,null,null).statusCode(),
+                    "A disabled editor cannot retain privileged Package source access");
+
             for(boolean revoke:List.of(false,true)) {
                 source=sendWithCookie(client,port,"GET",base+"/source",owner.cookie,null,null,null);
                 digest=ServerRuntime.JSON.readTree(source.body()).path("manifestDigest").asText();
@@ -408,6 +533,10 @@ class AuthenticationIntegrationTest {
 
     private static String sha256(String value) throws Exception {
         byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return java.util.HexFormat.of().formatHex(digest);
+    }
+    private static String sha256Bytes(byte[] value) throws Exception {
+        byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(value);
         return java.util.HexFormat.of().formatHex(digest);
     }
     private record ManifestSession(String cookie,String csrf) { }
@@ -553,7 +682,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,userMonitoring.statusCode(),userMonitoring.body());
             JsonNode monitoring=ServerRuntime.JSON.readTree(userMonitoring.body());
             assertEquals("att-monitoring/v1",monitoring.path("schemaVersion").asText());
-            assertEquals("4.4.0",monitoring.path("health").path("version").asText());
+            assertEquals("4.4.1",monitoring.path("health").path("version").asText());
             assertTrue(monitoring.path("workers").path("maxConcurrent").isIntegralNumber());
             assertTrue(monitoring.path("workers").path("activeLoadJobs").isIntegralNumber());
             assertTrue(monitoring.path("http").path("successfulRequests").isIntegralNumber());
@@ -666,6 +795,11 @@ class AuthenticationIntegrationTest {
         Path localHome=createLocalRuntime();
         System.setProperty("att.home",localHome.toString());
         Path packages=Files.createDirectory(temp.resolve("packages"));Files.createDirectory(packages.resolve("p"));
+        Path sharedPackage=Files.createDirectory(packages.resolve("fpp-common"));
+        Path adminPackage=Files.createDirectory(packages.resolve("admin"));
+        Path dualRolePackage=Files.createDirectory(packages.resolve("both"));
+        for(Path packageRoot:List.of(sharedPackage,adminPackage,dualRolePackage))
+            Files.writeString(packageRoot.resolve("package.yaml"),"schemaVersion: att-package/v1\n");
         Path debugPackage=Files.createDirectory(packages.resolve("debug"));Path template=Files.createDirectories(debugPackage.resolve("templates/FORM"));
         Files.createDirectories(debugPackage.resolve("testcase"));
         Path runtimeConfig=Files.createDirectories(localHome.resolve("config")).resolve("config.yaml");
@@ -678,8 +812,15 @@ class AuthenticationIntegrationTest {
         Files.writeString(loadDirectory.resolve("path-based.yaml"),"schemaVersion: att-load/v1.6\nworkloads:\n- id: path-based\n  target:\n    type: template\n    id: FORM\n  load:\n    users: 1\n    duration: 1s\n");
         Files.writeString(template.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs:\n  value: safe\n"
                 +"  payload: {account: 'customer account 123456789', secret: 'temporary credential violet-123'}\n");
-        Path users=Files.writeString(temp.resolve("tomcat-users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"OTHER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"peer\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"other\" password=\"secret\" roles=\"OTHER\"/></tomcat-users>");
-        Path config=Files.writeString(temp.resolve("server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n  security:\n    checkCrossOrigin: true\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\nworkers:\n  maxConcurrent: 2\n  queuedLimit: 2\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n");
+        Path users=Files.writeString(temp.resolve("tomcat-users.xml"),"<tomcat-users><role rolename=\"ATT_USER\"/><role rolename=\"ATT_ADMIN\"/><role rolename=\"OTHER\"/><user username=\"att\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"peer\" password=\"secret\" roles=\"ATT_USER\"/><user username=\"admin\" password=\"secret\" roles=\"ATT_ADMIN\"/><user username=\"both\" password=\"secret\" roles=\"ATT_ADMIN,ATT_USER\"/><user username=\"other\" password=\"secret\" roles=\"OTHER\"/></tomcat-users>");
+        Path config=Files.writeString(temp.resolve("server.yaml"),"server:\n  dataDir: "+yaml(temp.resolve("data"))+"\n  authenticationRequired: true\n"
+                +"  authorization: {userRole: ATT_USER, adminRole: ATT_ADMIN}\n  security:\n    checkCrossOrigin: true\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\n  inlineLoad:\n    enabled: true\n    maxWorkloads: 1\n"
+                +"workers:\n  maxConcurrent: 2\n  queuedLimit: 2\n  maxConcurrentLoad: 2\npackages:\n  allowedRoots:\n    - "+yaml(packages)+"\n  entries:\n"
+                +"    p: "+yaml(packages.resolve("p"))+"\n    debug: "+yaml(debugPackage)+"\n"
+                +"    fpp-common:\n      path: "+yaml(sharedPackage)+"\n      editors: [att]\n"
+                +"    admin: "+yaml(adminPackage)+"\n"
+                +"    both:\n      path: "+yaml(dualRolePackage)+"\n      editors: [both]\n");
         String old=System.getProperty("att.server.config");System.setProperty("att.server.config",config.toString());
         Tomcat tomcat=start(users,appDirectory("authenticated"),true);
         try {
@@ -688,6 +829,21 @@ class AuthenticationIntegrationTest {
             assertEquals(401,get(port,"/att/ui/index.html",null));
             String basic="Basic "+Base64.getEncoder().encodeToString("att:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));assertEquals(200,request(port,basic));
             String other="Basic "+Base64.getEncoder().encodeToString("other:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));assertEquals(403,request(port,other),"Only principals in the configured USER role receive operational API access");
+            String peerUser="Basic "+Base64.getEncoder().encodeToString("peer:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String adminBasic="Basic "+Base64.getEncoder().encodeToString("admin:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String both="Basic "+Base64.getEncoder().encodeToString("both:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            JsonNode packageItems=getJson(port,"/att/api/v1/packages",basic).path("items");
+            boolean editorCanEdit=false;
+            for(JsonNode item:packageItems)if("fpp-common".equals(item.path("packageId").asText()))
+                editorCanEdit=item.path("canEditPackageContent").asBoolean();
+            assertTrue(editorCanEdit,"A trusted active USER editor sees the Package source capability");
+            assertEquals(200,get(port,"/att/api/v1/packages/fpp-common/authoring-source?type=manifest",basic));
+            assertEquals(403,get(port,"/att/api/v1/packages/fpp-common/authoring-source?type=manifest",peerUser),
+                    "An authenticated USER without a registry grant cannot read the source");
+            assertEquals(403,get(port,"/att/api/v1/packages/admin/authoring-source?type=manifest",adminBasic),
+                    "An ADMIN whose login matches the Package ID still cannot read Package source");
+            assertEquals(403,get(port,"/att/api/v1/packages/both/authoring-source?type=manifest",both),
+                    "A principal with both ADMIN and USER roles remains ADMIN-only for Package editing");
             assertEquals(200,get(port,"/att/ui/index.html",basic));
             assertEquals(200,get(port,"/att/ui/app.js",basic));
             JsonNode resources=getJson(port,"/att/api/v1/packages/debug/resources?type=template",basic);
@@ -900,7 +1056,7 @@ class AuthenticationIntegrationTest {
             assertEquals(200,request(port,null));assertEquals(200,get(port,"/att/ui/index.html",null));
             assertEquals(200,get(port,"/att/ui/app.js",null));
             assertEquals(200,get(port,"/att/api/v1/health",null));
-            assertEquals("4.4.0",getJson(port,"/att/api/v1/version",null).path("version").asText());
+            assertEquals("4.4.1",getJson(port,"/att/api/v1/version",null).path("version").asText());
             JsonNode registry=getJson(port,"/att/api/v1/registry",null);
             assertEquals("att-package-registry/v1",registry.path("schemaVersion").asText());
             assertEquals("Ready",registry.path("status").asText());

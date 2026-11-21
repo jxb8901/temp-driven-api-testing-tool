@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-20
-- **Scope:** Next-generation ATT authoring (future; not shipped in 4.4.0)
+- **Scope:** Next-generation ATT authoring (future; not shipped in 4.4.1)
 - **Related:** [Issue #388](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/388), [#233](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/233), [PR #386](https://github.com/jxb8901/temp-driven-api-testing-tool/pull/386)
 - **Translation:** [繁體中文版](0001-flow-centric-testcase-resolution.zh.md)
 
@@ -72,7 +72,7 @@ An empty selection must have an explicit non-PASS status/policy; **zero executio
 Distinct identities:
 - **Definition ID:** `fpp.transfer.boundary`.
 - **Resolved Case ID:** `min_minus_1`, unique within a Definition.
-- **Qualified Case ID:** e.g. `fpp.transfer.boundary.min_minus_1`, unique under defined Package/Definition namespace rules.
+- **Qualified Case ID:** such as `fpp.transfer.boundary.min_minus_1`, unique under defined Package/Definition namespace rules.
 - **Execution/Iteration ID:** unique to each attempt; one Case ID may have arbitrarily many executions.
 
 A Case ID expression, or a stable source record key, is evaluated **during Resolution** using a safe deterministic record context. Do not default to physical Excel row numbers as durable identity. Validate blanks, duplicates, conflicts and unsafe IDs.
@@ -217,9 +217,9 @@ Preserve source ownership, authorization, confidentiality, revision consistency,
 
 Legacy path **must remain operational**: XLSX + `att-sidecar/v2.2` + canonical XML snapshot, multi-Stage Case execution, Template entry points, existing CLI/Job/Schedule/report IDs. Stage `required`/`runWhen`/`onFailure`, scope/overlays, rollback/cleanup, nested Flow state, retries, logs and events are **not automatically equivalent** to a plain nested Flow Action. Keep legacy execution via adapter until semantic equivalence is proven.
 
-Reuse 4.4.0 Package Source / Change Sets / Validate / Review / Publish / Revision / History / Restore and immutable Job source closure. Do not create a second authoring/publishing subsystem.
+Reuse 4.4.1 Package Source / Change Sets / Validate / Review / Publish / Revision / History / Restore and immutable Job source closure. Do not create a second authoring/publishing subsystem.
 
-**ATT 4.4.0 GA and PR #386 must not be blocked** by delivering native Test Cases, dynamic generators, Flow/Template consolidation or new LOAD targets. This ADR guides post-4.4 implementation and pre-release compatibility review only.
+**ATT 4.4.1 GA and PR #386 must not be blocked** by delivering native Test Cases, dynamic generators, Flow/Template consolidation or new LOAD targets. This ADR guides post-4.4 implementation and pre-release compatibility review only.
 
 ## Open questions before acceptance
 

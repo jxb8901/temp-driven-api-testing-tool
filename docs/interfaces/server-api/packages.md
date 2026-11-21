@@ -1,4 +1,4 @@
-<!-- att-doc-status: current release=4.3.0 -->
+<!-- att-doc-status: current release=4.4.1 -->
 
 # Package inspection APIs
 
@@ -58,7 +58,7 @@ Invalid list parameters return `400`; unknown packages/resources return the same
 
 ## Lossless authoring-source reads
 
-Safe source inspection above remains available to authorized USER operators and returns the existing redacted projection. It is not writable input. Package authoring reads use a separate endpoint and require an authenticated active USER whose canonical login ID exactly equals the registered Package ID; `default` is never editable. Local login IDs are NFKC-normalized and lowercased with `Locale.ROOT`, then restricted to lowercase ASCII letters, digits, dots, underscores, and hyphens. Trusted container/SSO principals must already use that same canonical form; the source API does not fold case or Unicode and does not merge identities. The trusted deployment switch `server.packageConfiguration.sourceEditingEnabled` must also be `true`. ADMIN does not receive Package USER operations or owner access, and a Package owner does not receive central configuration privileges.
+Safe source inspection above remains available to authorized USER operators and returns the existing redacted projection. It is not writable input. Package authoring reads use a separate endpoint and require an authenticated active USER whose canonical login ID either exactly equals the registered Package ID or is listed in that Package's trusted registry `editors` assignment; `default` is never editable. Local login IDs are NFKC-normalized and lowercased with `Locale.ROOT`, then restricted to lowercase ASCII letters, digits, dots, underscores, and hyphens. Trusted container/SSO principals and registry editor assignments must already use that same canonical form; the source API does not fold case or Unicode and does not merge identities. The trusted deployment switch `server.packageConfiguration.sourceEditingEnabled` must also be `true`. Registry grant changes advance the Package registry revision, so outstanding drafts cannot publish against a stale assignment. ADMIN does not receive Package USER operations or source editing, even when its login matches a Package ID or appears in `editors`; Package editing does not grant central configuration privileges.
 
 ```http
 GET /api/v1/packages/{packageId}/authoring-source?type=manifest
@@ -114,7 +114,7 @@ Configuration responses include `view`, `state`, `schemaVersion` when available,
 
 ## Source history, diff, and restore
 
-Package source history is separate from Job artifacts. Package owners can read complete permitted source history; another authenticated Package operator receives only a safe summary. Central Runtime Config history is a separate namespace and requires active `SYSTEM_SETTINGS_WRITE` (ADMIN). Revoked Package owners cannot use these routes to read old source. All successful responses use `Cache-Control: private, no-store`.
+Package source history is separate from Job artifacts. Package owners and assigned editors can read complete permitted source history; another authenticated Package operator receives only a safe summary. Central Runtime Config history is a separate namespace and requires active `SYSTEM_SETTINGS_WRITE` (ADMIN). Revoked Package editors cannot use these routes to read old source. All successful responses use `Cache-Control: private, no-store`.
 
 ```http
 GET /api/v1/packages/{packageId}/source-history?offset=0&limit=50
@@ -127,11 +127,11 @@ GET /api/v1/configuration/source-history/diff?beforeSnapshotId={snapshotId}&afte
 POST /api/v1/configuration/source-history/restore
 ```
 
-History pages are ordered newest first. `offset` is zero-based; `limit` defaults to 50 and accepts 1–100. Owner/Admin history includes transaction and revision metadata, action, author, snapshot IDs, permitted changed logical paths, validation revision, and activation status. Non-owner Package summaries omit paths, authors, snapshot IDs, and revision digests. The diff endpoint without `path` returns a paged list of changed permitted paths and byte counts. Add one logical `path` to request its text diff. The Server returns content only for bounded UTF-8 text that passes protected-value checks; binary, oversized, protected, or unparseable content returns metadata without source bytes. File references remain literal source text.
+History pages are ordered newest first. `offset` is zero-based; `limit` defaults to 50 and accepts 1–100. Owner/editor history includes transaction and revision metadata, action, author, snapshot IDs, permitted changed logical paths, validation revision, and activation status. Other Package summaries omit paths, authors, snapshot IDs, and revision digests. The diff endpoint without `path` returns a paged list of changed permitted paths and byte counts. Add one logical `path` to request its text diff. The Server returns content only for bounded UTF-8 text that passes protected-value checks; binary, oversized, protected, or unparseable content returns metadata without source bytes. File references remain literal source text.
 
 Each source scope retains at most the newest 500 committed transactions. History responses include a `retention` object with `transactionLimit`, `retainedTransactions`, and a `state` of `within_limit` or `cleanup_pending`. Scheduled cleanup removes older audit rows and revision copies no longer referenced by retained history, the active source pointer, or a durable Job/Schedule source lease. Old snapshots outside that window may no longer be available for Diff or Restore. Expired private Change Set drafts are reclaimed at least once per minute; crash recovery reconciles transaction journals, and the periodic source-history sweep removes abandoned `.copy-*` revision directories.
 
-Restore creates a new Change Set from an immutable snapshot against the current source revision. It never rewrites the selected history entry or changes an accepted Job's pinned source. Send the current revision returned by the owner/Admin history response; Package restores also require the current Package registry revision:
+Restore creates a new Change Set from an immutable snapshot against the current source revision. It never rewrites the selected history entry or changes an accepted Job's pinned source. Send the current revision returned by the owner/editor history response; Package restores also require the current Package registry revision:
 
 ```json
 {
@@ -141,13 +141,13 @@ Restore creates a new Change Set from an immutable snapshot against the current 
 }
 ```
 
-Omit `registryRevision` for Central Runtime Config. A successful request returns a new `changeSetId` and `restoredFromSnapshotId`; continue through the existing Change Set `validate`, `review`, and `publish` actions. Package restore uses the Package owner permission boundary. Central Config restore remains subject to the current Config impact and publication gate, including rejection when that gate cannot approve the candidate. A stale source or Package registry revision returns `409`; invalid, unavailable, or over-limit restores return a safe error without publishing.
+Omit `registryRevision` for Central Runtime Config. A successful request returns a new `changeSetId` and `restoredFromSnapshotId`; continue through the existing Change Set `validate`, `review`, and `publish` actions. Package restore uses the Package source-editor permission boundary. Central Config restore remains subject to the current Config impact and publication gate, including rejection when that gate cannot approve the candidate. A stale source or Package registry revision returns `409`; invalid, unavailable, or over-limit restores return a safe error without publishing.
 
 History and diff ignore query parameters that have no documented meaning. Restore accepts only `snapshotId`, `expectedSourceRevision`, and `registryRevision` for Package sources; Central Runtime Config restore accepts the first two fields. The API does not expose physical revision-store paths or provide unrestricted Central Config export.
 
 ## Package ZIP import
 
-Package owners can import a ZIP as a private Change Set. The import does not write published Package files or Runtime Config. It uses the existing Change Set validation, review, and publication gates.
+Package owners and assigned editors can import a ZIP as a private Change Set. The import does not write published Package files or Runtime Config. It uses the existing Change Set validation, review, and publication gates, which recheck current Package source permission and registry revision.
 
 ```http
 POST /api/v1/packages/{packageId}/change-sets/import
@@ -160,5 +160,7 @@ X-ATT-CSRF: {token}
 The Server parses the complete archive before staging any files. Each entry becomes a `create` or `replace` operation against the current Package revision. The `201` response contains the new `changeSetId` and a path-sorted `changedFiles` preview. Check that preview, then call the normal Change Set `validate`, `review`, and `publish` endpoints. A stale source or registry revision returns `409`; an invalid archive or disallowed Package path returns `400`. Rejected archives create no draft and publish no partial entries.
 
 The importer accepts at most 16 MiB of compressed data, 32 entries, 8 MiB of expanded file data, 4 MiB per file, and a 200:1 expansion ratio. Directory entries must be empty. It rejects traversal, absolute and drive-prefixed paths, backslashes, duplicate or case-colliding paths, file/directory conflicts, symlinks and special files, unsupported ZIP metadata, and inconsistent or malformed central directories. Nested archives are never recursively extracted. Imported paths and content still pass the Package Change Set allowlist and file validators, including workbook archive checks.
+
+Online and ZIP Change Sets use the same optimistic concurrency rule. For example, Alice and Bob can stage against shared Package revision R1; after Alice publishes R2, Bob's publish against R1 returns `409`. Bob should discard the stale draft, load the current source and history, reconcile the intended change onto R2, then stage, validate, review, and publish a new Change Set.
 
 This request imports Package source into the Package's own Change Set. It does not import or export Job Artifact ZIPs, write another Package, or change global Runtime Config. The API does not provide Package source ZIP export.

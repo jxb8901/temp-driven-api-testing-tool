@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppShellContext } from '../../AppShell';
 import { CodeEditor } from '../code/CodeEditor';
 import { AuthoringWorkflow, type AuthoringStepState } from './AuthoringWorkflow';
@@ -19,7 +19,7 @@ const shown = (value: unknown) => typeof value === 'string' ? value : JSON.strin
 
 export function PackageManifestWorkspace({ api, packageId, registerUnsavedChanges, onDirtyChange }: {
   api: PackageManifestApi; packageId: string;
-  registerUnsavedChanges?: (dirty: boolean, description?: string) => () => void;
+  registerUnsavedChanges?: (dirty: boolean, description?: string, onConfirmDiscard?: () => boolean | Promise<boolean>) => () => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const workspace = useContext(AppShellContext);
@@ -34,17 +34,67 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
   const [draftOutdated, setDraftOutdated] = useState(false);
   const [history, setHistory] = useState<ManifestHistory[]>([]);
   const [busy, setBusy] = useState(false);
+  const [mutationBusy, setMutationBusyState] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [revision, refresh] = useState(0);
   const [publishedDigest, setPublishedDigest] = useState('');
   const { confirm: confirmAction, dialog: confirmationDialog } = useAccessibleConfirmation();
   const dirty = source !== baseline || !!draft;
+  const busyRef = useRef(false);
+  const mutationBusyRef = useRef(false);
+  const navigationStateRef = useRef({ api, packageId, draft, source, baseline });
+  navigationStateRef.current = { api, packageId, draft, source, baseline };
+  const setWorkspaceBusy = (value: boolean) => { busyRef.current = value;setBusy(value); };
+  const setMutationBusy = (value: boolean) => { mutationBusyRef.current = value;setMutationBusyState(value); };
+  const clearPrivilegedState = useCallback(() => {
+    setSource('');setBaseline('');setCandidateSource(null);setDraft(null);setDraftOutdated(false);
+    setHistory([]);setPublishedDigest('');setMessage('');
+  }, []);
   useEffect(() => {
     workspace?.setWorkspaceEditorLock?.(Boolean(projection?.canEdit && dirty));
     return () => workspace?.setWorkspaceEditorLock?.(false);
   }, [workspace?.setWorkspaceEditorLock, projection?.canEdit, dirty]);
-  useEffect(() => registerUnsavedChanges?.(dirty, 'unpublished Package Manifest changes'), [dirty, registerUnsavedChanges]);
+  const confirmDiscardForNavigation = useCallback(async () => {
+    const current = navigationStateRef.current;
+    if (mutationBusyRef.current) return false;
+    if (current.draft) {
+      const controller = new AbortController();
+      const currentEpoch = epoch.current;
+      request.current?.abort();request.current = controller;
+      setMutationBusy(true);setWorkspaceBusy(true);setError('');setMessage('');
+      try {
+        await current.api.manifestDraftAction(current.packageId, current.draft.draftId, 'discard', controller.signal);
+        if (controller.signal.aborted || currentEpoch !== epoch.current) return false;
+        setDraft(null);setCandidateSource(null);setDraftOutdated(false);setSource(current.baseline);setError('');
+        refresh(value => value + 1);
+        return true;
+      } catch (failure) {
+        if (!controller.signal.aborted && currentEpoch === epoch.current) {
+          setError(readable(failure));
+          if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 403) {
+            clearPrivilegedState();setProjection(null);refresh(value => value + 1);
+          }
+          if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 409) setDraftOutdated(true);
+        }
+        return false;
+      } finally {
+        if (request.current === controller) request.current = null;
+        if (currentEpoch === epoch.current) {setWorkspaceBusy(false);setMutationBusy(false);}
+      }
+    }
+    if (current.source !== current.baseline) {
+      setSource(current.baseline);setCandidateSource(null);setDraftOutdated(false);setError('');setMessage('');
+    }
+    return true;
+  }, [clearPrivilegedState]);
+  const navigationGuardActive = dirty || mutationBusy;
+  useEffect(() => {
+    if (!registerUnsavedChanges) return;
+    return navigationGuardActive
+      ? registerUnsavedChanges(true, 'unpublished Package Manifest changes', confirmDiscardForNavigation)
+      : registerUnsavedChanges(false, 'unpublished Package Manifest changes');
+  }, [confirmDiscardForNavigation, navigationGuardActive, registerUnsavedChanges]);
   useEffect(() => { onDirtyChange?.(dirty);return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
   const request = useRef<AbortController | null>(null);
   const epoch = useRef(0);
@@ -55,7 +105,7 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
   }, [packageId]);
   useEffect(() => {
     const controller = new AbortController();request.current?.abort();request.current = controller;
-    setBusy(true);setError('');setProjection(null);
+    setWorkspaceBusy(true);setError('');setProjection(null);
     const load = async () => {
       const declared = await api.getPackageManifest(packageId, 'declared', undefined, controller.signal);
       let result: ManifestProjection = view === 'source' && !declared.present ? { ...declared, available: true, text: 'schemaVersion: att-package/v1\n', redacted: false }
@@ -69,27 +119,47 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
         } catch (failure) {
           if (controller.signal.aborted) return;
           result = { ...result, canEdit: false, authoringSourceUnavailable: true };
+          if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 403) {
+            clearPrivilegedState();setError(readable(failure));refresh(value => value + 1);
+          }
         }
       }
       if (controller.signal.aborted) return;
+      if (result.canEdit !== true) clearPrivilegedState();
       setProjection(result);if (view === 'source') {setSource(result.text || '');setBaseline(result.text || '');}
     };
-    void load().catch(failure => { if (!controller.signal.aborted) setError(readable(failure)); })
-      .finally(() => { if (!controller.signal.aborted) setBusy(false); });
+    void load().catch(failure => {
+      if (!controller.signal.aborted) {
+        setError(readable(failure));
+        if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 403)
+          clearPrivilegedState();
+      }
+    })
+      .finally(() => { if (!controller.signal.aborted) setWorkspaceBusy(false); });
     return () => controller.abort();
-  }, [api, packageId, view, environment, revision]);
+  }, [api, packageId, view, environment, revision, clearPrivilegedState]);
 
-  const act = async (operation: (signal: AbortSignal) => Promise<void>) => {
+  const act = async (operation: (signal: AbortSignal) => Promise<void>, mutation = false) => {
     const controller = new AbortController();request.current?.abort();request.current = controller;
-    const current = epoch.current;setBusy(true);setError('');setMessage('');
+    const current = epoch.current;setWorkspaceBusy(true);setError('');setMessage('');
+    if (mutation) setMutationBusy(true);
     try { await operation(controller.signal); }
     catch (failure) {
       if (!controller.signal.aborted && current === epoch.current) {
         setError(readable(failure));
+        if (failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 403) {
+          // The registry may revoke an editor while this workspace is open. Drop every
+          // previously loaded privileged value before refreshing the server projection.
+          clearPrivilegedState();setProjection(null);
+          refresh(value => value + 1);
+        }
         if (draft && failure && typeof failure === 'object' && 'status' in failure && Number(failure.status) === 409) setDraftOutdated(true);
       }
     }
-    finally { if (!controller.signal.aborted && current === epoch.current) setBusy(false); }
+    finally {
+      if (!controller.signal.aborted && current === epoch.current) setWorkspaceBusy(false);
+      if (mutation && current === epoch.current) setMutationBusy(false);
+    }
   };
   const canWrite = !!projection?.canEdit;
   const permissionBlocked = projection !== null && !canWrite;
@@ -100,10 +170,10 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
   const permissionReason = workspace?.uiLocale === 'zh-Hant'
     ? projection?.authoringSourceUnavailable
       ? '無法取得完整且已授權的 Manifest source；編輯功能維持唯讀。'
-      : '目前帳戶沒有此 Package source 的編輯權限。'
+      : '目前帳戶未獲此 Package registry 指派編輯權限。'
     : projection?.authoringSourceUnavailable
       ? 'The complete authorized Manifest source is unavailable; editing remains read only.'
-      : 'This account cannot edit the registered Package source.';
+      : 'This account is not assigned source editing access for this Package.';
   const validationReason = workspace?.uiLocale === 'zh-Hant'
     ? '先驗證草稿，才能檢閱候選版本。'
     : 'Validate the draft before reviewing the candidate.';
@@ -128,7 +198,7 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
       <button type="button" disabled={busy || dirty} onClick={() => refresh(value => value + 1)}>Refresh Package Configuration</button>
     </header>
     <AuthoringWorkflow label="Package Manifest publication workflow" steps={workflowSteps} />
-    <p role="status">Package owner: <strong>{packageId}</strong> · {projection === null ? 'Checking Package source permissions…' : canWrite ? 'Package source editing is available for this account.' : 'Package source is read only for this account.'}</p>
+    <p role="status">Package ID: <strong>{packageId}</strong> · {projection === null ? 'Checking Package source permissions…' : canWrite ? 'Package source editing is available for this account.' : 'Package source is read only for this account.'}</p>
     {publishedDigest && <details><summary>Published Manifest revision (advanced)</summary><code>{publishedDigest}</code></details>}
     <nav aria-label="Package Configuration views">{(['source', 'declared', 'effective', 'compare'] as const).map(item =>
       <button key={item} type="button" aria-pressed={view === item} disabled={busy || dirty} onClick={() => setView(item)}>
@@ -156,11 +226,13 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
           if (!await confirmAction({ title: 'Discard local Manifest edits?', message: `Remove local edits to package.yaml for Package ${packageId}. Published Package source stays unchanged.`, confirmLabel: 'Discard edits', destructive: true })) return;
           setSource(baseline);setError('');
         })()}>Discard source changes</button> before refreshing or switching views.</p>}
-        {!canWrite && <p>Source editing requires the active USER whose login matches this registered Package ID and enabled Server source policy.</p>}
+        {!canWrite && <p>{workspace?.uiLocale === 'zh-Hant'
+          ? '來源編輯需要已啟用的 USER 帳戶，並由此 Package 的 registry entry 指派，且 Server 已啟用來源編輯政策。'
+          : 'Source editing requires an active USER assigned to this Package by its registry entry and enabled Server source policy.'}</p>}
         <button type="button" disabled={!editable} onClick={() => void act(async signal => {
           const staged = await api.stagePackageManifest(packageId, source, projection.manifestDigest, signal);
           if (!signal.aborted) {setDraft(staged);setCandidateSource(source);setDraftOutdated(false);}
-        })}>Create Manifest draft</button>
+        }, true)}>Create Manifest draft</button>
       </>}
       {view === 'declared' && <CodeEditor value={shown(projection.declared) || '{}'} language="json" label="Declared Package Configuration" />}
       {fields && <table><caption>{draft ? 'Candidate effective configuration' : 'Effective values and origins'}</caption>
@@ -190,23 +262,23 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
         {draft.validation?.declared && <CodeEditor value={shown(draft.validation.declared) || '{}'} language="json" label="Validated Manifest declaration" />}
         <button type="button" disabled={busy || candidateSource === null || draftOutdated || draft.state !== 'draft'} onClick={() => void act(async signal => {
           const next = await api.manifestDraftAction(packageId, draft.draftId, 'validate', signal);if (!signal.aborted) setDraft({ ...draft, ...next });
-        })}>Validate Manifest draft</button>
+        }, true)}>Validate Manifest draft</button>
         <button type="button" disabled={busy || candidateSource === null || draftOutdated || draft.state !== 'validated'} onClick={() => void act(async signal => {
           const next = await api.manifestDraftAction(packageId, draft.draftId, 'review', signal);if (!signal.aborted) setDraft({ ...draft, ...next });
-        })}>Review validated Manifest</button>
+        }, true)}>Review validated Manifest</button>
         <button type="button" disabled={busy || candidateSource === null || draftOutdated || draft.state !== 'reviewed'} onClick={() => void act(async signal => {
           if (!await confirmAction({ title: 'Publish reviewed Package Manifest?',
             message: `Publish package.yaml for Package ${packageId}. This changes the registered Package configuration source for future configuration resolution.`,
             confirmLabel: 'Publish Manifest' })) return;
           const result = await api.publishPackageManifest(packageId, draft.draftId, signal);
           if (!signal.aborted && result.published) {setDraft(null);setCandidateSource(null);setDraftOutdated(false);setPublishedDigest(result.manifestDigest);refresh(value => value + 1);setMessage(result.auditConfirmed === false ? 'Manifest published; the durable audit intent records the revision.' : 'Manifest published. Package views will refresh.');}
-        })}>Publish reviewed Manifest</button>
+        }, true)}>Publish reviewed Manifest</button>
         <button type="button" disabled={busy} onClick={() => void act(async signal => {
           if (!await confirmAction({ title: 'Discard Manifest draft?',
             message: `Discard draft ${draft.draftId} and remove its staged Manifest source. Published Package source stays unchanged.`,
             confirmLabel: 'Discard draft', destructive: true })) return;
           await api.manifestDraftAction(packageId, draft.draftId, 'discard', signal);if (!signal.aborted) {setDraft(null);setCandidateSource(null);setDraftOutdated(false);refresh(value => value + 1);}
-        })}>Discard Manifest draft</button>
+        }, true)}>Discard Manifest draft</button>
       </section>}
       {canWrite && <section aria-label="Manifest revision history">
         <button type="button" disabled={busy || dirty} onClick={() => void act(async signal => {
@@ -223,7 +295,7 @@ export function PackageManifestWorkspace({ api, packageId, registerUnsavedChange
           if (preview.draftId !== staged.draftId || preview.expectedManifestDigest !== staged.expectedManifestDigest || !/^[a-f0-9]{64}$/.test(preview.sourceDigest))
             throw new Error('The Server returned a candidate source that does not match this draft.');
           if (!signal.aborted) {setSource(preview.source);setCandidateSource(preview.source);}
-        })}>Stage rollback {item.manifestDigest.slice(0, 12)}</button></p>)}
+        }, true)}>Stage rollback {item.manifestDigest.slice(0, 12)}</button></p>)}
       </section>}
     </>}
     {confirmationDialog}

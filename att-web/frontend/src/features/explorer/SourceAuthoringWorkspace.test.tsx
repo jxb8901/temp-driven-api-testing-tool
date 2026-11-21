@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShellContext, type AppShellContextValue } from '../../AppShell';
+import { ApiError } from '../../types';
 import { ChangedFiles, SourceAuthoringWorkspace } from './SourceAuthoringWorkspace';
 import type { ExplorerApi } from './types';
 import type { SourceImpactReport, SourceOperation } from './sourceManagement';
@@ -280,6 +281,91 @@ describe('SourceAuthoringWorkspace', () => {
     expect(button('Publish').disabled).toBe(true);
   });
 
+  it('clears authorized source and mutation controls when ZIP import is revoked', async () => {
+    const secretSource = { ...source(), text: 'zip-revocation-secret: value\n' };
+    const stageArchive = vi.fn(async () => { throw Object.assign(new Error('forbidden'), { status: 403 }); });
+    const api = {
+      getManagedPackageAuthoringSource: vi.fn(async () => secretSource),
+      stagePackageSourceArchive: stageArchive,
+    } as unknown as ExplorerApi;
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await act(async () => root.render(<SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId: 'payments',
+      query: { kind: 'resource', resourceType: 'template', resourceId: 'checkout' } }} />));
+    await settle();
+    const sourceView = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="View authorized source"]');
+    expect(sourceView?.value).toContain('zip-revocation-secret');
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="Import Package ZIP"]');
+    if (!input) throw new Error('Package ZIP input was not rendered.');
+    const archive = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], 'revoked.zip', { type: 'application/zip' });
+    Object.defineProperty(input, 'files', { configurable: true, value: [archive] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); await Promise.resolve(); });
+    await settle();
+
+    expect(stageArchive).toHaveBeenCalledOnce();
+    expect(host.textContent).toContain('Package source editing is unavailable for this identity');
+    expect(host.textContent).not.toContain('zip-revocation-secret');
+    expect(host.querySelector('textarea[aria-label^="View authorized source"]')).toBeNull();
+    expect(host.querySelector('textarea[aria-label^="Edit authorized source"]')).toBeNull();
+    expect([...host.querySelectorAll('button')].some(item => ['Edit', 'Import Package ZIP', 'Save Draft'].includes(item.textContent?.trim() || ''))).toBe(false);
+  });
+
+  it('clears a staged Package draft when guarded navigation discard receives a revocation 403', async () => {
+    const secretSource = { ...source(), text: 'discard-revocation-secret: value\n' };
+    const action = vi.fn(async (_domain: unknown, _scope: unknown, _id: unknown, operation: string) => {
+      if (operation === 'validate') throw new ApiError('validation failed', { status: 422, diagnostics: [
+        { code: 'PRIVATE_VALIDATION_DETAIL', severity: 'ERROR', logicalPath: 'templates/checkout/template.yaml', message: 'private validation detail' },
+      ] });
+      throw new ApiError('forbidden', { status: 403 });
+    });
+    let registeredDiscard: (() => boolean | Promise<boolean>) | undefined;
+    const registerUnsavedChanges = vi.fn((_dirty: boolean, _description?: string,
+      onConfirmDiscard?: () => boolean | Promise<boolean>) => {
+      registeredDiscard = onConfirmDiscard;
+      return () => {};
+    });
+    const api = {
+      getManagedPackageAuthoringSource: vi.fn(async () => secretSource),
+      stageSourceChangeSet: vi.fn(async () => draft()),
+      sourceChangeSetAction: action,
+    } as unknown as ExplorerApi;
+    await act(async () => root.render(<SourceAuthoringWorkspace api={api} target={{ domain: 'PACKAGE_SOURCE', packageId: 'payments',
+      query: { kind: 'resource', resourceType: 'template', resourceId: 'checkout' } }} registerUnsavedChanges={registerUnsavedChanges} />));
+    await settle();
+    const sourceView = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="View authorized source"]');
+    expect(sourceView?.value).toContain('discard-revocation-secret');
+    click(button('Edit'));
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Edit authorized source"]');
+    if (!editor) throw new Error('Owner source editor was not rendered.');
+    setInputValue(editor, 'discard-revocation-secret: candidate\n');
+    click(button('Save Draft'));
+    await settle();
+    expect(host.textContent).toContain('Draft cs-1');
+    click(button('Validate'));
+    await settle();
+    expect(host.textContent).toContain('private validation detail');
+
+    const confirmDiscard = registeredDiscard;
+    if (!confirmDiscard) throw new Error('Guarded draft-discard callback was not registered.');
+    let discardResult: boolean | undefined;
+    await act(async () => { discardResult = await confirmDiscard(); });
+    await settle();
+
+    expect(discardResult).toBe(false);
+    expect(action).toHaveBeenCalledTimes(2);
+    expect(action.mock.calls.map(call => call.slice(0, 4))).toEqual([
+      ['PACKAGE_SOURCE', 'payments', 'cs-1', 'validate'],
+      ['PACKAGE_SOURCE', 'payments', 'cs-1', 'discard'],
+    ]);
+    expect(host.textContent).toContain('Package source editing is unavailable for this identity');
+    expect(host.querySelector('[aria-label="Source validation diagnostics"]')).toBeNull();
+    expect(host.textContent).not.toContain('private validation detail');
+    expect(host.textContent).not.toContain('Draft cs-1');
+    expect([...host.querySelectorAll<HTMLTextAreaElement>('textarea')].map(item => item.value).join('\n')).not.toContain('discard-revocation-secret');
+    expect(host.querySelector('textarea[aria-label^="View authorized source"]')).toBeNull();
+    expect(host.querySelector('textarea[aria-label^="Edit authorized source"]')).toBeNull();
+    expect([...host.querySelectorAll('button')].some(item => ['Edit', 'Discard Draft', 'Save Draft', 'Publish'].includes(item.textContent?.trim() || ''))).toBe(false);
+  });
+
   it('shows shared-contract dependency paths, Action call sites, relationships and uncertainty', async () => {
     await act(async () => root.render(<ChangedFiles files={[{ operation: 'delete', path: 'templates/checkout/template.yaml', contentDiff: [
       '@@ -1 +1 @@', '-name: old', '+name: new'], inboundReferences: [
@@ -482,7 +568,7 @@ describe('SourceAuthoringWorkspace', () => {
     setInputValue(editor, 'revoked-secret: value\n');
     act(() => window.dispatchEvent(new Event('pagehide')));
     act(() => window.dispatchEvent(new Event('pageshow'))); await settle();
-    expect(host.textContent).toContain('Owner editing is unavailable');
+    expect(host.textContent).toContain('Package source editing is unavailable');
     expect(host.textContent).not.toContain('Resume work');
     expect(host.querySelector('textarea[aria-label^="Edit authorized source"]')).toBeNull();
   });
