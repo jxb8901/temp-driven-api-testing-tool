@@ -7,6 +7,7 @@ import { TestcaseAuthoringWorkspace } from './TestcaseAuthoringWorkspace';
 import { PackageTestdataWorkspace } from './PackageTestdataCatalog';
 import type { ExplorerApi } from './types';
 import { api as sharedApi } from '../../api';
+import { ApiError } from '../../types';
 
 let host: HTMLDivElement;
 let root: Root;
@@ -101,6 +102,111 @@ describe('TestcaseAuthoringWorkspace', () => {
       expectedWorkbookHash: 'ab'.repeat(32), expectedSidecarHash: 'ab'.repeat(32),
     }, expect.any(AbortSignal));
     expect(host.textContent).toContain('Testcase snapshot cases/case-01.xml generated');
+  });
+
+  it('discards a staged Testcase Change Set before allowing guarded navigation', async () => {
+    const draft = { changeSetId: 'cs-nav', domain: 'PACKAGE_SOURCE' as const, scopeId: 'payments', state: 'draft',
+      baseSourceRevision: 'base-1', registryRevision: 'registry-1', changedFiles: [] };
+    const stage = vi.fn(async () => draft);
+    const discard = vi.fn(async () => ({ discarded: true, changeSetId: 'cs-nav' }));
+    let confirmDiscard: (() => boolean | Promise<boolean>) | undefined;
+    const register = vi.fn((_dirty: boolean, _description?: string, callback?: () => boolean | Promise<boolean>) => {
+      confirmDiscard = callback;
+      return () => {};
+    });
+    const api = { getManagedPackageAuthoringSource: vi.fn(async () => ({ available: true, present: true,
+      logicalPath: 'package.yaml', format: 'yaml', text: '', sourceEtag: 'etag-1', revision: 'revision-1',
+      baseSourceRevision: 'base-1', registryRevision: 'registry-1' })), stageSourceChangeSet: stage,
+      sourceChangeSetAction: discard } as unknown as ExplorerApi;
+    vi.stubGlobal('crypto', { subtle: { digest: vi.fn(async () => new Uint8Array(32).fill(0xab).buffer) } });
+    await act(async () => root.render(<TestcaseAuthoringWorkspace api={api} packageId="payments"
+      sourcePath="cases/case-01.xml" registerUnsavedChanges={register} />));
+    await settle();
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="Upload Testcase workbook and sidecar"]');
+    if (!input) throw new Error('Testcase paired upload control was not rendered.');
+    const workbook = new File(['PK workbook'], 'case-01.xlsx');
+    const sidecar = new File(['columns: {}\n'], 'case-01.yaml');
+    Object.defineProperty(workbook, 'arrayBuffer', { value: async () => new TextEncoder().encode('PK workbook').buffer });
+    Object.defineProperty(sidecar, 'arrayBuffer', { value: async () => new TextEncoder().encode('columns: {}\n').buffer });
+    Object.defineProperty(input, 'files', { configurable: true, value: [workbook, sidecar] });
+    await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+    await settle();
+    expect(host.textContent).toContain('Draft cs-nav');
+    expect(confirmDiscard).toEqual(expect.any(Function));
+
+    let allowed = false;
+    await act(async () => { allowed = await confirmDiscard?.() ?? false; });
+    expect(allowed).toBe(true);
+    expect(discard).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', 'cs-nav', 'discard', expect.any(AbortSignal));
+    expect(host.textContent).not.toContain('Draft cs-nav');
+  });
+
+  it('keeps navigation blocked when Testcase Change Set discard fails', async () => {
+    const draft = { changeSetId: 'cs-denied', domain: 'PACKAGE_SOURCE' as const, scopeId: 'payments', state: 'draft',
+      baseSourceRevision: 'base-1', registryRevision: 'registry-1', changedFiles: [] };
+    const stage = vi.fn(async () => draft);
+    const discard = vi.fn(async () => { throw { status: 403 }; });
+    let confirmDiscard: (() => boolean | Promise<boolean>) | undefined;
+    const register = vi.fn((_dirty: boolean, _description?: string, callback?: () => boolean | Promise<boolean>) => {
+      confirmDiscard = callback;
+      return () => {};
+    });
+    const api = { getManagedPackageAuthoringSource: vi.fn(async () => ({ available: true, present: true,
+      logicalPath: 'package.yaml', format: 'yaml', text: '', sourceEtag: 'etag-1', revision: 'revision-1',
+      baseSourceRevision: 'base-1', registryRevision: 'registry-1' })), stageSourceChangeSet: stage,
+      sourceChangeSetAction: discard } as unknown as ExplorerApi;
+    vi.stubGlobal('crypto', { subtle: { digest: vi.fn(async () => new Uint8Array(32).fill(0xab).buffer) } });
+    await act(async () => root.render(<TestcaseAuthoringWorkspace api={api} packageId="payments"
+      sourcePath="cases/case-01.xml" registerUnsavedChanges={register} />));
+    await settle();
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="Upload Testcase workbook and sidecar"]');
+    if (!input) throw new Error('Testcase paired upload control was not rendered.');
+    const workbook = new File(['PK workbook'], 'case-01.xlsx');
+    const sidecar = new File(['columns: {}\n'], 'case-01.yaml');
+    Object.defineProperty(workbook, 'arrayBuffer', { value: async () => new TextEncoder().encode('PK workbook').buffer });
+    Object.defineProperty(sidecar, 'arrayBuffer', { value: async () => new TextEncoder().encode('columns: {}\n').buffer });
+    Object.defineProperty(input, 'files', { configurable: true, value: [workbook, sidecar] });
+    await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+    await settle();
+    expect(host.textContent).toContain('Draft cs-denied');
+
+    let allowed = true;
+    await act(async () => { allowed = await confirmDiscard?.() ?? true; });
+    expect(allowed).toBe(false);
+    expect(discard).toHaveBeenCalledWith('PACKAGE_SOURCE', 'payments', 'cs-denied', 'discard', expect.any(AbortSignal));
+    expect(host.textContent).not.toContain('Draft cs-denied');
+    expect(host.textContent).toContain('Testcase editing requires Package source edit permission.');
+  });
+
+  it('clears old Testcase diagnostics when a refreshed revision check returns 403', async () => {
+    const authoringSource = { available: true, present: true, logicalPath: 'package.yaml', format: 'yaml', text: '',
+      sourceEtag: 'etag-1', revision: 'revision-1', baseSourceRevision: 'base-1', registryRevision: 'registry-1' };
+    const revisionRead = vi.fn().mockResolvedValueOnce(authoringSource)
+      .mockRejectedValueOnce(new ApiError('Forbidden', { status: 403 }));
+    const stage = vi.fn(async () => { throw new ApiError('Validation failed', { status: 422, diagnostics: [
+      { code: 'ATT-TESTCASE-INPUT', severity: 'ERROR', field: 'columns.secret', message: 'obsolete validation detail' },
+    ] }); });
+    const api = { getManagedPackageAuthoringSource: revisionRead, stageSourceChangeSet: stage } as unknown as ExplorerApi;
+    vi.stubGlobal('crypto', { subtle: { digest: vi.fn(async () => new Uint8Array(32).fill(0xab).buffer) } });
+    await act(async () => root.render(<TestcaseAuthoringWorkspace api={api} packageId="payments"
+      sourcePath="cases/case-01.xml" />));
+    await settle();
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="Upload Testcase workbook and sidecar"]');
+    if (!input) throw new Error('Testcase paired upload control was not rendered.');
+    const workbook = new File(['PK workbook'], 'case-01.xlsx');
+    const sidecar = new File(['columns: {}\n'], 'case-01.yaml');
+    Object.defineProperty(workbook, 'arrayBuffer', { value: async () => new TextEncoder().encode('PK workbook').buffer });
+    Object.defineProperty(sidecar, 'arrayBuffer', { value: async () => new TextEncoder().encode('columns: {}\n').buffer });
+    Object.defineProperty(input, 'files', { configurable: true, value: [workbook, sidecar] });
+    await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+    await settle();
+    expect(host.querySelector('[aria-label="Validation diagnostics"]')?.textContent).toContain('obsolete validation detail');
+
+    click(button('Reload revision'));await settle();
+    expect(revisionRead).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('[aria-label="Validation diagnostics"]')).toBeNull();
+    expect(host.textContent).not.toContain('obsolete validation detail');
+    expect(host.textContent).toContain('Testcase editing requires Package source edit permission.');
   });
 
   it('creates a new Testcase from a Package-relative XML path', async () => {
