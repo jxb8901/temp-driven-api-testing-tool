@@ -86,12 +86,18 @@ class TestCaseDefinitionResolverTest {
     @Test void preservesExtensionFieldsAndTypedSourceProvenance() throws Exception {
         String yaml = "schemaVersion: att-testcase/v1\nid: fpp.extensions\nflow: payment.transfer.v1\n"
                 + "x-owner: {team: qa}\n"
+                + "report: {format: xlsx, x-footer: {team: qa}}\n"
                 + "dataSource:\n  type: inline\n  x-reader: {mode: strict}\n  records:\n"
                 + "    - recordId: row-1\n      data: {amount: 10}\n      x-origin: {import: fixture}\n";
         TestCaseResolutionResult result = resolve(yaml);
 
         Map<?,?> definitionMap = result.definition().toMap();
         assertEquals("qa", ((Map<?,?>) definitionMap.get("x-owner")).get("team"));
+        Map<?,?> report = (Map<?,?>) definitionMap.get("report");
+        assertEquals("xlsx", report.get("format"));
+        assertEquals("qa", ((Map<?,?>) report.get("x-footer")).get("team"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> ((Map) report).put("format", "mutated"));
         Map<?,?> dataSource = (Map<?,?>) definitionMap.get("dataSource");
         assertEquals("strict", ((Map<?,?>) dataSource.get("x-reader")).get("mode"));
         Map<?,?> sourceRecord = (Map<?,?>) ((java.util.List<?>) dataSource.get("records")).get(0);
@@ -236,6 +242,42 @@ class TestCaseDefinitionResolverTest {
         assertThrows(CancellationException.class, () -> resolver.resolve(source, "testcase/multi.yaml", "payments",
                 packageRoot, templatesRoot, new TestCaseDefinitionResolver.Options(10, 10, null,
                         () -> checks.incrementAndGet() > 1)));
+    }
+
+    @Test void rejectsOversizedUtf8DefinitionBeforeMaterializingSourceBytes() throws Exception {
+        StringBuilder nonAscii = new StringBuilder(TestCaseDefinitionResolver.MAX_SOURCE_BYTES / 2 + 4);
+        for (int index = 0; index < TestCaseDefinitionResolver.MAX_SOURCE_BYTES / 2 + 4; index++) nonAscii.append('\u00e9');
+        String source = "schemaVersion: att-testcase/v1\nid: fpp.large\nflow: payment.transfer.v1\n"
+                + "inputs: {}\nx-padding: \"" + nonAscii + "\"\n";
+
+        assertTrue(source.length() < TestCaseDefinitionResolver.MAX_SOURCE_BYTES,
+                "UTF-16 character count alone is below the byte limit");
+        assertTrue(TestCaseDefinitionResolver.utf8ByteLengthAtMost(source,
+                TestCaseDefinitionResolver.MAX_SOURCE_BYTES) > TestCaseDefinitionResolver.MAX_SOURCE_BYTES);
+        DiagnosticException failure = assertThrows(DiagnosticException.class, () -> resolver.resolve(source,
+                "testcase/large.yaml", "payments", packageRoot, templatesRoot,
+                TestCaseDefinitionResolver.Options.defaults()));
+        assertEquals(DiagnosticCodes.TESTCASE_INVALID, failure.code());
+        assertTrue(failure.detail().contains("size limit"));
+    }
+
+    @Test void boundsSelectionCountBeforeCopyAndRejectsOverlongQualifiedIds() {
+        java.util.Set<String> oversized = new java.util.AbstractSet<String>() {
+            @Override public int size() { return TestCaseDefinitionResolver.MAX_SELECTED_CASE_IDS + 1; }
+            @Override public java.util.Iterator<String> iterator() {
+                throw new AssertionError("selection must be size-checked before it is copied");
+            }
+        };
+        assertThrows(IllegalArgumentException.class, () -> new TestCaseDefinitionResolver.Options(
+                10, 10, oversized, null));
+
+        String tooLong = new String(new char[TestCaseDefinitionResolver.MAX_QUALIFIED_CASE_ID_LENGTH + 1]).replace('\0', 'a');
+        assertThrows(IllegalArgumentException.class, () -> new TestCaseDefinitionResolver.Options(
+                10, 10, Collections.singleton(tooLong), null));
+        String atLimit = new String(new char[TestCaseDefinitionResolver.MAX_QUALIFIED_CASE_ID_LENGTH]).replace('\0', 'a');
+        assertEquals(TestCaseDefinitionResolver.MAX_QUALIFIED_CASE_ID_LENGTH,
+                new TestCaseDefinitionResolver.Options(10, 10, Collections.singleton(atLimit), null)
+                        .selectedQualifiedCaseIds().iterator().next().length());
     }
 
     @Test void capturesStaticNestedFlowDependenciesAndRejectsMissingFlow() throws Exception {

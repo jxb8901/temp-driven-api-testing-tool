@@ -18,13 +18,15 @@ public final class TestCaseDefinition {
     private final Map<String,Object> directInputs;
     private final Map<String,Object> inputProjection;
     private final List<SourceRecord> records;
+    private final Map<String,Object> report;
     private final Map<String,Object> extensions;
     private final Map<String,Object> dataSourceFields;
 
     TestCaseDefinition(String id, String name, String description, String flowId, String caseIdExpression,
                        String dataSourceType, List<String> tags, Map<String,Object> directInputs,
                        Map<String,Object> inputProjection, List<SourceRecord> records,
-                       Map<String,Object> extensions, Map<String,Object> dataSourceFields) {
+                       Map<String,Object> report, Map<String,Object> extensions,
+                       Map<String,Object> dataSourceFields) {
         this.id = id;
         this.name = name;
         this.description = description;
@@ -35,6 +37,7 @@ public final class TestCaseDefinition {
         this.directInputs = directInputs == null ? null : TestCaseValues.immutableObject(directInputs, "inputs");
         this.inputProjection = inputProjection == null ? null : TestCaseValues.immutableObject(inputProjection, "inputs");
         this.records = Collections.unmodifiableList(new ArrayList<SourceRecord>(records));
+        this.report = report == null ? null : TestCaseValues.immutableObject(report, "report");
         this.extensions = extensions == null ? Collections.<String,Object>emptyMap()
                 : TestCaseValues.immutableObject(extensions, "extensions");
         this.dataSourceFields = dataSourceFields == null ? Collections.<String,Object>emptyMap()
@@ -52,6 +55,7 @@ public final class TestCaseDefinition {
     public Map<String,Object> directInputs() { return directInputs; }
     public Map<String,Object> inputProjection() { return inputProjection; }
     public List<SourceRecord> records() { return records; }
+    public Map<String,Object> report() { return report; }
     public Map<String,Object> extensions() { return extensions; }
     public Map<String,Object> dataSourceFields() { return dataSourceFields; }
 
@@ -65,6 +69,7 @@ public final class TestCaseDefinition {
         result.put("flow", flowId);
         if (!tags.isEmpty()) result.put("tags", tags);
         if (caseIdExpression != null) result.put("caseIdExpression", caseIdExpression);
+        if (report != null) result.put("report", report);
         if (directInputs != null) result.put("inputs", directInputs);
         if (dataSourceType != null) {
             Map<String,Object> source = new LinkedHashMap<String,Object>();

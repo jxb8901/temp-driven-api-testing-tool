@@ -54,6 +54,9 @@ public final class YamlSupport {
     /** Safe construction from an already captured byte snapshot, preserving its exact source revision. */
     public static Object load(Path file, byte[] bytes) throws IOException {
         if (bytes == null) throw new IllegalArgumentException("YAML source bytes are required");
+        Path key = file.toAbsolutePath().normalize();
+        Map<Path,YamlSource> snapshots = snapshotSources();
+        snapshots.put(key, null); // A failed snapshot parse must not fall back to older live-path marks.
         String sourceText;
         try {
             sourceText = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
@@ -61,11 +64,9 @@ public final class YamlSupport {
                     .onUnmappableCharacter(CodingErrorAction.REPORT)
                     .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
         } catch (java.nio.charset.CharacterCodingException failure) {
-            clearSnapshotSource(file);
+            clearGlobalSource(file);
             throw failure;
         }
-        Path key = file.toAbsolutePath().normalize();
-        Map<Path,YamlSource> snapshots = snapshotSources();
         snapshots.put(key, new YamlSource(file, null, sourceText));
         long inspectionStarted = System.nanoTime();
         att.metrics.InspectionMetrics.JVM.add(att.metrics.InspectionMetrics.Stage.READ_BYTES, bytes.length);
@@ -96,17 +97,22 @@ public final class YamlSupport {
     }
 
     public static SourceLocation location(Path file, String field, Throwable failure) {
-        YamlSource source = snapshotSource(file);
-        if (source == null) synchronized (SOURCES) { source = SOURCES.get(file.toAbsolutePath().normalize()); }
+        boolean hasSnapshot = hasSnapshotSource(file);
+        YamlSource source = hasSnapshot ? snapshotSource(file) : null;
+        if (!hasSnapshot) synchronized (SOURCES) { source = SOURCES.get(file.toAbsolutePath().normalize()); }
         java.util.List<String> capturedLines = source == null ? null : source.capturedLines();
         // Parser errors already have precise physical marks, even when no document was constructed.
         java.util.Set<Throwable> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Throwable, Boolean>());
         for (Throwable cause = failure; cause != null && seen.add(cause); cause = cause.getCause()) {
             if (cause instanceof MarkedYAMLException) {
                 org.yaml.snakeyaml.error.Mark mark = ((MarkedYAMLException) cause).getProblemMark();
-                if (mark != null) return withExcerpt(YamlSource.range(file.toString(), mark, mark), file, field, capturedLines);
+                if (mark != null) {
+                    SourceLocation range = YamlSource.range(file.toString(), mark, mark);
+                    return hasSnapshot && source == null ? range : withExcerpt(range, file, field, capturedLines);
+                }
             }
         }
+        if (hasSnapshot && source == null) return null;
         if (source != null) {
             att.template.ExpressionSyntaxException syntax = att.template.ExpressionSyntaxException.find(failure);
             SourceLocation range = source.location(field);
@@ -155,6 +161,15 @@ public final class YamlSupport {
     private static YamlSource snapshotSource(Path file) {
         Map<Path,YamlSource> snapshots = SNAPSHOT_SOURCES.get();
         return snapshots == null ? null : snapshots.get(file.toAbsolutePath().normalize());
+    }
+
+    private static boolean hasSnapshotSource(Path file) {
+        Map<Path,YamlSource> snapshots = SNAPSHOT_SOURCES.get();
+        return snapshots != null && snapshots.containsKey(file.toAbsolutePath().normalize());
+    }
+
+    private static void clearGlobalSource(Path file) {
+        synchronized (SOURCES) { SOURCES.remove(file.toAbsolutePath().normalize()); }
     }
 
     private static java.util.List<String> lines(Path file, java.util.List<String> captured) throws IOException {

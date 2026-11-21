@@ -60,6 +60,26 @@ class YamlSourceTest {
         assertNotNull(cause, "Malformed UTF-8 must be reported by the strict decoder");
     }
 
+    @Test void malformedSnapshotCannotReuseAnOlderGlobalSourceMap() throws Exception {
+        Path path = write("stale-snapshot.yaml", "name: stale-valid-source\n");
+        YamlSupport.load(path); // Seed the process-wide live-file source map.
+        byte[] malformed = new byte[] {'n', 'a', 'm', 'e', ':', ' ', (byte) 0xc3, 0x28, '\n'};
+
+        try {
+            assertThrows(Exception.class, () -> YamlSupport.load(path, malformed));
+            DiagnosticException error = YamlSupport.locate(DiagnosticException.of(DiagnosticCodes.CONFIG_INVALID,
+                    "Invalid snapshot", "Captured source is malformed", "Correct the source.")
+                    .withLocation(path.toString(), "name", null, null, null, null, null), path, "name");
+            assertNull(error.source(), "Malformed captured bytes must not borrow old source marks or excerpts");
+
+            YamlSupport.clearSnapshotSource(path);
+            assertNull(YamlSupport.location(path, "name", null),
+                    "The stale process-wide source map must be invalidated too");
+        } finally {
+            YamlSupport.clearSnapshotSource(path);
+        }
+    }
+
     @Test void snapshotDiagnosticsUseCapturedTextInsteadOfTheLivePath() throws Exception {
         Path path = write("captured.yaml", "name: live-value\n");
         byte[] captured = "name: captured-value\n".getBytes(StandardCharsets.UTF_8);

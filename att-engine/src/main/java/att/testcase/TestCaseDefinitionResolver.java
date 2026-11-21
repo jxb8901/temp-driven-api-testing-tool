@@ -38,6 +38,8 @@ public final class TestCaseDefinitionResolver {
     public static final int MAX_SOURCE_BYTES = 1024 * 1024;
     public static final int MAX_RECORDS = 10000;
     public static final int MAX_PREVIEW_CASES = 1000;
+    public static final int MAX_SELECTED_CASE_IDS = MAX_RECORDS;
+    public static final int MAX_QUALIFIED_CASE_ID_LENGTH = 255;
     public static final int MAX_FLOW_DESCRIPTORS = 1000;
     public static final int MAX_FLOW_TREE_ENTRIES = 20000;
     public static final long MAX_FLOW_DESCRIPTOR_BYTES = 1024L * 1024L;
@@ -86,8 +88,9 @@ public final class TestCaseDefinitionResolver {
         validatePackageId(packageId, sourceReference);
         validateSourceReference(sourceReference);
         if (yaml == null) throw invalid(sourceReference, "definition", "Test Case Definition source is required");
+        if (utf8ByteLengthAtMost(yaml, MAX_SOURCE_BYTES) > MAX_SOURCE_BYTES)
+            throw invalid(sourceReference, "definition", "Test Case Definition source exceeds its size limit");
         byte[] sourceBytes = yaml.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        if (sourceBytes.length > MAX_SOURCE_BYTES) throw invalid(sourceReference, "definition", "Test Case Definition source exceeds its size limit");
         if (Thread.currentThread().isInterrupted() || options.cancellation().getAsBoolean())
             throw new CancellationException("Test Case Resolution was cancelled");
 
@@ -161,6 +164,8 @@ public final class TestCaseDefinitionResolver {
         String description = optionalString(document.get("description"));
         List<String> tags = stringList(document.get("tags"), "tags");
         String caseIdExpression = optionalString(document.get("caseIdExpression"));
+        Map<String,Object> report = document.containsKey("report")
+                ? TestCaseValues.immutableObject(document.get("report"), "report") : null;
         if (caseIdExpression != null && !CASE_ID_EXPRESSION.matcher(caseIdExpression).matches())
             throw invalid(sourceReference, "caseIdExpression", "Only a direct ${DATA.key} lookup is supported");
 
@@ -169,7 +174,7 @@ public final class TestCaseDefinitionResolver {
             Map<String,Object> inputs = TestCaseValues.immutableObject(document.get("inputs"), "inputs");
             return new TestCaseDefinition(id, name, description, flow, null, null, tags, inputs, null,
                     Collections.<TestCaseDefinition.SourceRecord>emptyList(),
-                    TestCaseValues.extensionFields(document), Collections.<String,Object>emptyMap());
+                    report, TestCaseValues.extensionFields(document), Collections.<String,Object>emptyMap());
         }
         Map<String,Object> dataSource = TestCaseValues.object(rawDataSource, "dataSource");
         String type = string(dataSource.get("type"), "dataSource.type");
@@ -195,7 +200,7 @@ public final class TestCaseDefinitionResolver {
         for (Map.Entry<String,Object> entry : dataSource.entrySet())
             if (!"records".equals(entry.getKey())) dataSourceFields.put(entry.getKey(), entry.getValue());
         return new TestCaseDefinition(id, name, description, flow, caseIdExpression, type,
-                tags, null, projection, records, TestCaseValues.extensionFields(document), dataSourceFields);
+                tags, null, projection, records, report, TestCaseValues.extensionFields(document), dataSourceFields);
     }
 
     /** Ensures the Definition identity is unique across the Package's native testcase.yaml resources. */
@@ -600,6 +605,26 @@ public final class TestCaseDefinitionResolver {
         return result.toString();
     }
 
+    /** Counts UTF-8 bytes without copying the complete source String into a byte array. */
+    static long utf8ByteLengthAtMost(String value, long maximum) {
+        java.nio.charset.CharsetEncoder encoder = java.nio.charset.StandardCharsets.UTF_8.newEncoder();
+        long replacementBytes = encoder.replacement().length;
+        long count = 0L;
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (current <= 0x7f) count++;
+            else if (current <= 0x7ff) count += 2L;
+            else if (Character.isHighSurrogate(current) && index + 1 < value.length()
+                    && Character.isLowSurrogate(value.charAt(index + 1))) {
+                count += 4L;
+                index++;
+            } else if (Character.isSurrogate(current)) count += replacementBytes;
+            else count += 3L;
+            if (count > maximum) return count;
+        }
+        return count;
+    }
+
     /** Selection and preview controls. Values are copied at construction and never alter source order. */
     public static final class Options {
         private final int maxRecords;
@@ -619,9 +644,14 @@ public final class TestCaseDefinitionResolver {
             this.previewLimit = previewLimit;
             if (selectedQualifiedCaseIds == null) this.selectedQualifiedCaseIds = null;
             else {
+                if (selectedQualifiedCaseIds.size() > MAX_SELECTED_CASE_IDS)
+                    throw new IllegalArgumentException("selected Qualified Case IDs must not exceed " + MAX_SELECTED_CASE_IDS);
                 LinkedHashSet<String> copy = new LinkedHashSet<String>();
                 for (String id : selectedQualifiedCaseIds) {
-                    if (id == null || id.trim().isEmpty()) throw new IllegalArgumentException("selected Qualified Case IDs must be nonblank");
+                    if (id == null) throw new IllegalArgumentException("selected Qualified Case IDs must be nonblank");
+                    if (id.length() > MAX_QUALIFIED_CASE_ID_LENGTH)
+                        throw new IllegalArgumentException("selected Qualified Case IDs must not exceed " + MAX_QUALIFIED_CASE_ID_LENGTH + " characters");
+                    if (id.trim().isEmpty()) throw new IllegalArgumentException("selected Qualified Case IDs must be nonblank");
                     copy.add(id);
                 }
                 this.selectedQualifiedCaseIds = Collections.unmodifiableSet(copy);
