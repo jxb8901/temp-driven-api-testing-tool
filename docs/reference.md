@@ -999,10 +999,10 @@ The released Local CLI keeps its interface-specific compatibility boundary: its 
 
 Use the same authenticated Server origin and context path as ATT Studio. Send this request to `POST /api/v1/drafts/run`:
 
-<!-- att-doc-example: current id=unified-run-draft schema=att-execution/v1 format=json -->
+<!-- att-doc-example: current id=unified-run-draft schema=att-execution/v2 format=json -->
 ```json
 {
-  "schemaVersion": "att-execution/v1",
+  "schemaVersion": "att-execution/v2",
   "executionType": "run",
   "packageId": "payments",
   "environment": "SIT",
@@ -1014,7 +1014,10 @@ Use the same authenticated Server origin and context path as ATT Studio. Send th
 
 Replace `payments`, `SIT` and `PAYMENT` with configured package values. Review the safe preview, then send `{"packageId":"payments","draftId":"R..."}` to `POST /api/v1/jobs/run`. The accepted job uses the existing status, cancellation, events, results and artifact routes. Opening a page or changing a mode does not submit a job.
 
-The request follows `schemas/att-execution-v1.schema.json`. Unknown fields and mixed target/selection requests fail validation. A draft expires after ten minutes, belongs to the validating identity, and binds the package revision. Package changes require validation again. Invalid input returns HTTP 400, unavailable drafts 404, changed revisions 409 and exhausted job/draft capacity 429. Inspection capacity/time/size limits remain in force.
+<!-- att-docs:historical -->
+Legacy RUN requests follow `schemas/history/att-execution-v1.schema.json`; new Native Case targets use `att-execution/v2`.
+<!-- /att-docs:historical -->
+Unknown fields and mixed target/selection requests fail validation. A draft expires after ten minutes, belongs to the validating identity, and binds the package revision. Package changes require validation again. Invalid input returns HTTP 400, unavailable drafts 404, changed revisions 409 and exhausted job/draft capacity 429. Inspection capacity/time/size limits remain in force.
 
 For a single Case, use `target: {"type":"case","id":"payments.default.PAY001"}` and omit `input`. Case values continue to come from Excel/sidecar bindings. Template, Flow and Tool inputs retain Debug sidecar semantics, including omitted values, explicit null, literals, expressions, variables and Tool arguments. Do not translate Case parameters into resource input fields.
 
@@ -1022,6 +1025,7 @@ For a single Case, use `target: {"type":"case","id":"payments.default.PAY001"}` 
 
 Replace `target` and `input` with an explicit selection:
 
+<!-- att-docs:historical -->
 ```json
 {
   "schemaVersion": "att-execution/v1",
@@ -1037,6 +1041,7 @@ Replace `target` and `input` with an explicit selection:
   "options": {"debug": true, "failFast": false}
 }
 ```
+<!-- /att-docs:historical -->
 
 `suites` and `suiteDirectory` are mutually exclusive. `suiteDirectory` selects a package-relative group directory. Case and tag filters retain CLI intersection rules; tags match any requested tag, and excluded tags remove matches. Use `all:true` for the package selection. Arrays must be nonempty, unique and contain at most 1000 values. Validation resolves and freezes at most 10000 selected Case IDs. An empty selection fails rather than falling back to all Cases.
 
@@ -1089,7 +1094,9 @@ Every active local `USER` or authenticated container principal in `server.author
 | `/load-schedules`, legacy `jobType:load/debug` | Shared scheduler compatibility routes; existing definitions remain readable |
 | `/jobs/...`, saved Studio job/result links | Existing shared history, cancellation, events and results routes |
 
+<!-- att-docs:historical -->
 This release does not remove legacy endpoints. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.6; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
+<!-- /att-docs:historical -->
 
 Schedule persistence adds JSON fields in the existing H2 tables, leaving legacy LOAD rows unchanged. Before downgrade, stop scheduling, export new definitions, remove RUN/one-time definitions and restore the pre-upgrade database backup. An older scheduler must not interpret a new RUN definition as LOAD. Retained job artifacts remain separate from database metadata.
 
@@ -3761,7 +3768,7 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | Artifact | Active schema |
 |---|---|
 | Schedule creation | att-schedule/v2 |
-| RUN definition | att-execution/v1, att-execution/v2 |
+| RUN definition | att-execution/v2 |
 | Native Test Case Definition | att-testcase/v1 |
 | Global configuration | att-config/v2.15 |
 | Package Manifest | att-package/v2 |

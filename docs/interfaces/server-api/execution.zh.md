@@ -35,7 +35,10 @@ Content-Type: application/json
 {"packageId":"payments","draftId":"R0123456789ABCDEF0123456789ABCDEF"}
 ```
 
-Draft 會固定 Definition 及 Package revision。提交前來源有變更時，draft 會失效；Job 接受後，Worker 會從不可變 Job source snapshot 讀取來源。結果沿用現有 Job、event、cancellation 及 artifact route，並在 evidence 保留 Definition、Qualified Case、local Case 及 execution identity。v2 的 `options.runId` 可選擇 ATT output Run ID，並會保留在已接受的 Worker request 中。既有 `att-execution/v1` Workbook/Sidecar selection 與直接 Template/Flow/Tool target 行為不變。`GET /api/v1/version` 會保留 `unifiedRunVersion: att-execution/v1`，並另外透過 `unifiedRunVersions` 宣告支援版本，包括 v2。
+Draft 會固定 Definition 及 Package revision。提交前來源有變更時，draft 會失效；Job 接受後，Worker 會從不可變 Job source snapshot 讀取來源。結果沿用現有 Job、event、cancellation 及 artifact route，並在 evidence 保留 Definition、Qualified Case、local Case 及 execution identity。v2 的 `options.runId` 可選擇 ATT output Run ID，並會保留在已接受的 Worker request 中。
+<!-- att-docs:historical -->
+既有 `att-execution/v1` Workbook/Sidecar selection 與直接 Template/Flow/Tool target 行為不變。`GET /api/v1/version` 會保留 `unifiedRunVersion: att-execution/v1`，並另外透過 `unifiedRunVersions` 宣告支援版本，包括 v2。
+<!-- /att-docs:historical -->
 
 ## 目標範圍內的 Debug 與 draft
 

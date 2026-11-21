@@ -5,7 +5,7 @@ Active schemas (the matching ATT Engine JAR's embedded registry, built from `sch
 | Artifact | Active schema |
 |---|---|
 | Schedule creation | att-schedule/v2 |
-| RUN definition | att-execution/v1, att-execution/v2 |
+| RUN definition | att-execution/v2 |
 | Native Test Case Definition | att-testcase/v1 |
 | Global configuration | att-config/v2.15 |
 | Package Manifest | att-package/v2 |

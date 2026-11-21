@@ -35,7 +35,10 @@ Content-Type: application/json
 {"packageId":"payments","draftId":"R0123456789ABCDEF0123456789ABCDEF"}
 ```
 
-The draft pins the Definition and Package revision. A source change before submission makes the draft stale; after acceptance, the Worker reads the immutable Job source snapshot. Results use the existing Job, event, cancellation, and artifact routes, with Definition, Qualified Case, local Case, and execution identities in the evidence. In v2, `options.runId` is an optional ATT output Run ID and is preserved in the accepted Worker request. Existing `att-execution/v1` Workbook/Sidecar selection and direct Template/Flow/Tool targets keep their behavior. `GET /api/v1/version` retains `unifiedRunVersion: att-execution/v1` and also advertises `unifiedRunVersions`, including v2 when supported.
+The draft pins the Definition and Package revision. A source change before submission makes the draft stale; after acceptance, the Worker reads the immutable Job source snapshot. Results use the existing Job, event, cancellation, and artifact routes, with Definition, Qualified Case, local Case, and execution identities in the evidence. In v2, `options.runId` is an optional ATT output Run ID and is preserved in the accepted Worker request.
+<!-- att-docs:historical -->
+Existing `att-execution/v1` Workbook/Sidecar selection and direct Template/Flow/Tool targets keep their behavior. `GET /api/v1/version` retains `unifiedRunVersion: att-execution/v1` and also advertises `unifiedRunVersions`, including v2 when supported.
+<!-- /att-docs:historical -->
 
 ## Target-scoped Debug and drafts
 
