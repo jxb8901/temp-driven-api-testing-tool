@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -18,6 +19,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Regression coverage for the beginner-first EN/ZH Quick Start introduced by issue #45. */
@@ -87,7 +89,7 @@ class QuickStartDocumentationTest {
         assertEquals(0, dryRun.exitCode, dryRun.stderr + "\n" + dryRun.stdout);
         Map<?, ?> dryResult = parseJson(dryRun.stdout);
         assertEquals("SKIPPED", dryResult.get("status"), dryRun.stdout);
-        assertNativeRunArtifacts(outputRoot.resolve("native-quick-start-dry"), false);
+        assertNativeRunArtifacts(outputRoot.resolve("native-quick-start-dry"));
 
         CliResult single = runCli(root, "--local", "-p", "default", "--format", "json",
                 "--output-dir", outputRoot.toString(),
@@ -95,9 +97,8 @@ class QuickStartDocumentationTest {
                 "run", "native-case", "quick.start.single",
                 "--resolved-case-id", "default");
         assertEquals(0, single.exitCode, single.stderr + "\n" + single.stdout);
-        assertNativeSelection(single.stdout, "PASS", 1, 1,
+        assertNativeSelection(outputRoot.resolve("native-quick-start-single"), single.stdout, "PASS", 1, 1,
                 Arrays.asList("quick.start.single.default"));
-        assertNativeRunArtifacts(outputRoot.resolve("native-quick-start-single"), true);
 
         CliResult inline = runCli(root, "--local", "-p", "default", "--format", "json",
                 "--output-dir", outputRoot.toString(),
@@ -105,9 +106,13 @@ class QuickStartDocumentationTest {
                 "run", "native-case", "quick.start.inline",
                 "--resolved-case-id", "basic", "--resolved-case-id", "with-tool");
         assertEquals(0, inline.exitCode, inline.stderr + "\n" + inline.stdout);
-        assertNativeSelection(inline.stdout, "PASS", 2, 2,
+        assertNativeSelection(outputRoot.resolve("native-quick-start-inline"), inline.stdout, "PASS", 2, 2,
                 Arrays.asList("quick.start.inline.basic", "quick.start.inline.with-tool"));
-        assertNativeRunArtifacts(outputRoot.resolve("native-quick-start-inline"), true);
+
+        Path excelWorkbook = root.resolve("packages/default/testdata/quick-start-native.xlsx");
+        Path legacySnapshot = root.resolve("packages/default/testdata/quick-start-native.xml");
+        String excelDigestBefore = sha256(excelWorkbook);
+        assertFalse(Files.exists(legacySnapshot), "legacy Excel snapshot must not exist before Native Excel RUN");
 
         CliResult excel = runCli(root, "--local", "-p", "default", "--format", "json",
                 "--output-dir", outputRoot.toString(),
@@ -115,9 +120,12 @@ class QuickStartDocumentationTest {
                 "run", "native-case", "quick.start.excel",
                 "--resolved-case-id", "QS001", "--resolved-case-id", "QS002");
         assertEquals(0, excel.exitCode, excel.stderr + "\n" + excel.stdout);
-        assertNativeSelection(excel.stdout, "PASS", 2, 2,
+        assertNativeSelection(outputRoot.resolve("native-quick-start-excel"), excel.stdout, "PASS", 2, 2,
                 Arrays.asList("quick.start.excel.QS001", "quick.start.excel.QS002"));
-        assertNativeRunArtifacts(outputRoot.resolve("native-quick-start-excel"), true);
+        assertEquals(excelDigestBefore, sha256(excelWorkbook),
+                "Native Excel Data Source must leave quick-start-native.xlsx byte-for-byte unchanged");
+        assertFalse(Files.exists(legacySnapshot),
+                "Native Excel RUN must not create a legacy quick-start-native.xml snapshot");
     }
 
     @Test
@@ -163,7 +171,7 @@ class QuickStartDocumentationTest {
                 "payment_regression dry-run must write HTML report");
     }
 
-    private void assertNativeSelection(String stdout, String status, int total, int passed,
+    private void assertNativeSelection(Path runDirectory, String stdout, String status, int total, int passed,
             List<String> qualifiedCaseIds) throws Exception {
         Map<?, ?> result = parseJson(stdout);
         assertEquals(status, result.get("status"), stdout);
@@ -173,20 +181,39 @@ class QuickStartDocumentationTest {
         @SuppressWarnings("unchecked") List<Map<String, Object>> cases = (List<Map<String, Object>>) summary.get("cases");
         assertEquals(qualifiedCaseIds.size(), cases.size(), stdout);
         Map<String, String> byQualified = new LinkedHashMap<String, String>();
+        Map<String, String> execIdsByQualified = new LinkedHashMap<String, String>();
         for (Map<String, Object> executed : cases) {
-            byQualified.put(String.valueOf(executed.get("qualifiedCaseId")), String.valueOf(executed.get("status")));
-            assertTrue(executed.get("execId") != null && !String.valueOf(executed.get("execId")).trim().isEmpty(),
-                    "missing execId for " + executed.get("qualifiedCaseId"));
+            String qualified = String.valueOf(executed.get("qualifiedCaseId"));
+            String execId = String.valueOf(executed.get("execId"));
+            byQualified.put(qualified, String.valueOf(executed.get("status")));
+            assertTrue(execId != null && !"null".equals(execId) && !execId.trim().isEmpty(),
+                    "missing execId for " + qualified);
+            execIdsByQualified.put(qualified, execId);
         }
         for (String qualified : qualifiedCaseIds) {
             assertEquals("PASS", byQualified.get(qualified),
                     "missing or non-PASS Case " + qualified + " in " + byQualified);
         }
 
+        assertNativeRunArtifacts(runDirectory);
+        for (String qualified : qualifiedCaseIds) {
+            String execId = execIdsByQualified.get(qualified);
+            Path caseDir = runDirectory.resolve("executions").resolve(execId);
+            Path caseLog = caseDir.resolve("case.log");
+            Path caseYaml = caseDir.resolve("case.yaml");
+            assertTrue(Files.isRegularFile(caseLog), "missing case.log for " + qualified + " at " + caseLog);
+            assertTrue(Files.isRegularFile(caseYaml), "missing case.yaml for " + qualified + " at " + caseYaml);
+            String yamlText = read(caseYaml);
+            assertTrue(yamlText.contains("qualifiedCaseId: " + qualified)
+                            || yamlText.contains("caseId: " + qualified),
+                    "case.yaml for " + execId + " must identify " + qualified + ":\n" + yamlText);
+            String logText = read(caseLog);
+            assertTrue(logText.contains(qualified),
+                    "case.log for " + execId + " must mention " + qualified + ":\n" + logText);
+        }
+
         Map<?, ?> ciDocument = att.validation.JsonSupport.mapper().readValue(
-                Files.newInputStream(temp.resolve("native-output")
-                        .resolve(String.valueOf(result.get("executionId")))
-                        .resolve("ci/summary.json")),
+                Files.newInputStream(runDirectory.resolve("ci/summary.json")),
                 Map.class);
         Map<?, ?> ciSummary = (Map<?, ?>) ciDocument.get("summary");
         assertEquals(Integer.valueOf(total), toInt(ciSummary.get("total")), "ci/summary.json total");
@@ -204,26 +231,23 @@ class QuickStartDocumentationTest {
         }
     }
 
-    private void assertNativeRunArtifacts(Path runDirectory, boolean requireCaseLogs) throws Exception {
+    private void assertNativeRunArtifacts(Path runDirectory) throws Exception {
         assertTrue(Files.isDirectory(runDirectory), "missing run directory: " + runDirectory);
         assertTrue(Files.isRegularFile(runDirectory.resolve("run.yaml")), "missing run.yaml");
         assertTrue(Files.isRegularFile(runDirectory.resolve("report/index.html")), "missing report/index.html");
         assertTrue(Files.isRegularFile(runDirectory.resolve("ci/summary.json")), "missing ci/summary.json");
         assertTrue(Files.isRegularFile(runDirectory.resolve("ci/junit.xml")), "missing ci/junit.xml");
-        if (requireCaseLogs) {
-            Path executions = runDirectory.resolve("executions");
-            assertTrue(Files.isDirectory(executions), "missing executions/");
-            try (java.util.stream.Stream<Path> children = Files.list(executions)) {
-                List<Path> caseLogs = new ArrayList<Path>();
-                for (Path child : (Iterable<Path>) children::iterator) {
-                    Path log = child.resolve("case.log");
-                    if (Files.isRegularFile(log)) {
-                        caseLogs.add(log);
-                    }
-                }
-                assertTrue(!caseLogs.isEmpty(), "missing case.log under executions/");
-            }
+    }
+
+    private String sha256(Path file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update(Files.readAllBytes(file));
+        byte[] hash = digest.digest();
+        StringBuilder hex = new StringBuilder(hash.length * 2);
+        for (byte value : hash) {
+            hex.append(String.format("%02x", Integer.valueOf(value & 0xff)));
         }
+        return hex.toString();
     }
 
     private Integer toInt(Object value) {
