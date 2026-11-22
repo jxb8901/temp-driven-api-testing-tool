@@ -673,7 +673,7 @@ public final class WorkerMain {
                         .anyMatch(part->part.isEmpty()||".".equals(part)||"..".equals(part))
                 ||!sourcePath.endsWith("/testcase.yaml"))
             throw new IllegalArgumentException("Native Test Case preview path must be a safe Package-relative testcase.yaml");
-        if(request.registeredPackageId==null||request.registeredPackageId.isBlank())
+        if(request.registeredPackageId==null||request.registeredPackageId.codePoints().allMatch(Character::isWhitespace))
             throw new IllegalArgumentException("Native Test Case preview requires a registered Package");
 
         Path selectedConfig=RuntimeConfigPath.resolve(config,root);
