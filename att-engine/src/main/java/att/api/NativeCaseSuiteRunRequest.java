@@ -16,14 +16,24 @@ public final class NativeCaseSuiteRunRequest extends AttRequest {
     private final List<String> tags;
     private final List<String> excludeTags;
     private final boolean all;
+    private final boolean rerunFailed;
     private final boolean dryRun;
     private final boolean failFast;
+    private final NativeSuiteRetryLineage retryLineage;
     private final ExecutionEventListener observer;
 
     public NativeCaseSuiteRunRequest(Path packageRoot, Path configPath, String environment, Path outputDirectory,
             String runId, String packageId, List<String> definitionIds, List<String> qualifiedCaseIds,
             List<String> tags, List<String> excludeTags, boolean all, boolean dryRun, boolean failFast,
             ExecutionEventListener observer) {
+        this(packageRoot, configPath, environment, outputDirectory, runId, packageId, definitionIds,
+                qualifiedCaseIds, tags, excludeTags, all, false, dryRun, failFast, null, observer);
+    }
+
+    public NativeCaseSuiteRunRequest(Path packageRoot, Path configPath, String environment, Path outputDirectory,
+            String runId, String packageId, List<String> definitionIds, List<String> qualifiedCaseIds,
+            List<String> tags, List<String> excludeTags, boolean all, boolean rerunFailed, boolean dryRun,
+            boolean failFast, NativeSuiteRetryLineage retryLineage, ExecutionEventListener observer) {
         super(packageRoot, configPath, environment, outputDirectory, runId);
         if (packageId == null || packageId.trim().isEmpty()) throw new IllegalArgumentException("packageId is required");
         this.packageId = packageId;
@@ -32,10 +42,16 @@ public final class NativeCaseSuiteRunRequest extends AttRequest {
         this.tags = copy(tags, "tags", 100, TestCaseSuiteResolver.MAX_TAG_LENGTH);
         this.excludeTags = copy(excludeTags, "excludeTags", 100, TestCaseSuiteResolver.MAX_TAG_LENGTH);
         if (this.definitionIds.isEmpty()) throw new IllegalArgumentException("At least one Definition ID is required");
-        if (!all && this.qualifiedCaseIds.isEmpty() && this.tags.isEmpty())
+        if (rerunFailed && (all || !this.qualifiedCaseIds.isEmpty() || !this.tags.isEmpty() || !this.excludeTags.isEmpty()))
+            throw new IllegalArgumentException("--rerun-failed selects the latest eligible completed Native Suite RUN and cannot be combined with explicit selectors");
+        if (!rerunFailed && !all && this.qualifiedCaseIds.isEmpty() && this.tags.isEmpty())
             throw new IllegalArgumentException("Select all cases, at least one Qualified Case ID, or at least one tag");
         if (all && !this.qualifiedCaseIds.isEmpty()) throw new IllegalArgumentException("all and qualifiedCaseIds cannot be combined");
-        this.all = all; this.dryRun = dryRun; this.failFast = failFast; this.observer = observer;
+        if (retryLineage != null && (!this.qualifiedCaseIds.equals(retryLineage.failedQualifiedCaseIds())
+                || all || !this.tags.isEmpty() || !this.excludeTags.isEmpty() || rerunFailed))
+            throw new IllegalArgumentException("Native Suite retry lineage must match its frozen Qualified Case IDs");
+        this.all = all; this.rerunFailed = rerunFailed; this.dryRun = dryRun; this.failFast = failFast;
+        this.retryLineage = retryLineage; this.observer = observer;
     }
 
     private static List<String> copy(List<String> values, String name, int maximum) {
@@ -63,7 +79,9 @@ public final class NativeCaseSuiteRunRequest extends AttRequest {
     public List<String> tags() { return tags; }
     public List<String> excludeTags() { return excludeTags; }
     public boolean all() { return all; }
+    public boolean rerunFailed() { return rerunFailed; }
     public boolean dryRun() { return dryRun; }
     public boolean failFast() { return failFast; }
+    public NativeSuiteRetryLineage retryLineage() { return retryLineage; }
     public ExecutionEventListener observer() { return observer; }
 }

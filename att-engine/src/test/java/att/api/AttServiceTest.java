@@ -231,6 +231,124 @@ class AttServiceTest {
         assertTrue(regeneratedJunit.contains("fpp.transfer.third"),regeneratedJunit);
     }
 
+    @Test void nativeSuiteRerunFailedRetriesOnlyExecutedFailuresAndKeepsCountsSeparate() throws Exception {
+        Path root = nativeSuitePackage("native-suite-retry-package");
+        writeNativeDefinition(root, "fpp.transfer", "payment.transfer.v1",
+                "- {recordId: first, data: {caseId: first, amount: 7}}\n"
+              + "- {recordId: second, data: {caseId: second, amount: 13}}\n"
+              + "- {recordId: third, data: {caseId: third, amount: 17}}\n");
+        Files.write(root.resolve("templates/flows/payment/transfer/v1/flow.yaml"),
+                String.join("\n", "schemaVersion: att-flow/v3.6", "id: payment.transfer.v1", "name: Transfer",
+                        "description: Native Suite retry fixture", "actions:",
+                        "  verify: {type: assert, assert: '#{${EXEC.INPUT.amount} <= 7}'}", "")
+                        .getBytes(StandardCharsets.UTF_8));
+        DefaultAttService service = new DefaultAttService();
+        RunResult source = service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-retry-source", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, false, true, null));
+        assertEquals("FAIL", source.status());
+        assertEquals(3L, source.summary().get("total"));
+        assertEquals(2L, source.summary().get("executionCount"));
+        assertEquals(1L, source.summary().get("skipped"));
+
+        RunResult dryRun = service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-retry-dry-run", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, true, false, null));
+        assertEquals("SKIPPED", dryRun.status());
+        RunResult otherPackage = service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-retry-other-package", "other-payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, false, true, null));
+        assertEquals("FAIL", otherPackage.status());
+        @SuppressWarnings("unchecked") Map<String,Object> latest = (Map<String,Object>)new org.yaml.snakeyaml.Yaml()
+                .load(new String(Files.readAllBytes(root.resolve("output/latest-run.yaml")),StandardCharsets.UTF_8));
+        assertEquals("native-retry-other-package", latest.get("runId"),
+                "The global latest pointer may advance independently of this Package's retry history");
+
+        NativeCaseSuiteRunRequest retryRequest = new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-retry-first", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), false, true, false, false,
+                null, null);
+        RunResult retry = service.runNativeCaseSuite(retryRequest);
+        assertEquals("FAIL", retry.status());
+        assertEquals(1L, retry.summary().get("total"));
+        assertEquals(1, ((Number) retry.summary().get("selected")).intValue());
+        assertEquals(1L, retry.summary().get("executionCount"));
+        assertEquals(0L, retry.summary().get("skipped"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> cases =
+                (List<Map<String,Object>>) retry.summary().get("cases");
+        assertEquals(Collections.singletonList("fpp.transfer.second"), cases.stream()
+                .map(item -> String.valueOf(item.get("qualifiedCaseId")))
+                .collect(java.util.stream.Collectors.toList()));
+
+        @SuppressWarnings("unchecked") Map<String,Object> manifest = (Map<String,Object>)
+                new org.yaml.snakeyaml.Yaml().load(new String(Files.readAllBytes(
+                        root.resolve("output/native-retry-first/run.yaml")), StandardCharsets.UTF_8));
+        @SuppressWarnings("unchecked") Map<String,Object> run = (Map<String,Object>) manifest.get("run");
+        @SuppressWarnings("unchecked") Map<String,Object> lineage = (Map<String,Object>) run.get("retryLineage");
+        assertEquals("native-retry-source", lineage.get("sourceRunId"));
+        assertEquals(3, lineage.get("sourceSelectedCaseCount"));
+        assertEquals(1, lineage.get("retryAttemptNumber"));
+        assertEquals(1, lineage.get("retryCaseCount"));
+        assertEquals(1, ((Number) lineage.get("retryExecutionCount")).intValue());
+        assertEquals(0, ((Number) lineage.get("retrySkippedCaseCount")).intValue());
+        assertEquals(Collections.singletonList("fpp.transfer.second"), lineage.get("failedQualifiedCaseIds"));
+
+        RunResult retryAgain = service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-retry-second", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), false, true, false, false,
+                null, null));
+        assertEquals(1L, retryAgain.summary().get("total"));
+        @SuppressWarnings("unchecked") Map<String,Object> secondManifest = (Map<String,Object>)
+                new org.yaml.snakeyaml.Yaml().load(new String(Files.readAllBytes(
+                        root.resolve("output/native-retry-second/run.yaml")), StandardCharsets.UTF_8));
+        @SuppressWarnings("unchecked") Map<String,Object> secondRun = (Map<String,Object>) secondManifest.get("run");
+        @SuppressWarnings("unchecked") Map<String,Object> secondLineage = (Map<String,Object>) secondRun.get("retryLineage");
+        assertEquals("native-retry-first", secondLineage.get("sourceRunId"));
+        assertEquals(2, secondLineage.get("retryAttemptNumber"));
+        assertEquals(1, secondLineage.get("sourceSelectedCaseCount"));
+        assertEquals(Collections.singletonList("fpp.transfer.second"), secondLineage.get("failedQualifiedCaseIds"));
+    }
+
+    @Test void nativeSuiteRetryRejectsChangedFlowRevisionAndTamperedLatestManifest() throws Exception {
+        Path root = nativeSuitePackage("native-suite-retry-stale-package");
+        writeNativeDefinition(root, "fpp.transfer", "payment.transfer.v1",
+                "- {recordId: first, data: {caseId: first, amount: 13}}\n");
+        Path flow = root.resolve("templates/flows/payment/transfer/v1/flow.yaml");
+        byte[] originalFlow = Files.readAllBytes(flow);
+        Files.write(flow, String.join("\n", "schemaVersion: att-flow/v3.6", "id: payment.transfer.v1",
+                "name: Transfer", "description: Native Suite retry stale fixture", "actions:",
+                "  verify: {type: assert, assert: 'false'}", "").getBytes(StandardCharsets.UTF_8));
+        DefaultAttService service = new DefaultAttService();
+        RunResult source = service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-stale-source", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, false, false, null));
+        assertEquals("FAIL", source.status());
+
+        NativeCaseSuiteRunRequest retryRequest = new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-stale-retry", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), false, true, false, false,
+                null, null);
+        Files.write(flow, originalFlow);
+        IllegalArgumentException stale = assertThrows(IllegalArgumentException.class,
+                () -> service.runNativeCaseSuite(retryRequest));
+        assertTrue(stale.getMessage().contains("source changed"), stale.getMessage());
+
+        Path manifest = root.resolve("output/native-stale-source/run.yaml");
+        Files.write(manifest, (new String(Files.readAllBytes(manifest), StandardCharsets.UTF_8)
+                + "# tampered after completion\n").getBytes(StandardCharsets.UTF_8));
+        IllegalArgumentException tampered = assertThrows(IllegalArgumentException.class,
+                () -> service.runNativeCaseSuite(retryRequest));
+        assertTrue(tampered.getMessage().contains("hash does not match"), tampered.getMessage());
+        assertFalse(Files.exists(root.resolve("output/native-stale-retry/run.yaml")));
+    }
+
     @Test void crossDefinitionSelectionRunsCasesFromDistinctFlowsAndKeysAggregateEvidence() throws Exception {
         Path root = nativeSuitePackage("cross-suite-package");
         writeNativeFlow(root, "payment.alpha.v1", "alpha=${EXEC.INPUT.amount}");

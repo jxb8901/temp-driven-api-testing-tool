@@ -231,9 +231,12 @@ public final class DefaultAttService implements AttService {
         FrameworkConfig cfg = config(request);
         Path testcaseSchema = att.validation.SchemaFiles.resolve(request.packageRoot(), "att-testcase-v1.schema.json");
         att.testcase.TestCaseSuiteResolver resolver = new att.testcase.TestCaseSuiteResolver(testcaseSchema);
+        boolean rerunFailed=request.rerunFailed();
         att.testcase.TestCaseSuiteResolutionResult resolution = resolver.resolve(request.packageRoot(),
                 request.packageId(), cfg.templatesRoot(), cfg.testcasesRoot(), request.definitionIds(),
-                request.qualifiedCaseIds(), request.tags(), request.excludeTags(), request.all(), null);
+                rerunFailed?Collections.<String>emptyList():request.qualifiedCaseIds(),
+                rerunFailed?Collections.<String>emptyList():request.tags(),
+                rerunFailed?Collections.<String>emptyList():request.excludeTags(),rerunFailed||request.all(), null);
         if (resolution.emptySelection()) {
             Map<String,Object> summary = new LinkedHashMap<String,Object>();
             summary.put("total", 0); summary.put("passed", 0); summary.put("failed", 0);
@@ -253,8 +256,18 @@ public final class DefaultAttService implements AttService {
                     request.packageRoot(), "nativeSuite", source, java.time.Instant.now());
         }
         att.core.FrameworkEngine engine = new att.core.FrameworkEngine(request.packageRoot(), cfg);
+        att.api.NativeSuiteRetryLineage retryLineage=request.retryLineage();
+        if(rerunFailed) {
+            Path outputRoot=(request.outputDirectory()==null?request.packageRoot().resolve(cfg.outputDirectory())
+                    :request.packageRoot().resolve(request.outputDirectory())).toAbsolutePath().normalize();
+            retryLineage=att.testcase.NativeSuiteRetryResolver.resolve(outputRoot,request.packageId(),
+                    request.definitionIds(),resolution.cases());
+            resolution=resolver.resolve(request.packageRoot(),request.packageId(),cfg.templatesRoot(),cfg.testcasesRoot(),
+                    request.definitionIds(),retryLineage.failedQualifiedCaseIds(),Collections.<String>emptyList(),
+                    Collections.<String>emptyList(),false,()->Thread.currentThread().isInterrupted());
+        }
         att.core.RunSummary result = engine.runNativeCaseSuite(resolution, runId, request.outputDirectory(),
-                request.dryRun(), request.failFast(), request.observer());
+                request.packageId(), request.dryRun(), request.failFast(), request.observer(), retryLineage);
 
         Map<String,att.testcase.ResolvedTestCase> selectedById = new LinkedHashMap<String,att.testcase.ResolvedTestCase>();
         for (att.testcase.ResolvedTestCase testCase : resolution.cases()) selectedById.put(testCase.qualifiedCaseId(), testCase);

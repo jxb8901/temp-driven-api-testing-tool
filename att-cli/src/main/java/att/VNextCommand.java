@@ -108,7 +108,8 @@ public final class VNextCommand {
             String packageId=o.packageId()==null?root.getFileName().toString():o.packageId();
             result=new att.api.DefaultAttService().runNativeCaseSuite(new att.api.NativeCaseSuiteRunRequest(root,config,
                     o.environment(),o.outputDirectory(),o.runId(),packageId,o.definitionIds(),o.qualifiedCaseIds(),
-                    new ArrayList<String>(o.tags()),new ArrayList<String>(o.excludeTags()),o.all(),o.dryRun(),o.failFast(),null));
+                    new ArrayList<String>(o.tags()),new ArrayList<String>(o.excludeTags()),o.all(),o.rerunFailed(),
+                    o.dryRun(),o.failFast(),null,null));
         } else if(isResource(o.targetKind())) {
             result=new att.api.DefaultAttService().debug(new DebugRequest(root,config,o.environment(),o.outputDirectory(),o.runId(),
                     o.targetKind(),o.target(),o.input(),false,null,o.runId(),o.overrides()));

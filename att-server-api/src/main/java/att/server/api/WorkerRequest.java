@@ -56,6 +56,8 @@ public class WorkerRequest {
     public List<String> nativeSuiteTags;
     public List<String> nativeSuiteExcludeTags;
     public Boolean nativeSuiteAll;
+    /** Source Job/run and exact failed Qualified Case IDs frozen by Native Suite draft validation. */
+    public Map<String,Object> nativeSuiteRetry;
     /** Exact package-relative Definition sources frozen by Suite draft validation, keyed by Definition ID. */
     public Map<String,String> nativeSuiteSourcePaths;
     public List<String> tags;

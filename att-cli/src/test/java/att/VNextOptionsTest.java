@@ -103,6 +103,11 @@ class VNextOptionsTest {
                 "--definition","fpp.transfer","--all"});
         assertTrue(all.all());
         assertEquals("payments",all.packageId());
+        VNextOptions retry=VNextOptions.parse(new String[]{"--server","sit","-p","payments","run","native-suite",
+                "--definition","fpp.transfer","--rerun-failed"});
+        assertTrue(retry.rerunFailed());
+        assertFalse(retry.all());
+        assertTrue(retry.qualifiedCaseIds().isEmpty());
 
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer"}));
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--all","--qualified-case-id","fpp.transfer.one"}));
@@ -112,6 +117,7 @@ class VNextOptionsTest {
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--tag",longTag}));
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--all","--exclude-tag",longTag}));
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--all","--rerun-failed"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--tag","smoke","--rerun-failed"}));
     }
 
     @Test void nativeSuiteQualifiedSelectorLimitMatchesExecutionV2() {

@@ -29,17 +29,20 @@ final class RunDefinition {
     final List<String> nativeSuiteTags;
     final List<String> nativeSuiteExcludeTags;
     final boolean nativeSuiteAll;
+    final boolean nativeSuiteRerunFailed;
 
     private RunDefinition(ObjectNode definition,ObjectNode workerInput,boolean resourceTarget,boolean debug,
                           boolean nativeCaseTarget,String nativeDefinitionId,List<String> resolvedCaseIds,
                           boolean nativeSuiteTarget,List<String> nativeDefinitionIds,List<String> qualifiedCaseIds,
-                          List<String> nativeSuiteTags,List<String> nativeSuiteExcludeTags,boolean nativeSuiteAll) {
+                          List<String> nativeSuiteTags,List<String> nativeSuiteExcludeTags,boolean nativeSuiteAll,
+                          boolean nativeSuiteRerunFailed) {
         this.definition=definition;this.workerInput=workerInput;this.resourceTarget=resourceTarget;this.debug=debug;
         this.nativeCaseTarget=nativeCaseTarget;this.nativeDefinitionId=nativeDefinitionId;
         this.resolvedCaseIds=Collections.unmodifiableList(new ArrayList<>(resolvedCaseIds));
         this.nativeSuiteTarget=nativeSuiteTarget;this.nativeDefinitionIds=immutable(nativeDefinitionIds);
         this.qualifiedCaseIds=immutable(qualifiedCaseIds);this.nativeSuiteTags=immutable(nativeSuiteTags);
         this.nativeSuiteExcludeTags=immutable(nativeSuiteExcludeTags);this.nativeSuiteAll=nativeSuiteAll;
+        this.nativeSuiteRerunFailed=nativeSuiteRerunFailed;
     }
 
     static RunDefinition parse(JsonNode value) {return parse(value,false);}
@@ -57,7 +60,7 @@ final class RunDefinition {
             worker.set(name,value.get(name).deepCopy());
         }
         if(value.has("target")==value.has("selection"))throw invalid("Provide exactly one target or selection");
-        boolean resource=false,nativeCase=false,nativeSuite=false,nativeSuiteAll=false;
+        boolean resource=false,nativeCase=false,nativeSuite=false,nativeSuiteAll=false,nativeSuiteRerunFailed=false;
         String nativeDefinitionId=null;List<String> resolvedCaseIds=Collections.emptyList();
         List<String> nativeDefinitionIds=Collections.emptyList(),qualifiedCaseIds=Collections.emptyList();
         List<String> nativeSuiteTags=Collections.emptyList(),nativeSuiteExcludeTags=Collections.emptyList();
@@ -74,14 +77,20 @@ final class RunDefinition {
                 if(!nativeVersion)throw invalid("Native Suite RUN requires att-execution/v2");
                 fields(target,"type","definitionIds","selection");nativeSuite=true;
                 nativeDefinitionIds=nativeDefinitionIds(target.get("definitionIds"));
-                JsonNode selection=target.get("selection");fields(selection,"all","qualifiedCaseIds","tags","excludeTags");
+                JsonNode selection=target.get("selection");fields(selection,"all","qualifiedCaseIds","tags","excludeTags","rerunFailed");
                 nativeSuiteAll=selection.has("all")&&bool(selection,"all");
                 if(selection.has("all")&&!selection.get("all").isBoolean())throw invalid("all must be boolean");
+                if(selection.has("rerunFailed")) {
+                    nativeSuiteRerunFailed=bool(selection,"rerunFailed");
+                    if(!nativeSuiteRerunFailed)throw invalid("rerunFailed must be true when supplied");
+                }
                 qualifiedCaseIds=textList(selection.get("qualifiedCaseIds"),"qualifiedCaseIds",
                         att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS);
                 nativeSuiteTags=textList(selection.get("tags"),"tags",100,att.testcase.TestCaseSuiteResolver.MAX_TAG_LENGTH);
                 nativeSuiteExcludeTags=textList(selection.get("excludeTags"),"excludeTags",100,att.testcase.TestCaseSuiteResolver.MAX_TAG_LENGTH);
-                if(!nativeSuiteAll&&qualifiedCaseIds.isEmpty()&&nativeSuiteTags.isEmpty())
+                if(nativeSuiteRerunFailed&&(selection.has("all")||!qualifiedCaseIds.isEmpty()||!nativeSuiteTags.isEmpty()||!nativeSuiteExcludeTags.isEmpty()))
+                    throw invalid("rerunFailed selects the latest eligible completed Native Suite RUN and cannot be combined with explicit selectors");
+                if(!nativeSuiteRerunFailed&&!nativeSuiteAll&&qualifiedCaseIds.isEmpty()&&nativeSuiteTags.isEmpty())
                     throw invalid("Native Suite selection must include all, qualifiedCaseIds, or tags");
                 if(nativeSuiteAll&&!qualifiedCaseIds.isEmpty())throw invalid("all and qualifiedCaseIds cannot be combined");
                 Set<String> declared=new java.util.HashSet<>(nativeDefinitionIds);
@@ -154,7 +163,8 @@ final class RunDefinition {
         }
         worker.put("diagnosticMode",debug);
         return new RunDefinition(((ObjectNode)value).deepCopy(),worker,resource,debug,nativeCase,nativeDefinitionId,resolvedCaseIds,
-                nativeSuite,nativeDefinitionIds,qualifiedCaseIds,nativeSuiteTags,nativeSuiteExcludeTags,nativeSuiteAll);
+                nativeSuite,nativeDefinitionIds,qualifiedCaseIds,nativeSuiteTags,nativeSuiteExcludeTags,nativeSuiteAll,
+                nativeSuiteRerunFailed);
     }
 
     private static List<String> nativeDefinitionIds(JsonNode value) {

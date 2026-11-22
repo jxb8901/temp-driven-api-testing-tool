@@ -78,6 +78,22 @@ public class FrameworkEngine {
     public RunSummary runNativeCaseSuite(TestCaseSuiteResolutionResult resolution, String requestedRunId,
             Path requestedOutputRoot, boolean dryRun, boolean failFast,
             att.api.ExecutionEventListener observer) throws Exception {
+        return runNativeCaseSuite(resolution, requestedRunId, requestedOutputRoot, null,
+                dryRun, failFast, observer, null);
+    }
+
+    /** Executes a frozen retry selection while keeping its counts separate from this RUN's results. */
+    public RunSummary runNativeCaseSuite(TestCaseSuiteResolutionResult resolution, String requestedRunId,
+            Path requestedOutputRoot, boolean dryRun, boolean failFast,
+            att.api.ExecutionEventListener observer, att.api.NativeSuiteRetryLineage retryLineage) throws Exception {
+        return runNativeCaseSuite(resolution, requestedRunId, requestedOutputRoot, null,
+                dryRun, failFast, observer, retryLineage);
+    }
+
+    /** Executes a Suite with its Package identity for scoped local retry history. */
+    public RunSummary runNativeCaseSuite(TestCaseSuiteResolutionResult resolution, String requestedRunId,
+            Path requestedOutputRoot, String packageId, boolean dryRun, boolean failFast,
+            att.api.ExecutionEventListener observer, att.api.NativeSuiteRetryLineage retryLineage) throws Exception {
         config.requireExecutionConfig();
         List<ResolvedTestCase> selected = validateNativeSuiteResolution(resolution);
         String runId = IdentifierValidator.runId(requestedRunId);
@@ -159,8 +175,12 @@ public class FrameworkEngine {
             att.config.ConfigurationEvidence.write(runDirectory, config);
             ExecutionOptions manifestOptions = nativeManifestOptions(runId, requestedOutputRoot, dryRun, failFast, ciOutputs);
             writeManifest(runDirectory, runId, results, runStarted, runEnded, html, manifestOptions, inputs,
-                    Collections.<att.validation.Diagnostic>emptyList(), nativeRunMetadata(resolution, summary));
+                    Collections.<att.validation.Diagnostic>emptyList(), nativeRunMetadata(resolution, summary, retryLineage));
             writeLatest(outputRoot, runDirectory, runId, summary, runEnded);
+            if(!dryRun&&packageId!=null)writeLatest(outputRoot,runDirectory,runId,summary,runEnded,
+                    att.testcase.NativeSuiteRetryResolver.latestPointerFileName(packageId,
+                            resolution.definitions().stream().map(item->item.definition().id())
+                                    .collect(java.util.stream.Collectors.toList())));
             emitNativeEvent(observer, "RUN_FINISHED", runId, null, summary.status().name(),
                     Duration.between(runStarted, runEnded).toMillis(), nativeSuiteIdentityData(resolution, null));
             return new RunSummary(results, html, runId);
@@ -743,7 +763,8 @@ public class FrameworkEngine {
                 Collections.<String>emptyList()).withRunPolicies(ciOutputs, "reject", false);
     }
 
-    private Map<String,Object> nativeRunMetadata(TestCaseSuiteResolutionResult resolution, RunSummary summary) {
+    private Map<String,Object> nativeRunMetadata(TestCaseSuiteResolutionResult resolution, RunSummary summary,
+            att.api.NativeSuiteRetryLineage retryLineage) throws Exception {
         Map<String,Object> metadata = new LinkedHashMap<String,Object>();
         metadata.put("executionType", "run");
         metadata.put("targetType", resolution.implicitSuite() ? "nativeSuite" : "nativeCase");
@@ -770,7 +791,33 @@ public class FrameworkEngine {
         metadata.put("selectedCaseCount", resolution.selectedCount());
         metadata.put("executionCount", summary.executionCount());
         metadata.put("skippedCaseCount", summary.skipped());
+        List<Map<String,Object>> caseSources = new ArrayList<Map<String,Object>>();
+        for (ResolvedTestCase testCase : resolution.cases()) {
+            Map<String,Object> source = new LinkedHashMap<String,Object>();
+            source.put("definitionId", testCase.definitionId());
+            source.put("qualifiedCaseId", testCase.qualifiedCaseId());
+            source.put("sourceReference", testCase.sourceReference());
+            source.put("sourceRevision", testCase.sourceRevision());
+            source.put("flowId", testCase.flowId());
+            source.put("flowRevision", testCase.flowRevision());
+            if (testCase.sourceRecordId() != null) source.put("sourceRecordId", testCase.sourceRecordId());
+            if (testCase.recordIndex() != null) source.put("recordIndex", testCase.recordIndex());
+            List<Map<String,Object>> dependencies = new ArrayList<Map<String,Object>>();
+            for (ResolvedTestCase.FlowDependency dependency : testCase.dependencies()) dependencies.add(dependency.toMap());
+            source.put("dependencies", dependencies);
+            caseSources.add(source);
+        }
+        metadata.put("caseSources", caseSources);
+        metadata.put("sourceIdentityDigest", nativeSourceIdentityDigest(definitionValues, caseSources));
+        if (retryLineage != null) metadata.put("retryLineage", retryLineage.toManifestMap(
+                summary.executionCount(), summary.skipped()));
         return metadata;
+    }
+
+    private String nativeSourceIdentityDigest(List<Map<String,Object>> definitions,
+            List<Map<String,Object>> caseSources) throws Exception {
+        List<Object> identity=new ArrayList<Object>();identity.add(definitions);identity.add(caseSources);
+        return sha256Bytes(new Yaml().dump(identity).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private void verifyJunit(Path junitFile) throws Exception {
@@ -1004,10 +1051,22 @@ public class FrameworkEngine {
     }
 
     private void writeLatest(Path outputRoot, Path runDirectory, String runId, RunSummary summary, Instant endedAt) throws Exception {
-        Map<String, Object> pointer = new LinkedHashMap<String, Object>(); pointer.put("schemaVersion", "att-latest-run/v2.1"); pointer.put("runId", runId); pointer.put("runDirectory", outputRoot.relativize(runDirectory).toString().replace('\\', '/')); pointer.put("completedAt", endedAt.toString()); pointer.put("status", summary.status().name()); pointer.put("manifestSha256", sha256(runDirectory.resolve("run.yaml")));
+        writeLatest(outputRoot,runDirectory,runId,summary,endedAt,"latest-run.yaml");
+    }
+
+    private void writeLatest(Path outputRoot,Path runDirectory,String runId,RunSummary summary,Instant endedAt,
+            String pointerFileName) throws Exception {
+        Path absoluteOutputRoot = IdentifierValidator.canonicalPath(outputRoot, "Output root");
+        Path absoluteRunDirectory = IdentifierValidator.canonicalPath(runDirectory, "Run directory");
+        if (!absoluteOutputRoot.equals(absoluteRunDirectory.getParent()))
+            throw new IllegalArgumentException("Run directory must be a direct child of the output directory: "
+                    + absoluteRunDirectory + " under " + absoluteOutputRoot);
+        Map<String, Object> pointer = new LinkedHashMap<String, Object>(); pointer.put("schemaVersion", "att-latest-run/v2.1"); pointer.put("runId", runId); pointer.put("runDirectory", absoluteOutputRoot.relativize(absoluteRunDirectory).toString().replace('\\', '/')); pointer.put("completedAt", endedAt.toString()); pointer.put("status", summary.status().name()); pointer.put("manifestSha256", sha256(absoluteRunDirectory.resolve("run.yaml")));
         byte[] bytes = new Yaml().dump(pointer).getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        Path latest = outputRoot.resolve("latest-run.yaml");
-        Path temporary = outputRoot.resolve("latest-run.yaml.tmp");
+        if(pointerFileName==null||!pointerFileName.matches("latest-(?:run|native-suite-[a-f0-9]{64})\\.yaml"))
+            throw new IllegalArgumentException("Invalid latest RUN pointer filename");
+        Path latest = absoluteOutputRoot.resolve(pointerFileName);
+        Path temporary = absoluteOutputRoot.resolve(pointerFileName+".tmp");
         Files.write(temporary, bytes);
         Files.move(temporary, latest, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
     }

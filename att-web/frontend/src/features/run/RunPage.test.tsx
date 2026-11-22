@@ -294,6 +294,15 @@ it('surfaces Native Suite all-versus-selected Case selection as a v2 draft', asy
     target: { type: 'nativeSuite', definitionIds: ['payments.transfer', 'payments.refund'], selection: { qualifiedCaseIds: ['payments.transfer.customerA', 'payments.refund.refund1'] } }, options: { debug: false } });
 });
 
+it('surfaces Native Suite rerun-failed as an exclusive v2 selector', async () => {
+  await change('Target type', 'native-suite');
+  await changeTextarea('Definition IDs', 'payments.transfer');
+  await change('Suite selection', 'failed');
+  await click('Validate');
+  expect(api.previewRun).toHaveBeenLastCalledWith({ schemaVersion: 'att-execution/v2', executionType: 'run', packageId: 'payments',
+    target: { type: 'nativeSuite', definitionIds: ['payments.transfer'], selection: { rerunFailed: true } }, options: { debug: false } });
+});
+
 it('schedules the validated Native Suite draft without projecting it as a resource target', async () => {
   await change('Target type', 'native-suite');
   await changeTextarea('Definition IDs', 'payments.transfer');
@@ -325,6 +334,7 @@ async function renderNativeSuiteReplay(selection: JsonObject) {
 }
 
 const nativeSuiteReplayFixtures: Array<{name:string;selection:JsonObject;mode:string;tags:string;excludeTags:string}> = [
+  {name:'rerun failed',selection:{rerunFailed:true},mode:'failed',tags:'',excludeTags:''},
   {name:'tag-only',selection:{tags:['smoke']},mode:'tags',tags:'smoke',excludeTags:''},
   {name:'include and exclude tags',selection:{tags:['smoke','critical'],excludeTags:['destructive']},mode:'tags',tags:'smoke\ncritical',excludeTags:'destructive'},
   {name:'exclude tags from all Cases',selection:{all:true,excludeTags:['destructive']},mode:'all',tags:'',excludeTags:'destructive'},

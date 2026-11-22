@@ -34,7 +34,7 @@ Native RUN 使用 `run native-case <definitionId> --resolved-case-id <localCaseI
 
 ### Native Suite RUN
 
-Native Suite RUN 使用 `run native-suite`，並以一個或多個 `--definition <definitionId>` 指定 Definition，再以 `--all`、可重複的 `--qualified-case-id <DefinitionID.localCaseId>`，或 `--tag` / `--exclude-tag` 選取 Case。此命令不接受 positional target。`--all` 不可與 `--qualified-case-id` 併用，且會拒絕 `--rerun-failed`。Local `--dry-run` 會解析並驗證 Suite，但不執行 Flow。Remote Native Suite RUN 要求 `att-execution/v2`，先建立經驗證的 draft 再提交；Remote `--dry-run` 只預覽 draft，不會提交 Job。
+Native Suite RUN 使用 `run native-suite`，並以一個或多個 `--definition <definitionId>` 指定 Definition，再以 `--all`、可重複的 `--qualified-case-id <DefinitionID.localCaseId>`，或 `--tag` / `--exclude-tag` 選取 Case。此命令不接受 positional target。`--rerun-failed` 與上述 selector 互斥，只會重跑同一 Package 和 Definition 集合中最近一個符合資格且已完成的 Native Suite RUN 裏曾執行但失敗的 Case。Local 執行會驗證依 Package/Definition 區分的 Native Suite pointer 和 manifest hash；dry-run 及不相關 RUN 不會取代此 pointer。Remote 執行會解析呼叫者最近完成的 Job。經驗證的 draft 會凍結來源 Job/run、manifest digest、source revision 和確切 retry ID；來源變更或 draft 過期時會拒絕提交。Skipped Case 不會重跑。每次執行的選取、執行、略過及 retry 次數會在 summary 和 manifest 分開記錄。Schedule 會保留已驗證的 retry source。Local `--dry-run` 會解析並驗證 Suite，但不執行 Flow。Remote Native Suite RUN 要求 `att-execution/v2`，先建立經驗證的 draft 再提交；Remote `--dry-run` 只預覽 draft，不會提交 Job。
 
 ### 遷移既有命令
 

@@ -45,7 +45,7 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
   const [formResetKey, setFormResetKey] = useState(0);
   const [selection, setSelection] = useState('{"all": true}');
   const [nativeSuiteDefinitionIds, setNativeSuiteDefinitionIds] = useState('');
-  const [nativeSuiteSelectionMode, setNativeSuiteSelectionMode] = useState<'all' | 'selected' | 'tags'>('all');
+  const [nativeSuiteSelectionMode, setNativeSuiteSelectionMode] = useState<'all' | 'selected' | 'tags' | 'failed'>('all');
   const [nativeSuiteQualifiedCaseIds, setNativeSuiteQualifiedCaseIds] = useState('');
   const [nativeSuiteTags, setNativeSuiteTags] = useState('');
   const [nativeSuiteExcludeTags, setNativeSuiteExcludeTags] = useState('');
@@ -87,7 +87,8 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
           const suiteSelection=retained.target.selection || {};
           const ids=stringList(suiteSelection.qualifiedCaseIds);
           const tags=stringList(suiteSelection.tags);
-          setNativeSuiteSelectionMode(suiteSelection.all === true ? 'all' : ids.length ? 'selected' : tags.length ? 'tags' : 'selected');
+          setNativeSuiteSelectionMode(suiteSelection.rerunFailed === true ? 'failed'
+            : suiteSelection.all === true ? 'all' : ids.length ? 'selected' : tags.length ? 'tags' : 'selected');
           setNativeSuiteQualifiedCaseIds(ids.join('\n'));
           setNativeSuiteTags(tags.join('\n'));
           setNativeSuiteExcludeTags(stringList(suiteSelection.excludeTags).join('\n'));
@@ -187,10 +188,11 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
         const excludeTags=nativeSuiteExcludeTags.split(/[\r\n,]+/).map(value=>value.trim()).filter(Boolean);
         if(nativeSuiteSelectionMode==='selected'&&!qualifiedCaseIds.length)throw new Error('Enter at least one Qualified Case ID.');
         if(nativeSuiteSelectionMode==='tags'&&!tags.length)throw new Error('Enter at least one tag to select Cases.');
-        const suiteSelection:JsonObject=nativeSuiteSelectionMode==='all'?{all:true}
+        const suiteSelection:JsonObject=nativeSuiteSelectionMode==='failed'?{rerunFailed:true}
+          :nativeSuiteSelectionMode==='all'?{all:true}
           :nativeSuiteSelectionMode==='selected'?{qualifiedCaseIds}:{tags};
-        if(nativeSuiteSelectionMode!=='tags'&&tags.length)suiteSelection.tags=tags;
-        if(excludeTags.length)suiteSelection.excludeTags=excludeTags;
+        if(nativeSuiteSelectionMode!=='failed'&&nativeSuiteSelectionMode!=='tags'&&tags.length)suiteSelection.tags=tags;
+        if(nativeSuiteSelectionMode!=='failed'&&excludeTags.length)suiteSelection.excludeTags=excludeTags;
         body.target={type:'nativeSuite',definitionIds,selection:suiteSelection};
       }
       else if (targetType === 'batch') body.selection = object(selection);
@@ -264,9 +266,11 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
       {!initialTarget && targetType !== 'batch' && targetType !== 'native-suite' && <label>Target ID<input value={targetId} onChange={e => changed(() => setId(e.target.value))} /></label>}
       {targetType === 'native-suite' && <>
         <label>Definition IDs (one per line)<textarea value={nativeSuiteDefinitionIds} onChange={e => changed(() => setNativeSuiteDefinitionIds(e.target.value))} /></label>
-        <label>Suite selection<select value={nativeSuiteSelectionMode} onChange={e => changed(() => setNativeSuiteSelectionMode(e.target.value as 'all'|'selected'|'tags'))}>
+        <label>Suite selection<select value={nativeSuiteSelectionMode} onChange={e => changed(() => setNativeSuiteSelectionMode(e.target.value as 'all'|'selected'|'tags'|'failed'))}>
           <option value="all">All Cases</option><option value="selected">Selected Cases</option><option value="tags">Cases matching tags</option>
+          <option value="failed">Retry failed Cases</option>
         </select></label>
+        {nativeSuiteSelectionMode === 'failed' && <p>Retries only failed executed Qualified Case IDs from the latest eligible completed Native Suite RUN. Validation freezes its source Job, run, and manifest digest.</p>}
         {nativeSuiteSelectionMode === 'selected' && <label>Qualified Case IDs (one per line)<textarea value={nativeSuiteQualifiedCaseIds}
           onChange={e => changed(() => setNativeSuiteQualifiedCaseIds(e.target.value))} /></label>}
         <label>Tags (required for tag selection; optional filter otherwise)<textarea value={nativeSuiteTags}

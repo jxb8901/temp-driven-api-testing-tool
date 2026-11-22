@@ -138,6 +138,7 @@
               "minProperties": 1,
               "properties": {
                 "all": { "type": "boolean" },
+                "rerunFailed": { "const": true },
                 "qualifiedCaseIds": {
                   "type": "array",
                   "minItems": 1,
@@ -173,10 +174,20 @@
                   }
                 },
                 { "required": ["qualifiedCaseIds"] },
-                { "required": ["tags"] }
+                { "required": ["tags"] },
+                {
+                  "required": ["rerunFailed"],
+                  "properties": { "rerunFailed": { "const": true } }
+                }
               ],
               "not": {
-                "required": ["all", "qualifiedCaseIds"]
+                "anyOf": [
+                  { "required": ["all", "qualifiedCaseIds"] },
+                  { "required": ["rerunFailed", "all"] },
+                  { "required": ["rerunFailed", "qualifiedCaseIds"] },
+                  { "required": ["rerunFailed", "tags"] },
+                  { "required": ["rerunFailed", "excludeTags"] }
+                ]
               }
             }
           }

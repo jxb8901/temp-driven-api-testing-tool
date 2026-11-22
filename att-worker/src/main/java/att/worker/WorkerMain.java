@@ -383,10 +383,14 @@ public final class WorkerMain {
                 throw new IllegalArgumentException("Native Suite Definition sources do not match the accepted source closure");
             if(!r.nativeSuiteQualifiedCaseIds.equals(pinned.get("selectedQualifiedCaseIds")))
                 throw new IllegalArgumentException("Native Suite selection changed after draft validation");
+            att.api.NativeSuiteRetryLineage retryLineage=r.nativeSuiteRetry==null?null
+                    :att.api.NativeSuiteRetryLineage.fromMap(r.nativeSuiteRetry);
+            if(retryLineage!=null&&!r.nativeSuiteQualifiedCaseIds.equals(retryLineage.failedQualifiedCaseIds()))
+                throw new IllegalArgumentException("Native Suite retry selection does not match its frozen failed Qualified Case IDs");
             return service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,config,r.environment,output,r.runId,
                     r.registeredPackageId,r.nativeSuiteDefinitionIds,r.nativeSuiteQualifiedCaseIds,
-                    Collections.<String>emptyList(),Collections.<String>emptyList(),false,bool(r.dryRun),bool(r.failFast),
-                    event -> emitRunExecution(event,r.diagnosticMode)));
+                    Collections.<String>emptyList(),Collections.<String>emptyList(),false,false,bool(r.dryRun),bool(r.failFast),
+                    retryLineage,event -> emitRunExecution(event,r.diagnosticMode)));
         }
         if("run".equals(r.command)&&r.nativeCaseDefinitionId!=null) {
             if(r.nativeResolvedCaseIds==null||r.nativeResolvedCaseIds.isEmpty()||r.nativeCaseSourcePath==null)

@@ -216,7 +216,6 @@ public final class VNextOptions {
             } else if (!b.resolvedCaseIds.isEmpty()) throw invalid("--resolved-case-id is available only for run native-case");
             if ("native-suite".equals(b.targetKind)) {
                 if (b.target!=null) throw invalid("run native-suite does not take a positional target; use --definition");
-                if (b.rerunFailed) throw invalid("--rerun-failed is not available for run native-suite; select the cases to run explicitly");
                 if (b.definitionIds.isEmpty()||b.definitionIds.size()>100)
                     throw invalid("run native-suite requires between 1 and 100 --definition values");
                 if (!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.resolvedCaseIds.isEmpty())
@@ -242,8 +241,10 @@ public final class VNextOptions {
                     if(!definitions.contains(definition)) throw invalid("Each --qualified-case-id must belong to a declared --definition");
                     if(!selected.add(id)) throw invalid("--qualified-case-id values cannot contain duplicates");
                 }
+                if(b.rerunFailed&&(b.all||!b.qualifiedCaseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty()))
+                    throw invalid("--rerun-failed selects the latest eligible completed Native Suite RUN and cannot be combined with explicit selectors");
                 if(b.all&&!b.qualifiedCaseIds.isEmpty()) throw invalid("--all cannot be combined with --qualified-case-id");
-                if(!b.all&&b.qualifiedCaseIds.isEmpty()&&b.tags.isEmpty())
+                if(!b.rerunFailed&&!b.all&&b.qualifiedCaseIds.isEmpty()&&b.tags.isEmpty())
                     throw invalid("run native-suite requires --all, a --qualified-case-id, or at least one --tag");
             } else if (!b.definitionIds.isEmpty()||!b.qualifiedCaseIds.isEmpty())
                 throw invalid("--definition and --qualified-case-id are available only for run native-suite");
