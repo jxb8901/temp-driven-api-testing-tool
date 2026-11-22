@@ -33,9 +33,10 @@ it('negotiates RUN support and preserves legacy resource and Case adapters', asy
   expect(() => api.previewRun(nativeSuite)).toThrow(/att-execution\/v2/);
   expect(() => api.previewRun(nativeRun)).toThrow(/att-execution\/v2/);
   await api.runCase({ packageId: 'p', suite: 'testcase/a.xlsx', caseId: 'a.default.C1', environment: 'SIT' });
-  expect(calls.map(call => call.path.split('/').slice(-2).join('/'))).toEqual(['drafts/run', 'drafts/run']);
+  expect(calls.map(call => call.path.split('/').slice(-2).join('/'))).toEqual(['drafts/run', 'drafts/run', 'jobs/run']);
   expect(calls[0].body).toEqual(definition);
   expect(calls[1].body).toMatchObject({ environment: 'SIT', selection: { suites: ['testcase/a.xlsx'], caseIds: ['a.default.C1'] }, options: { debug: false } });
+  expect(calls[2].body).toEqual({ packageId: 'p', draftId: 'R123' });
   calls.length = 0; native = true; await api.getVersion();
   expect(api.supportsNativeCaseRun()).toBe(true);
   await api.previewRun(nativeSuite);
