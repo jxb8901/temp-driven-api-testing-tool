@@ -277,13 +277,17 @@ public final class ApiServlet extends HttpServlet {
             if(path.matches("/jobs/[^/]+/replay")){Map<String,Object> replay=runtime.jobReplay(segment(path,2),principal);replay.put("requestId",requestId);res.setHeader("Cache-Control","private, no-store");json(res,200,replay);return;}
             if(path.matches("/jobs/[^/]+/events")){sse(req,res,segment(path,2));return;}
             if(path.matches("/jobs/[^/]+/artifacts/archive\\.zip")){
-                String id=segment(path,2);
-                try(ServerRuntime.ArtifactRead read=runtime.openArtifactArchive(id,true)) {
-                    long size=read.length();
-                    res.setContentType("application/zip");res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Cache-Control","private, no-store");
-                    res.setHeader("Content-Disposition","attachment; filename=\""+id+"-artifacts.zip\"");res.setContentLengthLong(size);
-                    read.writeTo(res.getOutputStream());
-                }
+                String id=segment(path,2),actor=principalExact(req);
+                runtime.withPackageSourceAuthority(actor,
+                        login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),()->{
+                            try(ServerRuntime.ArtifactRead read=runtime.openArtifactArchive(id,true,actor)) {
+                                long size=read.length();
+                                res.setContentType("application/zip");res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("Cache-Control","private, no-store");
+                                res.setHeader("Content-Disposition","attachment; filename=\""+id+"-artifacts.zip\"");res.setContentLengthLong(size);
+                                read.writeTo(res.getOutputStream());
+                            }
+                            return null;
+                        });
                 return;
             }
             if(path.matches("/jobs/[^/]+/load-report/v2/archive\\.zip")) {
@@ -300,8 +304,10 @@ public final class ApiServlet extends HttpServlet {
             }
             if(path.startsWith("/jobs/")&&path.contains("/artifacts/view/")) {
                 int boundary=path.indexOf("/artifacts/view/");
-                String id=segment(path.substring(0,boundary),2),relative=path.substring(boundary+"/artifacts/view/".length());
-                byte[] bytes=runtime.archiveEntry(id,relative);
+                String id=segment(path.substring(0,boundary),2),relative=path.substring(boundary+"/artifacts/view/".length()),actor=principalExact(req);
+                byte[] bytes=runtime.withPackageSourceAuthority(actor,
+                        login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),
+                        ()->runtime.archiveEntry(id,relative,actor));
                 String ext=relative.substring(relative.lastIndexOf('.')+1).toLowerCase(java.util.Locale.ROOT);
                 boolean html="html".equals(ext)||"htm".equals(ext);
                 boolean workbook="xlsx".equals(ext);
@@ -310,7 +316,9 @@ public final class ApiServlet extends HttpServlet {
                 res.setHeader("X-Frame-Options","SAMEORIGIN");res.setHeader("Referrer-Policy","no-referrer");
                 res.setContentType(mime+(workbook?"":"; charset=UTF-8"));res.setHeader("X-Content-Type-Options","nosniff");
                 res.setHeader("Cache-Control","private, no-store");
-                res.setHeader("Content-Disposition",workbook?"attachment; filename=\"native-cases.result.xlsx\"":"inline");
+                String workbookName=relative.endsWith(ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX)
+                        ?"native-cases.source-workbook.xlsx":"native-cases.result.xlsx";
+                res.setHeader("Content-Disposition",workbook?"attachment; filename=\""+workbookName+"\"":"inline");
                 // Text destinations must remain navigable inside the report iframe, not inherit API frame denial.
                 String policy=html?"sandbox allow-scripts; "+ArtifactPreviewPolicy.CONTENT_POLICY
                         :"sandbox; default-src 'none'; base-uri 'none'; form-action 'none'";
@@ -318,7 +326,13 @@ public final class ApiServlet extends HttpServlet {
                 res.setContentLengthLong(bytes.length);res.getOutputStream().write(bytes);return;
             }
             if(path.startsWith("/jobs/")&&path.contains("/artifacts/"))throw new ServerRuntime.NotFoundException();
-            if(path.matches("/jobs/[^/]+/artifacts")){String id=segment(path,2);Map<String,Object> listing=runtime.artifactIndex(id,parseOffset(req.getParameter("offset")),parseConfigurationLimit(req.getParameter("limit")));listing.put("requestId",requestId);json(res,200,listing);return;}
+            if(path.matches("/jobs/[^/]+/artifacts")){
+                String id=segment(path,2),actor=principalExact(req);
+                Map<String,Object> listing=runtime.withPackageSourceAuthority(actor,
+                        login->login!=null&&login.equals(principalExact(req))&&operatorCapability(req,login),
+                        ()->runtime.artifactIndex(id,parseOffset(req.getParameter("offset")),parseConfigurationLimit(req.getParameter("limit")),actor));
+                listing.put("requestId",requestId);json(res,200,listing);return;
+            }
             if(path.matches("/jobs/[^/]+/result")){
                 String id=segment(path,2);Map<String,Object> result=runtime.resultRecord(id);
                 boolean admin=systemAdminCapability(req,principal);
@@ -330,6 +344,7 @@ public final class ApiServlet extends HttpServlet {
             error(res,404,"ATT-SERVER-NOT-FOUND","API resource was not found",requestId);
         } catch(JobStore.TargetSearchPendingException e){res.setHeader("Retry-After","2");error(res,503,"ATT-SERVER-TARGET-SEARCH-PENDING","Historical target search is being prepared. No partial results were returned. Use job: followed by the full Job ID for exact lookup, or retry Refresh jobs shortly.",requestId);}
           catch(ServerRuntime.ArchiveUnavailableException e){archiveUnavailable(res,e,requestId);}
+          catch(ServerRuntime.AuthoringSourceDeniedException e){error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);}
           catch(ServerRuntime.InspectionLimitException e){error(res,413,"ATT-RESOURCE-LIMIT","Package inspection exceeded a deterministic scan limit",requestId,e.diagnostics);}
           catch(ServerRuntime.ArtifactCapacityException e){error(res,503,"ATT-SERVER-ARTIFACT-CAPACITY","Artifact preview capacity is full; retry shortly",requestId);}
           catch(ServerRuntime.InlineLoadDisabledException e){error(res,403,"ATT-SERVER-INLINE-LOAD-DISABLED","Browser-submitted Load is disabled by Server configuration",requestId);}

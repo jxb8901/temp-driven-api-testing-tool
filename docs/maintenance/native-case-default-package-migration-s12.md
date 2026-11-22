@@ -1,7 +1,7 @@
-<!-- att-doc-status: current release=4.6.0-dev issue=413 -->
+<!-- att-doc-status: planned release=4.6.0 issue=413 acceptance=pending -->
 # Default Package Native Case migration matrix (S12 / #413)
 
-Baseline: branch stacked on S05 PR #409 (`codex/issue-395-studio`), which already includes S03 Native RUN and S04 Excel Data Source. This record is the before/after inventory for issue #413. It is **not** a claim that S06 implicit Suites or S07 source-independent native XLSX reports are shipped on this head.
+S12 originated on S05 PR #409, which includes S03 Native RUN and S04 Excel Data Source. This record tracks the Default Package migration for the ATT 4.6.0 release target; no release or tag has been published. The combined target stack includes S06 and S07 implementation work in downstream PRs #406 and #411, but their integrated/deployed acceptance remains open under [#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) and [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397). Native RUN acceptance remains open under [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393), and S12 adoption acceptance remains open under [#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413). Shared-editor deployment evidence is separate ([#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387)).
 
 ## Classification legend
 
@@ -27,9 +27,9 @@ Baseline: branch stacked on S05 PR #409 (`codex/issue-395-studio`), which alread
 | `packages/default/templates/flows/common/*` | Nested identity/decorate/compose Flows | Cross-mode examples | **Unchanged** | Already Flow-native helpers | Existing LoadCrossMode / Package validate |
 | `packages/default/tools/**` | Package-owned Tools | Legacy + Native Quick Start sample Tool | **Unchanged** | #352 ownership preserved | Package validate |
 | `examples/load/**` | `att-load/v1.9` direct targets | LOAD guides | **Supported legacy / current LOAD path** | Native LOAD Case targets are S08 (deferred) | Existing load smoke examples |
-| Implicit Native Suite (`run native-suite`) | S06 / #396 | — | **Deferred** | Requires S06 PR; not on S05 base | Documented as deferred in Quick Start |
-| Native standard XLSX without workbook (`workbooks/native-cases.result.xlsx`) | S07 / #397 | — | **Deferred** | Requires S07 PR; HTML/CI evidence from existing RUN path only on this head | Documented as deferred |
-| Studio Native editor + Preview | S05 / #395 | Studio | **Shipped on this base** | Preview/Resolve for `testcase.yaml` | Reference test-authoring Studio section |
+| Implicit Native Suite (`run native-suite`) | S06 / #396 | — | **Implemented in target stack; acceptance pending** | Included in downstream PR #406; S06 remains open for integration and acceptance | [S06 #396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) |
+| Native standard XLSX without workbook (`workbooks/native-cases.result.xlsx`) | S07 / #397 | — | **Implemented in target stack; acceptance pending** | Included in downstream PR #411; S07 integrated/report acceptance remains open | [S07 #397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397) |
+| Studio Native editor + Preview | S05 / #395 | Studio | **Implemented in target stack; acceptance pending** | Preview/Resolve for `testcase.yaml`; release has not been published | [S05 #395](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/395) |
 
 ## Before / after (Default Package user-facing Case sources)
 
@@ -61,9 +61,9 @@ Baseline: branch stacked on S05 PR #409 (`codex/issue-395-studio`), which alread
 ```
 
 
-## Intentionally out of scope on this PR
+## Release-target boundary and pending acceptance
 
 - Forced conversion or deletion of `payment2` / `payment_regression` / committed Snapshots
-- Implicit Suite descriptor or `native-suite` documentation as shipped behavior
-- Claiming S07 native workbook reports or S08 LOAD Case targets
+- S06 and S07 acceptance owned by their own issues; this S12 matrix does not close [#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) or [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)
+- Native LOAD Case targets ([#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)), advanced Testdata and generators ([#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)), Debug interoperability ([#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)), and Helper rollback/teardown verification ([#421](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/421)) are follow-ups outside the 4.6.0 target. ADR approval/architecture closure is tracked separately under [#422](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/422) and is not a target release blocker.
 - Automatic Workbook→Flow conversion or Stage/Template retirement (#398)

@@ -30,15 +30,23 @@ Testcase 是一個正規化 Workbook row；Run 會為每個選中的 row 建立�
 
 ## Native Test Case Definition
 
-4.6.0 開發候選版已在 Engine 登錄 `att-testcase/v1`，並支援透過 Native Case CLI 及經驗證的 Server draft flow discovery、resolution 和 RUN singleton、inline 與 Excel Definition。Native Excel adapter 只讀取 Package 內 `.xlsx`，沿用 Sidecar header、`dataColumns`、blank normalization 和安全 YAML cell parsing 規則，並在每個 resolved Case 保留 workbook revision、sheet、row 及 column provenance。壓縮後的 workbook 上限為 32 MiB；POI 載入前會預檢 ZIP archive，最多 256 個 entries、每個解壓 entry 32 MiB、總解壓資料 64 MiB。選取的 worksheet 最多 100,000 個實體 rows（包括空白列）；header scan 最多 1,000,000 個 header cells；Resolution 最多接受 10,000 筆非空白 records。Preview 亦有上限。YAML cells 沿用共用 parser 限制：3,000,000 code points、50 個 collection aliases 及 50 層巢狀；解析後的 value graph 最多 64 層及 100,000 個值。系統拒絕非有限數字和遞迴 aliases。Adapter 不會建立或更新舊式 XML Snapshot。現有 Workbook／Sidecar／Snapshot RUN 亦維持支援。
+ATT 4.6.0 發佈目標包含已啟用的 `att-testcase/v1` schema，以及 Native Case CLI 和經驗證 Server draft flow 對 singleton、inline 和 Excel Definition 的 discovery、resolution 及 RUN 支援。實作已在開啟中的發佈目標 PR stack；4.6.0 release 和 tag 尚未建立。Native RUN、報告整合及 Default Package 採納的部署驗收仍待完成；共享編輯器部署驗收另行跟進。Native LOAD Case target、進階 Testdata／generator 及 Debug interoperability 不屬於此目標；現有直接 LOAD 和 Debug 路徑仍受支援。
+
+Native Excel adapter 只讀取 Package 內 `.xlsx`，沿用 Sidecar header、`dataColumns`、blank normalization 和安全 YAML cell parsing 規則，並在每個 resolved Case 保留 workbook revision、sheet、row 及 column provenance。壓縮後的 workbook 上限為 32 MiB；POI 載入前會預檢 ZIP archive，最多 256 個 entries、每個解壓 entry 32 MiB、總解壓資料 64 MiB。選取的 worksheet 最多 100,000 個實體 rows（包括空白列）；header scan 最多 1,000,000 個 header cells；Resolution 最多接受 10,000 筆非空白 records。Preview 亦有上限。YAML cells 沿用共用 parser 限制：3,000,000 code points、50 個 collection aliases 及 50 層巢狀；解析後的 value graph 最多 64 層及 100,000 個值。系統拒絕非有限數字和遞迴 aliases。Adapter 不會建立或更新舊式 XML Snapshot。現有 Workbook／Sidecar／Snapshot RUN 亦維持支援。
 
 V1 契約定義兩種資料形態：含完整 typed `inputs` map、Resolved Case ID 固定為 `default` 的 singleton inline Case；或含穩定來源 ID 的多筆 inline／Excel Data Source。Definition ID 在 Package 範圍內唯一、保留大小寫並使用點號分段；Resolved Case ID 是單一 path-safe 段落。Excel Case ID 必須是符合 `[A-Za-z0-9_-]{1,128}` 的 literal text cell；公式、數字／日期／boolean／error cell、blank markers、前後空白、保留裝置名稱和 case-fold collision 都會被拒絕。`caseIdExpression` 只可用單一 `${DATA.key}` lookup 覆蓋 resolved ID。空白、重複、格式錯誤、缺少或衝突的 ID，以及空的 resolution 結果都屬錯誤，不會當作全部 PASS。
 
-Data-driven Case 省略 `inputs` 時，會把 `DATA` 同名映射到 Flow inputs；提供 projection 時，該 projection 會完全取代 identity mapping，只接受 `{from: DATA.key}` 或 `{value: <typed value>}`。Excel `dataColumns` 保留 `att-sidecar/v2.2` 逗號分隔字串語法，包括 alias、`(yaml)` parsing 和引號分隔符。省略或空白的 `dataColumns` 不會把任何業務欄選入 `DATA`（Case ID／tags selector 也不會自動暴露）；需要 Excel 輸入時必須明確宣告 `dataColumns`。Excel `path` 必須是可移植的 Package 相對 `.xlsx` 路徑。Source-workbook report template 只可用於 Excel Data Source，並永遠寫入新 Workbook。
+Data-driven Case 省略 `inputs` 時，會把 `DATA` 同名映射到 Flow inputs；提供 projection 時，該 projection 會完全取代 identity mapping，只接受 `{from: DATA.key}` 或 `{value: <typed value>}`。Excel `dataColumns` 保留 `att-sidecar/v2.2` 逗號分隔字串語法，包括 alias、`(yaml)` parsing 和引號分隔符。省略或空白的 `dataColumns` 不會把任何業務欄選入 `DATA`（Case ID／tags selector 也不會自動暴露）；需要 Excel 輸入時必須明確宣告 `dataColumns`。Excel `path` 必須是可移植的 Package 相對 `.xlsx` 路徑。
+
+每次 Native RUN 都會在 `workbooks/native-cases.result.xlsx` 建立不依賴來源 Workbook 的結果報告，內容包括所選 Case 的結果。Excel-backed Definition 可額外設定 `report: {format: xlsx, template: sourceWorkbook}`，要求產生選用的來源 Workbook 版面 artifact：`workbooks/native-cases.source-workbook.xlsx`。RUN 開始前，Engine 會 pin 及驗證 workbook bytes、formula inventory 和所選實體來源列身份。結果只寫入獨立檔案中的所選列，保留來源公式，且不修改 Package 內原始 Workbook。
+
+選用 artifact 限於單一 Excel Definition 和 worksheet、非空且不超過 1,000 個 Case 的 selection，以及不超過 16 MiB 的輸出。發佈前，ATT 會在每個 worksheet 遮蔽敏感來源欄，包括 header 或 mapping alias 被分類為敏感的欄，並在其他位置遮蔽已登記的 secret value。如果遮蔽可能留下敏感的 cached formula result，或無法安全驗證／發佈來源版面檔案，ATT 會省略此選用 artifact 並記錄 fallback diagnostic；標準結果 Workbook 和 Case 結果仍可用。如果 Workbook 在解析後改變，或已不符合 pinning 的資料列，ATT 會在執行前拒絕，不會改用過時來源資料而靜默 fallback。
+
+來源版面報告包含已遮蔽敏感值的 Workbook 其他工作表和資料列。Server 只有在 Job 建立時的原始 principal 目前仍有該 Package 的 editor 權限時才會將可選報告放入 archive；讀取 artifact 清單、每個 entry 和整個 archive 時，也會重新檢查目前的 Package editor 權限。沒有該權限的使用者仍可按一般 artifact 權限讀取不依賴來源的標準結果 Workbook 和其他 Job artifacts。
 
 完整契約和驗證界線見[active Schema](../../schemas/att-testcase-v1.schema.json)、[Singleton inline 範例](../adr/examples/att-testcase-v1/inline-single.yaml)、[多筆 inline 範例](../adr/examples/att-testcase-v1/inline-multi.yaml)、[Excel 範例](../adr/examples/att-testcase-v1/excel.yaml)、[省略 `dataColumns` 的 Excel 範例](../adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml)及[ADR-0001](../adr/0001-flow-centric-testcase-resolution.zh.md)。
 
-Default Package 已附上離線 Native Quick Start Definitions（`packages/default/testcase/quick-start/**/testcase.yaml`），綁定 Flow `quick.start.v1`。請見[快速入門](../quick-start.zh.md)與 [S12 遷移矩陣](../maintenance/native-case-default-package-migration-s12.md)。不依賴來源 Workbook 的 native XLSX 報告仍屬 S07 後續工作。
+Default Package 已附上離線 Native Quick Start Definitions（`packages/default/testcase/quick-start/**/testcase.yaml`），綁定 Flow `quick.start.v1`。請參閱[Default Package Native 快速入門指南](../quick-start.zh.md)與 [S12 遷移矩陣](../maintenance/native-case-default-package-migration-s12.md)。S07 亦提供上述可選的來源 Workbook 版面報告。
 
 ### 在 Studio 編寫
 
@@ -52,7 +60,7 @@ Excel-backed Definition 使用與 native resolution 相同的唯讀 S04 adapter�
 
 ### 執行 implicit Native Case Suite
 
-4.6.0 開發候選版可在已解析的 Case 上建立 Suite selection，毋須作者建立 `suite.yaml`。先指定一個或多個 Definition ID，再選取全部 Case、指定完整 Qualified Case ID，或按一個或多個 tags 選取。被排除的 tags 優先於包含的 tags。
+4.6.0 發佈目標可在已解析的 Case 上建立 Suite selection，毋須作者建立 `suite.yaml`。先指定一個或多個 Definition ID，再選取全部 Case、指定完整 Qualified Case ID，或按一個或多個 tags 選取。被排除的 tags 優先於包含的 tags。
 
 以下本地命令會從兩個 Definition 選取所有 `smoke` Case，但排除帶有 `destructive` tags 的 Case：
 

@@ -1,8 +1,8 @@
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
 # Documentation architecture and truth matrix
 
-This page records documentation owners, feature/interface availability and migration decisions for the ATT 4.4.1 release candidate. Product claims are checked against this branch source, schemas, tests and merged behavior. Open or unverified acceptance issues remain Pending.
+This page records documentation owners, feature/interface availability and migration decisions against the ATT 4.6.0 release target. No formal 4.6.0 release or tag has been published; 4.3.1 identifies the prior CLI code line and is not a verified GitHub Release. Product claims distinguish implementation in the open target stack from deployed acceptance. Open or unverified acceptance remains Pending.
 
 ## Inventory and link impact
 
@@ -17,19 +17,20 @@ The documentation release gate checks local links and anchors from current entry
 
 ## Feature, interface and availability matrix
 
-| Capability | ATT 4.4.1 candidate Local CLI | ATT Remote compatibility CLI | Studio and REST | Engine or Server | Status |
+| Capability | ATT 4.6.0 target Local CLI | ATT Remote compatibility CLI | Studio and REST | Engine or Server | Status |
 |---|---|---|---|---|---|
-| Functional Case execution | Current run command selects workbook Cases | Current remote run submits Server work | Current unified RUN supports Case and selected Case batches | Engine executes Case work; Server validates drafts and owns Jobs | Current |
+| Legacy Workbook Case execution | `./att.sh run` selects workbook Cases | `att remote run` submits legacy Server work | Existing Case and batch routes remain available | Engine executes the legacy Case adapter | Compatibility behavior retained |
+| Native Case and implicit Suite RUN | Target CLI exposes `run native-case` and `run native-suite` | `att remote` remains legacy; the target CLI's `--server` path requires validated Native drafts | Native authoring, preview and RUN draft flows are present in the target stack | Engine resolves/runs selected Cases; Server validates `att-execution/v2` drafts and owns Jobs | Implemented in target stack; deployed acceptance pending |
 | Template, Flow and Tool execution | Current standalone debug command | Current remote debug command | Current unified RUN targets these resources; Debug is optional diagnostic mode | Shared execution and Action contracts | Current; local CLI verb is legacy |
 | LOAD | Current load scenarios, Quick Load and Load Template CLI | Current remote load | Current six-mode Template catalog and validated builder | Current scheduler, workload mix and arrival-rate execution | Current |
 | VALIDATE | Current package and selected dependency validation | Current remote validation | Current Studio and REST validation flows | Read-only validation; no business execution | Current |
 | Shared Configuration and Package Manifest | Current config and Package validation | Server-owned configuration for remote work | Current inspectors and Package authoring flows | Global Runtime Configuration; optional Package Manifest and Package Testdata | Current |
 | Jobs and Schedules | Local Run IDs and output only | Current Job listing, watch, result, cancel and artifact commands | Current Job, Schedule and history views | Server persists Jobs and Schedule definitions | Server capability; no Local Job store |
-| CLI vNext common run, load and validate grammar | Planned for a later release | Proposed Local/Server selection syntax | No Studio or REST capability is removed by this proposal | The parser contract remains in a separate Planned proposal | Planned; promote only after release verification |
+| Broader CLI vNext grammar and migration | Target parser covers Native Case/Suite; broader shared grammar remains proposed | Legacy ATT Remote remains supported | Existing Studio and REST capabilities remain | Native remote RUN uses validated drafts; raw legacy Case submission is not used | Native target implemented; broader proposal remains Planned |
 | #294 CLI management resources | Not available | Not included in the proposed grammar | Server and Studio resources remain separately available | Future P3 proposal | Planned future work |
 | Workbook Snapshot generation | Current explicit snapshot authoring command | Not applicable | Studio authoring tools are separate | Snapshot generation is not a VALIDATE side effect | Current |
 
-The product feature, interface and release status are separate facts. A Server or Studio capability does not imply a Local CLI command. The proposed vNext command set is only run, load and validate; this does not remove current compatibility verbs or Server resources.
+The product feature, interface and release status are separate facts. A Server or Studio capability does not imply a command on the legacy CLI. The target CLI provides explicit Native Case/Suite commands while the broader grammar remains proposed. The 4.6.0 target stack is unpublished; implementation does not close deployed acceptance.
 
 ## Semantic ownership matrix
 
@@ -59,7 +60,7 @@ The product feature, interface and release status are separate facts. A Server o
 |---|---|---|
 | Root README | Rewrite around the Package-oriented platform and a runnable current workflow | [README](../../README.md) |
 | docs/README.md | Replace single workflow navigation with audiences, tasks and availability | [Documentation map](../README.md) |
-| docs/reference/cli.md and Chinese pair | Keep shipped legacy verbs Current; remove proposed grammar from the current Reference | [CLI Reference](../reference/cli.md) |
+| docs/reference/cli.md and Chinese pair | Keep legacy verbs and target-stack Native Case/Suite commands Current; label unpublished target behavior | [CLI Reference](../reference/cli.md) |
 | vNext portion of CLI Reference and proposed examples | Move and label Planned until a release is verified | [Proposed CLI vNext](../interfaces/cli/vnext-proposed.md) |
 | docs/remote-client.md and Chinese pair | Keep as the legacy ATT Remote profile, Job and artifact guide | [ATT Remote guide](../remote-client.md) |
 | docs/server-deployment.md and Chinese pair | Keep old paths and heading anchors as compatibility stubs | [Deployment](../operations/server-deployment.md), [configuration](../operations/server-configuration.md), [security](../operations/security.md), and [API v1](../interfaces/server-api/README.md) |
@@ -74,18 +75,18 @@ The product feature, interface and release status are separate facts. A Server o
 
 ## Current and Planned CLI migration
 
-ATT 4.4.1 keeps explicit workbook Snapshot authoring, package validation and legacy Case execution. The current Quick Start remains runnable with that interface. VALIDATE reads and checks authored files; it never generates or refreshes a Snapshot.
+The previous Local CLI baseline retains explicit workbook Snapshot authoring, Package validation and legacy Case execution. The 4.6.0 target Quick Start uses explicit `run native-case` commands documented in the [current CLI Reference](../reference/cli.md). VALIDATE reads and checks authored files; it never generates or refreshes a Snapshot. The target remains unpublished.
 
-| Legacy compatibility syntax | Proposed vNext syntax | Status |
+| Interface path | Current target or proposed syntax | Status |
 |---|---|---|
-| run with a workbook suite and Case selection | run suite or case with explicit Local selection | Planned |
-| standalone debug for a Template, Flow or Tool | run the corresponding typed target with optional Debug diagnostics | Planned |
-| load an authored scenario or Quick Load target | load a scenario or typed target with shared Local/Server routing | Planned |
-| remote run, load or validate through att remote | select a Server profile before run, load or validate | Planned |
-| snapshot, docs, report, build, clean and remote Job management | No equivalent command is defined by the three-command proposal | Keep current compatibility behavior; future changes require a separate release decision |
-| remote jobs, watch, artifacts, cancel and detach | Not included in the minimal run/load/validate grammar | Keep in the current legacy Remote guide; #294 management resources remain future work |
+| `./att.sh run --suite ...` and legacy Case selection | Workbook/Sidecar Case adapter | Retained compatibility behavior |
+| `run native-case` and `run native-suite` | Explicit Native Case and implicit Suite selectors | Implemented in the 4.6.0 target stack; release and deployed acceptance pending |
+| standalone Debug, direct LOAD, Snapshot, docs, report, build and clean | Existing command paths | Retained compatibility behavior |
+| `att remote` Jobs, events, artifacts and management | Existing Remote profile and REST/SSE client | Retained compatibility behavior |
+| Broader shared Local/Server run, load and validate grammar | See the separate [Proposed CLI vNext](../interfaces/cli/vnext-proposed.md) | Planned beyond the Native target commands |
+| #294 CLI management resources | Not part of the minimal proposal | Future work |
 
-This map describes an intended migration path, not exact behavioral parity. Update current entry points only when #287 is released and its parser, help, Local/Server behavior, diagnostics, output and compatibility tests pass.
+This map describes current target-stack coverage, not complete migration or semantic parity. The 4.6.0 release/tag does not exist yet; deployed acceptance for Native RUN, reports, shared editors and Default Package adoption remains separately tracked. Broader migration requires its own implementation and release verification.
 
 ## Documentation-as-code contract
 

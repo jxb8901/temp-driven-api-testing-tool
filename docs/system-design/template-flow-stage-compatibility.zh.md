@@ -2,8 +2,9 @@
 
 - **狀態：** 相容性分析及聚焦 golden fixture；尚未成為已接受的替代契約。
 - **範圍：** 現有 Workbook／Sidecar Stage 執行與透過單一 Flow 執行 Native Case 的比較。
-- **版本線：** 下一個 ATT development candidate；驗收仍待完成。
+- **版本線：** ATT 4.6.0 發佈目標；release 和 tag 尚未發佈。
 - **Runtime 變更：** 本階段沒有。Golden fixture 使用現有公開 API，記錄已觀察到的差異。
+- **驗收狀態：** S10 仍是相容性分析基線，並非已接受的替代契約。Native RUN（[#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)）、報告整合（[#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)）及 Default Package 採納（[#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)）的部署驗收仍待完成；共享編輯器部署證據由獨立的 [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387) 跟進。
 - **相關文件：** [Issue #398](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/398)、[ADR-0001](../adr/0001-flow-centric-testcase-resolution.md)、[English](template-flow-stage-compatibility.md)。
 
 ## 驗收摘要
@@ -11,6 +12,8 @@
 目前證據支持分階段處理相容性，不支持一次過替換整個 Engine。聚焦 fixture 證明兩條執行路徑都能保留 Verify 的失敗結果，同時執行 rollback action 及最後的 cleanup action。fixture 亦記錄必須清楚保留的差異：legacy Stage input overlay 只在該 Stage 期間有效，並在每個 Stage 邊界還原；Native Case Flow inputs 作用於整個 Case；結果樹及事件粒度亦不相同。
 
 Fixture 以 log action 作 rollback 和 cleanup 標記。它沒有證明資料庫交易已回滾、外部服務已補償，或所有 helper teardown 行為都相同。這些情況需要另外建立副作用測試。
+
+代表性 Helper rollback 和 teardown 效果由後續 [#421](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/421) 驗證。最終 ADR approval 和 architecture closure 會在 4.6.0 target 之後由 [#422](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/422) 跟進；這項後續工作不是 target release blocker。
 
 ## 現有執行路徑
 
@@ -37,7 +40,7 @@ Stage 路徑仍是受支援的執行契約。S10 不會移除 Workbook、Sidecar
 | Identity 及 reference checks | Case identity 來自 Workbook／Sidecar selectors；Template 和所引用的 Flow IDs 由 legacy execution plan 解析。 | Native resolver 解析並保存 Definition、Qualified Case、source revision 及入口 Flow。 | **Identity 契約不同。** 保留 legacy IDs／replay；version、cycle、depth 和 reference-failure 案例須分別比較。 |
 | Resource finalization | Case finalization 負責清理 legacy execution 開啟的資源。 | Native RUN 有自己的 Case finalization 路徑，處理所選 Flow execution。 | **尚未證明等價。** 本 log-marker fixture 沒有執行 DB transaction 或外部 resource teardown。 |
 | Retry、timeout、巢狀 Flow 錯誤 | 現有 Template Actions 及巢狀 Flow calls 使用共用 runner；Stage progression 在 runner 之外處理。 | Native Flow 亦使用共用 action／Flow runner，並保留 Native source identity 和 provenance。 | **共用部分機制，配對證據未完整。** 保留現有測試，為每個遷移邊界加入 golden case。 |
-| LOAD、Testdata/generators、Debug | 現有 Stage／Template 及直接 LOAD／Debug 行為仍是目前契約。 | Native Test Case 作為 LOAD target、Testdata／generator bindings 及 Debug interoperability 是獨立後續工作。 | **延後處理。** S08 LOAD、S09 Testdata/generators、S11 Debug 不屬本階段；#388 維持開啟。 |
+| LOAD、Testdata/generators、Debug | 現有 Stage／Template 及直接 LOAD／Debug 行為仍是目前契約。 | Native Case LOAD target、進階 Testdata／generator 和 Debug interoperability 是獨立後續工作。 | **不納入 4.6.0。** S08 ([#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418))、S09 ([#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)) 及 S11 ([#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)) 延後處理；#388 維持開啟。 |
 
 ## Golden fixture
 

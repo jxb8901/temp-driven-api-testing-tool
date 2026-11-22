@@ -1,8 +1,8 @@
 # Run mode
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-The ATT 4.4.1 Local CLI run command remains a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](unified-run.md).
+The legacy `./att.sh run` command remains a Case adapter: it executes selected authored Testcases from a workbook. The 4.6.0 release-target CLI also adds explicit Native Case and Native Suite commands, documented in [Unified RUN](unified-run.md) and the [CLI Reference](../cli.md). The target release and tag are unpublished; deployed acceptance remains pending.
 
 ```sh
 ./att.sh run --all

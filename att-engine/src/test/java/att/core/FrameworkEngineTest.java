@@ -563,6 +563,273 @@ class FrameworkEngineTest {
         assertFalse(Files.exists(projectRoot.resolve("output/NATIVE-EXCEL-LEDGER-STALE")));
     }
 
+    @Test void nativeExcelSourceWorkbookReportMapsPinnedRowsPreservesFormulasAndLeavesSourceUntouched() throws Exception {
+        Path workbook = writeNativeReportWorkbook("testdata/native-report.xlsx");
+        byte[] original = Files.readAllBytes(workbook);
+        Path definitionPath = writeNativeReportDefinition("testcase/fpp/report/testcase.yaml",
+                "native.report", "testdata/native-report.xlsx", true, false);
+        writeNativeReportFlow();
+        writeRuntimeSchemas();
+
+        att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(
+                att.validation.SchemaFiles.resolve(projectRoot, "att-testcase-v1.schema.json"));
+        att.testcase.TestCaseResolutionResult resolution = resolver.resolve(definitionPath, "payments", projectRoot,
+                Paths.get("templates"), new att.testcase.TestCaseDefinitionResolver.Options(10, 10,
+                        Collections.singleton("native.report.selected"), null));
+        RunSummary summary = new FrameworkEngine(projectRoot, globalConfig()).runNativeCases(resolution,
+                "NATIVE-SOURCE-REPORT", null, false, false, null);
+
+        assertEquals(1, summary.passed());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(original, Files.readAllBytes(workbook),
+                "The accepted source workbook must not be changed by report generation");
+        Path report = projectRoot.resolve("output/NATIVE-SOURCE-REPORT/workbooks/native-cases.source-workbook.xlsx");
+        assertTrue(Files.isRegularFile(report));
+        try (java.io.InputStream input = Files.newInputStream(report); XSSFWorkbook result = new XSSFWorkbook(input)) {
+            Sheet sheet = result.getSheet("Cases");
+            assertEquals("A4&\"-calc\"", sheet.getRow(3).getCell(2).getCellFormula(),
+                    "The source formula inventory must survive the result write");
+            assertEquals("Test Result", sheet.getRow(0).getCell(3).getStringCellValue());
+            assertEquals("PASS", sheet.getRow(3).getCell(3).getStringCellValue(),
+                    "The result belongs on the physical row pinned during Excel resolution");
+            assertNull(sheet.getRow(1).getCell(3), "Unselected rows must not receive the selected Case result");
+        }
+        @SuppressWarnings("unchecked")
+        Map<String,Object> manifest = (Map<String,Object>) new org.yaml.snakeyaml.Yaml().load(
+                new String(Files.readAllBytes(projectRoot.resolve("output/NATIVE-SOURCE-REPORT/run.yaml")), "UTF-8"));
+        @SuppressWarnings("unchecked")
+        Map<String,Object> run = (Map<String,Object>) manifest.get("run");
+        @SuppressWarnings("unchecked")
+        Map<String,Object> sourceReport = (Map<String,Object>) run.get("sourceWorkbookReport");
+        @SuppressWarnings("unchecked")
+        Map<String,Object> outputs = (Map<String,Object>) manifest.get("outputs");
+        assertEquals("written", sourceReport.get("status"));
+        assertEquals("workbooks/native-cases.source-workbook.xlsx", outputs.get("sourceWorkbookXlsx"));
+        byte[] reportBeforeRegeneration = Files.readAllBytes(report);
+        new att.report.ReportRegenerator().regenerate(projectRoot.resolve("output"), "NATIVE-SOURCE-REPORT");
+        org.junit.jupiter.api.Assertions.assertArrayEquals(reportBeforeRegeneration, Files.readAllBytes(report),
+                "Report regeneration must preserve the already generated source-workbook artifact");
+    }
+
+    @Test void nativeExcelSourceWorkbookReportRedactsSensitiveColumnsAndRegisteredValues() throws Exception {
+        Path workbook = projectRoot.resolve("testdata/native-report-secrets.xlsx");
+        Files.createDirectories(workbook.getParent());
+        try (Workbook source = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(workbook)) {
+            Sheet sheet = source.createSheet("Cases");
+            Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Case ID");
+            header.createCell(1).setCellValue("Token Value");
+            header.createCell(2).setCellValue("Notes");
+            header.createCell(3).setCellValue("Password");
+            Row selected = sheet.createRow(1);
+            selected.createCell(0).setCellValue("secret-case");
+            selected.createCell(1).setCellValue("registered-secret-123");
+            selected.createCell(2).setCellValue("reuse registered-secret-123 here");
+            selected.createCell(3).setCellValue("password-column-value");
+
+            Sheet privateData = source.createSheet("Private Data");
+            privateData.createRow(0).createCell(0).setCellValue("Exported account credentials");
+            Row privateHeader = privateData.createRow(1);
+            privateHeader.createCell(0).setCellValue("Account");
+            privateHeader.createCell(1).setCellValue("Password");
+            privateHeader.createCell(2).setCellValue("Token Value");
+            Row privateRow = privateData.createRow(2);
+            privateRow.createCell(0).setCellValue("user-1");
+            privateRow.createCell(1).setCellValue("other-sheet-password");
+            privateRow.createCell(2).setCellValue("other-sheet-token");
+            privateRow.createCell(3).setCellValue("password");
+            source.write(output);
+        }
+        Path definitionPath = projectRoot.resolve("testcase/fpp/report-secrets/testcase.yaml");
+        writeText(definitionPath,
+                "schemaVersion: att-testcase/v1\nid: native.report.secrets\nflow: payment.transfer.v1\n"
+                        + "dataSource:\n  type: excel\n  path: testdata/native-report-secrets.xlsx\n"
+                        + "  sheet: Cases\n  caseId: Case ID\n  dataColumns: tokenValue=Token Value,notes=Notes\n"
+                        + "inputs:\n  tokenValue: {from: DATA.tokenValue}\n  notes: {from: DATA.notes}\n"
+                        + "report: {format: xlsx, template: sourceWorkbook}\n");
+        writeText(projectRoot.resolve("templates/flows/payment/transfer/v1/flow.yaml"),
+                "schemaVersion: att-flow/v3.6\nid: payment.transfer.v1\nname: Transfer\n"
+                        + "description: Secret report fixture\nactions:\n"
+                        + "  log: {type: log, message: 'token=${EXEC.INPUT.tokenValue}|notes=${EXEC.INPUT.notes}'}\n");
+        writeRuntimeSchemas();
+        att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(
+                att.validation.SchemaFiles.resolve(projectRoot, "att-testcase-v1.schema.json"));
+        att.testcase.TestCaseResolutionResult resolution = resolver.resolve(definitionPath, "payments", projectRoot,
+                Paths.get("templates"), att.testcase.TestCaseDefinitionResolver.Options.defaults());
+        RunSummary summary = new FrameworkEngine(projectRoot, globalConfig()).runNativeCases(resolution,
+                "NATIVE-SOURCE-REPORT-SECRETS", null, false, false, null);
+
+        assertEquals(1, summary.passed());
+        Path report = projectRoot.resolve("output/NATIVE-SOURCE-REPORT-SECRETS/workbooks/native-cases.source-workbook.xlsx");
+        try (java.io.InputStream input = Files.newInputStream(report); XSSFWorkbook result = new XSSFWorkbook(input)) {
+            Row row = result.getSheet("Cases").getRow(1);
+            assertEquals(att.security.SecretProtection.REDACTED, row.getCell(1).getStringCellValue());
+            assertEquals("reuse " + att.security.SecretProtection.REDACTED + " here", row.getCell(2).getStringCellValue());
+            assertEquals(att.security.SecretProtection.REDACTED, row.getCell(3).getStringCellValue());
+            Row privateData = result.getSheet("Private Data").getRow(2);
+            assertEquals(att.security.SecretProtection.REDACTED, privateData.getCell(1).getStringCellValue(),
+                    "Sensitive values on a non-configured worksheet must be redacted");
+            assertEquals(att.security.SecretProtection.REDACTED, privateData.getCell(2).getStringCellValue(),
+                    "Explicitly sensitive Data Column aliases must be redacted on every worksheet");
+            assertEquals(att.security.SecretProtection.REDACTED, privateData.getCell(3).getStringCellValue(),
+                    "A value that resembles a sensitive header must not be exempted as an unverified header");
+        }
+        String log = new String(Files.readAllBytes(summary.results().get(0).caseLogPath()),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertFalse(log.contains("registered-secret-123"), log);
+        assertFalse(log.contains("password-column-value"), log);
+    }
+
+    @Test void nativeExcelSourceWorkbookReportFallsBackWhenFormulaCacheCouldRetainRedactedSecret() throws Exception {
+        Path workbook = projectRoot.resolve("testdata/native-report-formula-secret.xlsx");
+        Files.createDirectories(workbook.getParent());
+        try (Workbook source = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(workbook)) {
+            Sheet sheet = source.createSheet("Cases");
+            Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Case ID");
+            header.createCell(1).setCellValue("Amount");
+            header.createCell(2).setCellValue("Password");
+            header.createCell(3).setCellValue("Derived");
+            Row selected = sheet.createRow(1);
+            selected.createCell(0).setCellValue("secret-case");
+            selected.createCell(1).setCellValue("30");
+            selected.createCell(2).setCellValue("cached-password-secret");
+            selected.createCell(3).setCellFormula("C2");
+            source.getCreationHelper().createFormulaEvaluator().evaluateAll();
+            source.write(output);
+        }
+        Path definitionPath = writeNativeReportDefinition("testcase/fpp/formula-secret/testcase.yaml",
+                "native.report.formula.secret", "testdata/native-report-formula-secret.xlsx", true, false);
+        writeNativeReportFlow();
+        writeRuntimeSchemas();
+
+        att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(
+                att.validation.SchemaFiles.resolve(projectRoot, "att-testcase-v1.schema.json"));
+        att.testcase.TestCaseResolutionResult resolution = resolver.resolve(definitionPath, "payments", projectRoot,
+                Paths.get("templates"), att.testcase.TestCaseDefinitionResolver.Options.defaults());
+        RunSummary summary = new FrameworkEngine(projectRoot, globalConfig()).runNativeCases(resolution,
+                "NATIVE-SOURCE-REPORT-FORMULA-SECRET", null, false, false, null);
+
+        Path runDirectory = projectRoot.resolve("output/NATIVE-SOURCE-REPORT-FORMULA-SECRET");
+        assertEquals(1, summary.passed());
+        assertTrue(Files.isRegularFile(runDirectory.resolve("workbooks/native-cases.result.xlsx")),
+                "The standard Native report remains available when the optional layout cannot be safely redacted");
+        assertFalse(Files.exists(runDirectory.resolve("workbooks/native-cases.source-workbook.xlsx")),
+                "The optional workbook must not publish a formula cache that can retain a redacted secret");
+        @SuppressWarnings("unchecked")
+        Map<String,Object> manifest = (Map<String,Object>) new org.yaml.snakeyaml.Yaml().load(
+                new String(Files.readAllBytes(runDirectory.resolve("run.yaml")), "UTF-8"));
+        @SuppressWarnings("unchecked")
+        Map<String,Object> run = (Map<String,Object>) manifest.get("run");
+        @SuppressWarnings("unchecked")
+        Map<String,Object> sourceReport = (Map<String,Object>) run.get("sourceWorkbookReport");
+        assertEquals("fallback", sourceReport.get("status"));
+    }
+
+    @Test void nativeExcelSourceWorkbookReportRejectsStaleSnapshotBeforeStartingRun() throws Exception {
+        Path workbook = writeNativeReportWorkbook("testdata/native-report-stale.xlsx");
+        Path definitionPath = writeNativeReportDefinition("testcase/fpp/stale/testcase.yaml",
+                "native.report.stale", "testdata/native-report-stale.xlsx", true, false);
+        writeNativeReportFlow();
+        writeRuntimeSchemas();
+        att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(
+                att.validation.SchemaFiles.resolve(projectRoot, "att-testcase-v1.schema.json"));
+        att.testcase.TestCaseResolutionResult resolution = resolver.resolve(definitionPath, "payments", projectRoot,
+                Paths.get("templates"), att.testcase.TestCaseDefinitionResolver.Options.defaults());
+        try (java.io.InputStream input = Files.newInputStream(workbook); XSSFWorkbook source = new XSSFWorkbook(input)) {
+            source.getSheet("Cases").getRow(3).getCell(1).setCellValue("changed-after-resolution");
+            try (OutputStream output = Files.newOutputStream(workbook)) { source.write(output); }
+        }
+
+        IllegalArgumentException stale = assertThrows(IllegalArgumentException.class,
+                () -> new FrameworkEngine(projectRoot, globalConfig()).runNativeCases(resolution,
+                        "NATIVE-SOURCE-REPORT-STALE", null, false, false, null));
+        assertTrue(stale.getMessage().contains("changed after resolution"), stale.getMessage());
+        assertFalse(Files.exists(projectRoot.resolve("output/NATIVE-SOURCE-REPORT-STALE")),
+                "A stale accepted workbook must be rejected before Engine creates or executes a run");
+    }
+
+    @Test void nativeExcelSourceWorkbookReportFallsBackForMultiDefinitionSuite() throws Exception {
+        Path workbook = writeNativeReportWorkbook("testdata/native-report-suite.xlsx");
+        writeNativeReportDefinition("testcase/fpp/source/testcase.yaml", "native.report.source",
+                "testdata/native-report-suite.xlsx", true, false);
+        writeNativeReportDefinition("testcase/fpp/inline/testcase.yaml", "native.report.inline", "", false, true);
+        writeNativeReportFlow();
+        writeRuntimeSchemas();
+
+        att.testcase.TestCaseSuiteResolver resolver = new att.testcase.TestCaseSuiteResolver(
+                att.validation.SchemaFiles.resolve(projectRoot, "att-testcase-v1.schema.json"));
+        att.testcase.TestCaseSuiteResolutionResult resolution = resolver.resolve(projectRoot, "payments",
+                projectRoot.resolve("templates"), Paths.get("testcase"),
+                java.util.Arrays.asList("native.report.source", "native.report.inline"), null,
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, null);
+        RunSummary summary = new FrameworkEngine(projectRoot, globalConfig()).runNativeCaseSuite(resolution,
+                "NATIVE-SOURCE-REPORT-MULTI", null, false, false, null);
+
+        assertEquals(4, summary.passed());
+        Path runDirectory = projectRoot.resolve("output/NATIVE-SOURCE-REPORT-MULTI");
+        assertTrue(Files.isRegularFile(runDirectory.resolve("workbooks/native-cases.result.xlsx")));
+        assertFalse(Files.exists(runDirectory.resolve("workbooks/native-cases.source-workbook.xlsx")));
+        assertTrue(Files.isRegularFile(workbook));
+        @SuppressWarnings("unchecked")
+        Map<String,Object> manifest = (Map<String,Object>) new org.yaml.snakeyaml.Yaml().load(
+                new String(Files.readAllBytes(runDirectory.resolve("run.yaml")), "UTF-8"));
+        @SuppressWarnings("unchecked")
+        Map<String,Object> run = (Map<String,Object>) manifest.get("run");
+        @SuppressWarnings("unchecked")
+        Map<String,Object> sourceReport = (Map<String,Object>) run.get("sourceWorkbookReport");
+        assertEquals("fallback", sourceReport.get("status"));
+        assertEquals("MULTIPLE_DEFINITIONS", sourceReport.get("diagnosticCode"));
+    }
+
+    private Path writeNativeReportWorkbook(String relativePath) throws Exception {
+        Path workbook = projectRoot.resolve(relativePath);
+        Files.createDirectories(workbook.getParent());
+        try (Workbook book = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(workbook)) {
+            Sheet sheet = book.createSheet("Cases");
+            Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Case ID");
+            header.createCell(1).setCellValue("Amount");
+            header.createCell(2).setCellValue("Calculated");
+            Row unselected = sheet.createRow(1);
+            unselected.createCell(0).setCellValue("unselected");
+            unselected.createCell(1).setCellValue("10");
+            unselected.createCell(2).setCellFormula("A2&\"-calc\"");
+            Row secondUnselected = sheet.createRow(2);
+            secondUnselected.createCell(0).setCellValue("another");
+            secondUnselected.createCell(1).setCellValue("20");
+            Row selected = sheet.createRow(3);
+            selected.createCell(0).setCellValue("selected");
+            selected.createCell(1).setCellValue("30");
+            selected.createCell(2).setCellFormula("A4&\"-calc\"");
+            book.write(output);
+        }
+        return workbook;
+    }
+
+    private Path writeNativeReportDefinition(String relativePath, String definitionId, String workbookPath,
+            boolean sourceReport, boolean inline) throws Exception {
+        Path path = projectRoot.resolve(relativePath);
+        StringBuilder yaml = new StringBuilder("schemaVersion: att-testcase/v1\nid: ").append(definitionId)
+                .append("\nflow: payment.transfer.v1\n");
+        if (inline) {
+            yaml.append("inputs: {amount: 30}\n");
+        } else {
+            yaml.append("dataSource:\n  type: excel\n  path: ").append(workbookPath)
+                    .append("\n  sheet: Cases\n  headerRows: 1\n  caseId: Case ID\n  dataColumns: amount=Amount\n")
+                    .append("inputs:\n  amount: {from: DATA.amount}\n");
+        }
+        if (sourceReport) yaml.append("report: {format: xlsx, template: sourceWorkbook}\n");
+        writeText(path, yaml.toString());
+        return path;
+    }
+
+    private void writeNativeReportFlow() throws Exception {
+        writeText(projectRoot.resolve("templates/flows/payment/transfer/v1/flow.yaml"),
+                "schemaVersion: att-flow/v3.6\nid: payment.transfer.v1\nname: Transfer\n"
+                        + "description: Source workbook report fixture\nactions:\n"
+                        + "  log: {type: log, message: 'amount=${EXEC.INPUT.amount}'}\n");
+    }
+
     @Test void preservesExecutionErrorInsteadOfDowngradingItToFail() throws Exception {
         FrameworkEngine engine = new FrameworkEngine(projectRoot, globalConfig());
         java.lang.reflect.Method method = FrameworkEngine.class.getDeclaredMethod("aggregate", java.util.List.class);

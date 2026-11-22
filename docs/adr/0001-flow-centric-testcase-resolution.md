@@ -3,7 +3,7 @@
 - **Status:** Proposed
 - **Date:** 2026-11-20
 - **Scope:** Proposed next-generation ATT authoring, after the existing Source Management workflow
-- **Native Case schema:** att-testcase/v1 is active; S03 inline resolution and RUN are implemented on the 4.5.0 development-candidate line, with deployed acceptance still pending
+- **Native Case status:** The 4.6.0 release target contains the S03 inline resolution and RUN implementation; the release and tag have not been published, and deployed acceptance remains open under [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393).
 - **Related:** [Issue #388](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/388), [#233](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/233), [PR #386](https://github.com/jxb8901/temp-driven-api-testing-tool/pull/386)
 - **Translation:** [繁體中文版](0001-flow-centric-testcase-resolution.zh.md)
 - **S10 compatibility evidence:** [Template–Flow–Stage matrix and golden fixture](../system-design/template-flow-stage-compatibility.md)
@@ -16,7 +16,7 @@ ATT's established authoring path is **XLSX + att-sidecar/v2.2 + generated XML sn
 
 Existing Flow definitions already contain ordered Actions and nested Flow calls; Debug can execute a Flow with temporary input, and LOAD already repeats Flow/Template/Tool targets. Introducing an independent Steps model would duplicate the same execution language.
 
-This ADR records the architecture direction and staged implementation boundary. S03 registers att-testcase/v1 and implements inline Definition discovery, resolution, and RUN through existing Flow infrastructure in the 4.5.0 development candidate; deployed acceptance remains pending. S10/#398 adds a paired compatibility fixture and records the known Stage input, event, and evidence differences in the [compatibility matrix](../system-design/template-flow-stage-compatibility.md). Excel resolution, Testdata/generators, LOAD targets, Studio editing, and Debug interoperability remain follow-up work.
+This ADR remains **Proposed** and records the architecture direction and staged implementation boundary. The unpublished 4.6.0 release-target stack contains implementation work for S03–S07 and S12, including Native Case RUN, Excel sources, Studio editing, implicit Suites, reports, and Default Package examples. The code is in open stacked PRs; deployed acceptance remains open for Native RUN ([#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)), report integration ([#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)), and S12 adoption ([#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)). Shared-editor deployment evidence is tracked separately in [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387). S10/#398 is limited to compatibility analysis and a golden fixture; it makes no FrameworkEngine runtime-semantic changes. Native LOAD targets ([#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)), advanced Testdata and generators ([#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)), Debug interoperability ([#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)), and Helper rollback/teardown proof ([#421](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/421)) are follow-ups outside the target. ADR approval and architecture closure are tracked after the 4.6.0 target in [#422](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/422) and are not a release blocker.
 
 ## Decision
 
@@ -123,7 +123,7 @@ The S04 Excel adapter preserves the existing displayed-cell and blank-marker con
 
 Excel Case IDs have stricter identity rules than ordinary data columns. Read `dataSource.caseId` from a literal text cell using the existing `DataFormatter(Locale.ROOT)` extraction; formula, numeric, date, boolean and error cells are invalid. A blank cell or a value recognized as blank by the existing `ValueNormalizer` (`N/A`, `NA`, `NULL`, or `NONE`, ignoring surrounding whitespace and ASCII case) is a missing ID and is an error when the row contains other mapped data. For every other value, preserve the exact text and case: do not trim or case-normalize it. Reject leading/trailing whitespace, controls, values outside `[A-Za-z0-9_-]{1,128}`, and Windows reserved device names (case-insensitive). Check duplicate source IDs using ASCII case folding. `caseIdExpression` may derive a different Resolved Case ID, but it does not remove the required source ID. Physical row numbers are diagnostic provenance only, never an ID.
 
-The optional `report` object supports `format: xlsx`; `template: sourceWorkbook` requests a copy of the Excel Data Source as a new output workbook and is invalid for inline data. Report generation is a later workstream. No report writes back to its source workbook.
+The optional `report` object supports `format: xlsx`; `template: sourceWorkbook` requests a copy of the Excel Data Source as a new output workbook and is invalid for inline data. S07 writes that optional workbook report after checking the accepted workbook revision and selected physical rows before RUN. It preserves source formulas, redacts sensitive source values, and never writes back to the Package workbook. The standard Native report remains the complete fallback when the optional source-shaped artifact cannot be produced within its supported scope or limits. Server archive access to the source-shaped workbook requires current Package editor permission.
 
 Key reuse points from `att-sidecar/v2.2`:
 - `headerRows`, physical `caseId` and `tags` selectors, and especially scalar-string `dataColumns` (including `alias=ColumnName`, `ColumnName(yaml)`, quoting rules, and blank/N/A normalization) are intentionally preserved.
@@ -191,9 +191,9 @@ Preserve source ownership, authorization, confidentiality, revision consistency,
 
 Legacy path **must remain operational**: XLSX + att-sidecar/v2.2 + canonical XML snapshot, multi-Stage Case execution, Template entry points, existing CLI/Job/Schedule/report IDs. Stage required/runWhen/onFailure, scope/overlays, rollback/cleanup, nested Flow state, retries, logs and events are **not automatically equivalent** to a plain nested Flow Action. The S10 fixture proves only one explicit failure/rollback/cleanup mapping and exposes the Stage-only input overlay and output-shape differences. Keep legacy execution via adapter until each compatibility boundary is proven.
 
-Reuse 4.4.1 Package Source / Change Sets / Validate / Review / Publish / Revision / History / Restore and immutable Job source closure. Do not create a second authoring/publishing subsystem.
+Reuse the existing Package Source / Change Sets / Validate / Review / Publish / Revision / History / Restore workflow and immutable Job source closure. Do not create a second authoring/publishing subsystem.
 
-**ATT 4.4.1 GA and PR #386 must not be blocked** by delivering native Test Cases, dynamic generators, Flow/Template consolidation or new LOAD targets. This ADR guides post-4.4 implementation and pre-release compatibility review only.
+The original rollout plan kept PR #386 independent from Native Test Cases, dynamic generators, Flow/Template consolidation and new LOAD targets. The current 4.6.0 target includes the scoped S03–S07 and S12 implementation; S08/S09/S11 and Helper rollback verification remain follow-ups. This ADR still requires architecture review and approval under #422 after the target work; that closure does not block the release target.
 
 ## Open architecture questions after S01
 

@@ -69,17 +69,10 @@ public final class ExcelDataSourceAdapter {
             String dataColumnSpec, int maxRecords, BooleanSupplier cancelled) throws Exception {
         if (resources == null) throw new IllegalArgumentException("Package resources are required");
         String workbookReference = authoredPath == null ? "<excel>" : authoredPath;
-        Path workbookPath = resolveWorkbookPath(resources, definitionReference, authoredPath);
-        workbookReference = resources.fromInternalPath(workbookPath, PackageResourceResolver.Kind.FILE).logicalName();
-        byte[] bytes;
-        try { bytes = readBounded(workbookPath, workbookReference); }
-        catch (DiagnosticException failure) { throw failure; }
-        catch (Exception failure) {
-            throw invalid(workbookReference, "dataSource.path", "Unable to read Excel Data Source workbook",
-                    null, null, null, failure);
-        }
-        String workbookRevision = sha256(bytes);
-        preflightWorkbookArchive(bytes, workbookReference);
+        WorkbookSnapshot snapshot = captureWorkbook(resources, definitionReference, authoredPath);
+        workbookReference = snapshot.sourceReference();
+        byte[] bytes = snapshot.bytes();
+        String workbookRevision = snapshot.sha256();
 
         List<DataColumnConfig> dataColumns;
         try {
@@ -206,6 +199,27 @@ public final class ExcelDataSourceAdapter {
             throw invalid(workbookReference, "dataSource", "Unable to read Excel Data Source: " + safeMessage(failure),
                     sheetName, null, null, failure);
         }
+    }
+
+    /**
+     * Captures the bounded, package-contained workbook bytes used by native Excel resolution.
+     * Report generation uses the same snapshot rules and checks this digest against each selected
+     * Case provenance before copying the source workbook into a separate result artifact.
+     */
+    public static WorkbookSnapshot captureWorkbook(PackageResourceResolver resources,
+            String definitionReference, String authoredPath) throws Exception {
+        if (resources == null) throw new IllegalArgumentException("Package resources are required");
+        Path workbookPath = resolveWorkbookPath(resources, definitionReference, authoredPath);
+        String workbookReference = resources.fromInternalPath(workbookPath, PackageResourceResolver.Kind.FILE).logicalName();
+        byte[] bytes;
+        try { bytes = readBounded(workbookPath, workbookReference); }
+        catch (DiagnosticException failure) { throw failure; }
+        catch (Exception failure) {
+            throw invalid(workbookReference, "dataSource.path", "Unable to read Excel Data Source workbook",
+                    null, null, null, failure);
+        }
+        preflightWorkbookArchive(bytes, workbookReference);
+        return new WorkbookSnapshot(workbookReference, bytes, sha256(bytes));
     }
 
     /** Resolves an Excel Data Source workbook using the same containment and symlink rules as the adapter. */
@@ -563,5 +577,22 @@ public final class ExcelDataSourceAdapter {
         public Map<String,Object> data() { return data; }
         public int index() { return index; }
         public CaseSourceProvenance provenance() { return provenance; }
+    }
+
+    /** Immutable bounded workbook snapshot with a defensive byte-array accessor. */
+    public static final class WorkbookSnapshot {
+        private final String sourceReference;
+        private final byte[] bytes;
+        private final String sha256;
+
+        private WorkbookSnapshot(String sourceReference, byte[] bytes, String sha256) {
+            this.sourceReference = sourceReference;
+            this.bytes = bytes.clone();
+            this.sha256 = sha256;
+        }
+
+        public String sourceReference() { return sourceReference; }
+        public byte[] bytes() { return bytes.clone(); }
+        public String sha256() { return sha256; }
     }
 }

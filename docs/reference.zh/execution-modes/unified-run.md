@@ -1,10 +1,10 @@
 # 統一 RUN 與排程
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-ATT 4.4.1 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+功能性單次執行使用共用 **RUN** model，支援 Case、Template、Flow 和 Tool。**Debug** 是部分 RUN target 的診斷模式。**LOAD** 保留效能引擎、負載控制和專用報告。4.6.0 release-target stack 透過 `run native-case` 和 `run native-suite` 加入明確 Native Case 與 implicit Native Suite 選取；release 和 tag 尚未發佈，部署驗收仍待完成。
 
-已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](../../interfaces/cli/vnext-proposed.zh.md)。
+舊版 Local CLI 保留其相容邊界：`./att.sh run` 選取 workbook Case，standalone `debug` 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。Native Server RUN 需要經驗證的 `att-execution/v2` draft，不會透過舊式 raw Case selector 提交。更廣泛的共用 CLI grammar 仍屬[規劃中 proposal](../../interfaces/cli/vnext-proposed.zh.md)。
 
 ## 驗證及執行 RUN
 

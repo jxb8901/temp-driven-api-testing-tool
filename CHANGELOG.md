@@ -1,48 +1,26 @@
-# ATT 4.6.0 - development candidate (acceptance pending)
+# ATT 4.6.0 — formal release (2026-11-22)
 
-- Add the S10/#398 bilingual Template–Flow–Stage compatibility matrix and a paired legacy Stage/Native Flow golden fixture. Pin failed Verify status, rollback/cleanup action selection, Stage input overlay restoration, Flow case-wide inputs, result evidence paths, and current event-grain differences without changing FrameworkEngine runtime semantics.
-- Keep the Stage path supported. The marker fixture does not prove external compensation or database rollback; helper-specific rollback and teardown remain follow-up validation.
-- Keep #388 open. S08 LOAD, S09 Testdata/generators, and S11 Debug interoperability remain deferred; S03 deployed acceptance is pending.
-- This is a development candidate, not a release. Do not bump POM versions, tag, or publish from this analysis slice.
+## Native Test Authoring
 
-# ATT 4.4.1 - release candidate (2026-11-21; acceptance pending)
-### S01 — Proposed Native Test Case contract (4.4.1 train)
+- Activate the `att-testcase/v1` Definition and Flow binding model; resolve inline and Excel-backed Cases with stable IDs, typed inputs, bounded parsing, source provenance, preview and revision checks (#391–#394).
+- Add validated Native Case RUN through local/Remote CLI and Server drafts, including immutable Package source closure, preserved run IDs, per-Case evidence, retry lineage and stale-source rejection (#393).
+- Add the Studio Native Test Case editor and read-only preview, with revision-fenced Change Set publishing, secret redaction and workbook row diagnostics (#395).
+- Add implicit cross-Definition Suites, qualified Case and tag selection, deterministic ordering, bounded selectors, fail-fast/skipped evidence and retry of the latest eligible failed Cases (#396).
+- Add source-independent HTML, CI JSON, JUnit and XLSX reports with protected report regeneration and Run-bound Server publication. Excel-backed Definitions may also request a separate source-workbook-shaped XLSX; the accepted workbook is captured before RUN, rows are matched by pinned provenance, sensitive values are redacted across worksheets, and formula caches that could retain redacted values cause deterministic fallback to the standard report (#397).
+- Add the S10 bilingual Template–Flow–Stage compatibility matrix and paired golden fixture. Keep the Stage runtime path supported; the fixture does not prove external compensation or database rollback (#398).
+- Add Default Package Native Case examples, bilingual Quick Start and a resource migration matrix while retaining legacy Workbook/Sidecar/XML and direct LOAD examples without forced conversion (#413).
 
-- Add trusted shared Package editors for online edits, ZIP imports, Testcase snapshot publication, Manifest publication, and source history; access remains limited to active USER identities, grants remain Package-scoped, and grant or root changes invalidate outstanding drafts (#387).
-- Add a focused Server integration covering shared-editor publish against accepted/queued/running Jobs and pinned Schedules, plus no elevated ADMIN/Central rights from editor grants; document the remaining deployed multi-role operator acceptance matrix (#387).
-- Freeze the proposed `att-testcase/v1` field, typed input, stable ID, singleton/inline multi-record/Excel syntax, input projection precedence and `att-sidecar/v2.2` mapping compatibility; keep the proposal outside the active runtime schema catalog (#391).
-- Add proposed-schema catalog validation, valid/invalid fixtures, focused schema tests, bilingual contract documentation, and repairs for the #389 documentation-gate findings. Runtime discovery, resolution and execution remain follow-up work.
-- Clarify that omitted Excel `dataColumns` selects an empty `DATA` map, harden the portable Excel path grammar, and reject malformed additional proposed-catalog entries (#400).
-- Require absolute end-of-input for proposed identity/path patterns and reject duplicate proposed-catalog top-level fields (#400).
-- Release acceptance is pending. Do not tag or publish until shared-editor publication, revocation, history, exact-head hosted CI, and the deployed multi-role operator matrix pass.
+## Package Source Management
 
-# ATT 4.6.0 - development candidate (acceptance pending)
+- Add trusted Package-scoped editor grants for shared Packages, covering Online Edit, ZIP import, Change Set publication, source history and restore. Grants remain restricted to active USER identities and current Package authorization; they do not grant ADMIN or Central Runtime Config access (#387).
 
-- Add Default Package Native Case Quick Start examples: Flow `quick.start.v1`, offline `att-testcase/v1` Definitions for single inline, inline multi-record, and Excel Data Source Cases, plus a bilingual Quick Start that leads with the Native model and a labeled legacy Workbook appendix (#413).
-- Record the S12 resource migration matrix for `quick_start` / `payment2` / `payment_regression` and related Package assets; retain legacy suites and LOAD examples without forced conversion. Implicit Suite and source-independent native XLSX reports remain deferred to S06/S07 on this S05-based head (#413).
-- Add the Studio Native Test Case editor and bounded, read-only Server preview for candidate YAML and Excel-backed Cases. Enforce Package source authority/revision checks, redact typed inputs, and surface workbook revision plus sheet/row/column diagnostics without creating a Job/RunDraft or modifying source/workbooks (#395).
-- Preserve inline Preview, Case selection, and validated Native Case RUN through the revision-fenced Package Change Set Draft → Validate → Review → Publish lifecycle; RUN is enabled only when the Server advertises `att-execution/v2` (#395).
-- Keep Excel-backed Test Case authoring fields available while gating workbook row resolution and preview on the S04 adapter (#394). This is a development candidate; do not bump POM versions or tag 4.6.0 before the release acceptance gates pass.
-- Add a bounded, read-only Excel Data Source adapter for native `att-testcase/v1` Definitions. Reuse the legacy Sidecar header resolver, `dataColumns` parser, blank normalization, and safe YAML cell parsing; preserve source order, literal Case ID rules, typed values, selected Case behavior, and workbook/sheet/row/column revision provenance (#394).
-- Preflight native Excel ZIP archives to 256 entries, 32 MiB per expanded entry, and 64 MiB total expanded data; cap selected worksheets at 100,000 physical rows before iteration and reject non-finite, recursive, or over-bounded YAML cell values (#394).
-- Run native Excel-backed Cases through the existing resolver and Native Case RUN path without generating or modifying the legacy XML Snapshot. Keep the existing Stage/Sidecar/Snapshot workbook execution path unchanged.
-- This is a development candidate; the released product version remains unchanged and no POM version was bumped. LOAD integration, Testdata/generator bindings, and Debug/editor interoperability remain separate #388 follow-ups.
+## Open follow-ups tracked outside the 4.6.0 release scope
 
-# ATT 4.5.0 - development candidate (acceptance pending)
+- #387 retains deployed multi-role operator acceptance. #393 and #397 retain deployment and cross-PR integration evidence; #413 retains any remaining Default Package migration acceptance.
+- S08 Native LOAD Case targets are tracked by #418; S09 ATT Testdata and bounded generated Case sources by #419; S11 Debug and Native Case interoperability by #420.
+- Helper-specific external compensation and teardown validation from the S10 analysis is tracked by #421. Bilingual ADR-0001 review and approval for overall architecture closure is tracked by #422. #388 remains open for these follow-ups and overall acceptance.
 
-- Promote `att-testcase/v1` from the S01 proposal bundle into the active Engine schema registry; S03 implements singleton and inline-record resolution/RUN, while Excel source execution remains S04 work. Active/embedded copies track the finalized S01 identity, portable Excel path, and explicit-empty `dataColumns` contracts from #391.
-- Add the bounded Native Test Case Definition resolver and explicit `att-execution/v2` Native Case RUN targets in local CLI, remote CLI, and the validated Server draft flow. Preserve explicit `--run-id` values across Remote draft validation, Job acceptance, scheduled execution, and native output. Execute selected inline Cases through the existing Flow runner and preserve Definition, Qualified Case, local Case, execution, Flow, and source provenance in result evidence (#392, #393).
-- Pin the accepted Definition and Package source revision into the Job snapshot, reject stale drafts, and revalidate frozen selections for scheduled RUNs. Keep `att-execution/v1` Workbook/Sidecar selection and direct Template/Flow/Tool RUN behavior compatible. Native draft preview and fail-fast execution share S01 Definition/source order for multi-case selections.
-- This is a development candidate, not a release. V1 S02 scope is settled as inline resolution only; runtime Testdata bindings and generators remain future #388/S09 work. LOAD Case targets, Excel-backed native sources, and Debug/editor interoperability remain separate follow-ups. Do not bump the released product version or tag 4.5.0 before the release acceptance gates pass.
-
-# ATT 4.6.0 - development candidate (acceptance pending)
-
-- Add standard HTML, CI JSON, JUnit, and XLSX reporting for native Inline and implicit-Suite Cases without requiring an input Workbook. Preserve Definition, qualified Case, Flow, their source revisions, execution, and source-record provenance in per-Case evidence; redact registered secrets before snapshots and every report projection, and reject regeneration of legacy native manifests without the protection marker. Publish only the bounded Engine-owned XLSX through Server artifact archives as a non-preview download. Source-Workbook layout copying and workbook-backed acceptance remain pending S04 integration (#397).
-- Add implicit Native Case Suite selection across one or more Test Case Definitions. Select all Cases, qualified Case IDs, or matching tags; exclude tags, preserve deterministic Definition/source order, and aggregate per-Case results through the existing RUN reports (#396).
-- Surface Native Suite selection in Studio Run: enter one or more Definition IDs, then select all Cases, selected Qualified Case IDs, or Cases matching tags; included and excluded tag filters survive replay of retained definitions. Native Suite `--rerun-failed` now freezes the latest eligible source Job/run, manifest digest, source revision, and exact failed executed Qualified Case IDs through local/Remote CLI, validated Server drafts, Workers, schedules, and manifests. Local retry history is scoped by Package and Definitions and is not displaced by dry-runs or unrelated RUNs. Keep per-attempt Case, execution, skipped, and retry counts distinct; reject stale drafts and source changes.
-- Align CLI, Engine, resolver, and Server explicit Qualified Case ID limits at 1,000; retain the separate 10,000 resolved-candidate scan bound for filtering.
-- Validate Suite selectors before execution, reject duplicate or stale identities and empty selections, and freeze the accepted qualified Case IDs and Definition source revisions in Server RUN drafts and Worker requests. Keep the legacy Workbook/Sidecar selection contract intact.
-- Do not introduce a persisted `suite.yaml` for these derived selections. LOAD Case targets, advanced Testdata/generator sources, and Debug interoperability remain deferred to #388 follow-ups S08/S09/S11. Keep #388 open, and do not bump POM versions or tag 4.6.0 before release acceptance.
+The 4.4.1 and 4.5.0 development trains were not published as separate releases; their included changes are recorded above under 4.6.0.
 
 # ATT 4.4.0 - release candidate (2026-11-18; acceptance pending)
 

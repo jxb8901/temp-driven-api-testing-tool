@@ -78,7 +78,7 @@ Unsupported schema versions fail before execution and include migration guidance
 <!-- att-docs:historical -->
 ## Historical centralized SUT Metrics catalog
 
-Before ATT 4.3.1, global config `att-config/v2.14` could own bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays; `att-config/v2.13` files remained compatible when they did not declare `sutMetrics`. In 4.3.1, global `att-config/v2.15` keeps Data Source descriptor paths, while each Package owns its Metric Sources, Groups, and Profiles. Upgrade using the [Package-local SUT Metrics migration guide](../../guides/sut-metrics-config-migration.md). The old `data/sut-metrics-catalog.json` is not an active source for Package definitions and has no automatic dry-run/apply migration command; reconcile its entries with their owners before retiring it.
+Before the Package-local SUT Metrics migration, global config `att-config/v2.14` could own bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays; `att-config/v2.13` files remained compatible when they did not declare `sutMetrics`. The migrated configuration uses global `att-config/v2.15` for Data Source descriptor paths, while each Package owns its Metric Sources, Groups, and Profiles. Upgrade using the [Package-local SUT Metrics migration guide](../../guides/sut-metrics-config-migration.md). The old `data/sut-metrics-catalog.json` is not an active source for Package definitions and has no automatic dry-run/apply migration command; reconcile its entries with their owners before retiring it.
 <!-- /att-docs:historical -->
 
 

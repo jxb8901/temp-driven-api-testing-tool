@@ -1,7 +1,7 @@
-# ATT v4.4.1 reference manual
+# ATT v4.6.0 reference manual
 
 Author: Jeffrey + ChatGPT
-Version: 4.4.1
+Version: 4.6.0
 Status: Normative end-user documentation; generated from modular sources
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -102,7 +102,7 @@ Status: Normative end-user documentation; generated from modular sources
   - [API paths](#api-paths)
 - [CLI reference](#cli-reference)
   - [Choose a command](#choose-a-command)
-  - [Availability in ATT 4.4.1](#availability-in-att-441)
+  - [CLI status and availability](#cli-status-and-availability)
   - [Build a source checkout](#build-a-source-checkout)
   - [Find syntax, options, and examples by task](#find-syntax-options-and-examples-by-task)
   - [Use ATT Server from the CLI](#use-att-server-from-the-cli)
@@ -250,15 +250,23 @@ This page explains the normal day-to-day workflow in the same order that data mo
 
 ### Native Test Case Definition
 
-The 4.6.0 development candidate registers `att-testcase/v1` and supports discovery, resolution, and RUN for singleton, inline, and Excel-backed Definitions through the Native Case CLI and validated Server draft flow. The native Excel adapter reads a package-contained `.xlsx` workbook without modifying it, reuses the legacy Sidecar header and `dataColumns` mapping rules, and records workbook revision, sheet, row, and column provenance on each resolved Case. It accepts at most 32 MiB of compressed workbook bytes; before POI loads the workbook, ZIP preflight caps it at 256 entries, 32 MiB per expanded entry, and 64 MiB total expanded data. The selected worksheet is capped at 100,000 physical rows, including blank rows. Header scanning is capped at 1,000,000 header cells, and Resolution accepts at most 10,000 nonblank records; preview output remains bounded. YAML cells use the shared parser limits of 3,000,000 code points, 50 collection aliases, and 50 nested levels; resulting value graphs are further capped at depth 64 and 100,000 values. Non-finite numbers and recursive aliases are rejected. It does not create or update the legacy XML Snapshot. Existing workbook/Sidecar/Snapshot RUN remains supported.
+The ATT 4.6.0 release target includes an active `att-testcase/v1` schema and Native Case CLI and validated Server draft-flow support for discovery, resolution, and RUN of singleton, inline, and Excel-backed Definitions. The implementation is in the open release-target stack; no 4.6.0 release or tag has been published. Deployed acceptance remains open for Native RUN, report integration, and Default Package adoption; shared-editor deployment evidence is tracked separately. Native LOAD Case targets, advanced Testdata and generators, and Debug interoperability are excluded from this target; existing direct LOAD and Debug paths remain supported.
+
+The native Excel adapter reads a package-contained `.xlsx` workbook without modifying it, reuses the legacy Sidecar header and `dataColumns` mapping rules, and records workbook revision, sheet, row, and column provenance on each resolved Case. It accepts at most 32 MiB of compressed workbook bytes; before POI loads the workbook, ZIP preflight caps it at 256 entries, 32 MiB per expanded entry, and 64 MiB total expanded data. The selected worksheet is capped at 100,000 physical rows, including blank rows. Header scanning is capped at 1,000,000 header cells, and Resolution accepts at most 10,000 nonblank records; preview output remains bounded. YAML cells use the shared parser limits of 3,000,000 code points, 50 collection aliases, and 50 nested levels; resulting value graphs are further capped at depth 64 and 100,000 values. Non-finite numbers and recursive aliases are rejected. It does not create or update the legacy XML Snapshot. Existing workbook/Sidecar/Snapshot RUN remains supported.
 
 The v1 contract defines a singleton inline Case with a complete typed `inputs` map and the fixed Resolved Case ID `default`, or a multi-record inline/Excel Data Source with stable source IDs. Definition IDs are Package-scoped, case-preserving dotted IDs; Resolved Case IDs are one path-safe segment. Excel Case IDs must be literal text cells matching `[A-Za-z0-9_-]{1,128}`; formulas, numeric/date/boolean/error cells, blank markers, surrounding whitespace, reserved device names, and case-fold collisions are rejected. A `caseIdExpression` can override the resolved ID using only one `${DATA.key}` lookup. Empty, duplicate, malformed, missing, or colliding IDs and empty resolution results are errors; they never produce an all-PASS result.
 
-For data-driven Cases, omitted `inputs` means same-name projection from `DATA`; a supplied projection replaces that identity mapping and uses `{from: DATA.key}` or `{value: <typed value>}`. Excel `dataColumns` remains the `att-sidecar/v2.2` comma-separated string syntax, including aliases, `(yaml)` parsing, and quoted delimiters. Omitted or blank `dataColumns` selects no business columns into `DATA` (Case ID and tags selectors are never auto-exposed); declare `dataColumns` explicitly when Excel inputs are required. Excel `path` values must be portable Package-relative `.xlsx` paths. A source-workbook report template is only valid with an Excel source and always writes to a new workbook.
+For data-driven Cases, omitted `inputs` means same-name projection from `DATA`; a supplied projection replaces that identity mapping and uses `{from: DATA.key}` or `{value: <typed value>}`. Excel `dataColumns` remains the `att-sidecar/v2.2` comma-separated string syntax, including aliases, `(yaml)` parsing, and quoted delimiters. Omitted or blank `dataColumns` selects no business columns into `DATA` (Case ID and tags selectors are never auto-exposed); declare `dataColumns` explicitly when Excel inputs are required. Excel `path` values must be portable Package-relative `.xlsx` paths.
+
+Every Native RUN writes the source-independent result workbook at `workbooks/native-cases.result.xlsx`; it contains the selected Case results and does not depend on the source workbook. An Excel-backed Definition may also set `report: {format: xlsx, template: sourceWorkbook}` to request the optional source-workbook-shaped artifact at `workbooks/native-cases.source-workbook.xlsx`. Before RUN starts, Engine pins and verifies the workbook bytes, formula inventory, and selected physical row identities. It writes results only to those selected rows in a separate file, preserves source formulas, and leaves the Package workbook unchanged.
+
+The optional artifact is limited to one Excel Definition and worksheet, a nonempty selection of at most 1,000 Cases, and an output size of at most 16 MiB. Before publication, ATT redacts sensitive source columns on every worksheet, including columns whose headers or mapped aliases are classified as sensitive, and masks registered secret values elsewhere. If redaction could leave a sensitive cached formula result or safely verifying/publishing the source-shaped file fails, ATT omits that optional artifact and records a fallback diagnostic; the standard result workbook and Case results remain available. A workbook that changed after resolution or no longer matches the pinned rows is rejected before execution rather than silently falling back to stale source data.
+
+The source-shaped artifact contains the workbook's other rows and sheets, with sensitive values redacted. The Server publishes and serves it only when the Job's Package source permission is current; it rechecks Package editor permission for the artifact listing, each entry read, and the archive download. Users without that permission can still access the source-independent standard result workbook and other Job artifacts under the normal artifact policy.
 
 See the [active schema](../schemas/att-testcase-v1.schema.json), [single inline example](adr/examples/att-testcase-v1/inline-single.yaml), [multi-record inline example](adr/examples/att-testcase-v1/inline-multi.yaml), [Excel example](adr/examples/att-testcase-v1/excel.yaml), [Excel omitted-`dataColumns` example](adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml), and [ADR-0001](adr/0001-flow-centric-testcase-resolution.md) for the complete contract and validation boundary.
 
-The Default Package ships offline Native Quick Start Definitions under `packages/default/testcase/quick-start/**/testcase.yaml` bound to Flow `quick.start.v1`. Follow [Quick Start](quick-start.md) and the [S12 migration matrix](maintenance/native-case-default-package-migration-s12.md). Source-independent native XLSX reports remain an S07 follow-up.
+The Default Package ships offline Native Quick Start Definitions under `packages/default/testcase/quick-start/**/testcase.yaml` bound to Flow `quick.start.v1`. Use the [Default Package Native Quick Start guide](quick-start.md) and the [S12 migration matrix](maintenance/native-case-default-package-migration-s12.md). S07 adds source-workbook-shaped reports for Excel-backed Definitions.
 
 #### Author in Studio
 
@@ -272,7 +280,7 @@ Excel-backed definitions use the same read-only S04 adapter as native resolution
 
 #### Run an implicit Native Case Suite
 
-The 4.6.0 development candidate adds a Suite selection over resolved Cases without an authored `suite.yaml`. Declare one or more Definition IDs, then select all Cases, explicit qualified Case IDs, or Cases matching one or more tags. Excluded tags take precedence over included tags.
+The 4.6.0 release target adds Suite selection over resolved Cases without an authored `suite.yaml`. Declare one or more Definition IDs, then select all Cases, explicit qualified Case IDs, or Cases matching one or more tags. Excluded tags take precedence over included tags.
 
 This local command selects every `smoke` Case from two Definitions except Cases tagged `destructive`:
 
@@ -1019,11 +1027,11 @@ All adapters resolve the environment, construct canonical Context, validate the 
 
 ### Unified RUN and schedules
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-ATT 4.4.1 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+Functional one-shot execution uses the shared **RUN** model for Cases, Templates, Flows and Tools. **Debug** is an optional diagnostic mode of supported RUN targets. **LOAD** retains its performance engine, pacing controls and specialized reports. The 4.6.0 release-target stack adds explicit Native Case and implicit Native Suite selection through `run native-case` and `run native-suite`; the release and tag remain unpublished, with deployed acceptance pending.
 
-The released Local CLI keeps its interface-specific compatibility boundary: its run verb selects workbook Cases, and standalone debug runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. This shared RUN model does not mean the proposed vNext CLI grammar is released; see the [Planned vNext page](interfaces/cli/vnext-proposed.md).
+The legacy Local CLI keeps its compatibility boundary: `./att.sh run` selects workbook Cases, and standalone `debug` runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. Native Server RUN requires a validated `att-execution/v2` draft; it is not submitted through the legacy raw Case selector. The broader shared CLI grammar remains a [planned proposal](interfaces/cli/vnext-proposed.md).
 
 #### Validate and execute a RUN
 
@@ -1159,9 +1167,9 @@ Schedule creation uses its normal validated draft contract. Debug remains `optio
 
 ### Run mode
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-The ATT 4.4.1 Local CLI run command remains a legacy Case adapter: it executes selected authored Testcases from a workbook. The broader functional model and direct resource targets are defined in [Unified RUN](reference/execution-modes/unified-run.md).
+The legacy `./att.sh run` command remains a Case adapter: it executes selected authored Testcases from a workbook. The 4.6.0 release-target CLI also adds explicit Native Case and Native Suite commands, documented in [Unified RUN](reference/execution-modes/unified-run.md) and the [CLI Reference](reference/cli.md). The target release and tag are unpublished; deployed acceptance remains pending.
 
 ```sh
 ./att.sh run --all
@@ -3155,7 +3163,7 @@ Source revision conflicts return `409`; denied source access or Environment poli
 
 ## CLI reference
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
 
 ### Choose a command
@@ -3175,11 +3183,11 @@ Source revision conflicts return `409`; denied source access or Environment poli
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
-The commands in this table are the ATT 4.4.1 CLI. The separate vNext proposal is not part of this release.
+The legacy CLI surface from the 4.3.1 code line includes workbook Case, validation, snapshot, Debug, LOAD, and report commands. The 4.6.0 release-target stack adds explicit Native Case and Native Suite RUN commands. The 4.6.0 release and tag have not been published; deployed acceptance is still pending. The broader shared vNext grammar remains a separate [planned proposal](interfaces/cli/vnext-proposed.md).
 
-### Availability in ATT 4.4.1
+### CLI status and availability
 
-This Reference describes the CLI shipped with ATT 4.4.1. The vNext grammar is a separate [Planned proposal](interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
+This Reference distinguishes the existing legacy CLI from the Native Case and Native Suite commands in the open release-target stack. Native selector syntax and examples are documented in [Test authoring](reference/test-authoring.md#native-test-case-definition). Remote execution uses a validated Server draft. Do not treat target-stack behavior as evidence that a 4.6.0 release or tag exists.
 
 ### Build a source checkout
 
@@ -3242,6 +3250,10 @@ On Windows, `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not in
 | `./att.sh run <selection> --format json` | Emit machine-readable summary |
 | `./att.sh run <selection> --quiet` | Suppress detailed live progress; keep the final summary and errors |
 | `./att.sh run <selection> --verbose` | Accepted for compatibility; detailed live progress is already the default |
+
+#### Native Case and implicit Suite RUN
+
+The 4.6.0 release-target CLI adds `run native-case` and `run native-suite`. The formal release target remains unpublished. See [Test authoring](reference/test-authoring.md#native-test-case-definition) for selectors and examples and [Unified RUN](reference/execution-modes/unified-run.md) for Server draft semantics.
 
 #### Debug a component
 
@@ -3724,7 +3736,7 @@ Do not place passwords, tokens, private keys, or sensitive customer data in work
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.4.1",
+  "attVersion": "4.6.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -3942,7 +3954,7 @@ Unsupported schema versions fail before execution and include migration guidance
 <!-- att-docs:historical -->
 ### Historical centralized SUT Metrics catalog
 
-Before ATT 4.3.1, global config `att-config/v2.14` could own bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays; `att-config/v2.13` files remained compatible when they did not declare `sutMetrics`. In 4.3.1, global `att-config/v2.15` keeps Data Source descriptor paths, while each Package owns its Metric Sources, Groups, and Profiles. Upgrade using the [Package-local SUT Metrics migration guide](guides/sut-metrics-config-migration.md). The old `data/sut-metrics-catalog.json` is not an active source for Package definitions and has no automatic dry-run/apply migration command; reconcile its entries with their owners before retiring it.
+Before the Package-local SUT Metrics migration, global config `att-config/v2.14` could own bounded `sutMetrics.dataSources`, `metricSources`, `groups`, and `profiles` arrays; `att-config/v2.13` files remained compatible when they did not declare `sutMetrics`. The migrated configuration uses global `att-config/v2.15` for Data Source descriptor paths, while each Package owns its Metric Sources, Groups, and Profiles. Upgrade using the [Package-local SUT Metrics migration guide](guides/sut-metrics-config-migration.md). The old `data/sut-metrics-catalog.json` is not an active source for Package definitions and has no automatic dry-run/apply migration command; reconcile its entries with their owners before retiring it.
 <!-- /att-docs:historical -->
 
 

@@ -33,6 +33,7 @@ public final class ReportRegenerator {
         if (!"att-run/v2.1".equals(String.valueOf(run.get("schemaVersion")))) throw new IllegalArgumentException("Run manifest is not V2.1: " + manifest);
         Map<String, Object> runNode = run.get("run") instanceof Map ? (Map<String, Object>) run.get("run") : run;
         if (!"COMPLETE".equals(String.valueOf(runNode.get(run.containsKey("run") ? "state" : "status")))) throw new IllegalArgumentException("Run is not COMPLETE: " + runId);
+        verifyOptionalSourceWorkbook(runDir, run, runNode);
         Object cases = run.get("cases");
         boolean nativeRun = "nativeCase".equals(String.valueOf(runNode.get("targetType")))
                 || "nativeSuite".equals(String.valueOf(runNode.get("targetType")));
@@ -96,6 +97,52 @@ public final class ReportRegenerator {
     private long longValue(Object value) { return value == null ? 0 : Long.parseLong(String.valueOf(value)); }
     private String text(Object value) { return value == null ? "" : String.valueOf(value); }
     private java.util.List<String> strings(Object value) { java.util.List<String> result = new java.util.ArrayList<String>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(String.valueOf(item)); return result; }
+
+    private void verifyOptionalSourceWorkbook(Path runDir, Map<String,Object> manifest,
+            Map<String,Object> runNode) throws Exception {
+        Object value = runNode.get("sourceWorkbookReport");
+        if (value == null) return;
+        if (!(value instanceof Map<?,?>))
+            throw new IllegalArgumentException("Native source-workbook report metadata is invalid");
+        Map<?,?> report = (Map<?,?>) value;
+        if (!"att-native-source-workbook-report/v1".equals(String.valueOf(report.get("schemaVersion"))))
+            throw new IllegalArgumentException("Native source-workbook report metadata is invalid");
+        String status = String.valueOf(report.get("status"));
+        Map<?,?> outputs = manifest.get("outputs") instanceof Map<?,?>
+                ? (Map<?,?>) manifest.get("outputs") : Collections.emptyMap();
+        if ("fallback".equals(status)) {
+            if (outputs.containsKey("sourceWorkbookXlsx") || report.containsKey("outputPath"))
+                throw new IllegalArgumentException("Native source-workbook fallback metadata includes an output artifact");
+            return;
+        }
+        if (!"written".equals(status)
+                || !NativeSourceWorkbookReportWriter.OUTPUT_PATH.equals(String.valueOf(report.get("outputPath")))
+                || !NativeSourceWorkbookReportWriter.OUTPUT_PATH.equals(String.valueOf(outputs.get("sourceWorkbookXlsx"))))
+            throw new IllegalArgumentException("Native source-workbook report metadata is invalid");
+        Path normalizedRun = runDir.toAbsolutePath().normalize();
+        Path output = normalizedRun.resolve(NativeSourceWorkbookReportWriter.OUTPUT_PATH).normalize();
+        Path directory = output.getParent();
+        if (!output.startsWith(normalizedRun) || Files.isSymbolicLink(normalizedRun)
+                || Files.isSymbolicLink(directory) || Files.isSymbolicLink(output)
+                || !Files.isRegularFile(output, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                || Files.size(output) > NativeSourceWorkbookReportWriter.MAX_OUTPUT_BYTES)
+            throw new IllegalArgumentException("Native source-workbook report artifact is missing or unsafe");
+        String expected = String.valueOf(report.get("outputSha256"));
+        if (!expected.matches("[a-f0-9]{64}") || !expected.equals(sha256(Files.readAllBytes(output))))
+            throw new IllegalArgumentException("Native source-workbook report artifact changed after the run completed");
+        String expectedFormulaDigest = String.valueOf(report.get("formulaSha256"));
+        byte[] outputBytes = Files.readAllBytes(output);
+        if (!expectedFormulaDigest.matches("[a-f0-9]{64}")
+                || !expectedFormulaDigest.equals(NativeSourceWorkbookReportWriter.formulaSha256(outputBytes)))
+            throw new IllegalArgumentException("Native source-workbook formula inventory changed after the run completed");
+    }
+
+    private String sha256(byte[] bytes) throws Exception {
+        byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+        StringBuilder value = new StringBuilder(digest.length * 2);
+        for (byte item : digest) value.append(String.format(java.util.Locale.ROOT, "%02x", item & 0xff));
+        return value.toString();
+    }
 
     @SuppressWarnings("unchecked")
     private Object protectManifestValue(Object value) {

@@ -142,6 +142,8 @@ final class ServerRuntime implements AutoCloseable {
     private final Set<String> requestedLoadReportV2Jobs=ConcurrentHashMap.newKeySet();
     private final Object loadReportV2ScheduleLock=new Object();
     private final java.util.concurrent.locks.ReentrantReadWriteLock artifactLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
+    /** Serializes archive replacement with reads whose source-workbook decision uses the archive manifest. */
+    private final java.util.concurrent.locks.ReentrantReadWriteLock artifactPublicationLock=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
     /** Pages of {@link JobStore#STORAGE_CANDIDATE_PAGE} examined in one size sweep. Tests lower this to hit the boundary. */
     int storageCandidateBatchLimit=50;
@@ -5574,6 +5576,45 @@ final class ServerRuntime implements AutoCloseable {
                 registry.editors.getOrDefault(packageId,List.of()));
     }
 
+    /**
+     * Source-workbook inclusion runs after the request thread that authorized a manual Job has
+     * ended. In container auth, USER role membership is available only through the live servlet
+     * request, so this path accepts only the server-persisted identity tuple from a manual Job and
+     * rechecks the current package editor policy. Artifact reads still recheck the live requester
+     * role through {@link #withPackageSourceAuthority(String, PackageSourceActiveUserCheck,
+     * PackageSourceAction)}.
+     */
+    boolean canPublishNativeSourceWorkbook(Map<String,Object> storedJob) throws Exception {
+        if(storedJob==null||!config.authenticationRequired||!config.packageConfiguration.sourceEditingEnabled)
+            return false;
+        String packageId=nullableText(storedJob.get("packageId"));
+        String principal=nullableText(storedJob.get("principal"));
+        String submittedBy=nullableText(storedJob.get("submittedBy"));
+        String executionPrincipal=nullableText(storedJob.get("executionPrincipal"));
+        String submissionSource=nullableText(storedJob.get("submissionSource"));
+        if(!"run".equals(storedJob.get("command"))||!"manual".equals(submissionSource)
+                ||principal==null||principal.isBlank()||RequestIdentity.ANONYMOUS.equals(principal)
+                ||!principal.equals(submittedBy)||!principal.equals(executionPrincipal)
+                ||!noText(storedJob.get("originatingScheduleId"))||!noText(storedJob.get("scheduleId"))
+                ||!noText(storedJob.get("scheduleOwner"))||!noText(storedJob.get("triggeredBy")))
+            return false;
+
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+        if(packageId==null||!registry.packages.containsKey(packageId))return false;
+        if("local".equals(config.authMode))return canEditPackageContent(packageId,principal);
+
+        // In container mode, ServerRuntime records these fields only after ApiServlet's live
+        // authenticated USER-role gate. Re-evaluate the current Package/editor policy here; the
+        // live role is checked again against the requesting user before any private entry is read.
+        return SourceAuthorizationPolicy.canEditPackageContent(config.authenticationRequired,
+                config.packageConfiguration.sourceEditingEnabled,packageId,principal,true,
+                registry.editors.getOrDefault(packageId,List.of()));
+    }
+
+    private static boolean noText(Object value) {
+        return value==null||value instanceof String text&&text.isBlank();
+    }
+
     <T> T withPackageSourceAuthority(String loginId,PackageSourceActiveUserCheck activeUserCheck,
                                      PackageSourceAction<T> action) throws Exception {
         PackageSourceAuthority previous=packageSourceAuthority.get();
@@ -8286,9 +8327,13 @@ final class ServerRuntime implements AutoCloseable {
         finally {artifactLifecycle.writeLock().unlock();}
     }
     Map<String,Object> artifactIndex(String id,int offset,int limit) throws Exception {
+        return artifactIndex(id,offset,limit,null);
+    }
+    Map<String,Object> artifactIndex(String id,int offset,int limit,String requester) throws Exception {
         if(offset<0||offset>1_000_000||limit<1||limit>100)throw new IllegalArgumentException("Artifact listing pagination is invalid");
         if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
         artifactLifecycle.readLock().lock();
+        artifactPublicationLock.readLock().lock();
         try {
             Map<String,Object> storedJob=store.get(id);if(storedJob==null)throw new NotFoundException();
             String expectedNativeRunId=trustedArtifactRunId(id,storedJob);
@@ -8305,6 +8350,11 @@ final class ServerRuntime implements AutoCloseable {
                     Map<String,Object> data=ArtifactArchive.verify(archive,false,expectedNativeRunId);
                     long archiveSize=Files.size(archive);
                     List<?> all=(List<?>)data.get("entries");
+                    boolean sourceWorkbookAllowed=requester==null
+                            ||canEditPackageContent(String.valueOf(storedJob.get("packageId")),requester);
+                    if(!sourceWorkbookAllowed)all=all.stream().filter(item->!(item instanceof Map<?,?> row)
+                            ||!(row.get("path") instanceof String entryPath)
+                            ||!isNativeSourceWorkbookEntry(entryPath,expectedNativeRunId)).toList();
                     int start=Math.min(offset,all.size()),end=Math.min(all.size(),start+limit);
                     out.put("items",all.subList(start,end));out.put("nextOffset",end<all.size()?end:null);
                     out.put("primaryReports",all.stream().filter(item->item instanceof Map<?,?> row&&Boolean.TRUE.equals(row.get("report"))).toList());
@@ -8331,7 +8381,7 @@ final class ServerRuntime implements AutoCloseable {
             out.put("retryable",!quarantined&&"FAILED".equals(out.get("archiveStatus"))&&Files.isDirectory(outputDirectoryForJob(id)));
             out.put("archiveMetrics",store.archiveMetrics(id));
             out.put("downloadPath","archive.zip");return out;
-        } finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
+        } finally {artifactPublicationLock.readLock().unlock();artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
     }
 
     private static String artifactCategory(String path) {
@@ -8347,9 +8397,41 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     byte[] archiveEntry(String id,String requested) throws Exception {
+        return archiveEntry(id,requested,null);
+    }
+    byte[] archiveEntry(String id,String requested,String requester) throws Exception {
         if(!ArtifactArchive.safePath(requested)||ArtifactArchive.MANIFEST.equalsIgnoreCase(requested))throw new IllegalArgumentException("Invalid archive entry path");
-        try(ArtifactRead read=openArtifactArchive(id,false)) { return read.verified.read(requested); }
-        catch(java.io.FileNotFoundException missing){throw new NotFoundException();}
+        artifactLifecycle.readLock().lock();
+        artifactPublicationLock.readLock().lock();
+        try {
+            if(requester!=null) {
+                Map<String,Object> storedJob=store.get(id);if(storedJob==null)throw new NotFoundException();
+                String expectedNativeRunId=trustedArtifactRunId(id,storedJob);
+                if(isNativeSourceWorkbookEntry(requested,expectedNativeRunId)
+                        &&!canEditPackageContent(String.valueOf(storedJob.get("packageId")),requester))
+                    throw new AuthoringSourceDeniedException();
+            }
+            try(ArtifactRead read=openArtifactArchive(id,false)) { return read.verified.read(requested); }
+            catch(java.io.FileNotFoundException missing){throw new NotFoundException();}
+        } finally {
+            artifactPublicationLock.readLock().unlock();artifactLifecycle.readLock().unlock();
+        }
+    }
+    private static boolean isNativeSourceWorkbookEntry(String relative,String expectedRunId) {
+        return ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX.equals(relative)
+                ||expectedRunId!=null&&(expectedRunId+"/"+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX).equals(relative);
+    }
+    private static boolean archiveContainsNativeSourceWorkbook(Path archive,String expectedRunId) {
+        if(expectedRunId==null)return false;
+        try {
+            Map<String,Object> verified=ArtifactArchive.verify(archive,false,expectedRunId);
+            Object entries=verified.get("entries");
+            if(entries instanceof List<?> rows)for(Object value:rows)
+                if(value instanceof Map<?,?> row&&isNativeSourceWorkbookEntry(String.valueOf(row.get("path")),expectedRunId))return true;
+            return false;
+        } catch(Exception invalid) {
+            throw new ArchiveUnavailableException("FAILED");
+        }
     }
     final class ArtifactRead implements AutoCloseable {
         final Path path;
@@ -8358,11 +8440,15 @@ final class ServerRuntime implements AutoCloseable {
         ArtifactRead(Path path,ArtifactArchive.VerifiedRead verified,ArtifactDownload download){this.path=path;this.verified=verified;this.download=download;}
         long length(){return download.length;}
         void writeTo(java.io.OutputStream output) throws java.io.IOException {download.writeTo(output);}
-        @Override public void close() throws java.io.IOException {try {if(download!=null)download.close();else verified.close();} finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}}
+        @Override public void close() throws java.io.IOException {try {if(download!=null)download.close();else verified.close();} finally {artifactPublicationLock.readLock().unlock();artifactLifecycle.readLock().unlock();artifactReadSlots.release();}}
     }
     ArtifactRead openArtifactArchive(String id,boolean digests) throws Exception {
+        return openArtifactArchive(id,digests,null);
+    }
+    ArtifactRead openArtifactArchive(String id,boolean digests,String requester) throws Exception {
         if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
         artifactLifecycle.readLock().lock();
+        artifactPublicationLock.readLock().lock();
         try {
             Map<String,Object> storedJob=store.get(id);if(storedJob==null)throw new NotFoundException();
             String expectedNativeRunId=trustedArtifactRunId(id,storedJob);
@@ -8370,11 +8456,14 @@ final class ServerRuntime implements AutoCloseable {
             Path archive=artifactArchivePath(id),status=archive.resolveSibling("archive-status.json");
             String archiveState=readArchiveStatus(status).path("state").asText("FAILED");
             if(!"READY".equals(archiveState))throw new ArchiveUnavailableException(archiveState);
+            if(requester!=null&&digests&&archiveContainsNativeSourceWorkbook(archive,expectedNativeRunId)
+                    &&!canEditPackageContent(String.valueOf(storedJob.get("packageId")),requester))
+                throw new AuthoringSourceDeniedException();
             ArtifactArchive.VerifiedRead verified=null;ArtifactDownload download=null;
             try { if(digests)download=ArtifactDownload.open(archive,null,expectedNativeRunId);else verified=ArtifactArchive.openVerified(archive,false,expectedNativeRunId); }
             catch(Exception invalid){throw new ArchiveUnavailableException("FAILED");}
             return new ArtifactRead(archive,verified,download);
-        } catch(Exception failure){artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
+        } catch(Exception failure){artifactPublicationLock.readLock().unlock();artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
     }
     private void archiveStatus(String id,String state,String reason) throws Exception { archiveStatus(id,state,reason,null); }
     private void archiveStatus(String id,String state,String reason,Map<String,Object> diagnostic) throws Exception {
@@ -8436,6 +8525,7 @@ final class ServerRuntime implements AutoCloseable {
         final long queuedAt=System.nanoTime();
         try { artifactWriters.execute(() -> {
             artifactLifecycle.readLock().lock();
+            artifactPublicationLock.writeLock().lock();
             Path output=outputDirectoryForJob(id), archive=artifactArchivePath(id);
             ArtifactMetricsRecorder metrics=null;
             try {
@@ -8477,7 +8567,17 @@ final class ServerRuntime implements AutoCloseable {
                     if(!Files.isDirectory(output))throw new java.io.IOException("Worker output is unavailable");
                     cleanupArtifactStaging(archive.getParent());
                     // Preserve the exact bytes produced by the Engine/Worker; ZIP publication never rewrites them.
-                    artifactPublisher.publish(output,archive,ServerRuntime::validateApprovedArtifactBytes,expectedNativeRunId);
+                    boolean allowNativeSourceWorkbook=false;
+                    try {
+                        allowNativeSourceWorkbook=expectedNativeRunId!=null
+                                &&canPublishNativeSourceWorkbook(storedJob);
+                    } catch(Exception unavailable) {
+                        // Optional source-workbook reports fail closed without blocking standard artifacts.
+                        java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine(
+                                "Native source-workbook report authorization was unavailable for Job "+id);
+                    }
+                    artifactPublisher.publish(output,archive,ServerRuntime::validateApprovedArtifactBytes,
+                            expectedNativeRunId,allowNativeSourceWorkbook);
                 }
                 metrics.phase("publication");
                 Map<String,Object> overview=ArtifactArchive.overviewSummary(archive,expectedNativeRunId);
@@ -8513,7 +8613,7 @@ final class ServerRuntime implements AutoCloseable {
                 // Transfer an accepted retry before releasing the retention
                 // fence, so expiry cannot delete its source between writers.
                 try {if(requestedArtifactRetries.remove(id))scheduleArtifactArchive(id);}
-                finally {artifactLifecycle.readLock().unlock();}
+                finally {artifactPublicationLock.writeLock().unlock();artifactLifecycle.readLock().unlock();}
             }
         }); } catch(RejectedExecutionException full) {
             pendingArtifactJobs.remove(id);
@@ -9154,12 +9254,21 @@ final class ServerRuntime implements AutoCloseable {
                                           String expectedNativeRunId) throws Exception {
                 return ArtifactArchive.build(output,archive,validator,compression,expectedNativeRunId);
             }
+            @Override public Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator,
+                                          String expectedNativeRunId,boolean allowNativeSourceWorkbook) throws Exception {
+                return ArtifactArchive.build(output,archive,validator,compression,expectedNativeRunId,
+                        allowNativeSourceWorkbook);
+            }
         };
     }
     @FunctionalInterface interface ArtifactPublisher {
         Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator) throws Exception;
         default Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator,String expectedNativeRunId) throws Exception {
             return publish(output,archive,validator);
+        }
+        default Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator,
+                             String expectedNativeRunId,boolean allowNativeSourceWorkbook) throws Exception {
+            return publish(output,archive,validator,expectedNativeRunId);
         }
     }
     @FunctionalInterface interface LoadProgressPersistence { void update(String jobId,String progressJson) throws Exception; }

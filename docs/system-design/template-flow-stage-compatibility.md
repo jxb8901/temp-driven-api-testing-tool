@@ -2,8 +2,9 @@
 
 - **Status:** Compatibility analysis and focused golden fixture; not an accepted replacement contract.
 - **Scope:** Existing workbook/Sidecar Stage execution versus Native Case execution through one Flow.
-- **Release track:** Next ATT development candidate; acceptance remains pending.
+- **Release track:** ATT 4.6.0 release target; release and tag have not been published.
 - **Runtime changes:** None in this slice. The golden fixture exercises the current public APIs and pins observed differences.
+- **Acceptance status:** S10 remains an analysis baseline, not an accepted replacement contract. Deployed acceptance remains open for Native RUN ([#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)), report integration ([#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)), and Default Package adoption ([#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)); shared-editor deployment evidence is separate ([#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387)).
 - **Related:** [Issue #398](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/398), [ADR-0001](../adr/0001-flow-centric-testcase-resolution.md), [Traditional Chinese](template-flow-stage-compatibility.zh.md).
 
 ## Acceptance summary
@@ -11,6 +12,8 @@
 The current evidence supports a phased compatibility effort, not a whole-engine replacement. The focused fixture demonstrates that both execution paths can preserve a failed Verify result while allowing a rollback action and final cleanup action to run. It also records differences that must remain visible: legacy Stage input overlays are temporary and restored at each Stage boundary; Native Case Flow inputs are case-wide; result trees and event granularity differ.
 
 This fixture uses log actions as rollback and cleanup markers. It does not prove a database transaction was reversed, an external service was compensated, or every helper's teardown behavior is equivalent. Those require separate side-effect fixtures.
+
+Representative Helper rollback and teardown effects are deferred to [#421](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/421). Final ADR approval and architecture closure follow the 4.6.0 target under [#422](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/422); this follow-up is not a target release blocker.
 
 ## Current execution paths
 
@@ -37,7 +40,7 @@ The Stage path remains a supported execution contract. S10 does not remove workb
 | Identity and reference checks | Case identity comes from Workbook/Sidecar selectors; Template and referenced Flow IDs are resolved by the legacy execution plan. | Definition, Qualified Case, source revision, and entry Flow are resolved and captured by the Native resolver. | **Different identity contracts.** Keep legacy IDs/replay stable; compare version, cycle, depth, and reference-failure cases separately. |
 | Resource finalization | Case finalization owns cleanup for the resources opened by the legacy execution. | Native RUN has its own Case finalization path for selected Flow execution. | **Not proven equivalent.** This log-marker fixture does not exercise a DB transaction or external resource teardown. |
 | Retries, timeouts, nested Flow errors | Existing Template Actions and nested Flow calls use the shared runner, while Stage progression is handled outside it. | Native Flow also uses the shared action/Flow runner, with native source identity and provenance. | **Shared machinery, incomplete paired proof.** Preserve existing tests and add golden cases for each migration boundary. |
-| LOAD, Testdata/generators, Debug | Existing Stage/Template and direct LOAD/Debug behaviors remain current contracts. | Native Test Case targets for LOAD, Testdata/generator bindings, and Debug interoperability are separate follow-ups. | **Deferred.** S08 LOAD, S09 Testdata/generators, and S11 Debug remain out of this slice; #388 stays open. |
+| LOAD, Testdata/generators, Debug | Existing Stage/Template and direct LOAD/Debug behaviors remain current contracts. | Native Case LOAD targets, advanced Testdata/generators, and Debug interoperability are separate follow-ups. | **Deferred from 4.6.0.** S08 ([#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)), S09 ([#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)), and S11 ([#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)) remain out of scope; #388 stays open. |
 
 ## Golden fixture
 

@@ -22,6 +22,7 @@ import att.flow.FlowRegistry;
 import att.report.HtmlReportGenerator;
 import att.report.CiReportWriter;
 import att.report.NativeCaseExcelReportWriter;
+import att.report.NativeSourceWorkbookReportWriter;
 import att.Version;
 import att.validation.JsonSchemaVerifier;
 import att.validation.SchemaFiles;
@@ -108,6 +109,8 @@ public class FrameworkEngine {
         // invalidates the resolution instead of executing inputs from one revision against another.
         FlowRegistry flows = new FlowRegistry(projectRoot, config.templatesRoot(), false);
         List<Map<String,Object>> inputs = verifyNativeSources(resolution, selected, flows);
+        NativeSourceWorkbookReportWriter.Prepared preparedSourceWorkbookReport =
+                NativeSourceWorkbookReportWriter.prepareIfRequested(projectRoot, resolution);
 
         RunConcurrencyGuard concurrencyGuard = RunConcurrencyGuard.acquire(outputRoot, "reject", new Runnable() { @Override public void run() { } });
         try {
@@ -169,6 +172,10 @@ public class FrameworkEngine {
             Path html = new HtmlReportGenerator().generate(runDirectory, runId, summary, runStarted, runEnded,
                     config.report().htmlCaseLogInlineLimitBytes());
             new NativeCaseExcelReportWriter().write(runDirectory, runId, results);
+            NativeSourceWorkbookReportWriter.Result sourceWorkbookReport =
+                    NativeSourceWorkbookReportWriter.writePrepared(
+                            preparedSourceWorkbookReport, runDirectory, results, config,
+                            nativeInputSecrets(selected));
             String inputManifestHash = sha256Bytes(new Yaml().dump(inputs).getBytes(java.nio.charset.StandardCharsets.UTF_8));
             Set<String> ciOutputs = new LinkedHashSet<String>(java.util.Arrays.asList("junit", "json"));
             new CiReportWriter().write(runDirectory, runId, config.environment(), summary, runStarted, runEnded,
@@ -180,7 +187,8 @@ public class FrameworkEngine {
             att.config.ConfigurationEvidence.write(runDirectory, config);
             ExecutionOptions manifestOptions = nativeManifestOptions(runId, requestedOutputRoot, dryRun, failFast, ciOutputs);
             writeManifest(runDirectory, runId, results, runStarted, runEnded, html, manifestOptions, inputs,
-                    Collections.<att.validation.Diagnostic>emptyList(), nativeRunMetadata(resolution, summary, retryLineage));
+                    Collections.<att.validation.Diagnostic>emptyList(),
+                    nativeRunMetadata(resolution, summary, retryLineage, sourceWorkbookReport));
             writeLatest(outputRoot, runDirectory, runId, summary, runEnded);
             if(!dryRun&&packageId!=null)writeLatest(outputRoot,runDirectory,runId,summary,runEnded,
                     att.testcase.NativeSuiteRetryResolver.latestPointerFileName(packageId,
@@ -742,6 +750,13 @@ public class FrameworkEngine {
         return secrets;
     }
 
+    private List<String> nativeInputSecrets(List<ResolvedTestCase> cases) {
+        Set<String> secrets = new LinkedHashSet<String>();
+        if (cases != null) for (ResolvedTestCase testCase : cases)
+            secrets.addAll(nativeInputSecrets(testCase.inputs()));
+        return new ArrayList<String>(secrets);
+    }
+
     private void collectNativeInputSecrets(Object value, boolean sensitive, List<String> secrets,
             java.util.IdentityHashMap<Object,Boolean> active) {
         if (value == null) return;
@@ -848,7 +863,8 @@ public class FrameworkEngine {
     }
 
     private Map<String,Object> nativeRunMetadata(TestCaseSuiteResolutionResult resolution, RunSummary summary,
-            att.api.NativeSuiteRetryLineage retryLineage) throws Exception {
+            att.api.NativeSuiteRetryLineage retryLineage,
+            att.report.NativeSourceWorkbookReportWriter.Result sourceWorkbookReport) throws Exception {
         Map<String,Object> metadata = new LinkedHashMap<String,Object>();
         metadata.put("executionType", "run");
         metadata.put("targetType", resolution.implicitSuite() ? "nativeSuite" : "nativeCase");
@@ -881,6 +897,8 @@ public class FrameworkEngine {
             caseSources.add(att.testcase.NativeSuiteRetryResolver.caseSourceIdentity(testCase));
         metadata.put("caseSources", caseSources);
         metadata.put("sourceIdentityDigest", nativeSourceIdentityDigest(definitionValues, caseSources));
+        if (sourceWorkbookReport != null)
+            metadata.put("sourceWorkbookReport", sourceWorkbookReport.toMap());
         if (retryLineage != null) metadata.put("retryLineage", retryLineage.toManifestMap(
                 summary.executionCount(), summary.skipped()));
         return metadata;
@@ -1122,6 +1140,12 @@ public class FrameworkEngine {
         history.put("cases", cases);
         Map<String, Object> outputs = new LinkedHashMap<String, Object>(); outputs.put("html", "report/index.html"); if (options.ciOutputs().contains("json")) outputs.put("json", "ci/summary.json"); if (options.ciOutputs().contains("junit")) { outputs.put("junit", "ci/junit.xml"); outputs.put("junitHtml", "report/junit.html"); }
         if (results.stream().anyMatch(result -> result.definitionId() != null)) outputs.put("xlsx", NativeCaseExcelReportWriter.OUTPUT_PATH);
+        if (nativeRunMetadata != null && nativeRunMetadata.get("sourceWorkbookReport") instanceof Map<?,?>) {
+            Map<?,?> sourceReport = (Map<?,?>) nativeRunMetadata.get("sourceWorkbookReport");
+            if ("written".equals(sourceReport.get("status"))
+                    && NativeSourceWorkbookReportWriter.OUTPUT_PATH.equals(sourceReport.get("outputPath")))
+                outputs.put("sourceWorkbookXlsx", NativeSourceWorkbookReportWriter.OUTPUT_PATH);
+        }
         history.put("outputs", outputs);
         JsonSchemaVerifier.verify(SchemaFiles.resolve(projectRoot, "att-run-v2.1.schema.json"), history);
         byte[] bytes = new Yaml().dump(history).getBytes(java.nio.charset.StandardCharsets.UTF_8);

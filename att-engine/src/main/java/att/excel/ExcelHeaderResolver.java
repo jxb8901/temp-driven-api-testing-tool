@@ -11,10 +11,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Shared logical-header projection for testcase loading and result-workbook writing. */
-final class ExcelHeaderResolver {
+public final class ExcelHeaderResolver {
     private ExcelHeaderResolver() { }
 
-    static Map<String, Integer> columns(Sheet sheet, int headerRows, DataFormatter formatter) {
+    public static Map<String, Integer> columns(Sheet sheet, int headerRows, DataFormatter formatter) {
         return columns(sheet, headerRows, formatter, maxColumns(sheet, headerRows));
     }
 

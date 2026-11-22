@@ -1,7 +1,7 @@
 <!-- att-doc-status: planned release=unreleased issue=287 -->
 # Proposed CLI vNext
 
-> **Planned, not released.** This grammar is not part of ATT 4.4.1. Use the current [CLI Reference](../../reference/cli.md) for released commands. Promote this contract to Current only with a released and verified #287 implementation.
+> **Planned, not released.** This page describes the broader shared Local/Server grammar proposal. Native Case and Native Suite RUN commands are documented in the [current CLI Reference](../../reference/cli.md) for the 4.6.0 release-target stack; the 4.6.0 release and tag have not been published, and deployed acceptance remains pending. Promote this broader contract to Current only after release verification for #287.
 
 ## Proposed grammar and behavior
 
@@ -50,7 +50,7 @@ Legacy verbs remain on the compatibility path during migration. They are not add
 
 ## Remote examples
 
-These examples use the proposed grammar and are not part of ATT 4.4.1. The existing ATT Remote command and Job-management interface remains the current compatibility path.
+These examples use the proposed broader grammar and are not part of the 4.6.0 release target. The existing ATT Remote command and Job-management interface remains the compatibility path; Native RUN has its own target-stack contract in the current CLI Reference.
 
 
 The vNext syntax puts backend and Package selection before one of the three commands `run`, `load`, or `validate`. It uses the existing Server profile and authentication transport. Remote target paths stay Package-relative; `--config` and `--output-dir` are Local-only.

@@ -2,8 +2,8 @@
 
 - **狀態：** Proposed（提案中，尚未接受為已實作契約）
 - **日期：** 2026-11-20
-- **適用範圍：** ATT 下一代 Test Authoring；非 4.4.1 已發佈功能；本文定義的是提案，不表示可供目前 runtime 使用
-- **Native Case schema：** att-testcase/v1 已啟用；S03 inline resolution 及 RUN 已在 4.5.0 development-candidate 線實作，部署驗收仍待完成
+- **適用範圍：** ATT 下一代 Test Authoring 提案；本文記錄架構方向，不會自動定義 runtime compatibility
+- **Native Case 狀態：** 4.6.0 發佈目標包含 S03 inline resolution 和 RUN 實作；release 和 tag 尚未發佈，部署驗收仍由 [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) 跟進。
 - **相關工作：** [Issue #388](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/388)、[Source Management #233](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/233)、[PR #386](https://github.com/jxb8901/temp-driven-api-testing-tool/pull/386)
 - **英文主文件：** [ADR-0001](0001-flow-centric-testcase-resolution.md)
 - **S10 相容性證據：** [Template–Flow–Stage 矩陣及 golden fixture](../system-design/template-flow-stage-compatibility.zh.md)
@@ -16,7 +16,7 @@
 
 目前 `att-flow/v3.6` 已具備有序 Actions 與巢狀 Flow；Debug 可利用 `att-debug/v1.2` 的 Input 獨立執行 Flow；LOAD 已能重複執行 Flow、Template、Tool Target。因此下一代模型應**重用 Flow**，而不是另外發明 Steps 執行語言。
 
-本文記錄架構方向及分階段實作範圍。S03 已在 4.5.0 development candidate 登錄 att-testcase/v1，並沿用既有 Flow infrastructure 實作 inline Definition discovery、resolution 和 RUN；部署驗收仍待完成。S10/#398 加入配對相容性 fixture，並在[相容性矩陣](../system-design/template-flow-stage-compatibility.zh.md)記錄 Stage input、event 及 evidence 的已知差異。Excel resolution、Testdata／Generator、LOAD target、Studio 編輯及 Debug interoperability 仍屬後續工作。
+本文仍屬 **Proposed**，記錄架構方向及分階段實作範圍。尚未發佈的 4.6.0 release-target stack 包含 S03–S07 和 S12 的實作工作，包括 Native Case RUN、Excel source、Studio 編輯、implicit Suite、報告及 Default Package examples。程式碼仍在開啟中的 stacked PR；Native RUN（[#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)）、報告整合（[#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)）及 S12 採納（[#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)）的部署驗收仍未完成。共享編輯器部署驗收由獨立的 [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387) 跟進。S10/#398 只提供相容性分析和 golden fixture，不會改變 FrameworkEngine runtime semantics。Native LOAD target（[#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)）、進階 Testdata／generator（[#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)）、Debug interoperability（[#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)）及 Helper rollback／teardown 驗證（[#421](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/421)）均屬目標以外的後續工作。ADR approval 和 architecture closure 會在目標工作之後由 [#422](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/422) 跟進，不是發佈阻礙。
 
 ## 決策
 
@@ -113,7 +113,7 @@ Excel mapping 延用 `att-sidecar/v2.2`：`dataSource.caseId` 和 `tags` 是物�
 
 Excel Case ID 的 identity 規則比一般資料欄嚴格。`dataSource.caseId` 必須來自文字儲存格，並以現有 `DataFormatter(Locale.ROOT)` 方式讀取；公式、數字、日期、布林及錯誤儲存格均無效。空白儲存格，或經現有 `ValueNormalizer` 判定為空白標記的值（`N/A`、`NA`、`NULL`、`NONE`，忽略前後空白及 ASCII 大小寫），代表缺少 ID；若該列其他已映射欄位有資料，便會報錯。其餘值保留原文及大小寫，不可 trim 或轉換大小寫。前後空白、控制字元、不符合 `[A-Za-z0-9_-]{1,128}` 的值及 Windows 保留裝置名稱（不分大小寫）均會被拒絕。來源 ID 重複時按 ASCII case-folding 比較。`caseIdExpression` 可以產生不同的 Resolved Case ID，但不能免除來源 ID。Excel 行號只可作為診斷來源資訊，不可作為 ID。
 
-`report` 只允許 `format: xlsx`；`template: sourceWorkbook` 只可與 Excel Data Source 一起使用，且只會複製來源為新的輸出 workbook。報告執行屬後續工作，不在 S01 runtime scope 內。
+`report` 只允許 `format: xlsx`；`template: sourceWorkbook` 只可與 Excel Data Source 一起使用，且會將來源複製為新的輸出 workbook。S07 會在 RUN 前驗證已接受的 Workbook revision 和所選實體來源列，並在執行後產生該可選報告。它會保留來源公式、遮蔽敏感來源值，且不會寫回 Package 內的 Workbook。若可選來源版面 artifacts 超出支援範圍或限制，完整的標準 Native 報告仍作為 fallback。Server 只有在目前 Package editor 權限通過時才會提供來源版面 Workbook。
 
 Definition、Data Source、record 和 report object 可使用以 `x-` 為前綴的擴展欄位；其他未知欄位一律拒絕。Projection 和 binding 結構維持嚴格驗證。
 
@@ -191,9 +191,9 @@ View／Validate／Preview 不可改動 Source、產生有副作用的 Legacy Sna
 
 現有 **XLSX + Sidecar + XML Snapshot**、多 Stage Case、Template Target、CLI、Job／Schedule、報告必須繼續可用。Stage 的 required、runWhen、onFailure、Scope／Input Overlay、Rollback／Cleanup 和 Nested Flow Scope **不能假設等同普通 Flow Action**。S10 fixture 只證明一種明確的失敗／rollback／cleanup 對應方式，並揭示 Stage-only input overlay 和輸出結構差異。未驗證相容前應保留 Legacy Adapter／Execution Path。
 
-必須重用 4.4.1 的 Package Source／Change Sets／Validate／Review／Publish／Revision／History／Restore 及不可變 Job Source Snapshot，不另建平行發佈系統。
+必須重用現有 Package Source／Change Sets／Validate／Review／Publish／Revision／History／Restore 流程及不可變 Job Source Snapshot，不另建平行發佈系統。
 
-**本 ADR 不要求 PR #386／4.4.1 GA 完成 Native Cases、Generator、Template／Stage 合併或 LOAD Case Target。** 屬於後續逐步演進方向。
+原始 rollout 計劃將 PR #386 與 Native Case、dynamic generator、Flow／Template consolidation 和新 LOAD target 分開處理。目前 4.6.0 target 只包括上述範圍；S08／S09／S11 和 Helper rollback 驗證仍是後續工作。本 ADR 仍須在目標工作後由 #422 進行架構評審及批准；該 closure 不會阻礙 release target。
 
 ## 後續 ADR 評審仍需處理的問題
 

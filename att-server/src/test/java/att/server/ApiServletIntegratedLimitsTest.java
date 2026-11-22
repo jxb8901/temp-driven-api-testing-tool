@@ -141,6 +141,110 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void nativeSourceWorkbookArchiveRequiresCurrentPackageEditor() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("native-source-xlsx-packages"));
+        Path packageRoot=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig("native-source-xlsx-runtime");
+        Path data=temp.resolve("native-source-xlsx-data");
+        Path serverFile=temp.resolve("native-source-xlsx-server.yaml");
+        Path libs=workerLibraries("native-source-xlsx-libs");
+        String server="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n"
+                +"  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
+                +"  authenticationRequired: true\n  auth: {mode: local}\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\n  inspection: {enabled: true}\nworkers: {}\npackages:\n"
+                +"  allowedRoots: ["+ServerRuntimeTestSupport.yaml(packages)+"]\n  entries:\n"
+                +"    alice:\n      path: "+ServerRuntimeTestSupport.yaml(packageRoot)+"\n";
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(Files.writeString(serverFile,server)),libs.toString())) {
+            runtime.auth.createUser("alice","Alice","unused Alice password","USER");
+            runtime.auth.createUser("bob","Bob","unused Bob password","USER");
+            String id="J0000000000000791",runId="native-source-download";
+            byte[] sourceWorkbookBytes=workbookBytes("Source",true);
+            byte[] resultWorkbookBytes=workbookBytes("Cases",false);
+            createScheduledNativeSourceWorkbookFixture(runtime,id,runId,"alice",sourceWorkbookBytes,resultWorkbookBytes);
+            String nonEditorJobId="J0000000000000792",nonEditorRunId="native-source-no-editor";
+            createScheduledNativeSourceWorkbookFixture(runtime,nonEditorJobId,nonEditorRunId,"bob",
+                    sourceWorkbookBytes,resultWorkbookBytes);
+
+            ApiServlet servlet=servlet(runtime);
+            String sourcePath=runId+"/"+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX;
+            Captured editorZip=invokeAs(servlet,"alice","GET","/jobs/"+id+"/artifacts/archive.zip",Collections.emptyMap(),new byte[0],false);
+            assertEquals(200,editorZip.status);
+            Captured editorWorkbook=invokeAs(servlet,"alice","GET","/jobs/"+id+"/artifacts/view/"+sourcePath,Collections.emptyMap(),new byte[0],false);
+            assertEquals(200,editorWorkbook.status);
+            assertEquals("attachment; filename=\"native-cases.source-workbook.xlsx\"",editorWorkbook.headers.get("Content-Disposition"));
+            assertArrayEquals(sourceWorkbookBytes,editorWorkbook.body());
+
+            Captured nonEditorZip=invokeAs(servlet,"bob","GET","/jobs/"+id+"/artifacts/archive.zip",Collections.emptyMap(),new byte[0],false);
+            assertEquals(403,nonEditorZip.status,"A RUN-only USER cannot download an archive containing the source workbook");
+            Captured nonEditorWorkbook=invokeAs(servlet,"bob","GET","/jobs/"+id+"/artifacts/view/"+sourcePath,Collections.emptyMap(),new byte[0],false);
+            assertEquals(403,nonEditorWorkbook.status,"A RUN-only USER cannot download the source workbook entry");
+            Captured nonEditorStandardReport=invokeAs(servlet,"bob","GET","/jobs/"+id+"/artifacts/view/case.log",Collections.emptyMap(),new byte[0],false);
+            assertEquals(200,nonEditorStandardReport.status,"Standard artifacts retain their existing access policy");
+            Captured nonEditorIndex=invokeAs(servlet,"bob","GET","/jobs/"+id+"/artifacts",Collections.emptyMap(),new byte[0],false);
+            assertFalse(new String(nonEditorIndex.body(),StandardCharsets.UTF_8).contains(sourcePath),
+                    "The source-workbook path is not listed after editor access is revoked or absent");
+
+            String excludedPath=nonEditorRunId+"/"+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX;
+            Captured nonEditorJobZip=invokeAs(servlet,"bob","GET","/jobs/"+nonEditorJobId+"/artifacts/archive.zip",Collections.emptyMap(),new byte[0],false);
+            assertEquals(200,nonEditorJobZip.status,"A non-editor Job still receives ordinary artifacts when its source workbook is omitted at build time");
+            Captured nonEditorJobIndex=invokeAs(servlet,"bob","GET","/jobs/"+nonEditorJobId+"/artifacts",Collections.emptyMap(),new byte[0],false);
+            assertFalse(new String(nonEditorJobIndex.body(),StandardCharsets.UTF_8).contains(excludedPath),
+                    "A source workbook is omitted when the stored Job principal is not a current Package editor");
+
+            runtime.auth.disable("alice");
+            assertThrows(ServerRuntime.AuthoringSourceDeniedException.class,()->runtime.openArtifactArchive(id,true,"alice"),
+                    "A revoked editor loses access to the containing archive");
+            assertThrows(ServerRuntime.AuthoringSourceDeniedException.class,()->runtime.archiveEntry(id,sourcePath,"alice"),
+                    "A revoked editor loses access to the individual source workbook");
+        }
+    }
+
+    private static void createScheduledNativeSourceWorkbookFixture(ServerRuntime runtime,String id,String runId,
+            String principal,byte[] sourceWorkbookBytes,byte[] resultWorkbookBytes) throws Exception {
+        Path output=Files.createDirectories(runtime.outputDirectoryForJob(id));
+        Files.writeString(output.resolve("case.log"),"ordinary report remains available\n");
+        Path runDirectory=Files.createDirectories(output.resolve(runId));
+        Path sourceWorkbook=runDirectory.resolve(ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX);
+        Path resultWorkbook=runDirectory.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX);
+        Files.createDirectories(sourceWorkbook.getParent());Files.write(sourceWorkbook,sourceWorkbookBytes);
+        Files.createDirectories(resultWorkbook.getParent());Files.write(resultWorkbook,resultWorkbookBytes);
+        String outputDigest=sha256(sourceWorkbookBytes);
+        String formulaDigest=att.report.NativeSourceWorkbookReportWriter.formulaInventorySha256(sourceWorkbookBytes);
+        Files.writeString(runDirectory.resolve("run.yaml"),"schemaVersion: att-run/v2.1\nrun:\n"
+                +"  id: "+runId+"\n  targetType: nativeCase\n  nativeReportProtection: att-native-report/v1\n"
+                +"  sourceWorkbookReport:\n    schemaVersion: att-native-source-workbook-report/v1\n"
+                +"    status: written\n    outputPath: "+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX+"\n"
+                +"    sourceSha256: "+outputDigest+"\n    outputSha256: "+outputDigest+"\n"
+                +"    formulaSha256: "+formulaDigest+"\noutputs:\n"
+                +"  html: report/index.html\n  xlsx: "+ArtifactArchive.NATIVE_CASE_RESULT_XLSX+"\n"
+                +"  sourceWorkbookXlsx: "+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX+"\n");
+
+        Job job=new Job(id,"run","alice",principal,new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
+        job.executionSpec=nativeExecutionSpec("alice",runId);
+        job.resultJson=ServerRuntime.JSON.writeValueAsString(Map.of("executionId",runId,"status","PASS","exitCode",0));
+        runtime.store.insert(job,"{}");job.status="PASS";job.finishedAt=Instant.now();runtime.store.update(job);
+        runtime.scheduleArtifactArchive(id);
+        Path status=runtime.artifactArchivePath(id).resolveSibling("archive-status.json");
+        for(int attempt=0;attempt<400;attempt++) {
+            if(Files.isRegularFile(status)) {
+                JsonNode state=ServerRuntime.JSON.readTree(status.toFile()).path("state");
+                if("READY".equals(state.asText()))return;
+                if("FAILED".equals(state.asText()))throw new AssertionError("Archive publication failed for "+id+": "+Files.readString(status));
+            }
+            Thread.sleep(25L);
+        }
+        fail("Timed out waiting for artifact archive for "+id);
+    }
+
+    private static byte[] workbookBytes(String sheetName,boolean includeFormula) throws Exception {
+        try(XSSFWorkbook workbook=new XSSFWorkbook();ByteArrayOutputStream bytes=new ByteArrayOutputStream()) {
+            Sheet sheet=workbook.createSheet(sheetName);Row header=sheet.createRow(0);header.createCell(0).setCellValue("ID");
+            Row row=sheet.createRow(1);row.createCell(0).setCellValue("case-1");
+            if(includeFormula)row.createCell(1).setCellFormula("1+1");
+            workbook.write(bytes);return bytes.toByteArray();
+        }
+    }
+
     private static String nativeExecutionSpec(String packageId,String runId) throws Exception {
         var definition=ServerRuntime.JSON.createObjectNode();
         definition.put("schemaVersion",RunDefinition.NATIVE_CASE_VERSION);

@@ -155,7 +155,7 @@ class FlowRegistryTest {
             assertEquals(0, att.config.YamlSupport.snapshotSourceCount(),
                     "Successful non-snapshot Flow loads must clear ThreadLocal captures after promotion");
         }
-        Path first = root.resolve("templates/flows/retained-0/flow.yaml").toAbsolutePath().normalize();
+        Path first = root.toRealPath().resolve("templates/flows/retained-0/flow.yaml").toAbsolutePath().normalize();
         assertNotNull(att.config.YamlSupport.location(first, "id", null),
                 "Promoted captures remain available through the bounded process-wide source map");
     }

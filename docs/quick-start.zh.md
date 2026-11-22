@@ -1,8 +1,12 @@
-# ATT v4.4.1 快速入門
+# ATT v4.6.0 快速入門
 
 [English Quick Start](quick-start.md) · [Reference Manual](reference.zh.md) · [遷移矩陣](maintenance/native-case-default-package-migration-s12.md)
 
-Native Case 主路徑對應 4.6.0 開發候選（正式 POM 版本在發佈前仍為 4.4.1）。本指南從乾淨的 repository checkout 開始，用最小離線例子跑通一次 **Native Case**。內容先教新的作者模型：
+本指南示範預計納入 ATT 4.6.0 的 Native Case 流程。4.6.0 尚未發佈或建立 tag。目標 stack 已包含 inline 和 Excel Native RUN 實作，但部署驗收仍待完成（[#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)）；Default Package 採納驗收由 [#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413) 跟進。報告整合由 [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397) 跟進；共享編輯器部署驗收則由獨立的 [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387) 跟進。
+
+Native LOAD Case target（[#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)）、進階 Testdata／generator（[#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)）及 Debug interoperability（[#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)）不屬於此發佈目標；現有直接 LOAD 和 Debug 路徑仍受支援。
+
+本指南從乾淨的 repository checkout 開始，用最小離線例子跑通一次 **Native Case**。內容先教新的作者模型：
 
 ```text
 Package → Flow → testcase.yaml（+ inline 或 Excel Data Source）
@@ -158,8 +162,8 @@ Qualified ID 分別為 `quick.start.inline.basic` 與 `quick.start.inline.with-t
 
 | 能力 | 狀態 |
 |---|---|
-| Implicit Suite（`run native-suite`、跨 Definition 標籤） | S06 / #396 — 不在 S05 基底 |
-| 不依賴來源 Workbook 的 native XLSX 報告 | S07 / #397 — 不在 S05 基底 |
+| Implicit Suite（`run native-suite`、跨 Definition 標籤） | S06 / #396 — 已納入發佈目標 stack；驗收待完成 |
+| 不依賴來源 Workbook 的 native XLSX 報告 | S07 / #397 — 已納入發佈目標 stack；整合驗收待完成 |
 | Native LOAD Case targets | S08 — 延後 |
 | 自動 Stage/Template → Flow 轉換 | #398 — 分析軌道；保留舊式 suites |
 
@@ -196,4 +200,4 @@ packages/default/templates/QUICK_START/template.yaml
 | S12 盤點／遷移決策 | [遷移矩陣](maintenance/native-case-default-package-migration-s12.md) |
 | Debug Template／Flow | [Debug](reference.zh/execution-modes/debug.md) |
 | LOAD（既有直接 targets） | [Load](reference.zh/execution-modes/load.md) |
-| CLI 語法（含 `run native-case`） | [Proposed CLI vNext](interfaces/cli/vnext-proposed.md) |
+| CLI 語法（含 `run native-case` 和 `run native-suite`） | [目前 CLI Reference](reference.zh/cli.md) |

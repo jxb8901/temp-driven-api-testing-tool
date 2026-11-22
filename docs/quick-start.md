@@ -1,8 +1,12 @@
-# ATT v4.4.1 quick start
+# ATT v4.6.0 quick start
 
 [中文快速入門](quick-start.zh.md) · [Reference Manual](reference.md) · [Migration matrix](maintenance/native-case-default-package-migration-s12.md)
 
-Native Case happy path for the 4.6.0 development candidate (POM version remains 4.4.1 until release). This guide gets you from a clean checkout to a successful **Native Case** run with the smallest offline example. It teaches the new authoring model first:
+This guide follows the Native Case workflow targeted for ATT 4.6.0. The release and tag have not been published. The target stack contains the inline and Excel Native RUN path, while deployed acceptance remains open under [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) and Default Package adoption remains open under [#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413). Report integration is tracked under [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397); shared-editor deployment evidence remains separate under [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387).
+
+Native LOAD Case targets ([#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)), advanced Testdata and generators ([#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)), and Debug interoperability ([#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)) are excluded from this target. Existing direct LOAD and Debug paths remain supported.
+
+This guide gets you from a clean checkout to a successful **Native Case** run with the smallest offline example. It teaches the new authoring model first:
 
 ```text
 Package → Flow → testcase.yaml (+ inline or Excel Data Source)
@@ -145,7 +149,7 @@ The workbook `testdata/quick-start-native.xlsx` is a read-only Data Source. Prev
 
 ## Studio Preview (when Server/Studio is available)
 
-With ATT Server and Studio on this development candidate:
+With ATT Server and Studio built from the 4.6.0 release-target stack (not yet published):
 
 1. Open the Default Package in Explorer.
 2. Open or create a `testcase.yaml` under `testcase/`.
@@ -158,8 +162,8 @@ See [Test authoring — Native Case](reference/test-authoring.md).
 
 | Capability | Status |
 |---|---|
-| Implicit Suite (`run native-suite`, tags across Definitions) | S06 / #396 — not shipped on the S05 base |
-| Source-independent native XLSX report layout | S07 / #397 — not shipped on the S05 base |
+| Implicit Suite (`run native-suite`, tags across Definitions) | S06 / #396 — implemented in the release-target stack; acceptance pending |
+| Source-independent native XLSX report | S07 / #397 — implemented in the release-target stack; integrated acceptance pending |
 | Native LOAD Case targets | S08 — deferred |
 | Automatic Stage/Template → Flow conversion | #398 — analysis track; keep legacy suites |
 
@@ -196,4 +200,4 @@ Do not edit the committed `quick_start.xml` by hand; regenerate with `snapshot` 
 | S12 inventory / migration decisions | [Migration matrix](maintenance/native-case-default-package-migration-s12.md) |
 | Debug a Template/Flow | [Debug](reference/execution-modes/debug.md) |
 | LOAD (existing direct targets) | [Load](reference/execution-modes/load.md) |
-| CLI grammar (includes `run native-case`) | [Proposed CLI vNext](interfaces/cli/vnext-proposed.md) |
+| CLI grammar (includes `run native-case` and `run native-suite`) | [Current CLI Reference](reference/cli.md) |

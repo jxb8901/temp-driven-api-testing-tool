@@ -24,6 +24,73 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerRuntimeNativeRunTest {
     @TempDir Path temp;
 
+    @Test void nativeSuiteRetryRejectsWorkbookOnlyChangeWithStableCaseIdentity() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("excel-retry-allowed"));
+        Path packageRoot=Files.createDirectories(allowed.resolve("p"));
+        Path flow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+                .resolve("flow.yaml");
+        Files.createDirectories(packageRoot.resolve("testcase/payments"));
+        Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
+                +"description: Excel retry identity fixture\nactions:\n"
+                +"  verify: {type: assert, assert: 'false'}\n");
+        Path definition=packageRoot.resolve("testcase/payments/excel/testcase.yaml");
+        Files.createDirectories(definition.getParent());
+        Files.writeString(definition,excelDefinitionYaml());
+        Path workbook=writeExcelWorkbook(packageRoot.resolve("testdata/native-cases.xlsx"));
+
+        Path runtimeConfig=Files.createDirectories(temp.resolve("excel-retry-runtime/config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path data=temp.resolve("excel-retry-data"),serverConfig=temp.resolve("excel-retry-server.yaml");
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
+                +"\n  auth: {mode: local}\n  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"workers: {maxConcurrent: 1, queuedLimit: 2}\npackages:\n  allowedRoots: ["
+                +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
+        Path libs=Files.createDirectories(temp.resolve("excel-retry-libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
+            ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            JsonNode sourceBody=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.excel"),"selection",Map.of("all",true)),
+                    "options",Map.of("debug",false,"failFast",true,"runId","native-excel-retry-source")));
+            Map<String,Object> draft=runtime.createRunDraft(sourceBody,"alice");
+            Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",draft.get("draftId"))),"alice","alice");
+            String jobId=String.valueOf(accepted.get("jobId"));
+            Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,jobId);
+            assertEquals("FAIL",((Map<?,?>)result.get("job")).get("status"),result.toString());
+            awaitArtifactArchive(runtime,jobId);
+            Map<String,Object> archived=readArchivedRunManifest(runtime,jobId);
+            @SuppressWarnings("unchecked") Map<String,Object> run=(Map<String,Object>)archived.get("run");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> sourceCases=(List<Map<String,Object>>)run.get("caseSources");
+            assertEquals(3,sourceCases.size());
+            assertTrue(sourceCases.stream().allMatch(row->String.valueOf(row.get("workbookSha256")).matches("[a-f0-9]{64}")));
+            assertTrue(sourceCases.stream().allMatch(row->String.valueOf(row.get("resolvedInputDigest")).matches("[a-f0-9]{64}")));
+
+            try(InputStream input=Files.newInputStream(workbook);XSSFWorkbook changed=new XSSFWorkbook(input)) {
+                changed.getSheet("Cases").getRow(1).getCell(1).setCellValue(777);
+                try(var output=Files.newOutputStream(workbook)){changed.write(output);}
+            }
+            JsonNode retryBody=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.excel"),"selection",Map.of("rerunFailed",true)),
+                    "options",Map.of("debug",false,"runId","native-excel-retry-stale")));
+            ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,
+                    ()->runtime.createRunDraft(retryBody,"alice"),
+                    "A workbook-only edit must invalidate a retry even when Case IDs do not change");
+            assertEquals("ATT-SERVER-NATIVE-SUITE-RETRY-REVISION-STALE",stale.code);
+            assertFalse(runtime.jobs.values().stream().anyMatch(job->"native-excel-retry-stale".equals(job.request.runId)),
+                    "A stale workbook retry must not create a Job");
+        }
+    }
+
     @Test void validatesExactNativeSelectionRejectsStaleDraftAndRunsAcceptedSourceSnapshot() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("allowed"));
         Path packageRoot=Files.createDirectories(allowed.resolve("p"));

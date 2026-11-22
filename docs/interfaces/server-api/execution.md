@@ -1,10 +1,10 @@
-<!-- att-doc-status: current release=4.3.0 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
 # RUN and LOAD APIs
 
-## Native Test Case RUN (att-execution/v2; planned 4.5.0)
+## Native Test Case and Suite RUN (att-execution/v2)
 
-This contract is planned for the 4.5.0 development train and remains subject to its release acceptance gate. Use it only with a Server that advertises v2 support. Native inline Test Cases use an explicit `nativeCase` target. `definitionId` identifies a Package Definition under the configured Package Test Case root (default `testcase/`); `resolvedCaseIds` contains one or more unique local Case IDs (up to 1,000). The Server resolves and validates the exact selection in a draft. Do not send Native Case fields to a direct `/jobs/run` request or translate local IDs into legacy Workbook `caseIds`.
+This contract is included in the unpublished ATT 4.6.0 formal release target. No 4.6.0 release or tag has been published, and deployed Native RUN acceptance remains open under [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393). Use it only with a Server that advertises `att-execution/v2`. Native inline Test Cases use an explicit `nativeCase` target. `definitionId` identifies a Package Definition under the configured Package Test Case root (default `testcase/`); `resolvedCaseIds` contains one or more unique local Case IDs (up to 1,000). The Server resolves and validates the exact selection in a draft. Do not send Native Case fields to a direct `/jobs/run` request or translate local IDs into legacy Workbook `caseIds`.
 
 Create a validated draft:
 
@@ -36,6 +36,8 @@ Content-Type: application/json
 ```
 
 The draft pins the Definition and Package revision. A source change before submission makes the draft stale; after acceptance, the Worker reads the immutable Job source snapshot. Results use the existing Job, event, cancellation, and artifact routes, with Definition, Qualified Case, local Case, and execution identities in the evidence. In v2, `options.runId` is an optional ATT output Run ID and is preserved in the accepted Worker request.
+
+Native implicit Suites use `target.type: "nativeSuite"`, one or more `definitionIds`, and an explicit selection such as `all`, `qualifiedCaseIds`, or included/excluded `tags`. A `rerunFailed` selection is exclusive with explicit selectors and uses the latest eligible completed Native Suite RUN. The Server validates and freezes the Definition and selected Case identities in the same v2 draft flow.
 <!-- att-docs:historical -->
 Existing `att-execution/v1` Workbook/Sidecar selection and direct Template/Flow/Tool targets keep their behavior. `GET /api/v1/version` retains `unifiedRunVersion: att-execution/v1` and also advertises `unifiedRunVersions`, including v2 when supported.
 <!-- /att-docs:historical -->

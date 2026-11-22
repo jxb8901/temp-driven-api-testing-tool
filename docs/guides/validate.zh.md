@@ -1,6 +1,6 @@
 # 驗證 configuration 與 Package
 
-目前 ATT 4.4.1 VALIDATE command 會檢查 authored input，但不會執行 business work。
+VALIDATE command 會檢查 authored input，但不會執行 business work。4.6.0 release-target CLI 亦提供共用 Local/Server `validate` grammar；此目標尚未發佈。Native target-stack command 的可用狀態見 [CLI Reference](../reference.zh/cli.md)。
 
 ## 驗證 Package
 

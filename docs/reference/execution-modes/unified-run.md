@@ -1,10 +1,10 @@
 # Unified RUN and schedules
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-ATT 4.4.1 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+Functional one-shot execution uses the shared **RUN** model for Cases, Templates, Flows and Tools. **Debug** is an optional diagnostic mode of supported RUN targets. **LOAD** retains its performance engine, pacing controls and specialized reports. The 4.6.0 release-target stack adds explicit Native Case and implicit Native Suite selection through `run native-case` and `run native-suite`; the release and tag remain unpublished, with deployed acceptance pending.
 
-The released Local CLI keeps its interface-specific compatibility boundary: its run verb selects workbook Cases, and standalone debug runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. This shared RUN model does not mean the proposed vNext CLI grammar is released; see the [Planned vNext page](../../interfaces/cli/vnext-proposed.md).
+The legacy Local CLI keeps its compatibility boundary: `./att.sh run` selects workbook Cases, and standalone `debug` runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. Native Server RUN requires a validated `att-execution/v2` draft; it is not submitted through the legacy raw Case selector. The broader shared CLI grammar remains a [planned proposal](../../interfaces/cli/vnext-proposed.md).
 
 ## Validate and execute a RUN
 

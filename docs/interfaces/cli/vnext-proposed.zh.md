@@ -1,7 +1,7 @@
 <!-- att-doc-status: planned release=unreleased issue=287 -->
 # Proposed CLI vNext
 
-> **規劃中，尚未發行。** 此語法尚未納入 ATT 4.4.1。已發行的 command 請使用目前的 [CLI Reference](../../reference.zh/cli.md)。只有在 #287 implementation 發行並完成核實後，才可將本 contract 標示為 Current。
+> **規劃中，尚未發行。** 本頁描述更廣泛的 Local/Server 共用 grammar proposal。Native Case 和 Native Suite RUN command 已列於 4.6.0 release-target stack 的[目前 CLI Reference](../../reference.zh/cli.md)；4.6.0 release 和 tag 尚未發佈，部署驗收仍待完成。只有在 #287 完成 release 核實後，才可將這項更廣泛的 contract 標示為 Current。
 
 ## Proposed grammar and behavior
 
