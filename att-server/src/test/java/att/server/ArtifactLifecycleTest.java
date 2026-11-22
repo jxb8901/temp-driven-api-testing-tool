@@ -322,13 +322,14 @@ class ArtifactLifecycleTest {
     }
 
     private att.server.api.ArtifactArchiveMetrics awaitMetrics(ServerRuntime runtime,String id,String outcome) throws Exception {
-        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
+        att.server.api.ArtifactArchiveMetrics metrics=null;
         do {
-            var metrics=runtime.store.archiveMetrics(id);
+            metrics=runtime.store.archiveMetrics(id);
             if(metrics!=null&&outcome.equals(metrics.outcome))return metrics;
             Thread.sleep(20);
         }while(System.nanoTime()<deadline);
-        fail("Archive metrics did not reach "+outcome);return null;
+        fail("Archive metrics did not reach "+outcome+"; last="+metrics);return null;
     }
 
     @Test void archivesEveryTerminalOutcomeAndPreservesExactPreviewBytes() throws Exception {
@@ -607,10 +608,15 @@ class ArtifactLifecycleTest {
             while(Files.exists(output)&&System.nanoTime()<deadline)Thread.sleep(10);
             assertFalse(Files.exists(output));
             Files.writeString(runtime.artifactArchivePath(id),"corrupt after source cleanup");
-            runtime.scheduleArtifactArchive(id);awaitState(runtime,id,"FAILED");
-            // A corrupt READY archive already reads as FAILED before its writer finishes.
-            // Await persisted completion before replacing the status file below.
-            awaitMetrics(runtime,id,"FAILED");
+            long priorAttempts=runtime.store.archiveMetrics(id).attempts;
+            // A corrupt READY archive already reads as FAILED from artifactIndex before the
+            // writer updates metrics or the status file. Await persisted FAILED metrics first
+            // so the assertions below do not race a projected index state.
+            runtime.scheduleArtifactArchive(id);
+            var failed=awaitMetrics(runtime,id,"FAILED");
+            assertTrue(failed.attempts>priorAttempts);
+            assertEquals("publication_failed",failed.failureReason);
+            awaitState(runtime,id,"FAILED");
             assertEquals(false,runtime.artifactIndex(id).get("retryable"));
             assertThrows(ServerRuntime.ArchiveUnavailableException.class,()->runtime.openArtifactArchive(id,true));
             assertThrows(IllegalArgumentException.class,()->runtime.retryArtifactArchive(id));
