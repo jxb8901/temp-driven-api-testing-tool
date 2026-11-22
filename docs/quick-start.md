@@ -90,29 +90,58 @@ Dry-run resolves and validates the selected Case IDs. It does not execute Flow A
 ## RUN the single Case
 
 ```sh
-./att.sh --local -p default run native-case quick.start.single \
-  --resolved-case-id default
+./att.sh --local -p default --output-dir output --run-id native-qs-single \
+  run native-case quick.start.single --resolved-case-id default
 ```
 
-Expect status `PASS` and per-Case evidence under the run output directory. On this S05-based head, HTML/CI-style evidence follows the existing Native RUN path. **Source-independent standard native XLSX reporting is S07 and is not claimed here.**
+Expect overall status `PASS`. Use a dedicated `--run-id` (and optional `--output-dir`) so a second attempt does not collide with an existing run directory.
+
+## Inspect Results
+
+Native RUN writes evidence under `<output-dir>/<run-id>/` (default Package output is `packages/default/output/` when `--output-dir` is omitted):
+
+```text
+output/native-qs-single/
+  run.yaml
+  report/index.html
+  report/junit.html
+  ci/summary.json
+  ci/junit.xml
+  executions/<execId>/case.log
+  executions/<execId>/case.yaml
+```
+
+Open `report/index.html` for the HTML overview and `ci/summary.json` for machine-readable totals. Each selected Case has its own `executions/<execId>/case.log`.
+
+| Status | Meaning for this guide |
+|---|---|
+| `PASS` | Selected Cases finished and assertions succeeded |
+| `FAIL` | A business assertion failed |
+| `ERROR` | Runtime/integration failure |
+| `INVALID` | Validation prevented execution |
+| `SKIPPED` | Dry-run resolved the Case without executing the Flow |
+
+On this S05-based head, HTML/CI/JUnit evidence follows the existing Native RUN path. **Source-independent standard native XLSX reporting is S07 and is not claimed here.**
 
 ## RUN multiple inline Cases
 
 ```sh
-./att.sh --local -p default run native-case quick.start.inline \
+./att.sh --local -p default --output-dir output --run-id native-qs-inline \
+  run native-case quick.start.inline \
   --resolved-case-id basic --resolved-case-id with-tool
 ```
 
-Qualified IDs are `quick.start.inline.basic` and `quick.start.inline.with-tool`.
+Qualified IDs are `quick.start.inline.basic` and `quick.start.inline.with-tool`. Both should appear as `PASS` in `ci/summary.json` (`total=2`, `passed=2`).
 
 ## RUN Excel-backed Cases
 
 ```sh
-./att.sh --local -p default run native-case quick.start.excel \
+./att.sh --local -p default --output-dir output --run-id native-qs-excel \
+  run native-case quick.start.excel \
   --resolved-case-id QS001 --resolved-case-id QS002
 ```
 
-The workbook `testdata/quick-start-native.xlsx` is a read-only Data Source. Preview and RUN do not modify it and do not create a legacy XML Snapshot.
+The workbook `testdata/quick-start-native.xlsx` is a read-only Data Source. Preview and RUN do not modify it and do not create a legacy XML Snapshot. Expect both `quick.start.excel.QS001` and `quick.start.excel.QS002` in the run summary.
 
 ## Studio Preview (when Server/Studio is available)
 

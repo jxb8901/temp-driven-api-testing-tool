@@ -23,7 +23,7 @@ Baseline: branch stacked on S05 PR #409 (`codex/issue-395-studio`), which alread
 | `packages/default/testcase/quick_start.xlsx` + `.yaml` + `.xml` | Sidecar `att-sidecar/v2.2` + Snapshot `att-testcases/v2.4` + Template `QUICK_START` | Legacy Quick Start appendix, `QuickStartDocumentationTest`, packaging | **Supported legacy compatibility fixture** | Retain original Case IDs and Stage/Template path; do not rewrite | `./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001` |
 | `packages/default/templates/QUICK_START/template.yaml` | `att-template/v3.6` | Legacy Quick Start Stage | **Supported legacy compatibility fixture** | Stage/Template entry remains valid; Native path uses Flow instead | Legacy suite RUN |
 | `packages/default/testcase/payment2.xlsx` (+ sidecar/XML) | Legacy single-Stage payment demo | Docs/debug examples, `DocumentationExamplesTest` | **Retained legacy** (no parallel Native yet) | Business Template stages and external-style inputs; not offline-safe as a Native Quick Start | Dry-run suite remains green; Native conversion deferred pending #398 semantics review |
-| `packages/default/testcase/payment_regression.xlsx` (+ sidecar/XML) | Legacy multi-Stage prepare/invoke/verify/rollback/cleanup | Payment regression coverage | **Retained legacy** (no parallel Native yet) | Per-Stage Template selection, `runWhen`/`onFailure`, and Case ID mapping are not 1:1 with a single Flow binding (#398) | Keep suite intact; do not claim blanket conversion |
+| `packages/default/testcase/payment_regression.xlsx` (+ sidecar/XML) | Legacy multi-Stage prepare/invoke/verify/rollback/cleanup | Payment regression coverage | **Retained legacy** (no parallel Native yet) | Per-Stage Template selection, `runWhen`/`onFailure`, and Case ID mapping are not 1:1 with a single Flow binding (#398) | Offline dry-run: `./att.sh run --suite testcase/payment_regression.xlsx --dry-run` → `total=22`, `skipped=22` (no FPP/MQ/DB I/O). Package validate counts the suite in `suites=3` / `cases=26`. Full business RUN against live systems is integration-only and owned by #398; not exercised here. |
 | `packages/default/templates/flows/common/*` | Nested identity/decorate/compose Flows | Cross-mode examples | **Unchanged** | Already Flow-native helpers | Existing LoadCrossMode / Package validate |
 | `packages/default/tools/**` | Package-owned Tools | Legacy + Native Quick Start sample Tool | **Unchanged** | #352 ownership preserved | Package validate |
 | `examples/load/**` | `att-load/v1.9` direct targets | LOAD guides | **Supported legacy / current LOAD path** | Native LOAD Case targets are S08 (deferred) | Existing load smoke examples |
@@ -53,9 +53,13 @@ Baseline: branch stacked on S05 PR #409 (`codex/issue-395-studio`), which alread
 # Legacy Quick Start retained
 ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
 
+# Retained multi-Stage fixture — offline dry-run only (no live FPP/MQ/DB)
+./att.sh run --suite testcase/payment_regression.xlsx --dry-run --format json --quiet
+
 # Package closure (legacy + native together)
 ./att.sh validate --package --format json --quiet
 ```
+
 
 ## Intentionally out of scope on this PR
 
