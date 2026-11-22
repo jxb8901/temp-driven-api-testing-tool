@@ -114,6 +114,21 @@ public class FrameworkEngine {
             try {
                 for (ResolvedTestCase testCase : selected) {
                     if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("Native RUN was cancelled");
+                    if (stopRun) {
+                        String reason = "Not started because failFast stopped the Suite after an earlier Case failure";
+                        TestResult skipped = TestResult.notExecuted(testCase.qualifiedCaseId(), nativeCaseName(testCase),
+                                testCase.tags(), testCase.definitionId(), testCase.qualifiedCaseId(), reason);
+                        results.add(skipped);
+                        appendEvent(runDirectory, runId, skipped);
+                        Map<String,Object> identity = new LinkedHashMap<String,Object>();
+                        identity.put("definitionId", testCase.definitionId());
+                        identity.put("qualifiedCaseId", testCase.qualifiedCaseId());
+                        identity.put("notStartedReason", "failFast");
+                        identity.put("executionStarted", Boolean.FALSE);
+                        emitNativeEvent(observer, "CASE_FINISHED", runId, testCase.qualifiedCaseId(),
+                                ResultStatus.SKIPPED.name(), 0L, identity);
+                        continue;
+                    }
                     TestResult result = runNativeCase(testCase, runId, runStarted, runDirectory, templateEngine,
                             flows, dbHelperExecutor, dryRun, observer);
                     results.add(result);
@@ -122,7 +137,6 @@ public class FrameworkEngine {
                             || result.status() == ResultStatus.INVALID)) {
                         stopRun = true;
                     }
-                    if (stopRun) break;
                 }
             } finally {
                 try { dbHelperExecutor.close(); }
@@ -145,7 +159,7 @@ public class FrameworkEngine {
             att.config.ConfigurationEvidence.write(runDirectory, config);
             ExecutionOptions manifestOptions = nativeManifestOptions(runId, requestedOutputRoot, dryRun, failFast, ciOutputs);
             writeManifest(runDirectory, runId, results, runStarted, runEnded, html, manifestOptions, inputs,
-                    Collections.<att.validation.Diagnostic>emptyList(), nativeRunMetadata(resolution));
+                    Collections.<att.validation.Diagnostic>emptyList(), nativeRunMetadata(resolution, summary));
             writeLatest(outputRoot, runDirectory, runId, summary, runEnded);
             emitNativeEvent(observer, "RUN_FINISHED", runId, null, summary.status().name(),
                     Duration.between(runStarted, runEnded).toMillis(), nativeSuiteIdentityData(resolution, null));
@@ -390,7 +404,8 @@ public class FrameworkEngine {
             writeCaseTree(caseOutputDir, context, caseLog);
             return new TestResult(testCase.caseId(), testCase.caseName(), finalStatus,
                     Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations), caseLogPath, validations,
-                    testCase.workbookId(), testCase.groupId(), testCase.tags(), null, validatedCaseId);
+                    testCase.workbookId(), testCase.groupId(), testCase.tags(), null, validatedCaseId,
+                    null, null, !options.dryRun());
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
             String errorMessage = typed == null ? message(e) : typed.format();
@@ -412,7 +427,7 @@ public class FrameworkEngine {
                 context.put("CASE.error", errorMessage);
             }
             return error(testCase, errorMessage, caseLogPath, Duration.between(started, Instant.now()),
-                    typed == null ? null : typed.toDiagnostic(), validatedCaseId);
+                    typed == null ? null : typed.toDiagnostic(), validatedCaseId, !options.dryRun());
         } finally {
             if (!dbFinalized) dbHelperExecutor.abortCase();
             caseLog.close();
@@ -492,7 +507,7 @@ public class FrameworkEngine {
                 TestResult result = new TestResult(testCase.qualifiedCaseId(), nativeCaseName(testCase), status,
                         Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations),
                         caseLogPath, validations, "", "", testCase.tags(), null, executionId,
-                        testCase.definitionId(), testCase.qualifiedCaseId());
+                        testCase.definitionId(), testCase.qualifiedCaseId(), !dryRun);
                 identity.put("executionId", executionId);
                 emitNativeEvent(observer, "CASE_FINISHED", runId, testCase.qualifiedCaseId(), status.name(),
                         result.duration().toMillis(), identity);
@@ -516,7 +531,7 @@ public class FrameworkEngine {
                 TestResult result = new TestResult(testCase.qualifiedCaseId(), nativeCaseName(testCase), ResultStatus.ERROR,
                         duration, "", errorMessage, caseLogPath, validations, "", "", testCase.tags(),
                         typed == null ? null : typed.toDiagnostic(), executionId, testCase.definitionId(),
-                        testCase.qualifiedCaseId());
+                        testCase.qualifiedCaseId(), !dryRun);
                 emitNativeEvent(observer, "CASE_FINISHED", runId, testCase.qualifiedCaseId(), ResultStatus.ERROR.name(),
                         duration.toMillis(), identity);
                 return result;
@@ -728,7 +743,7 @@ public class FrameworkEngine {
                 Collections.<String>emptyList()).withRunPolicies(ciOutputs, "reject", false);
     }
 
-    private Map<String,Object> nativeRunMetadata(TestCaseSuiteResolutionResult resolution) {
+    private Map<String,Object> nativeRunMetadata(TestCaseSuiteResolutionResult resolution, RunSummary summary) {
         Map<String,Object> metadata = new LinkedHashMap<String,Object>();
         metadata.put("executionType", "run");
         metadata.put("targetType", resolution.implicitSuite() ? "nativeSuite" : "nativeCase");
@@ -753,6 +768,8 @@ public class FrameworkEngine {
         }
         metadata.put("resolvedCaseCount", resolution.resolvedCount());
         metadata.put("selectedCaseCount", resolution.selectedCount());
+        metadata.put("executionCount", summary.executionCount());
+        metadata.put("skippedCaseCount", summary.skipped());
         return metadata;
     }
 
@@ -942,6 +959,7 @@ public class FrameworkEngine {
         Map<String, Object> summary = new LinkedHashMap<String, Object>();
         RunSummary runSummary = new RunSummary(results, runDirectory);
         summary.put("total", runSummary.total());
+        summary.put("executionCount", runSummary.executionCount());
         summary.put("passed", runSummary.passed());
         summary.put("failed", runSummary.failed());
         summary.put("error", runSummary.error());
@@ -959,6 +977,7 @@ public class FrameworkEngine {
                 item.put("qualifiedCaseId", result.qualifiedCaseId());
             }
             item.put("caseName", result.caseName());
+            item.put("executed", result.executionStarted());
             item.put("workbookId", result.workbookId());
             item.put("groupId", result.groupId());
             item.put("tags", result.tags());
@@ -1082,14 +1101,19 @@ public class FrameworkEngine {
     }
 
     private void appendEvent(Path runDirectory, String runId, TestResult result) throws Exception {
-        Map<String,Object> event = new LinkedHashMap<String,Object>(); event.put("runId", runId); event.put("caseId", result.caseId()); event.put("status", result.status().name()); event.put("durationMs", result.duration().toMillis()); event.put("caseLog", result.caseLogPath() == null ? "" : PathPresentation.displayPath(result.caseLogPath(), projectRoot));
+        Map<String,Object> event = new LinkedHashMap<String,Object>(); event.put("runId", runId); event.put("caseId", result.caseId()); event.put("status", result.status().name()); event.put("durationMs", result.duration().toMillis()); event.put("executionStarted", Boolean.valueOf(result.executionStarted())); event.put("caseLog", result.caseLogPath() == null ? "" : PathPresentation.displayPath(result.caseLogPath(), projectRoot));
+        if (result.executionId() != null) event.put("execId", result.executionId());
+        if (!result.executionStarted() && result.actual() != null && !result.actual().isEmpty())
+            event.put("notStartedReason", result.actual());
         String json = att.validation.JsonSupport.write(event) + "\n";
         Files.write(runDirectory.resolve("events.jsonl"), json.getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
     }
 
     private static TestResult skipped(TestCase testCase, String message) {
-        return result(testCase, ResultStatus.SKIPPED, Duration.ZERO, message, "", null);
+        return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.SKIPPED, Duration.ZERO,
+                message, "", null, Collections.<ValidationResult>emptyList(), testCase.workbookId(),
+                testCase.groupId(), testCase.tags(), null, null, null, null, false);
     }
 
     private static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration) {
@@ -1101,11 +1125,18 @@ public class FrameworkEngine {
     }
     private static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration,
                                    att.validation.Diagnostic diagnostic, String executionId) {
+        return error(testCase,message,outputXml,duration,diagnostic,executionId,true);
+    }
+    static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration,
+                            att.validation.Diagnostic diagnostic, String executionId,boolean executionStarted) {
         return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.ERROR, duration, "", message, outputXml,
-                Collections.<ValidationResult>emptyList(), testCase.workbookId(), testCase.groupId(), testCase.tags(), diagnostic, executionId);
+                Collections.<ValidationResult>emptyList(), testCase.workbookId(), testCase.groupId(), testCase.tags(),
+                diagnostic, executionId, null, testCase.caseId(), executionStarted);
     }
     private static TestResult invalid(TestCase testCase, String message) {
-        return result(testCase, ResultStatus.INVALID, Duration.ZERO, "", message, null);
+        return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.INVALID, Duration.ZERO,
+                "", message, null, Collections.<ValidationResult>emptyList(), testCase.workbookId(),
+                testCase.groupId(), testCase.tags(), null, null, null, null, false);
     }
     private static TestResult result(TestCase testCase, ResultStatus status, Duration duration, String expected, String actual, Path log) {
         return result(testCase, status, duration, expected, actual, log, null);

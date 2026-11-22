@@ -55,6 +55,13 @@ class ExecutionConsoleFormatterTest {
         assertEquals("[CASE] id=case-1 status=PASS durationMs=12",
                 ExecutionConsoleFormatter.format("STATUS", "run-1", "case-1", null, null, "PASS", 12L, null,
                         finished, ExecutionConsoleFormatter.Options.cli(null)));
+        Map<String, Object> notStarted = new LinkedHashMap<String, Object>();
+        notStarted.put("event", "CASE_FINISHED");
+        notStarted.put("executionStarted", Boolean.FALSE);
+        notStarted.put("notStartedReason", "failFast");
+        assertEquals("[CASE] id=case-2 status=SKIPPED not-started=failFast durationMs=0",
+                ExecutionConsoleFormatter.format("STATUS", "run-1", "case-2", null, null, "SKIPPED", 0L, null,
+                        notStarted, ExecutionConsoleFormatter.Options.cli(null)));
         Map<String, Object> debug = new LinkedHashMap<String, Object>();
         debug.put("event", "DEBUG_STARTED");
         debug.put("targetType", "flow");

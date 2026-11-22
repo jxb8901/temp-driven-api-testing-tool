@@ -56,10 +56,13 @@ public final class ReportRegenerator {
                         text(action.get("expected")), text(action.get("actual")), text(action.get("message")),
                         diagnostic(action.get("diagnostic"))));
             }
+            boolean executionStarted = !row.containsKey("executed") || Boolean.parseBoolean(String.valueOf(row.get("executed")));
+            String executionId = row.containsKey("execId")
+                    ? (row.get("execId") == null ? null : String.valueOf(row.get("execId"))) : caseId;
             results.add(new TestResult(caseId, caseName, ResultStatus.valueOf(String.valueOf(row.get("status"))),
                     Duration.ofMillis(longValue(row.get("durationMs"))), text(row.get("expected")), text(row.get("actual")), log,
                     validations, workbookId, groupId, strings(row.get("tags")), diagnostic(row.get("diagnostic")),
-                    row.get("execId") == null ? caseId : String.valueOf(row.get("execId"))));
+                    executionId, null, caseId, executionStarted));
         }
         Instant ended = runNode.get("endedAt") == null ? Files.getLastModifiedTime(manifest).toInstant() : Instant.parse(String.valueOf(runNode.get("endedAt")));
         Instant started = runNode.get("startedAt") == null ? ended : Instant.parse(String.valueOf(runNode.get("startedAt")));

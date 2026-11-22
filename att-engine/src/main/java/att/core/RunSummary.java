@@ -55,6 +55,11 @@ public class RunSummary {
         return count(ResultStatus.SKIPPED);
     }
 
+    /** Number of Cases for which execution actually started; selected-but-skipped rows are excluded. */
+    public long executionCount() {
+        return results.stream().filter(TestResult::executionStarted).count();
+    }
+
     public long invalid() { return count(ResultStatus.INVALID); }
 
     public ResultStatus status() {
