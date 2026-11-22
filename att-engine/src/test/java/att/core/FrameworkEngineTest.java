@@ -11,6 +11,7 @@ import att.config.ToolConfig;
 import att.config.SuiteConfigResolver;
 import att.excel.ExcelTestSuiteLoader;
 import att.snapshot.TestcaseSnapshotService;
+import att.api.ExecutionEvent;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -23,9 +24,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -329,6 +332,135 @@ class FrameworkEngineTest {
         StageConfig success = new StageConfig("verify", "Verify", Collections.emptyList(), false, "continue", "onSuccess");
         assertTrue((Boolean) method.invoke(engine, failure, true, false));
         assertFalse((Boolean) method.invoke(engine, success, true, false));
+    }
+
+    @Test void legacyStageAndNativeFlowGoldenFixturePinsCompatibilityBoundary() throws Exception {
+        String inputRef = "$" + "{EXEC.INPUT.business}";
+        String variableRef = "$" + "{EXEC.VARS.sourceBusiness}";
+        String verifySuccessRef = "$" + "{EXEC.ACTIONS.verify.output.success}";
+
+        writeText(projectRoot.resolve("templates/PREPARE/template.yaml"),
+                "schemaVersion: att-template/v3.4\nname: PREPARE\ndescription: Prepare\n"
+                        + "actions:\n  seed: {type: assign, name: sourceBusiness, expression: '" + inputRef + "'}\n"
+                        + "  prepareLog: {type: log, message: 'prepare:" + inputRef + "'}\n");
+        writeText(projectRoot.resolve("templates/INVOKE/template.yaml"),
+                "schemaVersion: att-template/v3.4\nname: INVOKE\ndescription: Invoke\n"
+                        + "actions:\n  invokeLog: {type: log, message: 'invoke:" + inputRef + "|seed:" + variableRef + "'}\n");
+        writeText(projectRoot.resolve("templates/VERIFY/template.yaml"),
+                "schemaVersion: att-template/v3.4\nname: VERIFY\ndescription: Verify\n"
+                        + "actions:\n  verify: {type: assert, assert: 'false', actual: '" + inputRef + "'}\n");
+        writeText(projectRoot.resolve("templates/ROLLBACK/template.yaml"),
+                "schemaVersion: att-template/v3.4\nname: ROLLBACK\ndescription: Rollback\n"
+                        + "actions:\n  rollbackLog: {type: log, message: 'rollback:" + inputRef + "'}\n");
+        writeText(projectRoot.resolve("templates/CLEANUP/template.yaml"),
+                "schemaVersion: att-template/v3.4\nname: CLEANUP\ndescription: Cleanup\n"
+                        + "actions:\n  cleanupLog: {type: log, message: 'cleanup:" + inputRef + "'}\n");
+
+        Path workbook = projectRoot.resolve("testcase/stage-flow-compat.xlsx");
+        Files.createDirectories(workbook.getParent());
+        try (Workbook book = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(workbook)) {
+            Sheet sheet = book.createSheet("Cases");
+            Row header = sheet.createRow(0);
+            String[] headers = {"Case ID", "Tags", "Business", "Stage Business", "Prepare Template",
+                    "Invoke Template", "Verify Template", "Rollback Template", "Cleanup Template"};
+            for (int index = 0; index < headers.length; index++) header.createCell(index).setCellValue(headers[index]);
+            Row row = sheet.createRow(1);
+            String[] values = {"TC001", "compat", "BASE", "STAGE", "name: PREPARE", "name: INVOKE",
+                    "name: VERIFY", "name: ROLLBACK", "name: CLEANUP"};
+            for (int index = 0; index < values.length; index++) row.createCell(index).setCellValue(values[index]);
+            book.write(output);
+        }
+        writeText(projectRoot.resolve("testcase/stage-flow-compat.yaml"),
+                "schemaVersion: att-sidecar/v2.1\nid: compat\n"
+                        + "excel:\n  sheet: Cases\n  caseId: Case ID\n  tags: Tags\n  dataColumns: business=Business\n"
+                        + "stages:\n"
+                        + "  - {key: prepare, template: Prepare Template, required: true}\n"
+                        + "  - key: invoke\n    template: Invoke Template\n    required: true\n"
+                        + "    dataColumns: business=Stage Business\n"
+                        + "  - {key: verify, template: Verify Template, required: true, onFailure: continue}\n"
+                        + "  - {key: rollback, template: Rollback Template, runWhen: onFailure}\n"
+                        + "  - {key: cleanup, template: Cleanup Template, runWhen: always}\n");
+        writeSnapshot(workbook);
+
+        Path definitionPath = projectRoot.resolve("testcase/native-compat/testcase.yaml");
+        writeText(definitionPath,
+                "schemaVersion: att-testcase/v1\nid: native.compat\nflow: compat.stage-flow.v1\n"
+                        + "inputs: {business: BASE}\n");
+        writeText(projectRoot.resolve("templates/flows/compat/stage-flow/v1/flow.yaml"),
+                "schemaVersion: att-flow/v3.6\nid: compat.stage-flow.v1\nname: Stage Flow Compatibility\n"
+                        + "description: Closest Flow analogue to the five-stage fixture\nactions:\n"
+                        + "  seed: {type: assign, name: sourceBusiness, expression: '" + inputRef + "'}\n"
+                        + "  prepareLog: {type: log, message: 'prepare:" + inputRef + "'}\n"
+                        + "  invokeLog: {type: log, message: 'invoke:" + inputRef + "|seed:" + variableRef + "'}\n"
+                        + "  verify: {type: assert, assert: 'false', actual: '" + inputRef + "', onFailure: continue}\n"
+                        + "  rollbackLog:\n    type: log\n    message: 'rollback:" + inputRef + "'\n"
+                        + "    runWhen: '" + verifySuccessRef + " == false'\n"
+                        + "  cleanupLog: {type: log, message: 'cleanup:" + inputRef + "', runWhen: 'true'}\n");
+
+        List<ExecutionEvent> legacyEvents = new ArrayList<ExecutionEvent>();
+        RunSummary legacy = new FrameworkEngine(projectRoot, globalConfig()).run(
+                ExecutionOptionsTestSupport.parse(new String[]{"run", "--suite", workbook.toString(),
+                        "--run-id", "STAGE-FLOW-LEGACY"}).withObserver(legacyEvents::add));
+        att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(
+                att.validation.SchemaFiles.resolve(projectRoot, "att-testcase-v1.schema.json"));
+        att.testcase.TestCaseResolutionResult resolution = resolver.resolve(definitionPath, "compat", projectRoot,
+                Paths.get("templates"), att.testcase.TestCaseDefinitionResolver.Options.defaults());
+        List<ExecutionEvent> flowEvents = new ArrayList<ExecutionEvent>();
+        RunSummary flow = new FrameworkEngine(projectRoot, globalConfig()).runNativeCases(resolution,
+                "STAGE-FLOW-NATIVE", null, false, false, flowEvents::add);
+
+        assertEquals(1, legacy.failed());
+        assertEquals(ResultStatus.FAIL, legacy.results().get(0).status());
+        assertEquals(1, flow.failed());
+        assertEquals(ResultStatus.FAIL, flow.results().get(0).status());
+
+        Path legacyCaseYaml = legacy.results().get(0).caseLogPath().getParent().resolve("case.yaml");
+        Path flowCaseYaml = flow.results().get(0).caseLogPath().getParent().resolve("case.yaml");
+        Path legacyCaseLog = legacy.results().get(0).caseLogPath();
+        Path flowCaseLog = flow.results().get(0).caseLogPath();
+        assertTrue(Files.isRegularFile(legacyCaseYaml));
+        assertTrue(Files.isRegularFile(flowCaseYaml));
+        assertTrue(Files.isRegularFile(legacyCaseLog));
+        assertTrue(Files.isRegularFile(flowCaseLog));
+        assertNotEquals(projectRoot.resolve("output/STAGE-FLOW-LEGACY").relativize(legacyCaseLog),
+                projectRoot.resolve("output/STAGE-FLOW-NATIVE").relativize(flowCaseLog));
+
+        Map<?, ?> legacyEvidence = readCaseEvidence(legacyCaseYaml);
+        Map<?, ?> flowEvidence = readCaseEvidence(flowCaseYaml);
+        assertEquals("BASE", legacyEvidence.get("business"));
+        assertEquals("BASE", CaseRuntimeContext.getPath(legacyEvidence, "VARS.sourceBusiness"));
+        assertEquals("STAGE", CaseRuntimeContext.getPath(legacyEvidence, "STAGES.invoke.business"));
+        assertEquals("BASE", CaseRuntimeContext.getPath(legacyEvidence, "STAGES.verify.TEMPLATE.ACTIONS.verify.output.actual"));
+        assertEquals("FAIL", CaseRuntimeContext.getPath(legacyEvidence, "STAGES.verify.status"));
+        assertEquals("PASS", CaseRuntimeContext.getPath(legacyEvidence, "STAGES.rollback.status"));
+        assertEquals("PASS", CaseRuntimeContext.getPath(legacyEvidence, "STAGES.cleanup.status"));
+        assertEquals("BASE", flowEvidence.get("business"));
+        assertEquals("BASE", CaseRuntimeContext.getPath(flowEvidence, "VARS.sourceBusiness"));
+        assertEquals("FAIL", CaseRuntimeContext.getPath(flowEvidence, "STAGES.run.status"));
+        assertEquals(Boolean.FALSE, CaseRuntimeContext.getPath(flowEvidence,
+                "STAGES.run.TEMPLATE.ACTIONS.run.flow.actions.verify.output.success"));
+        assertEquals("PASS", CaseRuntimeContext.getPath(flowEvidence,
+                "STAGES.run.TEMPLATE.ACTIONS.run.flow.actions.rollbackLog.output.status"));
+        assertEquals("PASS", CaseRuntimeContext.getPath(flowEvidence,
+                "STAGES.run.TEMPLATE.ACTIONS.run.flow.actions.cleanupLog.output.status"));
+
+        String legacyLog = new String(Files.readAllBytes(legacyCaseLog), "UTF-8");
+        String flowLog = new String(Files.readAllBytes(flowCaseLog), "UTF-8");
+        for (String marker : new String[]{"prepare:BASE", "invoke:STAGE|seed:BASE", "rollback:BASE", "cleanup:BASE"})
+            assertTrue(legacyLog.contains(marker), "Missing legacy marker " + marker + " in " + legacyLog);
+        for (String marker : new String[]{"prepare:BASE", "invoke:BASE", "rollback:BASE", "cleanup:BASE"})
+            assertTrue(flowLog.contains(marker), "Missing Flow marker " + marker + " in " + flowLog);
+
+        assertEquals(5, legacyEvents.stream().filter(event -> "STAGE_STARTED".equals(event.data().get("event"))).count());
+        assertEquals(6, legacyEvents.stream().filter(event -> "ACTION_FINISHED".equals(event.data().get("event"))).count());
+        assertTrue(legacyEvents.stream().anyMatch(event -> "STAGE_FINISHED".equals(event.data().get("event"))
+                && "rollback".equals(event.stage()) && "PASS".equals(event.status())));
+        assertTrue(legacyEvents.stream().anyMatch(event -> "STAGE_FINISHED".equals(event.data().get("event"))
+                && "cleanup".equals(event.stage()) && "PASS".equals(event.status())));
+        assertTrue(flowEvents.stream().anyMatch(event -> "ACTION_FINISHED".equals(event.data().get("event"))
+                && "compat.stage-flow.v1".equals(event.data().get("flowId")) && "FAIL".equals(event.status())));
+        assertEquals(1, flowEvents.stream().filter(event -> "ACTION_FINISHED".equals(event.data().get("event"))).count());
+        assertFalse(flowEvents.stream().anyMatch(event -> "STAGE_STARTED".equals(event.data().get("event"))));
     }
 
     @Test void preservesExecutionErrorInsteadOfDowngradingItToFail() throws Exception {

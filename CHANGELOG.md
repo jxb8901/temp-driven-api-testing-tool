@@ -1,3 +1,10 @@
+# ATT 4.6.0 - development candidate (acceptance pending)
+
+- Add the S10/#398 bilingual Template–Flow–Stage compatibility matrix and a paired legacy Stage/Native Flow golden fixture. Pin failed Verify status, rollback/cleanup action selection, Stage input overlay restoration, Flow case-wide inputs, result evidence paths, and current event-grain differences without changing FrameworkEngine runtime semantics.
+- Keep the Stage path supported. The marker fixture does not prove external compensation or database rollback; helper-specific rollback and teardown remain follow-up validation.
+- Keep #388 open. S08 LOAD, S09 Testdata/generators, and S11 Debug interoperability remain deferred; S03 deployed acceptance is pending.
+- This is a development candidate, not a release. Do not bump POM versions, tag, or publish from this analysis slice.
+
 # ATT 4.4.1 - release candidate (2026-11-21; acceptance pending)
 
 - Add trusted shared Package editors for online edits, ZIP imports, Testcase snapshot publication, Manifest publication, and source history; access remains limited to active USER identities, grants remain Package-scoped, and grant or root changes invalidate outstanding drafts (#387).

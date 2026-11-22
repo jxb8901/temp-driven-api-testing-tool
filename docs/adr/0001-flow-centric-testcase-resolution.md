@@ -3,9 +3,10 @@
 - **Status:** Proposed
 - **Date:** 2026-11-20
 - **Scope:** Proposed next-generation ATT authoring, after the existing Source Management workflow
-- **Native Case schema:** `att-testcase/v1` is active; S03 delivers inline resolution and RUN in the 4.5.0 development candidate
+- **Native Case schema:** att-testcase/v1 is active; S03 inline resolution and RUN are implemented on the 4.5.0 development-candidate line, with deployed acceptance still pending
 - **Related:** [Issue #388](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/388), [#233](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/233), [PR #386](https://github.com/jxb8901/temp-driven-api-testing-tool/pull/386)
 - **Translation:** [繁體中文版](0001-flow-centric-testcase-resolution.zh.md)
+- **S10 compatibility evidence:** [Template–Flow–Stage matrix and golden fixture](../system-design/template-flow-stage-compatibility.md)
 
 > **Decision:** A Test Case Definition binds reusable Flow logic to a Data Source and resolution rules. The long-term model may resolve **0..m Resolved Test Cases**; a zero-case result is a validation error before RUN. RUN/LOAD executes selected cases. Case generation and execution are different lifecycles.
 
@@ -15,7 +16,7 @@ ATT's established authoring path is **XLSX + att-sidecar/v2.2 + generated XML sn
 
 Existing Flow definitions already contain ordered Actions and nested Flow calls; Debug can execute a Flow with temporary input, and LOAD already repeats Flow/Template/Tool targets. Introducing an independent Steps model would duplicate the same execution language.
 
-This ADR records the architecture direction and staged implementation boundary. S03 registers `att-testcase/v1` and implements inline Definition discovery, resolution, and RUN through existing Flow infrastructure in the 4.5.0 development candidate. Excel resolution, Testdata/generators, LOAD targets, Studio editing, and Debug interoperability remain follow-up work.
+This ADR records the architecture direction and staged implementation boundary. S03 registers att-testcase/v1 and implements inline Definition discovery, resolution, and RUN through existing Flow infrastructure in the 4.5.0 development candidate; deployed acceptance remains pending. S10/#398 adds a paired compatibility fixture and records the known Stage input, event, and evidence differences in the [compatibility matrix](../system-design/template-flow-stage-compatibility.md). Excel resolution, Testdata/generators, LOAD targets, Studio editing, and Debug interoperability remain follow-up work.
 
 ## Decision
 
@@ -188,7 +189,7 @@ Preserve source ownership, authorization, confidentiality, revision consistency,
 
 **Costs:** new Definition schema/Resolver, identity rules, potentially costly source expansion, validation and provenance, compatible reuse of execution core.
 
-Legacy path **must remain operational**: XLSX + `att-sidecar/v2.2` + canonical XML snapshot, multi-Stage Case execution, Template entry points, existing CLI/Job/Schedule/report IDs. Stage `required`/`runWhen`/`onFailure`, scope/overlays, rollback/cleanup, nested Flow state, retries, logs and events are **not automatically equivalent** to a plain nested Flow Action. Keep legacy execution via adapter until semantic equivalence is proven.
+Legacy path **must remain operational**: XLSX + att-sidecar/v2.2 + canonical XML snapshot, multi-Stage Case execution, Template entry points, existing CLI/Job/Schedule/report IDs. Stage required/runWhen/onFailure, scope/overlays, rollback/cleanup, nested Flow state, retries, logs and events are **not automatically equivalent** to a plain nested Flow Action. The S10 fixture proves only one explicit failure/rollback/cleanup mapping and exposes the Stage-only input overlay and output-shape differences. Keep legacy execution via adapter until each compatibility boundary is proven.
 
 Reuse 4.4.1 Package Source / Change Sets / Validate / Review / Publish / Revision / History / Restore and immutable Job source closure. Do not create a second authoring/publishing subsystem.
 
@@ -201,7 +202,7 @@ Reuse 4.4.1 Package Source / Change Sets / Validate / Review / Publish / Revisio
 3. Eager versus deterministic bounded/lazy Resolution; when and where selected target sets are pinned.
 4. Persistent Suite selection representation if needed across Definitions.
 5. Mapping selected Case targets into existing LOAD workload/mix without changing direct Flow/Template/Tool behavior.
-6. Exact compatibility of Stage scope/failure/cleanup versus Flow Action semantics, and Template-to-Flow transition.
+6. Exact compatibility of Stage scope/failure/cleanup versus Flow Action semantics, and Template-to-Flow transition ([S10 matrix](../system-design/template-flow-stage-compatibility.md)).
 7. Debug-to-Case conversion details, confidential input evidence and optional Excel report template behavior.
 
 These are delegated to focused follow-up design/issues. Status remains **Proposed** until review and first-implementation contracts are agreed.
