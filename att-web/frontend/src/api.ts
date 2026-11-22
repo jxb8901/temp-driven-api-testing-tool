@@ -57,6 +57,7 @@ let csrfToken = '';
 let localAuthMode = false;
 let unifiedRunSupported = false;
 let nativeCaseRunSupported = false;
+let nativeSuiteRunSupported = false;
 const schedulesPath = () => unifiedRunSupported ? 'schedules' : 'load-schedules';
 
 export interface UserPreferences {
@@ -286,8 +287,9 @@ export const api = {
     const version = await request<ServerVersion>('version', { signal });
     localAuthMode = version.authMode === 'local';
     const runVersions = new Set(version.unifiedRunVersions || (version.unifiedRunVersion ? [version.unifiedRunVersion] : []));
-    unifiedRunSupported = runVersions.has('att-execution/v1');
+    unifiedRunSupported = runVersions.has('att-execution/v1') || runVersions.has('att-execution/v2');
     nativeCaseRunSupported = runVersions.has('att-execution/v2');
+    nativeSuiteRunSupported = runVersions.has('att-execution/v2');
     return version;
   },
   getCurrentUser(signal?: AbortSignal): Promise<{ loginId: string; displayName: string; role: 'ADMIN' | 'USER'; csrfToken?: string }> {
@@ -721,8 +723,11 @@ export const api = {
     return request<DebugFormResponse>(resourcePath(identity) + '/debug-form' + queryString({ environment }), { signal });
   },
   previewRun(input: RunDefinition, signal?: AbortSignal): Promise<DraftResponse> {
-    if (input.target?.type === 'nativeCase' && (!unifiedRunSupported || !nativeCaseRunSupported)) {
+    if (input.target?.type === 'nativeCase' && !nativeCaseRunSupported) {
       throw new Error('Native Case RUN requires a Server that advertises att-execution/v2. Publish and preview remain available without that capability.');
+    }
+    if (input.target?.type === 'nativeSuite' && !nativeSuiteRunSupported) {
+      throw new Error('Native Suite RUN requires an ATT Server that advertises att-execution/v2.');
     }
     if (!unifiedRunSupported) {
       if (input.selection || input.target?.type === 'case' || input.target?.type === 'nativeCase') {

@@ -17,6 +17,7 @@ it('negotiates RUN support and preserves legacy resource and Case adapters', asy
   await api.getVersion();
   const legacy = await api.previewRun(definition); await api.submitRun({ packageId: 'p', draftId: legacy.draftId });
   expect(() => api.previewRun({ ...definition, target: { type: 'case', id: 'cases.default.C1' }, input: undefined })).toThrow(/Case and batch Run validation require ATT Server 4\.2\.1/);
+  expect(() => api.previewRun({ ...definition, schemaVersion: 'att-execution/v2', target: { type: 'nativeSuite', definitionIds: ['p.definition'], selection: { all: true } }, input: undefined })).toThrow(/requires an ATT Server that advertises att-execution\/v2/);
   expect(() => api.previewRun({ ...definition, target: undefined, input: undefined, selection: { all: true } })).toThrow(/legacy Case action in Explorer/);
   const nativeRun = { schemaVersion: 'att-execution/v2' as const, executionType: 'run' as const, packageId: 'p',
     target: { type: 'nativeCase', definitionId: 'payments.refund', selection: { resolvedCaseIds: ['R-001'] } }, options: { debug: false } };
@@ -27,15 +28,20 @@ it('negotiates RUN support and preserves legacy resource and Case adapters', asy
   expect(calls[2].body).toMatchObject({ environment: 'UAT', suites: ['testcase/a.xlsx'], caseIds: ['a.default.C1'] });
   calls.length = 0; current = true; await api.getVersion();
   await api.previewRun(definition);
+  const nativeSuite = { schemaVersion: 'att-execution/v2' as const, executionType: 'run' as const, packageId: 'p',
+    target: { type: 'nativeSuite', definitionIds: ['p.definition'], selection: { all: true } }, options: { debug: false } };
+  expect(() => api.previewRun(nativeSuite)).toThrow(/att-execution\/v2/);
+  expect(() => api.previewRun(nativeRun)).toThrow(/att-execution\/v2/);
   await api.runCase({ packageId: 'p', suite: 'testcase/a.xlsx', caseId: 'a.default.C1', environment: 'SIT' });
-  expect(calls.map(call => call.path.split('/').slice(-2).join('/'))).toEqual(['drafts/run', 'drafts/run', 'jobs/run']);
+  expect(calls.map(call => call.path.split('/').slice(-2).join('/'))).toEqual(['drafts/run', 'drafts/run']);
   expect(calls[0].body).toEqual(definition);
   expect(calls[1].body).toMatchObject({ environment: 'SIT', selection: { suites: ['testcase/a.xlsx'], caseIds: ['a.default.C1'] }, options: { debug: false } });
-  expect(calls[2].body).toEqual({ packageId: 'p', draftId: 'R123' });
   calls.length = 0; native = true; await api.getVersion();
   expect(api.supportsNativeCaseRun()).toBe(true);
+  await api.previewRun(nativeSuite);
   await api.previewRun(nativeRun);
   await api.submitRun({ packageId: 'p', draftId: 'R123' });
-  expect(calls.map(call => call.path.split('/').slice(-2).join('/'))).toEqual(['drafts/run', 'jobs/run']);
-  expect(calls[0].body).toEqual(nativeRun);
+  expect(calls.map(call => call.path.split('/').slice(-2).join('/'))).toEqual(['drafts/run', 'drafts/run', 'jobs/run']);
+  expect(calls[0].body).toEqual(nativeSuite);
+  expect(calls[1].body).toEqual(nativeRun);
 });
