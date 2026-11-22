@@ -10,6 +10,7 @@
 - Keep optional LOAD report downloads from holding the native archive publication lock, and make artifact-read cleanup release its lock and capacity exactly once (#397).
 - Add the S10 bilingual Template–Flow–Stage compatibility matrix and paired golden fixture. Keep the Stage runtime path supported; the fixture does not prove external compensation or database rollback (#398).
 - Add Default Package Native Case examples, bilingual Quick Start and a resource migration matrix while retaining legacy Workbook/Sidecar/XML and direct LOAD examples without forced conversion (#413).
+- Align Server version responses, UI fallback text and browser acceptance fixtures with the 4.6.0 release version.
 
 ## Package Source Management
 
