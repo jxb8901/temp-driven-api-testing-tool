@@ -90,29 +90,58 @@ Dry-run 會解析並驗證選中的 Case ID，不會執行 Flow Actions。
 ## RUN 單一 Case
 
 ```sh
-./att.sh --local -p default run native-case quick.start.single \
-  --resolved-case-id default
+./att.sh --local -p default --output-dir output --run-id native-qs-single \
+  run native-case quick.start.single --resolved-case-id default
 ```
 
-預期狀態為 `PASS`，並在 run 輸出目錄留下 per-Case evidence。在此 S05 基底上，HTML/CI 類證據沿用現有 Native RUN 路徑。**不依賴來源 Workbook 的標準 native XLSX 報告屬於 S07，本文件不宣稱已交付。**
+預期整體狀態為 `PASS`。請使用專屬 `--run-id`（可選 `--output-dir`），避免第二次執行撞上既有 run 目錄。
+
+## 查看結果
+
+Native RUN 會把 evidence 寫到 `<output-dir>/<run-id>/`（省略 `--output-dir` 時，Default Package 預設為 `packages/default/output/`）：
+
+```text
+output/native-qs-single/
+  run.yaml
+  report/index.html
+  report/junit.html
+  ci/summary.json
+  ci/junit.xml
+  executions/<execId>/case.log
+  executions/<execId>/case.yaml
+```
+
+用 `report/index.html` 看 HTML 總覽，用 `ci/summary.json` 看機器可讀彙總。每個選中的 Case 都有獨立的 `executions/<execId>/case.log`。
+
+| 狀態 | 在本指南中的意思 |
+|---|---|
+| `PASS` | 選中的 Case 完成且 assertion 成功 |
+| `FAIL` | 業務 assertion 失敗 |
+| `ERROR` | 執行／整合失敗 |
+| `INVALID` | 驗證阻止執行 |
+| `SKIPPED` | Dry-run 只做 Resolve，未執行 Flow |
+
+在此 S05 基底上，HTML／CI／JUnit 證據沿用現有 Native RUN 路徑。**不依賴來源 Workbook 的標準 native XLSX 報告屬於 S07，本文件不宣稱已交付。**
 
 ## RUN 多個 inline Case
 
 ```sh
-./att.sh --local -p default run native-case quick.start.inline \
+./att.sh --local -p default --output-dir output --run-id native-qs-inline \
+  run native-case quick.start.inline \
   --resolved-case-id basic --resolved-case-id with-tool
 ```
 
-Qualified ID 分別為 `quick.start.inline.basic` 與 `quick.start.inline.with-tool`。
+Qualified ID 分別為 `quick.start.inline.basic` 與 `quick.start.inline.with-tool`。兩者都應在 `ci/summary.json` 顯示 `PASS`（`total=2`、`passed=2`）。
 
 ## RUN Excel Data Source Case
 
 ```sh
-./att.sh --local -p default run native-case quick.start.excel \
+./att.sh --local -p default --output-dir output --run-id native-qs-excel \
+  run native-case quick.start.excel \
   --resolved-case-id QS001 --resolved-case-id QS002
 ```
 
-`testdata/quick-start-native.xlsx` 只作為唯讀 Data Source。Preview／RUN 不會修改該檔，也不會產生舊式 XML Snapshot。
+`testdata/quick-start-native.xlsx` 只作為唯讀 Data Source。Preview／RUN 不會修改該檔，也不會產生舊式 XML Snapshot。預期 run summary 同時包含 `quick.start.excel.QS001` 與 `quick.start.excel.QS002`。
 
 ## Studio Preview（當 Server／Studio 可用時）
 
