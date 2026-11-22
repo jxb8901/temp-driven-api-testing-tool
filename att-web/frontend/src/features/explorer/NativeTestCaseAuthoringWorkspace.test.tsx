@@ -162,6 +162,47 @@ dataSource:
     }), expect.any(AbortSignal));
   });
 
+  it('retains invalid JSON drafts and refuses to stage stale Definition YAML', async () => {
+    const definition = `schemaVersion: att-testcase/v1
+id: payments.refund
+name: Refund
+flow: checkout.v1
+inputs:
+  amount: 10
+`;
+    const getSource = vi.fn(async (_packageId: string, query: { kind: string }) => query.kind === 'manifest'
+      ? { available: true, present: true, logicalPath: 'package.yaml', format: 'yaml', text: 'resources:\n  testcaseRoot: testcase\n', sourceEtag: 'e', revision: 'r', baseSourceRevision: 'base-1', registryRevision: 'registry-1' }
+      : { available: true, present: true, logicalPath: 'testcase/refund/testcase.yaml', format: 'yaml', text: definition, sourceEtag: 'e', revision: 'r', baseSourceRevision: 'base-1', registryRevision: 'registry-1' });
+    const previewNative = vi.fn();
+    const api = {
+      listResources: vi.fn(async () => ({ items: [{ type: 'flow', resourceId: 'f1', logicalId: 'checkout.v1', name: 'Checkout' }], total: 1 })),
+      getManagedPackageAuthoringSource: getSource, previewNativeTestCase: previewNative,
+    } as unknown as ExplorerApi;
+
+    await act(async () => root.render(<AppShellContext.Provider value={context()}>
+      <NativeTestCaseAuthoringWorkspace api={api} packageId="payments" sourcePath="testcase/refund/testcase.yaml" />
+    </AppShellContext.Provider>));
+    await settle();
+    const loadCallsBeforeEdit = getSource.mock.calls.length;
+    const inputs = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Typed inputs"]');
+    expect(inputs).not.toBeNull();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(inputs!, '{"amount":');
+      inputs!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await settle();
+    expect(inputs!.value).toBe('{"amount":');
+    expect(host.textContent).toContain('Typed inputs must be a valid JSON object.');
+    expect(host.textContent).toContain('JSON draft is not synchronized');
+    expect(button('Preview / Resolve').disabled).toBe(true);
+    expect(button('Add to Change Set').disabled).toBe(true);
+    await act(async () => button('Add to Change Set').click());
+    expect(getSource.mock.calls.length).toBe(loadCallsBeforeEdit);
+    expect(host.querySelector('[aria-label="Package Change Set workflow"]')).toBeNull();
+    expect(previewNative).not.toHaveBeenCalled();
+  });
+
   it('surfaces structured Excel row and column diagnostics without previewing a Run draft', async () => {
     const definition = `schemaVersion: att-testcase/v1\nid: excel-errors\nflow: checkout.v1\ndataSource:\n  type: excel\n  path: testcase/cases.xlsx\n  sheet: Cases\n  caseId: ID\n  dataColumns: amount=Amount\n`;
     const previewNative = vi.fn(async () => ({ kind: 'NativeTestCasePreview', valid: false, sourceType: 'invalid',

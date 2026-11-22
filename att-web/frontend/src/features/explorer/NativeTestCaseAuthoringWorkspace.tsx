@@ -99,6 +99,10 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
   const [serverDraft, setServerDraft] = useState<{ draftId: string; expiresAt?: string } | null>(null);
   const [runBusy, setRunBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
+  const [inputsDraft, setInputsDraft] = useState<string | null>(null);
+  const [recordsDraft, setRecordsDraft] = useState<string | null>(null);
+  const [inputsDraftError, setInputsDraftError] = useState('');
+  const [recordsDraftError, setRecordsDraftError] = useState('');
   const requestGeneration = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
   const actualPath = path || `${testcaseRoot}/${String(parsedObject(source)?.id || 'new-case').replace(/\./g, '/')}/testcase.yaml`;
@@ -108,17 +112,23 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
   const excel = dataSource?.type === 'excel';
   const inputs = object(definition?.inputs) || {};
   const records = Array.isArray(dataSource?.records) ? dataSource.records : [];
-  const dirty = Boolean(source !== loadedSource || runBusy);
+  const jsonDraftsPending = inputsDraft != null || (inline && recordsDraft != null);
+  const dirty = Boolean(source !== loadedSource || runBusy || jsonDraftsPending);
   const isNewSource = !activeSourcePath;
   const sourceReadOnly = sourceState !== 'ready' || Boolean(activeSourcePath && !sourceInfo?.present);
-  const sourceCurrent = Boolean(activeSourcePath && source === loadedSource && !candidate && sourceState === 'ready');
+  const sourceCurrent = Boolean(activeSourcePath && source === loadedSource && !candidate && sourceState === 'ready' && !jsonDraftsPending);
   const previewValid = Boolean(preview?.valid && preview.cases.length && preview.diagnostics.length === 0);
   const selectedCases = preview?.cases.filter(item => selected.includes(item.caseId)) || [];
+
+  function clearJsonDrafts() {
+    setInputsDraft(null); setRecordsDraft(null); setInputsDraftError(''); setRecordsDraftError('');
+  }
 
   useEffect(() => {
     setPath(sourcePath || '');
     setActiveSourcePath(sourcePath || '');
     setCandidate(null); setCandidatePath(''); setPreview(null); setSelected([]); setServerDraft(null);
+    clearJsonDrafts();
   }, [sourcePath, packageId]);
 
   useEffect(() => {
@@ -179,10 +189,12 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
       if (!activeSourcePath) {
         const defaultSource = stringify(DEFAULT_DEFINITION);
         setSourceState('ready'); setSourceInfo(null); setSource(defaultSource); setLoadedSource(defaultSource);
+        clearJsonDrafts();
         setError(''); setStatus('Create a Package-relative testcase.yaml under the configured resources.testcaseRoot.');
         return;
       }
       setSourceState('loading'); setSourceInfo(null); setError(''); setStatus('');
+      clearJsonDrafts();
       if (!api.getManagedPackageAuthoringSource) {
         setSourceState('error'); setError('This Server does not expose the Package Change Set revision contract.'); return;
       }
@@ -194,6 +206,7 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
           setSourceState('error'); setError('The Server did not return an editable, revision-fenced YAML source.'); return;
         }
         setSourceInfo(managed); setSource(managed.text); setLoadedSource(managed.text); setPath(managed.logicalPath);
+        clearJsonDrafts();
         setSourceState('ready');
       } catch (reason) {
         if (!cancelled) { setSourceState('error'); setError(safeRequestError(reason, 'load native Test Case source')); }
@@ -236,14 +249,16 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
 
   function editField(field: string, value: unknown, remove = false) {
     const updated = updateField(source, [field], value, remove);
-    if (updated == null) { setError('Correct the YAML source before using the guided fields.'); return; }
+    if (updated == null) { setError('Correct the YAML source before using the guided fields.'); return false; }
     setSource(updated); setError(''); setStatus(''); clearPreview();
+    return true;
   }
 
   function editNested(section: string, field: string, value: unknown, remove = false) {
     const updated = updateField(source, [section, field], value, remove);
-    if (updated == null) { setError('Correct the YAML source before using the guided fields.'); return; }
+    if (updated == null) { setError('Correct the YAML source before using the guided fields.'); return false; }
     setSource(updated); setError(''); setStatus(''); clearPreview();
+    return true;
   }
 
   function switchDataSource(type: 'inline' | 'excel') {
@@ -252,12 +267,17 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
     document.delete('inputs');
     if (type === 'inline') document.set('dataSource', { type: 'inline', records: [{ recordId: 'case-1', data: {} }] });
     else document.set('dataSource', { type: 'excel', path: excelPaths[0] || 'testcase/cases.xlsx', sheet: 'Cases', headerRows: 1, caseId: 'ID', dataColumns: '' });
+    clearJsonDrafts();
     setSource(document.toString({ lineWidth: 0 })); setError(''); clearPreview();
   }
 
   async function runDesignPreview() {
     if (!api.previewNativeTestCase) {
       setError('This Server does not expose bounded Native Test Case preview.'); setStatus(''); return;
+    }
+    if (jsonDraftsPending) {
+      setError('Correct the unfinished JSON draft before previewing. Preview uses the synchronized Definition YAML only.');
+      setStatus(''); return;
     }
     const targetPath = actualPath.trim();
     if (!safeRelativePath(targetPath) || !targetPath.endsWith('/testcase.yaml')
@@ -285,6 +305,10 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
   }
 
   async function stageDefinition() {
+    if (jsonDraftsPending) {
+      setError('Correct the unfinished JSON draft before adding this Definition to the Change Set. Stale YAML is not staged.');
+      setStatus(''); return;
+    }
     const generation = ++requestGeneration.current;
     controllerRef.current?.abort();
     const controller = new AbortController(); controllerRef.current = controller;
@@ -415,6 +439,7 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
             if (event.currentTarget.value === 'direct') {
               const document = parseDocument(source, { uniqueKeys: true });
               document.delete('dataSource'); document.delete('caseIdExpression'); document.set('inputs', {});
+              clearJsonDrafts();
               setSource(document.toString({ lineWidth: 0 })); clearPreview();
             } else switchDataSource(event.currentTarget.value as 'inline' | 'excel');
           }}>
@@ -424,15 +449,29 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
 
         {!excel && <>
           <label className="att-native-case-json">{inline ? 'Typed input projection (JSON)' : 'Typed inputs (JSON)'}
-            <CodeEditor label={inline ? 'Typed input projection' : 'Typed inputs'} language="json" value={jsonText(inputs)} readOnly={sourceReadOnly || advanced}
+            <CodeEditor label={inline ? 'Typed input projection' : 'Typed inputs'} language="json"
+              value={inputsDraft ?? jsonText(inputs)} readOnly={sourceReadOnly || advanced}
               onChange={value => {
+                setInputsDraft(value);
                 try {
                   const parsed: unknown = JSON.parse(value);
-                  if (!object(parsed)) { setError('Typed inputs must be a JSON object.'); return; }
-                  editField('inputs', parsed);
-                } catch { setError('Typed inputs must be a valid JSON object.'); }
+                  if (!object(parsed)) {
+                    setInputsDraftError('Typed inputs must be a JSON object.');
+                    setError('Typed inputs must be a JSON object.');
+                    return;
+                  }
+                  if (!editField('inputs', parsed)) {
+                    setInputsDraftError('Correct the YAML source before using the guided fields.');
+                    return;
+                  }
+                  setInputsDraft(null); setInputsDraftError('');
+                } catch {
+                  setInputsDraftError('Typed inputs must be a valid JSON object.');
+                  setError('Typed inputs must be a valid JSON object.');
+                }
               }} maxCharacters={100 * 1024} />
           </label>
+          {inputsDraftError && <p role="alert" className="att-error">{inputsDraftError}</p>}
         </>}
 
         {inline && <>
@@ -440,15 +479,29 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
             disabled={sourceReadOnly || advanced} placeholder="${DATA.caseId}" onChange={event => editField('caseIdExpression', event.currentTarget.value, !event.currentTarget.value.trim())} />
             <small>Use a direct $&#123;DATA.key&#125; lookup; otherwise each recordId is the local Case ID.</small></label>
           <label className="att-native-case-json">Inline records (JSON)
-            <CodeEditor label="Inline multi-record data" language="json" value={recordText} readOnly={sourceReadOnly || advanced}
+            <CodeEditor label="Inline multi-record data" language="json"
+              value={recordsDraft ?? recordText} readOnly={sourceReadOnly || advanced}
               onChange={value => {
+                setRecordsDraft(value);
                 try {
                   const parsed: unknown = JSON.parse(value);
-                  if (!Array.isArray(parsed)) { setError('Inline records must be a JSON list.'); return; }
-                  editNested('dataSource', 'records', parsed);
-                } catch { setError('Inline records must be a valid JSON list.'); }
+                  if (!Array.isArray(parsed)) {
+                    setRecordsDraftError('Inline records must be a JSON list.');
+                    setError('Inline records must be a JSON list.');
+                    return;
+                  }
+                  if (!editNested('dataSource', 'records', parsed)) {
+                    setRecordsDraftError('Correct the YAML source before using the guided fields.');
+                    return;
+                  }
+                  setRecordsDraft(null); setRecordsDraftError('');
+                } catch {
+                  setRecordsDraftError('Inline records must be a valid JSON list.');
+                  setError('Inline records must be a valid JSON list.');
+                }
               }} maxCharacters={100 * 1024} />
           </label>
+          {recordsDraftError && <p role="alert" className="att-error">{recordsDraftError}</p>}
         </>}
 
         {excel && <section className="att-native-excel-source" aria-label="Excel Data Source mapping">
@@ -475,15 +528,19 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
           {advanced ? 'Hide advanced YAML source' : 'Advanced YAML source'}
         </button>
         {advanced && <CodeEditor label="Advanced testcase.yaml source" language="yaml" value={source} readOnly={sourceReadOnly}
-          onChange={value => { setSource(value); setError(''); setStatus(''); clearPreview(); }} maxCharacters={100 * 1024} />}
+          onChange={value => { clearJsonDrafts(); setSource(value); setError(''); setStatus(''); clearPreview(); }} maxCharacters={100 * 1024} />}
 
         <div className="att-native-case-actions">
-          <button type="button" className="button button-quiet" onClick={runDesignPreview} disabled={sourceState !== 'ready'}>Preview / Resolve</button>
+          <button type="button" className="button button-quiet" onClick={runDesignPreview}
+            disabled={sourceState !== 'ready' || jsonDraftsPending}
+            title={jsonDraftsPending ? 'Correct the unfinished JSON draft before previewing.' : undefined}>Preview / Resolve</button>
           <button type="button" className="button button-primary" onClick={() => void stageDefinition()}
-            disabled={sourceState !== 'ready' || !definition || sourceReadOnly || testcaseRootState !== 'ready'}>
+            disabled={sourceState !== 'ready' || !definition || sourceReadOnly || testcaseRootState !== 'ready' || jsonDraftsPending}
+            title={jsonDraftsPending ? 'Correct the unfinished JSON draft before staging.' : undefined}>
             Add to Change Set
           </button>
         </div>
+        {jsonDraftsPending && <p role="status">JSON draft is not synchronized with the Definition YAML. Preview, Change Set, and RUN stay disabled until the draft parses and applies.</p>}
       </section>
 
       {error && <p role="alert" className="att-error">{error}</p>}
@@ -524,8 +581,9 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
           </li>)}</ul>
           {previewValid && <div className="att-native-case-run-actions">
             <button type="button" className="button button-quiet" onClick={() => void validateRun()}
-              disabled={!selectedCases.length || !sourceCurrent || runBusy || !api.previewRun || !api.supportsNativeCaseRun?.()}
+              disabled={!selectedCases.length || !sourceCurrent || runBusy || !api.previewRun || !api.supportsNativeCaseRun?.() || jsonDraftsPending}
               title={!api.supportsNativeCaseRun?.() ? 'This Server has not advertised att-execution/v2 Native Case RUN support.'
+                : jsonDraftsPending ? 'Correct the unfinished JSON draft before validating RUN.'
                 : !sourceCurrent ? 'Publish the current source before running selected Cases.' : undefined}>
               Validate selected Cases for RUN
             </button>
