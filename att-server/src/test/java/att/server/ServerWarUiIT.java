@@ -127,7 +127,8 @@ class ServerWarUiIT {
         Files.writeString(failingTemplate.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
         for(String target:List.of("HOLD","TIMEOUT")) {
             Path targetTemplate=Files.createDirectories(pkg.resolve("templates").resolve(target));
-            String timeout=target.equals("TIMEOUT")?", timeoutMs: 300":"";
+            // Let a cold Worker launch the Tool before exercising its action timeout.
+            String timeout=target.equals("TIMEOUT")?", timeoutMs: 5000":"";
             Files.writeString(targetTemplate.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: "+target+"\n"
                     +"description: Packaged WAR "+target.toLowerCase(java.util.Locale.ROOT)+" parity\nactions:\n"
                     +"  hold: {type: tool, call: '#{hold()}'"+timeout+"}\n");
@@ -173,8 +174,10 @@ class ServerWarUiIT {
             assertPackagedParity(cold.cancelledDebug(),warm.cancelledDebug(),"cancelled DEBUG","CANCELLED",false);
             assertPackagedParity(cold.timedOutRun(),warm.timedOutRun(),"timed-out RUN",null,false);
             assertPackagedParity(cold.timedOutDebug(),warm.timedOutDebug(),"timed-out DEBUG",null,false);
-            assertNotEquals("PASS",cold.timedOutRun().status(),"Cold RUN Tool timeout must be terminal failure");
-            assertNotEquals("PASS",cold.timedOutDebug().status(),"Cold DEBUG Tool timeout must be terminal failure");
+            assertPackagedTimeout(cold.timedOutRun(),"cold RUN");
+            assertPackagedTimeout(warm.timedOutRun(),"warm RUN");
+            assertPackagedTimeout(cold.timedOutDebug(),"cold DEBUG");
+            assertPackagedTimeout(warm.timedOutDebug(),"warm DEBUG");
             assertEquals("cold",cold.run().dispatch());assertEquals("cold",cold.debug().dispatch());
             assertEquals("cold",warm.run().dispatch(),"Source-pinned RUN must use the isolated cold Worker");assertEquals("cold",warm.debug().dispatch(),"Source-pinned DEBUG must use the isolated cold Worker");
         } finally {
@@ -353,6 +356,10 @@ class ServerWarUiIT {
     private static void assertPackagedParity(PackagedExecutionCapture cold,PackagedExecutionCapture warm,
                                              String type,String expectedStatus) {
         assertPackagedParity(cold,warm,type,expectedStatus,true);
+    }
+
+    private static void assertPackagedTimeout(PackagedExecutionCapture capture,String label) {
+        assertNotEquals("PASS",capture.status(),label+" Tool timeout must be a terminal failure");
     }
 
     private static void assertPackagedParity(PackagedExecutionCapture cold,PackagedExecutionCapture warm,
