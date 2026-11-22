@@ -15,6 +15,7 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.ss.util.CellAddress;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -186,6 +187,7 @@ public class ExcelReportWriter {
                         throw new IOException("Native source-workbook report Case row no longer matches its pinned provenance");
                 }
 
+                removeCopiedSourceComments(workbook);
                 redactCopiedSource(workbook, sheet, headerRows, sourceColumns, sensitiveHeaders, registeredSecrets);
                 Map<Short, org.apache.poi.ss.usermodel.CellStyle> wrappedStyles =
                         new LinkedHashMap<Short, org.apache.poi.ss.usermodel.CellStyle>();
@@ -356,6 +358,25 @@ public class ExcelReportWriter {
                     String protectedValue = att.security.SecretProtection.text(original, registeredSecrets);
                     if (!original.equals(protectedValue)) cell.setCellValue(protectedValue);
                 }
+            }
+        }
+    }
+
+    /**
+     * Cell comments and notes are unstructured source text and can contain credentials even when
+     * the associated cell value is redacted. The optional copied workbook is downloadable, so
+     * remove every comment on every sheet before publishing it.
+     */
+    private static void removeCopiedSourceComments(Workbook workbook) {
+        for (int sheetIndex = 0; sheetIndex < workbook.getNumberOfSheets(); sheetIndex++) {
+            Sheet sheet = workbook.getSheetAt(sheetIndex);
+            Set<CellAddress> addresses = new LinkedHashSet<CellAddress>(sheet.getCellComments().keySet());
+            for (CellAddress address : addresses) {
+                Row row = sheet.getRow(address.getRow());
+                if (row == null) row = sheet.createRow(address.getRow());
+                Cell cell = row.getCell(address.getColumn());
+                if (cell == null) cell = row.createCell(address.getColumn());
+                cell.removeCellComment();
             }
         }
     }

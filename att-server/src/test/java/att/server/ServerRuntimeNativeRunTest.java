@@ -106,7 +106,7 @@ class ServerRuntimeNativeRunTest {
         Files.writeString(definition,original);
         Path excelDefinition=packageRoot.resolve("testcase/payments/excel/testcase.yaml");
         Files.createDirectories(excelDefinition.getParent());
-        Files.writeString(excelDefinition,excelDefinitionYaml());
+        Files.writeString(excelDefinition,excelDefinitionYamlWithSourceWorkbookReport());
         Path excelWorkbook=writeExcelWorkbook(packageRoot.resolve("testdata/native-cases.xlsx"));
         byte[] originalExcel=Files.readAllBytes(excelWorkbook);
 
@@ -277,6 +277,21 @@ class ServerRuntimeNativeRunTest {
                     "The archive-backed Server entry read returns the exact included Native Suite workbook bytes");
             try(XSSFWorkbook publishedWorkbook=new XSSFWorkbook(new java.io.ByteArrayInputStream(downloadedWorkbook))) {
                 assertTrue(publishedWorkbook.getNumberOfSheets()>0,"The downloaded native result must remain an openable XLSX");
+            }
+            Map<String,Object> publishedSourceWorkbook=excelArchiveItems.stream()
+                    .filter(item->String.valueOf(item.get("path")).endsWith("/"+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX))
+                    .findFirst().orElse(null);
+            assertNotNull(publishedSourceWorkbook,
+                    "The optional source-workbook report must be included in the authorized Server archive: "+excelArchiveIndex);
+            String sourceWorkbookPath=String.valueOf(publishedSourceWorkbook.get("path"));
+            byte[] downloadedSourceWorkbook=runtime.archiveEntry(excelJobId,sourceWorkbookPath);
+            assertArrayEquals(ArtifactArchive.read(awaitArtifactArchive(runtime,excelJobId),sourceWorkbookPath),downloadedSourceWorkbook,
+                    "The archive-backed Server entry read returns the exact included source-workbook report bytes");
+            try(XSSFWorkbook sanitizedSourceWorkbook=new XSSFWorkbook(
+                    new java.io.ByteArrayInputStream(downloadedSourceWorkbook))) {
+                for(int sheetIndex=0;sheetIndex<sanitizedSourceWorkbook.getNumberOfSheets();sheetIndex++)
+                    assertTrue(sanitizedSourceWorkbook.getSheetAt(sheetIndex).getCellComments().isEmpty(),
+                            "Source-workbook comments and notes must not be downloadable from the Server archive");
             }
             assertArrayEquals(originalExcel,Files.readAllBytes(excelWorkbook),"Native Excel RUN must leave the source workbook byte-identical");
 
@@ -828,6 +843,11 @@ class ServerRuntimeNativeRunTest {
                 +"inputs:\n  amount:\n    from: DATA.amount\n";
     }
 
+    private static String excelDefinitionYamlWithSourceWorkbookReport() {
+        return excelDefinitionYaml().replace("inputs:\n",
+                "report: {format: xlsx, template: sourceWorkbook}\ninputs:\n");
+    }
+
     private static Path writeExcelWorkbook(Path path) throws Exception {
         Files.createDirectories(path.getParent());
         try(XSSFWorkbook workbook=new XSSFWorkbook()) {
@@ -842,6 +862,13 @@ class ServerRuntimeNativeRunTest {
                 row.createCell(0).setCellValue(ids[index]);
                 row.createCell(1).setCellValue(amounts[index]);
             }
+            org.apache.poi.ss.usermodel.Drawing<?> drawing=sheet.createDrawingPatriarch();
+            org.apache.poi.ss.usermodel.ClientAnchor anchor=workbook.getCreationHelper().createClientAnchor();
+            anchor.setCol1(1);anchor.setCol2(2);anchor.setRow1(1);anchor.setRow2(2);
+            org.apache.poi.ss.usermodel.Comment comment=drawing.createCellComment(anchor);
+            comment.setAuthor("acceptance-fixture");
+            comment.setString(workbook.getCreationHelper().createRichTextString("api-key=source-comment-canary"));
+            sheet.getRow(1).getCell(1).setCellComment(comment);
             try(java.io.OutputStream output=Files.newOutputStream(path)){workbook.write(output);}
         }
         return path;

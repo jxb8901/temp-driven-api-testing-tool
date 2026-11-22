@@ -625,6 +625,15 @@ class FrameworkEngineTest {
             selected.createCell(1).setCellValue("registered-secret-123");
             selected.createCell(2).setCellValue("reuse registered-secret-123 here");
             selected.createCell(3).setCellValue("password-column-value");
+            org.apache.poi.ss.usermodel.Drawing<?> casesDrawing = sheet.createDrawingPatriarch();
+            org.apache.poi.ss.usermodel.ClientAnchor casesAnchor = source.getCreationHelper().createClientAnchor();
+            casesAnchor.setCol1(3);
+            casesAnchor.setCol2(4);
+            casesAnchor.setRow1(1);
+            casesAnchor.setRow2(2);
+            org.apache.poi.ss.usermodel.Comment passwordComment = casesDrawing.createCellComment(casesAnchor);
+            passwordComment.setString(source.getCreationHelper().createRichTextString("password-comment-canary"));
+            selected.getCell(3).setCellComment(passwordComment);
 
             Sheet privateData = source.createSheet("Private Data");
             privateData.createRow(0).createCell(0).setCellValue("Exported account credentials");
@@ -637,6 +646,15 @@ class FrameworkEngineTest {
             privateRow.createCell(1).setCellValue("other-sheet-password");
             privateRow.createCell(2).setCellValue("other-sheet-token");
             privateRow.createCell(3).setCellValue("password");
+            org.apache.poi.ss.usermodel.Drawing<?> privateDrawing = privateData.createDrawingPatriarch();
+            org.apache.poi.ss.usermodel.ClientAnchor privateAnchor = source.getCreationHelper().createClientAnchor();
+            privateAnchor.setCol1(1);
+            privateAnchor.setCol2(2);
+            privateAnchor.setRow1(2);
+            privateAnchor.setRow2(3);
+            org.apache.poi.ss.usermodel.Comment privateComment = privateDrawing.createCellComment(privateAnchor);
+            privateComment.setString(source.getCreationHelper().createRichTextString("api-key-comment-canary"));
+            privateRow.getCell(1).setCellComment(privateComment);
             source.write(output);
         }
         Path definitionPath = projectRoot.resolve("testcase/fpp/report-secrets/testcase.yaml");
@@ -672,6 +690,10 @@ class FrameworkEngineTest {
                     "Explicitly sensitive Data Column aliases must be redacted on every worksheet");
             assertEquals(att.security.SecretProtection.REDACTED, privateData.getCell(3).getStringCellValue(),
                     "A value that resembles a sensitive header must not be exempted as an unverified header");
+            assertTrue(result.getSheet("Cases").getCellComments().isEmpty(),
+                    "Comments on the configured source sheet must not carry secrets into the copied workbook");
+            assertTrue(result.getSheet("Private Data").getCellComments().isEmpty(),
+                    "Comments on other source sheets must also be removed");
         }
         String log = new String(Files.readAllBytes(summary.results().get(0).caseLogPath()),
                 java.nio.charset.StandardCharsets.UTF_8);
