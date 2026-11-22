@@ -340,20 +340,20 @@ class FrameworkEngineTest {
         String verifySuccessRef = "$" + "{EXEC.ACTIONS.verify.output.success}";
 
         writeText(projectRoot.resolve("templates/PREPARE/template.yaml"),
-                "schemaVersion: att-template/v3.4\nname: PREPARE\ndescription: Prepare\n"
+                "schemaVersion: att-template/v3.6\nname: PREPARE\ndescription: Prepare\n"
                         + "actions:\n  seed: {type: assign, name: sourceBusiness, expression: '" + inputRef + "'}\n"
                         + "  prepareLog: {type: log, message: 'prepare:" + inputRef + "'}\n");
         writeText(projectRoot.resolve("templates/INVOKE/template.yaml"),
-                "schemaVersion: att-template/v3.4\nname: INVOKE\ndescription: Invoke\n"
+                "schemaVersion: att-template/v3.6\nname: INVOKE\ndescription: Invoke\n"
                         + "actions:\n  invokeLog: {type: log, message: 'invoke:" + inputRef + "|seed:" + variableRef + "'}\n");
         writeText(projectRoot.resolve("templates/VERIFY/template.yaml"),
-                "schemaVersion: att-template/v3.4\nname: VERIFY\ndescription: Verify\n"
+                "schemaVersion: att-template/v3.6\nname: VERIFY\ndescription: Verify\n"
                         + "actions:\n  verify: {type: assert, assert: 'false', actual: '" + inputRef + "'}\n");
         writeText(projectRoot.resolve("templates/ROLLBACK/template.yaml"),
-                "schemaVersion: att-template/v3.4\nname: ROLLBACK\ndescription: Rollback\n"
+                "schemaVersion: att-template/v3.6\nname: ROLLBACK\ndescription: Rollback\n"
                         + "actions:\n  rollbackLog: {type: log, message: 'rollback:" + inputRef + "'}\n");
         writeText(projectRoot.resolve("templates/CLEANUP/template.yaml"),
-                "schemaVersion: att-template/v3.4\nname: CLEANUP\ndescription: Cleanup\n"
+                "schemaVersion: att-template/v3.6\nname: CLEANUP\ndescription: Cleanup\n"
                         + "actions:\n  cleanupLog: {type: log, message: 'cleanup:" + inputRef + "'}\n");
 
         Path workbook = projectRoot.resolve("testcase/stage-flow-compat.xlsx");
@@ -371,7 +371,7 @@ class FrameworkEngineTest {
             book.write(output);
         }
         writeText(projectRoot.resolve("testcase/stage-flow-compat.yaml"),
-                "schemaVersion: att-sidecar/v2.1\nid: compat\n"
+                "schemaVersion: att-sidecar/v2.2\nid: compat\n"
                         + "excel:\n  sheet: Cases\n  caseId: Case ID\n  tags: Tags\n  dataColumns: business=Business\n"
                         + "stages:\n"
                         + "  - {key: prepare, template: Prepare Template, required: true}\n"
