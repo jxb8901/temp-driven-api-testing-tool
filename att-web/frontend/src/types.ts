@@ -40,7 +40,6 @@ export interface ServerVersion {
   javaMinimum?: number;
   inlineLoadEnabled: boolean;
   loadSchedulingEnabled?: boolean;
-  unifiedRunVersions?: string[];
   authMode?: 'container' | 'local';
   authenticationRequired?: boolean;
 }
