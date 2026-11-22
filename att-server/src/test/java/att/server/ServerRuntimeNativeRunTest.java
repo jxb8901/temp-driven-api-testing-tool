@@ -255,6 +255,7 @@ class ServerRuntimeNativeRunTest {
         Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
                 +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
                 +"\n  auth: {mode: local}\n  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"  scheduling: {enabled: true, minimumIntervalMinutes: 1, maxConcurrentRuns: 1}\n"
                 +"workers: {maxConcurrent: 1, queuedLimit: 2}\npackages:\n  allowedRoots: ["
                 +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
         Path libs=Files.createDirectories(temp.resolve("libs"));
@@ -393,6 +394,136 @@ class ServerRuntimeNativeRunTest {
                     Map.of("packageId","p","draftId",staleDraft.get("draftId"))),"alice","alice"));
             assertEquals(jobsBeforeStaleSubmit,runtime.jobs.size(),
                     "A changed Definition must reject the complete Suite before creating a Job");
+        }
+    }
+
+    @Test void nativeSuiteRerunFailedFreezesOwnedSourceAndRetriesOnlyExecutedFailedCases() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("retry-allowed"));
+        Path packageRoot=Files.createDirectories(allowed.resolve("p"));
+        Path flow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+                .resolve("flow.yaml");
+        Files.createDirectories(packageRoot.resolve("testcase/payments/transfer"));
+        Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
+                +"description: Native Suite retry fixture\nactions:\n"
+                +"  verify: {type: assert, assert: '#{${EXEC.INPUT.amount} <= 7}'}\n"
+                +"  log: {type: log, message: 'amount=${EXEC.INPUT.amount}'}\n");
+        Path definition=packageRoot.resolve("testcase/payments/transfer/testcase.yaml");
+        Files.writeString(definition,definitionYaml(7,13));
+
+        Path runtimeConfig=Files.createDirectories(temp.resolve("retry-runtime/config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path data=temp.resolve("retry-data"),serverConfig=temp.resolve("retry-server.yaml");
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
+                +"\n  auth: {mode: local}\n  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"  scheduling: {enabled: true, minimumIntervalMinutes: 1, maxConcurrentRuns: 1}\n"
+                +"workers: {maxConcurrent: 1, queuedLimit: 2}\npackages:\n  allowedRoots: ["
+                +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
+        Path libs=Files.createDirectories(temp.resolve("retry-libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
+            ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            JsonNode sourceBody=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.transfer"),"selection",Map.of("all",true)),
+                    "options",Map.of("debug",false,"failFast",true,"runId","native-suite-retry-source")));
+            Map<String,Object> sourceDraft=runtime.createRunDraft(sourceBody,"alice");
+            Map<String,Object> sourceAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",sourceDraft.get("draftId"))),"alice","alice");
+            String sourceJobId=String.valueOf(sourceAccepted.get("jobId"));
+            Map<String,Object> sourceResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,sourceJobId);
+            assertEquals("FAIL",((Map<?,?>)sourceResult.get("job")).get("status"),sourceResult.toString());
+            @SuppressWarnings("unchecked") Map<String,Object> sourceCanonical=ServerRuntime.JSON.convertValue(sourceResult.get("result"),Map.class);
+            @SuppressWarnings("unchecked") Map<String,Object> sourceSummary=(Map<String,Object>)sourceCanonical.get("summary");
+            assertEquals(2,sourceSummary.get("total"));
+            assertEquals(2,sourceSummary.get("executionCount"));
+            assertEquals(1,sourceSummary.get("failed"));
+            assertEquals(0,sourceSummary.get("skipped"));
+
+            JsonNode retryBody=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.transfer"),"selection",Map.of("rerunFailed",true)),
+                    "options",Map.of("debug",false,"runId","native-suite-retry-attempt-1")));
+            Map<String,Object> staleRetryDraft=runtime.createRunDraft(retryBody,"alice");
+            var newerSourceBody=(com.fasterxml.jackson.databind.node.ObjectNode)sourceBody.deepCopy();
+            ((com.fasterxml.jackson.databind.node.ObjectNode)newerSourceBody.get("options")).put("runId","native-suite-retry-newer-source");
+            Map<String,Object> newerSourceDraft=runtime.createRunDraft(newerSourceBody,"alice");
+            Map<String,Object> newerSourceAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",newerSourceDraft.get("draftId"))),"alice","alice");
+            String newerSourceJobId=String.valueOf(newerSourceAccepted.get("jobId"));
+            Map<String,Object> newerSourceResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,newerSourceJobId);
+            assertEquals("FAIL",((Map<?,?>)newerSourceResult.get("job")).get("status"),newerSourceResult.toString());
+            int jobsBeforeStaleRetrySubmit=runtime.jobs.size();
+            assertThrows(ServerRuntime.JobConflictException.class,()->runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",staleRetryDraft.get("draftId"))),"alice","alice"),
+                    "A retry draft must be refreshed when a newer eligible Native Suite RUN completes");
+            assertEquals(jobsBeforeStaleRetrySubmit,runtime.jobs.size(),"A stale retry draft must not create a Job");
+
+            Map<String,Object> retryDraft=runtime.createRunDraft(retryBody,"alice");
+            assertEquals(List.of("payments.transfer.second"),retryDraft.get("selectedCaseIds"));
+            @SuppressWarnings("unchecked") Map<String,Object> frozenLineage=(Map<String,Object>)retryDraft.get("retryLineage");
+            assertEquals(newerSourceJobId,frozenLineage.get("sourceJobId"));
+            assertEquals("native-suite-retry-newer-source",frozenLineage.get("sourceRunId"));
+            assertEquals(2,frozenLineage.get("sourceSelectedCaseCount"));
+            assertEquals(1,frozenLineage.get("retryAttemptNumber"));
+            assertEquals(1,frozenLineage.get("retryCaseCount"));
+            assertEquals(List.of("payments.transfer.second"),frozenLineage.get("failedQualifiedCaseIds"));
+
+            Map<String,Object> retryAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",retryDraft.get("draftId"))),"alice","alice");
+            String retryJobId=String.valueOf(retryAccepted.get("jobId"));
+            assertEquals(newerSourceJobId,runtime.jobs.get(retryJobId).rerunOfJobId);
+            assertEquals(newerSourceJobId,runtime.jobs.get(retryJobId).request.nativeSuiteRetry.get("sourceJobId"));
+            Map<String,Object> retryResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,retryJobId);
+            assertEquals("FAIL",((Map<?,?>)retryResult.get("job")).get("status"),retryResult.toString());
+            @SuppressWarnings("unchecked") Map<String,Object> retryCanonical=ServerRuntime.JSON.convertValue(retryResult.get("result"),Map.class);
+            @SuppressWarnings("unchecked") Map<String,Object> retrySummary=(Map<String,Object>)retryCanonical.get("summary");
+            assertEquals(1,retrySummary.get("total"));
+            assertEquals(1,retrySummary.get("executionCount"));
+            assertEquals(1,retrySummary.get("failed"));
+            assertEquals(0,retrySummary.get("skipped"));
+            Map<String,Object> retryManifest=readArchivedRunManifest(runtime,retryJobId);
+            @SuppressWarnings("unchecked") Map<String,Object> retryRun=(Map<String,Object>)retryManifest.get("run");
+            @SuppressWarnings("unchecked") Map<String,Object> recordedLineage=(Map<String,Object>)retryRun.get("retryLineage");
+            assertEquals(newerSourceJobId,recordedLineage.get("sourceJobId"));
+            assertEquals("native-suite-retry-newer-source",recordedLineage.get("sourceRunId"));
+            assertEquals(1,((Number)recordedLineage.get("retryExecutionCount")).intValue());
+            assertEquals(0,((Number)recordedLineage.get("retrySkippedCaseCount")).intValue());
+
+            var scheduledRetryBody=(com.fasterxml.jackson.databind.node.ObjectNode)retryBody.deepCopy();
+            ((com.fasterxml.jackson.databind.node.ObjectNode)scheduledRetryBody.get("options")).put("runId","native-suite-retry-scheduled");
+            Map<String,Object> scheduledRetryDraft=runtime.createRunDraft(scheduledRetryBody,"alice");
+            LoadSchedule retrySchedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name","Native Suite retry schedule",
+                    "packageId","p","executionType","run","draftId",scheduledRetryDraft.get("draftId"),
+                    "timezone","UTC","cron","0 2 * * *","enabled",false)),"alice");
+            Map<String,Object> retryOccurrence=runtime.triggerLoadSchedule(retrySchedule.id,"alice");
+            String scheduledRetryJobId=String.valueOf(retryOccurrence.get("jobId"));
+            assertEquals("submitted",retryOccurrence.get("status"),retryOccurrence.toString());
+            assertEquals(retryJobId,runtime.jobs.get(scheduledRetryJobId).rerunOfJobId);
+            Map<String,Object> scheduledRetryResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,scheduledRetryJobId);
+            assertEquals("FAIL",((Map<?,?>)scheduledRetryResult.get("job")).get("status"),scheduledRetryResult.toString());
+            Map<String,Object> scheduledManifest=readArchivedRunManifest(runtime,scheduledRetryJobId);
+            @SuppressWarnings("unchecked") Map<String,Object> scheduledRun=(Map<String,Object>)scheduledManifest.get("run");
+            @SuppressWarnings("unchecked") Map<String,Object> scheduledLineage=(Map<String,Object>)scheduledRun.get("retryLineage");
+            assertEquals(retryJobId,scheduledLineage.get("sourceJobId"));
+            assertEquals(2,scheduledLineage.get("retryAttemptNumber"));
+            assertEquals(1,((Number)scheduledLineage.get("retryExecutionCount")).intValue());
+            Map<String,Object> nextRetryDraft=runtime.createRunDraft(retryBody,"alice");
+            @SuppressWarnings("unchecked") Map<String,Object> nextRetryLineage=(Map<String,Object>)nextRetryDraft.get("retryLineage");
+            assertEquals(scheduledRetryJobId,nextRetryLineage.get("sourceJobId"));
+            assertEquals(3,nextRetryLineage.get("retryAttemptNumber"),
+                    "The next retry attempt must increment from the scheduled Job's retained lineage");
+            runtime.deleteLoadSchedule(retrySchedule.id,"alice");
+
+            Files.writeString(flow,Files.readString(flow)+"# changed after the completed retry\n");
+            assertThrows(ServerRuntime.JobConflictException.class,()->runtime.createRunDraft(retryBody,"alice"),
+                    "A retry draft must reject source revision changes since the latest eligible Native Suite RUN");
         }
     }
 
@@ -540,6 +671,24 @@ class ServerRuntimeNativeRunTest {
         }
         assertEquals("READY",index.get("archiveStatus"),"Native RUN evidence must be published before inspection");
         return runtime.artifactArchivePath(jobId);
+    }
+
+    private static Map<String,Object> readArchivedRunManifest(ServerRuntime runtime,String jobId) throws Exception {
+        String yaml=null;
+        try(ZipFile archive=new ZipFile(awaitArtifactArchive(runtime,jobId).toFile())) {
+            var entries=archive.entries();
+            while(entries.hasMoreElements()) {
+                ZipEntry entry=entries.nextElement();
+                if(!entry.isDirectory()&&entry.getName().endsWith("/run.yaml")) {
+                    assertNull(yaml,"A completed Native Suite Job must publish one canonical run manifest");
+                    yaml=read(archive.getInputStream(entry));
+                }
+            }
+        }
+        assertNotNull(yaml,"A completed Native Suite Job must publish its run manifest");
+        Object loaded=new org.yaml.snakeyaml.Yaml().load(yaml);
+        assertInstanceOf(Map.class,loaded);
+        return ServerRuntime.JSON.convertValue(loaded,Map.class);
     }
 
     private static void assertDraftSelection(Map<String,Object> draft) {

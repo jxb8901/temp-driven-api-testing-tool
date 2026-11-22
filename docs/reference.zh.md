@@ -286,7 +286,7 @@ ATT 會按 ID 排列 Definition，並保留每個 Definition 的來源記錄順�
 
 Implicit Suite 是 runtime selection，並非可重用的 authored Definition。這項功能不會新增 LOAD target 或進階 Testdata/generator binding；Debug interoperability 仍屬後續工作。
 
-Studio Run editor 亦提供這項選取功能：輸入一個或多個 Definition ID，再選擇全部 Case、指定 Qualified Case ID，或按 tags 選取 Case。可用 Include Tags 和 Exclude Tags 進一步篩選；重播時會保留保存定義傳回的 tag selector。Native Suite `rerun-failed` 目前仍會被拒絕；Server 尚未將失敗來源 Job/run 和精確 retry Case ID 保留為新 Native Suite execution 的 lineage。
+Studio Run editor 亦提供這項選取功能：輸入一個或多個 Definition ID，再選擇全部 Case、指定 Qualified Case ID，或按 tags 選取 Case。可用 Include Tags 和 Exclude Tags 進一步篩選；重播時會保留保存定義傳回的 tag selector。Native Suite `--rerun-failed` 只會重跑同一 Package 和 Definition 集合中最近一個合資格已完成 RUN 內曾執行但失敗的 Case。Local RUN 會驗證 latest-run pointer 和 manifest hash；Server draft 會凍結來源 Job/run、manifest digest、Package revision 和精確 Qualified Case ID。過期 draft 或來源變更會被拒絕，Skipped Case 不會重跑，每次嘗試的執行／略過數會與來源及 retry 次數分開記錄。Schedule 會保留已驗證的 retry source。
 
 ### Workbook
 
@@ -1056,7 +1056,7 @@ ATT 4.4.1 將功能性單次執行統一為 **RUN**，支援 Case、Template、F
 
 `suites` 與 `suiteDirectory` 互斥；後者選取套件內的 group 目錄。Case/tag 篩選沿用 CLI 交集規則，任一要求的 tag 可匹配，excludeTags 則排除匹配 Case。`all:true` 表示套件選取。陣列必須非空、不重複，最多 1000 個值。驗證會解析並固定最多 10000 個 Case ID；空選取不會退回執行全部 Case。
 
-`rerunFailed:true` 從呼叫者最近 100 個擁有的工作中，選取同套件最近一個已完成 Case RUN 的失敗項目，與明確 Case/tag 篩選取交集，再固定 ID。Manifest 不可用或沒有匹配失敗項目會驗證失敗。既有 CLI `--rerun-failed` 繼續使用本機 output history。
+Native Suite 的 `rerunFailed:true` 會從同一擁有人、Package、Definition ID 和 Package revision 中最近一個符合資格且已完成的 Native Suite RUN，選取曾執行但失敗的 Case。Server 按完成時間排列候選，不限於最近 100 個 Job。本機執行使用依 Package/Definition 區分且驗證 manifest hash 的 Native Suite pointer；dry-run 及不相關 RUN 不會取代此 pointer。Draft 會凍結來源 Job/run、manifest digest、revision、來源選取數、retry attempt number 和精確失敗 Qualified Case ID；提交時會重新驗證來源，若 draft 驗證後有更新的相符 RUN 完成，就拒絕過期 draft。來源內 Skipped Case 不會重跑。新 RUN 只報告本次選取／執行／略過數，並把 retry 次數和來源統計分開保存。Schedule 會在每次執行時保留已驗證的來源 lineage。Manifest 不可用或不一致、來源變更，或沒有已執行的失敗 Case 都會驗證失敗。既有 Workbook／Sidecar `rerunFailed:true` 行為和本機 history 維持不變。
 
 #### 啟用 Debug 診斷
 

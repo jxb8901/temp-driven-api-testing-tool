@@ -204,6 +204,38 @@ class RemoteCommandTest {
         assertFalse(submission.has("qualifiedCaseIds"));
     }
 
+    @Test void nativeSuiteRerunFailedMapsOnlyTheExclusiveRetrySelector() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public JsonNode get(String path)throws RemoteException {
+                if("/version".equals(path)) {
+                    ObjectNode version=RemoteHttpClient.JSON.createObjectNode().put("apiVersion",ServerApi.VERSION);
+                    version.putArray("unifiedRunVersions").add("att-execution/v2");return version;
+                }
+                return super.get(path);
+            }
+            @Override public JsonNode post(String path,JsonNode body)throws RemoteException {
+                posts++;postPaths.add(path);postBodies.add(body.deepCopy());lastPath=path;lastBody=body.deepCopy();requests.add(body.deepCopy());
+                if("/drafts/run".equals(path))return RemoteHttpClient.JSON.createObjectNode()
+                        .put("draftId","R0123456789ABCDEF0123456789ABCDEF");
+                return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");
+            }
+        };
+        String plan="{\"command\":\"run\",\"targetKind\":\"native-suite\",\"packageId\":\"payments\","
+                +"\"definitionIds\":[\"fpp.transfer\"],\"rerunFailed\":true}";
+        int exit=RemoteCommand.run(new String[]{"--server","https://example.invalid","--format","json","vnext",plan},
+                java.util.Collections.<String,String>emptyMap(),null,null,(profile,password,username,provider)->client);
+
+        assertEquals(0,exit);
+        assertEquals(Arrays.asList("/drafts/run","/jobs/run"),client.postPaths);
+        JsonNode selection=client.postBodies.get(0).path("target").path("selection");
+        assertTrue(selection.path("rerunFailed").asBoolean());
+        assertFalse(selection.has("all"));
+        assertFalse(selection.has("qualifiedCaseIds"));
+        assertFalse(selection.has("tags"));
+        assertFalse(selection.has("excludeTags"));
+        assertEquals("R0123456789ABCDEF0123456789ABCDEF",client.postBodies.get(1).path("draftId").asText());
+    }
+
     @Test void nativeSuiteDryRunValidatesDraftWithoutSubmittingJob() throws Exception {
         MockClient client=new MockClient(){
             @Override public JsonNode get(String path)throws RemoteException {

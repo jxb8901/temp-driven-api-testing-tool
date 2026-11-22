@@ -278,8 +278,11 @@ public final class RemoteCommand {
             ObjectNode nativeTarget=nativeDefinition.putObject("target");nativeTarget.put("type","nativeSuite");
             nativeTarget.set("definitionIds",definitions.deepCopy());
             ObjectNode suiteSelection=nativeTarget.putObject("selection");
-            if(plan.path("all").asBoolean(false))suiteSelection.put("all",true);
-            copyArray(plan,suiteSelection,"qualifiedCaseIds");copyArray(plan,suiteSelection,"tags");copyArray(plan,suiteSelection,"excludeTags");
+            if(plan.path("rerunFailed").asBoolean(false))suiteSelection.put("rerunFailed",true);
+            else {
+                if(plan.path("all").asBoolean(false))suiteSelection.put("all",true);
+                copyArray(plan,suiteSelection,"qualifiedCaseIds");copyArray(plan,suiteSelection,"tags");copyArray(plan,suiteSelection,"excludeTags");
+            }
             ObjectNode nativeOptions=nativeDefinition.putObject("options");nativeOptions.put("debug",false);
             if(plan.path("failFast").asBoolean(false))nativeOptions.put("failFast",true);
             copyText(plan,nativeOptions,"runId");

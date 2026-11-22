@@ -86,7 +86,7 @@ class RunDefinitionTest {
         assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,request));
     }
 
-    @Test void nativeSuiteV2EnforcesSchemaTagLengthAndRejectsRerunHistoryIntent() throws Exception {
+    @Test void nativeSuiteV2EnforcesSchemaTagLengthAndAcceptsOnlyExclusiveRerunFailedSelection() throws Exception {
         java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
         String tag128=String.join("",java.util.Collections.nCopies(128,"x"));
         String valid=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":true,\"tags\":[\""+tag128+"\"]}}}");
@@ -98,9 +98,19 @@ class RunDefinitionTest {
         assertThrows(IllegalArgumentException.class,()->parse(tooLong));
         assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,tooLong));
 
-        String history=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":true,\"rerunFailed\":true}}");
-        assertThrows(IllegalArgumentException.class,()->parse(history));
-        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,history));
+        String rerun=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"rerunFailed\":true}}");
+        att.validation.JsonSchemaVerifier.verifyJson(schema,rerun);
+        assertTrue(parse(rerun).nativeSuiteRerunFailed);
+
+        for(String invalid:List.of(
+                "\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":true,\"rerunFailed\":true}}",
+                "\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"rerunFailed\":false}}",
+                "\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"rerunFailed\":true,\"tags\":[\"smoke\"]}}")) {
+            String request=requestV2(invalid);
+            assertThrows(IllegalArgumentException.class,()->parse(request));
+            assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                    ()->att.validation.JsonSchemaVerifier.verifyJson(schema,request));
+        }
     }
     @Test void nativeSuiteV2SchemaAndParserRejectIneffectiveSelectionAndC1Tags() throws Exception {
         java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
