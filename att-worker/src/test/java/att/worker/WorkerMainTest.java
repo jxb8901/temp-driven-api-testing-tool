@@ -103,11 +103,11 @@ class WorkerMainTest {
         Files.createDirectories(root.resolve("config"));Files.createDirectories(root.resolve("templates/flows/checkout/v1"));
         Files.createDirectories(root.resolve("testcase/native"));copyTree(Paths.get("schemas"),root.resolve("schemas"));
         Path config=root.resolve("config/config.yaml");
-        Files.writeString(config,"schemaVersion: att-config/v2.15\nenvironment: SIT\n"
-                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
-        Files.writeString(root.resolve("templates/flows/checkout/v1/flow.yaml"),
-                "schemaVersion: att-flow/v3.6\nid: checkout.v1\nname: Checkout\ndescription: preview\nactions:\n"
-                        +"  record: {type: log, message: preview-must-not-execute}\n");
+        Files.write(config,("schemaVersion: att-config/v2.15\nenvironment: SIT\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/flows/checkout/v1/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: checkout.v1\nname: Checkout\ndescription: preview\nactions:\n"
+                        +"  record: {type: log, message: preview-must-not-execute}\n").getBytes(StandardCharsets.UTF_8));
         Path workbookPath=root.resolve("testcase/native/cases.xlsx");
         writeNativePreviewWorkbook(workbookPath,"case-1",false);
         byte[] originalWorkbook=Files.readAllBytes(workbookPath);
