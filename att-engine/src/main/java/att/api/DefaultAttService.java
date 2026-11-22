@@ -174,6 +174,7 @@ public final class DefaultAttService implements AttService {
 
         Map<String,Object> summary = new LinkedHashMap<String,Object>();
         summary.put("total", result.total()); summary.put("passed", result.passed());
+        summary.put("executionCount", result.executionCount());
         summary.put("failed", result.failed()); summary.put("error", result.error());
         summary.put("skipped", result.skipped()); summary.put("invalid", result.invalid());
         Map<String,att.testcase.ResolvedTestCase> selectedById = new LinkedHashMap<String,att.testcase.ResolvedTestCase>();
@@ -187,6 +188,9 @@ public final class DefaultAttService implements AttService {
             row.put("caseId", item.caseId()); row.put("definitionId", item.definitionId());
             row.put("localCaseId", selected == null ? null : selected.caseId());
             row.put("qualifiedCaseId", item.qualifiedCaseId()); row.put("execId", item.executionId());
+            row.put("executed", Boolean.valueOf(item.executionStarted()));
+            if (!item.executionStarted() && item.actual() != null && !item.actual().isEmpty())
+                row.put("notStartedReason", item.actual());
             row.put("caseName", item.caseName()); row.put("status", item.status().name());
             row.put("durationMs", item.duration().toMillis()); row.put("tags", item.tags());
             if (selected != null) {
@@ -262,6 +266,9 @@ public final class DefaultAttService implements AttService {
             row.put("caseId", item.caseId()); row.put("definitionId", item.definitionId());
             row.put("localCaseId", selected == null ? null : selected.caseId());
             row.put("qualifiedCaseId", item.qualifiedCaseId()); row.put("execId", item.executionId());
+            row.put("executed", Boolean.valueOf(item.executionStarted()));
+            if (!item.executionStarted() && item.actual() != null && !item.actual().isEmpty())
+                row.put("notStartedReason", item.actual());
             row.put("caseName", item.caseName()); row.put("status", item.status().name());
             row.put("durationMs", item.duration().toMillis()); row.put("tags", item.tags());
             if (selected != null) {
@@ -280,6 +287,7 @@ public final class DefaultAttService implements AttService {
         }
         Map<String,Object> summary = new LinkedHashMap<String,Object>();
         summary.put("total", result.total()); summary.put("passed", result.passed());
+        summary.put("executionCount", result.executionCount());
         summary.put("failed", result.failed()); summary.put("error", result.error());
         summary.put("skipped", result.skipped()); summary.put("invalid", result.invalid());
         summary.put("resolved", resolution.resolvedCount()); summary.put("selected", resolution.selectedCount());

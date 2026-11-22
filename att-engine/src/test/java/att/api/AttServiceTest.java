@@ -1,5 +1,6 @@
 package att.api;
 
+import att.report.ReportRegenerator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayOutputStream;
@@ -8,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -145,6 +147,88 @@ class AttServiceTest {
                 cases.stream().map(item -> String.valueOf(item.get("qualifiedCaseId"))).collect(java.util.stream.Collectors.toList()));
         assertTrue(Files.isRegularFile(root.resolve("output/native-suite-all/run.yaml")));
         assertFalse(Files.exists(root.resolve("suite.yaml")), "An implicit Suite must not require a suite file");
+    }
+
+    @Test void failFastReportsSelectedButUnstartedCasesAsSkippedWithoutExecutionIds() throws Exception {
+        Path root = nativeSuitePackage("native-suite-fail-fast-package");
+        writeNativeDefinition(root, "fpp.transfer", "payment.transfer.v1", ""
+                + "- {recordId: first, data: {caseId: first, amount: 7}}\n"
+                + "- {recordId: second, data: {caseId: second, amount: 13}}\n"
+                + "- {recordId: third, data: {caseId: third, amount: 17}}\n");
+        Files.write(root.resolve("templates/flows/payment/transfer/v1/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: payment.transfer.v1\nname: Transfer\n"
+                        + "description: Fail-fast aggregate fixture\nactions:\n"
+                        + "  reject: {type: assert, assert: 'false'}\n").getBytes(StandardCharsets.UTF_8));
+
+        List<ExecutionEvent> observed=new ArrayList<ExecutionEvent>();
+        RunResult result = new DefaultAttService().runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-suite-fail-fast", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, false, true, observed::add));
+
+        assertEquals("FAIL", result.status());
+        assertEquals(3L, result.summary().get("total"));
+        assertEquals(3, result.summary().get("selected"));
+        assertEquals(1L, result.summary().get("executionCount"));
+        assertEquals(1L, result.summary().get("failed"));
+        assertEquals(2L, result.summary().get("skipped"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> cases = (List<Map<String,Object>>) result.summary().get("cases");
+        assertEquals(Arrays.asList("FAIL", "SKIPPED", "SKIPPED"), cases.stream()
+                .map(item -> String.valueOf(item.get("status"))).collect(java.util.stream.Collectors.toList()));
+        assertEquals(Boolean.TRUE, cases.get(0).get("executed"));
+        for (int index = 1; index < cases.size(); index++) {
+            assertEquals(Boolean.FALSE, cases.get(index).get("executed"));
+            assertNull(cases.get(index).get("execId"));
+            assertTrue(String.valueOf(cases.get(index).get("notStartedReason"))
+                    .contains("Not started because failFast"));
+        }
+
+        Path runDirectory = root.resolve("output/native-suite-fail-fast");
+        @SuppressWarnings("unchecked") Map<String,Object> manifest = (Map<String,Object>) new org.yaml.snakeyaml.Yaml()
+                .load(new String(Files.readAllBytes(runDirectory.resolve("run.yaml")), StandardCharsets.UTF_8));
+        @SuppressWarnings("unchecked") Map<String,Object> run = (Map<String,Object>) manifest.get("run");
+        assertEquals(3, run.get("selectedCaseCount"));
+        assertEquals(1, ((Number) run.get("executionCount")).intValue());
+        assertEquals(2, ((Number) run.get("skippedCaseCount")).intValue());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> manifestCases=(List<Map<String,Object>>)manifest.get("cases");
+        assertEquals(Boolean.TRUE,manifestCases.get(0).get("executed"));
+        for(int index=1;index<manifestCases.size();index++) {
+            assertEquals(Boolean.FALSE,manifestCases.get(index).get("executed"));
+            assertNull(manifestCases.get(index).get("execId"));
+            assertEquals("",manifestCases.get(index).get("caseLog"));
+        }
+        List<String> events = Files.readAllLines(runDirectory.resolve("events.jsonl"), StandardCharsets.UTF_8);
+        assertEquals(3, events.size());
+        assertEquals(2L, events.stream().filter(line -> line.contains("\"executionStarted\":false"))
+                .count());
+        assertTrue(events.stream().filter(line -> line.contains("\"executionStarted\":false"))
+                .allMatch(line -> line.contains("\"notStartedReason\":\"Not started because failFast")));
+        List<ExecutionEvent> notStartedEvents=observed.stream().filter(event->
+                event.type()==ExecutionEvent.Type.PROGRESS&&"CASE_FINISHED".equals(event.data().get("event"))
+                        &&Boolean.FALSE.equals(event.data().get("executionStarted")))
+                .collect(java.util.stream.Collectors.toList());
+        assertEquals(2,notStartedEvents.size());
+        assertTrue(notStartedEvents.stream().allMatch(event->"failFast".equals(event.data().get("notStartedReason"))));
+
+        com.fasterxml.jackson.databind.JsonNode ci = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(Files.readAllBytes(runDirectory.resolve("ci/summary.json")));
+        assertEquals(3, ci.path("summary").path("total").asInt());
+        assertEquals(1, ci.path("summary").path("executionCount").asInt());
+        assertEquals(2, ci.path("summary").path("skipped").asInt());
+        assertFalse(ci.path("cases").get(1).path("executed").asBoolean());
+        assertTrue(ci.path("cases").get(1).path("execId").isNull());
+        String junit = new String(Files.readAllBytes(runDirectory.resolve("ci/junit.xml")), StandardCharsets.UTF_8);
+        assertTrue(junit.contains("tests=\"3\""), junit);
+        assertTrue(junit.contains("skipped=\"2\""), junit);
+        assertTrue(junit.contains("name=\"ATT.EXECUTED\" value=\"false\""), junit);
+
+        Path regenerated=new ReportRegenerator().regenerate(root.resolve("output"),"native-suite-fail-fast");
+        String regeneratedHtml=new String(Files.readAllBytes(regenerated),StandardCharsets.UTF_8);
+        assertTrue(regeneratedHtml.contains("data-caseid=\"fpp.transfer.second\" data-execid=\"\""),regeneratedHtml);
+        assertTrue(regeneratedHtml.contains("data-status=\"SKIPPED\""),regeneratedHtml);
+        String regeneratedJunit=new String(Files.readAllBytes(runDirectory.resolve("report/junit.html")),StandardCharsets.UTF_8);
+        assertTrue(regeneratedJunit.contains("· Skipped 2"),regeneratedJunit);
+        assertTrue(regeneratedJunit.contains("fpp.transfer.third"),regeneratedJunit);
     }
 
     @Test void crossDefinitionSelectionRunsCasesFromDistinctFlowsAndKeysAggregateEvidence() throws Exception {

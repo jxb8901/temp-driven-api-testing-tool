@@ -98,6 +98,10 @@ public final class ExecutionConsoleFormatter {
         if ("SUITE_STARTED".equals(kind))
             return present("[SUITE] file=" + scalar(values.get("file"), options) + " cases=" + scalar(values.get("cases"), options), options);
         if ("CASE_STARTED".equals(kind)) return present("[CASE] id=" + scalar(caseId, options) + " status=START", options);
+        if ("CASE_FINISHED".equals(kind) && Boolean.FALSE.equals(values.get("executionStarted")))
+            return present("[CASE] id=" + scalar(caseId, options) + " status=" + scalar(status, options)
+                    + " not-started=" + scalar(values.get("notStartedReason"), options)
+                    + " durationMs=" + durationMs, options);
         if ("CASE_FINISHED".equals(kind))
             return present("[CASE] id=" + scalar(caseId, options) + " status=" + scalar(status, options) + " durationMs=" + durationMs, options);
         if ("CASE_LOG_PATH".equals(kind))
