@@ -220,6 +220,9 @@ class ApiServletIntegratedLimitsTest {
                 +"  sourceWorkbookXlsx: "+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX+"\n");
 
         Job job=new Job(id,"run","alice",principal,new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
+        job.submissionSource="manual";
+        job.submittedBy=principal;
+        job.executionPrincipal=principal;
         job.executionSpec=nativeExecutionSpec("alice",runId);
         job.resultJson=ServerRuntime.JSON.writeValueAsString(Map.of("executionId",runId,"status","PASS","exitCode",0));
         runtime.store.insert(job,"{}");job.status="PASS";job.finishedAt=Instant.now();runtime.store.update(job);
