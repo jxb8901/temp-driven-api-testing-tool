@@ -52,7 +52,7 @@ Excel-backed definitions use the same read-only S04 adapter as native resolution
 
 ### Run an implicit Native Case Suite
 
-ATT 4.6.0 adds a Suite selection over resolved Cases without an authored `suite.yaml`. Declare one or more Definition IDs, then select all Cases, explicit qualified Case IDs, or Cases matching one or more tags. Excluded tags take precedence over included tags.
+The 4.6.0 development candidate adds a Suite selection over resolved Cases without an authored `suite.yaml`. Declare one or more Definition IDs, then select all Cases, explicit qualified Case IDs, or Cases matching one or more tags. Excluded tags take precedence over included tags.
 
 This local command selects every `smoke` Case from two Definitions except Cases tagged `destructive`:
 
@@ -64,7 +64,7 @@ To select named Cases, use `--qualified-case-id` for each ID, such as `fpp.trans
 
 ATT orders Definitions by ID and keeps each Definition's source record order. Duplicate Definition IDs, duplicate qualified Case IDs, unknown IDs, and empty selections fail validation. The accepted Server draft freezes its selected IDs and Definition source revisions before the Worker runs. Per-Case results use the existing RUN evidence and report pipeline.
 
-This implicit Suite is a runtime selection, not a reusable authored resource. It does not add LOAD targets or advanced Testdata/generator bindings; Debug interoperability remains a separate #388 follow-up.
+This implicit Suite is a runtime selection, not a reusable authored resource. It does not add LOAD targets or advanced Testdata/generator bindings; Debug interoperability remains deferred.
 
 ## Workbook
 

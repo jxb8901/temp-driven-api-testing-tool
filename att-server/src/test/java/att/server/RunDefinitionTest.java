@@ -128,6 +128,23 @@ class RunDefinitionTest {
         assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
                 ()->att.validation.JsonSchemaVerifier.verifyJson(schema,overLimit));
     }
+    @Test void nativeSuiteV2RejectsAllFalseAloneAndC1ControlTagsWithSchemaParity() throws Exception {
+        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
+        String allFalseAlone=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":false}}}");
+        assertThrows(IllegalArgumentException.class,()->parse(allFalseAlone));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                ()->att.validation.JsonSchemaVerifier.verifyJson(schema,allFalseAlone));
+
+        String allTrue=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":true}}}");
+        att.validation.JsonSchemaVerifier.verifyJson(schema,allTrue);
+        assertTrue(parse(allTrue).nativeSuiteAll);
+
+        String c1Tag=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],"
+                +"\"selection\":{\"all\":true,\"tags\":[\"smoke\\u0080\"]}}}");
+        assertThrows(IllegalArgumentException.class,()->parse(c1Tag));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                ()->att.validation.JsonSchemaVerifier.verifyJson(schema,c1Tag));
+    }
     private static String nativeSuiteQualifiedIdsRequest(int count) {
         StringBuilder ids=new StringBuilder();
         for(int index=0;index<count;index++) {

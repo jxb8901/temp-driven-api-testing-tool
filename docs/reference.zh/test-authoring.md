@@ -52,9 +52,9 @@ Excel-backed Definition 使用與 native resolution 相同的唯讀 S04 adapter�
 
 ### 執行 implicit Native Case Suite
 
-ATT 4.6.0 可在已解析的 Case 上建立 Suite selection，毋須作者建立 `suite.yaml`。先指定一個或多個 Definition ID，再選取全部 Case、指定完整 Qualified Case ID，或按一個或多個標簽選取。被排除的標簽優先於包含的標簽。
+4.6.0 開發候選版可在已解析的 Case 上建立 Suite selection，毋須作者建立 `suite.yaml`。先指定一個或多個 Definition ID，再選取全部 Case、指定完整 Qualified Case ID，或按一個或多個 tags 選取。被排除的 tags 優先於包含的 tags。
 
-以下本地命令會從兩個 Definition 選取所有 `smoke` Case，但排除帶有 `destructive` 標簽的 Case：
+以下本地命令會從兩個 Definition 選取所有 `smoke` Case，但排除帶有 `destructive` tags 的 Case：
 
 ```sh
 att --local --package payments run native-suite --definition fpp.transfer --definition fpp.refund --tag smoke --exclude-tag destructive --fail-fast
@@ -64,7 +64,7 @@ att --local --package payments run native-suite --definition fpp.transfer --defi
 
 ATT 會按 ID 排列 Definition，並保留每個 Definition 的來源記錄順序。重複 Definition ID、重複 Qualified Case ID、不存在的 ID，以及空選取都會在驗證時失敗。Worker 執行前，Server draft 會凍結選取 ID 和 Definition source revision。每個 Case 的結果沿用現有 RUN evidence 和報告流程。
 
-Implicit Suite 是 runtime selection，並非可重用的作者資源。這項功能不會新增 LOAD target 或進階 Testdata/generator binding；Debug interoperability 仍屬 #388 後續工作。
+Implicit Suite 是 runtime selection，並非可重用的 authored Definition。這項功能不會新增 LOAD target 或進階 Testdata/generator binding；Debug interoperability 仍屬後續工作。
 
 ## Workbook
 
