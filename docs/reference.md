@@ -286,7 +286,7 @@ ATT orders Definitions by ID and keeps each Definition's source record order. Du
 
 This implicit Suite is a runtime selection, not a reusable authored resource. It does not add LOAD targets or advanced Testdata/generator bindings; Debug interoperability remains deferred.
 
-Studio's Run editor also exposes this selection: enter one or more Definition IDs, choose all Cases or selected Cases, then enter each Qualified Case ID on its own line. Native Suite `rerun-failed` is still rejected; the Server does not yet retain the failed source Job/run and exact retry Case IDs as lineage for a new Native Suite execution.
+Studio's Run editor also exposes this selection: enter one or more Definition IDs, then choose all Cases, explicit Qualified Case IDs, or Cases matching tags. Optional included and excluded tags further filter the selection, and replay preserves tag selectors returned in the saved definition. Native Suite `rerun-failed` is still rejected; the Server does not yet retain the failed source Job/run and exact retry Case IDs as lineage for a new Native Suite execution.
 
 ### Workbook
 

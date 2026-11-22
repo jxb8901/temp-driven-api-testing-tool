@@ -36,12 +36,13 @@ async function change(label: string, value: string) {
   await act(async () => { setter.call(element, value); element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); });
 }
 async function changeTextarea(label: string, value: string) {
-  const element=[...host.querySelectorAll('label')].find(item=>item.textContent?.startsWith(label))!.querySelector('textarea')!;
+  const element=textarea(label);
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(element, value);
     element.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
+function textarea(label: string) { return [...host.querySelectorAll('label')].find(item=>item.textContent?.startsWith(label))!.querySelector('textarea')!; }
 async function click(name: string) { const button = [...host.querySelectorAll('button')].find(item => item.textContent === name)!; await act(async () => button.click()); }
 async function settleDebugForm(milliseconds = 220) { await act(async () => { await new Promise(resolve => window.setTimeout(resolve, milliseconds)); }); }
 async function renderTarget(type: 'template' | 'flow' | 'tool', resourceId = 'resource-id', logicalId = 'payment.flow', environment = 'SIT') {
@@ -300,4 +301,42 @@ it('schedules the validated Native Suite draft without projecting it as a resour
   expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ packageId: 'payments', draftId: 'R123', executionType: 'run' }));
   expect(onSchedule.mock.calls.at(-1)?.[0]).not.toHaveProperty('target');
   expect(api.submitRun).not.toHaveBeenCalled();
+});
+
+it('clears Native Suite tags when the Package changes', async () => {
+  await change('Target type','native-suite');
+  await changeTextarea('Definition IDs','payments.transfer');
+  await changeTextarea('Tags','smoke');
+  await changeTextarea('Exclude Tags','destructive');
+  await change('Package ID','ledger');
+  expect(textarea('Tags').value).toBe('');
+  expect(textarea('Exclude Tags').value).toBe('');
+});
+
+async function renderNativeSuiteReplay(selection: JsonObject) {
+  vi.mocked(api.getJobReplayEditorDraft).mockResolvedValue({
+    schemaVersion:'att-job-replay-draft/v1',draftRef:'R0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'run',sourcePolicy:'current',
+    originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{environment:'SIT',environmentOrigin:'package'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
+    definition:{schemaVersion:'att-execution/v2',executionType:'run',packageId:'payments',environment:'SIT',target:{type:'nativeSuite',definitionIds:['payments.transfer'],selection},options:{debug:false}},
+  });
+  vi.mocked(api.createJobReplayDraft).mockResolvedValue({jobId:'J0123456789ABCDEF',available:true,sourcePolicy:'current',intentId:'intent',draftId:'R123',
+    preview:{draftId:'R123',preview:{selectedCaseIds:['payments.transfer.customerA']},expiresAt:new Date(Date.now()+60000).toISOString()}});
+  await act(async()=>root.render(<NavigationGuardContext.Provider value={guard}><RunPage key="native-suite-replay" packageId="payments" replayDraftId="R0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onAccepted={onAccepted} onSchedule={onSchedule} schedulingEnabled /></NavigationGuardContext.Provider>));
+}
+
+const nativeSuiteReplayFixtures: Array<{name:string;selection:JsonObject;mode:string;tags:string;excludeTags:string}> = [
+  {name:'tag-only',selection:{tags:['smoke']},mode:'tags',tags:'smoke',excludeTags:''},
+  {name:'include and exclude tags',selection:{tags:['smoke','critical'],excludeTags:['destructive']},mode:'tags',tags:'smoke\ncritical',excludeTags:'destructive'},
+  {name:'exclude tags from all Cases',selection:{all:true,excludeTags:['destructive']},mode:'all',tags:'',excludeTags:'destructive'},
+];
+it.each(nativeSuiteReplayFixtures)('restores and submits Native Suite replay $name selectors', async fixture => {
+  await renderNativeSuiteReplay(fixture.selection);
+  expect((control('Suite selection') as HTMLSelectElement).value).toBe(fixture.mode);
+  expect((textarea('Tags')).value).toBe(fixture.tags);
+  expect((textarea('Exclude Tags')).value).toBe(fixture.excludeTags);
+  await click('Validate');
+  expect(api.createJobReplayDraft).toHaveBeenCalledWith('J0123456789ABCDEF',expect.objectContaining({overrides:expect.objectContaining({
+    target:{type:'nativeSuite',definitionIds:['payments.transfer'],selection:fixture.selection},
+  })}));
+  expect(api.previewRun).not.toHaveBeenCalled();
 });
