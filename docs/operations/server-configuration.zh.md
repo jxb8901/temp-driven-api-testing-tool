@@ -15,7 +15,7 @@ Server 會驗證 `min(workers.maxConcurrent, workers.maxConcurrentLoad) <= 4`。
 | ADMIN-only 身分（包括按 admin-only role policy 解析的 container 身分） | 不具 Package USER operations | 不可以；填入 owner/editor 字串亦不會取得 USER 權限 | 僅在另有 `SYSTEM_SETTINGS_WRITE` 權限時可用；raw source 亦須 `centralConfigurationEditingEnabled: true` |
 | Anonymous 或 disabled 身分 | 只有明確啟用 anonymous operations 時可使用操作 API；disabled 身分視為未驗證 | 不可以；authoring 要求已驗證的 active USER | 不可以 |
 
-Package assignment 不會變更 authentication mode 授予的 USER 或 ADMIN 權限。撤銷 trusted editor assignment 或停用帳戶後，後續 privileged request 會立即重新驗證；既有 draft 會受 Package registry revision fence 保護。
+Package assignment 不會變更 authentication mode 授予的 USER 或 ADMIN 權限。撤銷 trusted editor assignment 或停用帳戶後，後續 privileged request 會立即重新驗證；既有 draft 會受 Package registry revision fence 保護。關閉 shared-editors 驗收 gate 前，請依 [Package-scoped shared editors 驗收](shared-editors-acceptance.zh.md) 執行已部署的多角色矩陣。
 
 已登錄的 Package root 與 `ATT_HOME` 是 source revision 的匯入／匯出鏡像。Server 啟動時及回傳 source pin 前會檢查設定目錄是否有變更，並將穩定副本匯入為新的 immutable revision。Server 會以 atomic pointer 更新切換讀者使用的 revision。Change Set 與 Manifest 發布會切換至完整 immutable revision，之後再匯出至設定目錄。後續有匯入或發布時，Worker 仍使用自己已 pin 的 revision。共用 `dataDir` 與 source root 的 Server process 必須使用相同 OS account，才能使用 private revision store 與 writer lock。
 

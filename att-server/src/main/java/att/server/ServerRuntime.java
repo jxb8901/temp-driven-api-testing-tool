@@ -8027,7 +8027,11 @@ final class ServerRuntime implements AutoCloseable {
                     metrics.phase("verification_fsync");
                     try { ArtifactArchive.verify(archive,true); }
                     catch(Exception corrupt) {
-                        if(!Files.isDirectory(output))throw corrupt;
+                        // Verification failures are publication I/O, not artifact policy limits.
+                        // Re-wrapping avoids IllegalArgumentException being audited as REJECTED_POLICY
+                        // when the private source is already gone and the archive cannot be rebuilt.
+                        if(!Files.isDirectory(output))
+                            throw new java.io.IOException("Artifact archive is unreadable and private source is unavailable",corrupt);
                         Files.delete(archive);
                     }
                 }
@@ -8053,6 +8057,13 @@ final class ServerRuntime implements AutoCloseable {
             } catch(Exception failure) {
                 boolean policy=failure instanceof IllegalArgumentException;
                 if(metrics!=null&&metrics.value.failurePhase==null)metrics.fail(policy?"policy_limit":"publication_failed");
+                // Persist FAILED metrics before status/audit side effects so callers that observe a
+                // projected FAILED index (corrupt READY zip) are not left reading a stale READY/RUNNING
+                // outcome if later persistence is delayed or interrupted.
+                if(metrics!=null) {
+                    try {store.archiveMetrics(id,metrics.value);}
+                    catch(Exception unavailable){java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Unable to persist artifact metrics for Job "+id);}
+                }
                 finishArtifactFailure(id,policy?"policy_limit":"publication_failed",policy?"REJECTED_POLICY":"FAILED_IO",failure);
                 java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).warning("Artifact publication failed for Job "+id);
             } finally {
@@ -8071,7 +8082,32 @@ final class ServerRuntime implements AutoCloseable {
         }); } catch(RejectedExecutionException full) {
             pendingArtifactJobs.remove(id);
             // Recovery retries when writer capacity becomes available; a retry cannot replace a READY state.
+            // Unrecoverable corrupt archives still need FAILED metrics when the queue rejects the writer.
+            recordUnrecoverableArchiveFailure(id,queuedAt);
         }
+    }
+    /** When a published archive is unreadable and private source is gone, record FAILED without a writer slot. */
+    private void recordUnrecoverableArchiveFailure(String id,long queuedAt) {
+        try {
+            if(store.get(id)==null||!terminal(id)||jobs.containsKey(id))return;
+            Path output=outputDirectoryForJob(id),archive=artifactArchivePath(id);
+            if(!Files.isRegularFile(archive)||Files.isDirectory(output))return;
+            try {ArtifactArchive.verify(archive,false);return;}
+            catch(Exception corrupt) {
+                if(!pendingArtifactJobs.add(id))return;
+                try {
+                    var previous=store.archiveMetrics(id);
+                    ArtifactMetricsRecorder metrics=new ArtifactMetricsRecorder(queuedAt,previous==null?1:Math.min(Long.MAX_VALUE-1,previous.attempts)+1);
+                    metrics.phase("verification_fsync");
+                    metrics.fail("publication_failed");
+                    metrics.finish();
+                    store.archiveMetrics(id,metrics.value);
+                    finishArtifactFailure(id,"publication_failed","FAILED_IO",corrupt);
+                } finally {
+                    pendingArtifactJobs.remove(id);
+                }
+            }
+        } catch(Exception ignored) { }
     }
     private void finishArtifactFailure(String id,String reason,String auditOutcome) {
         finishArtifactFailure(id,reason,auditOutcome,null);

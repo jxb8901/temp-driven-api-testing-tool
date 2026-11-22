@@ -124,4 +124,4 @@ There is no configured aggregate disk quota for retained or pinned snapshots. Mo
 | `422` | Read the validation diagnostics, correct the listed source, and validate again. |
 | Impact is unavailable, partial, or blocked | Do not publish central Config. Ask the Server administrator to restore complete Impact coverage or resolve the blocking condition. |
 
-See [Explorer and functional execution](explorer-run.md) for resource inspection and execution. See [Server configuration](../../operations/server-configuration.md) for the deployment switches and ownership rules.
+See [Explorer and functional execution](explorer-run.md) for resource inspection and execution. See [Server configuration](../../operations/server-configuration.md) for the deployment switches and ownership rules. The deployed multi-role operator matrix for shared Package editors is in [Package-scoped shared editors acceptance](../../operations/shared-editors-acceptance.md).
