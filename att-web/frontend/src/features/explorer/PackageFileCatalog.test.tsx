@@ -86,17 +86,28 @@ describe('PackageFileCatalog', () => {
     expect(listResources).not.toHaveBeenCalled();
   });
 
-  it('opens indexed native Test Case definitions in the dedicated editor', async () => {
+  it('keeps the indexed file editor route alongside the native Test Case editor route', async () => {
     const onOpenNativeTestCase = vi.fn();
-    const api = { listPackageFileIndex: vi.fn(async () => ({ items: [{ path: 'testcase/refund/testcase.yaml', available: true, uses: [] }],
+    const onOpenFile = vi.fn();
+    const referenceId = 'd'.repeat(64);
+    const api = { listPackageFileIndex: vi.fn(async () => ({ items: [{ path: 'testcase/refund/testcase.yaml', available: true, uses: [{
+      type: 'flow' as const, resourceId: 'flow-1', label: 'Checkout Flow', referenceId,
+      originPath: 'templates/checkout/flow.yaml', available: true, callSites: [{ actionId: 'submitOrder' }],
+    }] }],
       total: 1, nextCursor: null, packageRevision: 'a'.repeat(64), canEdit: true,
       coverage: { state: 'COMPLETE' as const, complete: true, resourcesScanned: 1, resourcesIncomplete: 0, referenceSetsTruncated: 0 },
     })) } as unknown as ExplorerApi;
-    await act(async () => root.render(<PackageFileCatalog api={api} packageId="payments" onOpenFile={() => {}}
+    await act(async () => root.render(<PackageFileCatalog api={api} packageId="payments" onOpenFile={onOpenFile}
       onOpenNativeTestCase={onOpenNativeTestCase} />));
     await settle();
+    expect([...host.querySelectorAll('button')].map(item => item.textContent?.trim())).toContain('Open Native Test Case');
+    expect([...host.querySelectorAll('button')].map(item => item.textContent?.trim())).toContain('Open file');
     click(button('Open Native Test Case'));
     expect(onOpenNativeTestCase).toHaveBeenCalledWith('testcase/refund/testcase.yaml');
+    click(button('Open file'));
+    expect(onOpenFile).toHaveBeenCalledWith('testcase/refund/testcase.yaml', 'templates/checkout/flow.yaml', {
+      type: 'flow', resourceId: 'flow-1', referenceId,
+    });
   });
 
   it('localizes complete and partial index coverage with explicit read access state', async () => {

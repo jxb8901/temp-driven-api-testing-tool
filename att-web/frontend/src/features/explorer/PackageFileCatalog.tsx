@@ -129,11 +129,12 @@ export function PackageFileCatalog({ api, packageId, onOpenFile, onOpenResource,
           }}>{useLabel(use)}</button> : <span>{useLabel(use)}</span>}
           {!use.available && <span> · {use.reason || 'file content unavailable'}</span>}
         </li>)}</ul></div>
-        {nativeTestCase && onOpenNativeTestCase
-          ? <button type="button" onClick={() => onOpenNativeTestCase(file.path)}>{locale === 'zh-Hant' ? '開啟 Native Test Case' : 'Open Native Test Case'}</button>
-          : firstAvailable ? <button type="button" onClick={() => onOpenFile(file.path, firstAvailable.originPath,
+        {nativeTestCase && onOpenNativeTestCase && <button type="button" onClick={() => onOpenNativeTestCase(file.path)}>
+          {locale === 'zh-Hant' ? '開啟 Native Test Case' : 'Open Native Test Case'}
+        </button>}
+        {firstAvailable ? <button type="button" onClick={() => onOpenFile(file.path, firstAvailable.originPath,
           { type: firstAvailable.type, resourceId: firstAvailable.resourceId, referenceId: firstAvailable.referenceId! })}>Open file</button>
-          : <span role="status">{file.reason || 'Unavailable'}</span>}
+          : !(nativeTestCase && onOpenNativeTestCase) && <span role="status">{file.reason || 'Unavailable'}</span>}
       </li>;
     })}</ul>}
     {cursor && <button type="button" onClick={loadMore} disabled={loading}>{loading ? 'Loading…' : 'Load more files'}</button>}
