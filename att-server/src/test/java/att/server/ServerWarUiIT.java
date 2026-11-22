@@ -342,6 +342,12 @@ class ServerWarUiIT {
         JsonNode result=getJson(port,jobPath+"/result",auth);
         assertEquals(job.path("status").asText(),result.path("job").path("status").asText(),result.toString());
         JsonNode archive=awaitArchive(port,api,id,auth);
+        if("TIMEOUT".equals(template)) {
+            String caseLog=readArchiveEntryText(port,api+"/jobs/"+id+"/artifacts/archive.zip",auth,"case.log");
+            assertNotNull(caseLog,type+" archived Case log must preserve Tool timeout evidence");
+            assertTrue(caseLog.contains("status: TIMEOUT")&&caseLog.contains("timeoutMs: 5000"),
+                    type+" archived Case log must identify the action timeout: "+caseLog);
+        }
         List<String> artifactPaths=java.util.stream.StreamSupport.stream(archive.path("items").spliterator(),false)
                 .map(item->item.path("path").asText()).sorted().toList();
         List<String> primaryReports=java.util.stream.StreamSupport.stream(archive.path("primaryReports").spliterator(),false)
@@ -641,6 +647,23 @@ class ServerWarUiIT {
             assertNotEquals("FAILED",index.path("archiveStatus").asText(),index.toString());Thread.sleep(30);
         }while(System.nanoTime()<deadline);
         fail("Archive did not become READY: "+index);return index;
+    }
+
+    private static String readArchiveEntryText(int port,String route,String authorization,String suffix) throws Exception {
+        HttpURLConnection connection=open(port,route,authorization);byte[] bytes;
+        try {
+            assertEquals(200,connection.getResponseCode(),"GET "+route);
+            try(var input=connection.getInputStream()){bytes=input.readAllBytes();}
+        } finally {connection.disconnect();}
+        try(var archive=new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(bytes))) {
+            java.util.zip.ZipEntry entry;
+            while((entry=archive.getNextEntry())!=null) {
+                if(entry.getName().endsWith(suffix))
+                    return new String(archive.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);
+                archive.closeEntry();
+            }
+        }
+        return null;
     }
 
     @Test
