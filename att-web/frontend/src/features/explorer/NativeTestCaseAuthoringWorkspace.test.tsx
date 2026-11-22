@@ -203,6 +203,71 @@ inputs:
     expect(previewNative).not.toHaveBeenCalled();
   });
 
+  it('confirms before discarding unsynchronized JSON drafts on Data Source switch', async () => {
+    const definition = `schemaVersion: att-testcase/v1
+id: payments.refund
+name: Refund
+flow: checkout.v1
+caseIdExpression: "\${DATA.id}"
+dataSource:
+  type: inline
+  records:
+    - recordId: first
+      data: {id: R-001}
+`;
+    const api = {
+      listResources: vi.fn(async () => ({ items: [{ type: 'flow', resourceId: 'f1', logicalId: 'checkout.v1', name: 'Checkout' }], total: 1 })),
+      getManagedPackageAuthoringSource: vi.fn(async (_packageId: string, query: { kind: string }) => query.kind === 'manifest'
+        ? { available: true, present: true, logicalPath: 'package.yaml', format: 'yaml', text: 'resources:\n  testcaseRoot: testcase\n', sourceEtag: 'e', revision: 'r', baseSourceRevision: 'base-1', registryRevision: 'registry-1' }
+        : { available: true, present: true, logicalPath: 'testcase/refund/testcase.yaml', format: 'yaml', text: definition, sourceEtag: 'e', revision: 'r', baseSourceRevision: 'base-1', registryRevision: 'registry-1' }),
+    } as unknown as ExplorerApi;
+
+    await act(async () => root.render(<AppShellContext.Provider value={context()}>
+      <NativeTestCaseAuthoringWorkspace api={api} packageId="payments" sourcePath="testcase/refund/testcase.yaml" />
+    </AppShellContext.Provider>));
+    await settle();
+
+    const records = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Inline multi-record data"]');
+    expect(records).not.toBeNull();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(records!, '[{"recordId":');
+      records!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await settle();
+    expect(records!.value).toBe('[{"recordId":');
+    expect(host.textContent).toContain('JSON draft is not synchronized');
+
+    const dataSource = host.querySelector<HTMLSelectElement>('select[aria-label="Native Case Data Source"]');
+    expect(dataSource).not.toBeNull();
+    expect(dataSource!.value).toBe('inline');
+    await act(async () => {
+      dataSource!.value = 'excel';
+      dataSource!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await settle();
+    expect(host.querySelector('[role="alertdialog"]')).not.toBeNull();
+    expect(host.textContent).toContain('Discard unfinished JSON draft?');
+
+    await act(async () => host.querySelector<HTMLButtonElement>('.att-confirm-actions button:first-child')!.click());
+    await settle();
+    expect(host.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Native Case Data Source"]')!.value).toBe('inline');
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Inline multi-record data"]')!.value).toBe('[{"recordId":');
+    expect(host.textContent).toContain('JSON draft is not synchronized');
+
+    await act(async () => {
+      dataSource!.value = 'excel';
+      dataSource!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await settle();
+    await act(async () => host.querySelector<HTMLButtonElement>('.att-confirm-actions button:last-child')!.click());
+    await settle();
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Native Case Data Source"]')!.value).toBe('excel');
+    expect(host.querySelector('textarea[aria-label="Inline multi-record data"]')).toBeNull();
+    expect(host.textContent).not.toContain('JSON draft is not synchronized');
+  });
+
   it('surfaces structured Excel row and column diagnostics without previewing a Run draft', async () => {
     const definition = `schemaVersion: att-testcase/v1\nid: excel-errors\nflow: checkout.v1\ndataSource:\n  type: excel\n  path: testcase/cases.xlsx\n  sheet: Cases\n  caseId: ID\n  dataColumns: amount=Amount\n`;
     const previewNative = vi.fn(async () => ({ kind: 'NativeTestCasePreview', valid: false, sourceType: 'invalid',

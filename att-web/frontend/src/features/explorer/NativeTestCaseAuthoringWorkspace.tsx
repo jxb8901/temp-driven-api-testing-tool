@@ -124,6 +124,17 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
     setInputsDraft(null); setRecordsDraft(null); setInputsDraftError(''); setRecordsDraftError('');
   }
 
+  async function confirmDiscardJsonDrafts(reason: string): Promise<boolean> {
+    if (!jsonDraftsPending) return true;
+    return confirm({
+      title: 'Discard unfinished JSON draft?',
+      message: `${reason} The unfinished JSON text is not in the Definition YAML and will be lost.`,
+      confirmLabel: 'Discard draft',
+      cancelLabel: 'Keep editing',
+      destructive: true,
+    });
+  }
+
   useEffect(() => {
     setPath(sourcePath || '');
     setActiveSourcePath(sourcePath || '');
@@ -261,7 +272,8 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
     return true;
   }
 
-  function switchDataSource(type: 'inline' | 'excel') {
+  async function switchDataSource(type: 'inline' | 'excel') {
+    if (!await confirmDiscardJsonDrafts('Changing the Data Source replaces the typed JSON editors.')) return;
     const document = parseDocument(source, { uniqueKeys: true });
     if (document.errors.length) { setError('Correct the YAML source before changing its Data Source.'); return; }
     document.delete('inputs');
@@ -269,6 +281,21 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
     else document.set('dataSource', { type: 'excel', path: excelPaths[0] || 'testcase/cases.xlsx', sheet: 'Cases', headerRows: 1, caseId: 'ID', dataColumns: '' });
     clearJsonDrafts();
     setSource(document.toString({ lineWidth: 0 })); setError(''); clearPreview();
+  }
+
+  async function switchToDirectInputs() {
+    if (!await confirmDiscardJsonDrafts('Changing the Data Source replaces the typed JSON editors.')) return;
+    const document = parseDocument(source, { uniqueKeys: true });
+    if (document.errors.length) { setError('Correct the YAML source before changing its Data Source.'); return; }
+    document.delete('dataSource'); document.delete('caseIdExpression'); document.set('inputs', {});
+    clearJsonDrafts();
+    setSource(document.toString({ lineWidth: 0 })); setError(''); clearPreview();
+  }
+
+  async function applyAdvancedYaml(value: string) {
+    if (!await confirmDiscardJsonDrafts('Editing the advanced YAML source replaces guided JSON drafts.')) return;
+    clearJsonDrafts();
+    setSource(value); setError(''); setStatus(''); clearPreview();
   }
 
   async function runDesignPreview() {
@@ -436,12 +463,9 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
 
         <label>Data Source<select aria-label="Native Case Data Source" value={inline ? 'inline' : excel ? 'excel' : 'direct'} disabled={sourceReadOnly || advanced}
           onChange={event => {
-            if (event.currentTarget.value === 'direct') {
-              const document = parseDocument(source, { uniqueKeys: true });
-              document.delete('dataSource'); document.delete('caseIdExpression'); document.set('inputs', {});
-              clearJsonDrafts();
-              setSource(document.toString({ lineWidth: 0 })); clearPreview();
-            } else switchDataSource(event.currentTarget.value as 'inline' | 'excel');
+            const next = event.currentTarget.value;
+            if (next === 'direct') void switchToDirectInputs();
+            else void switchDataSource(next as 'inline' | 'excel');
           }}>
           <option value="direct">Single Case · typed inputs</option><option value="inline">Inline multi-record Data Source</option>
           <option value="excel">Excel Data Source</option>
@@ -528,7 +552,7 @@ export function NativeTestCaseAuthoringWorkspace({ api, packageId, sourcePath, o
           {advanced ? 'Hide advanced YAML source' : 'Advanced YAML source'}
         </button>
         {advanced && <CodeEditor label="Advanced testcase.yaml source" language="yaml" value={source} readOnly={sourceReadOnly}
-          onChange={value => { clearJsonDrafts(); setSource(value); setError(''); setStatus(''); clearPreview(); }} maxCharacters={100 * 1024} />}
+          onChange={value => { void applyAdvancedYaml(value); }} maxCharacters={100 * 1024} />}
 
         <div className="att-native-case-actions">
           <button type="button" className="button button-quiet" onClick={runDesignPreview}
