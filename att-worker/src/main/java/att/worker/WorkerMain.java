@@ -908,16 +908,11 @@ public final class WorkerMain {
         List<String> selectedIds=new ArrayList<String>();List<Map<String,Object>> cases=new ArrayList<Map<String,Object>>();
         for(att.testcase.ResolvedTestCase testCase:resolution.cases()) {
             selectedIds.add(testCase.qualifiedCaseId());
-            Map<String,Object> item=new LinkedHashMap<String,Object>();item.put("definitionId",testCase.definitionId());
-            item.put("caseId",testCase.caseId());item.put("qualifiedCaseId",testCase.qualifiedCaseId());
-            item.put("flowId",testCase.flowId());item.put("flowRevision",testCase.flowRevision());
-            item.put("sourceReference",testCase.sourceReference());item.put("sourceRevision",testCase.sourceRevision());
-            if(testCase.sourceRecordId()!=null)item.put("sourceRecordId",testCase.sourceRecordId());
-            if(testCase.recordIndex()!=null)item.put("recordIndex",testCase.recordIndex());
+            Map<String,Object> item=new LinkedHashMap<String,Object>(
+                    att.testcase.NativeSuiteRetryResolver.caseSourceIdentity(testCase));
+            item.put("caseId",testCase.caseId());
             item.put("tags",testCase.tags());item.put("provenance",testCase.sourceProvenance().toMap());
-            List<Map<String,Object>> dependencies=new ArrayList<Map<String,Object>>();
-            for(att.testcase.ResolvedTestCase.FlowDependency dependency:testCase.dependencies())dependencies.add(dependency.toMap());
-            item.put("dependencies",dependencies);cases.add(item);
+            cases.add(item);
         }
         Map<String,Object> result=new LinkedHashMap<String,Object>();
         result.put("definitionIds",new ArrayList<String>(sourcePaths.keySet()));
