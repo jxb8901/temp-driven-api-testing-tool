@@ -390,6 +390,128 @@ class ServerRuntimeJobReplayTest {
         }
     }
 
+    @Test void sharedEditorPublishLeavesAcceptedJobsAndSchedulesPinnedWithoutElevatingRights() throws Exception {
+        assumeSourceSnapshotIsolationAvailable();
+        Fixture fixture=fixture();
+        grantTrustedEditors(fixture,"p",List.of("alice","bob","admin"));
+        String runningId,queuedId,newId,scheduleId,pinnedScheduleRevision;
+        Path packageA,configA,packageB;
+        try(ServerRuntime runtime=fixture.open()) {
+            users(runtime);
+            runtime.store.createAuthUser("carol","Carol","unused","USER","csrf");
+            runtime.store.createAuthUser("admin","Admin","unused","ADMIN","csrf");
+
+            assertTrue(runtime.canEditPackageContent("p","alice"),
+                    "A trusted editor assignment grants Package source authoring to an active USER");
+            assertTrue(runtime.canEditPackageContent("p","bob"));
+            assertFalse(runtime.canEditPackageContent("p","carol"),
+                    "An active USER without a Package assignment remains non-editor");
+            assertFalse(runtime.canEditPackageContent("p","admin"),
+                    "Listing an ADMIN login under editors does not grant Package USER authoring");
+            assertTrue(runtime.isActiveUserOperator("alice"));
+            assertTrue(runtime.isActiveUserOperator("carol"));
+            assertFalse(runtime.isActiveUserOperator("admin"),
+                    "Package editor grants do not convert ADMIN into an operational USER");
+
+            JsonNode loadScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6","workloads",List.of(
+                    Map.of("id","hold-shared","target",Map.of("type","template","id","SNAPSHOT"),"load",Map.of("users",1,"duration","8s"),
+                            "execution",Map.of("thinkTime","500ms")))));
+            var loadInput=ServerRuntime.JSON.createObjectNode();loadInput.put("packageId","p");loadInput.put("environment","SIT");loadInput.set("scenario",loadScenario);
+            Map<String,Object> loadDraft=runtime.createAdvancedLoadDraft(loadInput,"alice");
+            runningId=String.valueOf(runtime.submitAdvancedLoadDraft(submit(String.valueOf(loadDraft.get("draftId"))),"alice").get("jobId"));
+            awaitRunning(runtime,runningId);
+            Job running=runtime.jobs.get(runningId);assertNotNull(running);
+            packageA=Path.of(running.request.packageRoot);configA=Path.of(running.request.config);
+            String runningPackageRevision=sourceRevision(runtime,runningId,"packageSourceRevision");
+            String runningBusinessRevision=sourceRevision(runtime,runningId,"businessSource");
+            String runningExecutionRevision=sourceRevision(runtime,runningId,"executionRevisionDigest");
+
+            var runDefinition=ServerRuntime.JSON.createObjectNode();runDefinition.put("schemaVersion",RunDefinition.VERSION);runDefinition.put("executionType","run");runDefinition.put("packageId","p");runDefinition.put("environment","SIT");
+            runDefinition.putObject("options").put("debug",true);runDefinition.putObject("target").put("type","template").put("id","SNAPSHOT");runDefinition.putObject("input");
+            Map<String,Object> queuedDraft=runtime.createRunDraft(runDefinition,"alice");
+            queuedId=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(queuedDraft.get("draftId"))),"alice","alice").get("jobId"));
+            Job queued=runtime.jobs.get(queuedId);assertNotNull(queued);
+            assertEquals("QUEUED",queued.status);
+            assertEquals(packageA,Path.of(queued.request.packageRoot));
+            assertEquals(configA,Path.of(queued.request.config));
+            assertEquals(runningPackageRevision,sourceRevision(runtime,queuedId,"packageSourceRevision"));
+
+            Map<String,Object> scheduleDraft=runtime.createRunDraft(runDefinition,"alice");
+            LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of(
+                    "name","Shared editor schedule","executionType","run","packageId","p","environment","SIT",
+                    "draftId",scheduleDraft.get("draftId"),"timezone","UTC","cron","0 2 * * *","enabled",true)),"alice");
+            scheduleId=schedule.id;pinnedScheduleRevision=schedule.expectedRevisionDigest;
+            assertNotNull(pinnedScheduleRevision);
+
+            Map<String,String> current=runtime.changeSetPublisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,"p","bob",false);
+            Map<String,Object> staged=runtime.changeSetPublisher.stage(ChangeSetPublisher.PACKAGE_SOURCE,"p","bob",false,
+                    current.get("baseSourceRevision"),current.get("registryRevision"),
+                    List.of(ChangeSetPublisher.OperationInput.replace("files/value.txt","shared-editor-B\n".getBytes(StandardCharsets.UTF_8))),
+                    "shared-editor-publish");
+            String changeSetId=String.valueOf(staged.get("changeSetId"));
+            runtime.changeSetPublisher.validate(ChangeSetPublisher.PACKAGE_SOURCE,"p","bob",false,changeSetId,"shared-editor-publish");
+            runtime.changeSetPublisher.review(ChangeSetPublisher.PACKAGE_SOURCE,"p","bob",false,changeSetId,"shared-editor-publish");
+            Map<String,Object> publication=runtime.changeSetPublisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,"p","bob",false,changeSetId,"shared-editor-publish");
+            runtime.notifySourcePublished(ChangeSetPublisher.PACKAGE_SOURCE,"p",publication,"shared-editor-publish");
+            assertEquals("shared-editor-B\n",Files.readString(fixture.root.resolve("files/value.txt")));
+
+            assertEquals(packageA,Path.of(runtime.jobs.get(runningId).request.packageRoot),
+                    "An accepted running Job keeps its pinned Package root after a shared-editor publish");
+            assertEquals(configA,Path.of(runtime.jobs.get(runningId).request.config));
+            assertEquals(packageA,Path.of(runtime.jobs.get(queuedId).request.packageRoot),
+                    "An accepted queued Job keeps its pinned Package root after a shared-editor publish");
+            assertEquals(runningPackageRevision,sourceRevision(runtime,runningId,"packageSourceRevision"));
+            assertEquals(runningBusinessRevision,sourceRevision(runtime,runningId,"businessSource"));
+            assertEquals(runningExecutionRevision,sourceRevision(runtime,runningId,"executionRevisionDigest"));
+            assertEquals(runningPackageRevision,sourceRevision(runtime,queuedId,"packageSourceRevision"));
+            LoadSchedule afterPublish=runtime.loadSchedule(scheduleId);
+            assertEquals(pinnedScheduleRevision,afterPublish.expectedRevisionDigest,
+                    "Shared-editor publication must not rewrite a Schedule's pinned expected revision");
+            assertEquals("package-revision-changed",afterPublish.sourceStatus);
+
+            assertThrows(ChangeSetPublisher.Denied.class,()->runtime.changeSetPublisher.currentRevisions(
+                    ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"bob",false),
+                    "A Package editor grant does not imply CENTRAL_RUNTIME_CONFIG or SYSTEM_SETTINGS_WRITE");
+
+            Map<String,Object> newDraft=runtime.createRunDraft(runDefinition,"carol");
+            newId=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(newDraft.get("draftId"))),"carol","carol").get("jobId"));
+            Job newJob=runtime.jobs.get(newId);assertNotNull(newJob);
+            packageB=Path.of(newJob.request.packageRoot);
+            assertNotEquals(packageA,packageB,"A Job admitted after shared-editor publish uses the new Package revision");
+            assertEquals("shared-editor-B\n",Files.readString(packageB.resolve("files/value.txt")));
+            assertTrue(Files.readString(packageA.resolve("templates/SNAPSHOT/template.yaml")).contains("files/value.txt"));
+            assertNotEquals("shared-editor-B\n",Files.readString(packageA.resolve("files/value.txt")),
+                    "Pinned accepted Job trees must not observe the shared-editor publication bytes");
+
+            await(runtime,runningId);await(runtime,queuedId);await(runtime,newId);
+            assertEquals("PASS",runtime.jobRecord(runningId).get("status"),runtime.resultRecord(runningId).toString());
+            assertEquals("PASS",runtime.jobRecord(queuedId).get("status"),runtime.resultRecord(queuedId).toString());
+            assertEquals("PASS",runtime.jobRecord(newId).get("status"),runtime.resultRecord(newId).toString());
+            Path jobsDirectory=ServerConfig.load(fixture.server).dataDir.resolve("jobs");
+            String runningEvents=Files.readString(jobsDirectory.resolve(runningId).resolve("events.jsonl"));
+            String queuedEvents=Files.readString(jobsDirectory.resolve(queuedId).resolve("events.jsonl"));
+            String newEvents=Files.readString(jobsDirectory.resolve(newId).resolve("events.jsonl"));
+            assertFalse(runningEvents.contains("shared-editor-B"),"The running LOAD must keep its pre-publish Package bytes");
+            assertFalse(queuedEvents.contains("shared-editor-B"),"The queued RUN must keep its pre-publish Package bytes");
+            assertTrue(newEvents.contains("shared-editor-B"),newEvents);
+            assertEquals(pinnedScheduleRevision,runtime.loadSchedule(scheduleId).expectedRevisionDigest);
+        }
+    }
+
+    private static void grantTrustedEditors(Fixture fixture,String packageId,List<String> editors) throws Exception {
+        if(!"p".equals(packageId)&&!"owner".equals(packageId))
+            fail("This fixture helper only rewrites the known Package entries");
+        Path root="owner".equals(packageId)?fixture.ownerRoot:fixture.root;
+        String configured=Files.readString(fixture.server);
+        String pathLiteral=ServerRuntimeTestSupport.yaml(root);
+        String old="    "+packageId+": "+pathLiteral+"\n";
+        assertTrue(configured.contains(old),"Missing Package entry to rewrite as an editors object:\n"+configured);
+        String rewritten=configured.replace(old,"    "+packageId+":\n      path: "+pathLiteral+"\n      editors: ["
+                +String.join(", ",editors)+"]\n");
+        assertNotEquals(configured,rewritten);
+        Files.writeString(fixture.server,rewritten);
+    }
+
     @Test void acceptedLoadSurvivesPackageRepointRemovalAndSelectedScenarioTestdataDeletion() throws Exception {
         assumeSourceSnapshotIsolationAvailable();
         Fixture fixture=fixture(3);
