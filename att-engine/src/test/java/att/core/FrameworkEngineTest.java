@@ -702,6 +702,11 @@ class FrameworkEngineTest {
             assertTrue(result.getSheet("Private Data").getCellComments().isEmpty(),
                     "Comments on other source sheets must also be removed");
         }
+        byte[] reportBytes = Files.readAllBytes(report);
+        assertFalse(zipContainsText(reportBytes, "password-comment-canary"),
+                "The copied XLSX must not retain legacy comment text in any OOXML part");
+        assertFalse(zipContainsText(reportBytes, "api-key-comment-canary"),
+                "The copied XLSX must not retain comments from other source sheets");
         String log = new String(Files.readAllBytes(summary.results().get(0).caseLogPath()),
                 java.nio.charset.StandardCharsets.UTF_8);
         assertFalse(log.contains("registered-secret-123"), log);
@@ -791,6 +796,77 @@ class FrameworkEngineTest {
         Map<String,Object> sourceReport = (Map<String,Object>) run.get("sourceWorkbookReport");
         assertEquals("fallback", sourceReport.get("status"));
         assertEquals("SOURCE_WORKBOOK_UNAVAILABLE", sourceReport.get("diagnosticCode"));
+    }
+
+    @Test void nativeExcelSourceWorkbookReportFallsBackForPersonPartWithoutThreadedCommentPart() throws Exception {
+        String canary = "threaded-person-secret-canary";
+        Path workbook = writeNativeReportWorkbook("testdata/native-report-person-only.xlsx");
+        Files.write(workbook, addPersonPartOnly(Files.readAllBytes(workbook), canary));
+
+        Path definitionPath = writeNativeReportDefinition("testcase/fpp/person-only/testcase.yaml",
+                "native.report.person.only", "testdata/native-report-person-only.xlsx", true, false);
+        writeNativeReportFlow();
+        writeRuntimeSchemas();
+        att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(
+                att.validation.SchemaFiles.resolve(projectRoot, "att-testcase-v1.schema.json"));
+        att.testcase.TestCaseResolutionResult resolution = resolver.resolve(definitionPath, "payments", projectRoot,
+                Paths.get("templates"), att.testcase.TestCaseDefinitionResolver.Options.defaults());
+        RunSummary summary = new FrameworkEngine(projectRoot, globalConfig()).runNativeCases(resolution,
+                "NATIVE-SOURCE-REPORT-PERSON-ONLY", null, false, false, null);
+
+        Path runDirectory = projectRoot.resolve("output/NATIVE-SOURCE-REPORT-PERSON-ONLY");
+        assertEquals(3, summary.passed());
+        assertTrue(Files.isRegularFile(runDirectory.resolve("workbooks/native-cases.result.xlsx")));
+        assertFalse(Files.exists(runDirectory.resolve("workbooks/native-cases.source-workbook.xlsx")));
+        assertTrue(zipContainsText(Files.readAllBytes(workbook), canary));
+        assertFalse(zipContainsText(Files.readAllBytes(runDirectory.resolve("workbooks/native-cases.result.xlsx")), canary));
+
+        @SuppressWarnings("unchecked")
+        Map<String,Object> manifest = (Map<String,Object>) new org.yaml.snakeyaml.Yaml().load(
+                new String(Files.readAllBytes(runDirectory.resolve("run.yaml")), StandardCharsets.UTF_8));
+        @SuppressWarnings("unchecked")
+        Map<String,Object> run = (Map<String,Object>) manifest.get("run");
+        @SuppressWarnings("unchecked")
+        Map<String,Object> sourceReport = (Map<String,Object>) run.get("sourceWorkbookReport");
+        assertEquals("fallback", sourceReport.get("status"));
+        assertEquals("SOURCE_WORKBOOK_UNAVAILABLE", sourceReport.get("diagnosticCode"));
+    }
+
+    private static byte[] addPersonPartOnly(byte[] source, String canary) throws IOException {
+        Map<String,byte[]> entries = new LinkedHashMap<String,byte[]>();
+        try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(source))) {
+            ZipEntry entry;
+            byte[] buffer = new byte[4096];
+            while ((entry = input.getNextEntry()) != null) {
+                ByteArrayOutputStream contents = new ByteArrayOutputStream();
+                int count;
+                while ((count = input.read(buffer)) != -1) contents.write(buffer, 0, count);
+                entries.put(entry.getName(), contents.toByteArray());
+            }
+        }
+
+        String contentTypes = new String(entries.get("[Content_Types].xml"), StandardCharsets.UTF_8);
+        entries.put("[Content_Types].xml", appendBeforeEnd(contentTypes, "</Types>",
+                "<Override PartName=\"/xl/persons/person.xml\" "
+                        + "ContentType=\"application/vnd.ms-excel.person+xml\"/>")
+                .getBytes(StandardCharsets.UTF_8));
+
+        String workbookRelationships = new String(entries.get("xl/_rels/workbook.xml.rels"), StandardCharsets.UTF_8);
+        entries.put("xl/_rels/workbook.xml.rels", appendBeforeEnd(workbookRelationships, "</Relationships>",
+                "<Relationship Id=\"rIdThreadedPerson\" "
+                        + "Type=\"http://schemas.microsoft.com/office/2017/10/relationships/person\" "
+                        + "Target=\"persons/person.xml\"/>").getBytes(StandardCharsets.UTF_8));
+        entries.put("xl/persons/person.xml", ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<personList xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments\">"
+                + "<person displayName=\"" + canary + "\" id=\"{00000000-0000-0000-0000-000000000001}\" "
+                + "userId=\"fixture\" providerId=\"None\"/></personList>")
+                .getBytes(StandardCharsets.UTF_8));
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(output)) {
+            for (Map.Entry<String,byte[]> entry : entries.entrySet()) writeZipEntry(zip, entry.getKey(), entry.getValue());
+        }
+        return output.toByteArray();
     }
 
     private static byte[] addThreadedCommentParts(byte[] source, String canary) throws IOException {

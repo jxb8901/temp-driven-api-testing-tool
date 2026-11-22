@@ -393,6 +393,7 @@ public class ExcelReportWriter {
     private static void rejectThreadedCommentParts(byte[] sourceWorkbookBytes) throws IOException {
         try (OPCPackage packageFile = OPCPackage.open(new ByteArrayInputStream(sourceWorkbookBytes))) {
             for (PackagePart part : packageFile.getParts()) {
+                if (part.isRelationshipPart()) continue;
                 String name = part.getPartName().getName().toLowerCase(java.util.Locale.ROOT);
                 String contentType = part.getContentType().toLowerCase(java.util.Locale.ROOT);
                 if (name.contains("/threadedcomments/") || name.endsWith("/persons/person.xml")
@@ -402,7 +403,7 @@ public class ExcelReportWriter {
                 }
                 for (PackageRelationship relationship : part.getRelationships()) {
                     String type = relationship.getRelationshipType().toLowerCase(java.util.Locale.ROOT);
-                    if (type.contains("threadedcomment") || type.endsWith("/person"))
+                    if (type.contains("threadedcomment"))
                         throw new IOException("Native source-workbook report cannot safely remove threaded comments");
                 }
             }
