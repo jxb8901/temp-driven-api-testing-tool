@@ -314,6 +314,69 @@ class AttServiceTest {
         assertEquals(Collections.singletonList("fpp.transfer.second"), secondLineage.get("failedQualifiedCaseIds"));
     }
 
+    @Test void nativeSuiteRetryRejectsExcelWorkbookOnlyChangeWithUnchangedCaseIdentity() throws Exception {
+        Path root = nativeSuitePackage("native-suite-excel-retry-package");
+        Path workbook = root.resolve("testdata/retry-cases.xlsx");
+        Files.createDirectories(workbook.getParent());
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook book = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+             java.io.OutputStream output = Files.newOutputStream(workbook)) {
+            org.apache.poi.ss.usermodel.Sheet sheet = book.createSheet("Cases");
+            org.apache.poi.ss.usermodel.Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Case ID");
+            header.createCell(1).setCellValue("Amount");
+            org.apache.poi.ss.usermodel.Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue("TC01");
+            row.createCell(1).setCellValue("100");
+            book.write(output);
+        }
+        Path definition = root.resolve("testcase/fpp/transfer/testcase.yaml");
+        Files.createDirectories(definition.getParent());
+        Files.write(definition, ("schemaVersion: att-testcase/v1\nid: fpp.transfer\nflow: payment.transfer.v1\n"
+                + "dataSource:\n  type: excel\n  path: testdata/retry-cases.xlsx\n  sheet: Cases\n"
+                + "  headerRows: 1\n  caseId: Case ID\n  dataColumns: amount=Amount\n"
+                + "inputs:\n  amount: {from: DATA.amount}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/flows/payment/transfer/v1/flow.yaml"),
+                String.join("\n", "schemaVersion: att-flow/v3.6", "id: payment.transfer.v1", "name: Transfer",
+                        "description: Excel retry fixture", "actions:",
+                        "  verify: {type: assert, assert: 'false'}", "")
+                        .getBytes(StandardCharsets.UTF_8));
+
+        DefaultAttService service = new DefaultAttService();
+        RunResult source = service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-excel-retry-source", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, false, false, null));
+        assertEquals("FAIL", source.status());
+        @SuppressWarnings("unchecked") Map<String,Object> manifest = (Map<String,Object>)
+                new org.yaml.snakeyaml.Yaml().load(new String(Files.readAllBytes(
+                        root.resolve("output/native-excel-retry-source/run.yaml")), StandardCharsets.UTF_8));
+        @SuppressWarnings("unchecked") Map<String,Object> run = (Map<String,Object>) manifest.get("run");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> caseSources =
+                (List<Map<String,Object>>) run.get("caseSources");
+        assertEquals(1, caseSources.size());
+        assertEquals(64, String.valueOf(caseSources.get(0).get("workbookSha256")).length());
+        assertEquals(64, String.valueOf(caseSources.get(0).get("resolvedInputDigest")).length());
+        assertEquals("excel", caseSources.get(0).get("dataSourceType"));
+        assertEquals("testdata/retry-cases.xlsx", caseSources.get(0).get("dataSourceReference"));
+
+        try (java.io.InputStream input = Files.newInputStream(workbook);
+             org.apache.poi.xssf.usermodel.XSSFWorkbook book = new org.apache.poi.xssf.usermodel.XSSFWorkbook(input)) {
+            book.getSheet("Cases").getRow(1).getCell(1).setCellValue("200");
+            try (java.io.OutputStream output = Files.newOutputStream(workbook)) { book.write(output); }
+        }
+
+        NativeCaseSuiteRunRequest retryRequest = new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-excel-retry-stale", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), false, true, false, false,
+                null, null);
+        IllegalArgumentException stale = assertThrows(IllegalArgumentException.class,
+                () -> service.runNativeCaseSuite(retryRequest));
+        assertTrue(stale.getMessage().contains("source changed") || stale.getMessage().contains("workbook"),
+                stale.getMessage());
+        assertFalse(Files.exists(root.resolve("output/native-excel-retry-stale/run.yaml")));
+    }
+
     @Test void nativeSuiteRetryRejectsChangedFlowRevisionAndTamperedLatestManifest() throws Exception {
         Path root = nativeSuitePackage("native-suite-retry-stale-package");
         writeNativeDefinition(root, "fpp.transfer", "payment.transfer.v1",

@@ -3925,7 +3925,8 @@ final class ServerRuntime implements AutoCloseable {
     }
     private static boolean sameNativeSuiteSourceIdentity(Map<?,?> source,Map<?,?> current) {
         for(String key:List.of("definitionId","qualifiedCaseId","sourceReference","sourceRevision","flowId",
-                "flowRevision","sourceRecordId","recordIndex","dependencies"))
+                "flowRevision","sourceRecordId","recordIndex","dataSourceType","dataSourceReference",
+                "workbookSha256","resolvedInputDigest","dependencies"))
             if(!java.util.Objects.deepEquals(source.get(key),current.get(key)))return false;
         return true;
     }

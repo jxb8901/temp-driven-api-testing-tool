@@ -792,21 +792,8 @@ public class FrameworkEngine {
         metadata.put("executionCount", summary.executionCount());
         metadata.put("skippedCaseCount", summary.skipped());
         List<Map<String,Object>> caseSources = new ArrayList<Map<String,Object>>();
-        for (ResolvedTestCase testCase : resolution.cases()) {
-            Map<String,Object> source = new LinkedHashMap<String,Object>();
-            source.put("definitionId", testCase.definitionId());
-            source.put("qualifiedCaseId", testCase.qualifiedCaseId());
-            source.put("sourceReference", testCase.sourceReference());
-            source.put("sourceRevision", testCase.sourceRevision());
-            source.put("flowId", testCase.flowId());
-            source.put("flowRevision", testCase.flowRevision());
-            if (testCase.sourceRecordId() != null) source.put("sourceRecordId", testCase.sourceRecordId());
-            if (testCase.recordIndex() != null) source.put("recordIndex", testCase.recordIndex());
-            List<Map<String,Object>> dependencies = new ArrayList<Map<String,Object>>();
-            for (ResolvedTestCase.FlowDependency dependency : testCase.dependencies()) dependencies.add(dependency.toMap());
-            source.put("dependencies", dependencies);
-            caseSources.add(source);
-        }
+        for (ResolvedTestCase testCase : resolution.cases())
+            caseSources.add(att.testcase.NativeSuiteRetryResolver.caseSourceIdentity(testCase));
         metadata.put("caseSources", caseSources);
         metadata.put("sourceIdentityDigest", nativeSourceIdentityDigest(definitionValues, caseSources));
         if (retryLineage != null) metadata.put("retryLineage", retryLineage.toManifestMap(

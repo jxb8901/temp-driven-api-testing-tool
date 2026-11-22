@@ -154,16 +154,40 @@ public final class NativeSuiteRetryResolver {
         }
     }
 
-    private static Map<String,Object> currentIdentity(ResolvedTestCase testCase) {
+    /** Canonical per-Case identity frozen into Native Suite RUN manifests and compared on retry. */
+    public static Map<String,Object> caseSourceIdentity(ResolvedTestCase testCase) {
+        if(testCase==null)throw new IllegalArgumentException("Resolved Case is required");
         Map<String,Object> result=new LinkedHashMap<String,Object>();
         result.put("definitionId",testCase.definitionId());result.put("qualifiedCaseId",testCase.qualifiedCaseId());
         result.put("sourceReference",testCase.sourceReference());result.put("sourceRevision",testCase.sourceRevision());
         result.put("flowId",testCase.flowId());result.put("flowRevision",testCase.flowRevision());
         if(testCase.sourceRecordId()!=null)result.put("sourceRecordId",testCase.sourceRecordId());
         if(testCase.recordIndex()!=null)result.put("recordIndex",testCase.recordIndex());
+        CaseSourceProvenance provenance=testCase.sourceProvenance();
+        result.put("dataSourceType",provenance.sourceType());
+        result.put("dataSourceReference",provenance.sourceReference());
+        Object workbookSha=provenance.metadata().get("workbookSha256");
+        if(workbookSha instanceof String&&((String)workbookSha).matches("[a-f0-9]{64}"))
+            result.put("workbookSha256",workbookSha);
+        result.put("resolvedInputDigest",resolvedInputDigest(testCase));
         List<Map<String,Object>> dependencies=new ArrayList<Map<String,Object>>();
         for(ResolvedTestCase.FlowDependency dependency:testCase.dependencies())dependencies.add(dependency.toMap());
         result.put("dependencies",dependencies);return result;
+    }
+
+    private static Map<String,Object> currentIdentity(ResolvedTestCase testCase) {
+        return caseSourceIdentity(testCase);
+    }
+
+    private static String resolvedInputDigest(ResolvedTestCase testCase) {
+        try {
+            Map<String,Object> payload=new LinkedHashMap<String,Object>();
+            payload.put("data",testCase.data());
+            payload.put("inputs",testCase.inputs());
+            return sha256(new Yaml().dump(payload).getBytes(StandardCharsets.UTF_8));
+        } catch(Exception failure) {
+            throw new IllegalStateException("Unable to digest resolved Case inputs for " + testCase.qualifiedCaseId(), failure);
+        }
     }
     private static String sourceIdentityDigest(List<String> definitionIds,List<?> sourceCaseRows,
             Map<String,Map<?,?>> currentById) throws Exception {
@@ -196,7 +220,8 @@ public final class NativeSuiteRetryResolver {
     }
     private static boolean sameIdentity(Map<?,?> source,Map<?,?> current) {
         for(String key:Arrays.asList("definitionId","qualifiedCaseId","sourceReference","sourceRevision",
-                "flowId","flowRevision","sourceRecordId","recordIndex","dependencies"))
+                "flowId","flowRevision","sourceRecordId","recordIndex","dataSourceType","dataSourceReference",
+                "workbookSha256","resolvedInputDigest","dependencies"))
             if(!java.util.Objects.deepEquals(source.get(key),current.get(key)))return false;
         return true;
     }
