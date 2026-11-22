@@ -311,13 +311,13 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
         <details><summary>Review changes from the source Job</summary><p>Before → after</p><pre>{JSON.stringify({before:replaySourceDefinition,after:replayReview.definition||definition},null,2)}</pre></details></>}
       <CodeEditor label="Validated RUN preview" language={draft.previewYaml ? 'yaml' : 'json'} value={draft.previewYaml || JSON.stringify(draft.preview || draft, null, 2)} readOnly />
       <button className="button button-primary" type="button" disabled={busy||Boolean(replaySourceJobId&&(!replayReview?.intentId||replayReview.missingFields?.length))} onClick={() => void submit()}>{replaySourceJobId?'Run new Job':'Run Now'}</button>
-      {schedulingEnabled&&!replaySourceJobId && definition.target?.type !== 'nativeCase' && definition.target?.type !== 'nativeSuite' && <button className="button button-primary" type="button" disabled={busy} onClick={() => {
+      {schedulingEnabled&&!replaySourceJobId && definition.target?.type !== 'nativeCase' && <button className="button button-primary" type="button" disabled={busy} onClick={() => {
         releaseNavigationGuard.current();
         releaseNavigationGuard.current = () => {};
         const accepted = onSchedule({ packageId: definition.packageId, environment: definition.environment, draftId: draft.draftId,
           expiresAt: draft.expiresAt, executionType: 'run', legacyDebug: draft.draftId.startsWith('D'),
           previewYaml: draft.previewYaml || JSON.stringify(draft.preview || draft, null, 2),
-          ...(definition.target?.id ? { target: { type: definition.target.type, id: definition.target.id } } : {}) });
+          ...(definition.target?.type !== 'nativeSuite' && definition.target?.id ? { target: { type: definition.target.type, id: definition.target.id } } : {}) });
         if (accepted === false) {
           releaseNavigationGuard.current = navigation.registerUnsavedChanges(true, 'Run definition changes');
           setDirty(true);
