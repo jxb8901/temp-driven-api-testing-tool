@@ -394,6 +394,22 @@ class ServerRuntimeJobReplayTest {
         assumeSourceSnapshotIsolationAvailable();
         Fixture fixture=fixture();
         grantTrustedEditors(fixture,"p",List.of("alice","bob","admin"));
+        // Keep the release gate outside /tmp: Linux Workers overlay /tmp with a private tmpfs, but
+        // host paths elsewhere remain readable through the sandbox's read-only root bind.
+        Path holdDirectory=Path.of("target/shared-editor-hold").toAbsolutePath().normalize();
+        Files.createDirectories(holdDirectory);
+        Path releaseGate=holdDirectory.resolve("release.go");
+        Path holdScript=holdDirectory.resolve("hold.sh");
+        Files.deleteIfExists(releaseGate);
+        Files.writeString(holdScript,"#!/bin/bash\nset -eu\nrelease=\"$1\"\ndeadline=$((SECONDS+120))\n"
+                +"while [ ! -f \"$release\" ]; do\n"
+                +"  if [ \"$SECONDS\" -ge \"$deadline\" ]; then echo \"hold fence timed out\" >&2; exit 1; fi\n"
+                +"  sleep 0.05\ndone\necho released\n");
+        holdScript.toFile().setExecutable(true);
+        Files.writeString(fixture.root.resolve("tools/hold.yaml"),
+                "schemaVersion: att-tool/v1\nid: hold\nname: Hold\ndescription: Hold the LOAD Worker until the test releases it\n"
+                        +"command: ["+ServerRuntimeTestSupport.yaml(holdScript)+", "+ServerRuntimeTestSupport.yaml(releaseGate)+"]\n"
+                        +"stdoutFormat: text\ntimeoutMs: 130000\narguments: {}\n");
         String runningId,queuedId,newId,scheduleId,pinnedScheduleRevision;
         Path packageA,configA,packageB;
         try(ServerRuntime runtime=fixture.open()) {
@@ -413,29 +429,8 @@ class ServerRuntimeJobReplayTest {
             assertFalse(runtime.isActiveUserOperator("admin"),
                     "Package editor grants do not convert ADMIN into an operational USER");
 
-            JsonNode loadScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6","workloads",List.of(
-                    Map.of("id","hold-shared","target",Map.of("type","template","id","SNAPSHOT"),"load",Map.of("users",1,"duration","8s"),
-                            "execution",Map.of("thinkTime","500ms")))));
-            var loadInput=ServerRuntime.JSON.createObjectNode();loadInput.put("packageId","p");loadInput.put("environment","SIT");loadInput.set("scenario",loadScenario);
-            Map<String,Object> loadDraft=runtime.createAdvancedLoadDraft(loadInput,"alice");
-            runningId=String.valueOf(runtime.submitAdvancedLoadDraft(submit(String.valueOf(loadDraft.get("draftId"))),"alice").get("jobId"));
-            awaitRunning(runtime,runningId);
-            Job running=runtime.jobs.get(runningId);assertNotNull(running);
-            packageA=Path.of(running.request.packageRoot);configA=Path.of(running.request.config);
-            String runningPackageRevision=sourceRevision(runtime,runningId,"packageSourceRevision");
-            String runningBusinessRevision=sourceRevision(runtime,runningId,"businessSource");
-            String runningExecutionRevision=sourceRevision(runtime,runningId,"executionRevisionDigest");
-
             var runDefinition=ServerRuntime.JSON.createObjectNode();runDefinition.put("schemaVersion",RunDefinition.VERSION);runDefinition.put("executionType","run");runDefinition.put("packageId","p");runDefinition.put("environment","SIT");
             runDefinition.putObject("options").put("debug",true);runDefinition.putObject("target").put("type","template").put("id","SNAPSHOT");runDefinition.putObject("input");
-            Map<String,Object> queuedDraft=runtime.createRunDraft(runDefinition,"alice");
-            queuedId=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(queuedDraft.get("draftId"))),"alice","alice").get("jobId"));
-            Job queued=runtime.jobs.get(queuedId);assertNotNull(queued);
-            assertEquals("QUEUED",queued.status);
-            assertEquals(packageA,Path.of(queued.request.packageRoot));
-            assertEquals(configA,Path.of(queued.request.config));
-            assertEquals(runningPackageRevision,sourceRevision(runtime,queuedId,"packageSourceRevision"));
-
             Map<String,Object> scheduleDraft=runtime.createRunDraft(runDefinition,"alice");
             LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of(
                     "name","Shared editor schedule","executionType","run","packageId","p","environment","SIT",
@@ -451,9 +446,40 @@ class ServerRuntimeJobReplayTest {
             String changeSetId=String.valueOf(staged.get("changeSetId"));
             runtime.changeSetPublisher.validate(ChangeSetPublisher.PACKAGE_SOURCE,"p","bob",false,changeSetId,"shared-editor-publish");
             runtime.changeSetPublisher.review(ChangeSetPublisher.PACKAGE_SOURCE,"p","bob",false,changeSetId,"shared-editor-publish");
+
+            // Duration only bounds new admissions. The single in-flight hold Tool keeps the Job
+            // RUNNING until the test writes the release gate, then the LOAD ends promptly.
+            JsonNode loadScenario=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion","att-load/v1.6","workloads",List.of(
+                    Map.of("id","hold-shared","target",Map.of("type","tool","id","hold"),
+                            "load",Map.of("users",1,"duration","1s")))));
+            var loadInput=ServerRuntime.JSON.createObjectNode();loadInput.put("packageId","p");loadInput.put("environment","SIT");loadInput.set("scenario",loadScenario);
+            Map<String,Object> loadDraft=runtime.createAdvancedLoadDraft(loadInput,"alice");
+            runningId=String.valueOf(runtime.submitAdvancedLoadDraft(submit(String.valueOf(loadDraft.get("draftId"))),"alice").get("jobId"));
+            awaitRunning(runtime,runningId);
+            Job running=runtime.jobs.get(runningId);assertNotNull(running);
+            packageA=Path.of(running.request.packageRoot);configA=Path.of(running.request.config);
+            String runningPackageRevision=sourceRevision(runtime,runningId,"packageSourceRevision");
+            String runningBusinessRevision=sourceRevision(runtime,runningId,"businessSource");
+            String runningExecutionRevision=sourceRevision(runtime,runningId,"executionRevisionDigest");
+
+            Map<String,Object> queuedDraft=runtime.createRunDraft(runDefinition,"alice");
+            queuedId=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(queuedDraft.get("draftId"))),"alice","alice").get("jobId"));
+            assertEquals("QUEUED",runtime.jobs.get(queuedId).status);
+            assertEquals(packageA,Path.of(runtime.jobs.get(queuedId).request.packageRoot));
+            assertEquals(configA,Path.of(runtime.jobs.get(queuedId).request.config));
+            assertEquals(runningPackageRevision,sourceRevision(runtime,queuedId,"packageSourceRevision"));
+
+            assertEquals("RUNNING",runtime.jobs.get(runningId).status,
+                    "The hold Tool must keep the LOAD running until the test publishes");
+            assertEquals("QUEUED",runtime.jobs.get(queuedId).status,
+                    "The hold Tool must keep the RUN queued until the test publishes");
             Map<String,Object> publication=runtime.changeSetPublisher.publish(ChangeSetPublisher.PACKAGE_SOURCE,"p","bob",false,changeSetId,"shared-editor-publish");
             runtime.notifySourcePublished(ChangeSetPublisher.PACKAGE_SOURCE,"p",publication,"shared-editor-publish");
             assertEquals("shared-editor-B\n",Files.readString(fixture.root.resolve("files/value.txt")));
+            assertEquals("RUNNING",runtime.jobs.get(runningId).status,
+                    "Shared-editor publish must not wait for the held LOAD to finish");
+            assertEquals("QUEUED",runtime.jobs.get(queuedId).status,
+                    "Shared-editor publish must not admit the queued RUN early");
 
             assertEquals(packageA,Path.of(runtime.jobs.get(runningId).request.packageRoot),
                     "An accepted running Job keeps its pinned Package root after a shared-editor publish");
@@ -468,10 +494,23 @@ class ServerRuntimeJobReplayTest {
             assertEquals(pinnedScheduleRevision,afterPublish.expectedRevisionDigest,
                     "Shared-editor publication must not rewrite a Schedule's pinned expected revision");
             assertEquals("package-revision-changed",afterPublish.sourceStatus);
+            Map<String,Object> blockedSchedule=runtime.triggerLoadSchedule(scheduleId,"alice");
+            assertEquals("package-revision-changed",blockedSchedule.get("reason"));
+            assertNull(blockedSchedule.get("jobId"));
+            assertEquals(pinnedScheduleRevision,runtime.loadSchedule(scheduleId).expectedRevisionDigest);
 
             assertThrows(ChangeSetPublisher.Denied.class,()->runtime.changeSetPublisher.currentRevisions(
                     ChangeSetPublisher.CENTRAL_RUNTIME_CONFIG,ChangeSetPublisher.CENTRAL_SCOPE_ID,"bob",false),
                     "A Package editor grant does not imply CENTRAL_RUNTIME_CONFIG or SYSTEM_SETTINGS_WRITE");
+
+            assertNotEquals("shared-editor-B\n",Files.readString(packageA.resolve("files/value.txt")),
+                    "Pinned accepted Job trees must not observe the shared-editor publication bytes");
+            assertTrue(Files.readString(packageA.resolve("templates/SNAPSHOT/template.yaml")).contains("files/value.txt"));
+
+            Files.writeString(releaseGate,"go");
+            await(runtime,runningId);await(runtime,queuedId);
+            assertEquals("PASS",runtime.jobRecord(runningId).get("status"),runtime.resultRecord(runningId).toString());
+            assertEquals("PASS",runtime.jobRecord(queuedId).get("status"),runtime.resultRecord(queuedId).toString());
 
             Map<String,Object> newDraft=runtime.createRunDraft(runDefinition,"carol");
             newId=String.valueOf(runtime.submitRunDraft(submit(String.valueOf(newDraft.get("draftId"))),"carol","carol").get("jobId"));
@@ -479,13 +518,7 @@ class ServerRuntimeJobReplayTest {
             packageB=Path.of(newJob.request.packageRoot);
             assertNotEquals(packageA,packageB,"A Job admitted after shared-editor publish uses the new Package revision");
             assertEquals("shared-editor-B\n",Files.readString(packageB.resolve("files/value.txt")));
-            assertTrue(Files.readString(packageA.resolve("templates/SNAPSHOT/template.yaml")).contains("files/value.txt"));
-            assertNotEquals("shared-editor-B\n",Files.readString(packageA.resolve("files/value.txt")),
-                    "Pinned accepted Job trees must not observe the shared-editor publication bytes");
-
-            await(runtime,runningId);await(runtime,queuedId);await(runtime,newId);
-            assertEquals("PASS",runtime.jobRecord(runningId).get("status"),runtime.resultRecord(runningId).toString());
-            assertEquals("PASS",runtime.jobRecord(queuedId).get("status"),runtime.resultRecord(queuedId).toString());
+            await(runtime,newId);
             assertEquals("PASS",runtime.jobRecord(newId).get("status"),runtime.resultRecord(newId).toString());
             Path jobsDirectory=ServerConfig.load(fixture.server).dataDir.resolve("jobs");
             String runningEvents=Files.readString(jobsDirectory.resolve(runningId).resolve("events.jsonl"));
@@ -495,6 +528,8 @@ class ServerRuntimeJobReplayTest {
             assertFalse(queuedEvents.contains("shared-editor-B"),"The queued RUN must keep its pre-publish Package bytes");
             assertTrue(newEvents.contains("shared-editor-B"),newEvents);
             assertEquals(pinnedScheduleRevision,runtime.loadSchedule(scheduleId).expectedRevisionDigest);
+        } finally {
+            Files.writeString(releaseGate,"go");
         }
     }
 
