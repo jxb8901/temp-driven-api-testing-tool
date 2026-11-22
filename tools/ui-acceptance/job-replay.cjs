@@ -275,7 +275,9 @@ async function main() {
     await page.waitForURL(url=>url.hash.startsWith('#/run/payments?'));
     await page.getByText('Job settings loaded. Review the retained fields',{exact:false}).waitFor();
     await page.getByLabel('Target ID').waitFor();assert.equal(await page.getByLabel('Target ID').inputValue(),'lookup-customer');
-    await page.reload();await page.getByLabel('Target ID').waitFor();assert.equal(await page.getByLabel('Target ID').inputValue(),'lookup-customer');
+    await page.reload();
+    await page.getByText('Job settings loaded. Review the retained fields',{exact:false}).waitFor();
+    await page.getByLabel('Target ID').waitFor();assert.equal(await page.getByLabel('Target ID').inputValue(),'lookup-customer');
     await page.getByLabel('Target ID').fill('details-edited');await page.goBack();
     await page.getByRole('dialog',{name:'Discard your changes?'}).waitFor();
     await page.getByRole('button',{name:'Stay on this page'}).click();
