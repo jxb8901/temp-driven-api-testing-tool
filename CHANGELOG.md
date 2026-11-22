@@ -7,6 +7,7 @@
 - Add the Studio Native Test Case editor and read-only preview, with revision-fenced Change Set publishing, secret redaction and workbook row diagnostics (#395).
 - Add implicit cross-Definition Suites, qualified Case and tag selection, deterministic ordering, bounded selectors, fail-fast/skipped evidence and retry of the latest eligible failed Cases (#396).
 - Add source-independent HTML, CI JSON, JUnit and XLSX reports with protected report regeneration and Run-bound Server publication. Excel-backed Definitions may also request a separate source-workbook-shaped XLSX; the accepted workbook is captured before RUN, rows are matched by pinned provenance, sensitive values are redacted across worksheets, and formula caches that could retain redacted values cause deterministic fallback to the standard report (#397).
+- Keep optional LOAD report downloads from holding the native archive publication lock, and make artifact-read cleanup release its lock and capacity exactly once (#397).
 - Add the S10 bilingual Template–Flow–Stage compatibility matrix and paired golden fixture. Keep the Stage runtime path supported; the fixture does not prove external compensation or database rollback (#398).
 - Add Default Package Native Case examples, bilingual Quick Start and a resource migration matrix while retaining legacy Workbook/Sidecar/XML and direct LOAD examples without forced conversion (#413).
 

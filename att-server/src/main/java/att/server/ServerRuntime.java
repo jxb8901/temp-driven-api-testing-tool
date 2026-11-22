@@ -8106,7 +8106,7 @@ final class ServerRuntime implements AutoCloseable {
             ArtifactDownload download;
             try {download=ArtifactDownload.open(archive,expectedSha256);}
             catch(Exception invalid){throw new ArchiveUnavailableException("FAILED");}
-            return new ArtifactRead(archive,null,download);
+            return new ArtifactRead(archive,null,download,false);
         } catch(Exception failure) { artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure; }
     }
     /**
@@ -8437,10 +8437,21 @@ final class ServerRuntime implements AutoCloseable {
         final Path path;
         final ArtifactArchive.VerifiedRead verified;
         final ArtifactDownload download;
-        ArtifactRead(Path path,ArtifactArchive.VerifiedRead verified,ArtifactDownload download){this.path=path;this.verified=verified;this.download=download;}
+        final boolean publicationReadLockHeld;
+        private final AtomicBoolean closed=new AtomicBoolean();
+        ArtifactRead(Path path,ArtifactArchive.VerifiedRead verified,ArtifactDownload download,boolean publicationReadLockHeld){
+            this.path=path;this.verified=verified;this.download=download;this.publicationReadLockHeld=publicationReadLockHeld;
+        }
         long length(){return download.length;}
         void writeTo(java.io.OutputStream output) throws java.io.IOException {download.writeTo(output);}
-        @Override public void close() throws java.io.IOException {try {if(download!=null)download.close();else verified.close();} finally {artifactPublicationLock.readLock().unlock();artifactLifecycle.readLock().unlock();artifactReadSlots.release();}}
+        @Override public void close() throws java.io.IOException {
+            if(!closed.compareAndSet(false,true))return;
+            try {if(download!=null)download.close();else verified.close();}
+            finally {
+                try {if(publicationReadLockHeld)artifactPublicationLock.readLock().unlock();}
+                finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
+            }
+        }
     }
     ArtifactRead openArtifactArchive(String id,boolean digests) throws Exception {
         return openArtifactArchive(id,digests,null);
@@ -8462,7 +8473,7 @@ final class ServerRuntime implements AutoCloseable {
             ArtifactArchive.VerifiedRead verified=null;ArtifactDownload download=null;
             try { if(digests)download=ArtifactDownload.open(archive,null,expectedNativeRunId);else verified=ArtifactArchive.openVerified(archive,false,expectedNativeRunId); }
             catch(Exception invalid){throw new ArchiveUnavailableException("FAILED");}
-            return new ArtifactRead(archive,verified,download);
+            return new ArtifactRead(archive,verified,download,true);
         } catch(Exception failure){artifactPublicationLock.readLock().unlock();artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
     }
     private void archiveStatus(String id,String state,String reason) throws Exception { archiveStatus(id,state,reason,null); }

@@ -134,11 +134,11 @@ class ArtifactLifecycleTest {
 
             try(ServerRuntime.ArtifactRead previous=restarted.openLoadReportV2Archive(id,"user-a",true)) {
                 assertTrue(previous.length()>0,"The previous READY report remains downloadable while its replacement is built.");
+                Job unrelated=job(restarted,"J0000000000000802","PASS","run");
+                Files.writeString(restarted.outputDirectoryForJob(unrelated.id).resolve("native.txt"),"independent native archive");
+                restarted.scheduleArtifactArchive(unrelated.id);
+                awaitState(restarted,unrelated.id,"READY");
             }
-            Job unrelated=job(restarted,"J0000000000000802","PASS","run");
-            Files.writeString(restarted.outputDirectoryForJob(unrelated.id).resolve("native.txt"),"independent native archive");
-            restarted.scheduleArtifactArchive(unrelated.id);
-            awaitState(restarted,unrelated.id,"READY");
 
             releaseRefreshedReport.countDown();
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
@@ -158,6 +158,31 @@ class ArtifactLifecycleTest {
             assertTrue(Files.isRegularFile(previousArchive),"The previous immutable snapshot is retained after the replacement is ready.");
         } finally {
             releaseRefreshedReport.countDown();
+        }
+    }
+
+    @Test void closingArtifactReadTwiceDoesNotReleaseAnotherReadersCapacity() throws Exception {
+        try(ServerRuntime runtime=runtime()) {
+            String id="J0000000000000821";
+            job(runtime,id,"PASS","run");
+            Files.writeString(runtime.outputDirectoryForJob(id).resolve("native.txt"),"native evidence");
+            runtime.scheduleArtifactArchive(id);
+            awaitState(runtime,id,"READY");
+
+            try(ServerRuntime.ArtifactRead first=runtime.openArtifactArchive(id,false);
+                ServerRuntime.ArtifactRead second=runtime.openArtifactArchive(id,false)) {
+                first.close();
+                assertDoesNotThrow(first::close,"Repeated close must not unlock a different read handle or release capacity twice.");
+            }
+
+            int acquired=0;
+            try {
+                while(runtime.acquireArtifactReadSlot())acquired++;
+                assertEquals(ServerRuntime.MAX_ARTIFACT_READ_SLOTS,acquired,
+                        "Closing a read handle twice must preserve the bounded read capacity.");
+            } finally {
+                for(int i=0;i<acquired;i++)runtime.releaseArtifactReadSlot();
+            }
         }
     }
 
