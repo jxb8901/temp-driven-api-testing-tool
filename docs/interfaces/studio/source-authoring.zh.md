@@ -124,4 +124,4 @@ Server 會在每個已登錄的 Package 或 central Config root 旁建立私人 
 | `422` | 閱讀 validation diagnostics，修正指定 source 後再次驗證。 |
 | Impact 無法使用、coverage 不完整或 decision 被阻擋 | 不要發布 central Config。請 Server 管理員恢復完整 Impact coverage 或處理阻擋原因。 |
 
-資源檢視及執行方式請參閱 [Explorer 與 functional execution](explorer-run.zh.md)。部署開關及 source ownership 規則請參閱 [Server configuration](../../operations/server-configuration.zh.md)。
+資源檢視及執行方式請參閱 [Explorer 與 functional execution](explorer-run.zh.md)。部署開關及 source ownership 規則請參閱 [Server configuration](../../operations/server-configuration.zh.md)。Shared Package editors 的已部署多角色 operator 矩陣見 [Package-scoped shared editors 驗收](../../operations/shared-editors-acceptance.zh.md)。
