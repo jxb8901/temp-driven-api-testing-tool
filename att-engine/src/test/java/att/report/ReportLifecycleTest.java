@@ -31,7 +31,7 @@ class ReportLifecycleTest {
         Path output = tempDir.resolve("native-output"), run = output.resolve("R-NATIVE");
         Files.createDirectories(run);
         String manifest = "schemaVersion: att-run/v2.1\n"
-                + "run:\n  id: R-NATIVE\n  state: COMPLETE\n  startedAt: '2026-01-01T00:00:00Z'\n  endedAt: '2026-01-01T00:00:01Z'\n"
+                + "run:\n  id: R-NATIVE\n  state: COMPLETE\n  targetType: nativeCase\n  nativeReportProtection: att-native-report/v1\n  startedAt: '2026-01-01T00:00:00Z'\n  endedAt: '2026-01-01T00:00:01Z'\n"
                 + "cases:\n  - caseId: payments.transfer.ok\n    qualifiedCaseId: payments.transfer.ok\n    definitionId: payments.transfer\n"
                 + "    flowId: payment.transfer.v1\n    flowRevision: flow-revision-abc\n    sourceRevision: source-revision-xyz\n"
                 + "    sourceProvenance:\n      sourceType: inline\n"
