@@ -40,9 +40,11 @@ import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import att.testcase.CaseSourceProvenance;
 import att.testcase.ResolvedTestCase;
 import att.testcase.TestCaseDefinitionResolver;
 import att.testcase.TestCaseResolutionResult;
+import att.excel.ExcelDataSourceAdapter;
 import att.resource.PackageResourceResolver;
 
 /**
@@ -577,6 +579,34 @@ public class FrameworkEngine {
             if (!referenced) throw new IllegalArgumentException("Native Case Flow source identity changed after resolution: " + entry.getKey());
             for (TemplateAction action : flow.actions()) if ("flow".equalsIgnoreCase(action.type())) flows.validateInvocation(action);
             addNativeInput(captured, "flow", logicalPath, entry.getValue());
+        }
+
+        // Excel DATA rows are part of the frozen RUN source identity even though Definition YAML
+        // hashes exclude the workbook. Re-check every distinct workbook against the SHA captured
+        // during resolution so a workbook-only edit cannot execute against a stale resolution.
+        Map<String,String> workbookRevisions = new LinkedHashMap<String,String>();
+        for (ResolvedTestCase testCase : cases) {
+            CaseSourceProvenance provenance = testCase.sourceProvenance();
+            if (!"excel".equals(provenance.sourceType())) continue;
+            String logicalPath = provenance.sourceReference();
+            Object sha = provenance.metadata().get("workbookSha256");
+            if (!(sha instanceof String) || !((String) sha).matches("[a-f0-9]{64}"))
+                throw new IllegalArgumentException("Native Case Excel Data Source is missing a workbook SHA-256: " + logicalPath);
+            String previous = workbookRevisions.putIfAbsent(logicalPath, (String) sha);
+            if (previous != null && !previous.equals(sha))
+                throw new IllegalArgumentException("Native Case Excel Data Source has conflicting workbook revisions: " + logicalPath);
+        }
+        int workbookLimit = ExcelDataSourceAdapter.MAX_WORKBOOK_BYTES > Integer.MAX_VALUE
+                ? Integer.MAX_VALUE : (int) ExcelDataSourceAdapter.MAX_WORKBOOK_BYTES;
+        for (Map.Entry<String,String> entry : workbookRevisions.entrySet()) {
+            Path workbook = resources.resolvePackageRelative(entry.getKey(), PackageResourceResolver.Kind.FILE).canonicalPath();
+            byte[] workbookBytes = readNativeSource(workbook, workbookLimit, "Native Excel Data Source");
+            if (!entry.getValue().equals(sha256Bytes(workbookBytes)))
+                throw new IllegalArgumentException("Native Excel Data Source changed after resolution; resolve again before RUN: " + entry.getKey());
+            String logicalPath = resources.fromInternalPath(workbook, PackageResourceResolver.Kind.FILE).logicalName();
+            if (!entry.getKey().equals(logicalPath))
+                throw new IllegalArgumentException("Native Excel Data Source path identity changed after resolution: " + entry.getKey());
+            addNativeInput(captured, "excel-data-source", logicalPath, entry.getValue());
         }
         return new ArrayList<Map<String,Object>>(captured.values());
     }
