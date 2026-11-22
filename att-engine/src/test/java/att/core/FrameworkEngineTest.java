@@ -19,7 +19,11 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -30,6 +34,9 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -745,6 +752,124 @@ class FrameworkEngineTest {
         @SuppressWarnings("unchecked")
         Map<String,Object> sourceReport = (Map<String,Object>) run.get("sourceWorkbookReport");
         assertEquals("fallback", sourceReport.get("status"));
+    }
+
+    @Test void nativeExcelSourceWorkbookReportFallsBackForThreadedCommentParts() throws Exception {
+        String canary = "threaded-comment-secret-canary";
+        Path workbook = writeNativeReportWorkbook("testdata/native-report-threaded-comments.xlsx");
+        byte[] withThreadedComment = addThreadedCommentParts(Files.readAllBytes(workbook), canary);
+        Files.write(workbook, withThreadedComment);
+
+        Path definitionPath = writeNativeReportDefinition("testcase/fpp/threaded-comments/testcase.yaml",
+                "native.report.threaded.comments", "testdata/native-report-threaded-comments.xlsx", true, false);
+        writeNativeReportFlow();
+        writeRuntimeSchemas();
+        att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(
+                att.validation.SchemaFiles.resolve(projectRoot, "att-testcase-v1.schema.json"));
+        att.testcase.TestCaseResolutionResult resolution = resolver.resolve(definitionPath, "payments", projectRoot,
+                Paths.get("templates"), att.testcase.TestCaseDefinitionResolver.Options.defaults());
+        RunSummary summary = new FrameworkEngine(projectRoot, globalConfig()).runNativeCases(resolution,
+                "NATIVE-SOURCE-REPORT-THREADED-COMMENTS", null, false, false, null);
+
+        Path runDirectory = projectRoot.resolve("output/NATIVE-SOURCE-REPORT-THREADED-COMMENTS");
+        assertEquals(3, summary.passed());
+        assertTrue(Files.isRegularFile(runDirectory.resolve("workbooks/native-cases.result.xlsx")),
+                "The standard Native report remains available when threaded comments cannot be safely stripped");
+        assertFalse(Files.exists(runDirectory.resolve("workbooks/native-cases.source-workbook.xlsx")),
+                "The optional copied workbook must be withheld when unsupported threaded-comment parts are present");
+        assertTrue(zipContainsText(Files.readAllBytes(workbook), canary),
+                "The source fixture must contain a threaded-comment canary in an OOXML part");
+        assertFalse(zipContainsText(Files.readAllBytes(runDirectory.resolve("workbooks/native-cases.result.xlsx")), canary),
+                "The standard generated report must not carry the source threaded-comment canary");
+
+        @SuppressWarnings("unchecked")
+        Map<String,Object> manifest = (Map<String,Object>) new org.yaml.snakeyaml.Yaml().load(
+                new String(Files.readAllBytes(runDirectory.resolve("run.yaml")), StandardCharsets.UTF_8));
+        @SuppressWarnings("unchecked")
+        Map<String,Object> run = (Map<String,Object>) manifest.get("run");
+        @SuppressWarnings("unchecked")
+        Map<String,Object> sourceReport = (Map<String,Object>) run.get("sourceWorkbookReport");
+        assertEquals("fallback", sourceReport.get("status"));
+        assertEquals("SOURCE_WORKBOOK_UNAVAILABLE", sourceReport.get("diagnosticCode"));
+    }
+
+    private static byte[] addThreadedCommentParts(byte[] source, String canary) throws IOException {
+        Map<String,byte[]> entries = new LinkedHashMap<String,byte[]>();
+        try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(source))) {
+            ZipEntry entry;
+            byte[] buffer = new byte[4096];
+            while ((entry = input.getNextEntry()) != null) {
+                ByteArrayOutputStream contents = new ByteArrayOutputStream();
+                int count;
+                while ((count = input.read(buffer)) != -1) contents.write(buffer, 0, count);
+                entries.put(entry.getName(), contents.toByteArray());
+            }
+        }
+
+        String contentTypes = new String(entries.get("[Content_Types].xml"), StandardCharsets.UTF_8);
+        contentTypes = appendBeforeEnd(contentTypes, "</Types>",
+                "<Override PartName=\"/xl/threadedComments/threadedComment1.xml\" "
+                        + "ContentType=\"application/vnd.ms-excel.threadedcomments+xml\"/>"
+                        + "<Override PartName=\"/xl/persons/person.xml\" "
+                        + "ContentType=\"application/vnd.ms-excel.person+xml\"/>");
+        entries.put("[Content_Types].xml", contentTypes.getBytes(StandardCharsets.UTF_8));
+
+        String workbookRelationships = new String(entries.get("xl/_rels/workbook.xml.rels"), StandardCharsets.UTF_8);
+        workbookRelationships = appendBeforeEnd(workbookRelationships, "</Relationships>",
+                "<Relationship Id=\"rIdThreadedPerson\" "
+                        + "Type=\"http://schemas.microsoft.com/office/2017/10/relationships/person\" "
+                        + "Target=\"persons/person.xml\"/>");
+        entries.put("xl/_rels/workbook.xml.rels", workbookRelationships.getBytes(StandardCharsets.UTF_8));
+
+        entries.put("xl/worksheets/_rels/sheet1.xml.rels", ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                + "<Relationship Id=\"rIdThreadedComment\" "
+                + "Type=\"http://schemas.microsoft.com/office/2017/10/relationships/threadedComment\" "
+                + "Target=\"../threadedComments/threadedComment1.xml\"/></Relationships>")
+                .getBytes(StandardCharsets.UTF_8));
+        entries.put("xl/threadedComments/threadedComment1.xml", ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<ThreadedComments xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments\">"
+                + "<threadedComment ref=\"A2\" dT=\"2025-01-01T00:00:00Z\" "
+                + "personId=\"{00000000-0000-0000-0000-000000000001}\" "
+                + "id=\"{00000000-0000-0000-0000-000000000002}\"><text>" + canary
+                + "</text></threadedComment></ThreadedComments>").getBytes(StandardCharsets.UTF_8));
+        entries.put("xl/persons/person.xml", ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<personList xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments\">"
+                + "<person displayName=\"Fixture User\" id=\"{00000000-0000-0000-0000-000000000001}\" "
+                + "userId=\"fixture\" providerId=\"None\"/></personList>")
+                .getBytes(StandardCharsets.UTF_8));
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(output)) {
+            for (Map.Entry<String,byte[]> entry : entries.entrySet()) writeZipEntry(zip, entry.getKey(), entry.getValue());
+        }
+        return output.toByteArray();
+    }
+
+    private static String appendBeforeEnd(String xml, String closingTag, String fragment) {
+        int closing = xml.lastIndexOf(closingTag);
+        if (closing < 0) throw new IllegalArgumentException("Expected OOXML closing tag " + closingTag);
+        return xml.substring(0, closing) + fragment + xml.substring(closing);
+    }
+
+    private static void writeZipEntry(ZipOutputStream zip, String name, byte[] contents) throws IOException {
+        zip.putNextEntry(new ZipEntry(name));
+        zip.write(contents);
+        zip.closeEntry();
+    }
+
+    private static boolean zipContainsText(byte[] zippedBytes, String expected) throws IOException {
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(zippedBytes))) {
+            ZipEntry entry;
+            byte[] buffer = new byte[4096];
+            while ((entry = zip.getNextEntry()) != null) {
+                ByteArrayOutputStream contents = new ByteArrayOutputStream();
+                int count;
+                while ((count = zip.read(buffer)) != -1) contents.write(buffer, 0, count);
+                if (new String(contents.toByteArray(), StandardCharsets.UTF_8).contains(expected)) return true;
+            }
+        }
+        return false;
     }
 
     @Test void nativeExcelSourceWorkbookReportRejectsStaleSnapshotBeforeStartingRun() throws Exception {

@@ -16,6 +16,9 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.ss.util.CellAddress;
+import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.openxml4j.opc.PackagePart;
+import org.apache.poi.openxml4j.opc.PackageRelationship;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -120,6 +123,7 @@ public class ExcelReportWriter {
         Path temporary = Files.createTempFile(workbookDirectory, ".native-source-report-", ".xlsx.tmp");
         boolean published = false;
         try {
+            rejectThreadedCommentParts(sourceWorkbookBytes);
             try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(sourceWorkbookBytes));
                  OutputStream stream = Files.newOutputStream(temporary)) {
                 Sheet sheet = workbook.getSheet(sheetName);
@@ -378,6 +382,34 @@ public class ExcelReportWriter {
                 if (cell == null) cell = row.createCell(address.getColumn());
                 cell.removeCellComment();
             }
+        }
+    }
+
+    /**
+     * POI 5.2.5 exposes legacy comments through Sheet.getCellComments(), but does not model
+     * modern threaded-comment or person OOXML parts. Reject those source workbooks before POI
+     * rewrites them, so opaque comment payloads cannot survive into the downloadable report.
+     */
+    private static void rejectThreadedCommentParts(byte[] sourceWorkbookBytes) throws IOException {
+        try (OPCPackage packageFile = OPCPackage.open(new ByteArrayInputStream(sourceWorkbookBytes))) {
+            for (PackagePart part : packageFile.getParts()) {
+                String name = part.getPartName().getName().toLowerCase(java.util.Locale.ROOT);
+                String contentType = part.getContentType().toLowerCase(java.util.Locale.ROOT);
+                if (name.contains("/threadedcomments/") || name.endsWith("/persons/person.xml")
+                        || contentType.contains("threadedcomments")
+                        || contentType.contains("vnd.ms-excel.person+xml")) {
+                    throw new IOException("Native source-workbook report cannot safely remove threaded comments");
+                }
+                for (PackageRelationship relationship : part.getRelationships()) {
+                    String type = relationship.getRelationshipType().toLowerCase(java.util.Locale.ROOT);
+                    if (type.contains("threadedcomment") || type.endsWith("/person"))
+                        throw new IOException("Native source-workbook report cannot safely remove threaded comments");
+                }
+            }
+        } catch (IOException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            throw new IOException("Native source-workbook report cannot verify threaded-comment parts", failure);
         }
     }
 

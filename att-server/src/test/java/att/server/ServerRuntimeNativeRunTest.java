@@ -7,16 +7,22 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -294,6 +300,45 @@ class ServerRuntimeNativeRunTest {
                             "Source-workbook comments and notes must not be downloadable from the Server archive");
             }
             assertArrayEquals(originalExcel,Files.readAllBytes(excelWorkbook),"Native Excel RUN must leave the source workbook byte-identical");
+
+            String threadedCommentCanary="server-threaded-comment-canary";
+            byte[] threadedExcel=addThreadedCommentParts(originalExcel,threadedCommentCanary);
+            Files.write(excelWorkbook,threadedExcel);
+            JsonNode threadedRun=nativeRun("payments.excel","beta");
+            ((com.fasterxml.jackson.databind.node.ObjectNode)threadedRun.get("options"))
+                    .put("runId","native-threaded-comments");
+            Map<String,Object> threadedDraft=runtime.createRunDraft(threadedRun,"alice");
+            Map<String,Object> threadedAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",threadedDraft.get("draftId"))),"alice","alice");
+            String threadedJobId=String.valueOf(threadedAccepted.get("jobId"));
+            Map<String,Object> threadedResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,threadedJobId);
+            assertEquals("PASS",((Map<?,?>)threadedResult.get("job")).get("status"),threadedResult.toString());
+            Map<String,Object> threadedArchiveIndex=runtime.artifactIndex(threadedJobId,0,100);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> threadedArchiveItems=
+                    (List<Map<String,Object>>)threadedArchiveIndex.get("items");
+            assertFalse(threadedArchiveItems.stream().anyMatch(item->String.valueOf(item.get("path"))
+                            .endsWith("/"+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX)
+                            ||ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX.equals(item.get("path"))),
+                    "A source workbook with unsupported threaded comments must not enter the Server archive");
+            Map<String,Object> threadedNativeResult=threadedArchiveItems.stream()
+                    .filter(item->String.valueOf(item.get("path")).endsWith("/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX)
+                            ||ArtifactArchive.NATIVE_CASE_RESULT_XLSX.equals(item.get("path"))).findFirst().orElse(null);
+            assertNotNull(threadedNativeResult,"The standard Native Suite workbook must remain downloadable");
+            String threadedResultPath=String.valueOf(threadedNativeResult.get("path"));
+            byte[] downloadedThreadedResult=runtime.archiveEntry(threadedJobId,threadedResultPath);
+            assertArrayEquals(ArtifactArchive.read(awaitArtifactArchive(runtime,threadedJobId),threadedResultPath),
+                    downloadedThreadedResult,"The archive-backed read must return the published result bytes");
+            assertFalse(zipContainsText(downloadedThreadedResult,threadedCommentCanary),
+                    "The downloadable standard report must not contain the source threaded-comment payload");
+            Map<String,Object> threadedManifest=readArchivedRunManifest(runtime,threadedJobId);
+            @SuppressWarnings("unchecked") Map<String,Object> threadedManifestRun=(Map<String,Object>)threadedManifest.get("run");
+            @SuppressWarnings("unchecked") Map<String,Object> threadedSourceReport=
+                    (Map<String,Object>)threadedManifestRun.get("sourceWorkbookReport");
+            assertEquals("fallback",threadedSourceReport.get("status"));
+            assertEquals("SOURCE_WORKBOOK_UNAVAILABLE",threadedSourceReport.get("diagnosticCode"));
+            assertArrayEquals(threadedExcel,Files.readAllBytes(excelWorkbook),
+                    "Server execution must preserve the threaded-comment source workbook bytes");
+            Files.write(excelWorkbook,originalExcel);
 
             Files.writeString(definition,original);
             Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
@@ -775,6 +820,75 @@ class ServerRuntimeNativeRunTest {
         }
         assertEquals("READY",index.get("archiveStatus"),"Native RUN evidence must be published before inspection");
         return runtime.artifactArchivePath(jobId);
+    }
+
+    private static byte[] addThreadedCommentParts(byte[] source,String canary) throws IOException {
+        Map<String,byte[]> entries=new LinkedHashMap<>();
+        try(ZipInputStream input=new ZipInputStream(new ByteArrayInputStream(source))) {
+            ZipEntry entry;byte[] buffer=new byte[4096];
+            while((entry=input.getNextEntry())!=null) {
+                ByteArrayOutputStream contents=new ByteArrayOutputStream();int count;
+                while((count=input.read(buffer))!=-1)contents.write(buffer,0,count);
+                entries.put(entry.getName(),contents.toByteArray());
+            }
+        }
+        String contentTypes=new String(entries.get("[Content_Types].xml"),StandardCharsets.UTF_8);
+        contentTypes=appendBeforeEnd(contentTypes,"</Types>",
+                "<Override PartName=\"/xl/threadedComments/threadedComment1.xml\" "
+                        +"ContentType=\"application/vnd.ms-excel.threadedcomments+xml\"/>"
+                        +"<Override PartName=\"/xl/persons/person.xml\" "
+                        +"ContentType=\"application/vnd.ms-excel.person+xml\"/>");
+        entries.put("[Content_Types].xml",contentTypes.getBytes(StandardCharsets.UTF_8));
+        String workbookRelationships=new String(entries.get("xl/_rels/workbook.xml.rels"),StandardCharsets.UTF_8);
+        workbookRelationships=appendBeforeEnd(workbookRelationships,"</Relationships>",
+                "<Relationship Id=\"rIdThreadedPerson\" "
+                        +"Type=\"http://schemas.microsoft.com/office/2017/10/relationships/person\" "
+                        +"Target=\"persons/person.xml\"/>");
+        entries.put("xl/_rels/workbook.xml.rels",workbookRelationships.getBytes(StandardCharsets.UTF_8));
+        entries.put("xl/worksheets/_rels/sheet1.xml.rels",("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                +"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                +"<Relationship Id=\"rIdThreadedComment\" "
+                +"Type=\"http://schemas.microsoft.com/office/2017/10/relationships/threadedComment\" "
+                +"Target=\"../threadedComments/threadedComment1.xml\"/></Relationships>")
+                .getBytes(StandardCharsets.UTF_8));
+        entries.put("xl/threadedComments/threadedComment1.xml",("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                +"<ThreadedComments xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments\">"
+                +"<threadedComment ref=\"A2\" dT=\"2025-01-01T00:00:00Z\" "
+                +"personId=\"{00000000-0000-0000-0000-000000000001}\" "
+                +"id=\"{00000000-0000-0000-0000-000000000002}\"><text>"+canary
+                +"</text></threadedComment></ThreadedComments>").getBytes(StandardCharsets.UTF_8));
+        entries.put("xl/persons/person.xml",("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                +"<personList xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments\">"
+                +"<person displayName=\"Fixture User\" id=\"{00000000-0000-0000-0000-000000000001}\" "
+                +"userId=\"fixture\" providerId=\"None\"/></personList>")
+                .getBytes(StandardCharsets.UTF_8));
+        ByteArrayOutputStream output=new ByteArrayOutputStream();
+        try(ZipOutputStream zip=new ZipOutputStream(output)) {
+            for(Map.Entry<String,byte[]> entry:entries.entrySet())writeZipEntry(zip,entry.getKey(),entry.getValue());
+        }
+        return output.toByteArray();
+    }
+
+    private static String appendBeforeEnd(String xml,String closingTag,String fragment) {
+        int closing=xml.lastIndexOf(closingTag);
+        if(closing<0)throw new IllegalArgumentException("Expected OOXML closing tag "+closingTag);
+        return xml.substring(0,closing)+fragment+xml.substring(closing);
+    }
+
+    private static void writeZipEntry(ZipOutputStream zip,String name,byte[] contents)throws IOException {
+        zip.putNextEntry(new ZipEntry(name));zip.write(contents);zip.closeEntry();
+    }
+
+    private static boolean zipContainsText(byte[] zippedBytes,String expected)throws IOException {
+        try(ZipInputStream zip=new ZipInputStream(new ByteArrayInputStream(zippedBytes))) {
+            ZipEntry entry;byte[] buffer=new byte[4096];
+            while((entry=zip.getNextEntry())!=null) {
+                ByteArrayOutputStream contents=new ByteArrayOutputStream();int count;
+                while((count=zip.read(buffer))!=-1)contents.write(buffer,0,count);
+                if(new String(contents.toByteArray(),StandardCharsets.UTF_8).contains(expected))return true;
+            }
+        }
+        return false;
     }
 
     private static Map<String,Object> readArchivedRunManifest(ServerRuntime runtime,String jobId) throws Exception {
