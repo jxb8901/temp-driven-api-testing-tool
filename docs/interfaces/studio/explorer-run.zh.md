@@ -14,7 +14,7 @@ Debug 只能從已選取的 Template、Flow 或 Tool 詳細資料開啟。表單
 
 ## Package Explorer 與 Debug
 
-React Explorer 以三欄工作區呈現套件資源、所選定義及資源操作。選擇 Case、Template、Flow 或 Tool 即可開啟詳細資料。資源類型篩選以單一可用鍵盤操作的 radio group 呈現；Resources 工具列集中 **Refresh resources**、**驗證套件**、**執行測試案例…**及 **Testdata**。**執行測試案例…**會開啟既有 Run editor 並預選全部案例，不會提交 Job。Testdata 仍是檢視，不是資源類型篩選。`#/packages/{packageId}/resources/{type}/{resourceId}` hash route 會在重新載入時還原所選資源，並支援瀏覽器導覽。Definition、Source 及 Dependencies 分頁可使用方向鍵、Home 及 End 鍵盤操作。
+React Explorer 以三欄工作區呈現套件資源、所選定義及資源操作。選擇 Case、Template、Flow 或 Tool 即可開啟詳細資料。資源類型篩選以單一可用鍵盤操作的 radio group 呈現；Resources 工具列集中 **Refresh resources**、**驗證套件**、**執行測試案例…**及 **Testdata**。**執行測試案例…**會開啟既有 Run editor 並預選全部案例，不會提交 Job。Run editor 亦提供 **Native Suite**：可輸入一個或多個 Test Case Definition ID，選擇 **All Cases** 或 **Selected Cases**，再逐行輸入 Qualified Case ID。Validation 會建立 `att-execution/v2` draft；Server 解析選取項目，並在提交前凍結接受的 ID 和 Definition revision。Native Suite 的 `rerun-failed` 尚不可用；需先明確保留重試來源 Job/run 及失敗 Case ID，形成可追蹤的 retry lineage。Testdata 仍是檢視，不是資源類型篩選。`#/packages/{packageId}/resources/{type}/{resourceId}` hash route 會在重新載入時還原所選資源，並支援瀏覽器導覽。Definition、Source 及 Dependencies 分頁可使用方向鍵、Home 及 End 鍵盤操作。
 
 Package Testdata 是唯讀 Explorer 檢視，route 為 `#/packages/{packageId}/testdata`。它使用該 route 的 Package 與 Environment，並可透過選用的 `descriptor` query 還原所選 descriptor。每次請求最多讀取 50 筆 record；Generated records 會在使用者選擇 **Preview first 50 generated records** 前保持隱藏。Testdata 不是可執行的 resource，不會出現在 Run 或 Quick LOAD target 清單。Shared Configuration 只包含全域 Source、Declared、Effective 及 Compare 檢視；Package Testdata metadata 與 origin 仍保留於 Package Configuration。
 

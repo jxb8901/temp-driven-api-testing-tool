@@ -7,11 +7,12 @@ import { api } from '../../api';
 import { NavigationGuardContext, type NavigationGuardApi } from '../../router';
 import { ApiError } from '../../types';
 import type { DebugFormResponse, JsonObject, ResourceIdentity } from '../explorer/types';
+import type { ValidatedScheduleIntent } from '../schedules/types';
 vi.mock('../../api', () => ({ api: { previewRun: vi.fn(), submitRun: vi.fn(), getDeclaredConfiguration: vi.fn(), getPackageManifest: vi.fn(), getDebugForm: vi.fn(), getJobReplayEditorDraft: vi.fn(), createJobReplayDraft: vi.fn(), rerunJob: vi.fn() } }));
 vi.mock('../code/CodeEditor', () => ({ CodeEditor: ({ label, value, readOnly, onChange }: { label: string; value: string; readOnly?: boolean; onChange?: (value: string) => void }) => <textarea aria-label={label} value={value} readOnly={readOnly} onChange={e => onChange?.(e.target.value)} /> }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement; let root: Root;
-const onAccepted = vi.fn(); const onSchedule = vi.fn(() => true); const release = vi.fn();
+const onAccepted = vi.fn(); const onSchedule = vi.fn((_intent: ValidatedScheduleIntent) => true); const release = vi.fn();
 const guard = { registerUnsavedChanges: vi.fn(() => release) } as unknown as NavigationGuardApi;
 beforeEach(async () => {
   vi.clearAllMocks(); vi.mocked(api.previewRun).mockResolvedValue({ draftId: 'R123', preview: { selectedCaseIds: ['cases.default.C1'] },
@@ -33,6 +34,13 @@ function control(label: string) { return [...host.querySelectorAll('label')].fin
 async function change(label: string, value: string) {
   const element = control(label); const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value')!.set!;
   await act(async () => { setter.call(element, value); element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); });
+}
+async function changeTextarea(label: string, value: string) {
+  const element=[...host.querySelectorAll('label')].find(item=>item.textContent?.startsWith(label))!.querySelector('textarea')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(element, value);
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
 }
 async function click(name: string) { const button = [...host.querySelectorAll('button')].find(item => item.textContent === name)!; await act(async () => button.click()); }
 async function settleDebugForm(milliseconds = 220) { await act(async () => { await new Promise(resolve => window.setTimeout(resolve, milliseconds)); }); }
@@ -267,4 +275,29 @@ it('offers Batch RUN as the initial mode from the Explorer route', async () => {
   expect(host.querySelector('[aria-label="Case selection"]')).not.toBeNull();
   await click('Validate');
   expect(api.previewRun).toHaveBeenCalledWith(expect.objectContaining({ selection: { all: true } }));
+});
+
+it('surfaces Native Suite all-versus-selected Case selection as a v2 draft', async () => {
+  await change('Target type', 'native-suite');
+  expect(host.querySelector('textarea[aria-label="Case selection"]')).toBeNull();
+  await changeTextarea('Definition IDs', 'payments.transfer');
+  await click('Validate');
+  expect(api.previewRun).toHaveBeenLastCalledWith({ schemaVersion: 'att-execution/v2', executionType: 'run', packageId: 'payments',
+    target: { type: 'nativeSuite', definitionIds: ['payments.transfer'], selection: { all: true } }, options: { debug: false } });
+
+  await change('Suite selection', 'selected');
+  await changeTextarea('Definition IDs', 'payments.transfer\npayments.refund');
+  await changeTextarea('Qualified Case IDs', 'payments.transfer.customerA\npayments.refund.refund1');
+  await click('Validate');
+  expect(api.previewRun).toHaveBeenLastCalledWith({ schemaVersion: 'att-execution/v2', executionType: 'run', packageId: 'payments',
+    target: { type: 'nativeSuite', definitionIds: ['payments.transfer', 'payments.refund'], selection: { qualifiedCaseIds: ['payments.transfer.customerA', 'payments.refund.refund1'] } }, options: { debug: false } });
+});
+
+it('schedules the validated Native Suite draft without projecting it as a resource target', async () => {
+  await change('Target type', 'native-suite');
+  await changeTextarea('Definition IDs', 'payments.transfer');
+  await click('Validate'); await click('Schedule…');
+  expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ packageId: 'payments', draftId: 'R123', executionType: 'run' }));
+  expect(onSchedule.mock.calls.at(-1)?.[0]).not.toHaveProperty('target');
+  expect(api.submitRun).not.toHaveBeenCalled();
 });

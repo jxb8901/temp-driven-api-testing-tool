@@ -286,6 +286,8 @@ ATT 會按 ID 排列 Definition，並保留每個 Definition 的來源記錄順�
 
 Implicit Suite 是 runtime selection，並非可重用的 authored Definition。這項功能不會新增 LOAD target 或進階 Testdata/generator binding；Debug interoperability 仍屬後續工作。
 
+Studio Run editor 亦提供這項選取功能：輸入一個或多個 Definition ID，選擇全部 Case 或指定 Case，並將每個 Qualified Case ID 輸入獨立一行。Native Suite `rerun-failed` 目前仍會被拒絕；Server 尚未將失敗來源 Job/run 和精確 retry Case ID 保留為新 Native Suite execution 的 lineage。
+
 ### Workbook
 
 #### Workbook、Sidecar 和 Snapshot 之間的關系
