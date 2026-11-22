@@ -1,301 +1,170 @@
 # ATT v4.4.1 快速入門
 
-[English Quick Start](quick-start.md) · [Reference Manual](reference.zh.md)
+[English Quick Start](quick-start.md) · [Reference Manual](reference.zh.md) · [遷移矩陣](maintenance/native-case-default-package-migration-s12.md)
 
-本指南的目標很單純：從乾淨的 repository checkout 開始，用最小但完整的例子跑通第一次 ATT 測試。內容刻意先教正常的 Run 流程；Debug、Load、DB/MQ、environment、retry 及完整 Context 模型都放到最後的「下一步」。
+Native Case 主路徑對應 4.6.0 開發候選（正式 POM 版本在發佈前仍為 4.4.1）。本指南從乾淨的 repository checkout 開始，用最小離線例子跑通一次 **Native Case**。內容先教新的作者模型：
 
-本指南中，**Testcase** 指作者編寫並正規化的 Workbook row；**Case execution** 指 Run 對該 row 的一次執行。兩者共用 Case ID，但概念不同；本文使用 Testcase 表示 Workbook data，使用 Case execution 表示 runtime 結果。
+```text
+Package → Flow → testcase.yaml（+ inline 或 Excel Data Source）
+       → Preview / Resolve → 選擇 Case → Validate → RUN → Results
+```
 
-已提交的 Quick Start 例子刻意保持離線可執行：第一個 Testcase 只使用 `assign`、`log`、`assert`；第二個 Testcase 再加入 ATT 內置的本地 sample Tool，不需要資料庫、MQ、API endpoint、credential 或網絡連線。
+舊式 Excel + Sidecar + XML Snapshot + Stage/Template 仍然支援。若該路徑仍是正確選擇，請看[舊式 Workbook 附錄](#舊式-workbook-快速入門支援中)。
+
+已提交的 Native 例子刻意離線：只使用 `assign`、`log`、`assert`，以及可選的 ATT 本地 sample Tool；不需要資料庫、MQ、API、credential 或網絡。
 
 ## 你將會執行甚麼
 
-ATT 正常的案例作者流程可以先理解為：
+Default Package 內的主要檔案：
 
 ```text
-Excel Testcase
-   -> Stage
-      -> Template
-         -> ordered Actions
+packages/default/templates/flows/quick-start/flow.yaml
+packages/default/testcase/quick-start/single/testcase.yaml
+packages/default/testcase/quick-start/inline-multi/testcase.yaml
+packages/default/testcase/quick-start/excel/testcase.yaml
+packages/default/testdata/quick-start-native.xlsx
+config/config.yaml
 ```
 
-本指南直接使用 default package 內已準備好的檔案：
+| Definition ID | Resolved Case ID | 用途 |
+|---|---|---|
+| `quick.start.single` | `default` | 單一 Definition + typed `inputs` → 一個 Case |
+| `quick.start.inline` | `basic`、`with-tool` | 單一 Definition + inline records → 多個 Case |
+| `quick.start.excel` | `QS001`、`QS002` | 單一 Definition + 唯讀 Excel Data Source |
+
+三者皆綁定 Flow `quick.start.v1`。Resolved Case 是可選擇的邏輯 Case；每次 RUN 產生獨立 execution。
+
+## 前置條件
+
+1. 已安裝 JDK 與 Maven（需要時可編譯 source checkout）。
+2. 若缺少 class，於 repository root 編譯 Local CLI：
+
+```sh
+mvn -DskipTests -pl att-cli -am compile
+```
+
+3. Package validation 可能用到的占位環境變數（與本例子無關的 Helper）：
+
+```sh
+export ORDERS_DB_USERNAME=docs-example-user
+export ORDERS_DB_PASSWORD=docs-example-password
+export PAYMENT_MQ_USERNAME=docs-example-user
+export PAYMENT_MQ_PASSWORD=docs-example-password
+```
+
+## 查看 Native Definition
+
+打開 `testcase/quick-start/single/testcase.yaml`：
+
+```yaml
+schemaVersion: att-testcase/v1
+id: quick.start.single
+name: Native Quick Start (single Case)
+flow: quick.start.v1
+tags: [quick-start, smoke, native]
+inputs:
+  amount: 100
+  useTool: false
+  expected: 100
+```
+
+Actions 由 `templates/flows/quick-start/flow.yaml` 擁有；Test Case 不會再寫一套 Steps 或 assert DSL。
+
+## 驗證 Package
+
+```sh
+./att.sh validate --package
+```
+
+驗證是唯讀的，會一併檢查 Native Definition、Flow/Tool 依賴閉包，以及仍保留的舊式 suites。
+
+## 只做 Resolve（dry-run）
+
+```sh
+./att.sh --local -p default run native-case quick.start.single \
+  --resolved-case-id default --dry-run --format json
+```
+
+Dry-run 會解析並驗證選中的 Case ID，不會執行 Flow Actions。
+
+## RUN 單一 Case
+
+```sh
+./att.sh --local -p default run native-case quick.start.single \
+  --resolved-case-id default
+```
+
+預期狀態為 `PASS`，並在 run 輸出目錄留下 per-Case evidence。在此 S05 基底上，HTML/CI 類證據沿用現有 Native RUN 路徑。**不依賴來源 Workbook 的標準 native XLSX 報告屬於 S07，本文件不宣稱已交付。**
+
+## RUN 多個 inline Case
+
+```sh
+./att.sh --local -p default run native-case quick.start.inline \
+  --resolved-case-id basic --resolved-case-id with-tool
+```
+
+Qualified ID 分別為 `quick.start.inline.basic` 與 `quick.start.inline.with-tool`。
+
+## RUN Excel Data Source Case
+
+```sh
+./att.sh --local -p default run native-case quick.start.excel \
+  --resolved-case-id QS001 --resolved-case-id QS002
+```
+
+`testdata/quick-start-native.xlsx` 只作為唯讀 Data Source。Preview／RUN 不會修改該檔，也不會產生舊式 XML Snapshot。
+
+## Studio Preview（當 Server／Studio 可用時）
+
+在本開發候選版的 ATT Server 與 Studio：
+
+1. 於 Explorer 開啟 Default Package。
+2. 開啟或建立 `testcase/` 下的 `testcase.yaml`。
+3. 使用 **Preview / Resolve** 列出 qualified Case ID 與 typed inputs（唯讀；不會建立 Job）。
+4. 走既有 Change Set Draft → Validate → Review → Publish，並在 Server 宣告 `att-execution/v2` 後再 RUN。
+
+詳見[測試撰寫 — Native Case](reference.zh/test-authoring.md)。
+
+## 本基底刻意未涵蓋的能力
+
+| 能力 | 狀態 |
+|---|---|
+| Implicit Suite（`run native-suite`、跨 Definition 標籤） | S06 / #396 — 不在 S05 基底 |
+| 不依賴來源 Workbook 的 native XLSX 報告 | S07 / #397 — 不在 S05 基底 |
+| Native LOAD Case targets | S08 — 延後 |
+| 自動 Stage/Template → Flow 轉換 | #398 — 分析軌道；保留舊式 suites |
+
+## 舊式 Workbook 快速入門（支援中）
+
+新工作請優先使用 Native。需要 Stage/Template 語意、既有 Snapshot Case ID，或 workbook 報表版面時，繼續使用：
 
 ```text
 packages/default/testcase/quick_start.xlsx
 packages/default/testcase/quick_start.yaml
 packages/default/testcase/quick_start.xml
 packages/default/templates/QUICK_START/template.yaml
-config/config.yaml
 ```
 
-Workbook 內有兩個 Testcase：
-
-| Testcase ID | 用途 | 外部依賴 |
-|---|---|---|
-| `quickStart.default.QS001` | 第一次成功執行 ATT | 無 |
-| `quickStart.default.QS002` | 同一流程再加入本地 sample Tool | 無 |
-
-第一次使用時不需要先理解 ATT 全部 schema。
-
-## 確認前置條件
-
-ATT CLI、Engine、Remote 及 Server API module 支援 Java 8 或以上版本。Source checkout 需要 JDK 和 Maven，並須明確編譯這些 module；`att.sh` 和 `att.bat` 只會執行已預先編譯的 classes。完整 ATT release build 亦會編譯需要 Java 17 的 Server module。已打包的 release 內含 application JAR，只需要 Java runtime，無須 Maven。
-
-1. 在 macOS/Linux 上，如有需要先令 launcher 可執行：
-   ```sh
-   chmod +x att.sh
-   ```
-
-2. 在 repository root 編譯 CLI 和所需 module：
-   ```sh
-   mvn -DskipTests -pl att-cli -am compile
-   ```
-
-   此命令需要 JDK 和 Maven。若使用 database 或 IBM MQ integration，請把可選的 vendor driver JAR 放入 `lib/`。
-
-3. 確認 CLI 可以啟動：
-
-   ```sh
-   ./att.sh version
-   ```
-
-   Windows 使用者請執行相同的 Maven 命令，再執行 `att.bat version`。
-
-## 看懂 Workbook 與 Sidecar
-
-打開 `testcase/quick_start.xlsx`。第二列是真正由 sidecar 使用的 Excel header：
-
-```text
-Case ID | Tags | Name | Amount | Use Tool | Template | Expected
+```sh
+./att.sh snapshot --suite testcase/quick_start.xlsx
+./att.sh validate --package
+./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
+./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS002
 ```
 
-`testcase/quick_start.yaml` 把 Excel 欄位映射成 ATT input：
-
-```yaml
-schemaVersion: att-sidecar/v2.2
-id: quickStart
-excel:
-  sheet: QuickStart
-  headerRows: 2
-  caseId: Case ID
-  tags: Tags
-  dataColumns: name=Name, amount=Amount, useTool=Use Tool(yaml), expected=Expected
-
-stages:
-  - key: main
-    template: Template
-    required: true
-    onFailure: stop
-    runWhen: normal
-```
-
-`Use Tool(yaml)` 後面的 `(yaml)` 令 Excel 中的 `true` / `false` 保留為 Boolean，而不是普通字串。
-
-`testcase/quick_start.xml` 是 ATT 由 workbook 正規化產生的 snapshot。它是執行時驗證的一部分，不應手工修改。
-
-## 看懂最小 Template
-
-兩個 Testcase 都選擇 `QUICK_START`，實作位於 `templates/QUICK_START/template.yaml`。
-
-第一次只需要掌握三個概念：
-
-```yaml
-actions:
-  captureAmount:
-    type: assign
-    name: quickStartAmount
-    expression: "${EXEC.INPUT.amount}"
-
-  showInput:
-    type: log
-    message: "Quick Start case ${META.SOURCE.caseId}: amount=${EXEC.VARS.quickStartAmount}"
-
-  verifyAmount:
-    type: assert
-    assert: "#{${EXEC.VARS.quickStartAmount} == ${EXEC.INPUT.expected}}"
-    expected: "${EXEC.INPUT.expected}"
-    actual: "${EXEC.VARS.quickStartAmount}"
-```
-
-在這個例子中：
-
-- `EXEC.INPUT` 是由 Testcase row 物化而來的輸入；
-- `EXEC.VARS` 是由 `assign` 明確建立的 runtime value；
-- `${...}` 用來讀取或插入 Context 值；
-- `#{...}` 用來執行 typed expression。
-
-第一次執行知道這些已經足夠。完整定義見 [Runtime and Context](reference.zh/runtime-context.md) 及 [Expressions](reference.zh/expressions.md)。
-
-## 準備 package
-
-ATT 會檢查 Excel workbook 與 XML snapshot 是否一致：
-
-1. 產生 snapshot：
-   ```sh
-   ./att.sh snapshot --suite testcase/quick_start.xlsx
-   ```
-
-   日後修改 Workbook 後，請重新產生 snapshot，並在 commit 前 review XML diff。
-
-2. 執行 Testcase 前先驗證整個 package：
-
-   ```sh
-   ./att.sh validate --package
-   ```
-
-   Validation 會檢查 schema、Workbook/snapshot 一致性、Template reference、expression、Tool/resource reference 等契約，但不會執行 Testcase。首次 Case execution 前，請先解決 validation error。
-
-## 執行離線 Testcase
-
-1. 為離線 Testcase 啟動 Case execution：
-
-   ```sh
-   ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-   ```
-
-### 預期結果
-
-Case execution 應為 `PASS`。
-
-先記住這個簡化版 status 模型即可：
-
-| Status | 意義 |
+| 舊式 Case ID | 用途 |
 |---|---|
-| `PASS` | 執行成功，而且 assertion 成立 |
-| `FAIL` | framework 成功執行，但業務 assertion 不成立 |
-| `ERROR` | runtime／integration／I/O 等執行錯誤 |
-| `INVALID` | validation 失敗，因此沒有開始執行 |
-| `SKIPPED` | 被規則刻意跳過 |
+| `quickStart.default.QS001` | 離線 assign/log/assert |
+| `quickStart.default.QS002` | 同一路徑再加本地 sample Tool |
 
-遇到真實案例問題時再看 [Validation and Troubleshooting](reference.zh/validation-diagnostics.md)。
+不要手工修改已提交的 `quick_start.xml`；改 workbook 後用 `snapshot` 重新產生。Stage/Template 細節見[測試撰寫](reference.zh/test-authoring.md)。
 
-## 檢查 Case execution
+## 下一步
 
-1. 打開 Run 目錄，檢查摘要和 execution artifacts：
-
-```text
-output/<runId>/
-  run.yaml
-  ... case output ...
-  ... case.log ...
-```
-
-只有完整完成的 Run 才會更新 `output/latest-run.yaml`。
-
-`QS001` 的 Case execution `case.log` 應包含 `showInput` 寫出的訊息，而最後的 assertion 會比較 Excel 的 `Amount` 與 `Expected`。
-
-2. 開啟或重新產生 HTML 報表，請看 [Results, Reports, and Evidence](reference.zh/results-reports-evidence.md)。完整 report、Action evidence、attempt history 及輸出格式都在該頁說明。
-
-## 製造並還原一次受控失敗
-
-理解 `FAIL` 和 `ERROR` 的最好方法，是刻意讓業務 assertion 失敗一次。
-
-1. 在 `testcase/quick_start.xlsx` 把 `QS001` 的 `Expected` 從 `100` 改成 `999`，再產生 snapshot：
-
-   ```sh
-   ./att.sh snapshot --suite testcase/quick_start.xlsx
-   ```
-
-2. 再次執行該 Testcase：
-
-   ```sh
-   ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-   ```
-
-### 預期結果
-
-Case execution 應為 `FAIL`，而不是 `ERROR`：ATT 已完成 execution，但 business assertion 為 false。
-
-3. 完成後把 `Expected` 改回 `100`，並重新產生 snapshot。
-
-## 加入真正的 Tool Action
-
-同一個 Template 已包含一個可選 Tool：
-
-```yaml
-readDate:
-  type: tool
-  call: "#{sample.getAcDate()}"
-  runWhen: "#{${EXEC.INPUT.useTool} == true}"
-```
-
-`QS001` 的 `Use Tool = false`，所以這個 Action 會被跳過；`QS002` 則為 `true`。
-
-1. 為 `QS002` 啟動 Case execution：
-
-   ```sh
-   ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS002
-   ```
-
-這會調用 Package 所有的 `sample.getAcDate` Tool，描述檔位於 `packages/default/tools/sample/getAcDate.yaml`。它是本地 command-backed Tool，因此仍然不需要外部服務。
-
-### 預期結果
-
-`QS002` 的 Case execution 應為 `PASS`，Tool result 會記錄在 execution evidence 中。
-
-此時先建立這個 mental model：
-
-```text
-Testcase input -> Template Action -> Tool -> Action output/evidence
-```
-
-完整的 Tool descriptor、command-backed/call-backed 差異、arguments、output 及 evidence 契約請看 [Resources - Tool](reference.zh/resources/tools.md)。
-
-## 執行整個 Quick Start Workbook
-
-理解兩個 Testcase 後，可一起執行：
-
-1. 為 Workbook 中的每個 Testcase 啟動 Case execution：
-
-   ```sh
-   ./att.sh run --suite testcase/quick_start.xlsx
-   ```
-
-### 預期結果
-
-還原 `QS001` 的 `Expected` 值後，兩個 Testcase 對應的 Case execution 都應為 `PASS`。
-
-到這裡你已經完成 ATT 最重要的日常循環：
-
-```text
-修改 Excel / Template
-        |
-        v
-snapshot
-        |
-        v
-validate
-        |
-        v
-run
-        |
-        v
-查看 log / report
-```
-
-SIT/UAT 中更大的 package，本質上也是在這個循環之上增加可重用 Flow、Tool、DB/MQ、environment 和更多 validation contract。
-
-## 下一步學甚麼
-
-Quick Start 不應變成第二本 Reference Manual。按你真正要做的工作繼續閱讀：
-
-| 我想要…… | 下一步 |
+| 目標 | 文件 |
 |---|---|
-| 理解 Workbook、Sidecar、Snapshot、Template、Flow | [Test Authoring](reference.zh/test-authoring.md) |
-| 理解 `EXEC`、`META`、`EXEC.VARS`、`EXEC.ACTIONS`、`output` | [Runtime and Context](reference.zh/runtime-context.md) |
-| 不經 Excel 單獨測試 Template/Flow/Tool | [Standalone Debug](reference.zh/execution-modes/debug.md) |
-| 做 load test | [Load](reference.zh/execution-modes/load.md) |
-| 調用 script/program 或 framework-native Tool | [Tool](reference.zh/resources/tools.md) |
-| 查詢／更新資料庫，包括 query timeout/retry | [DBHelper](reference.zh/resources/dbhelper.md) |
-| 發送／接收／request MQ message | [MQHelper](reference.zh/resources/mqhelper.md) |
-| 在 SIT/UAT 間切換 resource binding | [Configuration and Environments](reference.zh/configuration.md) |
-| 正確使用 `${...}` / `#{...}` | [Expressions](reference.zh/expressions.md) |
-| 使用 assertion、timeout、retry、`runWhen`、`onFailure` | [Reliability and Execution Control](reference.zh/reliability-execution-control.md) |
-| 查 CLI command / option | [CLI Reference](reference.zh/cli.md) |
-| 排查 `FAIL`、`ERROR`、`INVALID` | [Validation and Troubleshooting](reference.zh/validation-diagnostics.md) |
-| 接入 CI 或打包部署 | [CI, Packaging, and Operations](reference.zh/ci-packaging-operations.md) |
-
-Direct DB Action 的安全邊界是：`query` 可以針對 `ASSERTION` / `TIMEOUT` retry；`update` 可設定 `timeoutMs`，但會拒絕自動 retry。完整契約見 [DBHelper](reference.zh/resources/dbhelper.md)。
-
-需要查完整欄位與 public contract 時，直接使用生成的 [目前的中文 ATT Reference Manual](reference.zh.md)。
+| Native Case 欄位與 Excel mapping | [測試撰寫](reference.zh/test-authoring.md) |
+| S12 盤點／遷移決策 | [遷移矩陣](maintenance/native-case-default-package-migration-s12.md) |
+| Debug Template／Flow | [Debug](reference.zh/execution-modes/debug.md) |
+| LOAD（既有直接 targets） | [Load](reference.zh/execution-modes/load.md) |
+| CLI 語法（含 `run native-case`） | [Proposed CLI vNext](interfaces/cli/vnext-proposed.md) |

@@ -116,6 +116,7 @@ class DocumentationExamplesTest {
         try (java.util.stream.Stream<Path> files = Files.walk(packageRoot)) {
             for (Path file : (Iterable<Path>) files.filter(Files::isRegularFile)
                     .filter(path -> !path.startsWith(packageRoot.resolve("target")))
+                    .filter(path -> !path.startsWith(packageRoot.resolve("output")))
                     .filter(path -> path.toString().endsWith(".yaml") || path.toString().endsWith(".yml"))::iterator) {
                 Object value = YamlSupport.parser().load(read(file));
                 assertTrue(value instanceof Map, "Package YAML must be a mapping: " + packageRoot.relativize(file));
@@ -130,10 +131,11 @@ class DocumentationExamplesTest {
 
         Map<String, Integer> expected = new TreeMap<String, Integer>();
         expected.put("att-debug/v1.2", Integer.valueOf(1));
-        expected.put("att-flow/v3.6", Integer.valueOf(3));
+        expected.put("att-flow/v3.6", Integer.valueOf(4));
         expected.put("att-package/v1", Integer.valueOf(1));
         expected.put("att-sidecar/v2.2", Integer.valueOf(3));
         expected.put("att-template/v3.6", Integer.valueOf(10));
+        expected.put("att-testcase/v1", Integer.valueOf(3));
         expected.put("att-testdata/v1.0", Integer.valueOf(1));
         expected.put("att-tool-group/v3.0", Integer.valueOf(3));
         expected.put("att-tool/v1", Integer.valueOf(21));

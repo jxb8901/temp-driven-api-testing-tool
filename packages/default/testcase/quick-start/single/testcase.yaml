@@ -1,0 +1,9 @@
+schemaVersion: att-testcase/v1
+id: quick.start.single
+name: Native Quick Start (single Case)
+flow: quick.start.v1
+tags: [quick-start, smoke, native]
+inputs:
+  amount: 100
+  useTool: false
+  expected: 100

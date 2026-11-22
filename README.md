@@ -10,21 +10,30 @@ ATT supports Local execution, an optional ATT Server control plane, a browser St
 
 *Illustrative Studio UI-shell baseline with sample Package and Job data; the version badge belongs to that screenshot baseline.*
 
-## Quick Start: current 4.3.1 CLI
+## Quick Start: Native Case (4.6.0 development candidate)
 
-This source-checkout walkthrough uses the shipped legacy CLI. Snapshot generation is an explicit authoring step; validation does not create or update snapshots.
+Primary happy path on this development candidate:
+
+```text
+Package → Flow → testcase.yaml → Preview/Resolve → Select Case(s) → Validate → RUN
+```
 
 ~~~sh
-./att.sh snapshot --suite testcase/quick_start.xlsx
 ./att.sh validate --package
+./att.sh --local -p default run native-case quick.start.single --resolved-case-id default
+~~~
+
+Open [Quick Start](docs/quick-start.md) for the offline Native fixtures (single / inline-multi / Excel), Studio preview notes, and the labeled legacy Workbook appendix. The same guide is available in [繁體中文](docs/quick-start.zh.md). Migration decisions live in the [S12 matrix](docs/maintenance/native-case-default-package-migration-s12.md).
+
+Legacy Workbook + Sidecar + Snapshot remains supported:
+
+~~~sh
 ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
 ~~~
 
-Open [Quick Start](docs/quick-start.md) for the full offline fixture, validation, execution, logs and assertions. The same guide is available in [繁體中文](docs/quick-start.zh.md).
-
 ## What ATT provides
 
-- Package isolation and reusable authoring with Testcases, Stages, Templates, Flows, Actions, Tools and Resources.
+- Package isolation and reusable authoring with Native Test Case Definitions (`testcase.yaml`), Flows, Actions, Tools and Resources; legacy Stages/Templates/Workbooks remain supported.
 - Functional RUN and separate LOAD execution, with read-only VALIDATE.
 - Shared Runtime Configuration, Environment profiles, optional Package Manifest defaults and Package-owned Testdata.
 - Local CLI, ATT Studio, REST/SSE integration and Server Jobs and Schedules.

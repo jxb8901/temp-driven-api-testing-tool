@@ -1,0 +1,29 @@
+schemaVersion: att-flow/v3.6
+id: quick.start.v1
+name: Quick Start
+description: Offline Native Case Quick Start Flow (assign/log/assert; optional sample Tool). Mirrors the legacy QUICK_START Template for the Native authoring path without claiming Stage/Template semantic equivalence.
+
+actions:
+  captureAmount:
+    type: assign
+    description: Copy one Case input into EXEC.VARS.
+    name: quickStartAmount
+    expression: "${EXEC.INPUT.amount}"
+
+  showInput:
+    type: log
+    description: Write a human-readable line to the Case log.
+    message: "Quick Start case #{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}: amount=${EXEC.VARS.quickStartAmount}"
+
+  readDate:
+    type: tool
+    description: Optional local sample Tool; no DB, MQ or network dependency.
+    call: "#{sample.getAcDate()}"
+    runWhen: "#{${EXEC.INPUT.useTool} == true}"
+
+  verifyAmount:
+    type: assert
+    description: Verify the value copied from EXEC.INPUT.
+    assert: "#{${EXEC.VARS.quickStartAmount} == ${EXEC.INPUT.expected}}"
+    expected: "${EXEC.INPUT.expected}"
+    actual: "${EXEC.VARS.quickStartAmount}"

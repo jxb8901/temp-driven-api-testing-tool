@@ -1,0 +1,30 @@
+schemaVersion: att-testcase/v1
+id: quick.start.inline
+name: Native Quick Start (inline multi-record)
+flow: quick.start.v1
+tags: [quick-start, regression, native]
+caseIdExpression: "${DATA.caseKey}"
+dataSource:
+  type: inline
+  records:
+    - recordId: qs-basic
+      tags: [smoke]
+      data:
+        caseKey: basic
+        amount: 100
+        useTool: false
+        expected: 100
+    - recordId: qs-tool
+      tags: [tool]
+      data:
+        caseKey: with-tool
+        amount: 50
+        useTool: true
+        expected: 50
+inputs:
+  amount:
+    from: DATA.amount
+  useTool:
+    from: DATA.useTool
+  expected:
+    from: DATA.expected
