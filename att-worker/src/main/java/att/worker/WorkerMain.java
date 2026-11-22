@@ -37,6 +37,7 @@ public final class WorkerMain {
     private final LinkedHashMap<String,Map<String,Object>> inspectionAggregates=new LinkedHashMap<String,Map<String,Object>>(16,.75f,true);
     private String jobId;
     private String currentCommand;
+    private WorkerRequest currentWorkerRequest;
     private boolean inspectionDaemon;
     private boolean prewarmed;
     private boolean inspectionRequest;
@@ -168,6 +169,7 @@ public final class WorkerMain {
             return fail("WORKER_SOURCE_SNAPSHOT_INVALID","The accepted source snapshot is unavailable or failed integrity verification");
         }
         currentCommand=request.command;
+        currentWorkerRequest=request;
         try { consoleOptions=att.console.ExecutionConsoleFormatter.Options.published(
                 request.liveOutputMaxEntryChars==null?4000:request.liveOutputMaxEntryChars,
                 request.liveOutputMaxEntryLines==null?40:request.liveOutputMaxEntryLines); }
@@ -1157,9 +1159,12 @@ public final class WorkerMain {
     }
     private synchronized void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception {
         resourceTelemetry.sample();
+        PreservedNativeTestCaseSource preservedSource=inspectionDaemon&&type==WorkerEvent.Type.RESULT
+                ?withoutValidatedNativeTestCaseSourceText(data):null;
+        Map<String,Object> sanitizeInput=preservedSource==null?data:preservedSource.data;
         Map<String,Object> safe;
-        if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&data.containsKey("inspectionMetrics")) {
-            Map<String,Object> content=new LinkedHashMap<String,Object>(data);
+        if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&sanitizeInput.containsKey("inspectionMetrics")) {
+            Map<String,Object> content=new LinkedHashMap<String,Object>(sanitizeInput);
             Object metrics=content.remove("inspectionMetrics");
             safe=DiagnosticSanitizer.sanitize(content);
             // These locally constructed metrics contain only fixed counters, numeric JMX
@@ -1167,7 +1172,8 @@ public final class WorkerMain {
             // classification of every counter name adds work to every inspection read.
             // Authored results, diagnostics and Worker telemetry still pass the sanitizer.
             safe.put("inspectionMetrics",metrics);
-        } else safe=DiagnosticSanitizer.sanitize(data);
+        } else safe=DiagnosticSanitizer.sanitize(sanitizeInput);
+        if(preservedSource!=null)restoreValidatedNativeTestCaseMapping(safe,preservedSource.marker,preservedSource.mapping);
         if(!inspectionDaemon&&!inspectionRequest) {
             attachConsole(type,safe);
             WorkerProtocol.Frame frame;
@@ -1203,6 +1209,44 @@ public final class WorkerMain {
         }
         protocol.println(line);protocol.flush();
         if(inspectionDaemon)inspectionResponseBytes+=bytes;
+    }
+    private PreservedNativeTestCaseSource withoutValidatedNativeTestCaseSourceText(Map<String,Object> data) {
+        WorkerRequest request=currentWorkerRequest;
+        if(request==null||!"inspect".equals(request.command)||!"authoring-source".equals(request.inspectionAction)
+                ||!"native-testcase".equals(request.authoringSourceKind)||request.inspectionPath==null
+                ||!request.inspectionPath.endsWith("/testcase.yaml"))return null;
+        Object rawResult=data.get("result");if(!(rawResult instanceof Map<?,?>))return null;
+        Map<String,Object> content=new LinkedHashMap<>(data);
+        Map<String,Object> result=new LinkedHashMap<>((Map<String,Object>)rawResult);
+        Object rawSummary=result.get("summary");if(!(rawSummary instanceof Map<?,?>))return null;
+        Map<String,Object> summary=new LinkedHashMap<>((Map<String,Object>)rawSummary);
+        Object rawInspection=summary.get("inspection");if(!(rawInspection instanceof Map<?,?>))return null;
+        Map<String,Object> inspection=new LinkedHashMap<>((Map<String,Object>)rawInspection);
+        Object text=inspection.get("text");if(!(text instanceof String))return null;
+        String sourceText=(String)text;
+        String mapping=PackageResourceInspector.nativeExcelDataColumnsMappingSource(request.inspectionPath,sourceText);
+        if(mapping==null)return null;
+        String marker="__ATT_NATIVE_EXCEL_DATA_COLUMNS__";
+        while(sourceText.contains(marker))marker+="_";
+        inspection.put("text",PackageResourceInspector.replaceNativeExcelDataColumnsMappingSource(
+                request.inspectionPath,sourceText,marker));
+        summary.put("inspection",inspection);result.put("summary",summary);content.put("result",result);
+        return new PreservedNativeTestCaseSource(content,marker,mapping);
+    }
+    @SuppressWarnings("unchecked") private static void restoreValidatedNativeTestCaseMapping(Map<String,Object> safe,String marker,String mapping) {
+        Object rawResult=safe.get("result");if(!(rawResult instanceof Map<?,?>))return;
+        Map<String,Object> result=(Map<String,Object>)rawResult;
+        Object rawSummary=result.get("summary");if(!(rawSummary instanceof Map<?,?>))return;
+        Map<String,Object> summary=(Map<String,Object>)rawSummary;
+        Object rawInspection=summary.get("inspection");if(!(rawInspection instanceof Map<?,?>))return;
+        Object text=((Map<String,Object>)rawInspection).get("text");
+        if(text instanceof String)((Map<String,Object>)rawInspection).put("text",((String)text).replace(marker,mapping));
+    }
+    private static final class PreservedNativeTestCaseSource {
+        final Map<String,Object> data;final String marker;final String mapping;
+        PreservedNativeTestCaseSource(Map<String,Object> data,String marker,String mapping) {
+            this.data=data;this.marker=marker;this.mapping=mapping;
+        }
     }
     private static boolean isCompactLoadResult(Map<String,Object> event) {
         Object value=event.get("result");

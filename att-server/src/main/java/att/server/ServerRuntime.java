@@ -5584,9 +5584,41 @@ final class ServerRuntime implements AutoCloseable {
             throw new InspectionLimitException(safeResourceLimitDiagnostics(envelope.get("diagnostics")));
         if(workerError!=null)throw new IllegalStateException("Package inspection Worker failed: "+workerError);
         Object raw=envelope.get("inspection");if(!(raw instanceof Map))throw new IllegalStateException("Package inspection Worker returned an invalid response");
-        JsonNode safe=projectInspectionPaths(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),root,"");
+        JsonNode safe=projectInspectionPaths(JSON.valueToTree(sanitizeInspectionResult(raw,request)),root,"");
         @SuppressWarnings("unchecked") Map<String,Object> result=JSON.convertValue(safe,Map.class);
         return result;
+    }
+    private static Object sanitizeInspectionResult(Object raw,WorkerRequest request) {
+        if("authoring-source".equals(request.inspectionAction)&&"native-testcase".equals(request.authoringSourceKind)
+                &&request.inspectionPath!=null&&request.inspectionPath.endsWith("/testcase.yaml")&&raw instanceof Map<?,?>) {
+            Map<?,?> source=(Map<?,?>)raw;
+            Object sourceText=source.get("text");
+            if(sourceText instanceof String) {
+                String mapping=att.resource.PackageResourceInspector.nativeExcelDataColumnsMappingSource(
+                        request.inspectionPath,(String)sourceText);
+                if(mapping!=null) {
+                    // Keep only the schema-validated mapping scalar out of generic text redaction;
+                    // sanitize the rest of the source and the response metadata as usual.
+                    String marker="__ATT_NATIVE_EXCEL_DATA_COLUMNS__";
+                    while(((String)sourceText).contains(marker))marker+="_";
+                    Map<String,Object> content=new LinkedHashMap<>();
+                    for(Map.Entry<?,?> entry:source.entrySet())if(entry.getKey() instanceof String)
+                        content.put((String)entry.getKey(),entry.getValue());
+                    content.put("text",att.resource.PackageResourceInspector.replaceNativeExcelDataColumnsMappingSource(
+                            request.inspectionPath,(String)sourceText,marker));
+                    Object sanitized=att.server.api.internal.DiagnosticSanitizer.sanitizeValue(content);
+                    if(sanitized instanceof Map<?,?>) {
+                        Map<String,Object> safe=new LinkedHashMap<>();
+                        for(Map.Entry<?,?> entry:((Map<?,?>)sanitized).entrySet())if(entry.getKey() instanceof String)
+                            safe.put((String)entry.getKey(),entry.getValue());
+                        Object safeText=safe.get("text");
+                        if(safeText instanceof String)safe.put("text",((String)safeText).replace(marker,mapping));
+                        return safe;
+                    }
+                }
+            }
+        }
+        return att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw);
     }
     private List<Map<String,Object>> safeResourceLimitDiagnostics(Object raw) {
         List<Map<String,Object>> result=new ArrayList<Map<String,Object>>();

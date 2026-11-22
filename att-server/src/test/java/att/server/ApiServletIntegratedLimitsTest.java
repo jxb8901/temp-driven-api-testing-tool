@@ -1623,8 +1623,8 @@ class ApiServletIntegratedLimitsTest {
         Path workbook=writeNativePreviewPackage(ownerPackage,"case-1","17");
         Path runtimeConfig=sharedRuntimeConfig();
         try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"native-preview-data",
-                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("native-preview-libs"))) {
-            addAuthoringUsers(runtime);ApiServlet servlet=servlet(runtime);
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("native-preview-libs"),"container")) {
+            ApiServlet servlet=servlet(runtime);
             byte[] sourceBefore=Files.readAllBytes(ownerPackage.resolve("testcase/native/testcase.yaml"));
             byte[] workbookBefore=Files.readAllBytes(workbook);
             int jobsBefore=runtime.jobs.size(),draftsBefore=runDraftCount(runtime);
@@ -1634,6 +1634,9 @@ class ApiServletIntegratedLimitsTest {
             JsonNode sourceBody=ServerRuntime.JSON.readTree(editableSource.body());
             assertEquals(200,editableSource.status,new String(editableSource.body(),StandardCharsets.UTF_8));
             assertEquals("testcase/native/testcase.yaml",sourceBody.path("logicalPath").asText());
+            assertEquals(new String(sourceBefore,StandardCharsets.UTF_8),sourceBody.path("text").asText(),
+                    "A supplementary Unicode comment before dataColumns must not shift source redaction offsets");
+            assertTrue(sourceBody.path("text").asText().contains("password=Password"),sourceBody.toString());
             assertTrue(sourceBody.path("baseSourceRevision").asText().matches("[a-f0-9]{64}"));
             assertTrue(sourceBody.path("registryRevision").asText().matches("[a-f0-9]{64}"));
 
@@ -2285,10 +2288,15 @@ class ApiServletIntegratedLimitsTest {
 
     private ServerRuntime authoringRuntime(Path packages,Path ownerPackage,Path runtimeConfig,String dataName,int timeout,
                                             ServerRuntime.WorkerProcessLauncher launcher,Path libs) throws Exception {
+        return authoringRuntime(packages,ownerPackage,runtimeConfig,dataName,timeout,launcher,libs,"local");
+    }
+
+    private ServerRuntime authoringRuntime(Path packages,Path ownerPackage,Path runtimeConfig,String dataName,int timeout,
+                                            ServerRuntime.WorkerProcessLauncher launcher,Path libs,String authMode) throws Exception {
         Path yaml=temp.resolve(dataName+".yaml");
         String config="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve(dataName))
                 +"\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
-                +"\n  authenticationRequired: true\n  auth: {mode: local}\n  centralConfigurationEditingEnabled: true\n"
+                +"\n  authenticationRequired: true\n  auth: {mode: "+authMode+"}\n  centralConfigurationEditingEnabled: true\n"
                 +"  packageConfiguration: {sourceEditingEnabled: true}\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n"
                 +"    queuedLimit: 0\n    timeoutMs: "+timeout+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 0\n"
                 +"packages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(packages)+"]\n  entries:\n    alice: "
@@ -2306,8 +2314,7 @@ class ApiServletIntegratedLimitsTest {
                         +"  record:\n    type: log\n    message: Preview must not execute a Flow\n");
         Files.createDirectories(packageRoot.resolve("testcase/native"));
         // Keep the active editor source safe to return; the unsaved preview candidate below adds a sensitive input mapping.
-        Files.writeString(packageRoot.resolve("testcase/native/testcase.yaml"),
-                nativePreviewDefinition().replace("password=Password","account=Password"));
+        Files.writeString(packageRoot.resolve("testcase/native/testcase.yaml"),nativePreviewDefinition());
         return workbook;
     }
 
@@ -2324,7 +2331,8 @@ class ApiServletIntegratedLimitsTest {
     }
 
     private static String nativePreviewDefinition() {
-        return "schemaVersion: att-testcase/v1\nid: native.case\nflow: checkout.v1\n"
+        return "# supplementary Unicode before dataColumns: 🚀\n"
+                +"schemaVersion: att-testcase/v1\nid: native.case\nflow: checkout.v1\n"
                 +"caseIdExpression: \"${DATA.id}\"\ndataSource:\n  type: excel\n"
                 +"  path: testcase/native/cases.xlsx\n  sheet: Cases\n  headerRows: 1\n  caseId: ID\n"
                 +"  dataColumns: id=ID, amount=Amount, password=Password\n";

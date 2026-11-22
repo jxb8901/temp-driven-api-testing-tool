@@ -327,6 +327,16 @@ public final class PackageResourceInspector implements AutoCloseable {
         return result;
     }
 
+    /** Returns the exact grammar-validated native Excel dataColumns scalar for narrow transport redaction. */
+    public static String nativeExcelDataColumnsMappingSource(String logicalPath,String sourceText) {
+        return AuthoringSourceSupport.nativeExcelDataColumnsSource(logicalPath,sourceText);
+    }
+
+    /** Replaces only a grammar-validated native Excel dataColumns scalar before generic text sanitization. */
+    public static String replaceNativeExcelDataColumnsMappingSource(String logicalPath,String sourceText,String replacement) {
+        return AuthoringSourceSupport.replaceNativeExcelDataColumns(logicalPath,sourceText,replacement);
+    }
+
     /** Reads one bounded Package-relative native Definition for its owner-authorized Studio editor. */
     public Map<String,Object> inspectAuthoringNativeTestcaseSource(String relativePath) throws Exception {
         if(relativePath==null||relativePath.length()>1024||!relativePath.equals(relativePath.trim())
@@ -3348,10 +3358,19 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private String scrubSourceText(String value, String logicalPath) {
         if (value == null) return null;
-        String result = sourcePathSafe(scrubSensitiveValues(value), safeFileExpressionTokens(value, logicalPath));
+        String nativeExcelColumns=AuthoringSourceSupport.nativeExcelDataColumnsSource(logicalPath,value);
+        String marker="ATT_NATIVE_EXCEL_DATA_COLUMNS_REDACTION_MARKER";
+        while(value.contains(marker))marker+="_";
+        String redactionInput=nativeExcelColumns==null?value
+                :AuthoringSourceSupport.replaceNativeExcelDataColumns(logicalPath,value,marker);
+        String result = sourcePathSafe(scrubSensitiveValues(redactionInput), safeFileExpressionTokens(value, logicalPath));
         if (redactionEnabled) result = SOURCE_PII_VALUE.matcher(result).replaceAll("$1[REDACTED]");
         if (redactionEnabled) result = XML_PII.matcher(result).replaceAll("$1[REDACTED]$3");
         if (logicalPath != null && logicalPath.toLowerCase(Locale.ROOT).endsWith(".csv")) result = scrubCsvPersonalData(result);
+        if(nativeExcelColumns!=null) {
+            nativeExcelColumns=sourcePathSafe(nativeExcelColumns,safeFileExpressionTokens(value,logicalPath));
+            result=result.replace(marker,nativeExcelColumns);
+        }
         return result;
     }
 

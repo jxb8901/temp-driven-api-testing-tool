@@ -1244,16 +1244,12 @@ public final class ApiServlet extends HttpServlet {
             String relativePath=text(input,"path"),source=text(input,"source");
             String packageId=segment(path,2);
             runtime.packageView(packageId,principal(req));
-            if(!runtime.canEditPackageContent(packageId,login)) {
-                error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);return;
-            }
             Map<String,Object> result=runtime.withPackageSourceAuthority(login,
                     id->id.equals(principalExact(req))&&operatorCapability(req,id),
-                    ()->runtime.previewNativeTestCase(packageId,relativePath,source,login));
-            if(!requireOperator(req,res,requestId))return;
-            if(!login.equals(principalExact(req))||!runtime.canEditPackageContent(packageId,login)) {
-                error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);return;
-            }
+                    ()->{
+                        if(!runtime.canEditPackageContent(packageId,login))throw new ServerRuntime.AuthoringSourceDeniedException();
+                        return runtime.previewNativeTestCase(packageId,relativePath,source,login);
+                    });
             result.put("requestId",requestId);json(res,200,result);
         } catch(ServerRuntime.AuthoringSourceDeniedException denied){error(res,403,"ATT-PACKAGE-SOURCE-DENIED","Package source editing is not authorized",requestId);}
           catch(ServerRuntime.NotFoundException missing){error(res,404,"ATT-SERVER-NOT-FOUND","Package Test Case preview was not found",requestId);}
