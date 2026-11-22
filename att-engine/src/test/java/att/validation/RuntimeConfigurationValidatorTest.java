@@ -29,7 +29,10 @@ class RuntimeConfigurationValidatorTest {
         Object profiles=((Map<?,?>)report.toMap().get("context")).get("environments");
         assertEquals(Arrays.asList("SIT","UAT"),profiles);
         JsonSchemaVerifier.verify(SchemaFiles.resolveVersion(temp,"att-validation/v1"),report.toMap());
-        assertDoesNotThrow(()->SchemaFiles.historicalSchemaVersions(temp));
+        Map<String, String> historicalVersions = SchemaFiles.historicalSchemaVersions(temp);
+        assertEquals("att-execution/v2", historicalVersions.get("att-execution/v1"));
+        assertDoesNotThrow(() -> SchemaFiles.resolveVersion(temp, "att-execution/v1"));
+        assertDoesNotThrow(() -> SchemaFiles.resolveVersion(temp, "att-execution/v2"));
         assertDoesNotThrow(() -> SchemaFiles.resolveVersion(temp, "att-sut-metrics-observation/v1"));
         assertDoesNotThrow(() -> SchemaFiles.resolveVersion(temp, "att-sut-metrics-observation/v2"));
         assertDoesNotThrow(() -> SchemaFiles.resolveVersion(temp, "att-sut-metrics-profile/v1"));

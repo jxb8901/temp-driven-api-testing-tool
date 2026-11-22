@@ -102,6 +102,60 @@ class VNextCommandTest {
         }
     }
 
+    @Test void localNativeCaseCommandUsesResolvedDefinitionCasesAndKeepsQualifiedIdentity() throws Exception {
+        Path home=packageRoot.resolve("native-home");
+        Path pkg=home.resolve("packages/payments");
+        Path config=home.resolve("config/config.yaml");
+        Files.createDirectories(config.getParent());
+        Files.createDirectories(pkg.resolve("testcase/transfer"));
+        Files.createDirectories(pkg.resolve("templates/flows/transfer"));
+        TestSchemas.install(home);
+        Files.write(config,runtimeConfig(null).getBytes(StandardCharsets.UTF_8));
+        Files.write(pkg.resolve("package.yaml"),"schemaVersion: att-package/v1\n".getBytes(StandardCharsets.UTF_8));
+        Files.write(pkg.resolve("templates/flows/transfer/flow.yaml"),
+                ("schemaVersion: att-flow/v3.4\nid: payments.echo.v1\nname: Echo\ndescription: Native Case flow\nactions:\n"
+                        +"  note: {type: log, message: FLOW_EXECUTED_MARKER_393}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(pkg.resolve("testcase/transfer/testcase.yaml"),
+                ("schemaVersion: att-testcase/v1\nid: payments.transfer\nname: Transfer\nflow: payments.echo.v1\n"
+                        +"inputs: {message: hello}\n").getBytes(StandardCharsets.UTF_8));
+
+        String previousHome=System.getProperty("att.home");
+        try {
+            System.setProperty("att.home",home.toString());
+            Captured captured=capture(()->VNextCommand.run(new String[]{"--local","--format","json","-p","payments",
+                    "--config",config.toString(),"--run-id","native-cli-run","run","native-case","payments.transfer",
+                    "--resolved-case-id","default"}));
+            assertEquals(0,captured.exitCode,captured.stdout+captured.stderr);
+            Map<?,?> result=new ObjectMapper().readValue(captured.stdout,Map.class);
+            assertEquals("native-case",result.get("targetKind"));
+            assertEquals("payments.transfer",result.get("target"));
+            assertEquals("PASS",result.get("status"));
+            Map<?,?> summary=(Map<?,?>)result.get("summary");
+            List<?> cases=(List<?>)summary.get("cases");
+            assertEquals(1,cases.size());
+            Map<?,?> executed=(Map<?,?>)cases.get(0);
+            assertEquals("payments.transfer.default",executed.get("qualifiedCaseId"));
+            assertEquals("default",executed.get("localCaseId"));
+            assertNotNull(executed.get("execId"));
+            Path executedLog=pkg.resolve(String.valueOf(executed.get("caseLog")));
+            assertTrue(new String(Files.readAllBytes(executedLog),StandardCharsets.UTF_8).contains("FLOW_EXECUTED_MARKER_393"));
+
+            Captured dryRun=capture(()->VNextCommand.run(new String[]{"--local","--format","json","-p","payments",
+                    "--config",config.toString(),"--run-id","native-cli-dry-run","run","native-case","payments.transfer",
+                    "--resolved-case-id","default","--dry-run"}));
+            assertEquals(0,dryRun.exitCode,dryRun.stdout+dryRun.stderr);
+            Map<?,?> dryResult=new ObjectMapper().readValue(dryRun.stdout,Map.class);
+            Map<?,?> drySummary=(Map<?,?>)dryResult.get("summary");
+            Map<?,?> dryCase=(Map<?,?>)((List<?>)drySummary.get("cases")).get(0);
+            assertEquals("SKIPPED",dryResult.get("status"));
+            Path dryLog=pkg.resolve(String.valueOf(dryCase.get("caseLog")));
+            assertFalse(new String(Files.readAllBytes(dryLog),StandardCharsets.UTF_8).contains("FLOW_EXECUTED_MARKER_393"),
+                    "Native Case dry-run must not execute the selected Flow");
+        } finally {
+            if(previousHome==null)System.clearProperty("att.home");else System.setProperty("att.home",previousHome);
+        }
+    }
+
     @Test void additionalSingleTargetSelectorsFailBeforeLocalOrRemoteDispatch() throws Exception {
         String[][] prefixes={{"--local"},{"--server","https://example.invalid","-p","payments"}};
         String[][] commands={

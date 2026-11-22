@@ -2,6 +2,7 @@
 package att.core;
 
 import att.exec.ActionExecutionResult;
+import att.testcase.ResolvedTestCase;
 
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -161,6 +162,21 @@ public final class CaseRuntimeContext {
     public CaseRuntimeContext(TestCase testCase, Path caseOutputDir, String executionId, String runId,
                               Path runDirectory, Path caseLog, String mode, String startedAtOverride,
                               String runStartedAtOverride) {
+        this(caseOutputDir, executionId, runId, runDirectory, caseLog, mode, startedAtOverride,
+                runStartedAtOverride, legacyIdentity(testCase));
+    }
+
+    /** Creates a Context for a resolved native Case without synthesizing Workbook or group identity. */
+    public CaseRuntimeContext(ResolvedTestCase testCase, Path caseOutputDir, String executionId, String runId,
+                              Path runDirectory, Path caseLog, String mode, String startedAtOverride,
+                              String runStartedAtOverride) {
+        this(caseOutputDir, executionId, runId, runDirectory, caseLog, mode, startedAtOverride,
+                runStartedAtOverride, nativeIdentity(testCase));
+    }
+
+    private CaseRuntimeContext(Path caseOutputDir, String executionId, String runId,
+                              Path runDirectory, Path caseLog, String mode, String startedAtOverride,
+                              String runStartedAtOverride, CaseIdentity identity) {
         this.caseOutputDir = caseOutputDir.toAbsolutePath().normalize();
         this.commandWorkingDirectory = this.caseOutputDir;
         this.caseLogPath = caseLog.toAbsolutePath().normalize();
@@ -188,30 +204,15 @@ public final class CaseRuntimeContext {
         diagnosticsNode.put("execution", executionDiagnostics);
         lifecycleNode.put("status", "RUNNING");
 
-        inputNode.putAll(testCase.caseData());
-
-        Map<String, Object> source = new LinkedHashMap<String, Object>();
-        source.put("type", "testcase");
-        source.put("caseId", testCase.caseId());
-        source.put("workbookId", testCase.workbookId());
-        source.put("groupId", testCase.groupId());
-        source.put("rowCaseId", testCase.rowCaseId());
-        source.put("sheet", testCase.sheetName());
-        source.put("row", Integer.valueOf(testCase.rowNumber()));
-        if (testCase.caseData().get("workbook") != null) source.put("workbook", testCase.caseData().get("workbook"));
-        metaNode.put("SOURCE", source);
-        metaNode.put("TARGET", mapOf("type", "testcase", "id", testCase.caseId()));
+        inputNode.putAll(identity.inputs);
+        metaNode.put("SOURCE", new LinkedHashMap<String, Object>(identity.source));
+        metaNode.put("TARGET", mapOf("type", identity.targetType, "id", identity.caseId));
 
         // The legacy Case view retains framework-owned identity and evidence
         // fields, but business data itself lives only in EXEC.INPUT.
-        caseNode.put("caseId", testCase.caseId());
-        caseNode.put("workbookId", testCase.workbookId());
-        caseNode.put("groupId", testCase.groupId());
-        caseNode.put("rowCaseId", testCase.rowCaseId());
-        caseNode.put("workbook", testCase.caseData().get("workbook"));
-        caseNode.put("sheet", testCase.sheetName());
-        caseNode.put("rowNumber", testCase.rowNumber());
-        caseNode.put("tags", testCase.tags());
+        caseNode.put("caseId", identity.caseId);
+        caseNode.putAll(identity.caseFields);
+        caseNode.put("tags", identity.tags);
         caseNode.put("status", "RUNNING");
         caseNode.put("startedAt", startedAt);
         caseNode.put("VARS", varsNode);
@@ -225,6 +226,70 @@ public final class CaseRuntimeContext {
         root.put("DB", new LinkedHashMap<String, Object>());
         runNode.put("runId", runId);
         runNode.put("id", runId);
+    }
+
+    private static CaseIdentity legacyIdentity(TestCase testCase) {
+        if (testCase == null) throw new IllegalArgumentException("Workbook Test Case is required");
+        Map<String,Object> source = new LinkedHashMap<String,Object>();
+        source.put("type", "testcase");
+        source.put("caseId", testCase.caseId());
+        source.put("workbookId", testCase.workbookId());
+        source.put("groupId", testCase.groupId());
+        source.put("rowCaseId", testCase.rowCaseId());
+        source.put("sheet", testCase.sheetName());
+        source.put("row", Integer.valueOf(testCase.rowNumber()));
+        if (testCase.caseData().get("workbook") != null) source.put("workbook", testCase.caseData().get("workbook"));
+        Map<String,Object> fields = new LinkedHashMap<String,Object>();
+        fields.put("workbookId", testCase.workbookId());
+        fields.put("groupId", testCase.groupId());
+        fields.put("rowCaseId", testCase.rowCaseId());
+        fields.put("workbook", testCase.caseData().get("workbook"));
+        fields.put("sheet", testCase.sheetName());
+        fields.put("rowNumber", Integer.valueOf(testCase.rowNumber()));
+        return new CaseIdentity(testCase.caseId(), "testcase", testCase.tags(), testCase.caseData(), source, fields);
+    }
+
+    private static CaseIdentity nativeIdentity(ResolvedTestCase testCase) {
+        if (testCase == null) throw new IllegalArgumentException("Resolved native Test Case is required");
+        Map<String,Object> source = new LinkedHashMap<String,Object>();
+        source.put("type", "nativeCase");
+        source.put("caseId", testCase.qualifiedCaseId());
+        source.put("definitionId", testCase.definitionId());
+        source.put("localCaseId", testCase.caseId());
+        source.put("qualifiedCaseId", testCase.qualifiedCaseId());
+        source.put("sourceReference", testCase.sourceReference());
+        source.put("sourceRevision", testCase.sourceRevision());
+        Map<String,Object> fields = new LinkedHashMap<String,Object>();
+        fields.put("definitionId", testCase.definitionId());
+        fields.put("localCaseId", testCase.caseId());
+        fields.put("qualifiedCaseId", testCase.qualifiedCaseId());
+        fields.put("caseName", testCase.name());
+        fields.put("data", testCase.data());
+        fields.put("sourceReference", testCase.sourceReference());
+        fields.put("sourceRevision", testCase.sourceRevision());
+        fields.put("sourceRecordId", testCase.sourceRecordId());
+        fields.put("recordIndex", testCase.recordIndex());
+        fields.put("provenance", testCase.sourceProvenance().toMap());
+        return new CaseIdentity(testCase.qualifiedCaseId(), "nativeCase", testCase.tags(), testCase.inputs(), source, fields);
+    }
+
+    private static final class CaseIdentity {
+        private final String caseId;
+        private final String targetType;
+        private final java.util.List<String> tags;
+        private final Map<String,Object> inputs;
+        private final Map<String,Object> source;
+        private final Map<String,Object> caseFields;
+        private CaseIdentity(String caseId, String targetType, java.util.List<String> tags,
+                             Map<String,Object> inputs, Map<String,Object> source,
+                             Map<String,Object> caseFields) {
+            this.caseId = caseId;
+            this.targetType = targetType;
+            this.tags = tags;
+            this.inputs = inputs;
+            this.source = source;
+            this.caseFields = caseFields;
+        }
     }
 
     @SuppressWarnings("unchecked")

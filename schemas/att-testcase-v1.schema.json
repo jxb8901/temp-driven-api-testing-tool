@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:att:schema:testcase:v1",
   "title": "ATT Test Case Definition v1",
-  "description": "Proposed native Test Case authoring contract. Runtime resolution is not implied by schema registration.",
+  "description": "Native Test Case authoring contract. Runtime adapters support Data Source types independently.",
   "type": "object",
   "required": ["schemaVersion", "id", "flow"],
   "properties": {

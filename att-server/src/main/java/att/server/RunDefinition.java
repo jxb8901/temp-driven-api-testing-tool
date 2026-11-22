@@ -2,18 +2,33 @@ package att.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Strict public RUN contract. Case bindings never pass through the Debug input adapter. */
 final class RunDefinition {
     static final String VERSION="att-execution/v1";
+    static final String NATIVE_CASE_VERSION="att-execution/v2";
+    private static final Pattern NATIVE_DEFINITION_ID=Pattern.compile(
+            "^(?!.*(?:^|\\.)(?:[cC][oO][nN]|[pP][rR][nN]|[aA][uU][xX]|[nN][uU][lL]|[cC][oO][mM][1-9]|[lL][pP][tT][1-9])(?:\\.|$))[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$");
+    private static final Pattern NATIVE_CASE_ID=Pattern.compile(
+            "^(?!(?:[cC][oO][nN]|[pP][rR][nN]|[aA][uU][xX]|[nN][uU][lL]|[cC][oO][mM][1-9]|[lL][pP][tT][1-9])$)[A-Za-z0-9_-]+$");
     final ObjectNode definition;
     final ObjectNode workerInput;
     final boolean resourceTarget;
     final boolean debug;
+    final boolean nativeCaseTarget;
+    final String nativeDefinitionId;
+    final List<String> resolvedCaseIds;
 
-    private RunDefinition(ObjectNode definition,ObjectNode workerInput,boolean resourceTarget,boolean debug) {
+    private RunDefinition(ObjectNode definition,ObjectNode workerInput,boolean resourceTarget,boolean debug,
+                          boolean nativeCaseTarget,String nativeDefinitionId,List<String> resolvedCaseIds) {
         this.definition=definition;this.workerInput=workerInput;this.resourceTarget=resourceTarget;this.debug=debug;
+        this.nativeCaseTarget=nativeCaseTarget;this.nativeDefinitionId=nativeDefinitionId;
+        this.resolvedCaseIds=Collections.unmodifiableList(new ArrayList<>(resolvedCaseIds));
     }
 
     static RunDefinition parse(JsonNode value) {return parse(value,false);}
@@ -21,7 +36,9 @@ final class RunDefinition {
     static RunDefinition parseRetained(JsonNode value) {return parse(value,true);}
     private static RunDefinition parse(JsonNode value,boolean retained) {
         fields(value,"schemaVersion","executionType","packageId","environment","config","target","selection","input","options");
-        if(!VERSION.equals(text(value,"schemaVersion")))throw invalid("Unsupported execution schemaVersion");
+        String schemaVersion=text(value,"schemaVersion");
+        boolean nativeVersion=NATIVE_CASE_VERSION.equals(schemaVersion);
+        if(!VERSION.equals(schemaVersion)&&!nativeVersion)throw invalid("Unsupported execution schemaVersion");
         if(!"run".equals(text(value,"executionType")))throw invalid("executionType must be run");
         ObjectNode worker=ServerRuntime.JSON.createObjectNode();worker.put("packageId",text(value,"packageId"));
         for(String name:new String[]{"environment","config"})if(value.has(name)) {
@@ -29,14 +46,23 @@ final class RunDefinition {
             worker.set(name,value.get(name).deepCopy());
         }
         if(value.has("target")==value.has("selection"))throw invalid("Provide exactly one target or selection");
-        boolean resource=false;
+        boolean resource=false,nativeCase=false;String nativeDefinitionId=null;List<String> resolvedCaseIds=Collections.emptyList();
         if(value.has("target")) {
-            JsonNode target=value.get("target");fields(target,"type","id");
-            String type=text(target,"type"),id=text(target,"id");
-            if(!Set.of("case","template","flow","tool").contains(type))throw invalid("Unsupported RUN target type");
-            resource=!"case".equals(type);
-            if(resource)worker.set("target",target.deepCopy());
-            else worker.putArray("caseIds").add(id);
+            JsonNode target=value.get("target");
+            String type=text(target,"type");
+            if("nativeCase".equals(type)) {
+                if(!nativeVersion)throw invalid("Native Case RUN requires att-execution/v2");
+                fields(target,"type","definitionId","selection");
+                nativeCase=true;nativeDefinitionId=nativeDefinitionId(text(target,"definitionId"));
+                JsonNode selection=target.get("selection");fields(selection,"resolvedCaseIds");
+                resolvedCaseIds=nativeCaseIds(selection.get("resolvedCaseIds"));
+            } else {
+                fields(target,"type","id");String id=text(target,"id");
+                if(!Set.of("case","template","flow","tool").contains(type))throw invalid("Unsupported RUN target type");
+                resource=!"case".equals(type);
+                if(resource)worker.set("target",target.deepCopy());
+                else worker.putArray("caseIds").add(id);
+            }
         } else {
             JsonNode selection=value.get("selection");
             fields(selection,"suites","suiteDirectory","caseIds","tags","excludeTags","all","rerunFailed");
@@ -63,15 +89,21 @@ final class RunDefinition {
         }
         JsonNode options=value.get("options");boolean debug=false;
         if(options!=null) {
-            fields(options,"debug","failFast");
+            if(nativeVersion)fields(options,"debug","failFast","runId");
+            else fields(options,"debug","failFast");
             for(String name:new String[]{"debug","failFast"})if(options.has(name)&&!options.get(name).isBoolean())throw invalid(name+" must be boolean");
             debug=options.path("debug").asBoolean(false);
             if(options.has("failFast")) {
                 if(resource)throw invalid("failFast is a case selection option");
                 worker.set("failFast",options.get("failFast"));
             }
+            if(options.has("runId")) {
+                if(!options.get("runId").isTextual())throw invalid("runId must be a valid v2 RUN ID");
+                try {worker.put("runId",att.core.IdentifierValidator.runId(options.get("runId").asText()));}
+                catch(IllegalArgumentException invalidRunId) {throw invalid("runId must be a valid v2 RUN ID");}
+            }
         }
-        if(value.has("input")&&!resource)throw invalid("Case RUN uses Excel/sidecar bindings; input is only valid for Template, Flow or Tool");
+        if(value.has("input")&&!resource)throw invalid("Workbook and Native Case RUN do not accept input overrides; input is only valid for Template, Flow or Tool");
         if(resource) {
             JsonNode input=value.get("input");
             if(input==null||!input.isObject())throw invalid("Resource RUN requires an input object");
@@ -79,7 +111,28 @@ final class RunDefinition {
                 throw invalid("Resource RUN must use the configuration validated by its input draft");
         }
         worker.put("diagnosticMode",debug);
-        return new RunDefinition(((ObjectNode)value).deepCopy(),worker,resource,debug);
+        return new RunDefinition(((ObjectNode)value).deepCopy(),worker,resource,debug,nativeCase,nativeDefinitionId,resolvedCaseIds);
+    }
+
+    private static String nativeDefinitionId(String value) {
+        if(value.length()>126||!NATIVE_DEFINITION_ID.matcher(value).matches())
+            throw invalid("definitionId must be a package-scoped native Definition ID");
+        return value;
+    }
+
+    private static List<String> nativeCaseIds(JsonNode value) {
+        if(value==null||!value.isArray()||value.isEmpty()||value.size()>1000)
+            throw invalid("resolvedCaseIds must be a nonempty array of at most 1000 strings");
+        Set<String> unique=new java.util.HashSet<>();List<String> result=new ArrayList<>(value.size());
+        for(JsonNode entry:value) {
+            if(!entry.isTextual())throw invalid("resolvedCaseIds contains an invalid value");
+            String id=entry.asText();
+            if(id.length()>128||!NATIVE_CASE_ID.matcher(id).matches())
+                throw invalid("resolvedCaseIds contains an invalid local Case ID");
+            if(!unique.add(id))throw invalid("resolvedCaseIds contains duplicate values");
+            result.add(id);
+        }
+        return result;
     }
 
     private static void fields(JsonNode value,String... allowed) {

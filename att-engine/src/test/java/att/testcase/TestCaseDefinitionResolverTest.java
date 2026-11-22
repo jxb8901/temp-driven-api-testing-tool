@@ -29,7 +29,7 @@ class TestCaseDefinitionResolverTest {
     @BeforeEach void setUp() throws Exception {
         packageRoot = Files.createDirectories(temp.resolve("package"));
         templatesRoot = Files.createDirectories(packageRoot.resolve("templates"));
-        resolver = new TestCaseDefinitionResolver(repositoryRoot().resolve("schemas/proposed/att-testcase-v1.schema.json"));
+        resolver = new TestCaseDefinitionResolver(repositoryRoot().resolve("schemas/att-testcase-v1.schema.json"));
         writeFlow("payment.transfer.v1", "");
     }
 
@@ -82,6 +82,65 @@ class TestCaseDefinitionResolverTest {
         assertEquals(Arrays.asList("fpp", "regression", "smoke"), minimum.tags());
         assertEquals("minimum", minimum.data().get("caseKey"));
         assertEquals("zero", result.cases().get(1).caseId());
+    }
+
+    @Test void discoversOneCasePreservingDefinitionIdUnderThePackageTestcaseRoot() throws Exception {
+        Path definition = packageRoot.resolve("testcase/fpp/transfer/testcase.yaml");
+        Files.createDirectories(definition.getParent());
+        Files.write(definition, inline("dataSource:\n  type: inline\n  records:\n"
+                + "    - {recordId: first, data: {amount: 7}}\n"
+                + "    - {recordId: second, data: {amount: 13}}\n")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Path other = packageRoot.resolve("testcase/other/testcase.yaml");
+        Files.createDirectories(other.getParent());
+        Files.write(other, "schemaVersion: att-testcase/v1\nid: fpp.other\nflow: payment.transfer.v1\ninputs: {}\n"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        TestCaseResolutionResult result = resolver.resolveByDefinitionId(packageRoot, "payments", templatesRoot,
+                Paths.get("testcase"), "fpp.inline", new TestCaseDefinitionResolver.Options(10, 10,
+                        Collections.singleton("fpp.inline.second"), null));
+
+        assertEquals("testcase/fpp/transfer/testcase.yaml", result.sourceReference());
+        assertEquals(2, result.resolvedCount());
+        assertEquals(1, result.selectedCount());
+        assertFalse(result.truncated());
+        assertEquals(Collections.singletonList("fpp.inline.second"),
+                Collections.singletonList(result.cases().get(0).qualifiedCaseId()));
+        assertEquals(13, result.cases().get(0).inputs().get("amount"));
+    }
+
+    @Test void definitionIdDiscoveryUsesConfiguredCustomTestcaseRoot() throws Exception {
+        Path customRoot = packageRoot.resolve("native-cases");
+        Path definition = customRoot.resolve("transfer/testcase.yaml");
+        Files.createDirectories(definition.getParent());
+        Files.write(definition, ("schemaVersion: att-testcase/v1\nid: fpp.custom\n"
+                + "flow: payment.transfer.v1\ninputs: {amount: 21}\n")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        TestCaseResolutionResult result = resolver.resolveByDefinitionId(packageRoot, "payments", templatesRoot,
+                Paths.get("native-cases"), "fpp.custom", TestCaseDefinitionResolver.Options.defaults());
+
+        assertEquals("native-cases/transfer/testcase.yaml", result.sourceReference());
+        assertEquals("fpp.custom.default", result.cases().get(0).qualifiedCaseId());
+        assertEquals(21, result.cases().get(0).inputs().get("amount"));
+    }
+
+    @Test void definitionIdDiscoveryRejectsAbsentAndCaseFoldAmbiguousIds() throws Exception {
+        Path first = packageRoot.resolve("testcase/one/testcase.yaml");
+        Files.createDirectories(first.getParent());
+        Files.write(first, "schemaVersion: att-testcase/v1\nid: fpp.one\nflow: payment.transfer.v1\ninputs: {}\n"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThrows(DiagnosticException.class, () -> resolver.resolveByDefinitionId(packageRoot, "payments",
+                templatesRoot, Paths.get("testcase"), "fpp.missing", TestCaseDefinitionResolver.Options.defaults()));
+
+        Path second = packageRoot.resolve("testcase/two/testcase.yaml");
+        Files.createDirectories(second.getParent());
+        Files.write(second, "schemaVersion: att-testcase/v1\nid: FPP.ONE\nflow: payment.transfer.v1\ninputs: {}\n"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        DiagnosticException ambiguous = assertThrows(DiagnosticException.class,
+                () -> resolver.resolveByDefinitionId(packageRoot, "payments", templatesRoot,
+                        Paths.get("testcase"), "fpp.one", TestCaseDefinitionResolver.Options.defaults()));
+        assertTrue(ambiguous.detail().contains("collides under ASCII case folding"));
     }
 
     @Test void preservesExtensionFieldsAndTypedSourceProvenance() throws Exception {
@@ -455,9 +514,9 @@ class TestCaseDefinitionResolverTest {
     private static Path repositoryRoot() {
         Path directory = Paths.get("").toAbsolutePath().normalize();
         while (directory != null) {
-            if (Files.isRegularFile(directory.resolve("schemas/proposed/att-testcase-v1.schema.json"))) return directory;
+            if (Files.isRegularFile(directory.resolve("schemas/att-testcase-v1.schema.json"))) return directory;
             directory = directory.getParent();
         }
-        throw new IllegalStateException("Could not locate repository root for proposed Test Case schema");
+        throw new IllegalStateException("Could not locate repository root for active Test Case schema");
     }
 }

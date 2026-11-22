@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -42,6 +43,61 @@ class AttServiceTest {
         assertEquals(1,result.diagnostics().size());
         assertEquals("",out.toString("UTF-8"));
         assertEquals("",err.toString("UTF-8"));
+    }
+
+    @Test void nativeRunExecutesOnlySelectedResolvedCasesAndKeepsNativeIdentity() throws Exception {
+        Path root = temp.resolve("native-run-package");
+        Path config = root.resolve("config/config.yaml");
+        Files.createDirectories(config.getParent());
+        Files.createDirectories(root.resolve("testcase/fpp/transfer"));
+        Files.createDirectories(root.resolve("templates/flows/payment/transfer/v1"));
+        att.TestSchemas.install(root);
+        Files.write(config, ("schemaVersion: att-config/v2.12\noutputDirectory: output\n"
+                + "environment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Path definition = root.resolve("testcase/fpp/transfer/testcase.yaml");
+        Files.write(definition, ("schemaVersion: att-testcase/v1\nid: fpp.transfer\n"
+                + "flow: payment.transfer.v1\n"
+                + "dataSource:\n  type: inline\n  records:\n"
+                + "    - {recordId: first, data: {amount: 7}}\n"
+                + "    - {recordId: second, data: {amount: 13}}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/flows/payment/transfer/v1/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: payment.transfer.v1\nname: Transfer\n"
+                        + "description: Native run fixture\nactions:\n"
+                        + "  show: {type: log, message: 'amount=${EXEC.INPUT.amount}'}\n")
+                        .getBytes(StandardCharsets.UTF_8));
+
+        RunResult result = new DefaultAttService().runNativeCases(new NativeCaseRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-run-selection", "payments",
+                "fpp.transfer", Collections.singletonList("second"), false, false, null));
+
+        assertEquals("PASS", result.status());
+        assertEquals(1L, result.summary().get("total"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> cases = (List<Map<String,Object>>) result.summary().get("cases");
+        assertEquals(1, cases.size());
+        Map<String,Object> row = cases.get(0);
+        assertEquals("fpp.transfer", row.get("definitionId"));
+        assertEquals("second", row.get("localCaseId"));
+        assertEquals("fpp.transfer.second", row.get("qualifiedCaseId"));
+        assertTrue(String.valueOf(row.get("execId")).startsWith("native-"));
+        assertEquals("PASS", row.get("status"));
+        Path runDirectory = root.resolve("output/native-run-selection");
+        String caseLog = new String(Files.readAllBytes(runDirectory.resolve("executions")
+                .resolve(String.valueOf(row.get("execId"))).resolve("case.log")), StandardCharsets.UTF_8);
+        assertTrue(caseLog.contains("amount=13"), caseLog);
+        assertFalse(caseLog.contains("amount=7"), caseLog);
+        String caseTree = new String(Files.readAllBytes(runDirectory.resolve("executions")
+                .resolve(String.valueOf(row.get("execId"))).resolve("case.yaml")), StandardCharsets.UTF_8);
+        assertTrue(caseTree.contains("definitionId: fpp.transfer"), caseTree);
+        assertTrue(caseTree.contains("qualifiedCaseId: fpp.transfer.second"), caseTree);
+        assertFalse(caseTree.contains("workbookId:"), caseTree);
+        assertFalse(caseTree.contains("groupId:"), caseTree);
+        assertTrue(Files.isRegularFile(runDirectory.resolve("run.yaml")));
+        assertTrue(Files.isRegularFile(runDirectory.resolve("ci/summary.json")));
+        assertTrue(Files.isRegularFile(runDirectory.resolve("ci/junit.xml")));
+        assertEquals(runDirectory.resolve("configuration.json").toRealPath().toString(),
+                result.paths().get("configuration"));
     }
 
     @Test void validationChecksIdentityFormatSyntaxBeforeAnyRunStarts() throws Exception {

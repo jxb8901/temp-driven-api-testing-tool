@@ -56,7 +56,8 @@ def proposed_schemas(catalog):
                 if status != "proposed":
                     raise ValueError("proposed schema catalog must declare status: proposed")
             else:
-                if value:
+                # Allow an explicit empty mapping after every proposed schema is promoted.
+                if value and value != "{}":
                     raise ValueError("proposed schema catalog schemas must be a mapping on line %s" % lineno)
                 in_schemas = True
             continue
@@ -85,8 +86,6 @@ def proposed_schemas(catalog):
         raise ValueError("proposed schema catalog must declare status: proposed")
     if "schemas" not in seen_top:
         raise ValueError("proposed schema catalog must declare schemas:")
-    if not schemas:
-        raise ValueError("proposed schema catalog contains no schema files")
     return {name: frozenset(versions) for name, versions in schemas.items()}
 
 

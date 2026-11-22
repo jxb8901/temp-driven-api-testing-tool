@@ -197,25 +197,25 @@ class ExecutionWorkerSemanticParityTest {
         TerminalCapture warmCancel=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"HOLD",true,false,"warm-cancel");
         assertEquals("CANCELLED",coldCancel.status);
         assertEquals("cold",coldCancel.dispatch);assertEquals("cold",warmCancel.dispatch,"Source-pinned cancellation must use the isolated cold Worker");
-        assertTerminalEquivalent(coldCancel,warmCancel,"Cancellation state, event, diagnostic, archive and history must match");
+        assertTerminalEquivalent(coldCancel,warmCancel,true,"Cancellation state, event, diagnostic, archive and history must match");
 
         TerminalCapture coldTimeout=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,false,"cold-timeout");
         TerminalCapture warmTimeout=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,false,"warm-timeout");
         assertNotEquals("PASS",coldTimeout.status);
         assertEquals("cold",coldTimeout.dispatch);assertEquals("cold",warmTimeout.dispatch,"Source-pinned timeout must use the isolated cold Worker");
-        assertTerminalEquivalent(coldTimeout,warmTimeout,"Timeout state, event, diagnostic, archive and history must match");
+        assertTerminalEquivalent(coldTimeout,warmTimeout,false,"Timeout state, event, diagnostic, archive and history must match");
 
         TerminalCapture coldDebugCancel=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"HOLD",true,true,"cold-debug-cancel");
         TerminalCapture warmDebugCancel=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"HOLD",true,true,"warm-debug-cancel");
         assertEquals("CANCELLED",coldDebugCancel.status);
         assertEquals("cold",coldDebugCancel.dispatch);assertEquals("cold",warmDebugCancel.dispatch,"Source-pinned DEBUG cancellation must use the isolated cold Worker");
-        assertTerminalEquivalent(coldDebugCancel,warmDebugCancel,"DEBUG cancellation evidence must match across dispatch paths");
+        assertTerminalEquivalent(coldDebugCancel,warmDebugCancel,true,"DEBUG cancellation evidence must match across dispatch paths");
 
         TerminalCapture coldDebugTimeout=executeInterrupted(false,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,true,"cold-debug-timeout");
         TerminalCapture warmDebugTimeout=executeInterrupted(true,allowed,pkg,runtimeConfig,libs,"TIMEOUT",false,true,"warm-debug-timeout");
         assertNotEquals("PASS",coldDebugTimeout.status);
         assertEquals("cold",coldDebugTimeout.dispatch);assertEquals("cold",warmDebugTimeout.dispatch,"Source-pinned DEBUG timeout must use the isolated cold Worker");
-        assertTerminalEquivalent(coldDebugTimeout,warmDebugTimeout,"DEBUG Tool-timeout evidence must match across dispatch paths");
+        assertTerminalEquivalent(coldDebugTimeout,warmDebugTimeout,false,"DEBUG Tool-timeout evidence must match across dispatch paths");
     }
 
     private void assertEquivalent(String expectedStatus,RunCapture cold,RunCapture warm) {
@@ -241,42 +241,32 @@ class ExecutionWorkerSemanticParityTest {
         assertFalse(capture.primaryReportPaths.isEmpty(),"The RUN fixture should identify primary Job Reports");
     }
 
-    private void assertTerminalEquivalent(TerminalCapture cold,TerminalCapture warm,String message) {
+    private void assertTerminalEquivalent(TerminalCapture cold,TerminalCapture warm,boolean requestedCancel,String message) {
         assertEquals(cold.status,warm.status,message+": status");
         assertEquals(cold.exitCode,warm.exitCode,message+": exit code");
-        // Cancellation/timeout races can emit an optional diagnostic event on only one dispatch path.
-        // Compare the durable stream without that marker; public diagnostic payloads are asserted below.
-        assertEquals(withoutOptionalDiagnosticEvents(cold.eventNames),
-                withoutOptionalDiagnosticEvents(warm.eventNames),message+": event order");
+        assertEquals(cold.eventNames,warm.eventNames,message+": event order");
         assertTrue(cold.eventNames.contains("result")&&warm.eventNames.contains("result"),
                 message+": both paths must publish a terminal result event");
         assertEquals(cold.logMessages,warm.logMessages,message+": logs");
         assertEquals(cold.resultPayload,warm.resultPayload,message+": result");
-        assertEquals(normalizeInterruptedDiagnostic(cold.status,cold.diagnostic),
-                normalizeInterruptedDiagnostic(warm.status,warm.diagnostic),message+": diagnostic");
+        assertEquals(stableResult(cold.diagnostic),stableResult(warm.diagnostic),message+": diagnostic");
+        if(requestedCancel) {
+            assertRequestedCancellationHasNoSyntheticDiagnostic(cold,message+": cold cancel");
+            assertRequestedCancellationHasNoSyntheticDiagnostic(warm,message+": warm cancel");
+        }
         assertEquals(cold.reportEntries,warm.reportEntries,message+": report inventory");
         assertEquals(cold.primaryReportPaths,warm.primaryReportPaths,message+": primary reports");
         assertEquals(cold.historyStatus,warm.historyStatus,message+": Job history");
     }
 
-    private static List<String> withoutOptionalDiagnosticEvents(List<String> eventNames) {
-        List<String> filtered=new ArrayList<>();
-        for(String event:eventNames)if(!"diagnostic".equals(event))filtered.add(event);
-        return filtered;
-    }
-
-    /** Cancellation can omit the public diagnostic on one dispatch path while still ending CANCELLED. */
-    private static JsonNode normalizeInterruptedDiagnostic(String status,Object diagnostic) {
-        if(!"CANCELLED".equals(status))return stableResult(diagnostic);
-        boolean missing=diagnostic==null
-                ||(diagnostic instanceof JsonNode&&((JsonNode)diagnostic).isNull());
-        if(missing) {
-            ObjectNode cancelled=ServerRuntime.JSON.createObjectNode();
-            cancelled.put("summary","Worker was cancelled");
-            cancelled.put("code","ATT-SERVER-CANCELLED");
-            return cancelled;
-        }
-        return stableResult(diagnostic);
+    private static void assertRequestedCancellationHasNoSyntheticDiagnostic(TerminalCapture capture,String message) {
+        assertEquals("CANCELLED",capture.status,message+": terminal status");
+        JsonNode diagnostic=ServerRuntime.JSON.valueToTree(capture.diagnostic);
+        assertFalse(diagnostic!=null&&diagnostic.isObject()
+                        &&"ATT-SERVER-CANCELLED".equals(diagnostic.path("code").asText()),
+                message+": requested cancellation must not publish ATT-SERVER-CANCELLED");
+        assertFalse(capture.eventNames.contains("diagnostic"),
+                message+": this clean requested-cancel fixture must not emit a diagnostic event");
     }
 
     private RunCapture execute(boolean enabled,Path allowed,Path pkg,Path runtimeConfig,Path libs,String targetCase,String name) throws Exception {
