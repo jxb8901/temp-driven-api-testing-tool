@@ -37,6 +37,14 @@ public final class CiReportWriter {
         for (TestResult result : summary.results()) {
             String caseLog = result.caseLogPath() == null ? null : runDirectory.relativize(result.caseLogPath()).toString().replace('\\', '/');
             java.util.Map<String,Object> item = new java.util.LinkedHashMap<String,Object>(); item.put("caseId", result.caseId()); item.put("execId", result.executionId()); item.put("executed", Boolean.valueOf(result.executionStarted())); item.put("name", result.caseName()); item.put("status", result.status().name()); item.put("durationMs", result.duration().toMillis()); item.put("expected", result.expected()); item.put("actual", result.actual()); item.put("caseLog", caseLog);
+            if (result.definitionId() != null) {
+                item.put("definitionId", result.definitionId());
+                item.put("qualifiedCaseId", result.qualifiedCaseId());
+                item.put("flowId", result.flowId());
+                item.put("flowRevision", result.flowRevision());
+                item.put("sourceRevision", result.sourceRevision());
+                item.put("sourceProvenance", result.sourceProvenance());
+            }
             java.util.List<java.util.Map<String,Object>> actions = new java.util.ArrayList<java.util.Map<String,Object>>(); for (att.core.ValidationResult action : result.validations()) { java.util.Map<String,Object> detail = new java.util.LinkedHashMap<String,Object>(); detail.put("stage", action.source()); detail.put("action", action.name()); detail.put("description", action.description()); detail.put("status", action.status().name()); detail.put("expected", action.expected()); detail.put("actual", action.actual()); detail.put("message", action.message()); if (action.diagnostic() != null) detail.put("diagnostic", action.diagnostic().toMap()); actions.add(detail); } item.put("actions", actions); if (result.diagnostic() != null) item.put("diagnostic", result.diagnostic().toMap()); cases.add(item);
         }
         long errors = 0, warnings = 0, info = 0; for (att.validation.Diagnostic diagnostic : diagnostics) { if (diagnostic.severity() == att.validation.Diagnostic.Severity.ERROR) errors++; else if (diagnostic.severity() == att.validation.Diagnostic.Severity.WARNING) warnings++; else info++; }
@@ -47,8 +55,18 @@ public final class CiReportWriter {
     private String junit(Path runDirectory, String runId, RunSummary summary, int caseLogThresholdBytes) throws Exception {
         StringBuilder out = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?><testsuite name=\"ATT ").append(xml(runId)).append("\" tests=\"").append(summary.total()).append("\" failures=\"").append(summary.failed()).append("\" errors=\"").append(summary.error() + summary.invalid()).append("\" skipped=\"").append(summary.skipped()).append("\">");
         for (TestResult result : summary.results()) {
-            out.append("<testcase classname=\"ATT\" name=\"").append(xml(result.caseId())).append("\" time=\"").append(String.format(java.util.Locale.ROOT, "%.3f", result.duration().toMillis() / 1000.0)).append("\">");
-            out.append("<properties><property name=\"EXEC.ID\" value=\"").append(xml(result.executionId())).append("\"/><property name=\"ATT.EXECUTED\" value=\"").append(result.executionStarted()).append("\"/></properties>");
+            String className = result.definitionId() == null ? "ATT" : result.definitionId() + (result.flowId() == null ? "" : "." + result.flowId());
+            out.append("<testcase classname=\"").append(xml(className)).append("\" name=\"").append(xml(result.qualifiedCaseId())).append("\" time=\"").append(String.format(java.util.Locale.ROOT, "%.3f", result.duration().toMillis() / 1000.0)).append("\">");
+            out.append("<properties><property name=\"EXEC.ID\" value=\"").append(xml(result.executionId())).append("\"/><property name=\"ATT.EXECUTED\" value=\"").append(result.executionStarted()).append("\"/>");
+            if (result.definitionId() != null) {
+                out.append("<property name=\"ATT.DEFINITION_ID\" value=\"").append(xml(result.definitionId())).append("\"/>")
+                        .append("<property name=\"ATT.QUALIFIED_CASE_ID\" value=\"").append(xml(result.qualifiedCaseId())).append("\"/>")
+                        .append("<property name=\"ATT.FLOW_ID\" value=\"").append(xml(result.flowId())).append("\"/>")
+                        .append("<property name=\"ATT.FLOW_REVISION\" value=\"").append(xml(result.flowRevision())).append("\"/>")
+                        .append("<property name=\"ATT.SOURCE_REVISION\" value=\"").append(xml(result.sourceRevision())).append("\"/>")
+                        .append("<property name=\"ATT.SOURCE_PROVENANCE\" value=\"").append(xml(att.validation.JsonSupport.write(result.sourceProvenance()))).append("\"/>");
+            }
+            out.append("</properties>");
             if (result.status() == ResultStatus.FAIL) out.append("<failure message=\"ATT assertion failure\">").append(xml(att.validation.DiagnosticCodes.ASSERTION_FAILED + "\n" + detail(result))).append("</failure>");
             else if (result.status() == ResultStatus.ERROR || result.status() == ResultStatus.INVALID) out.append("<error type=\"").append(result.status() == ResultStatus.INVALID ? "ATTValidationError" : "ATTExecutionError").append("\">").append(xml((result.status() == ResultStatus.INVALID ? att.validation.DiagnosticCodes.TESTCASE_INVALID : att.validation.DiagnosticCodes.RUN_FAILED) + "\n" + detail(result))).append("</error>");
             else if (result.status() == ResultStatus.SKIPPED) out.append("<skipped/>");

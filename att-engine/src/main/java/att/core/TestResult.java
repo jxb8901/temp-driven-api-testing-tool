@@ -9,6 +9,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Stores the final execution outcome and report fields for one test case.
@@ -31,6 +33,10 @@ public class TestResult {
     private final boolean executionStarted;
     /** Optional structured case-level diagnostic retained for runtime/report consumers. */
     private final att.validation.Diagnostic diagnostic;
+    private final String flowId;
+    private final String flowRevision;
+    private final String sourceRevision;
+    private final Map<String, Object> sourceProvenance;
 
     public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path caseLogPath, List<ValidationResult> validations) {
         this(caseId, caseName, status, duration, expected, actual, caseLogPath, validations, inferred(caseId, 0), inferred(caseId, 1), Collections.<String>emptyList(), null, caseId);
@@ -68,6 +74,28 @@ public class TestResult {
                       List<ValidationResult> validations, String workbookId, String groupId, List<String> tags,
                       att.validation.Diagnostic diagnostic, String executionId, String definitionId,
                       String qualifiedCaseId, boolean executionStarted) {
+        this(caseId, caseName, status, duration, expected, actual, caseLogPath, validations, workbookId, groupId,
+                tags, diagnostic, executionId, definitionId, qualifiedCaseId, executionStarted, null, null, null,
+                Collections.<String, Object>emptyMap());
+    }
+
+    /** Creates a result with traceable native Definition, Flow and data-source provenance. */
+    public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path caseLogPath,
+                      List<ValidationResult> validations, String workbookId, String groupId, List<String> tags,
+                      att.validation.Diagnostic diagnostic, String executionId, String definitionId,
+                      String qualifiedCaseId, boolean executionStarted, String flowId,
+                      Map<String, Object> sourceProvenance) {
+        this(caseId, caseName, status, duration, expected, actual, caseLogPath, validations, workbookId, groupId,
+                tags, diagnostic, executionId, definitionId, qualifiedCaseId, executionStarted, flowId, null, null,
+                sourceProvenance);
+    }
+
+    /** Creates a result with full native Definition, Flow, source-revision and record provenance. */
+    public TestResult(String caseId, String caseName, ResultStatus status, Duration duration, String expected, String actual, Path caseLogPath,
+                      List<ValidationResult> validations, String workbookId, String groupId, List<String> tags,
+                      att.validation.Diagnostic diagnostic, String executionId, String definitionId,
+                      String qualifiedCaseId, boolean executionStarted, String flowId, String flowRevision,
+                      String sourceRevision, Map<String, Object> sourceProvenance) {
         this.caseId = caseId;
         this.executionId = !executionStarted && (executionId == null || executionId.isEmpty())
                 ? null : executionId == null || executionId.isEmpty() ? caseId : executionId;
@@ -85,14 +113,34 @@ public class TestResult {
         this.diagnostic = diagnostic;
         this.definitionId = definitionId;
         this.qualifiedCaseId = qualifiedCaseId == null ? caseId : qualifiedCaseId;
+        this.flowId = flowId;
+        this.flowRevision = flowRevision;
+        this.sourceRevision = sourceRevision;
+        this.sourceProvenance = sourceProvenance == null || sourceProvenance.isEmpty()
+                ? Collections.<String, Object>emptyMap()
+                : Collections.unmodifiableMap(new LinkedHashMap<String, Object>(sourceProvenance));
     }
 
     /** Records a selected native Case that was not started because an earlier Case failed fast. */
     public static TestResult notExecuted(String caseId, String caseName, List<String> tags,
             String definitionId, String qualifiedCaseId, String reason) {
+        return notExecuted(caseId, caseName, tags, definitionId, qualifiedCaseId, reason, null,
+                null, null, Collections.<String, Object>emptyMap());
+    }
+
+    public static TestResult notExecuted(String caseId, String caseName, List<String> tags,
+            String definitionId, String qualifiedCaseId, String reason, String flowId,
+            Map<String, Object> sourceProvenance) {
+        return notExecuted(caseId, caseName, tags, definitionId, qualifiedCaseId, reason, flowId, null, null,
+                sourceProvenance);
+    }
+
+    public static TestResult notExecuted(String caseId, String caseName, List<String> tags,
+            String definitionId, String qualifiedCaseId, String reason, String flowId, String flowRevision,
+            String sourceRevision, Map<String, Object> sourceProvenance) {
         return new TestResult(caseId, caseName, ResultStatus.SKIPPED, Duration.ZERO, "", reason, null,
                 Collections.<ValidationResult>emptyList(), "", "", tags, null, null, definitionId,
-                qualifiedCaseId, false);
+                qualifiedCaseId, false, flowId, flowRevision, sourceRevision, sourceProvenance);
     }
 
     public String caseId() { return caseId; }
@@ -113,11 +161,16 @@ public class TestResult {
     public List<String> tags() { return Collections.unmodifiableList(tags); }
     public String definitionId() { return definitionId; }
     public String qualifiedCaseId() { return qualifiedCaseId; }
+    public String flowId() { return flowId; }
+    public String flowRevision() { return flowRevision; }
+    public String sourceRevision() { return sourceRevision; }
+    public Map<String, Object> sourceProvenance() { return sourceProvenance; }
     public att.validation.Diagnostic diagnostic() { return diagnostic; }
     public TestResult relocate(Path from, Path to) {
         Path relocated = caseLogPath != null && caseLogPath.startsWith(from) ? to.resolve(from.relativize(caseLogPath)) : caseLogPath;
         return new TestResult(caseId, caseName, status, duration, expected, actual, relocated, validations, workbookId, groupId,
-                tags, diagnostic, executionId, definitionId, qualifiedCaseId, executionStarted);
+                tags, diagnostic, executionId, definitionId, qualifiedCaseId, executionStarted, flowId, flowRevision,
+                sourceRevision, sourceProvenance);
     }
     private static String inferred(String caseId, int index) {
         if (caseId == null) return "";

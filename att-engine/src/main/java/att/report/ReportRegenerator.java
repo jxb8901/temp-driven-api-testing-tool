@@ -59,16 +59,29 @@ public final class ReportRegenerator {
             boolean executionStarted = !row.containsKey("executed") || Boolean.parseBoolean(String.valueOf(row.get("executed")));
             String executionId = row.containsKey("execId")
                     ? (row.get("execId") == null ? null : String.valueOf(row.get("execId"))) : caseId;
+            String definitionId = text(row.get("definitionId"));
+            String flowId = text(row.get("flowId"));
+            String flowRevision = text(row.get("flowRevision"));
+            String sourceRevision = text(row.get("sourceRevision"));
+            Map<String, Object> sourceProvenance = row.get("sourceProvenance") instanceof Map
+                    ? new java.util.LinkedHashMap<String, Object>((Map<String, Object>) row.get("sourceProvenance"))
+                    : Collections.<String, Object>emptyMap();
             results.add(new TestResult(caseId, caseName, ResultStatus.valueOf(String.valueOf(row.get("status"))),
                     Duration.ofMillis(longValue(row.get("durationMs"))), text(row.get("expected")), text(row.get("actual")), log,
                     validations, workbookId, groupId, strings(row.get("tags")), diagnostic(row.get("diagnostic")),
-                    executionId, null, caseId, executionStarted));
+                    executionId, definitionId.isEmpty() ? null : definitionId,
+                    text(row.get("qualifiedCaseId")).isEmpty() ? caseId : text(row.get("qualifiedCaseId")),
+                    executionStarted, flowId.isEmpty() ? null : flowId,
+                    flowRevision.isEmpty() ? null : flowRevision, sourceRevision.isEmpty() ? null : sourceRevision,
+                    sourceProvenance));
         }
         Instant ended = runNode.get("endedAt") == null ? Files.getLastModifiedTime(manifest).toInstant() : Instant.parse(String.valueOf(runNode.get("endedAt")));
         Instant started = runNode.get("startedAt") == null ? ended : Instant.parse(String.valueOf(runNode.get("startedAt")));
         RunSummary summary = new RunSummary(results, runDir);
         Path report = new HtmlReportGenerator().generate(runDir, runId, summary, started, ended);
         new CiReportWriter().writeJunitHtml(runDir, runId, summary, 10240);
+        if (results.stream().anyMatch(result -> result.definitionId() != null))
+            new NativeCaseExcelReportWriter().write(runDir, runId, results);
         return report;
     }
     private long longValue(Object value) { return value == null ? 0 : Long.parseLong(String.valueOf(value)); }

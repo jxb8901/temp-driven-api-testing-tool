@@ -122,6 +122,37 @@ class AttServiceTest {
         assertTrue(Files.isRegularFile(runDirectory.resolve("run.yaml")));
         assertTrue(Files.isRegularFile(runDirectory.resolve("ci/summary.json")));
         assertTrue(Files.isRegularFile(runDirectory.resolve("ci/junit.xml")));
+        Path standardWorkbook = runDirectory.resolve(att.report.NativeCaseExcelReportWriter.OUTPUT_PATH);
+        assertTrue(Files.isRegularFile(standardWorkbook), "Native RUN must always write standard XLSX without a source workbook");
+        String runManifest = new String(Files.readAllBytes(runDirectory.resolve("run.yaml")), StandardCharsets.UTF_8);
+        assertTrue(runManifest.contains("flowId: payment.transfer.v1"), runManifest);
+        assertTrue(runManifest.contains("flowRevision:"), runManifest);
+        assertTrue(runManifest.contains("sourceRevision:"), runManifest);
+        assertTrue(runManifest.contains("sourceProvenance:"), runManifest);
+        assertTrue(runManifest.contains("xlsx: workbooks/native-cases.result.xlsx"), runManifest);
+        String ciJson = new String(Files.readAllBytes(runDirectory.resolve("ci/summary.json")), StandardCharsets.UTF_8);
+        assertTrue(ciJson.contains("\"definitionId\":\"fpp.transfer\""), ciJson);
+        assertTrue(ciJson.contains("\"flowId\":\"payment.transfer.v1\""), ciJson);
+        assertTrue(ciJson.contains("\"flowRevision\":"), ciJson);
+        assertTrue(ciJson.contains("\"sourceRevision\":"), ciJson);
+        assertTrue(ciJson.contains("\"sourceType\":\"inline\""), ciJson);
+        String junitXml = new String(Files.readAllBytes(runDirectory.resolve("ci/junit.xml")), StandardCharsets.UTF_8);
+        assertTrue(junitXml.contains("classname=\"fpp.transfer.payment.transfer.v1\""), junitXml);
+        assertTrue(junitXml.contains("ATT.FLOW_REVISION"), junitXml);
+        assertTrue(junitXml.contains("ATT.SOURCE_REVISION"), junitXml);
+        assertTrue(junitXml.contains("ATT.SOURCE_PROVENANCE"), junitXml);
+        try (java.io.InputStream input = Files.newInputStream(standardWorkbook);
+             org.apache.poi.ss.usermodel.Workbook workbook = org.apache.poi.ss.usermodel.WorkbookFactory.create(input)) {
+            org.apache.poi.ss.usermodel.Row reportRow = workbook.getSheet("Cases").getRow(1);
+            assertEquals("fpp.transfer", reportRow.getCell(1).getStringCellValue());
+            assertEquals("fpp.transfer.second", reportRow.getCell(2).getStringCellValue());
+            assertEquals("second", reportRow.getCell(3).getStringCellValue());
+            assertEquals("payment.transfer.v1", reportRow.getCell(4).getStringCellValue());
+            assertTrue(reportRow.getCell(5).getStringCellValue().length() > 0);
+            assertTrue(reportRow.getCell(6).getStringCellValue().length() > 0);
+            assertEquals("inline", reportRow.getCell(7).getStringCellValue());
+            assertEquals("second", reportRow.getCell(11).getStringCellValue());
+        }
         assertEquals(runDirectory.resolve("configuration.json").toRealPath().toString(),
                 result.paths().get("configuration"));
     }

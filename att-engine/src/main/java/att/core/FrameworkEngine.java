@@ -21,6 +21,7 @@ import att.flow.FlowDefinition;
 import att.flow.FlowRegistry;
 import att.report.HtmlReportGenerator;
 import att.report.CiReportWriter;
+import att.report.NativeCaseExcelReportWriter;
 import att.Version;
 import att.validation.JsonSchemaVerifier;
 import att.validation.SchemaFiles;
@@ -133,7 +134,9 @@ public class FrameworkEngine {
                     if (stopRun) {
                         String reason = "Not started because failFast stopped the Suite after an earlier Case failure";
                         TestResult skipped = TestResult.notExecuted(testCase.qualifiedCaseId(), nativeCaseName(testCase),
-                                testCase.tags(), testCase.definitionId(), testCase.qualifiedCaseId(), reason);
+                                testCase.tags(), testCase.definitionId(), testCase.qualifiedCaseId(), reason,
+                                testCase.flowId(), testCase.flowRevision(), testCase.sourceRevision(),
+                                testCase.sourceProvenance().toMap());
                         results.add(skipped);
                         appendEvent(runDirectory, runId, skipped);
                         Map<String,Object> identity = new LinkedHashMap<String,Object>();
@@ -164,6 +167,7 @@ public class FrameworkEngine {
             RunSummary summary = new RunSummary(results, runDirectory, runId);
             Path html = new HtmlReportGenerator().generate(runDirectory, runId, summary, runStarted, runEnded,
                     config.report().htmlCaseLogInlineLimitBytes());
+            new NativeCaseExcelReportWriter().write(runDirectory, runId, results);
             String inputManifestHash = sha256Bytes(new Yaml().dump(inputs).getBytes(java.nio.charset.StandardCharsets.UTF_8));
             Set<String> ciOutputs = new LinkedHashSet<String>(java.util.Arrays.asList("junit", "json"));
             new CiReportWriter().write(runDirectory, runId, config.environment(), summary, runStarted, runEnded,
@@ -527,7 +531,8 @@ public class FrameworkEngine {
                 TestResult result = new TestResult(testCase.qualifiedCaseId(), nativeCaseName(testCase), status,
                         Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations),
                         caseLogPath, validations, "", "", testCase.tags(), null, executionId,
-                        testCase.definitionId(), testCase.qualifiedCaseId(), !dryRun);
+                        testCase.definitionId(), testCase.qualifiedCaseId(), !dryRun, testCase.flowId(),
+                        testCase.flowRevision(), testCase.sourceRevision(), testCase.sourceProvenance().toMap());
                 identity.put("executionId", executionId);
                 emitNativeEvent(observer, "CASE_FINISHED", runId, testCase.qualifiedCaseId(), status.name(),
                         result.duration().toMillis(), identity);
@@ -551,7 +556,8 @@ public class FrameworkEngine {
                 TestResult result = new TestResult(testCase.qualifiedCaseId(), nativeCaseName(testCase), ResultStatus.ERROR,
                         duration, "", errorMessage, caseLogPath, validations, "", "", testCase.tags(),
                         typed == null ? null : typed.toDiagnostic(), executionId, testCase.definitionId(),
-                        testCase.qualifiedCaseId(), !dryRun);
+                        testCase.qualifiedCaseId(), !dryRun, testCase.flowId(), testCase.flowRevision(),
+                        testCase.sourceRevision(), testCase.sourceProvenance().toMap());
                 emitNativeEvent(observer, "CASE_FINISHED", runId, testCase.qualifiedCaseId(), ResultStatus.ERROR.name(),
                         duration.toMillis(), identity);
                 return result;
@@ -1009,6 +1015,10 @@ public class FrameworkEngine {
                 item.put("definitionId", result.definitionId());
                 item.put("localCaseId", result.qualifiedCaseId().substring(result.definitionId().length() + 1));
                 item.put("qualifiedCaseId", result.qualifiedCaseId());
+                item.put("flowId", result.flowId());
+                item.put("flowRevision", result.flowRevision());
+                item.put("sourceRevision", result.sourceRevision());
+                item.put("sourceProvenance", result.sourceProvenance());
             }
             item.put("caseName", result.caseName());
             item.put("executed", result.executionStarted());
@@ -1031,7 +1041,9 @@ public class FrameworkEngine {
             cases.add(item);
         }
         history.put("cases", cases);
-        Map<String, Object> outputs = new LinkedHashMap<String, Object>(); outputs.put("html", "report/index.html"); if (options.ciOutputs().contains("json")) outputs.put("json", "ci/summary.json"); if (options.ciOutputs().contains("junit")) { outputs.put("junit", "ci/junit.xml"); outputs.put("junitHtml", "report/junit.html"); } history.put("outputs", outputs);
+        Map<String, Object> outputs = new LinkedHashMap<String, Object>(); outputs.put("html", "report/index.html"); if (options.ciOutputs().contains("json")) outputs.put("json", "ci/summary.json"); if (options.ciOutputs().contains("junit")) { outputs.put("junit", "ci/junit.xml"); outputs.put("junitHtml", "report/junit.html"); }
+        if (results.stream().anyMatch(result -> result.definitionId() != null)) outputs.put("xlsx", NativeCaseExcelReportWriter.OUTPUT_PATH);
+        history.put("outputs", outputs);
         JsonSchemaVerifier.verify(SchemaFiles.resolve(projectRoot, "att-run-v2.1.schema.json"), history);
         byte[] bytes = new Yaml().dump(history).getBytes(java.nio.charset.StandardCharsets.UTF_8);
         Files.write(runDirectory.resolve("run.yaml"), bytes);

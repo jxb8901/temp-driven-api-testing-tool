@@ -3411,7 +3411,11 @@ Run ID 和 Case ID 在校驗後保持原樣。只有 `run.yaml` 狀態為 `COMPL
 
 `report/index.html` 是主要終端用戶報表，可以直接從磁盤打開。組按 `workbookId.groupId` 彙總；界面把 `groupId` 標記為 Sheet。Cases view 支持 Workbook/Sheet/Status 下拉框、對 workbook/group/full Case ID/tag 的大小寫不敏感搜索，以及每列標題的升序/降序排序。Duration 按數值排序。
 
+Native Inline Case 和 implicit Suite 在沒有輸入 Workbook 時，也會生成標準 HTML、CI JSON、JUnit 及 `workbooks/native-cases.result.xlsx`。每個結果會保留 Definition ID、qualified Case ID、Flow ID、Definition/Flow source revision、execution ID，以及來源資料 record 可用的 provenance。此 XLSX 是表格式結果 Workbook；複製 Excel source Workbook 的版面仍依賴 S04，並非此輸出的一部分。
+
 展開的 Case 包含完整 Case ID、名稱、狀態、持續時間、Expected 和 Actual 結果、每條記錄 Action 結果的一行、詳細執行日誌，以及 `.log`/`case.yaml` 的顯式鏈接。Action Results 每行獨立顯示最終渲染的 Description，並寫入 `run.yaml` 與 CI JSON。為兼容既有報表，Expected 仍是所有 assert Action 非空最終 description 與 `expected` 的有序 LF 聯接；Actual 是所有非空運行時 `actual` 的有序 LF 聯接。
+
+Native Case 的 JUnit `classname` 表示 Definition 和 Flow，`name` 使用 qualified Case ID；ATT properties 會記錄 Definition/Flow source revision、execution 及 source-record provenance。
 
 ### 診斷 Tool evidence collector 失敗
 
@@ -3451,6 +3455,8 @@ ATT 會復制源 Workbook，並使用 `report.mode: append-to-copy` 追加配置
 ### 查看 CI JSON 彙總
 
 `ci/summary.json` 使用 `schemaVersion: att-ci-summary/v2.1`，包含 ATT/Run ID、環境、時間、聚合狀態/統計、持續時間統計、每個 Case 記錄、診斷計數、報表/產物路徑以及輸入清單哈希。
+
+Native Case 記錄會額外包含 Definition ID、qualified Case ID、Flow ID、Definition/Flow source revision 和 source provenance。`run.yaml` 也記錄相同 identity，並列出標準 XLSX 路徑。`report --run-id <id>` 會從完成清單重建 HTML 報告與 native 標準 XLSX。
 
 ### 重現 Run
 

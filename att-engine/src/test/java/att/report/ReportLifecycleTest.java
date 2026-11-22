@@ -26,6 +26,41 @@ class ReportLifecycleTest {
         assertFalse(Files.exists(run.resolve("package-config")));
         assertFalse(Files.exists(output.resolve(".in-progress")));
     }
+
+    @Test void regeneratesNativeCaseIdentityAndStandardWorkbookFromTheRunManifest() throws Exception {
+        Path output = tempDir.resolve("native-output"), run = output.resolve("R-NATIVE");
+        Files.createDirectories(run);
+        String manifest = "schemaVersion: att-run/v2.1\n"
+                + "run:\n  id: R-NATIVE\n  state: COMPLETE\n  startedAt: '2026-01-01T00:00:00Z'\n  endedAt: '2026-01-01T00:00:01Z'\n"
+                + "cases:\n  - caseId: payments.transfer.ok\n    qualifiedCaseId: payments.transfer.ok\n    definitionId: payments.transfer\n"
+                + "    flowId: payment.transfer.v1\n    flowRevision: flow-revision-abc\n    sourceRevision: source-revision-xyz\n"
+                + "    sourceProvenance:\n      sourceType: inline\n"
+                + "      sourceReference: testcase/payments/transfer/testcase.yaml\n      recordId: ok\n"
+                + "    execId: EXEC-42\n    executed: true\n    caseName: Native case\n    status: PASS\n"
+                + "    durationMs: 25\n    expected: success\n    actual: success\n    caseLog: ''\n";
+        Files.write(run.resolve("run.yaml"), manifest.getBytes("UTF-8"));
+
+        Path report = new ReportRegenerator().regenerate(output, "R-NATIVE");
+        String html = new String(Files.readAllBytes(report), "UTF-8");
+        assertTrue(html.contains("payments.transfer"));
+        assertTrue(html.contains("payment.transfer.v1"));
+        assertTrue(html.contains("flow-revision-abc"));
+        assertTrue(html.contains("source-revision-xyz"));
+        assertTrue(html.contains("testcase/payments/transfer/testcase.yaml"));
+        Path standardWorkbook = run.resolve(NativeCaseExcelReportWriter.OUTPUT_PATH);
+        assertTrue(Files.isRegularFile(standardWorkbook));
+        try (java.io.InputStream input = Files.newInputStream(standardWorkbook);
+             org.apache.poi.ss.usermodel.Workbook workbook = org.apache.poi.ss.usermodel.WorkbookFactory.create(input)) {
+            org.apache.poi.ss.usermodel.Row row = workbook.getSheet("Cases").getRow(1);
+            assertEquals("payments.transfer", row.getCell(1).getStringCellValue());
+            assertEquals("payments.transfer.ok", row.getCell(2).getStringCellValue());
+            assertEquals("ok", row.getCell(3).getStringCellValue());
+            assertEquals("payment.transfer.v1", row.getCell(4).getStringCellValue());
+            assertEquals("flow-revision-abc", row.getCell(5).getStringCellValue());
+            assertEquals("source-revision-xyz", row.getCell(6).getStringCellValue());
+            assertEquals("ok", row.getCell(11).getStringCellValue());
+        }
+    }
     @Test void reportRejectsDirectRunDirectoryWithoutCompleteManifest() throws Exception {
         Path output = tempDir.resolve("output"), run = output.resolve("DEBUG-RUN");
         Files.createDirectories(run);
