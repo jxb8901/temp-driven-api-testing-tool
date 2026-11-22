@@ -208,7 +208,7 @@ class ArtifactPublicationFaultTest {
         try (ServerRuntime runtime = runtime((output, archive, validator) -> {
             if (publications.incrementAndGet() == 1) {
                 archiving.countDown();
-                if (!release.await(10, TimeUnit.SECONDS)) throw new java.io.IOException("Test publication gate expired");
+                if (!release.await(60, TimeUnit.SECONDS)) throw new java.io.IOException("Test publication gate expired");
             }
             return ArtifactArchive.build(output, archive,validator);
         })) {
@@ -217,7 +217,8 @@ class ArtifactPublicationFaultTest {
                 String first = String.valueOf(runtime.submit("run", request, "user-a").get("jobId"));
                 assertTrue(archiving.await(5, TimeUnit.SECONDS));
                 assertEquals("PASS", runtime.jobRecord(first).get("status"));
-                assertEquals("ARCHIVING", runtime.artifactIndex(first).get("archiveStatus"));
+                // artifactIndex takes artifactPublicationLock.readLock(), held by the deliberately blocked writer.
+                assertEquals("ARCHIVING", runtime.artifactOverview(first).archiveStatus());
                 assertTrue(Files.isDirectory(runtime.outputDirectoryForJob(first)));
                 // maxConcurrent=1 and queuedLimit=0: this acceptance proves that
                 // the first execution released its admission lease before ZIP work.
@@ -231,7 +232,7 @@ class ArtifactPublicationFaultTest {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (!runtime.terminal(second) && System.nanoTime() < deadline) Thread.sleep(10);
                 assertEquals("PASS", runtime.jobRecord(second).get("status"));
-                assertEquals("ARCHIVING", runtime.artifactIndex(first).get("archiveStatus"));
+                assertEquals("ARCHIVING", runtime.artifactOverview(first).archiveStatus());
                 release.countDown();
                 awaitReady(runtime, first);
                 awaitReady(runtime, second);
