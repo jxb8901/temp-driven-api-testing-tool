@@ -305,14 +305,15 @@ class ArtifactLifecycleTest {
             Map<String,Object> overview=new java.util.LinkedHashMap<>();
             overview.put("complete",false);overview.put("approvedArtifactCount",0);overview.put("approvedReportCount",0);
             overview.put("omittedCandidateCount",1);
-            overview.put("omissionCategories",List.of(Map.of("count",1,"category","unsupported_type")));
+            overview.put("omissionCategories",List.of(Map.of("count",1,"category","rejected_xlsx")));
             Files.writeString(status,ServerRuntime.JSON.writeValueAsString(Map.of("state","READY","overviewVersion",1,"overview",overview)));
 
             JobArtifactOverview unrelated=runtime.artifactOverview(id);
             assertEquals("NOT_PRESENT",unrelated.reportAvailability());
             assertEquals(0,unrelated.approvedReportCount());
             assertEquals(1L,unrelated.omittedCandidateCount());
-            assertEquals("unsupported_type",unrelated.omissions().get(0).category());
+            assertEquals("rejected_xlsx",unrelated.omissions().get(0).category(),
+                    "The artifact overview must preserve XLSX rejection counts");
 
             overview.put("omissionCategories",List.of(Map.of("count",1,"category","incomplete_load_report")));
             Files.writeString(status,ServerRuntime.JSON.writeValueAsString(Map.of("state","READY","overviewVersion",1,"overview",overview)));

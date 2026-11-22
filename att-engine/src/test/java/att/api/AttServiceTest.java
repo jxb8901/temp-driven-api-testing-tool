@@ -157,6 +157,113 @@ class AttServiceTest {
                 result.paths().get("configuration"));
     }
 
+    @Test void nativeReportsRedactRegisteredCanaryFromResultsProvenanceAndRegeneration() throws Exception {
+        String canary = "violet-sequence-6fb1";
+        Path root = temp.resolve("native-secret-projection-package");
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("testcase/fpp/transfer"));
+        Files.createDirectories(root.resolve("templates/flows/payment/transfer/v1"));
+        Files.createDirectories(root.resolve("tools"));
+        Files.createDirectories(root.resolve("testdata"));
+        att.TestSchemas.install(root);
+        Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.15\noutputDirectory: output\n"
+                + "environment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet(canary);
+            org.apache.poi.ss.usermodel.Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Case ID");
+            header.createCell(1).setCellValue("Password");
+            org.apache.poi.ss.usermodel.Row data = sheet.createRow(1);
+            data.createCell(0).setCellValue("case1");
+            data.createCell(1).setCellValue(canary);
+            try (java.io.OutputStream output = Files.newOutputStream(root.resolve("testdata/native-cases.xlsx"))) {
+                workbook.write(output);
+            }
+        }
+        Files.write(root.resolve("testcase/fpp/transfer/testcase.yaml"), ("schemaVersion: att-testcase/v1\n"
+                + "id: fpp.transfer\nflow: payment.transfer.v1\n"
+                + "dataSource:\n  type: excel\n  path: testdata/native-cases.xlsx\n"
+                + "  sheet: " + canary + "\n  caseId: Case ID\n  dataColumns: 'password=Password'\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("tools/echo.yaml"), ("schemaVersion: att-tool/v1\nid: echo\nname: Echo\n"
+                + "description: Echo one value\ncommand: [/usr/bin/printf, '%s', '${password}']\nstdoutFormat: text\n"
+                + "arguments:\n  password: {name: Password, description: Echo value, required: true}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("tools/broken.yaml"), ("schemaVersion: att-tool/v1\nid: broken\nname: Broken\n"
+                + "description: Fail while passing the resolved argument to a static executable\n"
+                + "command: ['/missing-att-tool', '${password}']\nstdoutFormat: text\n"
+                + "arguments:\n  password: {name: Password, description: Failure value, required: true}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/flows/payment/transfer/v1/flow.yaml"), ("schemaVersion: att-flow/v3.6\n"
+                + "id: payment.transfer.v1\nname: Transfer\ndescription: Secret projection fixture\nactions:\n"
+                + "  echo:\n    type: tool\n    call: \"#{echo(password=${EXEC.INPUT.password})}\"\n"
+                + "    assert: \"${output.result} == 'a-different-value'\"\n"
+                + "    expected: ${EXEC.INPUT.password}\n    actual: ${output.result}\n"
+                + "  broken:\n    type: tool\n    call: \"#{broken(password=${EXEC.INPUT.password})}\"\n")
+                .getBytes(StandardCharsets.UTF_8));
+
+        RunResult result = new DefaultAttService().runNativeCases(new NativeCaseRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-secret-projection", "payments",
+                "fpp.transfer", Collections.singletonList("case1"), false, false, null));
+
+        assertTrue("ERROR".equals(result.status()) || "FAIL".equals(result.status()), result.status());
+        Path runDirectory = root.resolve("output/native-secret-projection");
+        String manifest = new String(Files.readAllBytes(runDirectory.resolve("run.yaml")), StandardCharsets.UTF_8);
+        String html = new String(Files.readAllBytes(runDirectory.resolve("report/index.html")), StandardCharsets.UTF_8);
+        String ciJson = new String(Files.readAllBytes(runDirectory.resolve("ci/summary.json")), StandardCharsets.UTF_8);
+        String junit = new String(Files.readAllBytes(runDirectory.resolve("ci/junit.xml")), StandardCharsets.UTF_8);
+        String junitHtml = new String(Files.readAllBytes(runDirectory.resolve("report/junit.html")), StandardCharsets.UTF_8);
+        Path executionDirectory;
+        try (java.util.stream.Stream<Path> executions = Files.list(runDirectory.resolve("executions"))) {
+            executionDirectory = executions.findFirst().orElse(null);
+        }
+        assertNotNull(executionDirectory, "Native report should retain execution evidence");
+        String caseLog = new String(Files.readAllBytes(executionDirectory.resolve("case.log")), StandardCharsets.UTF_8);
+        String caseYaml = new String(Files.readAllBytes(executionDirectory.resolve("case.yaml")), StandardCharsets.UTF_8);
+        assertTrue(manifest.contains("att-native-report/v1"), manifest);
+        assertTrue(manifest.contains("sourceIdentityDigest:"), manifest);
+        assertTrue(manifest.contains("qualifiedCaseId: fpp.transfer.case1"), manifest);
+        assertCanaryAbsent(canary, manifest, html, ciJson, junit, junitHtml, caseLog, caseYaml);
+        Path workbook = runDirectory.resolve(att.report.NativeCaseExcelReportWriter.OUTPUT_PATH);
+        assertFalse(workbookText(workbook).contains(canary), workbook.toString());
+
+        Path regenerated = new ReportRegenerator().regenerate(root.resolve("output"), "native-secret-projection");
+        String regeneratedHtml = new String(Files.readAllBytes(regenerated), StandardCharsets.UTF_8);
+        String regeneratedJunit = new String(Files.readAllBytes(runDirectory.resolve("report/junit.html")), StandardCharsets.UTF_8);
+        assertCanaryAbsent(canary, regeneratedHtml, regeneratedJunit);
+        assertFalse(workbookText(workbook).contains(canary), workbook.toString());
+
+        String legacyManifest = manifest.replaceAll("(?m)^[ \\t]*nativeReportProtection:.*(?:\\r?\\n|$)", "")
+                .replace("[REDACTED_SECRET]", canary);
+        assertTrue(legacyManifest.contains(canary), "fixture must emulate a pre-fix unsafe manifest value");
+        assertNotEquals(manifest, legacyManifest, "fixture must contain the native report-safety marker");
+        Files.write(runDirectory.resolve("run.yaml"), legacyManifest.getBytes(StandardCharsets.UTF_8));
+        assertThrows(IllegalArgumentException.class,
+                () -> new ReportRegenerator().regenerate(root.resolve("output"), "native-secret-projection"));
+        assertCanaryAbsent(canary,
+                new String(Files.readAllBytes(runDirectory.resolve("report/index.html")), StandardCharsets.UTF_8),
+                new String(Files.readAllBytes(runDirectory.resolve("report/junit.html")), StandardCharsets.UTF_8));
+        assertFalse(workbookText(workbook).contains(canary), workbook.toString());
+    }
+
+    private void assertCanaryAbsent(String canary, String... projections) {
+        for (String projection : projections) assertFalse(projection.contains(canary), projection);
+    }
+
+    private String workbookText(Path path) throws Exception {
+        StringBuilder result = new StringBuilder();
+        try (java.io.InputStream input = Files.newInputStream(path);
+             org.apache.poi.ss.usermodel.Workbook workbook = org.apache.poi.ss.usermodel.WorkbookFactory.create(input)) {
+            for (int sheetIndex = 0; sheetIndex < workbook.getNumberOfSheets(); sheetIndex++) {
+                org.apache.poi.ss.usermodel.Sheet sheet = workbook.getSheetAt(sheetIndex);
+                for (org.apache.poi.ss.usermodel.Row row : sheet)
+                    for (org.apache.poi.ss.usermodel.Cell cell : row) result.append(cell.toString()).append('\n');
+            }
+        }
+        return result.toString();
+    }
+
     @Test void implicitSuiteRunsEveryResolvedCaseFromOneDefinitionWithoutSuiteFile() throws Exception {
         Path root = nativeSuitePackage("single-suite-package");
         writeNativeDefinition(root, "fpp.transfer", "payment.transfer.v1", ""

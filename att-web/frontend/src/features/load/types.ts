@@ -311,6 +311,7 @@ export interface JobArtifact {
   size?: number;
   report?: boolean;
   mediaType?: string;
+  preview?: boolean;
 }
 
 export interface ArtifactArchiveMetrics {

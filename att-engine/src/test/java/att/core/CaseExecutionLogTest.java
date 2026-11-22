@@ -19,6 +19,27 @@ class CaseExecutionLogTest {
     @org.junit.jupiter.api.BeforeEach void enableLegacyPathPresentation() { PathPresentation.configure(true, true); }
     @org.junit.jupiter.api.AfterEach void restoreDefaultPathPresentation() { PathPresentation.configure(false, false); }
 
+    @Test void snapshotValueProtectionRedactsRegisteredSecretsRecursively() throws Exception {
+        String canary = "violet-sequence-6fb1";
+        Map<String,Object> details = new LinkedHashMap<String,Object>();
+        details.put("summary", "source=" + canary);
+        details.put("entries", java.util.Arrays.<Object>asList("nested " + canary,
+                Collections.<String,Object>singletonMap("customField", canary)));
+        Map<String,Object> provenance = new LinkedHashMap<String,Object>();
+        provenance.put("metadata", details);
+        Map<String,Object> snapshot = new LinkedHashMap<String,Object>();
+        snapshot.put("sourceProvenance", provenance);
+
+        try (CaseExecutionLog log = new CaseExecutionLog(tempDir.resolve("snapshot-protection.log"))) {
+            log.registerSecretRedactions(Collections.singletonList(canary));
+            Object safe = log.protectSnapshotValue(snapshot);
+            String serialized = att.validation.JsonSupport.write(safe);
+            assertFalse(serialized.contains(canary), serialized);
+            assertTrue(serialized.contains("[REDACTED_SECRET]"), serialized);
+            assertTrue(att.validation.JsonSupport.write(snapshot).contains(canary), "the source object must remain unchanged");
+        }
+    }
+
     @Test void workerModeRedactsHostPathsAtWriteWhilePreservingAuthoredExpressions() throws Exception {
         Path root=Files.createDirectories(tempDir.resolve("sensitive-producer-package"));
         Path logFile=tempDir.resolve("worker-safe.log");

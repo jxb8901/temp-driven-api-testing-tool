@@ -304,10 +304,13 @@ public final class ApiServlet extends HttpServlet {
                 byte[] bytes=runtime.archiveEntry(id,relative);
                 String ext=relative.substring(relative.lastIndexOf('.')+1).toLowerCase(java.util.Locale.ROOT);
                 boolean html="html".equals(ext)||"htm".equals(ext);
-                String mime=html?"text/html":"css".equals(ext)?"text/css":"text/plain";
+                boolean workbook="xlsx".equals(ext);
+                String mime=workbook?"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        :html?"text/html":"css".equals(ext)?"text/css":"text/plain";
                 res.setHeader("X-Frame-Options","SAMEORIGIN");res.setHeader("Referrer-Policy","no-referrer");
-                res.setContentType(mime+"; charset=UTF-8");res.setHeader("X-Content-Type-Options","nosniff");
-                res.setHeader("Cache-Control","private, no-store");res.setHeader("Content-Disposition","inline");
+                res.setContentType(mime+(workbook?"":"; charset=UTF-8"));res.setHeader("X-Content-Type-Options","nosniff");
+                res.setHeader("Cache-Control","private, no-store");
+                res.setHeader("Content-Disposition",workbook?"attachment; filename=\"native-cases.result.xlsx\"":"inline");
                 // Text destinations must remain navigable inside the report iframe, not inherit API frame denial.
                 String policy=html?"sandbox allow-scripts; "+ArtifactPreviewPolicy.CONTENT_POLICY
                         :"sandbox; default-src 'none'; base-uri 'none'; form-action 'none'";

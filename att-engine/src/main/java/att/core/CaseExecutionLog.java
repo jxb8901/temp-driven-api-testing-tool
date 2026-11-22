@@ -759,6 +759,18 @@ public class CaseExecutionLog implements AutoCloseable {
 
     public synchronized String protectSnapshotText(String value) { return redactSecrets(value); }
 
+    /**
+     * Copies a report/evidence value while applying the same registered and
+     * generic secret protection used by Case logs. This lets execution
+     * projections reuse per-execution secrets without serializing a value to
+     * text first (which would lose its nested structure).
+     */
+    public synchronized Object protectSnapshotValue(Object value) {
+        return serializable(value, new IdentityHashMap<Object, Object>(),
+                new IdentityHashMap<Object, Boolean>(), false, false, false,
+                java.util.Collections.<String>emptySet());
+    }
+
     private String redactSecrets(String value) {
         return att.security.SecretProtection.text(value, secretRedactions);
     }

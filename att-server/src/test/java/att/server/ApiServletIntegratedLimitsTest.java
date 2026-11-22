@@ -95,6 +95,62 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void nativeResultWorkbookArchiveEntryDownloadsWithXlsxHeaders() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("native-xlsx-download-packages"));
+        createPackage(packages.resolve("p"));
+        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"native-xlsx-download-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("native-xlsx-download-libs"))) {
+            String id="J0000000000000781";
+            Path output=Files.createDirectories(runtime.outputDirectoryForJob(id));
+            String runId="native-download";
+            Path runDirectory=Files.createDirectories(output.resolve(runId));
+            Path workbookPath=runDirectory.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX);Files.createDirectories(workbookPath.getParent());
+            try(org.apache.poi.xssf.usermodel.XSSFWorkbook workbook=new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+                java.io.OutputStream stream=Files.newOutputStream(workbookPath)) {
+                workbook.createSheet("Cases").createRow(0).createCell(0).setCellValue("Case ID");
+                workbook.write(stream);
+            }
+            Files.writeString(runDirectory.resolve("run.yaml"),"schemaVersion: att-run/v2.1\nrun:\n"
+                    +"  id: "+runId+"\n  targetType: nativeCase\n  nativeReportProtection: att-native-report/v1\n"
+                    +"outputs:\n  html: report/index.html\n  xlsx: workbooks/native-cases.result.xlsx\n");
+            byte[] expected=Files.readAllBytes(workbookPath);
+            Job job=new Job(id,"run","p","alice",new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
+            job.executionSpec=nativeExecutionSpec("p",runId);
+            job.resultJson=ServerRuntime.JSON.writeValueAsString(Map.of("executionId",runId,"status","PASS","exitCode",0));
+            runtime.store.insert(job,"{}");job.status="PASS";job.finishedAt=Instant.now();runtime.store.update(job);
+            ArtifactArchive.build(output,runtime.artifactArchivePath(id));
+            Files.writeString(runtime.artifactArchivePath(id).resolveSibling("archive-status.json"),"{\"state\":\"READY\"}");
+
+            ApiServlet servlet=servlet(runtime);
+            Captured indexResponse=invoke(servlet,"GET","/jobs/"+id+"/artifacts",Collections.emptyMap(),new byte[0]);
+            JsonNode index=ServerRuntime.JSON.readTree(indexResponse.body());
+            assertEquals(200,indexResponse.status,index.toString());
+            JsonNode workbookEntry=null;
+            String expectedPath=runId+"/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX;
+            for(JsonNode item:index.path("items"))if(expectedPath.equals(item.path("path").asText()))workbookEntry=item;
+            assertNotNull(workbookEntry,"The XLSX must be visible in the archive-backed artifact index");
+            assertEquals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",workbookEntry.path("mediaType").asText());
+            assertFalse(workbookEntry.path("preview").asBoolean());
+
+            Captured download=invoke(servlet,"GET","/jobs/"+id+"/artifacts/view/"+expectedPath,
+                    Collections.emptyMap(),new byte[0]);
+            assertEquals(200,download.status);
+            assertEquals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",download.headers.get("Content-Type"));
+            assertEquals("attachment; filename=\"native-cases.result.xlsx\"",download.headers.get("Content-Disposition"));
+            assertArrayEquals(expected,download.body());
+        }
+    }
+
+    private static String nativeExecutionSpec(String packageId,String runId) throws Exception {
+        var definition=ServerRuntime.JSON.createObjectNode();
+        definition.put("schemaVersion",RunDefinition.NATIVE_CASE_VERSION);
+        definition.put("executionType","run");definition.put("packageId",packageId);
+        var target=definition.putObject("target");target.put("type","nativeCase");target.put("definitionId","fixture.case");
+        target.putObject("selection").putArray("resolvedCaseIds").add("one");
+        definition.putObject("options").put("runId",runId);
+        return new JobExecutionSpec(definition,"a".repeat(64),null).json();
+    }
+
     @Test void staleCentralImpactReturnsConflictThroughPublishRoute() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("impact-api-packages"));
         Path packageRoot=createPackage(packages.resolve("p"));
@@ -2760,6 +2816,7 @@ class ApiServletIntegratedLimitsTest {
             if("setStatus".equals(called.getName()))response.status=(Integer)args[0];
             if("getOutputStream".equals(called.getName()))return response.stream;
             if("setHeader".equals(called.getName()))response.headers.put(String.valueOf(args[0]),String.valueOf(args[1]));
+            if("setContentType".equals(called.getName()))response.headers.put("Content-Type",String.valueOf(args[0]));
             return defaultValue(called.getReturnType());
         });
         servlet.service(request,httpResponse);

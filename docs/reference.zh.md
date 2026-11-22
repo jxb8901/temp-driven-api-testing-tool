@@ -3413,6 +3413,8 @@ Run ID 和 Case ID 在校驗後保持原樣。只有 `run.yaml` 狀態為 `COMPL
 
 Native Inline Case 和 implicit Suite 在沒有輸入 Workbook 時，也會生成標準 HTML、CI JSON、JUnit 及 `workbooks/native-cases.result.xlsx`。每個結果會保留 Definition ID、qualified Case ID、Flow ID、Definition/Flow source revision、execution ID，以及來源資料 record 可用的 provenance。此 XLSX 是表格式結果 Workbook；複製 Excel source Workbook 的版面仍依賴 S04，並非此輸出的一部分。
 
+作為 Server Job artifact 發佈時，native XLSX 會列為 binary 下載項、不作文字預覽，並以 `.xlsx` 附件提供。
+
 展開的 Case 包含完整 Case ID、名稱、狀態、持續時間、Expected 和 Actual 結果、每條記錄 Action 結果的一行、詳細執行日誌，以及 `.log`/`case.yaml` 的顯式鏈接。Action Results 每行獨立顯示最終渲染的 Description，並寫入 `run.yaml` 與 CI JSON。為兼容既有報表，Expected 仍是所有 assert Action 非空最終 description 與 `expected` 的有序 LF 聯接；Actual 是所有非空運行時 `actual` 的有序 LF 聯接。
 
 Native Case 的 JUnit `classname` 表示 Definition 和 Flow，`name` 使用 qualified Case ID；ATT properties 會記錄 Definition/Flow source revision、execution 及 source-record provenance。

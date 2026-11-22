@@ -54,6 +54,7 @@ import att.resource.PackageResourceResolver;
  * Coordinates the V2 run, stage and action execution flow.
  */
 public class FrameworkEngine {
+    private static final String NATIVE_REPORT_PROTECTION_VERSION = "att-native-report/v1";
     private final Path projectRoot;
     private final FrameworkConfig config;
 
@@ -482,6 +483,7 @@ public class FrameworkEngine {
         };
         try (CaseExecutionLog caseLog = new CaseExecutionLog(caseLogPath, config.caseLogYamlAnchors(), mirror)) {
             caseLog.setProjectRoot(projectRoot);
+            caseLog.registerSecretRedactions(nativeInputSecrets(testCase.inputs()));
             CaseRuntimeContext context = new CaseRuntimeContext(testCase, caseOutputDir, executionId,
                     runId, runDirectory, caseLogPath, "testcase", started.toString(), runStartedAt.toString());
             context.setProject(projectRoot);
@@ -533,6 +535,7 @@ public class FrameworkEngine {
                         caseLogPath, validations, "", "", testCase.tags(), null, executionId,
                         testCase.definitionId(), testCase.qualifiedCaseId(), !dryRun, testCase.flowId(),
                         testCase.flowRevision(), testCase.sourceRevision(), testCase.sourceProvenance().toMap());
+                result = protectNativeResult(result, caseLog);
                 identity.put("executionId", executionId);
                 emitNativeEvent(observer, "CASE_FINISHED", runId, testCase.qualifiedCaseId(), status.name(),
                         result.duration().toMillis(), identity);
@@ -558,6 +561,7 @@ public class FrameworkEngine {
                         typed == null ? null : typed.toDiagnostic(), executionId, testCase.definitionId(),
                         testCase.qualifiedCaseId(), !dryRun, testCase.flowId(), testCase.flowRevision(),
                         testCase.sourceRevision(), testCase.sourceProvenance().toMap());
+                result = protectNativeResult(result, caseLog);
                 emitNativeEvent(observer, "CASE_FINISHED", runId, testCase.qualifiedCaseId(), ResultStatus.ERROR.name(),
                         duration.toMillis(), identity);
                 return result;
@@ -704,6 +708,80 @@ public class FrameworkEngine {
                 ? testCase.qualifiedCaseId() : testCase.name();
     }
 
+    /** Applies the execution's registered secret set before any Native result reaches report writers. */
+    @SuppressWarnings("unchecked")
+    private TestResult protectNativeResult(TestResult result, CaseExecutionLog caseLog) {
+        List<ValidationResult> validations = new ArrayList<ValidationResult>();
+        for (ValidationResult value : result.validations()) {
+            validations.add(new ValidationResult(protectText(caseLog, value.source()),
+                    protectText(caseLog, value.name()), protectText(caseLog, value.description()), value.status(),
+                    protectText(caseLog, value.expected()), protectText(caseLog, value.actual()),
+                    protectText(caseLog, value.message()), protectDiagnostic(caseLog, value.diagnostic())));
+        }
+        Object provenanceValue = caseLog.protectSnapshotValue(result.sourceProvenance());
+        Map<String,Object> provenance = provenanceValue instanceof Map
+                ? (Map<String,Object>) provenanceValue : Collections.<String,Object>emptyMap();
+        List<String> tags = new ArrayList<String>();
+        for (String tag : result.tags()) tags.add(protectText(caseLog, tag));
+        return new TestResult(result.caseId(), protectText(caseLog, result.caseName()), result.status(),
+                result.duration(), protectText(caseLog, result.expected()), protectText(caseLog, result.actual()),
+                result.caseLogPath(), validations, result.workbookId(), result.groupId(), tags,
+                protectDiagnostic(caseLog, result.diagnostic()), result.executionId(), result.definitionId(),
+                result.qualifiedCaseId(), result.executionStarted(), result.flowId(), result.flowRevision(),
+                result.sourceRevision(), provenance);
+    }
+
+    private String protectText(CaseExecutionLog caseLog, String value) {
+        return value == null ? null : caseLog.protectSnapshotText(value);
+    }
+
+    private List<String> nativeInputSecrets(Map<String,Object> inputs) {
+        List<String> secrets = new ArrayList<String>();
+        collectNativeInputSecrets(inputs, false, secrets,
+                new java.util.IdentityHashMap<Object,Boolean>());
+        return secrets;
+    }
+
+    private void collectNativeInputSecrets(Object value, boolean sensitive, List<String> secrets,
+            java.util.IdentityHashMap<Object,Boolean> active) {
+        if (value == null) return;
+        if (value instanceof Map || value instanceof Iterable || value.getClass().isArray()) {
+            if (active.put(value, Boolean.TRUE) != null) return;
+            try {
+                if (value instanceof Map) {
+                    for (Map.Entry<?,?> entry : ((Map<?,?>) value).entrySet()) {
+                        boolean fieldSensitive = sensitive || entry.getKey() instanceof String
+                                && att.security.SecretProtection.sensitiveName((String) entry.getKey());
+                        collectNativeInputSecrets(entry.getValue(), fieldSensitive, secrets, active);
+                    }
+                } else if (value instanceof Iterable) {
+                    for (Object item : (Iterable<?>) value)
+                        collectNativeInputSecrets(item, sensitive, secrets, active);
+                } else {
+                    int length = java.lang.reflect.Array.getLength(value);
+                    for (int index = 0; index < length; index++)
+                        collectNativeInputSecrets(java.lang.reflect.Array.get(value, index), sensitive, secrets, active);
+                }
+            } finally {
+                active.remove(value);
+            }
+            return;
+        }
+        if (sensitive && !(value instanceof byte[])) {
+            String secret = String.valueOf(value);
+            if (!secret.isEmpty() && !secrets.contains(secret)) secrets.add(secret);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private att.validation.Diagnostic protectDiagnostic(CaseExecutionLog caseLog,
+            att.validation.Diagnostic diagnostic) {
+        if (diagnostic == null) return null;
+        Object protectedValue = caseLog.protectSnapshotValue(diagnostic.toMap());
+        return protectedValue instanceof Map
+                ? att.validation.Diagnostic.fromMap((Map<String,?>) protectedValue) : null;
+    }
+
     private Map<String,Object> nativeIdentityData(String definitionId, String sourceReference,
             String sourceRevision, ResolvedTestCase testCase) {
         Map<String,Object> data = new LinkedHashMap<String,Object>();
@@ -774,6 +852,7 @@ public class FrameworkEngine {
         Map<String,Object> metadata = new LinkedHashMap<String,Object>();
         metadata.put("executionType", "run");
         metadata.put("targetType", resolution.implicitSuite() ? "nativeSuite" : "nativeCase");
+        metadata.put("nativeReportProtection", NATIVE_REPORT_PROTECTION_VERSION);
         metadata.put("packageId", resolution.cases().get(0).packageId());
         List<Map<String,Object>> definitionValues = new ArrayList<Map<String,Object>>();
         List<String> definitionIds = new ArrayList<String>();

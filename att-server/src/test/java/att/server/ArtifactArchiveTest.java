@@ -2,6 +2,7 @@ package att.server;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -17,6 +18,139 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ArtifactArchiveTest {
     @TempDir Path temporary;
+
+    @Test void publishesOnlyTheValidatedNativeResultWorkbookAndKeepsOtherXlsxFenced() throws Exception {
+        Path output=Files.createDirectory(temporary.resolve("native-xlsx-output"));
+        Path nativeWorkbook=output.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX);Files.createDirectories(nativeWorkbook.getParent());
+        try(XSSFWorkbook workbook=new XSSFWorkbook();var stream=Files.newOutputStream(nativeWorkbook)) {
+            workbook.createSheet("Cases").createRow(0).createCell(0).setCellValue("Case ID");
+            workbook.write(stream);
+        }
+        byte[] original=Files.readAllBytes(nativeWorkbook);
+        Files.write(output.resolve("package-upload.xlsx"),original);
+        Files.write(output.resolve("workbooks/invalid.xlsx"),new byte[]{'P','K',3,4,1,2,3});
+
+        Path archive=temporary.resolve("native-xlsx.zip");
+        ArtifactArchive.build(output,archive,ServerRuntime::validateApprovedArtifactBytes);
+        Map<String,Object> manifest=ArtifactArchive.verify(archive,true);
+        Map<?,?> row=manifestEntry(archive,ArtifactArchive.NATIVE_CASE_RESULT_XLSX);
+        assertEquals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",row.get("mediaType"));
+        assertEquals("binary-output",row.get("classification"));
+        assertEquals("preserved",row.get("decision"));
+        assertEquals(false,row.get("report"));assertEquals(false,row.get("preview"));
+        assertArrayEquals(original,ArtifactArchive.read(archive,ArtifactArchive.NATIVE_CASE_RESULT_XLSX));
+        assertEquals(false,manifest.get("complete"),"Untrusted and malformed workbooks are recorded as omissions");
+        assertThrows(java.io.FileNotFoundException.class,()->ArtifactArchive.read(archive,"package-upload.xlsx"));
+        assertThrows(java.io.FileNotFoundException.class,()->ArtifactArchive.read(archive,"workbooks/invalid.xlsx"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> omissions=(List<Map<String,Object>>)manifest.get("omissions");
+        assertTrue(omissions.stream().anyMatch(item->"unsupported_type".equals(item.get("reason"))));
+        assertTrue(omissions.stream().anyMatch(item->"unsupported_type".equals(item.get("reason"))));
+    }
+
+    @Test void strictServerPublicationBindsNativeWorkbookToThePersistedRunAndEngineManifest() throws Exception {
+        String trustedRunId="trusted-run",otherRunId="other-run";
+        Path output=Files.createDirectory(temporary.resolve("strict-native-xlsx-output"));
+        Path runDirectory=Files.createDirectories(output.resolve(trustedRunId));
+        Files.writeString(runDirectory.resolve("run.yaml"),"schemaVersion: att-run/v2.1\nrun:\n"
+                +"  id: trusted-run\n  targetType: nativeSuite\n  nativeReportProtection: att-native-report/v1\n"
+                +"outputs:\n  html: report/index.html\n  xlsx: workbooks/native-cases.result.xlsx\n");
+        Path expected=runDirectory.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX);
+        Path rootLevel=output.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX);
+        Path differentRun=output.resolve(otherRunId).resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX);
+        writeNativeWorkbook(expected,"engine-output");
+        writeNativeWorkbook(rootLevel,"root-canary");
+        writeNativeWorkbook(differentRun,"other-run-canary");
+
+        Path archive=temporary.resolve("strict-native-xlsx.zip");
+        ArtifactArchive.build(output,archive,ServerRuntime::validateApprovedArtifactBytes,
+                ServerConfig.ArchiveCompression.defaults(),trustedRunId);
+        Map<String,Object> manifest=ArtifactArchive.verify(archive,true,trustedRunId);
+        assertNotNull(manifestEntry(archive,trustedRunId+"/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX));
+        assertThrows(java.io.FileNotFoundException.class,
+                ()->ArtifactArchive.read(archive,ArtifactArchive.NATIVE_CASE_RESULT_XLSX));
+        assertThrows(java.io.FileNotFoundException.class,
+                ()->ArtifactArchive.read(archive,otherRunId+"/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX));
+        assertThrows(IllegalArgumentException.class,()->ArtifactArchive.verify(archive,true,otherRunId));
+        assertEquals(false,manifest.get("complete"),"Root-level and mismatched Run ID workbooks are omitted");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> omissions=(List<Map<String,Object>>)manifest.get("omissions");
+        assertTrue(omissions.stream().anyMatch(item->"unsupported_type".equals(item.get("reason"))));
+    }
+
+    @Test void strictServerPublicationRejectsWorkbookWithoutEngineNativeManifestMarker() throws Exception {
+        String runId="untrusted-run";
+        Path output=Files.createDirectory(temporary.resolve("unmarked-native-xlsx-output"));
+        Path runDirectory=Files.createDirectories(output.resolve(runId));
+        Files.writeString(runDirectory.resolve("run.yaml"),"schemaVersion: att-run/v2.1\nrun:\n"
+                +"  id: untrusted-run\n  targetType: nativeSuite\noutputs:\n"
+                +"  xlsx: workbooks/native-cases.result.xlsx\n");
+        writeNativeWorkbook(runDirectory.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX),"should-not-publish");
+        Path archive=temporary.resolve("unmarked-native-xlsx.zip");
+        ArtifactArchive.build(output,archive,ServerRuntime::validateApprovedArtifactBytes,
+                ServerConfig.ArchiveCompression.defaults(),runId);
+        Map<String,Object> manifest=ArtifactArchive.verify(archive,true,runId);
+        assertThrows(java.io.FileNotFoundException.class,
+                ()->ArtifactArchive.read(archive,runId+"/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX));
+        assertEquals(false,manifest.get("complete"));
+    }
+
+    private static void writeNativeWorkbook(Path path,String value) throws Exception {
+        Files.createDirectories(path.getParent());
+        try(XSSFWorkbook workbook=new XSSFWorkbook();var stream=Files.newOutputStream(path)) {
+            workbook.createSheet("Cases").createRow(0).createCell(0).setCellValue(value);
+            workbook.write(stream);
+        }
+    }
+
+    @Test void rejectsUnsafeAndOverexpandedPathsInsideNativeResultXlsx() throws Exception {
+        for(String[] fixture:new String[][]{{"../escape.xml","ordinary".repeat(20)},
+                {"xl/large.xml","zip-bomb-marker".repeat(100_000)}}) {
+            Path output=Files.createDirectory(temporary.resolve("unsafe-xlsx-"+Math.abs(fixture[0].hashCode())));
+            Path workbook=output.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX);Files.createDirectories(workbook.getParent());
+            try(var bytes=new java.io.ByteArrayOutputStream();var zip=new java.util.zip.ZipOutputStream(bytes)) {
+                zip.putNextEntry(new java.util.zip.ZipEntry(fixture[0]));
+                zip.write(fixture[1].getBytes(StandardCharsets.UTF_8));zip.closeEntry();
+                Files.write(workbook,bytes.toByteArray());
+            }
+            Path archive=temporary.resolve("unsafe-xlsx-"+Math.abs(fixture[0].hashCode())+".zip");
+            ArtifactArchive.build(output,archive);
+            Map<String,Object> manifest=ArtifactArchive.verify(archive,true);
+            assertEquals(false,manifest.get("complete"));
+            assertThrows(java.io.FileNotFoundException.class,
+                    ()->ArtifactArchive.read(archive,ArtifactArchive.NATIVE_CASE_RESULT_XLSX));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> omissions=(List<Map<String,Object>>)manifest.get("omissions");
+            assertTrue(omissions.stream().anyMatch(item->"rejected_xlsx".equals(item.get("reason"))),fixture[0]);
+            assertFalse(Files.exists(temporary.resolve("escape.xml")),"Inner ZIP paths are inspected but never extracted");
+        }
+    }
+
+    @Test void rejectsFormulasExternalRelationshipsAndNonCanonicalNativeResultSheets() throws Exception {
+        for (String fixture : new String[]{"formula", "external-link", "wrong-sheet", "multiple-sheets"}) {
+            Path output=Files.createDirectory(temporary.resolve("rejected-native-xlsx-"+fixture));
+            Path workbookPath=output.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX);Files.createDirectories(workbookPath.getParent());
+            try (XSSFWorkbook workbook = new XSSFWorkbook(); var stream = Files.newOutputStream(workbookPath)) {
+                org.apache.poi.ss.usermodel.Sheet cases=workbook.createSheet("wrong-sheet".equals(fixture)?"Other":"Cases");
+                org.apache.poi.ss.usermodel.Cell cell=cases.createRow(0).createCell(0);
+                if ("formula".equals(fixture)) cell.setCellFormula("1+1");
+                else cell.setCellValue("value");
+                if ("external-link".equals(fixture)) {
+                    org.apache.poi.ss.usermodel.Hyperlink link=workbook.getCreationHelper()
+                            .createHyperlink(org.apache.poi.common.usermodel.HyperlinkType.URL);
+                    link.setAddress("https://example.invalid/"+fixture);
+                    cell.setHyperlink(link);
+                }
+                if ("multiple-sheets".equals(fixture)) workbook.createSheet("Unexpected");
+                workbook.write(stream);
+            }
+            Path archive=temporary.resolve("rejected-native-xlsx-"+fixture+".zip");
+            ArtifactArchive.build(output,archive);
+            Map<String,Object> manifest=ArtifactArchive.verify(archive,true);
+            assertEquals(false,manifest.get("complete"),fixture);
+            assertThrows(java.io.FileNotFoundException.class,
+                    ()->ArtifactArchive.read(archive,ArtifactArchive.NATIVE_CASE_RESULT_XLSX),fixture);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> omissions=(List<Map<String,Object>>)manifest.get("omissions");
+            assertTrue(omissions.stream().anyMatch(item->"rejected_xlsx".equals(item.get("reason"))),fixture);
+        }
+    }
 
     @Test void unsafeProducerOutputIsOmittedWithoutAnArchiveRedactionPass() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("mixed-approval-output"));

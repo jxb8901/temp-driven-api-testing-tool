@@ -132,6 +132,9 @@ class ServerRuntimeNativeRunTest {
             // then prove the Worker executes the frozen Definition rather than the live file.
             assertTrue(acceptedWorkerLaunch.await(10,TimeUnit.SECONDS),
                     "The accepted cold Worker must reach the launch barrier before the live Definition changes");
+            Path workerOutput=runtime.outputDirectoryForJob(jobId);
+            writeNativeResultWorkbook(workerOutput.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX),"root-canary");
+            writeNativeResultWorkbook(workerOutput.resolve("attacker-run").resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX),"other-run-canary");
             Files.writeString(definition,definitionYaml(70,130));
             releaseAcceptedWorker.countDown();
             Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,jobId);
@@ -139,7 +142,7 @@ class ServerRuntimeNativeRunTest {
             assertTrue(runtime.events(jobId).after(0).stream().anyMatch(event->"result".equals(event.get("event"))));
 
             try(ZipFile archive=new ZipFile(awaitArtifactArchive(runtime,jobId).toFile())) {
-                List<String> caseTrees=new ArrayList<>(),caseLogs=new ArrayList<>(),runManifests=new ArrayList<>();
+                List<String> caseTrees=new ArrayList<>(),caseLogs=new ArrayList<>(),runManifests=new ArrayList<>(),nativeWorkbooks=new ArrayList<>();
                 var entries=archive.entries();
                 while(entries.hasMoreElements()) {
                     ZipEntry entry=entries.nextElement();
@@ -148,6 +151,7 @@ class ServerRuntimeNativeRunTest {
                     if(name.endsWith("/case.yaml"))caseTrees.add(read(archive.getInputStream(entry)));
                     if(name.endsWith("/case.log"))caseLogs.add(read(archive.getInputStream(entry)));
                     if(name.endsWith("/run.yaml"))runManifests.add(name);
+                    if(name.endsWith("/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX))nativeWorkbooks.add(name);
                 }
                 assertEquals(1,caseTrees.size(),"Only the explicitly selected Native Case should produce case evidence");
                 assertTrue(caseTrees.get(0).contains("definitionId: payments.transfer"),caseTrees.get(0));
@@ -158,6 +162,8 @@ class ServerRuntimeNativeRunTest {
                 assertFalse(caseLogs.get(0).contains("amount=70"),caseLogs.get(0));
                 assertTrue(runManifests.stream().anyMatch(name->name.contains("native-first")),
                         "The explicit runId is used for the native execution output");
+                assertEquals(List.of("native-first/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX),nativeWorkbooks,
+                        "The production Server publisher keeps the Engine workbook and excludes Worker root/other Run ID canaries");
             }
 
             Map<String,Object> excelDraft=runtime.createRunDraft(nativeRun("payments.excel","beta"),"alice");
@@ -189,6 +195,22 @@ class ServerRuntimeNativeRunTest {
             Map<String,Object> excelResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,excelJobId);
             assertEquals("PASS",((Map<?,?>)excelResult.get("job")).get("status"),excelResult.toString());
             assertNativeCaseStatus(runtime,excelJobId,"payments.excel.beta","PASS");
+            Map<String,Object> excelArchiveIndex=runtime.artifactIndex(excelJobId,0,100);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> excelArchiveItems=(List<Map<String,Object>>)excelArchiveIndex.get("items");
+            Map<String,Object> nativeResultWorkbook=excelArchiveItems.stream()
+                    .filter(item->String.valueOf(item.get("path")).endsWith("/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX)
+                            ||ArtifactArchive.NATIVE_CASE_RESULT_XLSX.equals(item.get("path"))).findFirst().orElse(null);
+            assertNotNull(nativeResultWorkbook,"A Native Suite XLSX result must appear in the Server artifact index: "+excelArchiveIndex);
+            assertEquals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",nativeResultWorkbook.get("mediaType"));
+            assertEquals("binary-output",nativeResultWorkbook.get("classification"));
+            assertEquals(Boolean.FALSE,nativeResultWorkbook.get("preview"),"Binary workbooks are downloadable but are not text previews");
+            String publishedWorkbookPath=String.valueOf(nativeResultWorkbook.get("path"));
+            byte[] downloadedWorkbook=runtime.archiveEntry(excelJobId,publishedWorkbookPath);
+            assertArrayEquals(ArtifactArchive.read(awaitArtifactArchive(runtime,excelJobId),publishedWorkbookPath),downloadedWorkbook,
+                    "The archive-backed Server entry read returns the exact included Native Suite workbook bytes");
+            try(XSSFWorkbook publishedWorkbook=new XSSFWorkbook(new java.io.ByteArrayInputStream(downloadedWorkbook))) {
+                assertTrue(publishedWorkbook.getNumberOfSheets()>0,"The downloaded native result must remain an openable XLSX");
+            }
             assertArrayEquals(originalExcel,Files.readAllBytes(excelWorkbook),"Native Excel RUN must leave the source workbook byte-identical");
 
             Files.writeString(definition,original);
@@ -689,6 +711,14 @@ class ServerRuntimeNativeRunTest {
         Object loaded=new org.yaml.snakeyaml.Yaml().load(yaml);
         assertInstanceOf(Map.class,loaded);
         return ServerRuntime.JSON.convertValue(loaded,Map.class);
+    }
+
+    private static void writeNativeResultWorkbook(Path path,String value) throws Exception {
+        Files.createDirectories(path.getParent());
+        try(XSSFWorkbook workbook=new XSSFWorkbook();var stream=Files.newOutputStream(path)) {
+            workbook.createSheet("Cases").createRow(0).createCell(0).setCellValue(value);
+            workbook.write(stream);
+        }
     }
 
     private static void assertDraftSelection(Map<String,Object> draft) {

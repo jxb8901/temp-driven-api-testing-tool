@@ -528,7 +528,7 @@ class ServerWarUiIT {
                 for(JsonNode entry:manifest.path("entries")) {
                     String logical=entry.path("path").asText();
                     String extension=logical.substring(logical.lastIndexOf('.')+1).toLowerCase(java.util.Locale.ROOT);
-                    if(previewExtensions.add(extension)||entry.path("report").asBoolean())previewPaths.add(logical);
+                    if(entry.path("preview").asBoolean()&&(previewExtensions.add(extension)||entry.path("report").asBoolean()))previewPaths.add(logical);
                 }
                 try(var archive=new java.util.zip.ZipFile(zip.toFile())) {
                     for(JsonNode entry:manifest.path("entries")) {

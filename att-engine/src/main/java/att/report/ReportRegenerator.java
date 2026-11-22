@@ -19,6 +19,7 @@ import java.util.Map;
 
 /** Rebuilds report HTML from the persisted completed run manifest. */
 public final class ReportRegenerator {
+    private static final String NATIVE_REPORT_PROTECTION_VERSION = "att-native-report/v1";
     @SuppressWarnings("unchecked")
     public Path regenerate(Path outputRoot, String runId) throws Exception {
         runId = IdentifierValidator.runId(runId);
@@ -32,11 +33,19 @@ public final class ReportRegenerator {
         if (!"att-run/v2.1".equals(String.valueOf(run.get("schemaVersion")))) throw new IllegalArgumentException("Run manifest is not V2.1: " + manifest);
         Map<String, Object> runNode = run.get("run") instanceof Map ? (Map<String, Object>) run.get("run") : run;
         if (!"COMPLETE".equals(String.valueOf(runNode.get(run.containsKey("run") ? "state" : "status")))) throw new IllegalArgumentException("Run is not COMPLETE: " + runId);
-        List<TestResult> results = new ArrayList<TestResult>();
         Object cases = run.get("cases");
+        boolean nativeRun = "nativeCase".equals(String.valueOf(runNode.get("targetType")))
+                || "nativeSuite".equals(String.valueOf(runNode.get("targetType")));
+        if (!nativeRun && cases instanceof Iterable) for (Object item : (Iterable<?>) cases)
+            if (item instanceof Map && ((Map<?,?>) item).get("definitionId") != null) { nativeRun = true; break; }
+        if (nativeRun && !NATIVE_REPORT_PROTECTION_VERSION.equals(String.valueOf(runNode.get("nativeReportProtection"))))
+            throw new IllegalArgumentException("Native run manifest does not declare safe report projections; regenerate it with a version that protects execution secrets before report generation: " + runId);
+        List<TestResult> results = new ArrayList<TestResult>();
         if (cases instanceof Iterable) for (Object item : (Iterable<?>) cases) {
             if (!(item instanceof Map)) continue;
-            Map<String, Object> row = (Map<String, Object>) item;
+            Object safeRow = protectManifestValue(item);
+            if (!(safeRow instanceof Map)) continue;
+            Map<String, Object> row = (Map<String, Object>) safeRow;
             String caseId = String.valueOf(row.get("caseId"));
             Path log = String.valueOf(row.get("caseLog")).isEmpty() ? null : runDir.resolve(String.valueOf(row.get("caseLog"))).normalize();
             if (log != null && !log.startsWith(runDir)) throw new IllegalArgumentException("Unsafe case log path in manifest: " + row.get("caseLog"));
@@ -89,38 +98,27 @@ public final class ReportRegenerator {
     private java.util.List<String> strings(Object value) { java.util.List<String> result = new java.util.ArrayList<String>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(String.valueOf(item)); return result; }
 
     @SuppressWarnings("unchecked")
+    private Object protectManifestValue(Object value) {
+        if (value instanceof Map) {
+            Map<String,Object> result = new java.util.LinkedHashMap<String,Object>();
+            for (Map.Entry<?,?> entry : ((Map<?,?>) value).entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                result.put(key, att.security.SecretProtection.sensitiveName(key)
+                        ? att.security.SecretProtection.REDACTED : protectManifestValue(entry.getValue()));
+            }
+            return result;
+        }
+        if (value instanceof Iterable) {
+            List<Object> result = new ArrayList<Object>();
+            for (Object item : (Iterable<?>) value) result.add(protectManifestValue(item));
+            return result;
+        }
+        if (value instanceof String) return att.security.SecretProtection.text((String) value);
+        return value;
+    }
+
     private att.validation.Diagnostic diagnostic(Object value) {
         if (!(value instanceof Map)) return null;
-        Map<String, Object> map = (Map<String, Object>) value;
-        att.validation.SourceLocation source = null;
-        Object sourceValue = map.get("source");
-        if (sourceValue instanceof Map) {
-            Map<String, Object> sourceMap = (Map<String, Object>) sourceValue;
-            source = new att.validation.SourceLocation(text(sourceMap.get("file")), integer(sourceMap.get("line"), 1), integer(sourceMap.get("column"), 1),
-                    integer(sourceMap.get("endLine"), integer(sourceMap.get("line"), 1)), integer(sourceMap.get("endColumn"), integer(sourceMap.get("column"), 1)),
-                    sourceMap.get("excerpt") == null ? null : text(sourceMap.get("excerpt")));
-        }
-        att.validation.DiagnosticContext context = att.validation.DiagnosticContext.EMPTY;
-        Object contextValue = map.get("context");
-        if (contextValue instanceof Map) {
-            Map<String, Object> contextMap = (Map<String, Object>) contextValue;
-            context = new att.validation.DiagnosticContext(textOrNull(contextMap.get("caseFile")), textOrNull(contextMap.get("caseId")),
-                    textOrNull(contextMap.get("stage")), textOrNull(contextMap.get("flowId")), strings(contextMap.get("callChain")));
-        }
-        att.validation.Diagnostic.Severity severity;
-        try { severity = att.validation.Diagnostic.Severity.valueOf(text(map.get("severity"))); }
-        catch (Exception ignored) { severity = att.validation.Diagnostic.Severity.ERROR; }
-        java.util.List<java.util.Map<String, Object>> schemaViolations = new java.util.ArrayList<java.util.Map<String, Object>>();
-        Object violationsValue = map.get("schemaViolations");
-        if (violationsValue instanceof Iterable) for (Object item : (Iterable<?>) violationsValue) {
-            if (item instanceof Map) schemaViolations.add(new java.util.LinkedHashMap<String, Object>((Map<String, Object>) item));
-        }
-        return new att.validation.Diagnostic(text(map.get("code")), severity, text(map.get("message")), textOrNull(map.get("file")),
-                textOrNull(map.get("field")), textOrNull(map.get("sheet")), nullableInteger(map.get("row")), nullableInteger(map.get("column")),
-                textOrNull(map.get("template")), textOrNull(map.get("action")), textOrNull(map.get("suggestion")),
-                textOrNull(map.get("summary")), textOrNull(map.get("detail")), source, context, schemaViolations);
+        return att.validation.Diagnostic.fromMap((Map<String,?>) value);
     }
-    private String textOrNull(Object value) { return value == null ? null : text(value); }
-    private Integer nullableInteger(Object value) { return value == null ? null : Integer.valueOf(String.valueOf(value)); }
-    private int integer(Object value, int fallback) { return value == null ? fallback : Integer.parseInt(String.valueOf(value)); }
 }

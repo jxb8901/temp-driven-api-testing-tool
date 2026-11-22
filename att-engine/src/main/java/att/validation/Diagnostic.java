@@ -125,6 +125,70 @@ public final class Diagnostic implements Comparable<Diagnostic> {
         map.putAll(metadata);
         return map;
     }
+
+    /** Reconstructs the complete diagnostic contract from its persisted map. */
+    @SuppressWarnings("unchecked")
+    public static Diagnostic fromMap(java.util.Map<String, ?> map) {
+        if (map == null) return null;
+        String code = text(map.get("code"));
+        Severity severity;
+        try { severity = Severity.valueOf(text(map.get("severity"))); }
+        catch (RuntimeException invalid) { severity = Severity.ERROR; }
+        SourceLocation source = null;
+        Object sourceValue = map.get("source");
+        if (sourceValue instanceof java.util.Map) {
+            java.util.Map<String, ?> value = (java.util.Map<String, ?>) sourceValue;
+            int line = integer(value.get("line"), 1), column = integer(value.get("column"), 1);
+            source = new SourceLocation(text(value.get("file")), line, column,
+                    integer(value.get("endLine"), line), integer(value.get("endColumn"), column),
+                    nullableText(value.get("excerpt")), integer(value.get("excerptStartLine"), line));
+        }
+        DiagnosticContext context = DiagnosticContext.EMPTY;
+        Object contextValue = map.get("context");
+        if (contextValue instanceof java.util.Map) {
+            java.util.Map<String, ?> value = (java.util.Map<String, ?>) contextValue;
+            context = new DiagnosticContext(nullableText(value.get("caseFile")), nullableText(value.get("caseId")),
+                    nullableText(value.get("stage")), nullableText(value.get("flowId")), strings(value.get("callChain")));
+        }
+        java.util.List<java.util.Map<String, Object>> violations = objectMaps(map.get("schemaViolations"));
+        java.util.List<java.util.Map<String, Object>> cases = objectMaps(map.get("affectedCases"));
+        int occurrences = integer(map.get("occurrences"), 1);
+        java.util.Map<String, Object> metadata = new java.util.LinkedHashMap<String, Object>();
+        java.util.Set<String> known = new java.util.HashSet<String>(java.util.Arrays.asList(
+                "code", "severity", "message", "file", "field", "sheet", "row", "column", "template", "action",
+                "suggestion", "summary", "detail", "source", "context", "schemaViolations", "occurrences", "affectedCases"));
+        for (java.util.Map.Entry<String, ?> entry : map.entrySet())
+            if (!known.contains(entry.getKey())) metadata.put(entry.getKey(), entry.getValue());
+        return new Diagnostic(code, severity, nullableText(map.get("message")), nullableText(map.get("file")),
+                nullableText(map.get("field")), nullableText(map.get("sheet")), nullableInteger(map.get("row")),
+                nullableInteger(map.get("column")), nullableText(map.get("template")), nullableText(map.get("action")),
+                nullableText(map.get("suggestion")), nullableText(map.get("summary")), nullableText(map.get("detail")),
+                source, context, violations, occurrences, cases, metadata);
+    }
+
+    private static String text(Object value) { return value == null ? "" : String.valueOf(value); }
+    private static String nullableText(Object value) { return value == null ? null : String.valueOf(value); }
+    private static Integer nullableInteger(Object value) {
+        if (value == null) return null;
+        try { return Integer.valueOf(String.valueOf(value)); }
+        catch (NumberFormatException ignored) { return null; }
+    }
+    private static int integer(Object value, int fallback) {
+        Integer parsed = nullableInteger(value);
+        return parsed == null ? fallback : parsed.intValue();
+    }
+    private static java.util.List<String> strings(Object value) {
+        java.util.List<String> result = new java.util.ArrayList<String>();
+        if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(String.valueOf(item));
+        return result;
+    }
+    @SuppressWarnings("unchecked")
+    private static java.util.List<java.util.Map<String, Object>> objectMaps(Object value) {
+        java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<java.util.Map<String, Object>>();
+        if (value instanceof Iterable) for (Object item : (Iterable<?>) value)
+            if (item instanceof java.util.Map) result.add(new java.util.LinkedHashMap<String, Object>((java.util.Map<String, Object>) item));
+        return result;
+    }
     public String toJson() {
         return JsonSupport.write(toMap());
     }

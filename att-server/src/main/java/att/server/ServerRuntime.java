@@ -236,8 +236,7 @@ final class ServerRuntime implements AutoCloseable {
         this(config,workerLibs,processLauncher,Clock.systemUTC());
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock) throws Exception {
-        this(config,workerLibs,processLauncher,clock,(output,archive,validator)->
-                ArtifactArchive.build(output,archive,validator,config.archiveCompression));
+        this(config,workerLibs,processLauncher,clock,defaultArtifactPublisher(config.archiveCompression));
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher) throws Exception {
         this(config,workerLibs,processLauncher,clock,artifactPublisher,null);
@@ -7942,11 +7941,13 @@ final class ServerRuntime implements AutoCloseable {
     void releaseArtifactReadSlot() { artifactReadSlots.release(); }
     Map<String,Object> artifactIndex(String id) throws Exception { return artifactIndex(id,0,100); }
     JobArtifactOverview artifactOverview(String id) throws Exception {
-        if(store.get(id)==null)throw new NotFoundException();
+        Map<String,Object> storedJob=store.get(id);if(storedJob==null)throw new NotFoundException();
         JsonNode publication=readArchiveStatus(artifactArchivePath(id).resolveSibling("archive-status.json"));
         String state=publication.path("state").asText("PENDING");
         if(store.workerQuarantined(id))state="FAILED";
         if("READY".equals(state)&&!Files.isRegularFile(artifactArchivePath(id)))state="FAILED";
+        if("READY".equals(state))try {ArtifactArchive.verify(artifactArchivePath(id),false,trustedArtifactRunId(id,storedJob));}
+        catch(Exception invalid){state="FAILED";}
         if(!"READY".equals(state))return new JobArtifactOverview(state,false,"UNVERIFIED",null,null,null,null,null,null,false);
         JsonNode value=publication.path("overview");
         if(publication.path("overviewVersion").asInt()!=1||!value.isObject())
@@ -7958,7 +7959,7 @@ final class ServerRuntime implements AutoCloseable {
         JsonNode rows=value.path("omissionCategories");
         if(rows.isArray())for(JsonNode row:rows) {
             String category=row.path("category").asText("");long count=row.path("count").asLong(-1L);
-            if(count>0L&&Set.of("unsafe_path","unsafe_entry","incomplete_load_report","recovery_checkpoint","reserved_manifest","unsupported_type","duplicate_path","entry_limit","oversized","rejected_text","reason_unavailable").contains(category))
+            if(count>0L&&Set.of("unsafe_path","unsafe_entry","incomplete_load_report","recovery_checkpoint","reserved_manifest","unsupported_type","duplicate_path","entry_limit","oversized","rejected_text","rejected_xlsx","reason_unavailable").contains(category))
                 omissions.add(new JobArtifactOverview.OmissionCategory(count,category));
         }
         boolean reportOmitted=omissions.stream().anyMatch(omission->"incomplete_load_report".equals(omission.category()));
@@ -8289,7 +8290,8 @@ final class ServerRuntime implements AutoCloseable {
         if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
         artifactLifecycle.readLock().lock();
         try {
-            if(store.get(id)==null)throw new NotFoundException();
+            Map<String,Object> storedJob=store.get(id);if(storedJob==null)throw new NotFoundException();
+            String expectedNativeRunId=trustedArtifactRunId(id,storedJob);
             Path archive=artifactArchivePath(id),statusFile=archive.resolveSibling("archive-status.json");
             Map<String,Object> out=new LinkedHashMap<>();
             JsonNode publication=readArchiveStatus(statusFile);
@@ -8300,7 +8302,7 @@ final class ServerRuntime implements AutoCloseable {
             if(quarantined){state="FAILED";out.put("reason","worker_unverified");}
             if(Files.isRegularFile(archive)&&"READY".equals(state)) {
                 try {
-                    Map<String,Object> data=ArtifactArchive.verify(archive,false);
+                    Map<String,Object> data=ArtifactArchive.verify(archive,false,expectedNativeRunId);
                     long archiveSize=Files.size(archive);
                     List<?> all=(List<?>)data.get("entries");
                     int start=Math.min(offset,all.size()),end=Math.min(all.size(),start+limit);
@@ -8362,13 +8364,14 @@ final class ServerRuntime implements AutoCloseable {
         if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
         artifactLifecycle.readLock().lock();
         try {
-            if(store.get(id)==null)throw new NotFoundException();
+            Map<String,Object> storedJob=store.get(id);if(storedJob==null)throw new NotFoundException();
+            String expectedNativeRunId=trustedArtifactRunId(id,storedJob);
             if(store.workerQuarantined(id))throw new ArchiveUnavailableException("FAILED");
             Path archive=artifactArchivePath(id),status=archive.resolveSibling("archive-status.json");
             String archiveState=readArchiveStatus(status).path("state").asText("FAILED");
             if(!"READY".equals(archiveState))throw new ArchiveUnavailableException(archiveState);
             ArtifactArchive.VerifiedRead verified=null;ArtifactDownload download=null;
-            try { if(digests)download=ArtifactDownload.open(archive);else verified=ArtifactArchive.openVerified(archive,false); }
+            try { if(digests)download=ArtifactDownload.open(archive,null,expectedNativeRunId);else verified=ArtifactArchive.openVerified(archive,false,expectedNativeRunId); }
             catch(Exception invalid){throw new ArchiveUnavailableException("FAILED");}
             return new ArtifactRead(archive,verified,download);
         } catch(Exception failure){artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
@@ -8408,6 +8411,25 @@ final class ServerRuntime implements AutoCloseable {
         requestedArtifactRetries.add(id);
         scheduleArtifactArchive(id);
     }
+    private String trustedArtifactRunId(String id,Map<String,Object> storedJob) throws Exception {
+        if(!"run".equals(storedJob.get("command")))return null;
+        try {
+            Map<String,String> retained=store.executionSpec(id);
+            if(retained==null||retained.get("spec")==null)return null;
+            JsonNode definition=JobExecutionSpec.parse(retained.get("spec")).definition();
+            String targetType=definition.path("target").path("type").asText();
+            if(!Set.of("nativeCase","nativeSuite").contains(targetType))return null;
+            Object rawResult=storedJob.get("resultJson");
+            if(!(rawResult instanceof String resultJson)||resultJson.length()>2*1024*1024)return null;
+            JsonNode result=JSON.readTree(resultJson);
+            String runId=result.path("executionId").asText(null);
+            if(runId==null)return null;
+            String validated=att.core.IdentifierValidator.runId(runId);
+            JsonNode requested=definition.path("options").path("runId");
+            if(requested.isTextual()&&!validated.equals(requested.asText()))return null;
+            return validated;
+        } catch(Exception invalidOrUnavailable) { return null; }
+    }
     void scheduleArtifactArchive(String id) {
         if(closing||!pendingArtifactJobs.add(id))return;
         requestedArtifactRetries.remove(id);
@@ -8417,7 +8439,9 @@ final class ServerRuntime implements AutoCloseable {
             Path output=outputDirectoryForJob(id), archive=artifactArchivePath(id);
             ArtifactMetricsRecorder metrics=null;
             try {
-                if(store.get(id)==null||!terminal(id))return;
+                Map<String,Object> storedJob=store.get(id);
+                if(storedJob==null||!terminal(id))return;
+                String expectedNativeRunId=trustedArtifactRunId(id,storedJob);
                 if(jobs.containsKey(id))return;
                 var previous=store.archiveMetrics(id);
                 metrics=new ArtifactMetricsRecorder(queuedAt,previous==null?1:Math.min(Long.MAX_VALUE-1,previous.attempts)+1);
@@ -8437,7 +8461,7 @@ final class ServerRuntime implements AutoCloseable {
                 }
                 if(Files.isRegularFile(archive)) {
                     metrics.phase("verification_fsync");
-                    try { ArtifactArchive.verify(archive,true); }
+                    try { ArtifactArchive.verify(archive,true,expectedNativeRunId); }
                     catch(Exception corrupt) {
                         // Verification failures are publication I/O, not artifact policy limits.
                         // Re-wrapping avoids IllegalArgumentException being audited as REJECTED_POLICY
@@ -8453,10 +8477,10 @@ final class ServerRuntime implements AutoCloseable {
                     if(!Files.isDirectory(output))throw new java.io.IOException("Worker output is unavailable");
                     cleanupArtifactStaging(archive.getParent());
                     // Preserve the exact bytes produced by the Engine/Worker; ZIP publication never rewrites them.
-                    artifactPublisher.publish(output,archive,ServerRuntime::validateApprovedArtifactBytes);
+                    artifactPublisher.publish(output,archive,ServerRuntime::validateApprovedArtifactBytes,expectedNativeRunId);
                 }
                 metrics.phase("publication");
-                Map<String,Object> overview=ArtifactArchive.overviewSummary(archive);
+                Map<String,Object> overview=ArtifactArchive.overviewSummary(archive,expectedNativeRunId);
                 archiveStatus(id,"READY","",null,overview);
                 metrics.value.zipBytes=Files.size(archive);
                 metrics.value.outcome="READY";
@@ -9121,7 +9145,23 @@ final class ServerRuntime implements AutoCloseable {
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
-    @FunctionalInterface interface ArtifactPublisher { Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator) throws Exception; }
+    private static ArtifactPublisher defaultArtifactPublisher(ServerConfig.ArchiveCompression compression) {
+        return new ArtifactPublisher() {
+            @Override public Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator) throws Exception {
+                return ArtifactArchive.build(output,archive,validator,compression);
+            }
+            @Override public Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator,
+                                          String expectedNativeRunId) throws Exception {
+                return ArtifactArchive.build(output,archive,validator,compression,expectedNativeRunId);
+            }
+        };
+    }
+    @FunctionalInterface interface ArtifactPublisher {
+        Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator) throws Exception;
+        default Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator,String expectedNativeRunId) throws Exception {
+            return publish(output,archive,validator);
+        }
+    }
     @FunctionalInterface interface LoadProgressPersistence { void update(String jobId,String progressJson) throws Exception; }
     private static final class AdmissionLease {
         private final Semaphore admission,load;private final java.util.concurrent.atomic.AtomicBoolean released=new java.util.concurrent.atomic.AtomicBoolean();
