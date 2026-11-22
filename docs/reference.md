@@ -258,6 +258,8 @@ For data-driven Cases, omitted `inputs` means same-name projection from `DATA`; 
 
 See the [active schema](../schemas/att-testcase-v1.schema.json), [single inline example](adr/examples/att-testcase-v1/inline-single.yaml), [multi-record inline example](adr/examples/att-testcase-v1/inline-multi.yaml), [Excel example](adr/examples/att-testcase-v1/excel.yaml), [Excel omitted-`dataColumns` example](adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml), and [ADR-0001](adr/0001-flow-centric-testcase-resolution.md) for the complete contract and validation boundary.
 
+The Default Package ships offline Native Quick Start Definitions under `packages/default/testcase/quick-start/**/testcase.yaml` bound to Flow `quick.start.v1`. Follow [Quick Start](quick-start.md) and the [S12 migration matrix](maintenance/native-case-default-package-migration-s12.md). Implicit Suite selection and source-independent native XLSX reports remain S06/S07 follow-ups.
+
 #### Author in Studio
 
 In Explorer, choose **New native Test Case** or open an indexed `testcase.yaml`. The guided editor sets the Package-scoped Definition ID, name, tags, canonical Flow, typed inputs, and either one Case or inline records. Advanced YAML remains available for fields outside the guided form. New files must be placed under the Package's configured `resources.testcaseRoot` (default `testcase/`).

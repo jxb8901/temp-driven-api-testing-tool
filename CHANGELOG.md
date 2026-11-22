@@ -18,6 +18,8 @@
 
 # ATT 4.6.0 - development candidate (acceptance pending)
 
+- Add Default Package Native Case Quick Start examples: Flow `quick.start.v1`, offline `att-testcase/v1` Definitions for single inline, inline multi-record, and Excel Data Source Cases, plus a bilingual Quick Start that leads with the Native model and a labeled legacy Workbook appendix (#413).
+- Record the S12 resource migration matrix for `quick_start` / `payment2` / `payment_regression` and related Package assets; retain legacy suites and LOAD examples without forced conversion. Implicit Suite and source-independent native XLSX reports remain deferred to S06/S07 on this S05-based head (#413).
 - Add the Studio Native Test Case editor and bounded, read-only Server preview for candidate YAML and Excel-backed Cases. Enforce Package source authority/revision checks, redact typed inputs, and surface workbook revision plus sheet/row/column diagnostics without creating a Job/RunDraft or modifying source/workbooks (#395).
 - Preserve inline Preview, Case selection, and validated Native Case RUN through the revision-fenced Package Change Set Draft → Validate → Review → Publish lifecycle; RUN is enabled only when the Server advertises `att-execution/v2` (#395).
 - Keep Excel-backed Test Case authoring fields available while gating workbook row resolution and preview on the S04 adapter (#394). This is a development candidate; do not bump POM versions or tag 4.6.0 before the release acceptance gates pass.

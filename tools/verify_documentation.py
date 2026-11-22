@@ -386,6 +386,11 @@ def check_cli_documentation():
     source = read(ROOT / "att-cli/src/main/java/att/CliOptions.java")
     supported_options = set(re.findall(r'"(--[a-z][a-z0-9-]*)"', source))
     supported_options.update(("--server", "--no-auth", "--principal", "--detach", "--download", "--scenario"))
+    # Native Case / vNext Local options are implemented beside the legacy CLI (S03+) and may
+    # appear in Quick Start / current guides without expanding the released CLI Reference surface.
+    native_case_options = set(("--local", "--resolved-case-id"))
+    documented_command_options = set(supported_options)
+    documented_command_options.update(native_case_options)
     public_commands = set(("run", "validate", "snapshot", "docs", "report",
                            "build", "clean", "version", "debug", "load", "help", "remote"))
 
@@ -421,7 +426,7 @@ def check_cli_documentation():
         if "./att.sh" not in line and "att.bat" not in line:
             continue
         for option in re.findall(r"--[a-z][a-z0-9-]*", line):
-            if option not in supported_options:
+            if option not in documented_command_options:
                 fail("docs/quick-start.md uses unsupported ATT option: %s" % option)
 
 
@@ -439,7 +444,7 @@ def check_cli_documentation():
                 fail("%s uses unsupported ATT command: %s" %
                      (path.relative_to(ROOT), match.group(1)))
             for option in re.findall(r"--[a-z][a-z0-9-]*", line):
-                if option not in supported_options:
+                if option not in documented_command_options:
                     fail("%s uses unsupported ATT option: %s" %
                          (path.relative_to(ROOT), option))
 
@@ -703,6 +708,12 @@ def check_critical_examples():
     assets = (
         "packages/default/testcase/payment2.xlsx",
         "packages/default/templates/PAYMENT_INVOKE/debug.yaml",
+        "packages/default/templates/flows/quick-start/flow.yaml",
+        "packages/default/testcase/quick-start/single/testcase.yaml",
+        "packages/default/testcase/quick-start/inline-multi/testcase.yaml",
+        "packages/default/testcase/quick-start/excel/testcase.yaml",
+        "packages/default/testdata/quick-start-native.xlsx",
+        "docs/maintenance/native-case-default-package-migration-s12.md",
         "examples/load/closed-smoke.yaml",
         "examples/load/arrival-smoke.yaml",
         "config/config.yaml",

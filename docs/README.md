@@ -15,12 +15,11 @@ This is the canonical documentation map for the ATT 4.4.1 release candidate. Acc
 | Integrator | [Server API v1](interfaces/server-api/README.md) |
 | Contributor | [Documentation architecture](system-design/documentation-architecture.md) · [Reference source guide](reference/README.md) |
 
-The Quick Start is a current 4.3.1 workflow. Snapshot generation is explicit authoring; VALIDATE is read-only and does not create or update snapshots.
+The Quick Start leads with the Native Case happy path on the 4.6.0 development candidate. VALIDATE is read-only. Legacy Workbook snapshot generation remains an explicit authoring step when you use that path.
 
 ~~~sh
-./att.sh snapshot --suite testcase/quick_start.xlsx
 ./att.sh validate --package
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
+./att.sh --local -p default run native-case quick.start.single --resolved-case-id default
 ~~~
 
 ## Common tasks

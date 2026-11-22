@@ -29,12 +29,18 @@ class QuickStartDocumentationTest {
         Path packageRoot = root.resolve("packages/default");
 
         for (String relative : Arrays.asList(
+                "templates/flows/quick-start/flow.yaml",
+                "testcase/quick-start/single/testcase.yaml",
+                "testcase/quick-start/inline-multi/testcase.yaml",
+                "testcase/quick-start/excel/testcase.yaml",
+                "testdata/quick-start-native.xlsx",
                 "testcase/quick_start.xlsx",
                 "testcase/quick_start.yaml",
                 "testcase/quick_start.xml",
                 "templates/QUICK_START/template.yaml",
                 "docs/quick-start.md",
-                "docs/quick-start.zh.md")) {
+                "docs/quick-start.zh.md",
+                "docs/maintenance/native-case-default-package-migration-s12.md")) {
             Path assetRoot = relative.startsWith("docs/") ? root : packageRoot;
             assertTrue(Files.isRegularFile(assetRoot.resolve(relative)), "Missing Quick Start asset: " + relative);
         }
@@ -45,19 +51,59 @@ class QuickStartDocumentationTest {
 
         assertTrue(en.contains("(quick-start.zh.md)"), "English Quick Start must link to Chinese");
         assertTrue(zh.contains("(quick-start.md)"), "Chinese Quick Start must link to English");
+        assertTrue(en.contains("quick.start.single"));
+        assertTrue(zh.contains("quick.start.single"));
+        assertTrue(en.contains("run native-case"));
+        assertTrue(zh.contains("run native-case"));
         assertTrue(en.contains("testcase/quick_start.xlsx"));
         assertTrue(zh.contains("testcase/quick_start.xlsx"));
         assertTrue(en.contains("quickStart.default.QS001"));
         assertTrue(zh.contains("quickStart.default.QS001"));
         assertTrue(readme.contains("docs/quick-start.md"));
         assertTrue(readme.contains("docs/quick-start.zh.md"));
+        assertTrue(readme.contains("run native-case quick.start.single"));
 
         assertLocalMarkdownLinksResolve(root.resolve("docs/quick-start.md"), root);
         assertLocalMarkdownLinksResolve(root.resolve("docs/quick-start.zh.md"), root);
     }
 
     @Test
-    void quickStartCasesExecuteThroughTheRealCli() throws Exception {
+    void nativeQuickStartCasesExecuteThroughTheRealCli() throws Exception {
+        Path root = Paths.get("").toAbsolutePath().normalize();
+        CliResult dryRun = runCli(root, "--local", "-p", "default", "--format", "json",
+                "--run-id", "native-quick-start-dry",
+                "run", "native-case", "quick.start.single",
+                "--resolved-case-id", "default", "--dry-run");
+        assertEquals(0, dryRun.exitCode, dryRun.stderr + "\n" + dryRun.stdout);
+        assertTrue(dryRun.stdout.contains("\"status\":\"SKIPPED\"") || dryRun.stdout.contains("SKIPPED"),
+                dryRun.stdout);
+
+        CliResult single = runCli(root, "--local", "-p", "default", "--format", "json",
+                "--run-id", "native-quick-start-single",
+                "run", "native-case", "quick.start.single",
+                "--resolved-case-id", "default");
+        assertEquals(0, single.exitCode, single.stderr + "\n" + single.stdout);
+        assertTrue(single.stdout.contains("quick.start.single"), single.stdout);
+        assertTrue(single.stdout.contains("PASS"), single.stdout);
+
+        CliResult inline = runCli(root, "--local", "-p", "default", "--format", "json",
+                "--run-id", "native-quick-start-inline",
+                "run", "native-case", "quick.start.inline",
+                "--resolved-case-id", "basic", "--resolved-case-id", "with-tool");
+        assertEquals(0, inline.exitCode, inline.stderr + "\n" + inline.stdout);
+        assertTrue(inline.stdout.contains("quick.start.inline.basic")
+                || inline.stdout.contains("\"localCaseId\":\"basic\""), inline.stdout);
+
+        CliResult excel = runCli(root, "--local", "-p", "default", "--format", "json",
+                "--run-id", "native-quick-start-excel",
+                "run", "native-case", "quick.start.excel",
+                "--resolved-case-id", "QS001", "--resolved-case-id", "QS002");
+        assertEquals(0, excel.exitCode, excel.stderr + "\n" + excel.stdout);
+        assertTrue(excel.stdout.contains("QS001") || excel.stdout.contains("quick.start.excel"), excel.stdout);
+    }
+
+    @Test
+    void legacyQuickStartCasesExecuteThroughTheRealCli() throws Exception {
         Path root = Paths.get("").toAbsolutePath().normalize();
         Path packageRoot = root.resolve("packages/default");
         String config = root.resolve("config/config.yaml").toString();
@@ -108,13 +154,16 @@ class QuickStartDocumentationTest {
     private CliResult runCli(Path root, String... args) throws Exception {
         List<String> command = new ArrayList<String>(Arrays.asList(
                 Paths.get(System.getProperty("java.home"), "bin", "java").toString(),
-                "-cp", System.getProperty("java.class.path"), "att.FrameworkRunner"));
+                "-cp", System.getProperty("java.class.path"),
+                "-Datt.home=" + Paths.get("").toAbsolutePath().normalize(),
+                "att.FrameworkRunner"));
         command.addAll(Arrays.asList(args));
 
         Path stdout = temp.resolve("quick-start-cli-" + (++processCounter) + ".stdout");
         Path stderr = temp.resolve("quick-start-cli-" + processCounter + ".stderr");
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(root.toFile());
+        builder.environment().put("ATT_HOME", Paths.get("").toAbsolutePath().normalize().toString());
         builder.environment().put("ORDERS_DB_USERNAME", "docs-example-user");
         builder.environment().put("ORDERS_DB_PASSWORD", "docs-example-password");
         builder.environment().put("PAYMENT_MQ_USERNAME", "docs-example-user");
