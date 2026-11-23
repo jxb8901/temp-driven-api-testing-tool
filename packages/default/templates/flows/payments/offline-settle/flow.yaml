@@ -1,0 +1,23 @@
+schemaVersion: att-flow/v3.6
+id: payments.offline.settle.v1
+name: Offline payment settlement
+description: Deterministic offline settlement. A non-positive amount or an amount above the authorized cap is a business rejection. No network, database, or MQ.
+
+actions:
+  decide:
+    type: assign
+    description: Settle a positive amount that does not exceed the authorized cap.
+    name: decision
+    expression: "#{misc.iif((${EXEC.INPUT.amount} > 0) and (${EXEC.INPUT.amount} <= ${EXEC.INPUT.authorized}), 'SETTLED', 'REJECTED')}"
+
+  show:
+    type: log
+    description: Record the offline settlement decision.
+    message: "settle #{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}: decision=${EXEC.VARS.decision}"
+
+  verify:
+    type: assert
+    description: The Case passes when the decision matches the expected business outcome.
+    assert: "#{${EXEC.VARS.decision} == ${EXEC.INPUT.expectedDecision}}"
+    expected: "${EXEC.INPUT.expectedDecision}"
+    actual: "${EXEC.VARS.decision}"

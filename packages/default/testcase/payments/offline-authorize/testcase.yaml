@@ -1,0 +1,37 @@
+schemaVersion: att-testcase/v1
+id: payments.offline.authorize
+name: Offline payment authorization
+flow: payments.offline.authorize.v1
+tags: [payments, offline, native]
+caseIdExpression: "${DATA.caseKey}"
+dataSource:
+  type: inline
+  records:
+    - recordId: auth-accepted
+      tags: [smoke, positive]
+      data:
+        caseKey: auth-accepted
+        amount: 100
+        limit: 1000
+        expectedDecision: ACCEPTED
+    - recordId: auth-rejected
+      tags: [smoke, business-rejection]
+      data:
+        caseKey: auth-rejected
+        amount: 5000
+        limit: 1000
+        expectedDecision: REJECTED
+    - recordId: auth-mismatch
+      tags: [assertion-failure]
+      data:
+        caseKey: auth-mismatch
+        amount: 5000
+        limit: 1000
+        expectedDecision: ACCEPTED
+inputs:
+  amount:
+    from: DATA.amount
+  limit:
+    from: DATA.limit
+  expectedDecision:
+    from: DATA.expectedDecision

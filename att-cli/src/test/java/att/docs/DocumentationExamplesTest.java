@@ -131,11 +131,11 @@ class DocumentationExamplesTest {
 
         Map<String, Integer> expected = new TreeMap<String, Integer>();
         expected.put("att-debug/v1.2", Integer.valueOf(1));
-        expected.put("att-flow/v3.6", Integer.valueOf(4));
+        expected.put("att-flow/v3.6", Integer.valueOf(6));
         expected.put("att-package/v1", Integer.valueOf(1));
         expected.put("att-sidecar/v2.2", Integer.valueOf(3));
         expected.put("att-template/v3.6", Integer.valueOf(10));
-        expected.put("att-testcase/v1", Integer.valueOf(3));
+        expected.put("att-testcase/v1", Integer.valueOf(5));
         expected.put("att-testdata/v1.0", Integer.valueOf(1));
         expected.put("att-tool-group/v3.0", Integer.valueOf(3));
         expected.put("att-tool/v1", Integer.valueOf(21));

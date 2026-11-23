@@ -10,4 +10,4 @@ Offline-safe `att-testcase/v1` Definitions for the Native Case happy path. They 
 
 Legacy Workbook Quick Start remains at `../quick_start.xlsx` (+ sidecar/XML). See [migration matrix](../../../../docs/maintenance/native-case-default-package-migration-s12.md).
 
-Implicit Suite selection (`native-suite`) and source-independent native XLSX reporting land with S06/S07 and are not claimed here.
+The multi-Flow payments Suite, standard XLSX, and optional source-workbook report are in `../payments/` and [the walkthrough](../../../../docs/guides/native-payments.md). Suite acceptance ([#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396)) and report acceptance ([#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)) remain open. No 4.6.0 release tag has been published.

@@ -1,0 +1,24 @@
+schemaVersion: att-testcase/v1
+id: payments.offline.settle
+name: Offline payment settlement
+flow: payments.offline.settle.v1
+tags: [payments, offline, native, excel]
+caseIdExpression: "${DATA.stableKey}"
+dataSource:
+  type: excel
+  path: testdata/payments-offline-settle.xlsx
+  sheet: Cases
+  headerRows: 1
+  caseId: CaseID
+  tags: Tags
+  dataColumns: stableKey=CaseID, amount=Amount, authorized=Authorized, expectedDecision=ExpectedDecision
+report:
+  format: xlsx
+  template: sourceWorkbook
+inputs:
+  amount:
+    from: DATA.amount
+  authorized:
+    from: DATA.authorized
+  expectedDecision:
+    from: DATA.expectedDecision
