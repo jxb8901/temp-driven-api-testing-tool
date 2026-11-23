@@ -1603,4 +1603,49 @@ class PackageValidatorTest {
         @SuppressWarnings("unchecked") List<Path> suites = (List<Path>) method.invoke(validator,att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate","--package"}));
         assertEquals(Collections.singletonList(cases.resolve("sample.xlsx")), suites);
     }
+
+    @Test void packageValidationResolvesNativeDefinitionsAndRejectsBrokenFlowBindings() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("native-validate"));
+        att.TestSchemas.install(root);
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("flows/demo"));
+        Files.createDirectories(root.resolve("testcase/demo"));
+        Files.write(root.resolve("package.yaml"),
+                ("schemaVersion: att-package/v2\nresources:\n  flowRoot: flows\n  testcaseRoot: testcase\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(root.resolve("config/config.yaml"),
+                ("schemaVersion: att-config/v2.15\nenvironment: SIT\n"
+                        + "templates: {root: templates}\ntestcase: {root: testcase}\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(root.resolve("flows/demo/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: demo.v1\nname: Demo\ndescription: Valid Flow.\n"
+                        + "actions:\n  note:\n    type: log\n    message: ok\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Path definition = root.resolve("testcase/demo/testcase.yaml");
+        Files.write(definition,
+                ("schemaVersion: att-testcase/v1\nid: demo.broken\nflow: missing.flow.v1\n"
+                        + "name: Broken\ndescription: Unresolved Flow.\ninputs: {}\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertFalse(Files.exists(root.resolve("templates")));
+
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root, root, "SIT");
+        PackageValidator.ValidationSummary broken = new PackageValidator(root, loaded, root.resolve("config/config.yaml"))
+                .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
+        assertFalse(broken.valid(), broken.diagnostics.toString());
+        assertTrue(broken.diagnostics.stream().anyMatch(item -> item.severity() == Diagnostic.Severity.ERROR
+                        && item.file() != null && item.file().replace('\\', '/').contains("testcase/demo/testcase.yaml")),
+                broken.diagnostics.toString());
+
+        Files.write(definition,
+                ("schemaVersion: att-testcase/v1\nid: demo.ok\nflow: demo.v1\n"
+                        + "name: Ok\ndescription: Bound Flow.\ninputs: {}\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        PackageValidator.ValidationSummary repaired = new PackageValidator(root, loaded, root.resolve("config/config.yaml"))
+                .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
+        assertTrue(repaired.valid(), repaired.diagnostics.toString());
+        assertTrue(repaired.cases >= 1, String.valueOf(repaired.cases));
+        assertTrue(repaired.selectedCaseIds.contains("demo.ok.default")
+                        || repaired.selectedCaseIds.stream().anyMatch(id -> id.startsWith("demo.ok")),
+                String.valueOf(repaired.selectedCaseIds));
+    }
 }

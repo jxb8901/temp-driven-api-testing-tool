@@ -228,6 +228,7 @@ public final class PackageValidator {
             } catch (Exception e) { diagnostics.add(diagnostic(DiagnosticCodes.TEMPLATE_INVALID, e, flow.directory().resolve("flow.yaml"))); }
             validatePackageTools(diagnostics);
             validateDebugSidecars(diagnostics, loader);
+            cases += validateNativeDefinitions(diagnostics, fullCaseIds);
         }
         for (Path suite : suites) {
             try {
@@ -2722,12 +2723,65 @@ public final class PackageValidator {
         if (options.suiteDirectory() != null || options.suitePaths().isEmpty()) {
             Path configured = options.suiteDirectory() == null ? global.testcasesRoot() : options.suiteDirectory();
             Path directory = configured.isAbsolute() ? configured : projectRoot.resolve(configured);
-            try (Stream<Path> stream = Files.walk(directory)) {
+            if (Files.isDirectory(directory)) try (Stream<Path> stream = Files.walk(directory)) {
                 stream.filter(Files::isRegularFile).filter(p -> p.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".xlsx")).sorted().forEach(result::add);
             }
         } else result.addAll(options.suitePaths());
         if (result.isEmpty() && !"package".equals(options.validationScope())) throw new IllegalArgumentException("No Excel suites selected");
         return result;
+    }
+
+    /**
+     * Resolves every Native {@code testcase.yaml} under the configured testcase root without business
+     * execution. Captures schema, Data Source and Definition→Flow diagnostics for {@code validate --package}.
+     */
+    private int validateNativeDefinitions(List<Diagnostic> diagnostics, Map<String, CaseLocation> fullCaseIds) {
+        Path configured = global.testcasesRoot() == null ? Paths.get("testcase") : global.testcasesRoot();
+        Path directory = configured.isAbsolute() ? configured : projectRoot.resolve(configured);
+        if (!Files.isDirectory(directory)) return 0;
+        List<Path> definitions = new ArrayList<Path>();
+        try (Stream<Path> stream = Files.walk(directory)) {
+            stream.filter(Files::isRegularFile)
+                    .filter(path -> "testcase.yaml".equals(path.getFileName().toString()))
+                    .sorted()
+                    .forEach(definitions::add);
+        } catch (Exception error) {
+            diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, error, directory));
+            return 0;
+        }
+        if (definitions.isEmpty()) return 0;
+        Path schema;
+        try { schema = SchemaFiles.resolve(projectRoot, "att-testcase-v1.schema.json"); }
+        catch (Exception error) {
+            diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, error, directory));
+            return 0;
+        }
+        att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(schema);
+        int resolvedCases = 0;
+        for (Path definition : definitions) {
+            try {
+                att.testcase.TestCaseResolutionResult result = resolver.resolve(definition, "package", projectRoot,
+                        global.flowRoot(), global.templatesRoot(), att.testcase.TestCaseDefinitionResolver.Options.defaults());
+                for (att.testcase.ResolvedTestCase testCase : result.selectedCases()) {
+                    CaseLocation previous = fullCaseIds.put(testCase.qualifiedCaseId(),
+                            new CaseLocation(definition, testCase.definitionId(), 0));
+                    if (previous != null) diagnostics.add(new Diagnostic(DiagnosticCodes.TESTCASE_INVALID,
+                            Diagnostic.Severity.ERROR,
+                            "Duplicate Qualified Case ID '" + testCase.qualifiedCaseId()
+                                    + "'; first declared at " + previous,
+                            definition.toString(), testCase.definitionId(), null, null, null, null));
+                    resolvedCases++;
+                }
+                if (result.truncated()) diagnostics.add(new Diagnostic(DiagnosticCodes.TESTCASE_INVALID,
+                        Diagnostic.Severity.WARNING,
+                        "Native Definition resolution truncated at the bounded Case limit",
+                        definition.toString(), "dataSource", null, null, null, null, null,
+                        "Narrow the Data Source or raise the documented bound before relying on full Package validation."));
+            } catch (Exception error) {
+                diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, error, definition));
+            }
+        }
+        return resolvedCases;
     }
 
     public static final class ValidationSummary {

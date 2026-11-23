@@ -102,6 +102,25 @@ class ChangeSetPublisherTest {
         } finally { publisher.close(); }
     }
 
+    @Test void nestedCustomFlowRootUnderTestcaseIsCategorizedAsFlow() throws Exception {
+        ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
+        try {
+            String manifest = "schemaVersion: att-package/v2\nresources:\n  flowRoot: testcase/flows\n  testcaseRoot: testcase\n";
+            String flow = "schemaVersion: att-flow/v3.6\nid: nested.v1\nname: Nested\n"
+                    + "description: Nested custom Flow root.\nactions:\n  note:\n    type: log\n    message: hi\n";
+            Map<String, Object> draft = stagePackage(publisher, Arrays.asList(
+                    ChangeSetPublisher.OperationInput.create("package.yaml", bytes(manifest)),
+                    ChangeSetPublisher.OperationInput.create("testcase/flows/payments/flow.yaml", bytes(flow)),
+                    ChangeSetPublisher.OperationInput.create("testcase/payments/testcase.yaml",
+                            bytes("schemaVersion: att-testcase/v1\nid: payments.nested\nflow: nested.v1\ninputs: {}\n"))));
+            @SuppressWarnings("unchecked") List<String> categories = (List<String>) draft.get("categories");
+            assertTrue(categories.contains("FLOW"), String.valueOf(categories));
+            assertTrue(categories.contains("TESTCASE"), String.valueOf(categories));
+            assertFalse(categories.size() == 1 && categories.contains("TESTCASE"),
+                    "Flow under testcase/flows must not collapse to TESTCASE only: " + categories);
+        } finally { publisher.close(); }
+    }
+
     @Test void sameDraftCustomFlowRootMoveKeepsDescriptorSemanticsAndRewritesPayloadRefs() throws Exception {
         ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
         try {

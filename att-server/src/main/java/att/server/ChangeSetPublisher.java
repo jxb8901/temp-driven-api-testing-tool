@@ -1700,11 +1700,12 @@ final class ChangeSetPublisher implements AutoCloseable {
                                     String path, Path packageRoot, Map<String, byte[]> changes) {
         if (path == null || "package.yaml".equals(path)) return;
         String normalized = path.replace('\\', '/');
-        if (normalized.startsWith("testcase/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.TESTCASE);
+        // Configured Flow roots may legally nest under testcase/, load/, or testdata/; classify FLOW first.
+        if (isFlowPath(normalized, packageRoot, changes))
+            result.add(att.server.api.source.SourceManagementContracts.PackageCategory.FLOW);
+        else if (normalized.startsWith("testcase/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.TESTCASE);
         else if (normalized.startsWith("load/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.LOAD);
         else if (normalized.startsWith("testdata/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.TESTDATA);
-        else if (isFlowPath(normalized, packageRoot, changes))
-            result.add(att.server.api.source.SourceManagementContracts.PackageCategory.FLOW);
         else if (normalized.startsWith("templates/") && (normalized.endsWith("template.yaml") || normalized.endsWith("template.yml")))
             result.add(att.server.api.source.SourceManagementContracts.PackageCategory.TEMPLATE);
         else result.add(att.server.api.source.SourceManagementContracts.PackageCategory.FILE);
