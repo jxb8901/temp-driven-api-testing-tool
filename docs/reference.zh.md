@@ -2171,6 +2171,8 @@ Package ID 與實體根目錄來自可信註冊或既有 Local Package 選取。
 
 ### 宣告 Package 預設值
 
+現行 runtime 在 `<PACKAGE_ROOT>/<templatesRoot>/flows/` 發現 Flow 檔案（預設 `templates/flows/`）。獨立的 `flows/` 目錄尚未支援。現行 `att-package/v2` schema 有 `resources.templatesRoot`，沒有 `resources.flowRoot`。
+
 此範例選取中央既有 profile，並宣告 Package 自己的 Testdata。執行完整驗證前，先建立引用的 descriptor。
 
 ```yaml
@@ -2208,9 +2210,9 @@ defaults:
 
 所有路徑使用 `/`，相對於已選取 Package。絕對路徑、`..`、不安全 symlink 及越界路徑均會被拒絕。檔案上限為 262144 UTF-8 bytes。未知欄位、重複 YAML keys、aliases、anchors 及 `x-` extensions 均不允許。
 
-沒有 Manifest 時，Package 使用慣例 Flow 與 Test Case Definition roots，且 Package Testdata inventory 為空。
+沒有 Manifest 時，Package 在 `templates/flows/` 發現 Flow，Test Case Definition 使用 `testcase/`，Package Testdata inventory 為空。獨立的 `flows/` Package 尚未支援。
 
-Flow、Test Case Definition 及 `load/` roots 可在 inspection 時省略。目錄不存在時，Explorer、LOAD Catalog 及 Quick Load 會為該根目錄回傳空 inventory。若已設定或慣例根目錄存在，但不是可讀目錄或解析後超出 canonical Package，檢查會回傳已淨化的 `ATT-RESOURCE-ROOT-INVALID` 診斷；不會跟隨不安全路徑，也不會把存在但無效的目錄當成空目錄。
+現行 Flow 目錄（`templates/flows/`）、Test Case Definition 及 `load/` roots 可在 inspection 時省略。目錄不存在時，Explorer、LOAD Catalog 及 Quick Load 會為該根目錄回傳空 inventory。若已設定或慣例根目錄存在，但不是可讀目錄或解析後超出 canonical Package，檢查會回傳已淨化的 `ATT-RESOURCE-ROOT-INVALID` 診斷；不會跟隨不安全路徑，也不會把存在但無效的目錄當成空目錄。
 
 ### 解析 Environment
 
@@ -2653,7 +2655,7 @@ Display snapshot 不會授權 execution。Debug/Quick Load approval 及 Worker e
 
 ### CI 與 environment promotion
 
-CI 應先 validate package，再執行 external integration test，並按需要保存 Run/Debug/Load evidence。Environment 透過明確 `--config`/`--env` policy 選擇。穩定 DB/MQ logical ID 讓相同 Template 在 SIT/UAT/PREPROD 間移動而不用改 Action。
+CI 應先 validate package，再執行 external integration test，並按需要保存 Run/Debug/Load evidence。Environment 透過明確 `--config`/`--env` policy 選擇。穩定的 DB/MQ Logical ID 讓同一個 Flow 可以在 SIT、UAT、PREPROD 間重用，而無須修改 Action 定義。
 
 Parallel job 應使用唯一 Run ID；若需要獨立 retention/latest-run state，應使用不同 output root。對同一 shared output root 的 clean/report/archive 等 destructive operation 必須序列化。
 

@@ -372,6 +372,26 @@ def documentation_ownership_errors(root, manifest_items):
     )
     current_surfaces += tuple("docs/reference/" + item for item in manifest_items)
     current_surfaces += tuple("docs/reference.zh/" + item for item in manifest_items)
+    zh_ci = root / "docs/reference.zh/ci-packaging-operations.md"
+    if zh_ci.is_file():
+        zh_ci_text = zh_ci.read_text(encoding="utf-8")
+        if "相同 Template" in zh_ci_text:
+            errors.append("docs/reference.zh/ci-packaging-operations.md explains cross-environment reuse with Template")
+        if "同一個 Flow" not in zh_ci_text:
+            errors.append("docs/reference.zh/ci-packaging-operations.md does not explain cross-environment reuse with Flow")
+    for rel in ("docs/reference/package-manifest.md", "docs/reference.zh/package-manifest.md"):
+        path = root / rel
+        if not path.is_file():
+            errors.append("missing " + rel)
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "templates/flows/" not in text:
+            errors.append(rel + ": state that the current runtime discovers Flows under templates/flows/")
+        if "not yet supported" not in text and "尚未支援" not in text:
+            errors.append(rel + ": state that a standalone flows/ package is not yet supported")
+        if "resources.flowRoot" not in text:
+            errors.append(rel + ": state that resources.flowRoot is not defined")
+
     for rel in current_surfaces:
         path = root / rel
         if path.is_file():

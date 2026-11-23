@@ -41,7 +41,7 @@ Display snapshot 不會授權 execution。Debug/Quick Load approval 及 Worker e
 
 ## CI 與 environment promotion
 
-CI 應先 validate package，再執行 external integration test，並按需要保存 Run/Debug/Load evidence。Environment 透過明確 `--config`/`--env` policy 選擇。穩定 DB/MQ logical ID 讓相同 Template 在 SIT/UAT/PREPROD 間移動而不用改 Action。
+CI 應先 validate package，再執行 external integration test，並按需要保存 Run/Debug/Load evidence。Environment 透過明確 `--config`/`--env` policy 選擇。穩定的 DB/MQ Logical ID 讓同一個 Flow 可以在 SIT、UAT、PREPROD 間重用，而無須修改 Action 定義。
 
 Parallel job 應使用唯一 Run ID；若需要獨立 retention/latest-run state，應使用不同 output root。對同一 shared output root 的 clean/report/archive 等 destructive operation 必須序列化。
 
