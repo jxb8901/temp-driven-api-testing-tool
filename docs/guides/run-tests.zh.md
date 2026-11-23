@@ -30,7 +30,7 @@ Snapshot generation 會寫入 workbook 的 canonical representation。Validation
 請依據結果摘要中的 Local Run ID 和 output directory 尋找執行 evidence。Template、Flow 或 Tool diagnostics 使用目前相容 command standalone Debug：
 
 ~~~sh
-./att.sh debug template PAYMENT_INVOKE
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE
 ~~~
 
 Target 與 selection semantics 請參閱 [Unified RUN](../reference.zh/execution-modes/unified-run.md)。Native `run native-case` 和 `run native-suite` 是目前的 command。更廣泛的共用 vNext grammar 仍是[規劃中的 proposal](../interfaces/cli/vnext-proposed.zh.md)。

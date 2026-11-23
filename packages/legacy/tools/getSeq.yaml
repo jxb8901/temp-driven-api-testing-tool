@@ -1,0 +1,11 @@
+schemaVersion: att-tool/v1
+id: getSeq
+name: Get sequence
+description: Generate a new sequence value
+command: [./tools/get_seq.sh, "${input.caseId}"]
+stdoutFormat: text
+arguments:
+  caseId:
+    name: Case ID
+    description: Full V2 Case ID
+    required: true

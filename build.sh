@@ -130,6 +130,11 @@ for packaged in \
   packages/default/testcase/payments/offline-authorize/testcase.yaml \
   packages/default/testcase/payments/offline-settle/testcase.yaml \
   packages/default/testdata/payments-offline-settle.xlsx \
+  packages/legacy/package.yaml \
+  packages/legacy/templates/PAYMENT_INVOKE/template.yaml \
+  packages/legacy/templates/V3_FLOW_EXAMPLE/template.yaml \
+  packages/legacy/testcase/payment_regression.xlsx \
+  packages/legacy/testcase/payment2.xlsx \
   docs/guides/native-payments.md \
   docs/guides/native-payments.zh.md \
   docs/example-inventory.json \
@@ -144,6 +149,8 @@ for packaged in \
   examples/package-local-sut-metrics/packages/payments/package.yaml \
   examples/load/sut-metrics/v2/metric-source-db-wide-row.json \
   packages/default/testcase/payments/offline-settle/testcase.yaml \
+  packages/legacy/package.yaml \
+  packages/legacy/testcase/payment_regression.xlsx \
   docs/example-inventory.json
 do
   case "$SOURCE_ENTRIES" in
@@ -151,6 +158,9 @@ do
     *) echo "Source archive is missing packaged example file: $packaged" >&2; exit 2 ;;
   esac
 done
+if printf '%s\n' "$SOURCE_ENTRIES" | grep -F "$SOURCE_PACKAGE_NAME/packages/default/testcase/payment_regression.xlsx" >/dev/null; then
+  echo "Source archive still contains the relocated payment_regression workbook under packages/default" >&2; exit 2
+fi
 if [ -e "$LOCAL_PACKAGE_DIR/schemas" ]; then
   echo "Local archive must not install an ATT_HOME/schemas runtime source: $LOCAL_ARCHIVE" >&2; exit 2
 fi

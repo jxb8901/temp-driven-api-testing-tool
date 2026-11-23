@@ -24,11 +24,11 @@ Standalone Debug bootstrap values are mapped into these canonical roots: `inputs
 
 EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing diagnostics stay in evidence-only DIAG.load, which is not an expression root.
 
-`CASE.environment` contains the selected environment profile in Run, Debug and Load and is available before business Actions. `CASE.status` and `CASE.durationMs` describe a completed or failed execution; they are lifecycle/result fields, not portable inputs for an Action that is still running. The default `PAYMENT_ROLLBACK` example reads `CASE.status` only in its Run/Debug flow.
+`CASE.environment` contains the selected environment profile in Run, Debug and Load and is available before business Actions. `CASE.status` and `CASE.durationMs` describe a completed or failed execution; they are lifecycle/result fields, not portable inputs for an Action that is still running. The legacy Package `PAYMENT_ROLLBACK` example reads `CASE.status` only in its Run/Debug flow.
 
 For a reusable Flow that needs the source TestCase ID when one exists and an execution identity in every mode, use `#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}`. This preserves the TestCase or synthetic Debug Case ID in Run and Debug and uses the Load iteration's `EXEC.ID` when `META.SOURCE.caseId` is absent. These values are not interchangeable when a business or TestCase identifier is required; pass that identifier through an explicit input contract or keep the resource mode-specific.
 
-The default Package's `PAYMENT_PREPARE`, `PAYMENT_INVOKE`, `PAYMENT_VERIFY`, `PAYMENT_ROLLBACK`, `PAYMENT_CLEANUP`, `FPP_CTO_RTI_USMF`, `FPP_D3I_BATCH_SIT`, and local-payment integration examples require a business TestCase ID and are intended for Run/Debug. Do not use them as Quick or Advanced Load targets without adding an explicit business-ID input contract; Load's `EXEC.ID` is an iteration ID. If an unsupported Load call evaluates a required `${META.SOURCE.caseId}`, ATT reports the source Action and explains which Load identity is available.
+The legacy Package's `PAYMENT_PREPARE`, `PAYMENT_INVOKE`, `PAYMENT_VERIFY`, `PAYMENT_ROLLBACK`, `PAYMENT_CLEANUP`, `FPP_CTO_RTI_USMF`, `FPP_D3I_BATCH_SIT`, and local-payment integration examples require a business TestCase ID and are intended for Run/Debug from `packages/legacy`. Do not use them as Quick or Advanced Load targets without adding an explicit business-ID input contract; Load's `EXEC.ID` is an iteration ID. If an unsupported Load call evaluates a required `${META.SOURCE.caseId}`, ATT reports the source Action and explains which Load identity is available.
 
 ## META field inventory and lifecycle
 

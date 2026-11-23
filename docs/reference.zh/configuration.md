@@ -158,14 +158,14 @@ actions:
 # SIT
 ./att.sh validate --config config/config.yaml --env SIT --package
 ./att.sh run --config config/config.yaml --env SIT --all
-./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
+./att.sh load ../../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
 
 # UAT
 ./att.sh validate --config config/config.yaml --env UAT --package
 ./att.sh run --config config/config.yaml --env UAT --all
-./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
+./att.sh load ../../examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
 ```
 
 CI 對每個目標環境分別執行 `validate --package` 和 `run --all`：

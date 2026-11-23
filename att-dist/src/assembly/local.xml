@@ -3,6 +3,9 @@
     <id>local</id><formats><format>tar.gz</format></formats><includeBaseDirectory>true</includeBaseDirectory><baseDirectory>att-${project.version}-local</baseDirectory>
     <files>
         <file><source>${project.basedir}/../packages/default/package.yaml</source><outputDirectory>packages/default</outputDirectory><destName>package.yaml</destName><fileMode>0644</fileMode></file>
+        <file><source>${project.basedir}/../packages/legacy/package.yaml</source><outputDirectory>packages/legacy</outputDirectory><destName>package.yaml</destName><fileMode>0644</fileMode></file>
+        <file><source>${project.basedir}/../packages/legacy/README.md</source><outputDirectory>packages/legacy</outputDirectory><destName>README.md</destName><fileMode>0644</fileMode></file>
+        <file><source>${project.basedir}/../packages/legacy/README.zh.md</source><outputDirectory>packages/legacy</outputDirectory><destName>README.zh.md</destName><fileMode>0644</fileMode></file>
         <file><source>${project.basedir}/../att.sh</source><outputDirectory>/</outputDirectory><destName>att.sh</destName><fileMode>0755</fileMode></file>
         <file><source>${project.basedir}/../att.bat</source><outputDirectory>/</outputDirectory><destName>att.bat</destName><fileMode>0644</fileMode></file>
         <file><source>${project.basedir}/../README.md</source><outputDirectory>/</outputDirectory><destName>README.md</destName><fileMode>0644</fileMode></file>
@@ -17,6 +20,9 @@
         <fileSet><directory>${project.basedir}/../packages/default/testcase</directory><outputDirectory>packages/default/testcase</outputDirectory></fileSet>
         <fileSet><directory>${project.basedir}/../packages/default/testdata</directory><outputDirectory>packages/default/testdata</outputDirectory></fileSet>
         <fileSet><directory>${project.basedir}/../packages/default/sql</directory><outputDirectory>packages/default/sql</outputDirectory></fileSet>
+        <fileSet><directory>${project.basedir}/../packages/legacy/templates</directory><outputDirectory>packages/legacy/templates</outputDirectory></fileSet>
+        <fileSet><directory>${project.basedir}/../packages/legacy/tools</directory><outputDirectory>packages/legacy/tools</outputDirectory><fileMode>0755</fileMode></fileSet>
+        <fileSet><directory>${project.basedir}/../packages/legacy/testcase</directory><outputDirectory>packages/legacy/testcase</outputDirectory></fileSet>
         <!-- Raw PR benchmark captures remain in Git and the source archive; keep them out of the size-capped Local release bundle. -->
         <fileSet><directory>${project.basedir}/../docs</directory><outputDirectory>docs</outputDirectory><excludes><exclude>system-design/ui-shell-architecture.md</exclude><exclude>system-design/ui-shell-architecture.zh.md</exclude><exclude>system-design/ui-shell-baseline/**</exclude><exclude>performance/baselines/issues-278-281/**</exclude></excludes></fileSet>
     </fileSets>

@@ -314,7 +314,11 @@ Workbook, Stage, and Template remain a supported runtime. Use this path when Sta
 
 #### Workbook, Sidecar, and Snapshot relationship
 
-In the legacy Workbook/Sidecar/Snapshot workflow, every `.xlsx` workbook requires a YAML sidecar and generated XML snapshot with the same basename in the same directory:
+In the legacy Workbook/Sidecar/Snapshot workflow, every `.xlsx` workbook requires a YAML sidecar and generated XML snapshot with the same basename in the same directory. `payment_regression` is in `packages/legacy`. From the repository root, `./att.sh` changes into `packages/default` unless `ATT_PACKAGE_ROOT` names another package, and a suite path is relative to that package:
+
+```sh
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh run --suite testcase/payment_regression.xlsx --dry-run
+```
 
 ```text
 testcase/payment_regression.xlsx
@@ -761,11 +765,11 @@ Standalone Debug bootstrap values are mapped into these canonical roots: `inputs
 
 EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing diagnostics stay in evidence-only DIAG.load, which is not an expression root.
 
-`CASE.environment` contains the selected environment profile in Run, Debug and Load and is available before business Actions. `CASE.status` and `CASE.durationMs` describe a completed or failed execution; they are lifecycle/result fields, not portable inputs for an Action that is still running. The default `PAYMENT_ROLLBACK` example reads `CASE.status` only in its Run/Debug flow.
+`CASE.environment` contains the selected environment profile in Run, Debug and Load and is available before business Actions. `CASE.status` and `CASE.durationMs` describe a completed or failed execution; they are lifecycle/result fields, not portable inputs for an Action that is still running. The legacy Package `PAYMENT_ROLLBACK` example reads `CASE.status` only in its Run/Debug flow.
 
 For a reusable Flow that needs the source TestCase ID when one exists and an execution identity in every mode, use `#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}`. This preserves the TestCase or synthetic Debug Case ID in Run and Debug and uses the Load iteration's `EXEC.ID` when `META.SOURCE.caseId` is absent. These values are not interchangeable when a business or TestCase identifier is required; pass that identifier through an explicit input contract or keep the resource mode-specific.
 
-The default Package's `PAYMENT_PREPARE`, `PAYMENT_INVOKE`, `PAYMENT_VERIFY`, `PAYMENT_ROLLBACK`, `PAYMENT_CLEANUP`, `FPP_CTO_RTI_USMF`, `FPP_D3I_BATCH_SIT`, and local-payment integration examples require a business TestCase ID and are intended for Run/Debug. Do not use them as Quick or Advanced Load targets without adding an explicit business-ID input contract; Load's `EXEC.ID` is an iteration ID. If an unsupported Load call evaluates a required `${META.SOURCE.caseId}`, ATT reports the source Action and explains which Load identity is available.
+The legacy Package's `PAYMENT_PREPARE`, `PAYMENT_INVOKE`, `PAYMENT_VERIFY`, `PAYMENT_ROLLBACK`, `PAYMENT_CLEANUP`, `FPP_CTO_RTI_USMF`, `FPP_D3I_BATCH_SIT`, and local-payment integration examples require a business TestCase ID and are intended for Run/Debug from `packages/legacy`. Do not use them as Quick or Advanced Load targets without adding an explicit business-ID input contract; Load's `EXEC.ID` is an iteration ID. If an unsupported Load call evaluates a required `${META.SOURCE.caseId}`, ATT reports the source Action and explains which Load identity is available.
 
 ### META field inventory and lifecycle
 
@@ -1208,10 +1212,10 @@ In Studio, **Configure & Rerun** from a Job preloads the safe retained RUN targe
 Debug executes one Template, Flow or Tool without requiring a workbook Testcase.
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE
 ./att.sh debug flow common.compose.v1 --input /tmp/compose.debug.yaml
 ./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml --env UAT
-./att.sh debug template PAYMENT_INVOKE --profile
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --profile
 ```
 
 Run `./att.sh debug` with no target to list statically valid runnable Tools, Templates and Flows with copyable commands. A default sidecar path is displayed only when that regular non-symlink file exists. Discovery validates selected target dependencies but does not create Debug output or invoke Tools. Use `--format json` for machine-readable discovery output.
@@ -1263,7 +1267,7 @@ Descriptor paths are relative to the package root and use the normal `att-testda
 For collector failures whose safe projection hides details, local runs can opt in with `--unsafe-failure-details`:
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE --unsafe-failure-details
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --unsafe-failure-details
 ```
 
 This flag is accepted only by standalone `debug`. ATT prints a warning before execution, preserves configured-secret redaction, and includes `failureDetailMode: local-unsafe` in the result. It does not dump raw inputs, argv, request bodies, or Context values. The default remains `safe-default`; `load --debug`, Run, Validate, and Snapshot cannot enable the override.
@@ -1314,7 +1318,7 @@ Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does 
 
 The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.2` document.
 
-Template sidecar (`templates/PAYMENT_INVOKE/debug.yaml`):
+`PAYMENT_INVOKE` is in `packages/legacy`. From the repository root, select that package before Debug. Template sidecar (`templates/PAYMENT_INVOKE/debug.yaml`):
 
 ```yaml
 schemaVersion: att-debug/v1.2
@@ -1329,7 +1333,7 @@ stage:
     sourceRef: SRC-001
 ```
 
-Run it with `./att.sh debug template PAYMENT_INVOKE`. Template expressions should prefer `${EXEC.INPUT.amount}`, `${EXEC.INPUT.environment}`, and the current Stage value `${EXEC.INPUT.channel}`; the current Stage's `values` overlay Case-level input for that Stage, with the Stage value winning on collisions. The corresponding `CASE.*` paths remain compatibility aliases, while `CASE.STAGES.*` is retained only as the legacy execution/evidence view.
+Run it with `ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE`. Template expressions should prefer `${EXEC.INPUT.amount}`, `${EXEC.INPUT.environment}`, and the current Stage value `${EXEC.INPUT.channel}`; the current Stage's `values` overlay Case-level input for that Stage, with the Stage value winning on collisions. The corresponding `CASE.*` paths remain compatibility aliases, while `CASE.STAGES.*` is retained only as the legacy execution/evidence view.
 
 Flow sidecar (`templates/flows/common/compose/debug.yaml`):
 
@@ -1380,7 +1384,7 @@ Run it with `./att.sh debug tool invokePaymentApi`. For an ungrouped Tool, root 
 An explicit file overrides sidecar discovery, which is useful for temporary values in CI or local diagnosis:
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE --input /tmp/payment-debug.yaml \
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --input /tmp/payment-debug.yaml \
   --output-dir /tmp/att-debug --format json
 ```
 
@@ -1745,11 +1749,11 @@ evidence: {mode: failures}
 ~~~
 
 ~~~sh
-./att.sh load examples/load/closed-smoke.yaml
-./att.sh load examples/load/arrival-smoke.yaml --format json
-./att.sh load examples/load/multi-closed.yaml
-./att.sh load examples/load/multi-arrival.yaml
-./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+./att.sh load ../../examples/load/closed-smoke.yaml
+./att.sh load ../../examples/load/arrival-smoke.yaml --format json
+./att.sh load ../../examples/load/multi-closed.yaml
+./att.sh load ../../examples/load/multi-arrival.yaml
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh debug
 ./att.sh load
@@ -2796,14 +2800,14 @@ actions:
 # SIT
 ./att.sh validate --config config/config.yaml --env SIT --package
 ./att.sh run --config config/config.yaml --env SIT --all
-./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
+./att.sh load ../../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
 
 # UAT
 ./att.sh validate --config config/config.yaml --env UAT --package
 ./att.sh run --config config/config.yaml --env UAT --all
-./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
+./att.sh load ../../examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
 ```
 
 For CI, run the same validation and execution stages once per selected environment:
@@ -3348,7 +3352,7 @@ Local CLI output shows absolute paths by default. Add `--substitute-package-root
 
 ```sh
 ./att.sh validate --package --substitute-package-root
-./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
 ```
 
 ### Typed overrides and quick Load
@@ -3367,7 +3371,7 @@ evidence: {mode: failures}
 ```sh
 ./att.sh debug
 ./att.sh load
-./att.sh load --debug template PAYMENT_INVOKE
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh load --debug template PAYMENT_INVOKE
 ./att.sh load --debug tool fpp.invokeApi --users 1 --duration 10s --set arg.requestId=42
 ./att.sh load --debug flow common.payment --users 4 --duration 5s --set input.customer.ids[0]=42
 ```
@@ -3394,8 +3398,8 @@ This page defines target, `--input`, `--set` and `--env` syntax in the option ma
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 
 ```sh
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
-./att.sh load examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
+./att.sh load ../../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
+./att.sh load ../../examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
   --arrival-rate 5/s --ramp-up 1s --warmup 1s --duration 5s --ramp-down 1s \
   --max-concurrent 4 --overload-policy drop --format json
 ```
@@ -3403,7 +3407,7 @@ Load uses the scenario as the base and explicit workload options override the co
 Repeatable `--set <input|arg|vars>.<path>=<yaml-value>` applies safe-YAML typed overrides before expression evaluation. The same option works for `debug`, single-workload Load scenarios, and `load --debug template|flow|tool <id>`. Quick Load uses `load/load.yaml` when present; otherwise provide a complete policy on the command line. For example:
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ```
 

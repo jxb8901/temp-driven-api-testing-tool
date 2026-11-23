@@ -94,7 +94,11 @@ Workbook、Stage 和 Template 仍是受支援的 runtime。需要 Stage 選取�
 
 ### Workbook、Sidecar 和 Snapshot 之間的關系
 
-在舊式 Workbook／Sidecar／Snapshot 工作流中，每個 `.xlsx` Workbook 都要求有一個 YAML Sidecar 和一個生成的 XML Snapshot，它們必須具有相同的基名且位於同一目錄：
+在舊式 Workbook／Sidecar／Snapshot 工作流中，每個 `.xlsx` Workbook 都要求有一個 YAML Sidecar 和一個生成的 XML Snapshot，它們必須具有相同的基名且位於同一目錄。`payment_regression` 位於 `packages/legacy`。從 repository root 執行時，`./att.sh` 會進入 `packages/default`，除非 `ATT_PACKAGE_ROOT` 指定另一個 Package；suite 路徑相對於該 Package：
+
+```sh
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh run --suite testcase/payment_regression.xlsx --dry-run
+```
 
 ```text
 testcase/payment_regression.xlsx

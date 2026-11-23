@@ -314,7 +314,11 @@ Workbook、Stage 和 Template 仍是受支援的 runtime。需要 Stage 選取�
 
 #### Workbook、Sidecar 和 Snapshot 之間的關系
 
-在舊式 Workbook／Sidecar／Snapshot 工作流中，每個 `.xlsx` Workbook 都要求有一個 YAML Sidecar 和一個生成的 XML Snapshot，它們必須具有相同的基名且位於同一目錄：
+在舊式 Workbook／Sidecar／Snapshot 工作流中，每個 `.xlsx` Workbook 都要求有一個 YAML Sidecar 和一個生成的 XML Snapshot，它們必須具有相同的基名且位於同一目錄。`payment_regression` 位於 `packages/legacy`。從 repository root 執行時，`./att.sh` 會進入 `packages/default`，除非 `ATT_PACKAGE_ROOT` 指定另一個 Package；suite 路徑相對於該 Package：
+
+```sh
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh run --suite testcase/payment_regression.xlsx --dry-run
+```
 
 ```text
 testcase/payment_regression.xlsx
@@ -762,11 +766,11 @@ Standalone Debug bootstrap value 會映射到這些 canonical root：`inputs` �
 
 EXEC.LOAD 只公開穩定 identity。Scheduler counter、queue state 與 timing diagnostics 留在 evidence-only DIAG.load，不能作為 expression root。
 
-`CASE.environment` 是目前選用的 Environment profile，在 Run、Debug 與 Load 中均會於業務 Action 前提供。`CASE.status` 與 `CASE.durationMs` 描述已完成或失敗的執行；它們是生命週期／結果欄位，不是仍在執行中的 Action 可攜帶輸入。預設的 `PAYMENT_ROLLBACK` 範例只在 Run／Debug 流程中讀取 `CASE.status`。
+`CASE.environment` 是目前選用的 Environment profile，在 Run、Debug 與 Load 中均會於業務 Action 前提供。`CASE.status` 與 `CASE.durationMs` 描述已完成或失敗的執行；它們是生命週期／結果欄位，不是仍在執行中的 Action 可攜帶輸入。Legacy Package 的 `PAYMENT_ROLLBACK` 範例只在 Run／Debug 流程中讀取 `CASE.status`。
 
 若 reusable Flow 在有來源 TestCase ID 時要使用該 ID，並在所有模式都有 execution identity，可使用 `#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}`。Run 和 Debug 會保留 TestCase 或 synthetic Debug Case ID；當 Load 沒有 `META.SOURCE.caseId` 時，則使用 Load iteration 的 `EXEC.ID`。兩者在需要 business 或 TestCase ID 時不可互換；請透過明確的 input contract 傳入該 ID，或將 Resource 限制於支援的模式。
 
-Default Package 的 `PAYMENT_PREPARE`、`PAYMENT_INVOKE`、`PAYMENT_VERIFY`、`PAYMENT_ROLLBACK`、`PAYMENT_CLEANUP`、`FPP_CTO_RTI_USMF`、`FPP_D3I_BATCH_SIT` 及本地付款 integration examples 需要 business TestCase ID，預期用於 Run/Debug。沒有加入明確的 business-ID input contract 前，請勿將它們用作 Quick 或 Advanced Load target；Load 的 `EXEC.ID` 是 iteration ID。若不支援的 Load 呼叫讀取必要的 `${META.SOURCE.caseId}`，ATT 會指出來源 Action，並說明可用的 Load identity。
+Legacy Package 的 `PAYMENT_PREPARE`、`PAYMENT_INVOKE`、`PAYMENT_VERIFY`、`PAYMENT_ROLLBACK`、`PAYMENT_CLEANUP`、`FPP_CTO_RTI_USMF`、`FPP_D3I_BATCH_SIT` 及本地付款 integration examples 需要 business TestCase ID，並從 `packages/legacy` 執行 Run/Debug。沒有加入明確的 business-ID input contract 前，請勿將它們用作 Quick 或 Advanced Load target；Load 的 `EXEC.ID` 是 iteration ID。若不支援的 Load 呼叫讀取必要的 `${META.SOURCE.caseId}`，ATT 會指出來源 Action，並說明可用的 Load identity。
 
 ### META 欄位清單與生命週期
 
@@ -1188,10 +1192,10 @@ selector 和 option 請看 [CLI Reference](reference.zh/cli.md)，Stage 和 Acti
 Debug 可在沒有 workbook Testcase 的情況下執行單一 Template、Flow 或 Tool。
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE
 ./att.sh debug flow common.compose.v1 --input /tmp/compose.debug.yaml
 ./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml --env UAT
-./att.sh debug template PAYMENT_INVOKE --profile
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --profile
 ```
 
 不帶 target 執行 `./att.sh debug`，會列出 statically valid、可執行的 Tool、Template 和 Flow，附 copyable command。只會顯示實際存在的 regular non-symlink default sidecar。Discovery 會檢查 selected target dependencies，但不建立 Debug output，也不呼叫 Tool。可用 `--format json` 取得 machine-readable 結果。
@@ -1243,7 +1247,7 @@ Descriptor path 相對於 package root，並使用一般 `att-testdata/v1.0` 格
 若 collector failure 的安全投影隱藏了診斷細節，可在本機執行時明確選用 `--unsafe-failure-details`：
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE --unsafe-failure-details
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --unsafe-failure-details
 ```
 
 此 flag 僅供 standalone `debug` 使用。ATT 會在執行前顯示警告，保留 configured-secret redaction，並在 result 寫入 `failureDetailMode: local-unsafe`。它不會 dump raw inputs、argv、request body 或 Context values。預設仍為 `safe-default`；Run、Validate、Snapshot 及 `load --debug` 不能啟用此 override。
@@ -1296,7 +1300,7 @@ Load 專用的 evidence retention（`metrics`、`failures`、`samples`、`all`�
 
 以下每個文件都是完整的 `att-debug/v1.2` 文檔，展示 Template、Flow、分組 Tool、未分組 Tool 和臨時覆蓋值的不同寫法。
 
-Template sidecar（`templates/PAYMENT_INVOKE/debug.yaml`）：
+`PAYMENT_INVOKE` 位於 `packages/legacy`。從 repository root 執行 Debug 前先選用該 Package。Template sidecar（`templates/PAYMENT_INVOKE/debug.yaml`）：
 
 ```yaml
 schemaVersion: att-debug/v1.2
@@ -1314,7 +1318,7 @@ stage:
 執行：
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE
 ```
 
 Template 表達式應優先讀取 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.environment}` 和當前 Stage 的 `${EXEC.INPUT.channel}`；當前 Stage 的 `values` 會在該 Stage 期間覆蓋同名 Case-level input，Stage 結束後恢復。對應的 `CASE.*` 路徑仍是兼容 aliases，`CASE.STAGES.*` 只保留為舊的執行／證據視圖。
@@ -1386,7 +1390,7 @@ arguments:
 臨時覆蓋自動發現的 sidecar：
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE \
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE \
   --input /tmp/payment-debug.yaml \
   --output-dir /tmp/att-debug --format json
 ```
@@ -1746,11 +1750,11 @@ evidence: {mode: failures}
 ~~~
 
 ~~~sh
-./att.sh load examples/load/closed-smoke.yaml
-./att.sh load examples/load/arrival-smoke.yaml --format json
-./att.sh load examples/load/multi-closed.yaml
-./att.sh load examples/load/multi-arrival.yaml
-./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+./att.sh load ../../examples/load/closed-smoke.yaml
+./att.sh load ../../examples/load/arrival-smoke.yaml --format json
+./att.sh load ../../examples/load/multi-closed.yaml
+./att.sh load ../../examples/load/multi-arrival.yaml
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh debug
 ./att.sh load
@@ -2713,14 +2717,14 @@ actions:
 # SIT
 ./att.sh validate --config config/config.yaml --env SIT --package
 ./att.sh run --config config/config.yaml --env SIT --all
-./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
+./att.sh load ../../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
 
 # UAT
 ./att.sh validate --config config/config.yaml --env UAT --package
 ./att.sh run --config config/config.yaml --env UAT --all
-./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
+./att.sh load ../../examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
 ```
 
 CI 對每個目標環境分別執行 `validate --package` 和 `run --all`：
@@ -3260,8 +3264,8 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix�
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 
 ```sh
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
-./att.sh load examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
+./att.sh load ../../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
+./att.sh load ../../examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
   --arrival-rate 5/s --ramp-up 1s --warmup 1s --duration 5s --ramp-down 1s \
   --max-concurrent 4 --overload-policy drop --format json
 ```
@@ -3274,7 +3278,7 @@ Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應
 
 ```sh
 ./att.sh validate --package --substitute-package-root
-./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
 ```
 
 `--set` 可重複使用，namespace 只能是 `input`、`arg` 或 `vars`。值使用 safe YAML 解析並保留型別，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可用 map key 及數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效。解析時不會執行 ATT expression；shell 可能展開的值要加引號。`arg.*` 僅適用 Tool，`vars.*` 僅適用 Template/Flow。多 workload Load scenario 會拒絕未限定的 override。
@@ -3291,7 +3295,7 @@ evidence: {mode: failures}
 ```sh
 ./att.sh debug
 ./att.sh load
-./att.sh load --debug template PAYMENT_INVOKE
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh load --debug template PAYMENT_INVOKE
 ./att.sh load --debug tool fpp.invokeApi --users 1 --duration 10s --set arg.requestId=42
 ./att.sh load --debug flow common.payment --users 4 --duration 5s --set input.customer.ids[0]=42
 ```
@@ -3299,7 +3303,7 @@ evidence: {mode: failures}
 重複的 `--set <input|arg|vars>.<path>=<yaml-value>` 會在 expression evaluation 前以安全 YAML 型別覆寫 definition。`debug`、單 workload Load scenario，以及 `load --debug template|flow|tool <id>` 都支援。Quick Load 會使用可選的 `load/load.yaml`；若沒有 profile，請在 command line 提供完整 policy。例如：
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ```
 

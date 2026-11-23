@@ -20,6 +20,13 @@
 | testdata-generated.yaml | 從 Load-local generated testdata 依 iteration 順序載入 QUICK_START Template；records 用盡時停止 workload。 |
 | quick-profile.yaml | 僅含 Load policy 的 Quick Load profile；複製到 `load/load.yaml` 後使用。 |
 
+`closed.yaml` and `closed-minimal.yaml` select Template `V3_FLOW_EXAMPLE`. That Template, and the common Flows it calls, are in the registered `packages/legacy` package. `./att.sh` changes into `packages/default` unless `ATT_PACKAGE_ROOT` names another package, and a scenario path is relative to that package. Tool scenarios such as `closed-smoke.yaml` stay on `packages/default`.
+
+~~~sh
+./att.sh load ../../examples/load/closed-smoke.yaml
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh load ../../examples/load/closed-minimal.yaml --users 1 --duration 100ms
+~~~
+
 ## 最小 closed workload
 
 ~~~yaml
@@ -41,7 +48,7 @@ workloads:
 `testdata-generated.yaml` imports a four-record virtual sequence from `examples/testdata/generated-account.yaml`, maps the typed `amount` value into the offline `QUICK_START` Template, and uses `scope: iteration`. Its `exhaustion: stop` policy ends that workload cleanly after the records are consumed:
 
 ~~~sh
-./att.sh load examples/load/testdata-generated.yaml
+./att.sh load ../../examples/load/testdata-generated.yaml
 ~~~
 
 ## Quick Load policy profile
@@ -112,11 +119,11 @@ output/load/<RUN_ID>/
 Closed workload 使用 load.users 及必填 duration，可配置 execution.thinkTime。Arrival-rate 使用 load.arrivalRate、maxConcurrent、overloadPolicy: drop；超額 arrival 計為 generator drop，不排隊，也不是 SUT error。Arrival-rate 不支援 thinkTime，且沒有 USER_ID。
 
 ~~~sh
-./att.sh load examples/load/closed-smoke.yaml
-./att.sh load examples/load/arrival-smoke.yaml --format json
-./att.sh load examples/load/multi-closed.yaml
-./att.sh load examples/load/multi-arrival.yaml
-./att.sh load examples/load/tool.yaml --duration 100ms --run-id load-tool-example
+./att.sh load ../../examples/load/closed-smoke.yaml
+./att.sh load ../../examples/load/arrival-smoke.yaml --format json
+./att.sh load ../../examples/load/multi-closed.yaml
+./att.sh load ../../examples/load/multi-arrival.yaml
+./att.sh load ../../examples/load/tool.yaml --duration 100ms --run-id load-tool-example
 ~~~
 
 同一 scenario 的 workloads 必須使用相同 model 與 phase timing envelope。Multi-workload 是多個固定 target 各自 pacing，不會在 target 間隨機切換。CLI load-model overrides 僅適用單一 workload；多 workload 時請修改 YAML。完整欄位、threshold、CLI option 與報告契約見[Load Mode](../../docs/reference/execution-modes/load.md)。

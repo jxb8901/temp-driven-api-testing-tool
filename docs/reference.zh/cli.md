@@ -184,8 +184,8 @@ CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix�
 Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
 
 ```sh
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
-./att.sh load examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
+./att.sh load ../../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
+./att.sh load ../../examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
   --arrival-rate 5/s --ramp-up 1s --warmup 1s --duration 5s --ramp-down 1s \
   --max-concurrent 4 --overload-policy drop --format json
 ```
@@ -198,7 +198,7 @@ Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應
 
 ```sh
 ./att.sh validate --package --substitute-package-root
-./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
 ```
 
 `--set` 可重複使用，namespace 只能是 `input`、`arg` 或 `vars`。值使用 safe YAML 解析並保留型別，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可用 map key 及數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效。解析時不會執行 ATT expression；shell 可能展開的值要加引號。`arg.*` 僅適用 Tool，`vars.*` 僅適用 Template/Flow。多 workload Load scenario 會拒絕未限定的 override。
@@ -215,7 +215,7 @@ evidence: {mode: failures}
 ```sh
 ./att.sh debug
 ./att.sh load
-./att.sh load --debug template PAYMENT_INVOKE
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh load --debug template PAYMENT_INVOKE
 ./att.sh load --debug tool fpp.invokeApi --users 1 --duration 10s --set arg.requestId=42
 ./att.sh load --debug flow common.payment --users 4 --duration 5s --set input.customer.ids[0]=42
 ```
@@ -223,7 +223,7 @@ evidence: {mode: failures}
 重複的 `--set <input|arg|vars>.<path>=<yaml-value>` 會在 expression evaluation 前以安全 YAML 型別覆寫 definition。`debug`、單 workload Load scenario，以及 `load --debug template|flow|tool <id>` 都支援。Quick Load 會使用可選的 `load/load.yaml`；若沒有 profile，請在 command line 提供完整 policy。例如：
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ```
 

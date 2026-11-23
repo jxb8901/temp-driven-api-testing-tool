@@ -24,8 +24,8 @@ This record tracks Default Package migration on the current default branch. No 4
 | `packages/default/templates/flows/quick-start/flow.yaml` (`quick.start.v1`) | `att-flow/v3.6` | Bound by the three Definitions above | **Native canonical example** | Offline assign/log/assert (+ optional `sample.getAcDate`) | Package validate + Native RUN |
 | `packages/default/testcase/quick_start.xlsx` + `.yaml` + `.xml` | Sidecar `att-sidecar/v2.2` + Snapshot `att-testcases/v2.4` + Template `QUICK_START` | Legacy Quick Start appendix, `QuickStartDocumentationTest`, packaging | **Supported legacy compatibility fixture** | Retain original Case IDs and Stage/Template path; do not rewrite | `./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001` |
 | `packages/default/templates/QUICK_START/template.yaml` | `att-template/v3.6` | Legacy Quick Start Stage | **Supported legacy compatibility fixture** | Stage/Template entry remains valid; Native path uses Flow instead | Legacy suite RUN |
-| `packages/default/testcase/payment2.xlsx` (+ sidecar/XML) | Legacy single-Stage payment demo | Docs/debug examples, `DocumentationExamplesTest` | **Retained legacy** (no parallel Native yet) | Business Template stages and external-style inputs; not offline-safe as a Native Quick Start | Dry-run suite remains green; Native conversion deferred pending #398 semantics review |
-| `packages/default/testcase/payment_regression.xlsx` (+ sidecar/XML) | Legacy multi-Stage prepare/invoke/verify/rollback/cleanup | Payment regression coverage | **Retained legacy** (no parallel Native yet) | Per-Stage Template selection, `runWhen`/`onFailure`, and Case ID mapping are not 1:1 with a single Flow binding (#398) | Offline dry-run: `./att.sh run --suite testcase/payment_regression.xlsx --dry-run` → `total=22`, `skipped=22` (no FPP/MQ/DB I/O). Package validate counts the suite in `suites=3` / `cases=26`. Full business RUN against live systems is integration-only and owned by #398; not exercised here. |
+| `packages/legacy/testcase/payment2.xlsx` (+ sidecar/XML) | Legacy single-Stage payment demo | Docs/debug examples, `DocumentationExamplesTest` | **Relocated legacy** | Business Template stages and external-style inputs; not offline-safe as a Native Quick Start. Case IDs unchanged | Dry-run from `packages/legacy` remains green |
+| `packages/legacy/testcase/payment_regression.xlsx` (+ sidecar/XML) | Legacy multi-Stage prepare/invoke/verify/rollback/cleanup | Payment regression coverage | **Relocated legacy** | Per-Stage Template selection, `runWhen`/`onFailure`, and Case ID mapping are not 1:1 with a single Flow binding | Offline dry-run from `packages/legacy`: `./att.sh run --suite testcase/payment_regression.xlsx --dry-run` → `total=22`, `skipped=22` (no FPP/MQ/DB I/O). Full business RUN against live systems is not part of this move |
 | `packages/default/templates/flows/common/*` | Nested identity/decorate/compose Flows | Cross-mode examples | **Unchanged** | Already Flow-native helpers | Existing LoadCrossMode / Package validate |
 | `packages/default/tools/**` | Package-owned Tools | Legacy + Native Quick Start sample Tool | **Unchanged** | #352 ownership preserved | Package validate |
 | `examples/load/**` | `att-load/v1.9` direct targets | LOAD guides | **Supported legacy / current LOAD path** | Native LOAD Case targets are S08 (deferred) | Existing load smoke examples |
@@ -37,7 +37,7 @@ This record tracks Default Package migration on the current default branch. No 4
 
 | Before (master without S12) | After (this PR) |
 |---|---|
-| Only legacy `quick_start` / `payment2` / `payment_regression` under `testcase/` | Same three legacy suites, the Quick Start Native Definitions, and the offline payments Suite under `testcase/payments/` |
+| Only legacy `quick_start` / `payment2` / `payment_regression` under `packages/default/testcase/` | `quick_start` stays in `packages/default`. `payment2` and `payment_regression` live in `packages/legacy`. Quick Start Native Definitions and the offline payments Suite stay under `packages/default/testcase/` |
 | Quick Start docs lead with Excel → Stage → Template | Quick Start docs lead with Package → Flow → `testcase.yaml` → Preview/Resolve → Select → RUN |
 | No Default Package `att-testcase/v1` example | Offline Native single / inline-multi / Excel examples with Flow `quick.start.v1` |
 
@@ -55,25 +55,27 @@ This record tracks Default Package migration on the current default branch. No 4
 # Legacy Quick Start retained
 ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
 
-# Retained multi-Stage fixture — offline dry-run only (no live FPP/MQ/DB)
-./att.sh run --suite testcase/payment_regression.xlsx --dry-run --format json --quiet
+# Relocated multi-Stage fixture — launcher selects packages/legacy (no live FPP/MQ/DB)
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh run --suite testcase/payment_regression.xlsx --dry-run --format json --quiet
 
-# Package closure (legacy + native together)
+# Package closure
 ./att.sh validate --package --format json --quiet
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh validate --package --format json --quiet
 ```
 
+## Relocated legacy resources
 
-## Tracked exceptions (#426)
+[#426](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/426) moves the former blocked Templates and workbooks into the registered `packages/legacy` package. Template IDs and workbook Case IDs are unchanged. Run, Debug, and the closed LOAD scenarios that select `V3_FLOW_EXAMPLE` use `packages/legacy` as the working directory. Tool scenarios such as `closed-smoke.yaml` stay on `packages/default`. The common Flows and Tools copied into `packages/legacy` exist so that package resolves its own dependencies; the canonical copies stay in `packages/default`.
 
-[#426](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/426) is not finished. The blocked rows in [example-migration-matrix.md](example-migration-matrix.md) stay in `packages/default`, and `packages/legacy` does not exist yet. Each blocked row names the test, LOAD scenario, debug command, or file expression that still resolves that path or Template ID, and the missing [#398](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/398) golden where a Flow translation would change Case IDs. `V3_FLOW_EXAMPLE` additionally stays because current LOAD scenarios select that id and [#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418) is still deferred. A move without those consumer edits would break the compatibility route. That cutover remains follow-up work on #426, #398, and #418.
+These resources are not rewritten as `att-testcase/v1`. That rewrite would change Stage selection or Case IDs. `examples/load/closed.yaml` still selects Template id `V3_FLOW_EXAMPLE`. The per-file table is [example-migration-matrix.md](example-migration-matrix.md).
 
-The physical relocation in this change is the former SUT Metrics Settings catalog, now under `examples/legacy/sut-metrics/`. The v2 schema samples stay at `examples/load/sut-metrics/v2/` because server contract tests load them there. The current ownership example stays at `examples/package-local-sut-metrics/`.
+The former SUT Metrics Settings catalog is under `examples/legacy/sut-metrics/`. The v2 schema samples stay at `examples/load/sut-metrics/v2/` because server contract tests load them there. The current ownership example stays at `examples/package-local-sut-metrics/`.
 
-The per-file table is [example-migration-matrix.md](example-migration-matrix.md). The machine-readable inventory is [../example-inventory.json](../example-inventory.json).
+The machine-readable inventory is [../example-inventory.json](../example-inventory.json).
 
 ## Current-branch boundary and pending acceptance
 
-- Forced conversion or deletion of `payment2` / `payment_regression` / committed Snapshots
+- Rewriting `payment2` / `payment_regression` / committed Snapshots into Native Cases
 - S06 and S07 acceptance owned by their own issues; this S12 matrix does not close [#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) or [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)
 - Native LOAD Case targets ([#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)), advanced Testdata and generators ([#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)), Debug interoperability ([#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)), and Helper rollback/teardown verification ([#421](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/421)) are follow-ups outside the 4.6.0 target. ADR approval/architecture closure is tracked separately under [#422](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/422) and is not a target release blocker.
 - Automatic Workbook→Flow conversion or Stage/Template retirement (#398)

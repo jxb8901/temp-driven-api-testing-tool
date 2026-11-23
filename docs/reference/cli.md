@@ -171,7 +171,7 @@ Local CLI output shows absolute paths by default. Add `--substitute-package-root
 
 ```sh
 ./att.sh validate --package --substitute-package-root
-./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
 ```
 
 ## Typed overrides and quick Load
@@ -190,7 +190,7 @@ evidence: {mode: failures}
 ```sh
 ./att.sh debug
 ./att.sh load
-./att.sh load --debug template PAYMENT_INVOKE
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh load --debug template PAYMENT_INVOKE
 ./att.sh load --debug tool fpp.invokeApi --users 1 --duration 10s --set arg.requestId=42
 ./att.sh load --debug flow common.payment --users 4 --duration 5s --set input.customer.ids[0]=42
 ```
@@ -217,8 +217,8 @@ This page defines target, `--input`, `--set` and `--env` syntax in the option ma
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 
 ```sh
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
-./att.sh load examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
+./att.sh load ../../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
+./att.sh load ../../examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
   --arrival-rate 5/s --ramp-up 1s --warmup 1s --duration 5s --ramp-down 1s \
   --max-concurrent 4 --overload-policy drop --format json
 ```
@@ -226,7 +226,7 @@ Load uses the scenario as the base and explicit workload options override the co
 Repeatable `--set <input|arg|vars>.<path>=<yaml-value>` applies safe-YAML typed overrides before expression evaluation. The same option works for `debug`, single-workload Load scenarios, and `load --debug template|flow|tool <id>`. Quick Load uses `load/load.yaml` when present; otherwise provide a complete policy on the command line. For example:
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ```
 

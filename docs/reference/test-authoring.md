@@ -94,7 +94,11 @@ Workbook, Stage, and Template remain a supported runtime. Use this path when Sta
 
 ### Workbook, Sidecar, and Snapshot relationship
 
-In the legacy Workbook/Sidecar/Snapshot workflow, every `.xlsx` workbook requires a YAML sidecar and generated XML snapshot with the same basename in the same directory:
+In the legacy Workbook/Sidecar/Snapshot workflow, every `.xlsx` workbook requires a YAML sidecar and generated XML snapshot with the same basename in the same directory. `payment_regression` is in `packages/legacy`. From the repository root, `./att.sh` changes into `packages/default` unless `ATT_PACKAGE_ROOT` names another package, and a suite path is relative to that package:
+
+```sh
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh run --suite testcase/payment_regression.xlsx --dry-run
+```
 
 ```text
 testcase/payment_regression.xlsx

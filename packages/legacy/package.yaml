@@ -1,0 +1,4 @@
+schemaVersion: att-package/v1
+metadata:
+  name: Legacy Package
+  description: Registered package for legacy Template and workbook examples that are not Native Flow Cases.

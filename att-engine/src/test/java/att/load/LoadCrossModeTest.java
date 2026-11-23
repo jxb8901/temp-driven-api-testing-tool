@@ -789,10 +789,10 @@ class LoadCrossModeTest {
 
     private Path findDefaultPackageRoot() throws Exception {
         for (Path candidate = Paths.get("").toAbsolutePath().normalize(); candidate != null; candidate = candidate.getParent()) {
-            Path packageRoot = candidate.resolve("packages/default");
+            Path packageRoot = candidate.resolve("packages/legacy");
             if (Files.isDirectory(packageRoot.resolve("templates/V3_FLOW_EXAMPLE"))) return packageRoot;
         }
-        throw new IllegalStateException("Could not locate the checked-in packages/default resources");
+        throw new IllegalStateException("Could not locate the checked-in packages/legacy resources");
     }
 
     private Path write(Path project, String relative, String content) throws Exception {

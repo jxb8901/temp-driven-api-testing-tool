@@ -706,8 +706,8 @@ def check_secret_placeholders():
 
 def check_critical_examples():
     assets = (
-        "packages/default/testcase/payment2.xlsx",
-        "packages/default/templates/PAYMENT_INVOKE/debug.yaml",
+        "packages/legacy/testcase/payment2.xlsx",
+        "packages/legacy/templates/PAYMENT_INVOKE/debug.yaml",
         "packages/default/templates/flows/quick-start/flow.yaml",
         "packages/default/testcase/quick-start/single/testcase.yaml",
         "packages/default/testcase/quick-start/inline-multi/testcase.yaml",
@@ -766,7 +766,7 @@ def check_critical_examples():
         fail("missing Java documentation example regression test: att-cli/src/test/java/att/docs/DocumentationExamplesTest.java")
     else:
         test_text = read(test)
-        for rel in ("packages/default/testcase/payment2.xlsx", "packages/default/templates/PAYMENT_INVOKE/debug.yaml",
+        for rel in ("packages/legacy/testcase/payment2.xlsx", "packages/legacy/templates/PAYMENT_INVOKE/debug.yaml",
                     "examples/load/closed-smoke.yaml", "examples/load/arrival-smoke.yaml",
                     "config/environments/sit.yaml", "config/environments/uat.yaml",
                     "config/mqhelpers/sit/payment.yaml", "packages/default/tools/orders/findByDate.yaml"):
@@ -873,17 +873,21 @@ def check_example_inventory():
             fail("example inventory path is missing: %s" % rel)
             continue
         covered.add(rel)
-        if status == "legacy" and not (rel.startswith("examples/legacy/") or rel.startswith("examples/history/")):
-            fail("legacy inventory entry is outside examples/legacy and examples/history: %s" % rel)
+        if status == "legacy" and not (rel.startswith("examples/legacy/") or rel.startswith("examples/history/")
+                                        or rel.startswith("packages/legacy/")):
+            fail("legacy inventory entry is outside an explicit legacy location: %s" % rel)
         if status == "blocked":
-            if not rel.startswith("packages/default/"):
-                fail("blocked inventory entry must remain in packages/default: %s" % rel)
             if ci_runnable or "This file is" not in str(entry.get("reason")):
                 fail("blocked inventory entry needs its own file-specific blocker: %s" % rel)
-        if status == "current" and rel.startswith("examples/legacy/"):
-            fail("current inventory entry points at examples/legacy: %s" % rel)
-        if "/templates/flows/common/" in rel and (runtime != "executable-flow" or ci_runnable or status != "current"):
-            fail("common Flow must stay executable and outside the offline native-suite fixture set: %s" % rel)
+        if status == "current" and (rel.startswith("examples/legacy/") or rel.startswith("packages/legacy/")):
+            fail("current inventory entry points at a legacy location: %s" % rel)
+        if "/templates/flows/common/" in rel:
+            if runtime != "executable-flow" or ci_runnable:
+                fail("common Flow must stay executable and outside the offline native-suite fixture set: %s" % rel)
+            if rel.startswith("packages/legacy/") and status != "legacy":
+                fail("packages/legacy common Flow is a dependency copy and must be legacy: %s" % rel)
+            if rel.startswith("packages/default/") and status != "current":
+                fail("packages/default common Flow must stay current: %s" % rel)
         if ci_runnable:
             if status != "current" or runtime != "native" or entry.get("environment") != "offline":
                 fail("ciRunnable inventory entry must be a current offline native fixture: %s" % entry_id)
@@ -894,7 +898,7 @@ def check_example_inventory():
         fail("example inventory does not name an executable current Native Suite fixture")
     expected = []
     for base in ("packages/default/templates", "packages/default/testcase", "packages/default/testdata",
-                 "packages/default/tools", "examples"):
+                 "packages/default/tools", "packages/legacy", "examples"):
         for path in (ROOT / base).rglob("*"):
             if path.is_file():
                 expected.append(path.relative_to(ROOT).as_posix())
@@ -907,8 +911,10 @@ def check_example_inventory():
     if "examples/package-local-sut-metrics" not in load_readme or "examples/legacy/sut-metrics" not in load_readme:
         fail("examples/load/README.md must point at the package-local example and the archived catalog")
     matrix = read(DOCS / "maintenance/example-migration-matrix.md")
-    if "packages/legacy" not in matrix or "packages/default" not in matrix:
-        fail("migration matrix must explain why blocked files stay in packages/default")
+    if "packages/legacy/testcase/payment_regression.xlsx" not in matrix or "packages/default" not in matrix:
+        fail("migration matrix must record the packages/legacy cutover and the remaining default package")
+    if "packages/default/testcase/payment_regression.xlsx" in matrix:
+        fail("migration matrix still lists payment_regression under packages/default")
 
 
 def main():

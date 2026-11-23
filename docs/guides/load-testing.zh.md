@@ -17,8 +17,8 @@
 在 repository root 執行已撰寫的 scenario，或將一個支援的 Debug sidecar 提升為 Load workload：
 
 ~~~sh
-./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
-./att.sh load --debug template PAYMENT_INVOKE --load-template builtin:single-vu --preview
+./att.sh load ../../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh load --debug template PAYMENT_INVOKE --load-template builtin:single-vu --preview
 ./att.sh load --debug --load-template load/templates/mixed.yaml --bindings load/bindings/mixed.yaml --env SIT --preview
 ~~~
 

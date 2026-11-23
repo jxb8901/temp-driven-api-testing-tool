@@ -52,20 +52,20 @@ class ExampleInventoryContractTest {
                     "archived", "contract-sample", "load-scenario", "documentation", "deferred").contains(runtime), runtime);
             covered.add(path);
             if ("legacy".equals(status)) {
-                assertTrue(path.startsWith("examples/legacy/") || path.startsWith("examples/history/"), path);
+                assertTrue(path.startsWith("examples/legacy/") || path.startsWith("examples/history/")
+                        || path.startsWith("packages/legacy/"), path);
             }
             if ("blocked".equals(status)) {
-                assertTrue(path.startsWith("packages/default/"), path);
                 assertEquals(Boolean.FALSE, entry.get("ciRunnable"));
                 assertTrue(String.valueOf(entry.get("reason")).contains("This file is"), path);
             }
             if ("current".equals(status)) {
-                assertFalse(path.startsWith("examples/legacy/"), path);
+                assertFalse(path.startsWith("examples/legacy/") || path.startsWith("packages/legacy/"), path);
             }
             if (path.contains("/templates/flows/common/")) {
-                assertEquals("current", status);
                 assertEquals("executable-flow", runtime);
                 assertEquals(Boolean.FALSE, entry.get("ciRunnable"));
+                assertEquals(path.startsWith("packages/legacy/") ? "legacy" : "current", status);
             }
             if (Boolean.TRUE.equals(entry.get("ciRunnable"))) {
                 assertEquals("current", status);
@@ -82,7 +82,7 @@ class ExampleInventoryContractTest {
         assertTrue(planned, "planned work must stay in the inventory and out of the executable set");
         List<String> missing = new ArrayList<String>();
         for (String base : Arrays.asList("packages/default/templates", "packages/default/testcase",
-                "packages/default/testdata", "packages/default/tools", "examples")) {
+                "packages/default/testdata", "packages/default/tools", "packages/legacy", "examples")) {
             for (Path file : (Iterable<Path>) Files.walk(root.resolve(base))::iterator) {
                 if (Files.isRegularFile(file)) {
                     String relative = root.relativize(file).toString().replace('\\', '/');
@@ -96,9 +96,10 @@ class ExampleInventoryContractTest {
         assertTrue(loadReadme.contains("examples/package-local-sut-metrics"));
         assertTrue(loadReadme.contains("examples/legacy/sut-metrics"));
         String matrix = read(root.resolve("docs/maintenance/example-migration-matrix.md"));
-        assertTrue(matrix.contains("packages/default/testcase/payment_regression.xlsx"));
+        assertTrue(matrix.contains("packages/legacy/testcase/payment_regression.xlsx"));
+        assertFalse(matrix.contains("packages/default/testcase/payment_regression.xlsx"));
         assertTrue(matrix.contains("examples/legacy/sut-metrics/source.json"));
-        assertTrue(matrix.contains("packages/legacy"));
+        assertTrue(matrix.contains("packages/default"));
     }
 
     @Test

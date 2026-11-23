@@ -3,10 +3,10 @@
 Debug executes one Template, Flow or Tool without requiring a workbook Testcase.
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE
 ./att.sh debug flow common.compose.v1 --input /tmp/compose.debug.yaml
 ./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml --env UAT
-./att.sh debug template PAYMENT_INVOKE --profile
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --profile
 ```
 
 Run `./att.sh debug` with no target to list statically valid runnable Tools, Templates and Flows with copyable commands. A default sidecar path is displayed only when that regular non-symlink file exists. Discovery validates selected target dependencies but does not create Debug output or invoke Tools. Use `--format json` for machine-readable discovery output.
@@ -58,7 +58,7 @@ Descriptor paths are relative to the package root and use the normal `att-testda
 For collector failures whose safe projection hides details, local runs can opt in with `--unsafe-failure-details`:
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE --unsafe-failure-details
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --unsafe-failure-details
 ```
 
 This flag is accepted only by standalone `debug`. ATT prints a warning before execution, preserves configured-secret redaction, and includes `failureDetailMode: local-unsafe` in the result. It does not dump raw inputs, argv, request bodies, or Context values. The default remains `safe-default`; `load --debug`, Run, Validate, and Snapshot cannot enable the override.
@@ -109,7 +109,7 @@ Load-specific evidence retention (`metrics`, `failures`, `samples`, `all`) does 
 
 The following examples show the supported placement of debug values. Every file is a complete `att-debug/v1.2` document.
 
-Template sidecar (`templates/PAYMENT_INVOKE/debug.yaml`):
+`PAYMENT_INVOKE` is in `packages/legacy`. From the repository root, select that package before Debug. Template sidecar (`templates/PAYMENT_INVOKE/debug.yaml`):
 
 ```yaml
 schemaVersion: att-debug/v1.2
@@ -124,7 +124,7 @@ stage:
     sourceRef: SRC-001
 ```
 
-Run it with `./att.sh debug template PAYMENT_INVOKE`. Template expressions should prefer `${EXEC.INPUT.amount}`, `${EXEC.INPUT.environment}`, and the current Stage value `${EXEC.INPUT.channel}`; the current Stage's `values` overlay Case-level input for that Stage, with the Stage value winning on collisions. The corresponding `CASE.*` paths remain compatibility aliases, while `CASE.STAGES.*` is retained only as the legacy execution/evidence view.
+Run it with `ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE`. Template expressions should prefer `${EXEC.INPUT.amount}`, `${EXEC.INPUT.environment}`, and the current Stage value `${EXEC.INPUT.channel}`; the current Stage's `values` overlay Case-level input for that Stage, with the Stage value winning on collisions. The corresponding `CASE.*` paths remain compatibility aliases, while `CASE.STAGES.*` is retained only as the legacy execution/evidence view.
 
 Flow sidecar (`templates/flows/common/compose/debug.yaml`):
 
@@ -175,7 +175,7 @@ Run it with `./att.sh debug tool invokePaymentApi`. For an ungrouped Tool, root 
 An explicit file overrides sidecar discovery, which is useful for temporary values in CI or local diagnosis:
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE --input /tmp/payment-debug.yaml \
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --input /tmp/payment-debug.yaml \
   --output-dir /tmp/att-debug --format json
 ```
 

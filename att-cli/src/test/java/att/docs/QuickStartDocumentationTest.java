@@ -156,8 +156,9 @@ class QuickStartDocumentationTest {
 
         // Safe offline evidence for the retained multi-Stage fixture: dry-run skips all rows
         // without calling FPP/MQ/DB Tools. Full business execution remains #398 / integration-only.
-        CliResult paymentRegression = runCli(packageRoot, "run", "--config", config,
-                "--suite", packageRoot.resolve("testcase/payment_regression.xlsx").toString(),
+        Path legacyRoot = root.resolve("packages/legacy");
+        CliResult paymentRegression = runCli(legacyRoot, "run", "--config", config,
+                "--suite", legacyRoot.resolve("testcase/payment_regression.xlsx").toString(),
                 "--dry-run", "--format", "json", "--quiet",
                 "--output-dir", temp.resolve("payment-regression-output").toString(),
                 "--run-id", "payment-regression-dry");

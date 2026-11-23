@@ -30,7 +30,7 @@ Snapshot generation writes the canonical workbook representation. Validation che
 Use the Local Run ID and output directory in the result summary to find the execution evidence. For template, flow or tool diagnostics, the current compatibility command is standalone Debug:
 
 ~~~sh
-./att.sh debug template PAYMENT_INVOKE
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE
 ~~~
 
 For target and selection semantics, see [Unified RUN](../reference/execution-modes/unified-run.md). Native `run native-case` and `run native-suite` are the current commands. The broader shared vNext grammar remains a [planned proposal](../interfaces/cli/vnext-proposed.md).

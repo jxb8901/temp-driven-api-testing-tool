@@ -1,0 +1,19 @@
+schemaVersion: att-tool/v1
+id: querySqlplus
+name: Query SQLPlus and return XML
+description: Execute one SQL file through SQLPlus, save raw streams, and convert pipe-delimited stdout to XML
+command: [./tools/fpp_query_sqlplus.sh, "${input.sqlFile}", "${input.outputFile}", "${input.stderrPath}"]
+stdoutFormat: xml
+arguments:
+  sqlFile:
+    name: SQL File
+    description: SQLPlus script which exits non-zero while its expected condition is not yet satisfied
+    required: true
+  outputFile:
+    name: SQLPlus Output File
+    description: Full path for raw pipe-delimited SQLPlus stdout
+    required: true
+  stderrPath:
+    name: SQLPlus Stderr Path
+    description: Full path for SQLPlus diagnostics
+    required: true

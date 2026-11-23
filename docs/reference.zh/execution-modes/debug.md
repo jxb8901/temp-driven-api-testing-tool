@@ -3,10 +3,10 @@
 Debug 可在沒有 workbook Testcase 的情況下執行單一 Template、Flow 或 Tool。
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE
 ./att.sh debug flow common.compose.v1 --input /tmp/compose.debug.yaml
 ./att.sh debug tool fpp.invokeApi --input /tmp/invoke.debug.yaml --env UAT
-./att.sh debug template PAYMENT_INVOKE --profile
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --profile
 ```
 
 不帶 target 執行 `./att.sh debug`，會列出 statically valid、可執行的 Tool、Template 和 Flow，附 copyable command。只會顯示實際存在的 regular non-symlink default sidecar。Discovery 會檢查 selected target dependencies，但不建立 Debug output，也不呼叫 Tool。可用 `--format json` 取得 machine-readable 結果。
@@ -58,7 +58,7 @@ Descriptor path 相對於 package root，並使用一般 `att-testdata/v1.0` 格
 若 collector failure 的安全投影隱藏了診斷細節，可在本機執行時明確選用 `--unsafe-failure-details`：
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE --unsafe-failure-details
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --unsafe-failure-details
 ```
 
 此 flag 僅供 standalone `debug` 使用。ATT 會在執行前顯示警告，保留 configured-secret redaction，並在 result 寫入 `failureDetailMode: local-unsafe`。它不會 dump raw inputs、argv、request body 或 Context values。預設仍為 `safe-default`；Run、Validate、Snapshot 及 `load --debug` 不能啟用此 override。
@@ -111,7 +111,7 @@ Load 專用的 evidence retention（`metrics`、`failures`、`samples`、`all`�
 
 以下每個文件都是完整的 `att-debug/v1.2` 文檔，展示 Template、Flow、分組 Tool、未分組 Tool 和臨時覆蓋值的不同寫法。
 
-Template sidecar（`templates/PAYMENT_INVOKE/debug.yaml`）：
+`PAYMENT_INVOKE` 位於 `packages/legacy`。從 repository root 執行 Debug 前先選用該 Package。Template sidecar（`templates/PAYMENT_INVOKE/debug.yaml`）：
 
 ```yaml
 schemaVersion: att-debug/v1.2
@@ -129,7 +129,7 @@ stage:
 執行：
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE
 ```
 
 Template 表達式應優先讀取 `${EXEC.INPUT.amount}`、`${EXEC.INPUT.environment}` 和當前 Stage 的 `${EXEC.INPUT.channel}`；當前 Stage 的 `values` 會在該 Stage 期間覆蓋同名 Case-level input，Stage 結束後恢復。對應的 `CASE.*` 路徑仍是兼容 aliases，`CASE.STAGES.*` 只保留為舊的執行／證據視圖。
@@ -201,7 +201,7 @@ arguments:
 臨時覆蓋自動發現的 sidecar：
 
 ```sh
-./att.sh debug template PAYMENT_INVOKE \
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE \
   --input /tmp/payment-debug.yaml \
   --output-dir /tmp/att-debug --format json
 ```
