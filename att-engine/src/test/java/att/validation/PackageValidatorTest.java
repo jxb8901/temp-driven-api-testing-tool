@@ -1648,4 +1648,43 @@ class PackageValidatorTest {
                         || repaired.selectedCaseIds.stream().anyMatch(id -> id.startsWith("demo.ok")),
                 String.valueOf(repaired.selectedCaseIds));
     }
+
+    @Test void packageValidationAcceptsMoreThanPreviewLimitWithoutTruncationWarning() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("native-preview-limit"));
+        att.TestSchemas.install(root);
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("flows/demo"));
+        Files.createDirectories(root.resolve("testcase/many"));
+        Files.write(root.resolve("package.yaml"),
+                ("schemaVersion: att-package/v2\nresources:\n  flowRoot: flows\n  testcaseRoot: testcase\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(root.resolve("config/config.yaml"),
+                ("schemaVersion: att-config/v2.15\nenvironment: SIT\n"
+                        + "templates: {root: templates}\ntestcase: {root: testcase}\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(root.resolve("flows/demo/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: demo.v1\nname: Demo\ndescription: Valid Flow.\n"
+                        + "actions:\n  note:\n    type: log\n    message: ok\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        StringBuilder records = new StringBuilder();
+        for (int index = 1; index <= 101; index++) {
+            records.append("    - recordId: r").append(index).append("\n")
+                    .append("      data: {caseKey: c").append(index).append("}\n");
+        }
+        Files.write(root.resolve("testcase/many/testcase.yaml"),
+                ("schemaVersion: att-testcase/v1\nid: demo.many\nflow: demo.v1\nname: Many\n"
+                        + "caseIdExpression: \"${DATA.caseKey}\"\n"
+                        + "dataSource:\n  type: inline\n  records:\n" + records
+                        + "inputs: {}\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        FrameworkConfig loaded = new FrameworkConfigLoader().load(root.resolve("config/config.yaml"), root, root, "SIT");
+        PackageValidator.ValidationSummary summary = new PackageValidator(root, loaded, root.resolve("config/config.yaml"))
+                .validate(att.core.ExecutionOptionsTestSupport.parse(new String[]{"validate", "--package"}));
+        assertTrue(summary.valid(), summary.diagnostics.toString());
+        assertEquals(101, summary.cases);
+        assertFalse(summary.diagnostics.stream().anyMatch(item ->
+                        item.message() != null && item.message().toLowerCase(java.util.Locale.ROOT).contains("truncated")),
+                summary.diagnostics.toString());
+    }
+
 }

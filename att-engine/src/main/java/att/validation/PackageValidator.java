@@ -2757,11 +2757,19 @@ public final class PackageValidator {
             return 0;
         }
         att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(schema);
+        att.testcase.TestCaseDefinitionResolver.Options sharedOptions;
+        try {
+            sharedOptions = resolver.preparePackageValidationOptions(projectRoot, global.flowRoot(),
+                    global.templatesRoot(), definitions, att.testcase.TestCaseDefinitionResolver.Options.defaults());
+        } catch (Exception error) {
+            diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, error, directory));
+            return 0;
+        }
         int resolvedCases = 0;
         for (Path definition : definitions) {
             try {
                 att.testcase.TestCaseResolutionResult result = resolver.resolve(definition, "package", projectRoot,
-                        global.flowRoot(), global.templatesRoot(), att.testcase.TestCaseDefinitionResolver.Options.defaults());
+                        global.flowRoot(), global.templatesRoot(), sharedOptions);
                 for (att.testcase.ResolvedTestCase testCase : result.selectedCases()) {
                     CaseLocation previous = fullCaseIds.put(testCase.qualifiedCaseId(),
                             new CaseLocation(definition, testCase.definitionId(), 0));
@@ -2772,11 +2780,7 @@ public final class PackageValidator {
                             definition.toString(), testCase.definitionId(), null, null, null, null));
                     resolvedCases++;
                 }
-                if (result.truncated()) diagnostics.add(new Diagnostic(DiagnosticCodes.TESTCASE_INVALID,
-                        Diagnostic.Severity.WARNING,
-                        "Native Definition resolution truncated at the bounded Case limit",
-                        definition.toString(), "dataSource", null, null, null, null, null,
-                        "Narrow the Data Source or raise the documented bound before relying on full Package validation."));
+                // result.truncated() is preview-presentation only; selectedCases() already holds the full plan.
             } catch (Exception error) {
                 diagnostics.add(diagnostic(DiagnosticCodes.TESTCASE_INVALID, error, definition));
             }
