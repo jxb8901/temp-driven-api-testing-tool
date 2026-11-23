@@ -69,6 +69,12 @@ public final class TestCaseDefinitionResolver {
     /** Resolves an existing package-relative Definition after proving its path remains package-local. */
     public TestCaseResolutionResult resolve(Path definitionPath, String packageId, Path packageRoot,
                                             Path templatesRoot, Options options) throws Exception {
+        return resolve(definitionPath, packageId, packageRoot, att.flow.PackageFlowRoots.DEFAULT_FLOW_ROOT,
+                templatesRoot, options);
+    }
+
+    public TestCaseResolutionResult resolve(Path definitionPath, String packageId, Path packageRoot,
+                                            Path flowRoot, Path templatesRoot, Options options) throws Exception {
         if (definitionPath == null) throw new IllegalArgumentException("Test Case Definition path is required");
         PackageResourceResolver resources = new PackageResourceResolver(packageRoot);
         PackageResourceResolver.PackageResource resource;
@@ -80,7 +86,7 @@ public final class TestCaseDefinitionResolver {
         }
         byte[] bytes = readBounded(resource.canonicalPath(), MAX_SOURCE_BYTES, "Test Case Definition source");
         return resolve(decodeUtf8(bytes, resource.logicalName()), resource.logicalName(), packageId,
-                packageRoot, templatesRoot, options);
+                packageRoot, flowRoot, templatesRoot, options);
     }
 
     /**
@@ -91,6 +97,12 @@ public final class TestCaseDefinitionResolver {
      */
     public TestCaseResolutionResult resolveByDefinitionId(Path packageRoot, String packageId,
             Path templatesRoot, Path testcasesRoot, String definitionId, Options suppliedOptions) throws Exception {
+        return resolveByDefinitionId(packageRoot, packageId, att.flow.PackageFlowRoots.DEFAULT_FLOW_ROOT,
+                templatesRoot, testcasesRoot, definitionId, suppliedOptions);
+    }
+
+    public TestCaseResolutionResult resolveByDefinitionId(Path packageRoot, String packageId,
+            Path flowRoot, Path templatesRoot, Path testcasesRoot, String definitionId, Options suppliedOptions) throws Exception {
         Options options = suppliedOptions == null ? Options.defaults() : suppliedOptions;
         validatePackageId(packageId, definitionId);
         validateDefinitionId(definitionId, definitionId);
@@ -155,12 +167,19 @@ public final class TestCaseDefinitionResolver {
         checkCancelled(options);
         if (match == null)
             throw invalid(definitionId, "id", "Definition ID was not found under the configured testcase.root");
-        return resolve(match, packageId, resources.packageRoot(), templatesRoot, options);
+        return resolve(match, packageId, resources.packageRoot(), flowRoot, templatesRoot, options);
     }
 
     /** Resolves a source snapshot, which can come from an immutable Package revision or an editor draft. */
     public TestCaseResolutionResult resolve(String yaml, String sourceReference, String packageId,
                                             Path packageRoot, Path templatesRoot, Options suppliedOptions) throws Exception {
+        return resolve(yaml, sourceReference, packageId, packageRoot, att.flow.PackageFlowRoots.DEFAULT_FLOW_ROOT,
+                templatesRoot, suppliedOptions);
+    }
+
+    public TestCaseResolutionResult resolve(String yaml, String sourceReference, String packageId,
+                                            Path packageRoot, Path flowRoot, Path templatesRoot,
+                                            Options suppliedOptions) throws Exception {
         Options options = suppliedOptions == null ? Options.defaults() : suppliedOptions;
         validatePackageId(packageId, sourceReference);
         validateSourceReference(sourceReference);
@@ -194,7 +213,7 @@ public final class TestCaseDefinitionResolver {
         Path packageDirectory = resources.packageRoot();
         validatePackageDefinitionIdentity(definition.id(), sourceReference, packageDirectory, resources, options);
         List<ResolvedTestCase.FlowDependency> dependencies = validateAndCaptureFlow(definition.flowId(), packageDirectory,
-                templatesRoot, resources, sourceReference, options);
+                flowRoot, templatesRoot, resources, sourceReference, options);
 
         List<ResolvedTestCase> resolved = new ArrayList<ResolvedTestCase>();
         Set<String> sourceIds = new HashSet<String>();
@@ -399,13 +418,13 @@ public final class TestCaseDefinitionResolver {
     }
 
     private List<ResolvedTestCase.FlowDependency> validateAndCaptureFlow(String flowId, Path packageRoot,
-            Path templatesRoot, PackageResourceResolver resources, String sourceReference, Options options) throws Exception {
-        Path templates = templatesRoot == null ? packageRoot.resolve("templates")
-                : templatesRoot.isAbsolute() ? templatesRoot : packageRoot.resolve(templatesRoot);
+            Path flowRoot, Path templatesRoot, PackageResourceResolver resources, String sourceReference,
+            Options options) throws Exception {
+        Path configuredFlowRoot = flowRoot == null ? att.flow.PackageFlowRoots.DEFAULT_FLOW_ROOT : flowRoot;
         att.flow.PackageFlowRoots.Resolution resolution = att.flow.PackageFlowRoots.resolve(
-                packageRoot, att.flow.PackageFlowRoots.DEFAULT_FLOW_ROOT, templatesRoot);
+                packageRoot, configuredFlowRoot, templatesRoot);
         FlowTreeSnapshot flowSnapshots = preflightFlowTrees(resolution.existingRoots(), resources, sourceReference, options);
-        return resolveCapturedFlows(flowId, packageRoot, templates, sourceReference, flowSnapshots, options);
+        return resolveCapturedFlows(flowId, packageRoot, resolution, sourceReference, flowSnapshots, options);
     }
 
     private FlowTreeSnapshot preflightFlowTrees(List<Path> flowRoots, PackageResourceResolver resources,
@@ -424,15 +443,18 @@ public final class TestCaseDefinitionResolver {
 
     List<ResolvedTestCase.FlowDependency> resolveCapturedFlows(String flowId, Path packageRoot, Path templates,
             String sourceReference, FlowTreeSnapshot flowSnapshots) throws Exception {
-        return resolveCapturedFlows(flowId, packageRoot, templates, sourceReference, flowSnapshots, Options.defaults());
+        return resolveCapturedFlows(flowId, packageRoot,
+                att.flow.PackageFlowRoots.resolve(packageRoot, att.flow.PackageFlowRoots.DEFAULT_FLOW_ROOT, templates),
+                sourceReference, flowSnapshots, Options.defaults());
     }
 
-    List<ResolvedTestCase.FlowDependency> resolveCapturedFlows(String flowId, Path packageRoot, Path templates,
-            String sourceReference, FlowTreeSnapshot flowSnapshots, Options options) throws Exception {
+    List<ResolvedTestCase.FlowDependency> resolveCapturedFlows(String flowId, Path packageRoot,
+            att.flow.PackageFlowRoots.Resolution flowRoots, String sourceReference, FlowTreeSnapshot flowSnapshots,
+            Options options) throws Exception {
         checkCancelled(options);
         PackageResourceResolver resources = new PackageResourceResolver(packageRoot);
         FlowRegistry registry;
-        try { registry = new FlowRegistry(packageRoot, templates, false,
+        try { registry = new FlowRegistry(packageRoot, flowRoots, false,
                 flowSnapshots.sources, flowSnapshots.templateDescriptors); }
         catch (Exception failure) { throw flowFailure(sourceReference, packageRoot, failure, "Package Flow registry is invalid"); }
         checkCancelled(options);

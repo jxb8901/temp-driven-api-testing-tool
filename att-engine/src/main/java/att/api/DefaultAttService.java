@@ -149,7 +149,7 @@ public final class DefaultAttService implements AttService {
         att.testcase.TestCaseResolutionResult resolution;
         try {
             resolution = resolver.resolveByDefinitionId(request.packageRoot(), request.packageId(),
-                    cfg.templatesRoot(), cfg.testcasesRoot(), request.definitionId(), resolverOptions);
+                    cfg.flowRoot(), cfg.templatesRoot(), cfg.testcasesRoot(), request.definitionId(), resolverOptions);
         } catch (att.validation.DiagnosticException invalid) {
             Map<String,Object> summary = new LinkedHashMap<String,Object>();
             summary.put("total", 0); summary.put("passed", 0); summary.put("failed", 0);
@@ -233,7 +233,7 @@ public final class DefaultAttService implements AttService {
         att.testcase.TestCaseSuiteResolver resolver = new att.testcase.TestCaseSuiteResolver(testcaseSchema);
         boolean rerunFailed=request.rerunFailed();
         att.testcase.TestCaseSuiteResolutionResult resolution = resolver.resolve(request.packageRoot(),
-                request.packageId(), cfg.templatesRoot(), cfg.testcasesRoot(), request.definitionIds(),
+                request.packageId(), cfg.flowRoot(), cfg.templatesRoot(), cfg.testcasesRoot(), request.definitionIds(),
                 rerunFailed?Collections.<String>emptyList():request.qualifiedCaseIds(),
                 rerunFailed?Collections.<String>emptyList():request.tags(),
                 rerunFailed?Collections.<String>emptyList():request.excludeTags(),rerunFailed||request.all(), null);
@@ -262,9 +262,10 @@ public final class DefaultAttService implements AttService {
                     :request.packageRoot().resolve(request.outputDirectory())).toAbsolutePath().normalize();
             retryLineage=att.testcase.NativeSuiteRetryResolver.resolve(outputRoot,request.packageId(),
                     request.definitionIds(),resolution.cases());
-            resolution=resolver.resolve(request.packageRoot(),request.packageId(),cfg.templatesRoot(),cfg.testcasesRoot(),
-                    request.definitionIds(),retryLineage.failedQualifiedCaseIds(),Collections.<String>emptyList(),
-                    Collections.<String>emptyList(),false,()->Thread.currentThread().isInterrupted());
+            resolution=resolver.resolve(request.packageRoot(),request.packageId(),cfg.flowRoot(),cfg.templatesRoot(),
+                    cfg.testcasesRoot(),request.definitionIds(),retryLineage.failedQualifiedCaseIds(),
+                    Collections.<String>emptyList(),Collections.<String>emptyList(),false,
+                    ()->Thread.currentThread().isInterrupted());
         }
         att.core.RunSummary result = engine.runNativeCaseSuite(resolution, runId, request.outputDirectory(),
                 request.packageId(), request.dryRun(), request.failFast(), request.observer(), retryLineage);

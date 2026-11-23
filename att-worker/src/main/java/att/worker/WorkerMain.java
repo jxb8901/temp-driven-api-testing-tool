@@ -740,7 +740,7 @@ public final class WorkerMain {
                 null,()->Thread.currentThread().isInterrupted());
         try {
             att.testcase.TestCaseResolutionResult resolution=resolver.resolve(source,logicalPath,
-                    request.registeredPackageId,root,effective.templatesRoot(),options);
+                    request.registeredPackageId,root,effective.flowRoot(),effective.templatesRoot(),options);
             Map<String,Object> result=new LinkedHashMap<String,Object>();
             result.put("kind","NativeTestCasePreview");result.put("valid",Boolean.TRUE);
             result.put("sourceType",resolution.definition().dataSourceType()==null?"direct":resolution.definition().dataSourceType());
@@ -847,7 +847,8 @@ public final class WorkerMain {
                 att.testcase.TestCaseDefinitionResolver.MAX_RECORDS,request.nativeResolvedCaseIds.size(),selectedQualified,
                 ()->Thread.currentThread().isInterrupted());
         att.testcase.TestCaseResolutionResult resolution=resolver.resolveByDefinitionId(root,request.registeredPackageId,
-                effective.templatesRoot(),effective.testcasesRoot(),request.nativeCaseDefinitionId,options);
+                effective.flowRoot(),effective.templatesRoot(),effective.testcasesRoot(),
+                request.nativeCaseDefinitionId,options);
         // Native RUN follows S01 Definition/source order for both draft preview and execution.
         // Requested resolvedCaseIds are an unordered exact selection set; they must not reorder fail-fast.
         java.util.List<att.testcase.ResolvedTestCase> selected=resolution.selectedCases();

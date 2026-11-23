@@ -966,7 +966,7 @@ public class FrameworkEngine {
             Path previousWorkbook = workbookIds.put(suiteConfig.workbookId(), workbook);
             if (previousWorkbook != null) throw new IllegalArgumentException("Duplicate workbook id '" + suiteConfig.workbookId() + "' in " + previousWorkbook + " and " + workbook);
             StageTemplateLoader loader = new StageTemplateLoader(projectRoot, suiteConfig.templatesRoot());
-            att.flow.FlowRegistry flows = new att.flow.FlowRegistry(projectRoot, suiteConfig.templatesRoot(), false);
+            att.flow.FlowRegistry flows = new att.flow.FlowRegistry(projectRoot, suiteConfig, false);
             List<TestCase> selectedCases = new ArrayList<TestCase>();
             Map<String, StageTemplate> templates = new LinkedHashMap<String, StageTemplate>();
             List<TestCase> loadedCases = new ExcelTestSuiteLoader(suiteConfig).load(workbook);
@@ -1187,6 +1187,8 @@ public class FrameworkEngine {
         }
         Path templates = resolve(config.templatesRoot());
         if (Files.isDirectory(templates)) try (java.util.stream.Stream<Path> files = Files.walk(templates)) { java.util.Iterator<Path> iterator = files.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path)).filter(path -> !path.getFileName().toString().startsWith(".")).sorted().iterator(); while (iterator.hasNext()) addInput(inputs, "template-input", iterator.next()); }
+        Path flows = resolve(config.flowRoot());
+        if (Files.isDirectory(flows)) try (java.util.stream.Stream<Path> files = Files.walk(flows)) { java.util.Iterator<Path> iterator = files.filter(Files::isRegularFile).filter(path -> !Files.isSymbolicLink(path)).filter(path -> !path.getFileName().toString().startsWith(".")).sorted().iterator(); while (iterator.hasNext()) addInput(inputs, "flow-input", iterator.next()); }
         java.util.Set<Path> toolGroupFiles = new java.util.LinkedHashSet<Path>();
         java.util.Set<Path> toolSqlFiles = new java.util.LinkedHashSet<Path>();
         att.template.FileExpressionResolver toolFileExpressions = new att.template.FileExpressionResolver(projectRoot);

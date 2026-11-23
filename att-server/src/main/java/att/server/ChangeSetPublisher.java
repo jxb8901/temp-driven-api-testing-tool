@@ -1126,7 +1126,7 @@ final class ChangeSetPublisher implements AutoCloseable {
                                           Map<String, String> expected, List<Diff> diffs, List<Move> moves) throws Exception {
         if (!PACKAGE_SOURCE.equals(scope.domain) || moves.isEmpty()) return;
         for (Move move : moves) {
-            if (isDescriptor(move.source)) continue;
+            if (isDescriptor(scope.root, move.source)) continue;
             List<String> descriptors = descriptorPaths(scope.root, changes);
             for (String descriptor : descriptors) {
                 byte[] current = candidateBytes(scope.root, changes, descriptor);
@@ -1449,19 +1449,34 @@ final class ChangeSetPublisher implements AutoCloseable {
 
     private static List<String> descriptorPaths(Path root, Map<String, byte[]> changes) throws Exception {
         Set<String> result = new java.util.TreeSet<String>();
-        for (String name : scan(root, PACKAGE_SOURCE).files.keySet()) if (isDescriptor(name)) result.add(name);
+        for (String name : scan(root, PACKAGE_SOURCE).files.keySet()) if (isDescriptor(root, name)) result.add(name);
         for (Map.Entry<String, byte[]> change : changes.entrySet()) {
-            if (isDescriptor(change.getKey())) {
+            if (isDescriptor(root, change.getKey())) {
                 if (change.getValue() == null) result.remove(change.getKey()); else result.add(change.getKey());
             }
         }
         return new ArrayList<String>(result);
     }
 
-    private static boolean isDescriptor(String path) {
+    private static boolean isDescriptor(Path root, String path) {
         String lower = path.toLowerCase(Locale.ROOT);
-        if (!(lower.startsWith("templates/") || lower.startsWith("flows/"))) return false;
-        return lower.endsWith(".yaml") || lower.endsWith(".yml");
+        if (!(lower.endsWith(".yaml") || lower.endsWith(".yml"))) return false;
+        if (lower.startsWith("templates/") || lower.startsWith("flows/")) return true;
+        String flowPrefix = configuredFlowRootPrefix(root);
+        return flowPrefix != null && lower.startsWith(flowPrefix);
+    }
+
+    /** Package-relative lowercase prefix for the configured Flow root, including trailing slash. */
+    private static String configuredFlowRootPrefix(Path root) {
+        try {
+            att.config.PackageConfig pkg = att.config.PackageConfig.load(root);
+            String flow = pkg.flowRoot().toString().replace('\\', '/');
+            if (flow.isEmpty()) return "flows/";
+            if (!flow.endsWith("/")) flow = flow + "/";
+            return flow.toLowerCase(Locale.ROOT);
+        } catch (Exception unavailable) {
+            return "flows/";
+        }
     }
 
     private static String resolveLocator(Path root, String descriptor, String locator) throws Exception {
@@ -1657,22 +1672,30 @@ final class ChangeSetPublisher implements AutoCloseable {
                 java.util.EnumSet.noneOf(att.server.api.source.SourceManagementContracts.PackageCategory.class);
         if (!PACKAGE_SOURCE.equals(draft.scope.domain)) return Collections.emptyList();
         for (Diff diff : draft.diff) {
-            addCategory(result, diff.path);
-            if (diff.targetPath != null) addCategory(result, diff.targetPath);
+            addCategory(result, diff.path, draft.scope.root);
+            if (diff.targetPath != null) addCategory(result, diff.targetPath, draft.scope.root);
         }
         return new ArrayList<att.server.api.source.SourceManagementContracts.PackageCategory>(result);
     }
 
-    private static void addCategory(Set<att.server.api.source.SourceManagementContracts.PackageCategory> result, String path) {
+    private static void addCategory(Set<att.server.api.source.SourceManagementContracts.PackageCategory> result,
+                                    String path, Path packageRoot) {
         if (path == null || "package.yaml".equals(path)) return;
-        if (path.startsWith("testcase/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.TESTCASE);
-        else if (path.startsWith("load/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.LOAD);
-        else if (path.startsWith("testdata/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.TESTDATA);
-        else if (path.startsWith("flows/") || path.startsWith("templates/flows/"))
+        String normalized = path.replace('\\', '/');
+        if (normalized.startsWith("testcase/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.TESTCASE);
+        else if (normalized.startsWith("load/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.LOAD);
+        else if (normalized.startsWith("testdata/")) result.add(att.server.api.source.SourceManagementContracts.PackageCategory.TESTDATA);
+        else if (isFlowPath(normalized, packageRoot))
             result.add(att.server.api.source.SourceManagementContracts.PackageCategory.FLOW);
-        else if (path.startsWith("templates/") && (path.endsWith("template.yaml") || path.endsWith("template.yml")))
+        else if (normalized.startsWith("templates/") && (normalized.endsWith("template.yaml") || normalized.endsWith("template.yml")))
             result.add(att.server.api.source.SourceManagementContracts.PackageCategory.TEMPLATE);
         else result.add(att.server.api.source.SourceManagementContracts.PackageCategory.FILE);
+    }
+
+    private static boolean isFlowPath(String path, Path packageRoot) {
+        if (path.startsWith("flows/") || path.startsWith("templates/flows/")) return true;
+        String prefix = configuredFlowRootPrefix(packageRoot);
+        return prefix != null && path.toLowerCase(Locale.ROOT).startsWith(prefix);
     }
 
     private static boolean manifestChanged(Draft draft) {

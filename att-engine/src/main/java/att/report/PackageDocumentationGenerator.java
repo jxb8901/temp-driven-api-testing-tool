@@ -156,7 +156,7 @@ public final class PackageDocumentationGenerator {
     }
 
     private String flowPage(Path root, FrameworkConfig config) throws Exception {
-        StringBuilder body = new StringBuilder("<h1>Flows</h1><p>Static reusable Template Action groups using the calling Template Context.</p>");
+        StringBuilder body = new StringBuilder("<h1>Flows</h1><p>First-class reusable ordered Action sequences. Native Case Definitions bind a Flow by static ID; Legacy Template invocation semantics live in the Legacy documentation set.</p>");
         att.flow.FlowRegistry registry = new att.flow.FlowRegistry(root, config, true);
         for (att.flow.FlowDefinition flow : registry.all()) {
             body.append("<section class=\"doc-item\" data-search=\"").append(escape((flow.id()+" "+flow.name()+" "+flow.description()).toLowerCase(java.util.Locale.ROOT))).append("\" id=\"").append(anchor(flow.id())).append("\"><h2>").append(escape(flow.id())).append("</h2><p>").append(escape(flow.description())).append("</p>");
