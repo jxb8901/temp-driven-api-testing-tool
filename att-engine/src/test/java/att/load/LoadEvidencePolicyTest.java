@@ -104,6 +104,21 @@ class LoadEvidencePolicyTest {
                 }));
             }
             for(Future<?> task:tasks)task.get();
+            Map<String,Object> burst=store.statistics();
+            // One-shot attempts can observe a full cap while a failure still holds its
+            // provisional success reservation. That attempt is denied and does not retry.
+            assertTrue(((Number)burst.get("retainedSuccessCount")).intValue()<=7);
+            assertTrue(((Number)burst.get("retainedFailureCount")).intValue()<=11);
+            assertEquals(0,burst.get("reservedSuccessCount"));
+            assertEquals(0,burst.get("reservedFailureCount"));
+            for(int i=0;i<7;i++) {
+                String id="later-success-"+i;
+                if(store.reserveSuccessEvidence(id))store.onEvent(event(id,ResultStatus.PASS));
+            }
+            for(int i=0;i<11;i++) {
+                String id="later-failure-"+i;
+                if(store.claimFailureEvidence(id))store.onEvent(event(id,ResultStatus.ERROR));
+            }
         } finally {workers.shutdownNow();}
         assertEquals(7,store.statistics().get("retainedSuccessCount"));assertEquals(11,store.statistics().get("retainedFailureCount"));
         assertEquals(0,store.statistics().get("reservedSuccessCount"));assertEquals(0,store.statistics().get("reservedFailureCount"));
