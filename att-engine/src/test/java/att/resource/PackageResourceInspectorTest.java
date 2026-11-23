@@ -648,6 +648,46 @@ class PackageResourceInspectorTest {
         }
     }
 
+    @Test void nativeExcelWorkbookBytesChangeExecutionRevisionWithoutAddingWorkbookCaseResources() throws Exception {
+        Path root = packageWithTemplate("native-excel-execution-revision", "NATIVE", "description: revision fixture");
+        Path definition = root.resolve("testcase/fpp/transfer/testcase.yaml");
+        Files.createDirectories(definition.getParent());
+        writeUtf8(definition, "schemaVersion: att-testcase/v1\nid: fpp.transfer\nflow: payment.transfer.v1\n"
+                + "dataSource:\n  type: excel\n  path: testdata/cases.xlsx\n  sheet: Cases\n  caseId: Case ID\n");
+        Path workbookPath = root.resolve("testdata/cases.xlsx");
+        writeNativeExcelRevisionWorkbook(workbookPath, 7);
+        String initial;
+        try (PackageResourceInspector inspector = new PackageResourceInspector(root,
+                root.resolve("config/config.yaml"), "SIT", Collections.<String>emptyList(), 65536, 262144)) {
+            initial = inspector.executionRevisionDigest();
+            @SuppressWarnings("unchecked")
+            List<Map<String,Object>> caseResources = (List<Map<String,Object>>) inspector.inspect(
+                    "list", "case", null, null, 0, 50).get("items");
+            assertTrue(caseResources.isEmpty(), "Native Excel Definitions stay out of legacy Workbook Case indexing");
+        }
+
+        writeNativeExcelRevisionWorkbook(workbookPath, 13);
+        try (PackageResourceInspector inspector = new PackageResourceInspector(root,
+                root.resolve("config/config.yaml"), "SIT", Collections.<String>emptyList(), 65536, 262144)) {
+            assertNotEquals(initial, inspector.executionRevisionDigest(),
+                    "Accepted native RUN Jobs become stale when the referenced Excel source changes");
+        }
+    }
+
+    private void writeNativeExcelRevisionWorkbook(Path path, int amount) throws Exception {
+        Files.createDirectories(path.getParent());
+        try (Workbook workbook = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(path)) {
+            Sheet sheet = workbook.createSheet("Cases");
+            Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Case ID");
+            header.createCell(1).setCellValue("Amount");
+            Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue("case-1");
+            row.createCell(1).setCellValue(amount);
+            workbook.write(output);
+        }
+    }
+
     private Map<String,String> revisionProbe(Path root,Path config,String engineCommit) throws Exception {
         String javaExecutable=Paths.get(System.getProperty("java.home"),"bin","java").toString();
         Path buildInfo=Files.createDirectories(temp.resolve("build-info-"+engineCommit));

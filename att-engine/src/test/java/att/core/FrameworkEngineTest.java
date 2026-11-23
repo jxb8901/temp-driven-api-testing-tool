@@ -463,6 +463,68 @@ class FrameworkEngineTest {
         assertFalse(flowEvents.stream().anyMatch(event -> "STAGE_STARTED".equals(event.data().get("event"))));
     }
 
+    @Test void nativeRunLedgerCapturesExcelWorkbookShaAndDetectsWorkbookOnlyChange() throws Exception {
+        Path workbook = projectRoot.resolve("testdata/native-ledger.xlsx");
+        Files.createDirectories(workbook.getParent());
+        try (Workbook book = new XSSFWorkbook(); OutputStream output = Files.newOutputStream(workbook)) {
+            Sheet sheet = book.createSheet("Cases");
+            Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Case ID");
+            header.createCell(1).setCellValue("Amount");
+            Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue("alpha");
+            row.createCell(1).setCellValue("100");
+            book.write(output);
+        }
+        writeText(projectRoot.resolve("testcase/fpp/transfer/testcase.yaml"),
+                "schemaVersion: att-testcase/v1\nid: fpp.transfer.ledger\nflow: payment.transfer.v1\n"
+                        + "dataSource:\n  type: excel\n  path: testdata/native-ledger.xlsx\n  sheet: Cases\n"
+                        + "  headerRows: 1\n  caseId: Case ID\n  dataColumns: amount=Amount\n"
+                        + "inputs:\n  amount: {from: DATA.amount}\n");
+        writeText(projectRoot.resolve("templates/flows/payment/transfer/v1/flow.yaml"),
+                "schemaVersion: att-flow/v3.6\nid: payment.transfer.v1\nname: Transfer\n"
+                        + "description: Native Excel ledger fixture\nactions:\n"
+                        + "  show: {type: log, message: 'amount=${EXEC.INPUT.amount}'}\n");
+        writeRuntimeSchemas();
+
+        att.testcase.TestCaseDefinitionResolver resolver = new att.testcase.TestCaseDefinitionResolver(
+                att.validation.SchemaFiles.resolve(projectRoot, "att-testcase-v1.schema.json"));
+        att.testcase.TestCaseResolutionResult resolution = resolver.resolve(
+                projectRoot.resolve("testcase/fpp/transfer/testcase.yaml"), "payments", projectRoot,
+                Paths.get("templates"), att.testcase.TestCaseDefinitionResolver.Options.defaults());
+        String expectedWorkbookSha = String.valueOf(resolution.selectedCases().get(0)
+                .sourceProvenance().metadata().get("workbookSha256"));
+        assertEquals(64, expectedWorkbookSha.length());
+
+        RunSummary summary = new FrameworkEngine(projectRoot, globalConfig()).runNativeCases(resolution,
+                "NATIVE-EXCEL-LEDGER", null, false, false, null);
+        assertEquals(1, summary.passed());
+        @SuppressWarnings("unchecked")
+        Map<String,Object> manifest = (Map<String,Object>) new org.yaml.snakeyaml.Yaml().load(
+                new String(Files.readAllBytes(projectRoot.resolve("output/NATIVE-EXCEL-LEDGER/run.yaml")), "UTF-8"));
+        @SuppressWarnings("unchecked")
+        List<Map<String,Object>> inputs = (List<Map<String,Object>>) manifest.get("inputs");
+        assertTrue(inputs.stream().anyMatch(item -> "test-case-definition".equals(item.get("kind"))), inputs.toString());
+        assertTrue(inputs.stream().anyMatch(item -> "flow".equals(item.get("kind"))), inputs.toString());
+        Map<String,Object> workbookInput = inputs.stream()
+                .filter(item -> "excel-data-source".equals(item.get("kind"))
+                        && "testdata/native-ledger.xlsx".equals(item.get("path")))
+                .findFirst().orElseThrow(() -> new AssertionError("Missing excel-data-source input: " + inputs));
+        assertEquals(expectedWorkbookSha, workbookInput.get("sha256"));
+
+        try (java.io.InputStream input = Files.newInputStream(workbook); XSSFWorkbook book = new XSSFWorkbook(input)) {
+            book.getSheet("Cases").getRow(1).getCell(1).setCellValue("200");
+            try (OutputStream output = Files.newOutputStream(workbook)) { book.write(output); }
+        }
+        IllegalArgumentException stale = assertThrows(IllegalArgumentException.class,
+                () -> new FrameworkEngine(projectRoot, globalConfig()).runNativeCases(resolution,
+                        "NATIVE-EXCEL-LEDGER-STALE", null, false, false, null));
+        assertTrue(stale.getMessage().contains("Native Excel Data Source changed after resolution"),
+                stale.getMessage());
+        assertTrue(stale.getMessage().contains("testdata/native-ledger.xlsx"), stale.getMessage());
+        assertFalse(Files.exists(projectRoot.resolve("output/NATIVE-EXCEL-LEDGER-STALE")));
+    }
+
     @Test void preservesExecutionErrorInsteadOfDowngradingItToFail() throws Exception {
         FrameworkEngine engine = new FrameworkEngine(projectRoot, globalConfig());
         java.lang.reflect.Method method = FrameworkEngine.class.getDeclaredMethod("aggregate", java.util.List.class);
