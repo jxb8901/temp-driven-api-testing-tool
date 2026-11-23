@@ -80,6 +80,28 @@ class ChangeSetPublisherTest {
         } finally { publisher.close(); }
     }
 
+    @Test void classifiesCustomFlowRootDescriptorsAsFlowCategory() throws Exception {
+        ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
+        try {
+            String manifest = "schemaVersion: att-package/v2\nresources:\n  flowRoot: custom-flows\n  testcaseRoot: testcase\n";
+            String flow = "schemaVersion: att-flow/v3.6\nid: payments.offline.v1\nname: Offline\n"
+                    + "description: Custom root Flow.\nactions:\n  note:\n    type: log\n    message: hi\n";
+            Map<String, Object> draft = stagePackage(publisher, Arrays.asList(
+                    ChangeSetPublisher.OperationInput.create("package.yaml", bytes(manifest)),
+                    ChangeSetPublisher.OperationInput.create("custom-flows/payments/flow.yaml", bytes(flow))));
+            @SuppressWarnings("unchecked") List<String> categories = (List<String>) draft.get("categories");
+            assertNotNull(categories);
+            assertTrue(categories.contains("FLOW"), String.valueOf(categories));
+            assertFalse(categories.contains("FILE"), String.valueOf(categories));
+            String id = String.valueOf(draft.get("changeSetId"));
+            validateReview(publisher, id);
+            Map<String, Object> published = publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, id);
+            assertEquals(Boolean.TRUE, published.get("published"));
+            assertEquals(manifest, read("package.yaml"));
+            assertEquals(flow, read("custom-flows/payments/flow.yaml"));
+        } finally { publisher.close(); }
+    }
+
     @Test void sourceHistoryReturnsSafeDiffsAndStagesRestoreAsANewCurrentChangeSet() throws Exception {
         ChangeSetPublisher publisher=publisher(acceptingValidator(),allowingGate());
         try {

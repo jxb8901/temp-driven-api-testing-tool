@@ -49,6 +49,8 @@ class PackageDocumentationGeneratorTest {
         assertTrue(html.contains("position:sticky;top:0"));
         assertTrue(html.contains("href=\"#testcases\""));
         assertTrue(html.contains("href=\"#flows\""));
+        assertTrue(html.contains("First-class reusable ordered Action sequences"));
+        assertFalse(html.contains("Static reusable Template Action groups"));
         assertTrue(html.contains("sample.echo.v1"));
         assertTrue(html.contains("Documented Flow"));
         assertTrue(html.contains("href=\"#dbhelpers\""));

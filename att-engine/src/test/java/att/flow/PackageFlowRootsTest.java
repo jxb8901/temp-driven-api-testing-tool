@@ -115,6 +115,24 @@ class PackageFlowRootsTest {
         assertNotNull(failure.getMessage());
     }
 
+    @Test void rejectsDuplicateIdsAcrossCustomFlowRootAndLegacyCompanion() throws Exception {
+        Path pkg = Files.createDirectories(temp.resolve("custom-dual"));
+        writeFlow(pkg.resolve("custom-flows/shared"), "shared.v1", "Custom canonical");
+        writeFlow(pkg.resolve("templates/flows/shared"), "shared.v1", "Legacy companion");
+        Files.write(pkg.resolve("package.yaml"),
+                ("schemaVersion: att-package/v2\nresources:\n  flowRoot: custom-flows\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        PackageConfig manifest = PackageConfig.load(pkg);
+        PackageFlowRoots.Resolution roots = PackageFlowRoots.resolve(pkg, manifest);
+        assertEquals(2, roots.existingRoots().size());
+        Exception failure = assertThrows(Exception.class,
+                () -> new FlowRegistry(pkg, roots, true, null, null));
+        assertTrue(failure.getMessage().contains("Duplicate Flow ID")
+                || (failure.getCause() != null && failure.getCause().getMessage() != null
+                && failure.getCause().getMessage().contains("Duplicate Flow ID")),
+                failure.getMessage());
+    }
+
     @Test void treatsMissingOptionalFlowRootAsEmptyWhilePresentInvalidRootFails() throws Exception {
         Path pkg = Files.createDirectories(temp.resolve("missing-vs-invalid"));
         PackageFlowRoots.Resolution missing = PackageFlowRoots.resolve(pkg,
