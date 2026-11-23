@@ -1,0 +1,13 @@
+schemaVersion: att-testcase/v1
+id: quick.start.excel
+name: Native Quick Start (Excel Data Source)
+flow: quick.start.v1
+tags: [quick-start, excel, native]
+dataSource:
+  type: excel
+  path: testdata/quick-start-native.xlsx
+  sheet: QuickStart
+  headerRows: 1
+  caseId: CaseID
+  tags: Tags
+  dataColumns: amount=Amount, useTool=UseTool(yaml), expected=Expected

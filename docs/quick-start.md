@@ -1,301 +1,199 @@
 # ATT v4.4.1 quick start
 
-[中文快速入門](quick-start.zh.md) · [Reference Manual](reference.md)
+[中文快速入門](quick-start.zh.md) · [Reference Manual](reference.md) · [Migration matrix](maintenance/native-case-default-package-migration-s12.md)
 
-This guide gets you from a clean checkout to a successful ATT run with the smallest useful example. It deliberately teaches the normal Run workflow first. Debug, Load, DB/MQ, environments, retry, and the full Context model come later as next steps.
+Native Case happy path for the 4.6.0 development candidate (POM version remains 4.4.1 until release). This guide gets you from a clean checkout to a successful **Native Case** run with the smallest offline example. It teaches the new authoring model first:
 
-Here, **Testcase** means an authored normalized workbook row. A **Case execution** is one Run of that row. They share a Case ID but describe different things; this guide uses Testcase for workbook data and Case execution for runtime results.
+```text
+Package → Flow → testcase.yaml (+ inline or Excel Data Source)
+       → Preview / Resolve → Select Case(s) → Validate → RUN → Results
+```
 
-The checked-in Quick Start example is intentionally offline: the first Testcase uses only `assign`, `log`, and `assert`. The second Testcase adds ATT's local sample Tool without requiring a database, MQ server, API endpoint, credentials, or network access.
+Legacy Excel + Sidecar + XML Snapshot + Stage/Template remains supported. Use the [legacy Workbook appendix](#legacy-workbook-quick-start-supported) when that path is still the right one.
+
+The checked-in Native examples are offline: they use only `assign`, `log`, `assert`, and optionally ATT's local sample Tool. No database, MQ, API endpoint, credentials, or network access is required.
 
 ## What you will run
 
-ATT's normal authoring path is:
+Primary files in the Default Package:
 
 ```text
-Excel Testcase
-   -> Stage
-      -> Template
-         -> ordered Actions
+packages/default/templates/flows/quick-start/flow.yaml
+packages/default/testcase/quick-start/single/testcase.yaml
+packages/default/testcase/quick-start/inline-multi/testcase.yaml
+packages/default/testcase/quick-start/excel/testcase.yaml
+packages/default/testdata/quick-start-native.xlsx
+config/config.yaml
 ```
 
-For this tutorial, the important files are already in the default package:
+| Definition ID | Resolved Case IDs | Purpose |
+|---|---|---|
+| `quick.start.single` | `default` | One Definition + typed `inputs` → one Case |
+| `quick.start.inline` | `basic`, `with-tool` | One Definition + inline records → multiple Cases |
+| `quick.start.excel` | `QS001`, `QS002` | One Definition + read-only Excel Data Source |
+
+All three bind Flow `quick.start.v1`. A Resolved Case is a selectable logical Case; each RUN creates a separate execution.
+
+## Prerequisites
+
+1. JDK and Maven available so the source checkout can compile when needed.
+2. From the repository root, build the Local CLI if classes are missing:
+
+```sh
+mvn -DskipTests -pl att-cli -am compile
+```
+
+3. Optional placeholders used by Package validation for unrelated Helpers:
+
+```sh
+export ORDERS_DB_USERNAME=docs-example-user
+export ORDERS_DB_PASSWORD=docs-example-password
+export PAYMENT_MQ_USERNAME=docs-example-user
+export PAYMENT_MQ_PASSWORD=docs-example-password
+```
+
+## Inspect the Native Definition
+
+Open `testcase/quick-start/single/testcase.yaml`:
+
+```yaml
+schemaVersion: att-testcase/v1
+id: quick.start.single
+name: Native Quick Start (single Case)
+flow: quick.start.v1
+tags: [quick-start, smoke, native]
+inputs:
+  amount: 100
+  useTool: false
+  expected: 100
+```
+
+The Flow at `templates/flows/quick-start/flow.yaml` owns the Actions. The Test Case does not duplicate Steps or assert DSL.
+
+## Validate the Package
+
+```sh
+./att.sh validate --package
+```
+
+Validation is read-only. It checks Native Definitions, Flow/Tool closure, and the retained legacy suites together.
+
+## Resolve without executing (dry-run)
+
+```sh
+./att.sh --local -p default run native-case quick.start.single \
+  --resolved-case-id default --dry-run --format json
+```
+
+Dry-run resolves and validates the selected Case IDs. It does not execute Flow Actions.
+
+## RUN the single Case
+
+```sh
+./att.sh --local -p default --output-dir output --run-id native-qs-single \
+  run native-case quick.start.single --resolved-case-id default
+```
+
+Expect overall status `PASS`. Use a dedicated `--run-id` (and optional `--output-dir`) so a second attempt does not collide with an existing run directory.
+
+## Inspect Results
+
+Native RUN writes evidence under `<output-dir>/<run-id>/` (default Package output is `packages/default/output/` when `--output-dir` is omitted):
+
+```text
+output/native-qs-single/
+  run.yaml
+  report/index.html
+  report/junit.html
+  ci/summary.json
+  ci/junit.xml
+  executions/<execId>/case.log
+  executions/<execId>/case.yaml
+```
+
+Open `report/index.html` for the HTML overview and `ci/summary.json` for machine-readable totals. Each selected Case has its own `executions/<execId>/case.log`.
+
+| Status | Meaning for this guide |
+|---|---|
+| `PASS` | Selected Cases finished and assertions succeeded |
+| `FAIL` | A business assertion failed |
+| `ERROR` | Runtime/integration failure |
+| `INVALID` | Validation prevented execution |
+| `SKIPPED` | Dry-run resolved the Case without executing the Flow |
+
+On this S05-based head, HTML/CI/JUnit evidence follows the existing Native RUN path. **Source-independent standard native XLSX reporting is S07 and is not claimed here.**
+
+## RUN multiple inline Cases
+
+```sh
+./att.sh --local -p default --output-dir output --run-id native-qs-inline \
+  run native-case quick.start.inline \
+  --resolved-case-id basic --resolved-case-id with-tool
+```
+
+Qualified IDs are `quick.start.inline.basic` and `quick.start.inline.with-tool`. Both should appear as `PASS` in `ci/summary.json` (`total=2`, `passed=2`).
+
+## RUN Excel-backed Cases
+
+```sh
+./att.sh --local -p default --output-dir output --run-id native-qs-excel \
+  run native-case quick.start.excel \
+  --resolved-case-id QS001 --resolved-case-id QS002
+```
+
+The workbook `testdata/quick-start-native.xlsx` is a read-only Data Source. Preview and RUN do not modify it and do not create a legacy XML Snapshot. Expect both `quick.start.excel.QS001` and `quick.start.excel.QS002` in the run summary.
+
+## Studio Preview (when Server/Studio is available)
+
+With ATT Server and Studio on this development candidate:
+
+1. Open the Default Package in Explorer.
+2. Open or create a `testcase.yaml` under `testcase/`.
+3. Use **Preview / Resolve** to list qualified Case IDs and typed inputs (read-only; no Job).
+4. Publish through the existing Change Set Draft → Validate → Review → Publish flow, then RUN when the Server advertises `att-execution/v2`.
+
+See [Test authoring — Native Case](reference/test-authoring.md).
+
+## Deferred on this head (honest limits)
+
+| Capability | Status |
+|---|---|
+| Implicit Suite (`run native-suite`, tags across Definitions) | S06 / #396 — not shipped on the S05 base |
+| Source-independent native XLSX report layout | S07 / #397 — not shipped on the S05 base |
+| Native LOAD Case targets | S08 — deferred |
+| Automatic Stage/Template → Flow conversion | #398 — analysis track; keep legacy suites |
+
+## Legacy Workbook Quick Start (supported)
+
+Prefer Native for new work. Keep the Workbook path when you need Stage/Template semantics, existing Snapshot IDs, or workbook report layouts:
 
 ```text
 packages/default/testcase/quick_start.xlsx
 packages/default/testcase/quick_start.yaml
 packages/default/testcase/quick_start.xml
 packages/default/templates/QUICK_START/template.yaml
-config/config.yaml
 ```
 
-The workbook contains two Testcases:
-
-| Testcase ID | Purpose | External dependency |
-|---|---|---|
-| `quickStart.default.QS001` | first successful ATT run | none |
-| `quickStart.default.QS002` | same flow plus a local sample Tool | none |
-
-You do not need to understand every ATT schema before running them.
-
-## Check prerequisites
-
-ATT CLI, Engine, Remote, and Server API modules support Java 8 or later. A source checkout needs a JDK and Maven to build these modules explicitly; `att.sh` and `att.bat` only run prebuilt classes. A full ATT release build also includes the Java 17 Server module. Packaged releases contain their application JARs and need a Java runtime, not Maven.
-
-1. On macOS/Linux, make the launcher executable if necessary:
-   ```sh
-   chmod +x att.sh
-   ```
-
-2. From the repository root, compile the CLI and its required modules:
-   ```sh
-   mvn -DskipTests -pl att-cli -am compile
-   ```
-
-   This command requires a JDK and Maven. For database or IBM MQ integrations, provide the optional vendor driver JARs in `lib/`.
-
-3. Check the CLI:
-
-   ```sh
-   ./att.sh version
-   ```
-
-   On Windows, run the same Maven command, then use `att.bat version`.
-
-## Inspect the workbook and sidecar
-
-Open `testcase/quick_start.xlsx`. The second header row contains the physical Excel column names used by the sidecar:
-
-```text
-Case ID | Tags | Name | Amount | Use Tool | Template | Expected
+```sh
+./att.sh snapshot --suite testcase/quick_start.xlsx
+./att.sh validate --package
+./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
+./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS002
 ```
 
-`testcase/quick_start.yaml` maps those columns into ATT input:
-
-```yaml
-schemaVersion: att-sidecar/v2.2
-id: quickStart
-excel:
-  sheet: QuickStart
-  headerRows: 2
-  caseId: Case ID
-  tags: Tags
-  dataColumns: name=Name, amount=Amount, useTool=Use Tool(yaml), expected=Expected
-
-stages:
-  - key: main
-    template: Template
-    required: true
-    onFailure: stop
-    runWhen: normal
-```
-
-The `(yaml)` marker on `Use Tool` preserves Excel `true`/`false` as a Boolean instead of a string.
-
-The generated `testcase/quick_start.xml` is the normalized snapshot ATT executes against. Do not edit it manually.
-
-## Understand the Template
-
-Both rows select `QUICK_START`, implemented by `templates/QUICK_START/template.yaml`.
-
-The first three useful ideas are enough for now:
-
-```yaml
-actions:
-  captureAmount:
-    type: assign
-    name: quickStartAmount
-    expression: "${EXEC.INPUT.amount}"
-
-  showInput:
-    type: log
-    message: "Quick Start case ${META.SOURCE.caseId}: amount=${EXEC.VARS.quickStartAmount}"
-
-  verifyAmount:
-    type: assert
-    assert: "#{${EXEC.VARS.quickStartAmount} == ${EXEC.INPUT.expected}}"
-    expected: "${EXEC.INPUT.expected}"
-    actual: "${EXEC.VARS.quickStartAmount}"
-```
-
-For this tutorial:
-
-- `EXEC.INPUT` contains values materialized from the Testcase row;
-- `EXEC.VARS` contains values explicitly created by `assign`;
-- `${...}` reads/interpolates Context values;
-- `#{...}` evaluates a typed expression.
-
-That is enough Context knowledge for a first run. The complete model is in [Runtime and Context](reference/runtime-context.md) and [Expressions](reference/expressions.md).
-
-## Prepare the package
-
-ATT keeps the Excel workbook and normalized XML snapshot in sync:
-
-1. Generate the snapshot:
-   ```sh
-   ./att.sh snapshot --suite testcase/quick_start.xlsx
-   ```
-
-   If you edit the workbook later, regenerate the snapshot and review its XML diff before committing it.
-
-2. Validate the package before executing it:
-
-   ```sh
-   ./att.sh validate --package
-   ```
-
-   Validation checks schemas, workbook/snapshot consistency, Template references, expressions, Tool/resource references, and other package contracts without executing a Testcase. Resolve validation errors before the first Case execution.
-
-## Run the offline Testcase
-
-1. Start a Case execution for the offline Testcase:
-
-   ```sh
-   ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-   ```
-
-### Expected result
-
-The Case execution should be `PASS`.
-
-The high-level status model is:
-
-| Status | Meaning |
+| Legacy Case ID | Purpose |
 |---|---|
-| `PASS` | execution completed and assertions passed |
-| `FAIL` | execution completed but a business assertion failed |
-| `ERROR` | execution/runtime/integration failure |
-| `INVALID` | validation prevented execution |
-| `SKIPPED` | execution was intentionally skipped |
+| `quickStart.default.QS001` | Offline assign/log/assert |
+| `quickStart.default.QS002` | Same path plus local sample Tool |
 
-You do not need the detailed aggregation rules yet; see [Validation and Troubleshooting](reference/validation-diagnostics.md) when troubleshooting real suites.
+Do not edit the committed `quick_start.xml` by hand; regenerate with `snapshot` after workbook edits. Full Stage/Template authoring detail remains in [Test authoring](reference/test-authoring.md).
 
-## Inspect the Case execution
+## Next steps
 
-ATT writes each normal run below `output/<runId>/` and updates `output/latest-run.yaml` only for a completed run.
-
-1. Open the run directory and inspect its summary and execution artifacts:
-
-```text
-output/<runId>/
-  run.yaml
-  ... case output ...
-  ... case.log ...
-```
-
-2. Open or regenerate the HTML report using [Results, Reports, and Evidence](reference/results-reports-evidence.md).
-
-For the `QS001` Case execution, `case.log` should include the line written by `showInput`, and the final assertion should compare the workbook's `Amount` with `Expected`.
-
-## Create and restore a controlled failure
-
-A useful way to learn ATT is to make one business assertion fail without breaking the framework.
-
-1. In `testcase/quick_start.xlsx`, change `QS001` `Expected` from `100` to `999` and regenerate the snapshot:
-
-   ```sh
-   ./att.sh snapshot --suite testcase/quick_start.xlsx
-   ```
-
-2. Run that Testcase again:
-
-   ```sh
-   ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-   ```
-
-### Expected result
-
-The Case execution should be `FAIL`, not `ERROR`: ATT completed the execution, but the business assertion was false.
-
-3. Restore `Expected` to `100` and regenerate the snapshot.
-
-## Add a real Tool call
-
-The same Template already contains one optional Tool Action:
-
-```yaml
-readDate:
-  type: tool
-  call: "#{sample.getAcDate()}"
-  runWhen: "#{${EXEC.INPUT.useTool} == true}"
-```
-
-`QS001` has `Use Tool = false`, so this Action is skipped. `QS002` has `Use Tool = true`.
-
-1. Start a Case execution for `QS002`:
-
-   ```sh
-   ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS002
-   ```
-
-This calls the checked-in, Package-owned `sample.getAcDate` Tool from `packages/default/tools/sample/getAcDate.yaml`. It is a local command-backed example, so the tutorial remains offline.
-
-### Expected result
-
-The `QS002` Case execution should be `PASS`, with the Tool result in the execution evidence.
-
-The important mental model is:
-
-```text
-Testcase input -> Template Action -> Tool -> Action output/evidence
-```
-
-For complete Tool configuration, command-backed vs call-backed behavior, arguments, outputs, and evidence, use [Resources - Tool](reference/resources/tools.md).
-
-## Run the whole Quick Start workbook
-
-Once both Testcases make sense, run them together:
-
-1. Start a Case execution for every Testcase in the workbook:
-
-   ```sh
-   ./att.sh run --suite testcase/quick_start.xlsx
-   ```
-
-### Expected result
-
-The Case executions for both Testcases should have `PASS` status after you restore `QS001`'s `Expected` value.
-
-You now have the basic ATT authoring loop:
-
-```text
-edit Excel / Template
-        |
-        v
-snapshot
-        |
-        v
-validate
-        |
-        v
-run
-        |
-        v
-inspect log/report
-```
-
-That loop is the foundation for larger SIT/UAT packages.
-
-## What to learn next
-
-Do not try to learn every ATT feature from this tutorial. Follow the Reference page that matches the task you are doing:
-
-| I want to... | Read next |
+| Goal | Guide |
 |---|---|
-| understand workbook, sidecar, snapshot, Template, Flow | [Test Authoring](reference/test-authoring.md) |
-| understand `EXEC`, `META`, `EXEC.VARS`, `EXEC.ACTIONS`, `output` | [Runtime and Context](reference/runtime-context.md) |
-| debug one Template/Flow/Tool without Excel | [Standalone Debug](reference/execution-modes/debug.md) |
-| run load tests | [Load](reference/execution-modes/load.md) |
-| call scripts/programs or framework-native Tools | [Tool](reference/resources/tools.md) |
-| query/update a database, including query timeout/retry | [DBHelper](reference/resources/dbhelper.md) |
-| send/receive/request MQ messages | [MQHelper](reference/resources/mqhelper.md) |
-| switch SIT/UAT resource bindings | [Configuration and Environments](reference/configuration.md) |
-| use `${...}` and `#{...}` correctly | [Expressions](reference/expressions.md) |
-| add assertion, timeout, retry, `runWhen`, `onFailure` | [Reliability and Execution Control](reference/reliability-execution-control.md) |
-| look up commands and options | [CLI Reference](reference/cli.md) |
-| troubleshoot `FAIL`, `ERROR`, `INVALID` | [Validation and Troubleshooting](reference/validation-diagnostics.md) |
-| integrate ATT into CI or package it | [CI, Packaging, and Operations](reference/ci-packaging-operations.md) |
-
-For direct DB Actions specifically, remember the safety boundary: `query` may retry `ASSERTION`/`TIMEOUT`, while `update` supports `timeoutMs` but rejects automatic retry. See the [DBHelper Reference](reference/resources/dbhelper.md) for the full contract.
-
-For field-by-field supported behavior, use the generated [current ATT Reference Manual](reference.md) rather than extending this tutorial into a second manual.
+| Native Case fields and Excel mapping | [Test authoring](reference/test-authoring.md) |
+| S12 inventory / migration decisions | [Migration matrix](maintenance/native-case-default-package-migration-s12.md) |
+| Debug a Template/Flow | [Debug](reference/execution-modes/debug.md) |
+| LOAD (existing direct targets) | [Load](reference/execution-modes/load.md) |
+| CLI grammar (includes `run native-case`) | [Proposed CLI vNext](interfaces/cli/vnext-proposed.md) |

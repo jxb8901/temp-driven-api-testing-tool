@@ -38,6 +38,8 @@ Data-driven Case 省略 `inputs` 時，會把 `DATA` 同名映射到 Flow inputs
 
 完整契約和驗證界線見[active Schema](../../schemas/att-testcase-v1.schema.json)、[Singleton inline 範例](../adr/examples/att-testcase-v1/inline-single.yaml)、[多筆 inline 範例](../adr/examples/att-testcase-v1/inline-multi.yaml)、[Excel 範例](../adr/examples/att-testcase-v1/excel.yaml)、[省略 `dataColumns` 的 Excel 範例](../adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml)及[ADR-0001](../adr/0001-flow-centric-testcase-resolution.zh.md)。
 
+Default Package 已附上離線 Native Quick Start Definitions（`packages/default/testcase/quick-start/**/testcase.yaml`），綁定 Flow `quick.start.v1`。請見[快速入門](../quick-start.zh.md)與 [S12 遷移矩陣](../maintenance/native-case-default-package-migration-s12.md)。Implicit Suite 選擇與不依賴來源 Workbook 的 native XLSX 報告仍屬 S06／S07 後續工作。
+
 ### 在 Studio 編寫
 
 在 Explorer 選擇 **New native Test Case**，或開啟索引中的 `testcase.yaml`。引導式編輯器可設定 Package 範圍的 Definition ID、名稱、標籤、canonical Flow、typed inputs，以及單一 Case 或 inline records。進階 YAML 可編輯引導式表單以外的欄位。新檔案必須位於 Package 已配置的 `resources.testcaseRoot` 之下（預設為 `testcase/`）。
