@@ -258,6 +258,16 @@ For data-driven Cases, omitted `inputs` means same-name projection from `DATA`; 
 
 See the [active schema](../schemas/att-testcase-v1.schema.json), [single inline example](adr/examples/att-testcase-v1/inline-single.yaml), [multi-record inline example](adr/examples/att-testcase-v1/inline-multi.yaml), [Excel example](adr/examples/att-testcase-v1/excel.yaml), [Excel omitted-`dataColumns` example](adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml), and [ADR-0001](adr/0001-flow-centric-testcase-resolution.md) for the complete contract and validation boundary.
 
+#### Author in Studio
+
+In Explorer, choose **New native Test Case** or open an indexed `testcase.yaml`. The guided editor sets the Package-scoped Definition ID, name, tags, canonical Flow, typed inputs, and either one Case or inline records. Advanced YAML remains available for fields outside the guided form. New files must be placed under the Package's configured `resources.testcaseRoot` (default `testcase/`).
+
+**Preview / Resolve** sends the current editor candidate and Package-relative `testcase.yaml` path to the authenticated Server. The Server checks the exact USER/editor authority and Package source revisions, then resolves the candidate through the bounded Test Case resolver and S04 Excel adapter. Preview output is capped at 1,000 Cases and returns the Package source revision, Definition revision, and workbook revision when applicable. Excel row errors include sheet, row, and column locations. Typed inputs use the Server's configured redaction policy. Preview does not create a Job or RunDraft, write Package source, or modify a workbook; RUN validation resolves and freezes the selected Case IDs again.
+
+Use **Add to Change Set** to stage a create or replacement through the existing Package source workflow: Draft → Validate → Review → Publish. The current Package source stays active until Publish. After publication, preview the latest source and select the Case IDs to validate and submit a RUN. Native Case RUN is available only when the Server advertises `att-execution/v2`; the Server validates and freezes the source and selected IDs for the Job.
+
+Excel-backed definitions use the same read-only S04 adapter as native resolution, with row and column diagnostics shown in Studio. The existing Workbook/Sidecar editor remains available for legacy suites.
+
 ### Workbook
 
 #### Workbook, Sidecar, and Snapshot relationship

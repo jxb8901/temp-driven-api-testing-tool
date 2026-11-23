@@ -88,6 +88,22 @@ function centralImpact(decision: 'COMPATIBLE' | 'REQUIRES_REVIEW' | 'BLOCKED' = 
 }
 
 describe('SourceAuthoringWorkspace', () => {
+  it('masks secret-looking values from Native Test Case source diffs', async () => {
+    await act(async () => root.render(<ChangedFiles files={[{
+      operation: 'replace', path: 'testcase/refund/testcase.yaml', oldBytes: 12, newBytes: 20,
+      contentSummary: 'password: old-secret',
+      contentDiff: ['- password: old-secret', '+ apiToken: new-secret', '+ inputs: {password: "old,secret"}',
+        '+ password:', '+   nested: hidden-secret', '+ flow: checkout.v1'],
+    }]} />));
+    expect(host.textContent).toContain('[redacted]');
+    expect(host.textContent).not.toContain('old-secret');
+    expect(host.textContent).not.toContain('new-secret');
+    expect(host.textContent).not.toContain('old,secret');
+    expect(host.textContent).not.toContain('hidden-secret');
+    expect(host.textContent).toContain('flow: checkout.v1');
+    expect(host.textContent).not.toContain('password: old-secret');
+  });
+
   it('reviews authorized source history and stages Restore as a draft against current revisions', async () => {
     const beforeSnapshotId = 'a'.repeat(64);
     const afterSnapshotId = 'b'.repeat(64);

@@ -258,6 +258,16 @@ Data-driven Case 省略 `inputs` 時，會把 `DATA` 同名映射到 Flow inputs
 
 完整契約和驗證界線見[active Schema](../schemas/att-testcase-v1.schema.json)、[Singleton inline 範例](adr/examples/att-testcase-v1/inline-single.yaml)、[多筆 inline 範例](adr/examples/att-testcase-v1/inline-multi.yaml)、[Excel 範例](adr/examples/att-testcase-v1/excel.yaml)、[省略 `dataColumns` 的 Excel 範例](adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml)及[ADR-0001](adr/0001-flow-centric-testcase-resolution.zh.md)。
 
+#### 在 Studio 編寫
+
+在 Explorer 選擇 **New native Test Case**，或開啟索引中的 `testcase.yaml`。引導式編輯器可設定 Package 範圍的 Definition ID、名稱、標籤、canonical Flow、typed inputs，以及單一 Case 或 inline records。進階 YAML 可編輯引導式表單以外的欄位。新檔案必須位於 Package 已配置的 `resources.testcaseRoot` 之下（預設為 `testcase/`）。
+
+**Preview / Resolve** 會把目前編輯器中的 candidate 及 Package-relative `testcase.yaml` 路徑提交至已驗證身份的 Server。Server 會檢查精確 USER/editor 權限和 Package source revisions，再透過有界的 Test Case resolver 及 S04 Excel adapter 解析 candidate。預覽最多回傳 1,000 個 Case，並提供 Package source revision、Definition revision，以及適用時的 workbook revision。Excel row 錯誤會標示 sheet、row 和 column。Typed inputs 依照 Server 設定的 redaction policy 處理。預覽不會建立 Job 或 RunDraft、不會寫入 Package source，也不會修改 Workbook；RUN validation 會再次解析並凍結已選的 Case ID。
+
+使用 **Add to Change Set**，透過現有 Package source 工作流暫存新增或替換：Draft → Validate → Review → Publish。發布前目前 Package source 仍保持啟用。發布後請預覽最新 source，再選擇 Case ID 進行 RUN 驗證和提交。只有在 Server 宣告支援 `att-execution/v2` 時，Native Case RUN 才可用；Server 會為 Job 驗證並凍結 source 和已選的 ID。
+
+Excel-backed Definition 使用與 native resolution 相同的唯讀 S04 adapter，並在 Studio 顯示 row 和 column diagnostics。Legacy suite 仍可使用現有 Workbook／Sidecar 編輯器。
+
 ### Workbook
 
 #### Workbook、Sidecar 和 Snapshot 之間的關系

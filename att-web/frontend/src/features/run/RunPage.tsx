@@ -11,9 +11,9 @@ import type { ValidatedScheduleIntent } from '../schedules/types';
 import type { JobReplay, JobReplayEditorDraft } from '../load/types';
 
 export interface RunDefinition {
-  schemaVersion: 'att-execution/v1'; executionType: 'run'; packageId: string; environment?: string;
-  target?: { type: string; id: string }; selection?: JsonObject; input?: JsonObject;
-  options: { debug: boolean; failFast?: boolean };
+  schemaVersion: 'att-execution/v1' | 'att-execution/v2'; executionType: 'run'; packageId: string; environment?: string;
+  target?: { type: string; id?: string; definitionId?: string; selection?: JsonObject }; selection?: JsonObject; input?: JsonObject;
+  options: { debug: boolean; failFast?: boolean; runId?: string };
 }
 function isDebugTarget(type: string): type is DebugResourceType {
   return type === 'template' || type === 'flow' || type === 'tool';
@@ -70,7 +70,7 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
       replayPackageDefaultEnvironment.current=replayEnvironmentOrigin.current==='package'?String(draft.configuration?.environment||''):'';
       setPackage(retained.packageId);setEnvironment(replayEnvironmentOrigin.current==='package'?'':retained.environment||String(draft.configuration?.environment||''));
       setMissingReplayFields(draft.missingFields||[]);
-      if(retained.target){setType(retained.target.type);setId(retained.target.id);}else if(retained.selection){setType('batch');setId('');}else{setType('case');setId('');}
+      if(retained.target){setType(retained.target.type);setId(retained.target.id || retained.target.definitionId || '');}else if(retained.selection){setType('batch');setId('');}else{setType('case');setId('');}
       setSelection(JSON.stringify(retained.selection||{all:true},null,2));replayInputRef.current=JSON.stringify(retained.input||{},null,2);
       setInput(replayInputRef.current);setDebug(Boolean(retained.options?.debug));setFailFast(Boolean(retained.options?.failFast));
       setReplaySourceDefinition((draft.originalDefinition||retained) as unknown as RunDefinition);
@@ -257,12 +257,13 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
         <details><summary>Review changes from the source Job</summary><p>Before → after</p><pre>{JSON.stringify({before:replaySourceDefinition,after:replayReview.definition||definition},null,2)}</pre></details></>}
       <CodeEditor label="Validated RUN preview" language={draft.previewYaml ? 'yaml' : 'json'} value={draft.previewYaml || JSON.stringify(draft.preview || draft, null, 2)} readOnly />
       <button className="button button-primary" type="button" disabled={busy||Boolean(replaySourceJobId&&(!replayReview?.intentId||replayReview.missingFields?.length))} onClick={() => void submit()}>{replaySourceJobId?'Run new Job':'Run Now'}</button>
-      {schedulingEnabled&&!replaySourceJobId && <button className="button button-primary" type="button" disabled={busy} onClick={() => {
+      {schedulingEnabled&&!replaySourceJobId && definition.target?.type !== 'nativeCase' && <button className="button button-primary" type="button" disabled={busy} onClick={() => {
         releaseNavigationGuard.current();
         releaseNavigationGuard.current = () => {};
         const accepted = onSchedule({ packageId: definition.packageId, environment: definition.environment, draftId: draft.draftId,
           expiresAt: draft.expiresAt, executionType: 'run', legacyDebug: draft.draftId.startsWith('D'),
-          previewYaml: draft.previewYaml || JSON.stringify(draft.preview || draft, null, 2), target: definition.target });
+          previewYaml: draft.previewYaml || JSON.stringify(draft.preview || draft, null, 2),
+          ...(definition.target?.id ? { target: { type: definition.target.type, id: definition.target.id } } : {}) });
         if (accepted === false) {
           releaseNavigationGuard.current = navigation.registerUnsavedChanges(true, 'Run definition changes');
           setDirty(true);

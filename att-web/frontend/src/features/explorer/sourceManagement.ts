@@ -1,7 +1,7 @@
 import type { ResourceIdentity } from './types';
 
 export type SourceDomain = 'PACKAGE_SOURCE' | 'CENTRAL_RUNTIME_CONFIG';
-export type PackageAuthoringSourceKind = 'manifest' | 'resource' | 'file' | 'load' | 'testdata';
+export type PackageAuthoringSourceKind = 'manifest' | 'resource' | 'file' | 'load' | 'testdata' | 'native-testcase';
 export type SourceOperationKind = 'create' | 'replace' | 'delete' | 'move';
 export type SourceChangeAction = 'validate' | 'review' | 'publish' | 'discard';
 

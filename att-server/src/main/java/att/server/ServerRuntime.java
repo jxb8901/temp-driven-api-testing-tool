@@ -5285,6 +5285,42 @@ final class ServerRuntime implements AutoCloseable {
         } finally {admissionLifecycle.readLock().unlock();}
     }
 
+    Map<String,Object> previewNativeTestCase(String packageId,String path,String source,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(!canEditPackageContent(packageId,principal))throw new AuthoringSourceDeniedException();
+        if(path==null||source==null||source.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                >att.testcase.TestCaseDefinitionResolver.MAX_SOURCE_BYTES)
+            throw new IllegalArgumentException("Native Test Case preview source is missing or too large");
+        if(path.length()>1024||!path.equals(path.trim())||path.startsWith("/")||path.indexOf('\\')>=0
+                ||path.contains("//")||path.matches("^[A-Za-z]:.*")||!path.endsWith("/testcase.yaml")
+                ||java.util.Arrays.stream(path.split("/",-1)).anyMatch(part->part.isEmpty()||".".equals(part)||"..".equals(part)))
+            throw new IllegalArgumentException("A safe Package-relative testcase.yaml path is required");
+        admissionLifecycle.readLock().lock();
+        try {
+            PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+            Path root=pinPackageRoot(registry,packageId);
+            if(root==null)throw new NotFoundException();
+            validatePackageRoot(root);root=root.toRealPath();
+            Map<String,String> before=changeSetPublisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,
+                    packageId,principal,false);
+            if(!registry.revision.equals(before.get("registryRevision")))throw new StaleDraftException();
+            WorkerRequest request=inspectionRequest(packageId,root,null);
+            request.inspectionAction="native-case-preview";request.inspectionPath=path;
+            request.nativeCasePreviewSource=source;
+            Map<String,Object> inspected=executeInspection(root,request);
+            PackageRegistry.Snapshot current=packageRegistry.snapshot();
+            if(!registry.revision.equals(current.revision)||!root.equals(packageRoot(packageId))
+                    ||!canEditPackageContent(packageId,principal))throw new StaleDraftException();
+            Map<String,String> after=changeSetPublisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,
+                    packageId,principal,false);
+            if(!before.equals(after)||!registry.revision.equals(packageRegistry.snapshot().revision)
+                    ||!root.equals(packageRoot(packageId)))throw new StaleDraftException();
+            inspected.put("packageSourceRevision",after.get("baseSourceRevision"));
+            inspected.put("registryRevision",after.get("registryRevision"));
+            return inspected;
+        } finally {admissionLifecycle.readLock().unlock();}
+    }
+
     Map<String,Object> inspectAuthoringCentralSource(String logicalPath,String principal) throws Exception {
         if(!config.centralConfigurationEditingEnabled)throw new NotFoundException();
         Path root=centralSourceRoot();
@@ -5503,7 +5539,7 @@ final class ServerRuntime implements AutoCloseable {
                 ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                 ||"load-templates".equals(request.inspectionAction)||"load-template-compose".equals(request.inspectionAction)
                 ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction)
-                ||"load-detail".equals(request.inspectionAction);
+                ||"load-detail".equals(request.inspectionAction)||"native-case-preview".equals(request.inspectionAction);
         if(draftInspection&&("WORKER_REQUEST_INVALID".equals(workerError)
                 ||workerError!=null&&(workerError.startsWith("ATT-DEBUG")||workerError.startsWith("ATT-LOAD"))
                 ||envelope.get("diagnostics") instanceof List&&!((List<?>)envelope.get("diagnostics")).isEmpty())) {
@@ -5512,7 +5548,7 @@ final class ServerRuntime implements AutoCloseable {
             if(rawDiagnostics instanceof List)for(Object raw:(List<?>)rawDiagnostics)if(raw instanceof Map) {
                 @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
                 Map<String,Object> safe=new LinkedHashMap<String,Object>();
-                for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId")) {
+                for(String key:List.of("code","summary","detail","field","file","sheet","suggestion","resourceId","sourceFile","packageId")) {
                     Object item=value.get(key);
                     if(item instanceof String) {
                         String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
@@ -5520,7 +5556,7 @@ final class ServerRuntime implements AutoCloseable {
                         safe.put(key,text);
                     }
                 }
-                for(String key:List.of("line","column","sourceColumn"))if(value.get(key) instanceof Number)safe.put(key,value.get(key));
+                for(String key:List.of("line","row","column","sourceColumn"))if(value.get(key) instanceof Number)safe.put(key,value.get(key));
                 if(!safe.isEmpty())diagnostics.add(safe);
             }
             if(diagnostics.isEmpty()) {
@@ -5548,9 +5584,41 @@ final class ServerRuntime implements AutoCloseable {
             throw new InspectionLimitException(safeResourceLimitDiagnostics(envelope.get("diagnostics")));
         if(workerError!=null)throw new IllegalStateException("Package inspection Worker failed: "+workerError);
         Object raw=envelope.get("inspection");if(!(raw instanceof Map))throw new IllegalStateException("Package inspection Worker returned an invalid response");
-        JsonNode safe=projectInspectionPaths(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),root,"");
+        JsonNode safe=projectInspectionPaths(JSON.valueToTree(sanitizeInspectionResult(raw,request)),root,"");
         @SuppressWarnings("unchecked") Map<String,Object> result=JSON.convertValue(safe,Map.class);
         return result;
+    }
+    private static Object sanitizeInspectionResult(Object raw,WorkerRequest request) {
+        if("authoring-source".equals(request.inspectionAction)&&"native-testcase".equals(request.authoringSourceKind)
+                &&request.inspectionPath!=null&&request.inspectionPath.endsWith("/testcase.yaml")&&raw instanceof Map<?,?>) {
+            Map<?,?> source=(Map<?,?>)raw;
+            Object sourceText=source.get("text");
+            if(sourceText instanceof String) {
+                String mapping=att.resource.PackageResourceInspector.nativeExcelDataColumnsMappingSource(
+                        request.inspectionPath,(String)sourceText);
+                if(mapping!=null) {
+                    // Keep only the schema-validated mapping scalar out of generic text redaction;
+                    // sanitize the rest of the source and the response metadata as usual.
+                    String marker="__ATT_NATIVE_EXCEL_DATA_COLUMNS__";
+                    while(((String)sourceText).contains(marker))marker+="_";
+                    Map<String,Object> content=new LinkedHashMap<>();
+                    for(Map.Entry<?,?> entry:source.entrySet())if(entry.getKey() instanceof String)
+                        content.put((String)entry.getKey(),entry.getValue());
+                    content.put("text",att.resource.PackageResourceInspector.replaceNativeExcelDataColumnsMappingSource(
+                            request.inspectionPath,(String)sourceText,marker));
+                    Object sanitized=att.server.api.internal.DiagnosticSanitizer.sanitizeValue(content);
+                    if(sanitized instanceof Map<?,?>) {
+                        Map<String,Object> safe=new LinkedHashMap<>();
+                        for(Map.Entry<?,?> entry:((Map<?,?>)sanitized).entrySet())if(entry.getKey() instanceof String)
+                            safe.put((String)entry.getKey(),entry.getValue());
+                        Object safeText=safe.get("text");
+                        if(safeText instanceof String)safe.put("text",((String)safeText).replace(marker,mapping));
+                        return safe;
+                    }
+                }
+            }
+        }
+        return att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw);
     }
     private List<Map<String,Object>> safeResourceLimitDiagnostics(Object raw) {
         List<Map<String,Object>> result=new ArrayList<Map<String,Object>>();
