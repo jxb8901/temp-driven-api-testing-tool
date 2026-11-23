@@ -125,9 +125,11 @@ class ServerRuntimeNativeRunTest {
         Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
                 +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
                 +"\n  auth: {mode: local}\n  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\n"
                 +"  scheduling: {enabled: true, minimumIntervalMinutes: 1, maxConcurrentRuns: 1}\n"
                 +"workers: {maxConcurrent: 1, queuedLimit: 2}\npackages:\n  allowedRoots: ["
-                +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
+                +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: {path: "+ServerRuntimeTestSupport.yaml(packageRoot)
+                +", editors: [alice]}}\n");
         Path libs=Files.createDirectories(temp.resolve("libs"));
         for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
             ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
