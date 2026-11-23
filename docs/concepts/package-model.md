@@ -4,11 +4,11 @@ ATT separates shared runtime ownership from business-resource ownership.
 
 ## Global Runtime Configuration
 
-The installation owns one shared Runtime Configuration, normally at ATT_HOME/config/config.yaml. It defines runtime defaults, resource registries, Tool groups and Environment Profiles. Operators select an Environment to bind stable logical helper IDs to environment-specific DB, MQ, HTTP or SSH resources.
+The installation owns one shared Runtime Configuration, normally at ATT_HOME/config/config.yaml. It defines runtime defaults, helper registries, and Environment Profiles. Operators select an Environment to bind stable logical helper IDs to environment-specific DB, MQ, HTTP or SSH resources. Tools and Tool groups are owned by the selected Package under `tools/`, not by that global file.
 
 ## Package ownership and isolation
 
-A Package is a registered root for business resources: Testcase workbooks and sidecars, Templates, Flows, package-local scripts, SQL and Testdata. The Server registry assigns a logical Package ID to a root. Server requests use that ID and Package-relative resource names; clients do not choose a host path. A Package does not own a second Runtime Configuration or schema catalog.
+A Package is a registered root for business resources: Testcase workbooks and sidecars, Templates, Flows, Tools, Tool groups, package-local scripts, SQL and Testdata. The Server registry assigns a logical Package ID to a root. Server requests use that ID and Package-relative resource names; clients do not choose a host path. A Package does not own a second Runtime Configuration or schema catalog.
 
 Package isolation prevents one Package from using another Package's private resources by inventing a path. Shared Runtime Configuration remains global. This does not make every shared resource visible to every user: Server authorization, registered roots and inspection policy still apply.
 

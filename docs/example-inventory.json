@@ -1,6 +1,6 @@
 {
   "schemaVersion": "att-example-inventory/v1",
-  "description": "Machine-readable example and Default Package migration inventory for issues #425, #426, #427 and #428. Current, planned, legacy and blocked entries are separate. Only current offline native-suite paths are executable in the routine gate.",
+  "description": "Example inventory. migrationStatus is current, planned, legacy, or blocked. runtimeSupport says whether ATT can execute or read the resource today. ciRunnable is only the offline native-suite fixture set and does not mean the resource is non-executable. status mirrors migrationStatus. executable mirrors ciRunnable. #426 physical isolation under packages/legacy is not complete.",
   "entries": [
     {
       "id": "asset-001",
@@ -9,9 +9,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "FppLandingTemplatesTest loads template id FPP_CTO_RTI_USMF, and template.yaml reads CT001_Precheck.xml through a package file expression. The Reference lists this id as a Run/Debug example that requires a business TestCase ID. No #398 golden shows a Flow with the same file and assertion behavior, so the directory stays at this Template ID. This file is `CT001_Precheck.xml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-002",
@@ -20,9 +23,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "FppLandingTemplatesTest loads template id FPP_CTO_RTI_USMF, and template.yaml reads CT001_Precheck.xml through a package file expression. The Reference lists this id as a Run/Debug example that requires a business TestCase ID. No #398 golden shows a Flow with the same file and assertion behavior, so the directory stays at this Template ID. This file is `README.md` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-003",
@@ -31,9 +37,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "FppLandingTemplatesTest loads template id FPP_CTO_RTI_USMF, and template.yaml reads CT001_Precheck.xml through a package file expression. The Reference lists this id as a Run/Debug example that requires a business TestCase ID. No #398 golden shows a Flow with the same file and assertion behavior, so the directory stays at this Template ID. This file is `template.yaml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-004",
@@ -42,9 +51,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "FppLandingTemplatesTest loads template id FPP_D3I_BATCH_SIT. The Reference lists it as a Run/Debug example that requires a business TestCase ID. The batch/file contract has no #398 Flow golden, so the Template ID and README stay in packages/default. This file is `README.md` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-005",
@@ -53,9 +65,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "FppLandingTemplatesTest loads template id FPP_D3I_BATCH_SIT. The Reference lists it as a Run/Debug example that requires a business TestCase ID. The batch/file contract has no #398 Flow golden, so the Template ID and README stay in packages/default. This file is `template.yaml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-006",
@@ -64,9 +79,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "payment_regression selects this Template ID from its cleanup stage. No #398 golden shows the cleanup actions as one Native Flow. This file is `template.yaml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-007",
@@ -75,9 +93,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "DocumentationExamplesTest runs debug template PAYMENT_INVOKE against debug.yaml and payload.xml. payment_regression selects this Template ID from its invoke stage. Published CLI examples use the same id. No #398 golden replaces that debug sidecar. This file is `debug.yaml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-008",
@@ -86,9 +107,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "DocumentationExamplesTest runs debug template PAYMENT_INVOKE against debug.yaml and payload.xml. payment_regression selects this Template ID from its invoke stage. Published CLI examples use the same id. No #398 golden replaces that debug sidecar. This file is `payload.xml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-009",
@@ -97,9 +121,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "DocumentationExamplesTest runs debug template PAYMENT_INVOKE against debug.yaml and payload.xml. payment_regression selects this Template ID from its invoke stage. Published CLI examples use the same id. No #398 golden replaces that debug sidecar. This file is `template.yaml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-010",
@@ -108,9 +135,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "payment_regression selects the prepare stage template by the workbook column value for this Template ID. QuickStartDocumentationTest dry-runs that suite (total 22, skipped 22). No #398 golden maps the prepare stage onto one Flow without changing Case IDs. This file is `template.yaml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-011",
@@ -119,9 +149,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "payment_regression selects this Template ID from its rollback stage, including onFailure behavior. No #398 golden shows the same rollback semantics as one Native Flow. This file is `template.yaml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-012",
@@ -130,9 +163,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "payment_regression selects this Template ID from its verify stage. The Reference lists PAYMENT_VERIFY as a Run/Debug example that needs a business TestCase ID. No #398 golden covers the verify assertions. This file is `template.yaml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-013",
@@ -141,9 +177,12 @@
       "kind": "legacy-compatibility",
       "owner": "default-package",
       "environment": "offline",
-      "expectedResult": "legacy Quick Start Case IDs QS001 and QS002 remain runnable",
+      "expectedResult": "QuickStartDocumentationTest runs QS001 and QS002",
       "executable": false,
-      "reason": "Supported Workbook/Stage/Template route. Not deprecated."
+      "reason": "Supported workbook/Stage/Template route. QuickStartDocumentationTest executes the legacy Case IDs. Not part of the native-suite fixture set, and not a candidate for packages/legacy while that route remains the compatibility command.",
+      "migrationStatus": "current",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-014",
@@ -152,42 +191,54 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "examples/load/closed.yaml, closed-minimal.yaml, and the load README bind target id V3_FLOW_EXAMPLE. FlowRuntimeTest and LoadCrossModeTest load that Template ID. Native LOAD targets remain deferred, so replacing or moving the id would change those LOAD scenarios. This file is `template.yaml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-015",
       "path": "packages/default/templates/flows/common/compose/flow.yaml",
-      "status": "blocked",
-      "kind": "tracked-exception",
+      "status": "current",
+      "kind": "flow-helper",
       "owner": "default-package",
-      "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "environment": "offline",
+      "expectedResult": "executable att-flow/v3.6 helper; not an offline native-suite fixture",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "Load cross-mode tests and package validation execute this Flow. It is already att-flow/v3.6, so it is not a blocked conversion and it is not part of the offline native-suite CI fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "executable-flow",
+      "ciRunnable": false
     },
     {
       "id": "asset-016",
       "path": "packages/default/templates/flows/common/decorate/flow.yaml",
-      "status": "blocked",
-      "kind": "tracked-exception",
+      "status": "current",
+      "kind": "flow-helper",
       "owner": "default-package",
-      "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "environment": "offline",
+      "expectedResult": "executable att-flow/v3.6 helper; not an offline native-suite fixture",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "Load cross-mode tests and package validation execute this Flow. It is already att-flow/v3.6, so it is not a blocked conversion and it is not part of the offline native-suite CI fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "executable-flow",
+      "ciRunnable": false
     },
     {
       "id": "asset-017",
       "path": "packages/default/templates/flows/common/identity/flow.yaml",
-      "status": "blocked",
-      "kind": "tracked-exception",
+      "status": "current",
+      "kind": "flow-helper",
       "owner": "default-package",
-      "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "environment": "offline",
+      "expectedResult": "executable att-flow/v3.6 helper; not an offline native-suite fixture",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "Load cross-mode tests and package validation execute this Flow. It is already att-flow/v3.6, so it is not a blocked conversion and it is not part of the offline native-suite CI fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "executable-flow",
+      "ciRunnable": false
     },
     {
       "id": "asset-018",
@@ -198,7 +249,10 @@
       "environment": "offline",
       "expectedResult": "see docs/guides/native-payments.md",
       "executable": true,
-      "reason": "Offline multi-Flow Native Suite. Issue #425. Not a conversion of payment2."
+      "reason": "Offline multi-Flow Native Suite fixture executed by NativePaymentsExampleTest. Not a conversion of payment2.",
+      "migrationStatus": "current",
+      "runtimeSupport": "native",
+      "ciRunnable": true
     },
     {
       "id": "asset-019",
@@ -209,7 +263,10 @@
       "environment": "offline",
       "expectedResult": "see docs/guides/native-payments.md",
       "executable": true,
-      "reason": "Offline multi-Flow Native Suite. Issue #425. Not a conversion of payment2."
+      "reason": "Offline multi-Flow Native Suite fixture executed by NativePaymentsExampleTest. Not a conversion of payment2.",
+      "migrationStatus": "current",
+      "runtimeSupport": "native",
+      "ciRunnable": true
     },
     {
       "id": "asset-020",
@@ -220,7 +277,10 @@
       "environment": "offline",
       "expectedResult": "PASS via QuickStartDocumentationTest",
       "executable": false,
-      "reason": "Existing Native Quick Start. att-testcase/v1."
+      "reason": "Native Quick Start executed by QuickStartDocumentationTest. It is runnable, but it is not the offline native-suite CI fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "native",
+      "ciRunnable": false
     },
     {
       "id": "asset-021",
@@ -229,9 +289,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "template.yaml reads request.tmp.xml by the package path templates/\u4ed8\u6b3e/\u672c\u5730\u4ed8\u6b3e/request.tmp.xml. The Reference lists the local-payment Template as a Run/Debug example that needs a business TestCase ID. No #398 golden preserves that Chinese Template ID and payload. This file is `request.tmp.xml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-022",
@@ -240,9 +303,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "template.yaml reads request.tmp.xml by the package path templates/\u4ed8\u6b3e/\u672c\u5730\u4ed8\u6b3e/request.tmp.xml. The Reference lists the local-payment Template as a Run/Debug example that needs a business TestCase ID. No #398 golden preserves that Chinese Template ID and payload. This file is `template.yaml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-023",
@@ -251,9 +317,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "DocumentationExamplesTest dry-runs packages/default/testcase/payment2.xlsx. The sidecar maps stage column \u57f7\u884c\u6a21\u677f onto a Template selected per row, and the Case IDs are the workbook ids. No #398 golden preserves those IDs, so the xlsx, sidecar, and snapshot stay together. This file is `payment2.xlsx` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-024",
@@ -262,9 +331,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "DocumentationExamplesTest dry-runs packages/default/testcase/payment2.xlsx. The sidecar maps stage column \u57f7\u884c\u6a21\u677f onto a Template selected per row, and the Case IDs are the workbook ids. No #398 golden preserves those IDs, so the xlsx, sidecar, and snapshot stay together. This file is `payment2.xml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-025",
@@ -273,9 +345,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "DocumentationExamplesTest dry-runs packages/default/testcase/payment2.xlsx. The sidecar maps stage column \u57f7\u884c\u6a21\u677f onto a Template selected per row, and the Case IDs are the workbook ids. No #398 golden preserves those IDs, so the xlsx, sidecar, and snapshot stay together. This file is `payment2.yaml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-026",
@@ -284,9 +359,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "QuickStartDocumentationTest dry-runs payment_regression.xlsx and expects total 22 and skipped 22. The sidecar maps five stage columns onto the PAYMENT_* Template IDs, with runWhen and onFailure. No #398 golden preserves those 22 Case IDs. This file is `payment_regression.xlsx` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-027",
@@ -295,9 +373,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "QuickStartDocumentationTest dry-runs payment_regression.xlsx and expects total 22 and skipped 22. The sidecar maps five stage columns onto the PAYMENT_* Template IDs, with runWhen and onFailure. No #398 golden preserves those 22 Case IDs. This file is `payment_regression.xml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-028",
@@ -306,9 +387,12 @@
       "kind": "tracked-exception",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "compatibility route retained; do not execute live dependencies in CI",
+      "expectedResult": "compatibility route retained; do not execute live dependencies in routine CI",
       "executable": false,
-      "reason": "Blocked by #398 golden evidence and, for LOAD/V3 targets, #418. Stays in packages/default. packages/legacy is not created."
+      "reason": "QuickStartDocumentationTest dry-runs payment_regression.xlsx and expects total 22 and skipped 22. The sidecar maps five stage columns onto the PAYMENT_* Template IDs, with runWhen and onFailure. No #398 golden preserves those 22 Case IDs. This file is `payment_regression.yaml` and moves only with that Template ID.",
+      "migrationStatus": "blocked",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-029",
@@ -319,7 +403,10 @@
       "environment": "offline",
       "expectedResult": "see docs/guides/native-payments.md",
       "executable": true,
-      "reason": "Offline multi-Flow Native Suite. Issue #425. Not a conversion of payment2."
+      "reason": "Offline multi-Flow Native Suite fixture executed by NativePaymentsExampleTest. Not a conversion of payment2.",
+      "migrationStatus": "current",
+      "runtimeSupport": "native",
+      "ciRunnable": true
     },
     {
       "id": "asset-030",
@@ -330,7 +417,10 @@
       "environment": "offline",
       "expectedResult": "see docs/guides/native-payments.md",
       "executable": true,
-      "reason": "Offline multi-Flow Native Suite. Issue #425. Not a conversion of payment2."
+      "reason": "Offline multi-Flow Native Suite fixture executed by NativePaymentsExampleTest. Not a conversion of payment2.",
+      "migrationStatus": "current",
+      "runtimeSupport": "native",
+      "ciRunnable": true
     },
     {
       "id": "asset-031",
@@ -341,7 +431,10 @@
       "environment": "offline",
       "expectedResult": "PASS via QuickStartDocumentationTest",
       "executable": false,
-      "reason": "Existing Native Quick Start. att-testcase/v1."
+      "reason": "Native Quick Start executed by QuickStartDocumentationTest. It is runnable, but it is not the offline native-suite CI fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "native",
+      "ciRunnable": false
     },
     {
       "id": "asset-032",
@@ -352,7 +445,10 @@
       "environment": "offline",
       "expectedResult": "PASS via QuickStartDocumentationTest",
       "executable": false,
-      "reason": "Existing Native Quick Start. att-testcase/v1."
+      "reason": "Native Quick Start executed by QuickStartDocumentationTest. It is runnable, but it is not the offline native-suite CI fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "native",
+      "ciRunnable": false
     },
     {
       "id": "asset-033",
@@ -363,7 +459,10 @@
       "environment": "offline",
       "expectedResult": "PASS via QuickStartDocumentationTest",
       "executable": false,
-      "reason": "Existing Native Quick Start. att-testcase/v1."
+      "reason": "Native Quick Start executed by QuickStartDocumentationTest. It is runnable, but it is not the offline native-suite CI fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "native",
+      "ciRunnable": false
     },
     {
       "id": "asset-034",
@@ -374,7 +473,10 @@
       "environment": "offline",
       "expectedResult": "PASS via QuickStartDocumentationTest",
       "executable": false,
-      "reason": "Existing Native Quick Start. att-testcase/v1."
+      "reason": "Native Quick Start executed by QuickStartDocumentationTest. It is runnable, but it is not the offline native-suite CI fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "native",
+      "ciRunnable": false
     },
     {
       "id": "asset-035",
@@ -383,9 +485,12 @@
       "kind": "legacy-compatibility",
       "owner": "default-package",
       "environment": "offline",
-      "expectedResult": "legacy Quick Start Case IDs QS001 and QS002 remain runnable",
+      "expectedResult": "QuickStartDocumentationTest runs QS001 and QS002",
       "executable": false,
-      "reason": "Supported Workbook/Stage/Template route. Not deprecated."
+      "reason": "Supported workbook/Stage/Template route. QuickStartDocumentationTest executes the legacy Case IDs. Not part of the native-suite fixture set, and not a candidate for packages/legacy while that route remains the compatibility command.",
+      "migrationStatus": "current",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-036",
@@ -394,9 +499,12 @@
       "kind": "legacy-compatibility",
       "owner": "default-package",
       "environment": "offline",
-      "expectedResult": "legacy Quick Start Case IDs QS001 and QS002 remain runnable",
+      "expectedResult": "QuickStartDocumentationTest runs QS001 and QS002",
       "executable": false,
-      "reason": "Supported Workbook/Stage/Template route. Not deprecated."
+      "reason": "Supported workbook/Stage/Template route. QuickStartDocumentationTest executes the legacy Case IDs. Not part of the native-suite fixture set, and not a candidate for packages/legacy while that route remains the compatibility command.",
+      "migrationStatus": "current",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-037",
@@ -405,9 +513,12 @@
       "kind": "legacy-compatibility",
       "owner": "default-package",
       "environment": "offline",
-      "expectedResult": "legacy Quick Start Case IDs QS001 and QS002 remain runnable",
+      "expectedResult": "QuickStartDocumentationTest runs QS001 and QS002",
       "executable": false,
-      "reason": "Supported Workbook/Stage/Template route. Not deprecated."
+      "reason": "Supported workbook/Stage/Template route. QuickStartDocumentationTest executes the legacy Case IDs. Not part of the native-suite fixture set, and not a candidate for packages/legacy while that route remains the compatibility command.",
+      "migrationStatus": "current",
+      "runtimeSupport": "legacy-compatible",
+      "ciRunnable": false
     },
     {
       "id": "asset-038",
@@ -416,9 +527,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-039",
@@ -429,7 +543,10 @@
       "environment": "offline",
       "expectedResult": "see docs/guides/native-payments.md",
       "executable": true,
-      "reason": "Offline multi-Flow Native Suite. Issue #425. Not a conversion of payment2."
+      "reason": "Offline multi-Flow Native Suite fixture executed by NativePaymentsExampleTest. Not a conversion of payment2.",
+      "migrationStatus": "current",
+      "runtimeSupport": "native",
+      "ciRunnable": true
     },
     {
       "id": "asset-040",
@@ -440,7 +557,10 @@
       "environment": "offline",
       "expectedResult": "PASS via QuickStartDocumentationTest",
       "executable": false,
-      "reason": "Existing Native Quick Start. att-testcase/v1."
+      "reason": "Native Quick Start executed by QuickStartDocumentationTest. It is runnable, but it is not the offline native-suite CI fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "native",
+      "ciRunnable": false
     },
     {
       "id": "asset-041",
@@ -449,9 +569,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-042",
@@ -460,9 +583,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-043",
@@ -471,9 +597,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-044",
@@ -482,9 +611,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-045",
@@ -493,9 +625,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-046",
@@ -504,9 +639,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-047",
@@ -515,9 +653,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-048",
@@ -526,9 +667,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-049",
@@ -537,9 +681,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-050",
@@ -548,9 +695,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-051",
@@ -559,9 +709,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-052",
@@ -570,9 +723,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-053",
@@ -581,9 +737,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-054",
@@ -592,9 +751,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-055",
@@ -603,9 +765,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-056",
@@ -614,9 +779,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-057",
@@ -625,9 +793,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-058",
@@ -636,9 +807,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-059",
@@ -647,9 +821,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-060",
@@ -658,9 +835,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-061",
@@ -669,9 +849,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-062",
@@ -680,9 +863,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-063",
@@ -691,9 +877,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-064",
@@ -702,9 +891,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-065",
@@ -713,9 +905,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-066",
@@ -724,9 +919,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-067",
@@ -735,9 +933,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-068",
@@ -746,9 +947,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-069",
@@ -757,9 +961,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-070",
@@ -768,9 +975,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-071",
@@ -779,9 +989,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-072",
@@ -790,9 +1003,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-073",
@@ -801,9 +1017,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-074",
@@ -812,9 +1031,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-075",
@@ -823,9 +1045,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-076",
@@ -834,9 +1059,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-077",
@@ -845,9 +1073,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-078",
@@ -856,9 +1087,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-079",
@@ -867,9 +1101,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-080",
@@ -878,9 +1115,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-081",
@@ -889,9 +1129,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-082",
@@ -900,9 +1143,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-083",
@@ -911,9 +1157,12 @@
       "kind": "package-owned-tool-or-data",
       "owner": "default-package",
       "environment": "external",
-      "expectedResult": "unchanged package-owned resource",
+      "expectedResult": "package-owned resource; not a native-suite fixture",
       "executable": false,
-      "reason": "Tool and testdata ownership stays with the Package. Not a Native Case."
+      "reason": "The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set.",
+      "migrationStatus": "current",
+      "runtimeSupport": "package-owned",
+      "ciRunnable": false
     },
     {
       "id": "asset-084",
@@ -924,7 +1173,10 @@
       "environment": "none",
       "expectedResult": "documentation",
       "executable": false,
-      "reason": "Current example note."
+      "reason": "Current example note.",
+      "migrationStatus": "current",
+      "runtimeSupport": "documentation",
+      "ciRunnable": false
     },
     {
       "id": "asset-085",
@@ -935,7 +1187,10 @@
       "environment": "none",
       "expectedResult": "migration input only",
       "executable": false,
-      "reason": "Historical inline config kept as a migration input."
+      "reason": "Historical inline config kept as a migration input.",
+      "migrationStatus": "legacy",
+      "runtimeSupport": "archived",
+      "ciRunnable": false
     },
     {
       "id": "asset-086",
@@ -946,7 +1201,10 @@
       "environment": "none",
       "expectedResult": "non-runnable archived catalog",
       "executable": false,
-      "reason": "Former Settings catalog. Current path is examples/package-local-sut-metrics. Issue #428."
+      "reason": "Former Settings catalog archived by #428. Current path is examples/package-local-sut-metrics.",
+      "migrationStatus": "legacy",
+      "runtimeSupport": "archived",
+      "ciRunnable": false
     },
     {
       "id": "asset-087",
@@ -957,7 +1215,10 @@
       "environment": "none",
       "expectedResult": "non-runnable archived catalog",
       "executable": false,
-      "reason": "Former Settings catalog. Current path is examples/package-local-sut-metrics. Issue #428."
+      "reason": "Former Settings catalog archived by #428. Current path is examples/package-local-sut-metrics.",
+      "migrationStatus": "legacy",
+      "runtimeSupport": "archived",
+      "ciRunnable": false
     },
     {
       "id": "asset-088",
@@ -968,7 +1229,10 @@
       "environment": "none",
       "expectedResult": "non-runnable archived catalog",
       "executable": false,
-      "reason": "Former Settings catalog. Current path is examples/package-local-sut-metrics. Issue #428."
+      "reason": "Former Settings catalog archived by #428. Current path is examples/package-local-sut-metrics.",
+      "migrationStatus": "legacy",
+      "runtimeSupport": "archived",
+      "ciRunnable": false
     },
     {
       "id": "asset-089",
@@ -979,7 +1243,10 @@
       "environment": "none",
       "expectedResult": "non-runnable archived catalog",
       "executable": false,
-      "reason": "Former Settings catalog. Current path is examples/package-local-sut-metrics. Issue #428."
+      "reason": "Former Settings catalog archived by #428. Current path is examples/package-local-sut-metrics.",
+      "migrationStatus": "legacy",
+      "runtimeSupport": "archived",
+      "ciRunnable": false
     },
     {
       "id": "asset-090",
@@ -990,7 +1257,10 @@
       "environment": "none",
       "expectedResult": "non-runnable archived catalog",
       "executable": false,
-      "reason": "Former Settings catalog. Current path is examples/package-local-sut-metrics. Issue #428."
+      "reason": "Former Settings catalog archived by #428. Current path is examples/package-local-sut-metrics.",
+      "migrationStatus": "legacy",
+      "runtimeSupport": "archived",
+      "ciRunnable": false
     },
     {
       "id": "asset-091",
@@ -1001,7 +1271,10 @@
       "environment": "none",
       "expectedResult": "non-runnable archived catalog",
       "executable": false,
-      "reason": "Former Settings catalog. Current path is examples/package-local-sut-metrics. Issue #428."
+      "reason": "Former Settings catalog archived by #428. Current path is examples/package-local-sut-metrics.",
+      "migrationStatus": "legacy",
+      "runtimeSupport": "archived",
+      "ciRunnable": false
     },
     {
       "id": "asset-092",
@@ -1012,7 +1285,10 @@
       "environment": "none",
       "expectedResult": "non-runnable archived catalog",
       "executable": false,
-      "reason": "Former Settings catalog. Current path is examples/package-local-sut-metrics. Issue #428."
+      "reason": "Former Settings catalog archived by #428. Current path is examples/package-local-sut-metrics.",
+      "migrationStatus": "legacy",
+      "runtimeSupport": "archived",
+      "ciRunnable": false
     },
     {
       "id": "asset-093",
@@ -1023,7 +1299,10 @@
       "environment": "none",
       "expectedResult": "non-runnable archived catalog",
       "executable": false,
-      "reason": "Former Settings catalog. Current path is examples/package-local-sut-metrics. Issue #428."
+      "reason": "Former Settings catalog archived by #428. Current path is examples/package-local-sut-metrics.",
+      "migrationStatus": "legacy",
+      "runtimeSupport": "archived",
+      "ciRunnable": false
     },
     {
       "id": "asset-094",
@@ -1034,7 +1313,10 @@
       "environment": "none",
       "expectedResult": "non-runnable archived catalog",
       "executable": false,
-      "reason": "Former Settings catalog. Current path is examples/package-local-sut-metrics. Issue #428."
+      "reason": "Former Settings catalog archived by #428. Current path is examples/package-local-sut-metrics.",
+      "migrationStatus": "legacy",
+      "runtimeSupport": "archived",
+      "ciRunnable": false
     },
     {
       "id": "asset-095",
@@ -1043,9 +1325,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-096",
@@ -1054,9 +1339,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-097",
@@ -1065,9 +1353,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-098",
@@ -1076,9 +1367,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-099",
@@ -1087,9 +1381,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-100",
@@ -1098,9 +1395,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-101",
@@ -1109,9 +1409,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-102",
@@ -1120,9 +1423,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-103",
@@ -1131,9 +1437,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-104",
@@ -1142,9 +1451,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-105",
@@ -1153,9 +1465,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-106",
@@ -1164,9 +1479,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-107",
@@ -1175,9 +1493,12 @@
       "kind": "sut-v2-contract",
       "owner": "examples",
       "environment": "none",
-      "expectedResult": "schema contract sample loaded by SutMetricsContractMigrationTest",
+      "expectedResult": "schema sample loaded by SutMetricsContractMigrationTest",
       "executable": false,
-      "reason": "Active att-sut-metrics v2 samples. Not moved."
+      "reason": "Active v2 schema sample. Server tests load this path, so it stays here.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-108",
@@ -1186,9 +1507,12 @@
       "kind": "sut-v2-contract",
       "owner": "examples",
       "environment": "none",
-      "expectedResult": "schema contract sample loaded by SutMetricsContractMigrationTest",
+      "expectedResult": "schema sample loaded by SutMetricsContractMigrationTest",
       "executable": false,
-      "reason": "Active att-sut-metrics v2 samples. Not moved."
+      "reason": "Active v2 schema sample. Server tests load this path, so it stays here.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-109",
@@ -1197,9 +1521,12 @@
       "kind": "sut-v2-contract",
       "owner": "examples",
       "environment": "none",
-      "expectedResult": "schema contract sample loaded by SutMetricsContractMigrationTest",
+      "expectedResult": "schema sample loaded by SutMetricsContractMigrationTest",
       "executable": false,
-      "reason": "Active att-sut-metrics v2 samples. Not moved."
+      "reason": "Active v2 schema sample. Server tests load this path, so it stays here.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-110",
@@ -1208,9 +1535,12 @@
       "kind": "sut-v2-contract",
       "owner": "examples",
       "environment": "none",
-      "expectedResult": "schema contract sample loaded by SutMetricsContractMigrationTest",
+      "expectedResult": "schema sample loaded by SutMetricsContractMigrationTest",
       "executable": false,
-      "reason": "Active att-sut-metrics v2 samples. Not moved."
+      "reason": "Active v2 schema sample. Server tests load this path, so it stays here.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-111",
@@ -1219,9 +1549,12 @@
       "kind": "sut-v2-contract",
       "owner": "examples",
       "environment": "none",
-      "expectedResult": "schema contract sample loaded by SutMetricsContractMigrationTest",
+      "expectedResult": "schema sample loaded by SutMetricsContractMigrationTest",
       "executable": false,
-      "reason": "Active att-sut-metrics v2 samples. Not moved."
+      "reason": "Active v2 schema sample. Server tests load this path, so it stays here.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-112",
@@ -1230,9 +1563,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-113",
@@ -1241,9 +1577,12 @@
       "kind": "load-scenario",
       "owner": "examples",
       "environment": "external",
-      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred (#418)",
+      "expectedResult": "LOAD scenario; Native LOAD Case targets stay deferred",
       "executable": false,
-      "reason": "Direct LOAD target. Not converted to a Native Case."
+      "reason": "Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case.",
+      "migrationStatus": "current",
+      "runtimeSupport": "load-scenario",
+      "ciRunnable": false
     },
     {
       "id": "asset-114",
@@ -1254,7 +1593,10 @@
       "environment": "none",
       "expectedResult": "schema and ownership example; no live Prometheus",
       "executable": false,
-      "reason": "Canonical Global Data Source plus Package inventory. Issue #428."
+      "reason": "Canonical global Data Source plus Package inventory. No live service in CI.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-115",
@@ -1265,7 +1607,10 @@
       "environment": "none",
       "expectedResult": "schema and ownership example; no live Prometheus",
       "executable": false,
-      "reason": "Canonical Global Data Source plus Package inventory. Issue #428."
+      "reason": "Canonical global Data Source plus Package inventory. No live service in CI.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-116",
@@ -1276,7 +1621,10 @@
       "environment": "none",
       "expectedResult": "schema and ownership example; no live Prometheus",
       "executable": false,
-      "reason": "Canonical Global Data Source plus Package inventory. Issue #428."
+      "reason": "Canonical global Data Source plus Package inventory. No live service in CI.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-117",
@@ -1287,7 +1635,10 @@
       "environment": "none",
       "expectedResult": "schema and ownership example; no live Prometheus",
       "executable": false,
-      "reason": "Canonical Global Data Source plus Package inventory. Issue #428."
+      "reason": "Canonical global Data Source plus Package inventory. No live service in CI.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-118",
@@ -1298,7 +1649,10 @@
       "environment": "none",
       "expectedResult": "schema and ownership example; no live Prometheus",
       "executable": false,
-      "reason": "Canonical Global Data Source plus Package inventory. Issue #428."
+      "reason": "Canonical global Data Source plus Package inventory. No live service in CI.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-119",
@@ -1309,7 +1663,10 @@
       "environment": "none",
       "expectedResult": "schema and ownership example; no live Prometheus",
       "executable": false,
-      "reason": "Canonical Global Data Source plus Package inventory. Issue #428."
+      "reason": "Canonical global Data Source plus Package inventory. No live service in CI.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-120",
@@ -1320,7 +1677,10 @@
       "environment": "none",
       "expectedResult": "schema and ownership example; no live Prometheus",
       "executable": false,
-      "reason": "Canonical Global Data Source plus Package inventory. Issue #428."
+      "reason": "Canonical global Data Source plus Package inventory. No live service in CI.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-121",
@@ -1331,7 +1691,10 @@
       "environment": "none",
       "expectedResult": "schema and ownership example; no live Prometheus",
       "executable": false,
-      "reason": "Canonical Global Data Source plus Package inventory. Issue #428."
+      "reason": "Canonical global Data Source plus Package inventory. No live service in CI.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-122",
@@ -1342,7 +1705,10 @@
       "environment": "none",
       "expectedResult": "schema and ownership example; no live Prometheus",
       "executable": false,
-      "reason": "Canonical Global Data Source plus Package inventory. Issue #428."
+      "reason": "Canonical global Data Source plus Package inventory. No live service in CI.",
+      "migrationStatus": "current",
+      "runtimeSupport": "contract-sample",
+      "ciRunnable": false
     },
     {
       "id": "asset-123",
@@ -1353,7 +1719,10 @@
       "environment": "none",
       "expectedResult": "documentation",
       "executable": false,
-      "reason": "Current example note."
+      "reason": "Current example note.",
+      "migrationStatus": "current",
+      "runtimeSupport": "documentation",
+      "ciRunnable": false
     },
     {
       "id": "planned-native-load-targets",
@@ -1362,10 +1731,13 @@
       "kind": "native-load",
       "owner": "docs",
       "environment": "none",
-      "expectedResult": "deferred; excluded from the executable current suite",
+      "expectedResult": "deferred; excluded from the offline CI fixture set",
       "executable": false,
-      "reason": "Native LOAD Case targets remain #418. This entry must not be executed as a current example.",
-      "issue": 418
+      "reason": "Native LOAD Case targets remain deferred. This documentation entry is not an executable example.",
+      "issue": 418,
+      "migrationStatus": "planned",
+      "runtimeSupport": "deferred",
+      "ciRunnable": false
     }
   ]
 }

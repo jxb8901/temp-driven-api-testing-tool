@@ -74,19 +74,7 @@ packages/default/testdata/payments-offline-settle.xlsx
 
 預期 `total=6`、`passed=4`、`failed=2`、`executionCount=6`、`skipped=0`。Definition 依 ID 排序，每個 Definition 保留來源紀錄順序。
 
-在第一個失敗後停止：
-
-```sh
-./att.sh --local -p default --output-dir output --run-id payments-failfast \
-  run native-suite \
-  --definition payments.offline.authorize \
-  --definition payments.offline.settle \
-  --all --fail-fast
-```
-
-`auth-accepted` 和 `auth-rejected` 通過，`auth-mismatch` 失敗，三個結算 Case 是 `SKIPPED`，因為執行沒有開始。預期 `total=6`、`passed=2`、`failed=1`、`skipped=3`、`executionCount=3`。被略過的列不是 execution。
-
-只重跑該輸出目錄中已執行且失敗的 Case。`--rerun-failed` 已在這個 branch 的 Local CLI 和 Studio 實作。它不能和 `--all`、ID 或 tag 併用，也會忽略 Skipped Case：
+立刻在同一個 `--output-dir` 重跑。`--rerun-failed` 讀取該目錄裡最新的 Native Suite pointer。同一個目錄裡稍後的非 dry-run 會取代這個 pointer。此 command 不能和 `--all`、ID 或 tag 併用，也會忽略 Skipped Case：
 
 ```sh
 ./att.sh --local -p default --output-dir output --run-id payments-rerun \
@@ -96,7 +84,19 @@ packages/default/testdata/payments-offline-settle.xlsx
   --rerun-failed
 ```
 
-若要重跑兩個 assertion 失敗，請對 `payments-all` 使用同一個 `--output-dir`，不要用 fail-fast 那次執行。新的 RUN 只報告自己的選取。它的 `run.yaml` `retryLineage` 會把來源選取數和這次嘗試的執行數分開。Issue [#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) 的 Suite 驗收仍然開啟。沒有 4.6.0 release tag。
+預期重跑 `payments-all` 的兩個已執行失敗：`payments.offline.authorize.auth-mismatch` 和 `payments.offline.settle.SETTLE-MISMATCH`。`total=2`、`failed=2`、`executionCount=2`、`skipped=0`。`run.yaml` 的 `retryLineage.sourceSelectedCaseCount` 仍是 6，和這次嘗試分開。Issue [#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) 的 Suite 驗收仍然開啟。沒有 4.6.0 release tag。
+
+在另一個輸出目錄於第一個失敗後停止，才不會取代上面使用的 pointer：
+
+```sh
+./att.sh --local -p default --output-dir output-failfast --run-id payments-failfast \
+  run native-suite \
+  --definition payments.offline.authorize \
+  --definition payments.offline.settle \
+  --all --fail-fast
+```
+
+`auth-accepted` 和 `auth-rejected` 通過，`auth-mismatch` 失敗，三個結算 Case 是 `SKIPPED`，因為執行沒有開始。預期 `total=6`、`passed=2`、`failed=1`、`skipped=3`、`executionCount=3`。被略過的列不是 execution。在 `output-failfast` 執行 `--rerun-failed` 只會選到 `auth-mismatch`。
 
 ## 報告
 

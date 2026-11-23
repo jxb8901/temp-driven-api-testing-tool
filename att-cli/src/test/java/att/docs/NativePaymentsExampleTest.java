@@ -1,6 +1,11 @@
 /* Author: Jeffrey + ChatGPT */
 package att.docs;
 
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.yaml.snakeyaml.Yaml;
@@ -12,6 +17,7 @@ import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +67,8 @@ class NativePaymentsExampleTest {
         assertTrue(en.contains("(native-payments.zh.md)"));
         assertTrue(zh.contains("(native-payments.md)"));
         assertTrue(en.contains("There is no `suite.yaml`"));
+        assertTrue(en.contains("--output-dir output-failfast"));
+        assertTrue(zh.contains("--output-dir output-failfast"));
         assertFalse(read(root.resolve("packages/default/testcase/payments/offline-authorize/testcase.yaml")).contains("steps:"));
     }
 
@@ -128,6 +136,8 @@ class NativePaymentsExampleTest {
         assertTrue(html.contains("case.log"));
         assertTrue(Files.isRegularFile(runDir.resolve("ci/junit.xml")));
         assertTrue(Files.isRegularFile(runDir.resolve("ci/summary.json")));
+        Map<String, String> workbookStatus = standardWorkbookStatus(runDir.resolve("workbooks/native-cases.result.xlsx"));
+        assertEquals(status, workbookStatus);
     }
 
     @Test
@@ -147,6 +157,8 @@ class NativePaymentsExampleTest {
         assertTrue(Files.isRegularFile(runDir.resolve("workbooks/native-cases.source-workbook.xlsx")));
         Map<?, ?> sourceReport = (Map<?, ?>) runNode(runDir).get("sourceWorkbookReport");
         assertEquals("written", sourceReport.get("status"));
+        assertSettlementWorkbook(runDir.resolve("workbooks/native-cases.result.xlsx"),
+                runDir.resolve("workbooks/native-cases.source-workbook.xlsx"));
     }
 
     @Test
@@ -192,6 +204,92 @@ class NativePaymentsExampleTest {
         assertEquals(Integer.valueOf(6), toInt(lineage.get("sourceSelectedCaseCount")));
         assertEquals(Integer.valueOf(1), toInt(lineage.get("retryAttemptNumber")));
         assertEquals("payments-all", lineage.get("sourceRunId"));
+    }
+
+    @Test
+    void tutorialSequenceRetriesBothFailuresWhenFailFastUsesAnotherDirectory() throws Exception {
+        Path fullRun = temp.resolve("tutorial-output");
+        Path failFast = temp.resolve("tutorial-output-failfast");
+        suite(fullRun, "payments-all", 1, "--all");
+        suite(failFast, "payments-failfast", 1, "--all", "--fail-fast");
+        CliResult retry = suite(fullRun, "payments-rerun", 1, "--rerun-failed");
+        assertEquals(Arrays.asList(
+                "payments.offline.authorize.auth-mismatch",
+                "payments.offline.settle.SETTLE-MISMATCH"), new ArrayList<String>(caseStatus(retry).keySet()));
+        Map<?, ?> summary = summary(retry);
+        assertEquals(Integer.valueOf(2), toInt(summary.get("total")));
+        assertEquals(Integer.valueOf(2), toInt(summary.get("failed")));
+        assertEquals(Integer.valueOf(2), toInt(summary.get("executionCount")));
+        assertEquals(Integer.valueOf(6), toInt(((Map<?, ?>) runNode(fullRun.resolve("payments-rerun")).get("retryLineage")).get("sourceSelectedCaseCount")));
+    }
+
+    @Test
+    void rerunAfterFailFastInTheSameDirectoryKeepsOnlyTheExecutedFailure() throws Exception {
+        Path shared = temp.resolve("shared-pointer");
+        suite(shared, "payments-all", 1, "--all");
+        suite(shared, "payments-failfast", 1, "--all", "--fail-fast");
+        CliResult retry = suite(shared, "payments-rerun", 1, "--rerun-failed");
+        assertEquals(Collections.singletonList("payments.offline.authorize.auth-mismatch"),
+                new ArrayList<String>(caseStatus(retry).keySet()));
+    }
+
+    private static Map<String, String> standardWorkbookStatus(Path workbook) throws Exception {
+        Map<String, String> status = new LinkedHashMap<String, String>();
+        DataFormatter formatter = new DataFormatter();
+        try (XSSFWorkbook file = new XSSFWorkbook(Files.newInputStream(workbook))) {
+            Sheet sheet = file.getSheet("Cases");
+            Row header = sheet.getRow(0);
+            int idColumn = column(header, "Qualified Case ID", formatter);
+            int statusColumn = column(header, "Status", formatter);
+            for (int index = 1; index <= sheet.getLastRowNum(); index++) {
+                Row row = sheet.getRow(index);
+                status.put(formatter.formatCellValue(row.getCell(idColumn)), formatter.formatCellValue(row.getCell(statusColumn)));
+            }
+        }
+        return status;
+    }
+
+    private static void assertSettlementWorkbook(Path standard, Path sourceCopy) throws Exception {
+        Map<String, String> standardStatus = standardWorkbookStatus(standard);
+        assertEquals("PASS", standardStatus.get("payments.offline.settle.SETTLE-OK"));
+        assertEquals("PASS", standardStatus.get("payments.offline.settle.SETTLE-REJECTED"));
+        assertEquals("FAIL", standardStatus.get("payments.offline.settle.SETTLE-MISMATCH"));
+        DataFormatter formatter = new DataFormatter();
+        try (XSSFWorkbook file = new XSSFWorkbook(Files.newInputStream(sourceCopy))) {
+            Sheet sheet = file.getSheet("Cases");
+            Row header = sheet.getRow(0);
+            int idColumn = column(header, "CaseID", formatter);
+            int tagsColumn = column(header, "Tags", formatter);
+            int amountColumn = column(header, "Amount", formatter);
+            int authorizedColumn = column(header, "Authorized", formatter);
+            int expectedColumn = column(header, "ExpectedDecision", formatter);
+            int resultColumn = column(header, "Test Result", formatter);
+            assertEquals(3, sheet.getLastRowNum());
+            assertRow(sheet.getRow(1), formatter, idColumn, "SETTLE-OK", tagsColumn, "smoke,positive",
+                    amountColumn, "40", authorizedColumn, "100", expectedColumn, "SETTLED", resultColumn, "PASS");
+            assertRow(sheet.getRow(2), formatter, idColumn, "SETTLE-REJECTED", tagsColumn, "smoke,business-rejection",
+                    amountColumn, "0", authorizedColumn, "100", expectedColumn, "REJECTED", resultColumn, "PASS");
+            assertRow(sheet.getRow(3), formatter, idColumn, "SETTLE-MISMATCH", tagsColumn, "assertion-failure",
+                    amountColumn, "40", authorizedColumn, "100", expectedColumn, "REJECTED", resultColumn, "FAIL");
+        }
+    }
+
+    private static void assertRow(Row row, DataFormatter formatter, int idColumn, String id, int tagsColumn, String tags,
+            int amountColumn, String amount, int authorizedColumn, String authorized, int expectedColumn, String expected,
+            int resultColumn, String result) {
+        assertEquals(id, formatter.formatCellValue(row.getCell(idColumn)));
+        assertEquals(tags, formatter.formatCellValue(row.getCell(tagsColumn)));
+        assertEquals(amount, formatter.formatCellValue(row.getCell(amountColumn)));
+        assertEquals(authorized, formatter.formatCellValue(row.getCell(authorizedColumn)));
+        assertEquals(expected, formatter.formatCellValue(row.getCell(expectedColumn)));
+        assertEquals(result, formatter.formatCellValue(row.getCell(resultColumn)));
+    }
+
+    private static int column(Row header, String name, DataFormatter formatter) {
+        for (Cell cell : header) {
+            if (name.equals(formatter.formatCellValue(cell))) return cell.getColumnIndex();
+        }
+        throw new AssertionError("Missing workbook column " + name);
     }
 
     private CliResult suite(Path output, String runId, int expectedExit, String... selectors) throws Exception {

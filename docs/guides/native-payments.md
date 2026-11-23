@@ -74,19 +74,7 @@ Run every Case. The two deliberate assertion failures make the Suite `FAIL`:
 
 Expect `total=6`, `passed=4`, `failed=2`, `executionCount=6`, `skipped=0`. Definitions run in ID order, and each Definition keeps source-record order.
 
-Stop after the first failure:
-
-```sh
-./att.sh --local -p default --output-dir output --run-id payments-failfast \
-  run native-suite \
-  --definition payments.offline.authorize \
-  --definition payments.offline.settle \
-  --all --fail-fast
-```
-
-`auth-accepted` and `auth-rejected` pass, `auth-mismatch` fails, and the three settlement Cases are `SKIPPED` because execution did not start. Expect `total=6`, `passed=2`, `failed=1`, `skipped=3`, `executionCount=3`. Skipped rows are not executions.
-
-Retry only the failed executed Cases from that output directory. `--rerun-failed` is implemented on this branch for Local CLI and Studio. It cannot be combined with `--all`, IDs, or tags. It ignores skipped Cases:
+Retry immediately, in that same `--output-dir`. `--rerun-failed` reads the latest Native Suite pointer written in the directory. A later non-dry-run in the same directory replaces that pointer. The command cannot be combined with `--all`, IDs, or tags, and it ignores skipped Cases:
 
 ```sh
 ./att.sh --local -p default --output-dir output --run-id payments-rerun \
@@ -96,7 +84,19 @@ Retry only the failed executed Cases from that output directory. `--rerun-failed
   --rerun-failed
 ```
 
-Run this against the same `--output-dir` as `payments-all`, not the fail-fast run, when you want both assertion failures retried. The new RUN reports only its own selection. Its `run.yaml` `retryLineage` keeps the source selected count separate from this attempt's execution count. Issue [#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) remains open for Suite acceptance. No 4.6.0 release tag exists.
+Expect the two executed failures from `payments-all`: `payments.offline.authorize.auth-mismatch` and `payments.offline.settle.SETTLE-MISMATCH`. `total=2`, `failed=2`, `executionCount=2`, `skipped=0`. `run.yaml` `retryLineage.sourceSelectedCaseCount` stays 6, separate from this attempt. Issue [#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) remains open for Suite acceptance. No 4.6.0 release tag exists.
+
+Stop after the first failure in a different output directory, so it does not replace the pointer used above:
+
+```sh
+./att.sh --local -p default --output-dir output-failfast --run-id payments-failfast \
+  run native-suite \
+  --definition payments.offline.authorize \
+  --definition payments.offline.settle \
+  --all --fail-fast
+```
+
+`auth-accepted` and `auth-rejected` pass, `auth-mismatch` fails, and the three settlement Cases are `SKIPPED` because execution did not start. Expect `total=6`, `passed=2`, `failed=1`, `skipped=3`, `executionCount=3`. Skipped rows are not executions. `--rerun-failed` in `output-failfast` would select only `auth-mismatch`.
 
 ## Reports
 

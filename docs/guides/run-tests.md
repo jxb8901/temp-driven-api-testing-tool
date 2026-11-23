@@ -1,6 +1,6 @@
 # Run functional tests
 
-This guide shows the legacy workbook/Sidecar/Snapshot compatibility path and runs a checked-in offline Case with `./att.sh run`. For Native Case commands in the unpublished 4.6.0 release-target stack, see the [Quick Start](../quick-start.md) and [current CLI Reference](../reference/cli.md).
+The current Case path is Flow + `testcase.yaml` + Data Source, documented in the [Quick Start](../quick-start.md) and [current CLI Reference](../reference/cli.md). Those Native commands are integrated on the current default branch. This page keeps the workbook/Sidecar/Snapshot commands that still run a checked-in offline Case. That path is supported compatibility, not the only authoring model, and no 4.6.0 release or tag has been published.
 
 ## Build the source checkout
 
@@ -33,4 +33,4 @@ Use the Local Run ID and output directory in the result summary to find the exec
 ./att.sh debug template PAYMENT_INVOKE
 ~~~
 
-For target and selection semantics, see [Unified RUN](../reference/execution-modes/unified-run.md). Local CLI vNext syntax is [proposed for a later release](../interfaces/cli/vnext-proposed.md).
+For target and selection semantics, see [Unified RUN](../reference/execution-modes/unified-run.md). Native `run native-case` and `run native-suite` are the current commands. The broader shared vNext grammar remains a [planned proposal](../interfaces/cli/vnext-proposed.md).

@@ -854,28 +854,42 @@ def check_example_inventory():
     for entry in entries:
         entry_id = entry.get("id")
         rel = entry.get("path")
-        status = entry.get("status")
+        status = entry.get("migrationStatus")
+        runtime = entry.get("runtimeSupport")
+        ci_runnable = entry.get("ciRunnable")
         if not entry_id or entry_id in seen:
             fail("example inventory id is missing or duplicated: %s" % entry_id)
         seen.add(entry_id)
         if status not in ("current", "planned", "legacy", "blocked"):
-            fail("example inventory status is invalid for %s: %s" % (entry_id, status))
+            fail("example inventory migrationStatus is invalid for %s: %s" % (entry_id, status))
+        if entry.get("status") != status:
+            fail("example inventory status must mirror migrationStatus for %s" % entry_id)
+        if runtime not in ("native", "legacy-compatible", "executable-flow", "package-owned",
+                           "archived", "contract-sample", "load-scenario", "documentation", "deferred"):
+            fail("example inventory runtimeSupport is invalid for %s: %s" % (entry_id, runtime))
+        if not isinstance(ci_runnable, bool) or entry.get("executable") is not ci_runnable:
+            fail("example inventory ciRunnable must be boolean and executable must mirror it for %s" % entry_id)
         if not isinstance(rel, str) or not (ROOT / rel).is_file():
             fail("example inventory path is missing: %s" % rel)
             continue
         covered.add(rel)
         if status == "legacy" and not (rel.startswith("examples/legacy/") or rel.startswith("examples/history/")):
             fail("legacy inventory entry is outside examples/legacy and examples/history: %s" % rel)
-        if status == "blocked" and not rel.startswith("packages/default/"):
-            fail("blocked inventory entry must remain in packages/default: %s" % rel)
+        if status == "blocked":
+            if not rel.startswith("packages/default/"):
+                fail("blocked inventory entry must remain in packages/default: %s" % rel)
+            if ci_runnable or "This file is" not in str(entry.get("reason")):
+                fail("blocked inventory entry needs its own file-specific blocker: %s" % rel)
         if status == "current" and rel.startswith("examples/legacy/"):
             fail("current inventory entry points at examples/legacy: %s" % rel)
-        if entry.get("executable"):
-            if status != "current" or entry.get("environment") != "offline" or entry.get("kind") != "native-suite":
-                fail("executable inventory entry must be a current offline native suite: %s" % entry_id)
+        if "/templates/flows/common/" in rel and (runtime != "executable-flow" or ci_runnable or status != "current"):
+            fail("common Flow must stay executable and outside the offline native-suite fixture set: %s" % rel)
+        if ci_runnable:
+            if status != "current" or runtime != "native" or entry.get("environment") != "offline":
+                fail("ciRunnable inventory entry must be a current offline native fixture: %s" % entry_id)
             executable.append(rel)
-        if status == "planned" and entry.get("executable"):
-            fail("planned inventory entry must not be executable: %s" % entry_id)
+        if status == "planned" and ci_runnable:
+            fail("planned inventory entry must not be in the offline CI fixture set: %s" % entry_id)
     if not executable:
         fail("example inventory does not name an executable current Native Suite fixture")
     expected = []

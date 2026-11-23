@@ -41,33 +41,44 @@ class ExampleInventoryContractTest {
         for (Map<String, Object> entry : entries) {
             String id = String.valueOf(entry.get("id"));
             String path = String.valueOf(entry.get("path"));
-            String status = String.valueOf(entry.get("status"));
+            String status = String.valueOf(entry.get("migrationStatus"));
+            String runtime = String.valueOf(entry.get("runtimeSupport"));
+            assertEquals(status, String.valueOf(entry.get("status")));
+            assertEquals(entry.get("ciRunnable"), entry.get("executable"));
             assertTrue(ids.add(id), "duplicate id " + id);
             assertTrue(Files.isRegularFile(root.resolve(path)), path);
             assertTrue(Arrays.asList("current", "planned", "legacy", "blocked").contains(status), status);
+            assertTrue(Arrays.asList("native", "legacy-compatible", "executable-flow", "package-owned",
+                    "archived", "contract-sample", "load-scenario", "documentation", "deferred").contains(runtime), runtime);
             covered.add(path);
             if ("legacy".equals(status)) {
                 assertTrue(path.startsWith("examples/legacy/") || path.startsWith("examples/history/"), path);
             }
             if ("blocked".equals(status)) {
                 assertTrue(path.startsWith("packages/default/"), path);
-                assertFalse(Boolean.TRUE.equals(entry.get("executable")));
+                assertEquals(Boolean.FALSE, entry.get("ciRunnable"));
+                assertTrue(String.valueOf(entry.get("reason")).contains("This file is"), path);
             }
             if ("current".equals(status)) {
                 assertFalse(path.startsWith("examples/legacy/"), path);
             }
-            if (Boolean.TRUE.equals(entry.get("executable"))) {
+            if (path.contains("/templates/flows/common/")) {
                 assertEquals("current", status);
+                assertEquals("executable-flow", runtime);
+                assertEquals(Boolean.FALSE, entry.get("ciRunnable"));
+            }
+            if (Boolean.TRUE.equals(entry.get("ciRunnable"))) {
+                assertEquals("current", status);
+                assertEquals("native", runtime);
                 assertEquals("offline", entry.get("environment"));
-                assertEquals("native-suite", entry.get("kind"));
                 executable = true;
             }
             if ("planned".equals(status)) {
                 planned = true;
-                assertFalse(Boolean.TRUE.equals(entry.get("executable")));
+                assertEquals(Boolean.FALSE, entry.get("ciRunnable"));
             }
         }
-        assertTrue(executable, "current offline Native Suite must be executable");
+        assertTrue(executable, "offline Native Suite fixture set must be marked ciRunnable");
         assertTrue(planned, "planned work must stay in the inventory and out of the executable set");
         List<String> missing = new ArrayList<String>();
         for (String base : Arrays.asList("packages/default/templates", "packages/default/testcase",

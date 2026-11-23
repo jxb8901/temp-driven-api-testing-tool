@@ -1,6 +1,6 @@
 # 執行 functional test
 
-本指南示範舊版 workbook／Sidecar／Snapshot 相容路徑，並使用 `./att.sh run` 執行已提交的 offline Case。尚未發佈的 4.6.0 release-target stack 中的 Native Case command，請參閱[快速入門](../quick-start.zh.md)及[目前 CLI Reference](../reference.zh/cli.md)。
+目前的 Case 路徑是 Flow + `testcase.yaml` + Data Source，說明見[快速入門](../quick-start.zh.md)及[目前 CLI Reference](../reference.zh/cli.md)。這些 Native command 已整合在目前的 default branch。本頁保留仍可執行已提交 offline Case 的 workbook／Sidecar／Snapshot command。這條路徑是受支援的相容做法，不是唯一的撰寫模型，且尚未發佈 4.6.0 release 或 tag。
 
 ## 1. 編譯 source checkout
 
@@ -33,4 +33,4 @@ Snapshot generation 會寫入 workbook 的 canonical representation。Validation
 ./att.sh debug template PAYMENT_INVOKE
 ~~~
 
-Target 與 selection semantics 請參閱 [Unified RUN](../reference.zh/execution-modes/unified-run.md)。Local CLI vNext 語法[預計於未來版本推出](../interfaces/cli/vnext-proposed.zh.md)。
+Target 與 selection semantics 請參閱 [Unified RUN](../reference.zh/execution-modes/unified-run.md)。Native `run native-case` 和 `run native-suite` 是目前的 command。更廣泛的共用 vNext grammar 仍是[規劃中的 proposal](../interfaces/cli/vnext-proposed.zh.md)。
