@@ -28,7 +28,7 @@ class LoadAcceptanceTest {
         FrameworkConfig legacyConfig = new FrameworkConfigLoader().load(home.resolve("config/config.yaml"), home, legacy, "SIT");
         FrameworkConfig config = new FrameworkConfigLoader().load(home.resolve("config/config.yaml"), home, projectRoot(), "SIT");
         for (String name : Arrays.asList("closed-minimal.yaml", "closed.yaml")) {
-            Path scenarioFile = home.resolve("examples/load").resolve(name);
+            Path scenarioFile = home.resolve("examples/legacy/load").resolve(name);
             LoadScenario scenario = new LoadScenarioLoader(legacy).load(scenarioFile);
             LoadTarget target = new LoadTargetResolver(legacy, legacyConfig).resolve(scenario);
             new LoadTargetValidator(legacy, legacyConfig).validate(scenario, target);

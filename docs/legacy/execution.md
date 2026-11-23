@@ -27,7 +27,7 @@ You can supply `--input <path>` to select an explicit Debug input file. Keep cre
 
 ## Run LOAD
 
-LOAD accepts an `att-load/v1.9` scenario and supports direct Template, Flow, and Tool targets. Scenario files under `examples/load/` are relative to the repository root when the selected Package is `packages/legacy`:
+LOAD accepts an `att-load/v1.9` scenario and supports direct Template, Flow, and Tool targets. Scenario files under `examples/legacy/load/` are relative to the repository root when the selected Package is `packages/legacy`:
 
 ```sh
 ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh load ../../examples/legacy/load/closed-minimal.yaml --users 1 --duration 100ms

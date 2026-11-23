@@ -132,8 +132,6 @@ class DocumentationExamplesTest {
         Map<String, Integer> expected = new TreeMap<String, Integer>();
         expected.put("att-flow/v3.6", Integer.valueOf(6));
         expected.put("att-package/v1", Integer.valueOf(1));
-        expected.put("att-sidecar/v2.2", Integer.valueOf(1));
-        expected.put("att-template/v3.6", Integer.valueOf(1));
         expected.put("att-testcase/v1", Integer.valueOf(5));
         expected.put("att-testdata/v1.0", Integer.valueOf(1));
         expected.put("att-tool-group/v3.0", Integer.valueOf(3));
@@ -191,12 +189,12 @@ class DocumentationExamplesTest {
             int fenceIndex = index + 1;
             while (fenceIndex < lines.length && lines[fenceIndex].trim().isEmpty()) fenceIndex++;
             assertTrue(fenceIndex < lines.length, "missing code block after documentation example tag " + id);
-            Matcher fence = Pattern.compile("^```(json|yaml|yml)\\s*$").matcher(lines[fenceIndex].trim());
+            Matcher fence = Pattern.compile("^(```|~~~)(json|yaml|yml)\\s*$").matcher(lines[fenceIndex].trim());
             assertTrue(fence.matches(), "expected a JSON/YAML code block after documentation example tag " + id);
-            String blockFormat = "yml".equals(fence.group(1)) ? "yaml" : fence.group(1);
+            String blockFormat = "yml".equals(fence.group(2)) ? "yaml" : fence.group(2);
             StringBuilder content = new StringBuilder();
             int end = fenceIndex + 1;
-            while (end < lines.length && !"```".equals(lines[end].trim())) {
+            while (end < lines.length && !fence.group(1).equals(lines[end].trim())) {
                 if (content.length() > 0) content.append('\n');
                 content.append(lines[end]);
                 end++;
