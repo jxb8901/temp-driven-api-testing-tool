@@ -1745,10 +1745,10 @@ evidence: {mode: failures}
 ~~~
 
 ~~~sh
-./att.sh load ../examples/load/closed-smoke.yaml
-./att.sh load ../examples/load/arrival-smoke.yaml --format json
-./att.sh load ../examples/load/multi-closed.yaml
-./att.sh load ../examples/load/multi-arrival.yaml
+./att.sh load examples/load/closed-smoke.yaml
+./att.sh load examples/load/arrival-smoke.yaml --format json
+./att.sh load examples/load/multi-closed.yaml
+./att.sh load examples/load/multi-arrival.yaml
 ./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
 ./att.sh debug
@@ -2797,13 +2797,13 @@ actions:
 ./att.sh validate --config config/config.yaml --env SIT --package
 ./att.sh run --config config/config.yaml --env SIT --all
 ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env SIT
-./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT
 
 # UAT
 ./att.sh validate --config config/config.yaml --env UAT --package
 ./att.sh run --config config/config.yaml --env UAT --all
 ./att.sh debug template PAYMENT_INVOKE --config config/config.yaml --env UAT
-./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env UAT
 ```
 
 For CI, run the same validation and execution stages once per selected environment:
@@ -3394,8 +3394,8 @@ This page defines target, `--input`, `--set` and `--env` syntax in the option ma
 Load uses the scenario as the base and explicit workload options override the corresponding fields before the effective scenario is validated again:
 
 ```sh
-./att.sh load ../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
-./att.sh load ../examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
+./att.sh load examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
+./att.sh load examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
   --arrival-rate 5/s --ramp-up 1s --warmup 1s --duration 5s --ramp-down 1s \
   --max-concurrent 4 --overload-policy drop --format json
 ```
