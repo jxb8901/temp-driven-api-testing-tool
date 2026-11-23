@@ -2,10 +2,11 @@
 
 - **狀態：** Proposed（提案中，尚未接受為已實作契約）
 - **日期：** 2026-11-20
-- **適用範圍：** ATT 下一代 Test Authoring；非 4.4.1 已發佈功能；本文定義的是提案，不表示可供目前 runtime 使用
-- **Native Case schema：** S01 凍結 `att-testcase/v1` 欄位與身份契約；resolution／execution 仍未實作
+- **適用範圍：** ATT 下一代 Test Authoring 提案；本文記錄架構方向，不會自動定義 runtime compatibility
+- **Native Case 狀態：** 4.6.0 發佈目標包含 S03 inline resolution 和 RUN 實作；release 和 tag 尚未發佈，部署驗收仍由 [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) 跟進。
 - **相關工作：** [Issue #388](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/388)、[Source Management #233](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/233)、[PR #386](https://github.com/jxb8901/temp-driven-api-testing-tool/pull/386)
 - **英文主文件：** [ADR-0001](0001-flow-centric-testcase-resolution.md)
+- **S10 相容性證據：** [Template–Flow–Stage 矩陣及 golden fixture](../system-design/template-flow-stage-compatibility.zh.md)
 
 > **架構決策：** Test Case Definition 綁定 Flow、Data Source 及 Resolution Rules；長期模型可解析出 **0..m 個 Resolved Test Cases**，但零案例必須在 RUN 前成為驗證錯誤。RUN／LOAD 對選定的 Cases 執行。**產生案例與執行案例是不同的生命週期。**
 
@@ -15,7 +16,7 @@
 
 目前 `att-flow/v3.6` 已具備有序 Actions 與巢狀 Flow；Debug 可利用 `att-debug/v1.2` 的 Input 獨立執行 Flow；LOAD 已能重複執行 Flow、Template、Tool Target。因此下一代模型應**重用 Flow**，而不是另外發明 Steps 執行語言。
 
-本文記錄架構方向及分階段實作範圍。S03 已在 4.5.0 開發候選版登錄 `att-testcase/v1`，並沿用既有 Flow infrastructure 實作 inline Definition discovery、resolution 和 RUN。Excel resolution、Testdata／Generator、LOAD target、Studio 編輯及 Debug interoperability 仍屬後續工作。
+本文仍屬 **Proposed**，記錄架構方向及分階段實作範圍。尚未發佈的 4.6.0 release-target stack 包含 S03–S07 和 S12 的實作工作，包括 Native Case RUN、Excel source、Studio 編輯、implicit Suite、報告及 Default Package examples。程式碼仍在開啟中的 stacked PR；Native RUN（[#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)）、報告整合（[#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)）及 S12 採納（[#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)）的部署驗收仍未完成。共享編輯器部署驗收由獨立的 [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387) 跟進。S10/#398 只提供相容性分析和 golden fixture，不會改變 FrameworkEngine runtime semantics。Native LOAD target（[#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)）、進階 Testdata／generator（[#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)）、Debug interoperability（[#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)）及 Helper rollback／teardown 驗證（[#421](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/421)）均屬目標以外的後續工作。ADR approval 和 architecture closure 會在目標工作之後由 [#422](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/422) 跟進，不是發佈阻礙。
 
 ## 決策
 
@@ -87,7 +88,7 @@ V1 保留 Inline 記錄宣告順序及 Excel 工作表資料列順序，每筆�
 
 #### S01 凍結的 `att-testcase/v1` authoring contract
 
-S01 凍結欄位、型別與身份規則；S03 已把 schema 登錄至 Engine active registry，並支援 inline Definition discovery、resolution 和 execution。Schema 和範例位於 `schemas/` 及 `docs/adr/examples/att-testcase-v1/`。現時 resolver 可執行 singleton 和 inline records；Excel 契約仍待 S04 adapter（#394）支援。
+S01 凍結欄位、型別與身份規則；S03 已把 schema 登錄至 Engine active registry，並支援 inline Definition discovery、resolution 和 execution。S04 加入 package-contained Excel source resolution，並沿用現有 Sidecar mapping 語義。Schema 和範例位於 `schemas/` 及 `docs/adr/examples/att-testcase-v1/`。
 
 頂層包含 `schemaVersion`、Package 範圍的 `id`、可選 `name`／`description`／`tags`、靜態且 canonical 的版本化 `flow`，以及以下其中一種資料形態：
 
@@ -98,7 +99,7 @@ V1 schema 只接受 `inline` 及 `excel` 兩種 Data Source type。Validator 必
 
 Definition ID 使用點號分隔的 `[A-Za-z0-9_-]+` 段落，長度最多 126 個 ASCII 字元；Resolved Case ID 使用 `[A-Za-z0-9_-]{1,128}`，不得包含路徑分隔符。ID 保留作者提供的大小寫，不會自動 trim 或轉小寫。Resolver 必須拒絕 Package 內以 ASCII case-folding 比較時相撞的 Definition ID，以及同一 Definition 內相撞的 Resolved Case ID；完整 Qualified Case ID 在 Package 內也必須 case-fold 唯一。任何輸出路徑映射均須另行定義並保持路徑 containment。Descriptor 的檔名和目錄只是位置；移動或改名不改變 Definition identity，修改 `id` 則代表新 Definition，不會遷移舊結果。
 
-`recordId` 是來源記錄 identity；`caseIdExpression` 是可選的 Resolved Case ID 覆蓋規則，兩者不可混為一談。Excel `dataSource.caseId` 是物理表頭選擇器；`caseIdExpression` 則只能是單一 `${DATA.key}` 直接鍵查詢，在 Resolution 時對 record `DATA` 求值。函式、串接、巢狀路徑、`EXEC.*`、`META.*` 及其他 runtime 值均非法。結果必須是非空、符合 Case ID 段落規則的字串。缺值、null、非字串、非法值、重複結果或衝突均為錯誤；不可用 Excel 行號當作身份。同一 Definition 內的 `recordId` 必須按 ASCII case-folding 唯一，即使 `caseIdExpression` 覆寫 Resolved Case ID 亦然；Resolved Case ID 同樣須在 Definition 內按 ASCII case-folding 唯一。Active schema 會驗證 ID 語法；S03 inline Resolver 會拒絕同一 Definition 內的重複來源 ID、重複 expression 結果，以及 Package 內 Definition ID 的大小寫碰撞。重複 ID fixture 見[resolution-invalid 範例](examples/att-testcase-v1/resolution-invalid-duplicate-ids.yaml)。Excel row identity collision 由 S04 adapter 負責。
+`recordId` 是來源記錄 identity；`caseIdExpression` 是可選的 Resolved Case ID 覆蓋規則，兩者不可混為一談。Excel `dataSource.caseId` 是物理表頭選擇器；`caseIdExpression` 則只能是單一 `${DATA.key}` 直接鍵查詢，在 Resolution 時對 record `DATA` 求值。函式、串接、巢狀路徑、`EXEC.*`、`META.*` 及其他 runtime 值均非法。結果必須是非空、符合 Case ID 段落規則的字串。缺值、null、非字串、非法值、重複結果或衝突均為錯誤；不可用 Excel 行號當作身份。同一 Definition 內的 `recordId` 必須按 ASCII case-folding 唯一，即使 `caseIdExpression` 覆寫 Resolved Case ID 亦然；Resolved Case ID 同樣須在 Definition 內按 ASCII case-folding 唯一。Active schema 會驗證 ID 語法；S03 inline Resolver 會拒絕同一 Definition 內的重複來源 ID、重複 expression 結果，以及 Package 內 Definition ID 的大小寫碰撞。重複 ID fixture 見[resolution-invalid 範例](examples/att-testcase-v1/resolution-invalid-duplicate-ids.yaml)。S04 Excel adapter 亦會拒絕重複來源 ID 及 Resolved Case ID。
 
 沒有 `inputs` 時，Data Source 的每個 `DATA` 鍵以同名 Flow input identity-mapped。提供 `inputs` 時，它是完整 projection，取代 identity projection，不是合併或 override 層。每個 projection 值必須是 `{from: DATA.key}` 或 `{value: <typed value>}`。來源鍵不存在為錯誤；來源值為 null 時保留 null。V1 沒有隱含 defaults、環境 overlay 或 override precedence。Flow input 填入 `EXEC.INPUT`，不初始化 `EXEC.VARS` 或 Debug bootstrap vars。
 
@@ -108,11 +109,11 @@ Excel mapping 延用 `att-sidecar/v2.2`：`dataSource.caseId` 和 `tags` 是物�
 
 `dataSource.path` 必須是 Package 相對的可移植路徑：僅允許非空 ASCII `[A-Za-z0-9_-]` 路徑段、`/` 分隔，並以 `.xlsx`／`.XLSX` 結尾。Active Schema 在語法層拒絕空段、`.`／`..`、反斜線、磁碟機／冒號形式、空白與控制字元。Schema 拒絕是必要條件但不足夠；S04 Excel adapter 仍須在 Package root 下解析路徑，並拒絕逃逸或不安全的檔案系統形式。
 
-空白或 whitespace、`N/A`、`NA`、`NULL`、`NONE` 正規化為空字串；空白 `(yaml)` 不解析。Inline YAML 的 null 仍為 typed null。Excel tags 以逗號分隔；Definition 與 record tags 按來源順序合併並去重。缺少或重複欄位、重複 alias、錯誤 quoting、不安全路徑或不支援的 workbook 結構均須報錯；S04 Excel adapter 讀取來源 workbook 時不得修改它。Excel 資料列按工作表來源順序解析，每列恰好產生一個 Resolved Case。Stage selector 和 `stages[].dataColumns` 不適用；Definition 直接綁定一個入口 Flow。
+空白或 whitespace、`N/A`、`NA`、`NULL`、`NONE` 正規化為空字串；空白 `(yaml)` 不解析。Inline YAML 的 null 仍為 typed null。Excel tags 以逗號分隔；Definition 與 record tags 按來源順序合併並去重。缺少或重複欄位、重複 alias、錯誤 quoting、不安全路徑或不支援的 workbook 結構均須報錯。S04 Excel adapter 從單一有界 byte snapshot（壓縮後最多 32 MiB）解析並計算該 revision fingerprint，ZIP 解壓上限為 256 entries、每個 expanded entry 32 MiB、合計 64 MiB；每張 worksheet 最多掃描 100,000 個物理列、解析 10,000 筆非空記錄，headerRows 最多 86,400，header row/column 合計掃描最多 1,000,000 cells。YAML cells 沿用共用 `YamlSupport` 上限：3,000,000 code points、50 個 collection aliases 及 50 層巢狀；解析後的 value graph 另限制為最多 64 層及 100,000 個值，並拒絕非有限數字和遞迴 alias。adapter 不會修改 workbook 或建立舊式 XML Snapshot。Excel 資料列按工作表來源順序解析，每列恰好產生一個 Resolved Case。Stage selector 和 `stages[].dataColumns` 不適用；Definition 直接綁定一個入口 Flow。
 
-Excel Case ID 的 identity 規則比一般資料欄嚴格。`dataSource.caseId` 必須來自文字儲存格，並以現有 `DataFormatter(Locale.ROOT)` 方式讀取；公式、數字、日期、布林及錯誤儲存格均無效。空白儲存格，或經現有 `ValueNormalizer` 判定為空白標記的值（`N/A`、`NA`、`NULL`、`NONE`，忽略前後空白及 ASCII 大小寫），代表缺少 ID；該資料列必須報錯。其餘值保留原文及大小寫，不可 trim 或轉換大小寫。前後空白、控制字元、不符合 `[A-Za-z0-9_-]{1,128}` 的值及 Windows 保留裝置名稱（不分大小寫）均須拒絕。來源 ID 重複時按 ASCII case-folding 比較。`caseIdExpression` 可以產生不同的 Resolved Case ID，但不能免除來源 ID。Excel 行號只可作為診斷來源資訊，不可作為 ID。S04 必須加入儲存格型別、空白標記、空白字元、保留名稱及大小寫碰撞的回歸測試。
+Excel Case ID 的 identity 規則比一般資料欄嚴格。`dataSource.caseId` 必須來自文字儲存格，並以現有 `DataFormatter(Locale.ROOT)` 方式讀取；公式、數字、日期、布林及錯誤儲存格均無效。空白儲存格，或經現有 `ValueNormalizer` 判定為空白標記的值（`N/A`、`NA`、`NULL`、`NONE`，忽略前後空白及 ASCII 大小寫），代表缺少 ID；若該列其他已映射欄位有資料，便會報錯。其餘值保留原文及大小寫，不可 trim 或轉換大小寫。前後空白、控制字元、不符合 `[A-Za-z0-9_-]{1,128}` 的值及 Windows 保留裝置名稱（不分大小寫）均會被拒絕。來源 ID 重複時按 ASCII case-folding 比較。`caseIdExpression` 可以產生不同的 Resolved Case ID，但不能免除來源 ID。Excel 行號只可作為診斷來源資訊，不可作為 ID。
 
-`report` 只允許 `format: xlsx`；`template: sourceWorkbook` 只可與 Excel Data Source 一起使用，且只會複製來源為新的輸出 workbook。報告執行屬後續工作，不在 S01 runtime scope 內。
+`report` 只允許 `format: xlsx`；`template: sourceWorkbook` 只可與 Excel Data Source 一起使用，且會將來源複製為新的輸出 workbook。S07 會在 RUN 前驗證已接受的 Workbook revision 和所選實體來源列，並在執行後產生該可選報告。它會保留來源公式、遮蔽敏感來源值，且不會寫回 Package 內的 Workbook。若可選來源版面 artifacts 超出支援範圍或限制，完整的標準 Native 報告仍作為 fallback。Server 只有在目前 Package editor 權限通過時才會提供來源版面 Workbook。
 
 Definition、Data Source、record 和 report object 可使用以 `x-` 為前綴的擴展欄位；其他未知欄位一律拒絕。Projection 和 binding 結構維持嚴格驗證。
 
@@ -188,11 +189,11 @@ View／Validate／Preview 不可改動 Source、產生有副作用的 Legacy Sna
 
 **成本：** 需要新 Definition Schema、Resolver、穩定 ID 規則、擴展／容量限制、來源溯源、跨 RUN／LOAD／Debug 的兼容處理。
 
-現有 **XLSX + Sidecar + XML Snapshot**、多 Stage Case、Template Target、CLI、Job／Schedule、報告必須繼續可用。Stage 的 `required`、`runWhen`、`onFailure`、Scope／Input Overlay、Rollback／Cleanup 和 Nested Flow Scope **不能假設等同普通 Flow Action**。未驗證等價前應保留 Legacy Adapter／Execution Path。
+現有 **XLSX + Sidecar + XML Snapshot**、多 Stage Case、Template Target、CLI、Job／Schedule、報告必須繼續可用。Stage 的 required、runWhen、onFailure、Scope／Input Overlay、Rollback／Cleanup 和 Nested Flow Scope **不能假設等同普通 Flow Action**。S10 fixture 只證明一種明確的失敗／rollback／cleanup 對應方式，並揭示 Stage-only input overlay 和輸出結構差異。未驗證相容前應保留 Legacy Adapter／Execution Path。
 
-必須重用 4.4.1 的 Package Source／Change Sets／Validate／Review／Publish／Revision／History／Restore 及不可變 Job Source Snapshot，不另建平行發佈系統。
+必須重用現有 Package Source／Change Sets／Validate／Review／Publish／Revision／History／Restore 流程及不可變 Job Source Snapshot，不另建平行發佈系統。
 
-**本 ADR 不要求 PR #386／4.4.1 GA 完成 Native Cases、Generator、Template／Stage 合併或 LOAD Case Target。** 屬於後續逐步演進方向。
+原始 rollout 計劃將 PR #386 與 Native Case、dynamic generator、Flow／Template consolidation 和新 LOAD target 分開處理。目前 4.6.0 target 只包括上述範圍；S08／S09／S11 和 Helper rollback 驗證仍是後續工作。本 ADR 仍須在目標工作後由 #422 進行架構評審及批准；該 closure 不會阻礙 release target。
 
 ## 後續 ADR 評審仍需處理的問題
 
@@ -201,7 +202,7 @@ View／Validate／Preview 不可改動 Source、產生有副作用的 Legacy Sna
 3. Eager 與決定性 bounded/lazy Resolution，以及何時固定選定 Target 集合。
 4. 若跨 Definition 使用持久 Suite selection，其表示方式。
 5. 將已選 Case Target 映射到既有 LOAD workload/mix，同時保持直接 Flow／Template／Tool 行為。
-6. Stage scope/failure/cleanup 與 Flow Action 語義的精確兼容性，以及 Template 到 Flow 的轉換。
+6. Stage scope/failure/cleanup 與 Flow Action 語義的精確兼容性，以及 Template 到 Flow 的轉換（見[S10 矩陣](../system-design/template-flow-stage-compatibility.zh.md)）。
 7. Debug 轉換為 Case、敏感 input evidence 及可選 Excel report template 的細節。
 
 狀態保持 **Proposed**，待架構評審及首階段實作契約確定後才轉為 **Accepted**。

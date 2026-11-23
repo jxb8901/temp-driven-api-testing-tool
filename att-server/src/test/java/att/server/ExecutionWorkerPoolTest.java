@@ -123,7 +123,10 @@ class ExecutionWorkerPoolTest {
                     Map.of("pid",unrelated.pid(),"start",unrelated.info().startInstant().orElseThrow().minusSeconds(60).toString())))));
             Path yaml=temp.resolve("server.yaml");Files.writeString(yaml,Files.readString(yaml).replace("enabled: true","enabled: false"));
             try(ExecutionWorkerPool recovered=new ExecutionWorkerPool(ServerConfig.load(yaml),id->{throw new AssertionError("Disabled pool must not launch");},ProcessBuilder::start,()->"v1","a".repeat(64))) {
-                assertFalse(root.isAlive());assertFalse(child.isAlive());assertTrue(unrelated.isAlive());
+                // destroyForcibly() is asynchronous; wait for OS reaping before asserting death.
+                ProcessHandle stoppedChild=child;
+                await(()->!root.isAlive()&&!stoppedChild.isAlive());
+                assertTrue(unrelated.isAlive());
                 assertFalse(Files.exists(marker));assertEquals(0L,recovered.metrics().get("starts"));
             }
         } finally {

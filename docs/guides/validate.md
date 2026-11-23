@@ -1,6 +1,6 @@
 # Validate configuration and Packages
 
-The current ATT 4.4.1 VALIDATE command checks authored inputs without running business work.
+VALIDATE checks authored inputs without running business work. The 4.6.0 release-target CLI also exposes the shared Local/Server `validate` grammar; this target remains unpublished. See the [CLI Reference](../reference/cli.md) for Native target-stack command availability.
 
 ## Validate the Package
 

@@ -116,8 +116,13 @@ class PrewarmedWorkerTest {
         org.junit.jupiter.api.Assumptions.assumeFalse(isWindows(),"The OS source sandbox is not available on Windows");
         Path root=fixture(temp.resolve("sandbox-mutation-package-"+UUID.randomUUID()));
         Files.createDirectories(root.resolve("files"));
-        Files.write(root.resolve("files/watched.txt"),"accepted-value\n".getBytes(StandardCharsets.UTF_8));
+        Path acceptedPackageFile=root.resolve("files/watched.txt");
+        Files.write(acceptedPackageFile,"accepted-value\n".getBytes(StandardCharsets.UTF_8));
         Path acceptedConfig=root.resolve("config/config.yaml");
+        Set<PosixFilePermission> readOnly=EnumSet.of(PosixFilePermission.OWNER_READ,
+                PosixFilePermission.GROUP_READ,PosixFilePermission.OTHERS_READ);
+        Files.setPosixFilePermissions(acceptedPackageFile,readOnly);
+        Files.setPosixFilePermissions(acceptedConfig,readOnly);
         String acceptedConfigBytes=readUtf8(acceptedConfig);
         Path started=root.resolve("output/mutation-started.marker"),release=root.resolve("output/mutation-release.marker");
         Path firstPackageRead=root.resolve("output/package-first-read.txt"),firstConfigRead=root.resolve("output/config-first-read.txt");

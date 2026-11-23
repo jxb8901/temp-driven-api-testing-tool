@@ -25,10 +25,20 @@ final class ArtifactDownload implements AutoCloseable {
     }
 
     static ArtifactDownload open(Path archive) throws Exception {
-        return open(archive, null);
+        return open(archive,null,null,false);
     }
 
     static ArtifactDownload open(Path archive, String expectedArchiveSha256) throws Exception {
+        return open(archive,expectedArchiveSha256,null,false);
+    }
+
+    static ArtifactDownload open(Path archive,String expectedArchiveSha256,String expectedNativeRunId) throws Exception {
+        String runId=expectedNativeRunId==null?null:att.core.IdentifierValidator.runId(expectedNativeRunId);
+        return open(archive,expectedArchiveSha256,runId,true);
+    }
+
+    private static ArtifactDownload open(Path archive,String expectedArchiveSha256,String expectedNativeRunId,
+                                        boolean enforceNativeRunIdentity) throws Exception {
         // A private OS-temp directory keeps the copy outside publication/recovery's namespace.
         Path directory=Files.createTempDirectory("att-artifact-download-");
         Path snapshot=directory.resolve("archive.zip");
@@ -55,7 +65,8 @@ final class ArtifactDownload implements AutoCloseable {
             if(expectedArchiveSha256!=null&&!expectedArchiveSha256.equals(java.util.HexFormat.of().formatHex(archiveDigest.digest())))
                 throw new IOException("Artifact archive digest does not match its publication record");
             // Validate the copied bytes, not a source that publication may atomically replace.
-            ArtifactArchive.verify(snapshot,true);
+            if(enforceNativeRunIdentity)ArtifactArchive.verify(snapshot,true,expectedNativeRunId);
+            else ArtifactArchive.verify(snapshot,true);
             return new ArtifactDownload(directory,channel,hashes,length);
         } catch(Exception failure) {
             if(channel!=null)try{channel.close();}catch(IOException close){failure.addSuppressed(close);}

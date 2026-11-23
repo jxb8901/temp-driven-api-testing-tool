@@ -6,7 +6,7 @@ ATT 將 functional execution、Load generation 及 read-only validation 分開�
 
 執行模型支援 Case、Template、Flow 或 Tool target，亦支援選取一批 Case。ATT Studio 及 Server 透過統一的 RUN draft 與 Job 提供這些功能。對支援的 Server target，Debug 是 RUN 的選用診斷模式。
 
-ATT 4.4.1 保留各 interface 的相容行為：Local CLI 的 run command 執行 workbook Case，standalone debug command 執行單一 Template、Flow 或 Tool。舊版 ATT Remote client 保留相應 Server command。這些 command 名稱不會定義不同的 Engine semantics。
+舊版 Local CLI 的 `./att.sh run` command 會執行 workbook Case，standalone `debug` 則執行單一 Template、Flow 或 Tool。4.6.0 release-target CLI 加入由 Native resolution 支援的明確 `run native-case` 和 `run native-suite` command；release 和 tag 尚未發佈，部署驗收仍待完成。舊版 ATT Remote client 保留其 Server command。Command 名稱不會定義不同的 Engine semantics。
 
 ## LOAD
 

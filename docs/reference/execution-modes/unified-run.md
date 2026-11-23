@@ -1,10 +1,10 @@
 # Unified RUN and schedules
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-ATT 4.4.1 represents functional one-shot execution as **RUN**. A RUN executes a Case, Template, Flow, Tool, or a selected batch of Cases. **Debug** is an optional diagnostic mode of RUN. **LOAD** retains its performance engine, pacing controls and specialized reports.
+Functional one-shot execution uses the shared **RUN** model for Cases, Templates, Flows and Tools. **Debug** is an optional diagnostic mode of supported RUN targets. **LOAD** retains its performance engine, pacing controls and specialized reports. The 4.6.0 release-target stack adds explicit Native Case and implicit Native Suite selection through `run native-case` and `run native-suite`; the release and tag remain unpublished, with deployed acceptance pending.
 
-The released Local CLI keeps its interface-specific compatibility boundary: its run verb selects workbook Cases, and standalone debug runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. This shared RUN model does not mean the proposed vNext CLI grammar is released; see the [Planned vNext page](../../interfaces/cli/vnext-proposed.md).
+The legacy Local CLI keeps its compatibility boundary: `./att.sh run` selects workbook Cases, and standalone `debug` runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. Native Server RUN requires a validated `att-execution/v2` draft; it is not submitted through the legacy raw Case selector. The broader shared CLI grammar remains a [planned proposal](../../interfaces/cli/vnext-proposed.md).
 
 ## Validate and execute a RUN
 
@@ -56,7 +56,7 @@ Replace `target` and `input` with an explicit selection:
 
 `suites` and `suiteDirectory` are mutually exclusive. `suiteDirectory` selects a package-relative group directory. Case and tag filters retain CLI intersection rules; tags match any requested tag, and excluded tags remove matches. Use `all:true` for the package selection. Arrays must be nonempty, unique and contain at most 1000 values. Validation resolves and freezes at most 10000 selected Case IDs. An empty selection fails rather than falling back to all Cases.
 
-`rerunFailed:true` resolves failures from the latest retained completed Case RUN owned by the caller in this package, within the latest 100 owned jobs. It intersects explicit Case/tag filters and freezes the resulting IDs. An unavailable manifest or no matching failures is a validation error. Existing CLI `--rerun-failed` continues to use its local output history.
+`rerunFailed:true` on a Native Suite selects only failed, executed Cases from the latest eligible completed Native Suite RUN for the same owner, Package, Definition IDs, and Package revision. The Server orders candidates by completion time and does not cap discovery at the latest 100 Jobs. Local execution uses a Package/Definition-scoped Native Suite pointer with a verified manifest hash; dry-runs and unrelated RUNs do not replace that pointer. The draft freezes the source Job/run, manifest digest, revision, selected source count, retry attempt number, and exact failed Qualified Case IDs; submit revalidates that source and rejects a stale draft if a newer matching RUN completed. Skipped source Cases are excluded. The new RUN reports only its own selected/executed/skipped counts and stores retry counts separately from source counts. A Schedule preserves its validated source lineage for each occurrence. An unavailable or inconsistent manifest, changed source, or empty failed selection is a validation error. Existing Workbook/Sidecar `rerunFailed:true` behavior and local history remain unchanged.
 
 ## Enable Debug diagnostics
 

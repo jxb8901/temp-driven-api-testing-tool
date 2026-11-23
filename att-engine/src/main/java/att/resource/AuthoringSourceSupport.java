@@ -1,6 +1,7 @@
 package att.resource;
 
 import att.security.SecretProtection;
+import att.config.ColumnSpecParser;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -14,6 +15,10 @@ import org.xml.sax.SAXParseException;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
+import org.yaml.snakeyaml.nodes.MappingNode;
+import org.yaml.snakeyaml.nodes.NodeTuple;
+import org.yaml.snakeyaml.nodes.ScalarNode;
+import org.yaml.snakeyaml.nodes.Tag;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -75,7 +80,8 @@ final class AuthoringSourceSupport {
         if(size>maxBytes)throw new PackageResourceInspector.ResponseTooLargeException();
         byte[] bytes=readBounded(path,maxBytes);
         String text=decodeUtf8(bytes);
-        if(text.indexOf('\0')>=0||!SecretProtection.text(text).equals(text)
+        String assignmentScanText=neutralizeNativeExcelDataColumns(logicalPath,text);
+        if(text.indexOf('\0')>=0||!SecretProtection.text(assignmentScanText).equals(assignmentScanText)
                 ||containsProtectedContent(text,logicalPath,safeList(sensitivePaths),safeList(sensitiveFieldPatterns)))
             throw new PackageResourceInspector.ResourceNotFoundException();
         return result(logicalPath,bytes,text,true);
@@ -163,7 +169,7 @@ final class AuthoringSourceSupport {
         int count=0;
         for(Object document:documents) {
             if(++count>64||protectedValue(document,"",sensitivePaths,sensitiveFieldPatterns,
-                    new IdentityHashMap<Object,Boolean>(),0))return true;
+                    new IdentityHashMap<Object,Boolean>(),0,nativeExcelDefinition(document)))return true;
         }
         return false;
     }
@@ -171,12 +177,20 @@ final class AuthoringSourceSupport {
     private static boolean protectedValue(Object value,String path,List<String> sensitivePaths,
                                           List<String> sensitiveFieldPatterns,IdentityHashMap<Object,Boolean> active,
                                           int depth) {
+        return protectedValue(value,path,sensitivePaths,sensitiveFieldPatterns,active,depth,false);
+    }
+
+    private static boolean protectedValue(Object value,String path,List<String> sensitivePaths,
+                                          List<String> sensitiveFieldPatterns,IdentityHashMap<Object,Boolean> active,
+                                          int depth,boolean nativeExcelDefinition) {
         if(depth>64)return true;
         if(value instanceof CharSequence)return protectedScalar(value.toString(),sensitivePaths,sensitiveFieldPatterns,depth);
         if(value instanceof Map<?,?>) {
             if(active.put(value,Boolean.TRUE)!=null)return true;
             try {
                 Map<?,?> map=(Map<?,?>)value;
+                boolean nativeExcelDataSource=nativeExcelDefinition&&"dataSource".equals(path)
+                        &&"excel".equalsIgnoreCase(String.valueOf(map.get("type")));
                 for(Map.Entry<?,?> entry:map.entrySet()) {
                     if(!(entry.getKey() instanceof String))return true;
                     String key=(String)entry.getKey();Object child=entry.getValue();
@@ -188,7 +202,9 @@ final class AuthoringSourceSupport {
                     String childPath=appendPath(path,key);
                     if((SecretProtection.sensitiveName(key)||matchesConfiguredField(key,sensitiveFieldPatterns)
                             ||matchesConfiguredPath(childPath,sensitivePaths))&&hasValue(child))return true;
-                    if(protectedValue(child,childPath,sensitivePaths,sensitiveFieldPatterns,active,depth+1))return true;
+                    if(nativeExcelDataSource&&"dataColumns".equals(key)&&nativeExcelColumnMapping(child))continue;
+                    if(protectedValue(child,childPath,sensitivePaths,sensitiveFieldPatterns,active,depth+1,
+                            nativeExcelDefinition))return true;
                 }
                 return false;
             } finally {active.remove(value);}
@@ -196,15 +212,109 @@ final class AuthoringSourceSupport {
         if(value instanceof Iterable<?>) {
             int index=0;
             for(Object child:(Iterable<?>)value) {
-                if(protectedValue(child,path+"["+(index++)+"]",sensitivePaths,sensitiveFieldPatterns,active,depth+1))return true;
+                if(protectedValue(child,path+"["+(index++)+"]",sensitivePaths,sensitiveFieldPatterns,active,
+                        depth+1,nativeExcelDefinition))return true;
             }
         }
         if(value!=null&&value.getClass().isArray()) {
             int length=java.lang.reflect.Array.getLength(value);
             for(int index=0;index<length;index++)if(protectedValue(java.lang.reflect.Array.get(value,index),
-                    path+"["+index+"]",sensitivePaths,sensitiveFieldPatterns,active,depth+1))return true;
+                    path+"["+index+"]",sensitivePaths,sensitiveFieldPatterns,active,depth+1,nativeExcelDefinition))return true;
         }
         return false;
+    }
+
+    private static String neutralizeNativeExcelDataColumns(String logicalPath,String text) {
+        String normalizedPath=logicalPath==null?"":logicalPath.replace('\\','/').toLowerCase(Locale.ROOT);
+        if(!(normalizedPath.equals("testcase.yaml")||normalizedPath.endsWith("/testcase.yaml")))return text;
+        try {
+            LoaderOptions options=new LoaderOptions();options.setAllowDuplicateKeys(false);
+            org.yaml.snakeyaml.nodes.Node root=new Yaml(new SafeConstructor(options)).compose(new StringReader(text));
+            if(!nativeExcelDefinition(root))return text;
+            org.yaml.snakeyaml.nodes.Node dataSource=mappingValue(root,"dataSource");
+            org.yaml.snakeyaml.nodes.Node columns=mappingValue(dataSource,"dataColumns");
+            if(!(columns instanceof ScalarNode)||!Tag.STR.equals(columns.getTag()))return text;
+            if(!nativeExcelColumnMapping(((ScalarNode)columns).getValue()))return text;
+            int[] range=nativeExcelDataColumnsRange(columns,text);
+            if(range==null)return text;
+            char[] masked=text.toCharArray();
+            for(int index=range[0];index<range[1];index++)if(masked[index]!='\n'&&masked[index]!='\r')masked[index]=' ';
+            return new String(masked);
+        } catch(Exception malformed) { return text; }
+    }
+
+    static String replaceNativeExcelDataColumns(String logicalPath,String text,String replacement) {
+        int[] range=nativeExcelDataColumnsRange(logicalPath,text);
+        if(range==null||replacement==null)return text;
+        return text.substring(0,range[0])+replacement+text.substring(range[1]);
+    }
+
+    static String nativeExcelDataColumnsSource(String logicalPath,String text) {
+        int[] range=nativeExcelDataColumnsRange(logicalPath,text);
+        return range==null?null:text.substring(range[0],range[1]);
+    }
+
+    private static int[] nativeExcelDataColumnsRange(String logicalPath,String text) {
+        String normalizedPath=logicalPath==null?"":logicalPath.replace('\\','/').toLowerCase(Locale.ROOT);
+        if(!(normalizedPath.equals("testcase.yaml")||normalizedPath.endsWith("/testcase.yaml")))return null;
+        try {
+            LoaderOptions options=new LoaderOptions();options.setAllowDuplicateKeys(false);
+            org.yaml.snakeyaml.nodes.Node root=new Yaml(new SafeConstructor(options)).compose(new StringReader(text));
+            if(!nativeExcelDefinition(root))return null;
+            org.yaml.snakeyaml.nodes.Node dataSource=mappingValue(root,"dataSource");
+            org.yaml.snakeyaml.nodes.Node columns=mappingValue(dataSource,"dataColumns");
+            if(!(columns instanceof ScalarNode)||!Tag.STR.equals(columns.getTag()))return null;
+            if(!nativeExcelColumnMapping(((ScalarNode)columns).getValue()))return null;
+            return nativeExcelDataColumnsRange(columns,text);
+        } catch(Exception malformed) { return null; }
+    }
+
+    private static int[] nativeExcelDataColumnsRange(org.yaml.snakeyaml.nodes.Node columns,String text) {
+        int start=codePointIndexToUtf16(columns.getStartMark().getIndex(),text);
+        int end=codePointIndexToUtf16(columns.getEndMark().getIndex(),text);
+        return start<0||end<start?null:new int[]{start,end};
+    }
+
+    /** SnakeYAML marks count Unicode code points; Java String offsets count UTF-16 code units. */
+    private static int codePointIndexToUtf16(int codePointIndex,String text) {
+        if(codePointIndex<0)return -1;
+        int codePointCount=text.codePointCount(0,text.length());
+        return codePointIndex>codePointCount?-1:text.offsetByCodePoints(0,codePointIndex);
+    }
+
+    private static boolean nativeExcelColumnMapping(Object value) {
+        if(!(value instanceof String))return false;
+        try { ColumnSpecParser.dataColumns((String)value);return true; }
+        catch(IllegalArgumentException malformed) { return false; }
+    }
+
+    private static boolean nativeExcelDefinition(Object value) {
+        if(!(value instanceof Map<?,?>))return false;
+        Map<?,?> definition=(Map<?,?>)value;Object dataSource=definition.get("dataSource");
+        return "att-testcase/v1".equals(definition.get("schemaVersion"))
+                &&dataSource instanceof Map<?,?>
+                &&"excel".equalsIgnoreCase(String.valueOf(((Map<?,?>)dataSource).get("type")));
+    }
+
+    private static boolean nativeExcelDefinition(org.yaml.snakeyaml.nodes.Node value) {
+        org.yaml.snakeyaml.nodes.Node schemaVersion=mappingValue(value,"schemaVersion");
+        org.yaml.snakeyaml.nodes.Node dataSource=mappingValue(value,"dataSource");
+        org.yaml.snakeyaml.nodes.Node type=mappingValue(dataSource,"type");
+        return "att-testcase/v1".equals(scalarValue(schemaVersion))
+                &&"excel".equalsIgnoreCase(scalarValue(type));
+    }
+
+    private static org.yaml.snakeyaml.nodes.Node mappingValue(org.yaml.snakeyaml.nodes.Node value,String key) {
+        if(!(value instanceof MappingNode))return null;
+        for(NodeTuple entry:((MappingNode)value).getValue()) {
+            if(entry.getKeyNode() instanceof ScalarNode&&key.equals(((ScalarNode)entry.getKeyNode()).getValue()))
+                return entry.getValueNode();
+        }
+        return null;
+    }
+
+    private static String scalarValue(org.yaml.snakeyaml.nodes.Node value) {
+        return value instanceof ScalarNode?((ScalarNode)value).getValue():null;
     }
 
     private static boolean protectedScalar(String text,List<String> sensitivePaths,List<String> sensitiveFieldPatterns,

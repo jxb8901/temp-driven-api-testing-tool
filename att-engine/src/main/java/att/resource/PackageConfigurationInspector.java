@@ -291,7 +291,8 @@ public final class PackageConfigurationInspector {
     }
 
     /** The Package Manifest view uses exactly the established secret and source projection policy. */
-    Object projectPackageValue(Object value, String field, boolean[] redacted) {
+    /** Projects one package value through the same configured secret policy used by safe inspection views. */
+    public Object projectPackageValue(Object value, String field, boolean[] redacted) {
         int dot = field.lastIndexOf('.');
         return projectTestdataValue(value, field, dot < 0 ? field : field.substring(dot + 1), redacted);
     }

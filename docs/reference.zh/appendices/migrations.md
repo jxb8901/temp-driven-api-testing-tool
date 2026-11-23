@@ -80,7 +80,7 @@ Unsupported schema version 會在 execution 前失敗並提供 migration guidanc
 <!-- att-docs:historical -->
 ## 歷史的集中式 SUT Metrics catalog
 
-ATT 4.3.1 之前，global config `att-config/v2.14` 可管理有界的 `sutMetrics.dataSources`、`metricSources`、`groups` 和 `profiles` lists；沒有 `sutMetrics` 的 `att-config/v2.13` 檔案仍受支援。4.3.1 的 global `att-config/v2.15` 保留 Data Source 描述檔路徑，各 Package 則管理自己的 Metric Source、Group 和 Profile。升級時請依照 [Package-local SUT Metrics migration guide](../../guides/sut-metrics-config-migration.zh.md) 操作。舊的 `data/sut-metrics-catalog.json` 不是 Package 定義的有效來源，也沒有自動 dry-run/apply 遷移命令；停用前請先與各定義擁有者明確協調及整理內容。
+Package-local SUT Metrics 遷移前，global config `att-config/v2.14` 可管理有界的 `sutMetrics.dataSources`、`metricSources`、`groups` 和 `profiles` lists；沒有 `sutMetrics` 的 `att-config/v2.13` 檔案仍受支援。遷移後，global `att-config/v2.15` 保留 Data Source 描述檔路徑，各 Package 則管理自己的 Metric Source、Group 和 Profile。請依照 [Package-local SUT Metrics migration guide](../../guides/sut-metrics-config-migration.zh.md) 操作。舊的 `data/sut-metrics-catalog.json` 不是 Package 定義的有效來源，也沒有自動 dry-run/apply 遷移命令；停用前請先與各定義擁有者明確協調及整理內容。
 <!-- /att-docs:historical -->
 
 

@@ -1,6 +1,8 @@
-# ATT 4.4.1 — API and integration testing (release candidate)
+# ATT 4.6.0 — API and integration testing (release target)
 
-**Acceptance pending; not released.** The latest released baseline remains at version 4.3.1.
+**Release status: not published.** This documentation describes the 4.6.0 formal release target; no 4.6.0 release or tag exists. The 4.3.1 version identifies an earlier CLI code line and is not a verified GitHub Release.
+
+The 4.6.0 target stack contains Native Case implementation work for inline and Excel data, Studio editing and preview, implicit Suites, Native reports, and Default Package examples. Deployed acceptance remains open for Native RUN ([#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)), report integration ([#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)), and Default Package adoption ([#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)). Shared-editor deployment evidence is tracked separately in [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387). Native LOAD Case targets ([#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)), advanced Testdata and generators ([#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)), and Debug interoperability ([#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)) are outside this release target.
 
 ATT is a Package-oriented platform for functional API and integration testing and controlled Load testing. A Package groups Testcases, Templates, Flows, Tools, Testdata and other business resources behind one registered root. Shared Runtime Configuration and Environment profiles bind those resources to SIT, UAT or another environment.
 
@@ -10,21 +12,30 @@ ATT supports Local execution, an optional ATT Server control plane, a browser St
 
 *Illustrative Studio UI-shell baseline with sample Package and Job data; the version badge belongs to that screenshot baseline.*
 
-## Quick Start: current 4.3.1 CLI
+## Quick Start: Native Case (4.6.0 release target)
 
-This source-checkout walkthrough uses the shipped legacy CLI. Snapshot generation is an explicit authoring step; validation does not create or update snapshots.
+Primary happy path on the release-target stack; release and deployed acceptance remain pending:
+
+```text
+Package → Flow → testcase.yaml → Preview/Resolve → Select Case(s) → Validate → RUN
+```
 
 ~~~sh
-./att.sh snapshot --suite testcase/quick_start.xlsx
 ./att.sh validate --package
+./att.sh --local -p default run native-case quick.start.single --resolved-case-id default
+~~~
+
+Open [Quick Start](docs/quick-start.md) for the offline Native fixtures (single / inline-multi / Excel), Studio preview notes, and the labeled legacy Workbook appendix. The same guide is available in [繁體中文](docs/quick-start.zh.md). Migration decisions live in the [S12 matrix](docs/maintenance/native-case-default-package-migration-s12.md).
+
+Legacy Workbook + Sidecar + Snapshot remains supported:
+
+~~~sh
 ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
 ~~~
 
-Open [Quick Start](docs/quick-start.md) for the full offline fixture, validation, execution, logs and assertions. The same guide is available in [繁體中文](docs/quick-start.zh.md).
-
 ## What ATT provides
 
-- Package isolation and reusable authoring with Testcases, Stages, Templates, Flows, Actions, Tools and Resources.
+- Package isolation and reusable authoring with Native Test Case Definitions (`testcase.yaml`), Flows, Actions, Tools and Resources; legacy Stages/Templates/Workbooks remain supported.
 - Functional RUN and separate LOAD execution, with read-only VALIDATE.
 - Shared Runtime Configuration, Environment profiles, optional Package Manifest defaults and Package-owned Testdata.
 - Local CLI, ATT Studio, REST/SSE integration and Server Jobs and Schedules.
@@ -36,7 +47,7 @@ Open [Quick Start](docs/quick-start.md) for the full offline fixture, validation
 - [Concepts](docs/concepts/): Package, authoring, execution, configuration and Server lifecycle.
 - [Guides](docs/guides/): task-oriented RUN, LOAD and validation procedures.
 - [Current CLI Reference](docs/reference/cli.md) and [ATT Remote compatibility guide](docs/remote-client.md).
-- [Proposed CLI vNext](docs/interfaces/cli/vnext-proposed.md) is a plan for a later release. It is not part of ATT 4.4.1.
+- [Proposed CLI vNext](docs/interfaces/cli/vnext-proposed.md) is a plan for a later release and is not part of the 4.6.0 target.
 - [Generated Reference Manual](docs/reference.md) and [繁體中文 Reference](docs/reference.zh.md).
 - [Server deployment](docs/operations/server-deployment.md), [Studio interfaces](docs/interfaces/studio/), and [Server API v1](docs/interfaces/server-api/).
 - [Documentation architecture and inventory](docs/system-design/documentation-architecture.md); [history archive](docs/history/README.md).

@@ -5,6 +5,8 @@ import att.server.api.LimitDiagnostic;
 import att.server.api.LimitOutcome;
 
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -27,6 +29,19 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
+import java.util.zip.CRC32;
+import java.util.Enumeration;
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.SAXParserFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.Attributes;
+import org.xml.sax.helpers.DefaultHandler;
+import java.io.StringReader;
 
 /** Builds the sole public representation of a Job's output. Raw Worker output is never served. */
 final class ArtifactArchive {
@@ -40,10 +55,23 @@ final class ArtifactArchive {
     static final int MAX_CANDIDATES = 50_000;
     static final long MAX_MEMORY_EXPORT_BYTES = 8L * 1024 * 1024;
     static final long MAX_ARCHIVE_BYTES = MAX_TOTAL_BYTES + MAX_MANIFEST_BYTES + 4L * 1024 * 1024;
+    static final String NATIVE_CASE_RESULT_XLSX = "workbooks/native-cases.result.xlsx";
+    static final String NATIVE_SOURCE_WORKBOOK_XLSX = "workbooks/native-cases.source-workbook.xlsx";
+    private static final String NATIVE_SOURCE_WORKBOOK_REPORT_SCHEMA = "att-native-source-workbook-report/v1";
+    private static final String XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    private static final String XLSX_CLASSIFICATION = "binary-output";
+    private static final int MAX_XLSX_ENTRIES = 4096;
+    private static final int MAX_XLSX_CONTROL_XML_BYTES = 2 * 1024 * 1024;
+    private static final long MAX_NATIVE_RUN_MANIFEST_BYTES = MAX_ENTRY_BYTES;
+    private static final long MAX_XLSX_EXPANDED_BYTES = MAX_TOTAL_BYTES;
+    private static final long MAX_XLSX_COMPRESSION_RATIO = 200L;
+    private static final int MAX_SOURCE_XLSX_ENTRIES = 256;
+    private static final long MAX_SOURCE_XLSX_ENTRY_BYTES = 32L * 1024 * 1024;
+    private static final long MAX_SOURCE_XLSX_EXPANDED_BYTES = 64L * 1024 * 1024;
     private static final Set<String> SAFE_EXTENSIONS = Set.of("txt", "log", "json", "yaml", "yml", "xml", "html", "htm", "css", "csv", "md");
     private static final String OMISSION_REASON = "unsupported, unsafe, duplicate, binary, oversized, or unapproved output";
     private static final Set<String> OMISSION_CATEGORIES = Set.of("unsafe_path", "unsafe_entry", "incomplete_load_report",
-            "recovery_checkpoint", "reserved_manifest", "unsupported_type", "duplicate_path", "entry_limit", "oversized", "rejected_text");
+            "recovery_checkpoint", "reserved_manifest", "unsupported_type", "duplicate_path", "entry_limit", "oversized", "rejected_text", "rejected_xlsx", "source_protected");
     private static final int AUTO_MIN_BYTES = 256;
     private static final int AUTO_MIN_SAVINGS_PERCENT = 5;
     private static final long DEFLATE_STAGING_OVERHEAD_BYTES = 64L * 1024L;
@@ -80,6 +108,21 @@ final class ArtifactArchive {
         return build(output,archive,MAX_MEMORY_EXPORT_BYTES,null,MAX_CANDIDATES,validator,compression);
     }
 
+    /** Server publication binds Native result XLSX acceptance to the Run ID persisted for this Job. */
+    static Path build(Path output,Path archive,EntryValidator validator,ServerConfig.ArchiveCompression compression,
+                      String expectedNativeRunId) throws Exception {
+        String runId=expectedNativeRunId==null?null:att.core.IdentifierValidator.runId(expectedNativeRunId);
+        return build(output,archive,MAX_MEMORY_EXPORT_BYTES,null,MAX_CANDIDATES,validator,compression,runId,true,false);
+    }
+
+    /** Publish the full source-workbook layout only after the Server has authorized its Job owner. */
+    static Path build(Path output,Path archive,EntryValidator validator,ServerConfig.ArchiveCompression compression,
+                      String expectedNativeRunId,boolean allowNativeSourceWorkbook) throws Exception {
+        String runId=expectedNativeRunId==null?null:att.core.IdentifierValidator.runId(expectedNativeRunId);
+        return build(output,archive,MAX_MEMORY_EXPORT_BYTES,null,MAX_CANDIDATES,validator,compression,runId,true,
+                allowNativeSourceWorkbook);
+    }
+
     /** The zero-budget path also provides a controlled disk-staging benchmark. */
     static Path build(Path output, Path archive,long memoryBudget) throws Exception {
         return build(output,archive,memoryBudget,null,MAX_CANDIDATES,null,ServerConfig.ArchiveCompression.defaults());
@@ -107,6 +150,13 @@ final class ArtifactArchive {
 
     private static Path build(Path output,Path archive,long memoryBudget,ZipProgress progress,int maxCandidates,
                               EntryValidator validator,ServerConfig.ArchiveCompression compression) throws Exception {
+        return build(output,archive,memoryBudget,progress,maxCandidates,validator,compression,null,false,false);
+    }
+
+    private static Path build(Path output,Path archive,long memoryBudget,ZipProgress progress,int maxCandidates,
+                              EntryValidator validator,ServerConfig.ArchiveCompression compression,
+                              String expectedNativeRunId,boolean enforceNativeRunIdentity,
+                              boolean allowNativeSourceWorkbook) throws Exception {
         if(memoryBudget<0||memoryBudget>MAX_MEMORY_EXPORT_BYTES)throw new IllegalArgumentException("Artifact memory budget exceeds limits");
         if(compression==null)throw new IllegalArgumentException("Artifact archive compression policy is required");
         ArtifactMetricsRecorder metrics = ArtifactMetricsRecorder.CURRENT.get();
@@ -132,6 +182,9 @@ final class ArtifactArchive {
         boolean published=false;
         try {
             List<Path> candidates=inventory(root,maxCandidates);
+            boolean trustedNativeRun=expectedNativeRunId!=null&&nativeRunManifestMatches(root,expectedNativeRunId);
+            Map<String,Object> sourceWorkbookReport=allowNativeSourceWorkbook&&trustedNativeRun
+                    ?nativeSourceWorkbookReport(root,expectedNativeRunId):null;
             if(metrics!=null){metrics.value.candidateCount=(long)candidates.size();usage(metrics.value.limitUsage,"artifact.inventory.candidates",candidates.size(),maxCandidates);}
             LoadReportInventory loadReports=validateLoadReportBundles(root,candidates);
             Set<String> names=new HashSet<>();List<String> approved=new ArrayList<>();long total=0;int omitted=0;long oversizedOmission=0L;long largestEntryBytes=0L;int entryCapOmissions=0;
@@ -163,17 +216,29 @@ final class ArtifactArchive {
                 String lower=relative.toLowerCase(Locale.ROOT);
                 if(!safePath(relative)){omitted++;omissionCategories.merge("unsafe_path",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 if(lower.equals(MANIFEST)){omitted++;omissionCategories.merge("reserved_manifest",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
-                if(!SAFE_EXTENSIONS.contains(extension(relative))){omitted++;omissionCategories.merge("unsupported_type",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                boolean nativeResultWorkbook=enforceNativeRunIdentity
+                        ?trustedNativeRun&&isNativeResultWorkbook(relative,expectedNativeRunId)
+                        :isNativeResultWorkbook(relative);
+                boolean sourceWorkbookCandidate=isNativeSourceWorkbook(relative);
+                boolean nativeSourceWorkbook=enforceNativeRunIdentity&&allowNativeSourceWorkbook
+                        &&sourceWorkbookReport!=null&&isNativeSourceWorkbook(relative,expectedNativeRunId)
+                        &&NATIVE_SOURCE_WORKBOOK_XLSX.equals(sourceWorkbookReport.get("outputPath"));
+                if(sourceWorkbookCandidate&&!nativeSourceWorkbook){omitted++;omissionCategories.merge("source_protected",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
+                if(!SAFE_EXTENSIONS.contains(extension(relative))&&!nativeResultWorkbook&&!nativeSourceWorkbook){omitted++;omissionCategories.merge("unsupported_type",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 if(names.contains(lower)){omitted++;omissionCategories.merge("duplicate_path",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 if(approved.size()>=MAX_ENTRIES){omitted++;entryCapOmissions++;omissionCategories.merge("entry_limit",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 largestEntryBytes=Math.max(largestEntryBytes,sourceSize);
                 if(sourceSize>MAX_ENTRY_BYTES){omitted++;oversizedOmission=Math.max(oversizedOmission,sourceSize);omissionCategories.merge("oversized",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 byte[] bytes;
                 try {
-                    bytes=readProducerBytes(candidate);
-                    if(validator!=null)validator.validate(candidate,bytes.clone());
+                    bytes=nativeResultWorkbook?readNativeResultWorkbook(candidate)
+                            :nativeSourceWorkbook?readNativeSourceWorkbook(candidate,sourceWorkbookReport)
+                            :readProducerBytes(candidate);
+                    // The canonical XLSX is produced by Engine's bounded, redacted Native Suite report writer.
+                    // The existing validator handles text projections and must not decode or rewrite workbook bytes.
+                    if(validator!=null&&!nativeResultWorkbook&&!nativeSourceWorkbook)validator.validate(candidate,bytes.clone());
                 } catch(IllegalArgumentException rejected) {
-                    omitted++;omissionCategories.merge("rejected_text",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;
+                    omitted++;omissionCategories.merge(nativeResultWorkbook||nativeSourceWorkbook?"rejected_xlsx":"rejected_text",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;
                 }
                 if(bytes.length>MAX_ENTRY_BYTES){omitted++;oversizedOmission=Math.max(oversizedOmission,bytes.length);omissionCategories.merge("oversized",1,Integer::sum);if(metrics!=null)metrics.value.omittedEntries=(long)omitted;continue;}
                 ReportFile committed=loadReports.required.get(relative);
@@ -212,7 +277,9 @@ final class ArtifactArchive {
                     if(total+bytes.length>MAX_TOTAL_BYTES)throw new LimitFailure("Final artifact size exceeds limits","artifact.archive.totalBytes",MAX_TOTAL_BYTES,total+bytes.length);
                     total+=bytes.length;
                     largestEntryBytes=Math.max(largestEntryBytes,bytes.length);
-                    entries.add(new Entry(relative,mediaType(relative),bytes.length,sha256(bytes),"textual-output","preserved",report,true));
+                    boolean binaryWorkbook=isNativeResultWorkbook(relative)||isNativeSourceWorkbook(relative);
+                    entries.add(new Entry(relative,mediaType(relative),bytes.length,sha256(bytes),
+                            binaryWorkbook?XLSX_CLASSIFICATION:"textual-output","preserved",report,!binaryWorkbook));
                     writeEntry(zip,relative,bytes,exports,compression);
                     if(metrics!=null){metrics.value.includedEntries++;metrics.value.includedBytes+=bytes.length;}
                     if(progress!=null)progress.entryWritten(relative);
@@ -243,7 +310,9 @@ final class ArtifactArchive {
                 zip.finish();
             }
             if(metrics!=null)metrics.phase("verification_fsync");
-            verify(staging,true);
+            if (enforceNativeRunIdentity && expectedNativeRunId != null)
+                verify(staging,true,expectedNativeRunId);
+            else verify(staging,true);
             try(var channel=java.nio.channels.FileChannel.open(staging,java.nio.file.StandardOpenOption.WRITE)){channel.force(true);}
             Files.move(staging,destination,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
             published=true;
@@ -501,6 +570,499 @@ final class ArtifactArchive {
         return bytes;
     }
 
+    private static boolean isNativeResultWorkbook(String relative) {
+        if (NATIVE_CASE_RESULT_XLSX.equals(relative)) return true;
+        int separator = relative == null ? -1 : relative.indexOf('/');
+        if (separator <= 0 || !NATIVE_CASE_RESULT_XLSX.equals(relative.substring(separator + 1))) return false;
+        String runId = relative.substring(0, separator);
+        try {
+            return runId.equals(att.core.IdentifierValidator.runId(runId));
+        } catch (IllegalArgumentException invalidRunId) {
+            return false;
+        }
+    }
+
+    private static boolean isNativeResultWorkbook(String relative,String expectedRunId) {
+        return expectedRunId!=null&&(expectedRunId+"/"+NATIVE_CASE_RESULT_XLSX).equals(relative);
+    }
+
+    private static boolean isNativeSourceWorkbook(String relative) {
+        if (NATIVE_SOURCE_WORKBOOK_XLSX.equals(relative)) return true;
+        int separator = relative == null ? -1 : relative.indexOf('/');
+        if (separator <= 0 || !NATIVE_SOURCE_WORKBOOK_XLSX.equals(relative.substring(separator + 1))) return false;
+        String runId = relative.substring(0, separator);
+        try { return runId.equals(att.core.IdentifierValidator.runId(runId)); }
+        catch (IllegalArgumentException invalidRunId) { return false; }
+    }
+
+    private static boolean isNativeSourceWorkbook(String relative,String expectedRunId) {
+        return expectedRunId!=null&&(expectedRunId+"/"+NATIVE_SOURCE_WORKBOOK_XLSX).equals(relative);
+    }
+
+    private static boolean nativeRunManifestMatches(Path output,String expectedRunId) {
+        try {
+            Path root=output.toRealPath(),runDirectory=output.resolve(expectedRunId);
+            Path manifest=runDirectory.resolve("run.yaml");
+            if(Files.isSymbolicLink(runDirectory)||Files.isSymbolicLink(manifest)
+                    ||!Files.isDirectory(runDirectory,LinkOption.NOFOLLOW_LINKS)
+                    ||!Files.isRegularFile(manifest,LinkOption.NOFOLLOW_LINKS)
+                    ||!runDirectory.toRealPath().startsWith(root))return false;
+            long size=Files.size(manifest);
+            if(size<1||size>MAX_NATIVE_RUN_MANIFEST_BYTES)return false;
+            byte[] bytes;
+            try(InputStream input=Files.newInputStream(manifest,LinkOption.NOFOLLOW_LINKS)) {
+                bytes=input.readNBytes((int)MAX_NATIVE_RUN_MANIFEST_BYTES+1);
+            }
+            if(bytes.length>MAX_NATIVE_RUN_MANIFEST_BYTES)return false;
+            return nativeRunManifestIdentity(parseNativeRunManifest(bytes),expectedRunId);
+        } catch(Exception invalidOrUnavailable) { return false; }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String,Object> nativeSourceWorkbookReport(Path output,String expectedRunId) {
+        try {
+            Path runDirectory=output.resolve(expectedRunId),manifest=runDirectory.resolve("run.yaml");
+            if(Files.isSymbolicLink(runDirectory)||Files.isSymbolicLink(manifest)
+                    ||!Files.isDirectory(runDirectory,LinkOption.NOFOLLOW_LINKS)
+                    ||!Files.isRegularFile(manifest,LinkOption.NOFOLLOW_LINKS))return null;
+            long size=Files.size(manifest);if(size<1||size>MAX_NATIVE_RUN_MANIFEST_BYTES)return null;
+            byte[] bytes;
+            try(InputStream input=Files.newInputStream(manifest,LinkOption.NOFOLLOW_LINKS)) {
+                bytes=input.readNBytes((int)MAX_NATIVE_RUN_MANIFEST_BYTES+1);
+            }
+            if(bytes.length>MAX_NATIVE_RUN_MANIFEST_BYTES)return null;
+            Object parsed=parseNativeRunManifest(bytes);
+            if(!(parsed instanceof Map<?,?> root)||!(root.get("outputs") instanceof Map<?,?> outputs)
+                    ||!(root.get("run") instanceof Map<?,?> run)
+                    ||!NATIVE_SOURCE_WORKBOOK_XLSX.equals(outputs.get("sourceWorkbookXlsx"))
+                    ||!(run.get("sourceWorkbookReport") instanceof Map<?,?> report)
+                    ||!NATIVE_SOURCE_WORKBOOK_REPORT_SCHEMA.equals(report.get("schemaVersion"))
+                    ||!"written".equals(report.get("status"))
+                    ||!NATIVE_SOURCE_WORKBOOK_XLSX.equals(report.get("outputPath"))
+                    ||!isSha256(String.valueOf(report.get("sourceSha256")))
+                    ||!isSha256(String.valueOf(report.get("outputSha256")))
+                    ||!isSha256(String.valueOf(report.get("formulaSha256"))))return null;
+            if(!nativeRunManifestIdentity(parsed,expectedRunId))return null;
+            Map<String,Object> result=new LinkedHashMap<>();
+            for(Map.Entry<?,?> entry:report.entrySet())result.put(String.valueOf(entry.getKey()),entry.getValue());
+            return result;
+        } catch(Exception invalidOrUnavailable) { return null; }
+    }
+
+    private static boolean isSha256(String value) {
+        return value!=null&&value.matches("[a-f0-9]{64}");
+    }
+
+    private static void verifyNativeWorkbookIdentity(ZipFile zip,Map<String,Object> manifest,String expectedRunId)
+            throws Exception {
+        Object entriesValue=manifest.get("entries");
+        if(!(entriesValue instanceof List<?> entries))throw new IllegalArgumentException("Invalid archive manifest entries");
+        boolean hasNativeWorkbook=false,hasSourceWorkbook=false;
+        Map<?,?> sourceEntry=null;
+        for(Object value:entries) {
+            if(!(value instanceof Map<?,?> row)||!(row.get("path") instanceof String path))continue;
+            if(isNativeResultWorkbook(path)) {
+                hasNativeWorkbook=true;
+                if(expectedRunId==null||!isNativeResultWorkbook(path,expectedRunId))
+                    throw new IllegalArgumentException("Native result workbook does not belong to the persisted Job Run ID");
+            }
+            if(isNativeSourceWorkbook(path)) {
+                hasSourceWorkbook=true;sourceEntry=row;
+                if(expectedRunId==null||!isNativeSourceWorkbook(path,expectedRunId))
+                    throw new IllegalArgumentException("Native source workbook does not belong to the persisted Job Run ID");
+            }
+        }
+        if(hasNativeWorkbook||hasSourceWorkbook) {
+            ZipEntry runManifest=zip.getEntry(expectedRunId+"/run.yaml");
+            if(runManifest==null||runManifest.isDirectory()||runManifest.getSize()<1
+                    ||runManifest.getSize()>MAX_NATIVE_RUN_MANIFEST_BYTES)
+                throw new IllegalArgumentException("Native workbook has no bounded Engine run manifest");
+            byte[] bytes;
+            try(InputStream input=zip.getInputStream(runManifest)) {
+                bytes=input.readNBytes((int)MAX_NATIVE_RUN_MANIFEST_BYTES+1);
+            }
+            Object parsed=parseNativeRunManifest(bytes);
+            if(bytes.length>MAX_NATIVE_RUN_MANIFEST_BYTES
+                    ||!nativeRunManifestIdentity(parsed,expectedRunId))
+                throw new IllegalArgumentException("Native workbook has no matching Engine Native report marker");
+            if(hasSourceWorkbook) {
+                Map<?,?> root=(Map<?,?>)parsed,run=(Map<?,?>)root.get("run");
+                Map<?,?> report=(Map<?,?>)run.get("sourceWorkbookReport");
+                String expectedDigest=String.valueOf(report.get("outputSha256"));
+                ZipEntry source=zip.getEntry(expectedRunId+"/"+NATIVE_SOURCE_WORKBOOK_XLSX);
+                if(source==null||source.isDirectory()||source.getSize()<22||source.getSize()>MAX_ENTRY_BYTES)
+                    throw new IllegalArgumentException("Native source workbook entry is missing or oversized");
+                byte[] payload;
+                try(InputStream input=zip.getInputStream(source)) {
+                    payload=input.readNBytes((int)MAX_ENTRY_BYTES+1);
+                }
+                if(payload.length>MAX_ENTRY_BYTES||!isSha256(expectedDigest)
+                        ||!expectedDigest.equals(sha256(payload))
+                        ||!(sourceEntry.get("sha256") instanceof String archiveDigest)
+                        ||!archiveDigest.equals(expectedDigest))
+                    throw new IllegalArgumentException("Native source workbook does not match its Engine report identity");
+                validateNativeSourceWorkbook(payload,report);
+            }
+        }
+    }
+
+    private static boolean hasNativeSourceWorkbook(Map<String,Object> manifest) {
+        Object entriesValue=manifest.get("entries");
+        if(!(entriesValue instanceof List<?> entries))return false;
+        for(Object value:entries)if(value instanceof Map<?,?> row&&row.get("path") instanceof String path
+                &&isNativeSourceWorkbook(path))return true;
+        return false;
+    }
+
+    private static String nativeSourceWorkbookRunId(Map<String,Object> manifest) {
+        Object entriesValue=manifest.get("entries");
+        if(!(entriesValue instanceof List<?> entries))throw new IllegalArgumentException("Invalid archive manifest entries");
+        String expected=null;
+        for(Object value:entries)if(value instanceof Map<?,?> row&&row.get("path") instanceof String path
+                &&isNativeSourceWorkbook(path)) {
+            int separator=path.indexOf('/');
+            if(separator<=0||!isNativeSourceWorkbook(path,path.substring(0,separator)))
+                throw new IllegalArgumentException("Native source workbook path is not bound to a Run ID");
+            String runId=att.core.IdentifierValidator.runId(path.substring(0,separator));
+            if(expected!=null&&!expected.equals(runId))
+                throw new IllegalArgumentException("Archive contains source workbooks for multiple Run IDs");
+            expected=runId;
+        }
+        if(expected==null)throw new IllegalArgumentException("Native source workbook is missing");
+        return expected;
+    }
+
+    private static Object parseNativeRunManifest(byte[] bytes) {
+        org.yaml.snakeyaml.LoaderOptions options=new org.yaml.snakeyaml.LoaderOptions();
+        options.setAllowDuplicateKeys(false);options.setMaxAliasesForCollections(10);
+        options.setCodePointLimit((int)MAX_NATIVE_RUN_MANIFEST_BYTES);
+        return new org.yaml.snakeyaml.Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor(options))
+                .load(new ByteArrayInputStream(bytes));
+    }
+
+    private static boolean nativeRunManifestIdentity(Object parsed,String expectedRunId) {
+        if(!(parsed instanceof Map<?,?> root)||!"att-run/v2.1".equals(root.get("schemaVersion"))
+                ||!(root.get("run") instanceof Map<?,?> run)||!(root.get("outputs") instanceof Map<?,?> outputs))return false;
+        String targetType=String.valueOf(run.get("targetType"));
+        return expectedRunId.equals(run.get("id"))
+                &&Set.of("nativeCase","nativeSuite").contains(targetType)
+                &&"att-native-report/v1".equals(run.get("nativeReportProtection"))
+                &&NATIVE_CASE_RESULT_XLSX.equals(outputs.get("xlsx"))
+                &&nativeSourceWorkbookMetadataValid(run,outputs);
+    }
+
+    private static boolean nativeSourceWorkbookMetadataValid(Map<?,?> run,Map<?,?> outputs) {
+        Object outputPath=outputs.get("sourceWorkbookXlsx"),rawReport=run.get("sourceWorkbookReport");
+        if(outputPath==null&&rawReport==null)return true; // Read older native manifests.
+        if(!(rawReport instanceof Map<?,?> report)
+                ||!NATIVE_SOURCE_WORKBOOK_REPORT_SCHEMA.equals(report.get("schemaVersion")))return false;
+        String status=String.valueOf(report.get("status"));
+        if(outputPath==null)
+            return !outputs.containsKey("sourceWorkbookXlsx")&&"fallback".equals(status)
+                    &&!report.containsKey("outputPath")
+                    &&report.get("diagnosticCode") instanceof String code&&!code.isBlank()
+                    &&report.get("diagnostic") instanceof String diagnostic&&!diagnostic.isBlank();
+        return NATIVE_SOURCE_WORKBOOK_XLSX.equals(outputPath)
+                &&"written".equals(status)
+                &&NATIVE_SOURCE_WORKBOOK_XLSX.equals(report.get("outputPath"))
+                &&isSha256(String.valueOf(report.get("sourceSha256")))
+                &&isSha256(String.valueOf(report.get("outputSha256")))
+                &&isSha256(String.valueOf(report.get("formulaSha256")));
+    }
+
+    private static byte[] readNativeResultWorkbook(Path file) throws java.io.IOException {
+        byte[] bytes;
+        try(InputStream input=Files.newInputStream(file,LinkOption.NOFOLLOW_LINKS)) {
+            bytes=input.readNBytes((int)MAX_ENTRY_BYTES+1);
+        }
+        if(bytes.length>MAX_ENTRY_BYTES)throw new IllegalArgumentException("Native result XLSX exceeds the 16 MiB artifact limit");
+        validateNativeResultWorkbook(bytes);
+        return bytes;
+    }
+
+    /** Validate the Engine-owned OOXML workbook without extracting any inner ZIP path. */
+    private static void validateNativeResultWorkbook(byte[] bytes) throws java.io.IOException {
+        if(bytes.length<22||bytes.length>MAX_ENTRY_BYTES)throw new IllegalArgumentException("Native result XLSX size is invalid");
+        Path staged=Files.createTempFile("att-native-result-", ".xlsx");
+        try {
+            Files.write(staged,bytes);
+            validateNativeResultWorkbookZip(staged);
+        } catch(IllegalArgumentException invalid) {
+            throw invalid;
+        } catch(Exception invalid) {
+            throw new IllegalArgumentException("Native result is not a valid bounded XLSX workbook",invalid);
+        } finally {
+            Files.deleteIfExists(staged);
+        }
+    }
+
+    private static byte[] readNativeSourceWorkbook(Path file,Map<String,Object> report) throws java.io.IOException {
+        byte[] bytes;
+        try(InputStream input=Files.newInputStream(file,LinkOption.NOFOLLOW_LINKS)) {
+            bytes=input.readNBytes((int)MAX_ENTRY_BYTES+1);
+        }
+        if(bytes.length>MAX_ENTRY_BYTES)throw new IllegalArgumentException("Native source-workbook XLSX exceeds the 16 MiB artifact limit");
+        String expectedOutputSha256=String.valueOf(report.get("outputSha256"));
+        if(!isSha256(expectedOutputSha256)||!expectedOutputSha256.equals(sha256(bytes)))
+            throw new IllegalArgumentException("Native source-workbook XLSX does not match its Engine output digest");
+        validateNativeSourceWorkbook(bytes,report);
+        return bytes;
+    }
+
+    private static void validateNativeSourceWorkbook(byte[] bytes,Map<?,?> report) throws java.io.IOException {
+        if(bytes.length<22||bytes.length>MAX_ENTRY_BYTES)throw new IllegalArgumentException("Native source-workbook XLSX size is invalid");
+        Path staged=Files.createTempFile("att-native-source-", ".xlsx");
+        try {
+            Files.write(staged,bytes);
+            validateNativeWorkbookZip(staged,true);
+            String expected=String.valueOf(report.get("formulaSha256"));
+            String actual=att.report.NativeSourceWorkbookReportWriter.formulaSha256(bytes);
+            if(!isSha256(expected)||!expected.equals(actual))
+                throw new IllegalArgumentException("Native source-workbook formula inventory changed during report generation");
+        } catch(IllegalArgumentException invalid) {
+            throw invalid;
+        } catch(Exception invalid) {
+            throw new IllegalArgumentException("Native source-workbook XLSX is invalid or changed",invalid);
+        } finally {
+            Files.deleteIfExists(staged);
+        }
+    }
+
+    private static void validateNativeResultWorkbookZip(Path staged) throws Exception {
+        validateNativeWorkbookZip(staged,false);
+    }
+
+    private static void validateNativeWorkbookZip(Path staged,boolean sourceWorkbook) throws Exception {
+        Map<String,byte[]> controlParts=new LinkedHashMap<>();
+        Set<String> names=new HashSet<>(),sheetParts=new HashSet<>();
+        long expanded=0L;int count=0;
+        try(ZipFile workbook=new ZipFile(staged.toFile(),StandardCharsets.UTF_8)) {
+            Enumeration<? extends ZipEntry> entries=workbook.entries();
+            while(entries.hasMoreElements()) {
+                ZipEntry entry=entries.nextElement();String name=entry.getName();
+                String lowerName=name.toLowerCase(Locale.ROOT);
+                long maxEntryBytes=sourceWorkbook?MAX_SOURCE_XLSX_ENTRY_BYTES:MAX_ENTRY_BYTES;
+                long maxExpandedBytes=sourceWorkbook?MAX_SOURCE_XLSX_EXPANDED_BYTES:MAX_XLSX_EXPANDED_BYTES;
+                int maxEntries=sourceWorkbook?MAX_SOURCE_XLSX_ENTRIES:MAX_XLSX_ENTRIES;
+                if(++count>maxEntries||entry.isDirectory()||!safePath(name)
+                        ||!names.add(name.toLowerCase(Locale.ROOT))
+                        ||lowerName.contains("vbaproject")||lowerName.contains("macrosheets/")||lowerName.contains("externallinks/")
+                        ||sourceWorkbook&&(lowerName.contains("embeddings/")||lowerName.contains("activex/")||lowerName.contains("customui/"))
+                        ||entry.getMethod()!=ZipEntry.STORED&&entry.getMethod()!=ZipEntry.DEFLATED
+                        ||entry.getSize()<0||entry.getSize()>maxEntryBytes
+                        ||entry.getCompressedSize()<0
+                        ||entry.getSize()>Math.max(1L,entry.getCompressedSize())*MAX_XLSX_COMPRESSION_RATIO
+                        ||expanded>maxExpandedBytes-entry.getSize())
+                    throw new IllegalArgumentException(sourceWorkbook
+                            ?"Native source-workbook XLSX contains an unsafe or oversized ZIP entry"
+                            :"Native result XLSX contains an unsafe or oversized ZIP entry");
+                expanded+=entry.getSize();
+                boolean control=isXlsxControlPart(name);
+                boolean xml=name.toLowerCase(Locale.ROOT).endsWith(".xml")||name.toLowerCase(Locale.ROOT).endsWith(".rels");
+                if(control&&entry.getSize()>MAX_XLSX_CONTROL_XML_BYTES)
+                    throw new IllegalArgumentException("Native XLSX control XML exceeds its limit");
+                ByteArrayOutputStream content=new ByteArrayOutputStream((int)Math.min(entry.getSize(),64L*1024L));
+                CRC32 crc=new CRC32();long observed=0L;byte[] buffer=new byte[8192];
+                try(InputStream input=workbook.getInputStream(entry)) {
+                    int read;
+                    while((read=input.read(buffer))!=-1) {
+                        observed+=read;
+                        if(observed>entry.getSize()||observed>maxEntryBytes)
+                            throw new IllegalArgumentException("Native XLSX ZIP entry expanded beyond its declared size");
+                        crc.update(buffer,0,read);
+                        if(xml)content.write(buffer,0,read);
+                    }
+                }
+                if(observed!=entry.getSize()||crc.getValue()!=entry.getCrc())
+                    throw new IllegalArgumentException("Native XLSX ZIP entry checksum is invalid");
+                if(xml) {
+                    byte[] part=content.toByteArray();
+                    boolean sheetXml=isNativeResultSheetPart(name);
+                    validateXmlWellFormed(part,sheetXml&&!sourceWorkbook,maxEntryBytes);
+                    if(control)controlParts.put(name,part);
+                    if(sheetXml)sheetParts.add(name);
+                }
+            }
+        }
+        if(count<5)throw new IllegalArgumentException("Native XLSX is missing required OOXML parts");
+        validateNativeWorkbookParts(controlParts,names,sheetParts,sourceWorkbook);
+    }
+
+    private static boolean isXlsxControlPart(String name) {
+        return Set.of("[Content_Types].xml","_rels/.rels","xl/workbook.xml","xl/_rels/workbook.xml.rels").contains(name)
+                ||name.toLowerCase(Locale.ROOT).endsWith(".rels");
+    }
+
+    private static boolean isNativeResultSheetPart(String name) {
+        return name.matches("xl/worksheets/sheet[1-9][0-9]*\\.xml");
+    }
+
+    private static void validateNativeWorkbookParts(Map<String,byte[]> parts,Set<String> names,
+            Set<String> sheetParts,boolean sourceWorkbook) {
+        for(String required:Set.of("[Content_Types].xml","_rels/.rels","xl/workbook.xml","xl/_rels/workbook.xml.rels"))
+            if(!parts.containsKey(required))throw new IllegalArgumentException("Native XLSX is missing required part: "+required);
+        if(sheetParts.isEmpty())throw new IllegalArgumentException("Native XLSX has no worksheet");
+        try {
+            Document contentTypes=parseXml(parts.get("[Content_Types].xml"));
+            Document rootRelationships=parseXml(parts.get("_rels/.rels"));
+            Document workbook=parseXml(parts.get("xl/workbook.xml"));
+            Document workbookRelationships=parseXml(parts.get("xl/_rels/workbook.xml.rels"));
+            if(!"Types".equals(localName(contentTypes.getDocumentElement()))
+                    ||!"Relationships".equals(localName(rootRelationships.getDocumentElement()))
+                    ||!"workbook".equals(localName(workbook.getDocumentElement()))
+                    ||!"Relationships".equals(localName(workbookRelationships.getDocumentElement())))
+                throw new IllegalArgumentException("Native XLSX has invalid OOXML roots");
+
+            Map<String,String> overrides=new LinkedHashMap<>();
+            var overrideNodes=contentTypes.getElementsByTagNameNS("*","Override");
+            for(int index=0;index<overrideNodes.getLength();index++) {
+                Element override=(Element)overrideNodes.item(index);String part=override.getAttribute("PartName");
+                String type=override.getAttribute("ContentType").toLowerCase(Locale.ROOT);
+                if(type.contains("macroenabled")||type.contains("vbaproject")
+                        ||part.isBlank()||overrides.putIfAbsent(part,override.getAttribute("ContentType"))!=null)
+                    throw new IllegalArgumentException("Native XLSX has an unapproved content type override");
+            }
+            if(!"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml".equals(overrides.get("/xl/workbook.xml")))
+                throw new IllegalArgumentException("Native XLSX does not declare a spreadsheet workbook part");
+
+            boolean rootHasWorkbook=false;
+            var rootNodes=rootRelationships.getElementsByTagNameNS("*","Relationship");
+            for(int index=0;index<rootNodes.getLength();index++) {
+                Element relationship=(Element)rootNodes.item(index);
+                rejectExternalRelationship(relationship);
+                if(relationship.getAttribute("Type").endsWith("/officeDocument")
+                        &&"xl/workbook.xml".equals(resolveXlsxTarget("",relationship.getAttribute("Target"))))
+                    rootHasWorkbook=true;
+            }
+            if(!rootHasWorkbook)throw new IllegalArgumentException("Native XLSX package does not reference its workbook");
+
+            Map<String,Element> workbookRels=new LinkedHashMap<>();
+            var workbookRelNodes=workbookRelationships.getElementsByTagNameNS("*","Relationship");
+            for(int index=0;index<workbookRelNodes.getLength();index++) {
+                Element relationship=(Element)workbookRelNodes.item(index);rejectExternalRelationship(relationship);
+                String id=relationship.getAttribute("Id");
+                if(id.isBlank()||workbookRels.putIfAbsent(id,relationship)!=null)
+                    throw new IllegalArgumentException("Native XLSX has duplicate workbook relationships");
+            }
+            Set<String> referencedSheets=new HashSet<>(),sheetNames=new HashSet<>();
+            var sheetNodes=workbook.getElementsByTagNameNS("*","sheet");
+            if(sheetNodes.getLength()<1||!sourceWorkbook&&sheetNodes.getLength()!=1||sourceWorkbook&&sheetNodes.getLength()>MAX_SOURCE_XLSX_ENTRIES)
+                throw new IllegalArgumentException(sourceWorkbook?"Native source workbook has an invalid worksheet count"
+                        :"Native result XLSX must contain exactly one Native Suite worksheet");
+            for(int index=0;index<sheetNodes.getLength();index++) {
+                Element sheet=(Element)sheetNodes.item(index);
+                String id=sheet.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","id");
+                String sheetName=sheet.getAttribute("name");Element relationship=workbookRels.get(id);
+                if(id.isBlank()||relationship==null||(!sourceWorkbook&&!"Cases".equals(sheetName))
+                        ||!sheetNames.add(sheetName.toLowerCase(Locale.ROOT))
+                        ||!relationship.getAttribute("Type").endsWith("/worksheet"))
+                    throw new IllegalArgumentException("Native XLSX worksheet relationship is invalid");
+                String target=resolveXlsxTarget("xl",relationship.getAttribute("Target"));
+                if(!isNativeResultSheetPart(target)||!names.contains(target.toLowerCase(Locale.ROOT))||!referencedSheets.add(target))
+                    throw new IllegalArgumentException("Native XLSX worksheet target is unsafe or missing");
+                if(!"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml".equals(overrides.get("/"+target)))
+                    throw new IllegalArgumentException("Native XLSX does not declare a worksheet content type");
+            }
+            if(!referencedSheets.equals(sheetParts))
+                throw new IllegalArgumentException("Native XLSX contains unreferenced or missing worksheets");
+
+            // Reject external relationships in every relationships part, including sheet drawings or linked books.
+            for(Map.Entry<String,byte[]> part:parts.entrySet())if(part.getKey().toLowerCase(Locale.ROOT).endsWith(".rels")) {
+                Document relations=parseXml(part.getValue());var relationNodes=relations.getElementsByTagNameNS("*","Relationship");
+                String base=relationshipBase(part.getKey());
+                for(int index=0;index<relationNodes.getLength();index++) {
+                    Element relationship=(Element)relationNodes.item(index);rejectExternalRelationship(relationship);
+                    String target=resolveXlsxTarget(base,relationship.getAttribute("Target"));
+                    if(!names.contains(target.toLowerCase(Locale.ROOT)))
+                            throw new IllegalArgumentException("Native XLSX relationship target is missing");
+                }
+            }
+        } catch(IllegalArgumentException invalid) {
+            throw invalid;
+        } catch(Exception invalid) {
+            throw new IllegalArgumentException(sourceWorkbook?"Native source workbook OOXML parts are invalid"
+                    :"Native result XLSX OOXML parts are invalid",invalid);
+        }
+    }
+
+    private static void rejectExternalRelationship(Element relationship) {
+        String type=relationship.getAttribute("Type").toLowerCase(Locale.ROOT);
+        if("external".equalsIgnoreCase(relationship.getAttribute("TargetMode"))
+                ||type.contains("vbaproject")||type.contains("macrosheet")||type.contains("externallink"))
+            throw new IllegalArgumentException("Native result XLSX external relationships are not publishable");
+    }
+
+    static String resolveXlsxTarget(String base,String target) {
+        if(target==null||target.isBlank()||target.startsWith("/")||target.indexOf('\\')>=0
+                ||target.indexOf(':')>=0||target.indexOf('?')>=0||target.indexOf('#')>=0||target.indexOf('%')>=0)
+            throw new IllegalArgumentException("Native result XLSX relationship target is unsafe");
+        List<String> segments=new ArrayList<>();
+        if(!base.isEmpty())for(String segment:base.split("/",-1)) {
+            if(segment.isBlank()||segment.equals(".")||segment.equals(".."))
+                throw new IllegalArgumentException("Native result XLSX relationship base is unsafe");
+            segments.add(segment);
+        }
+        for(String segment:target.split("/",-1)) {
+            if(segment.isBlank())
+                throw new IllegalArgumentException("Native result XLSX relationship target is unsafe");
+            if(segment.equals("."))continue;
+            if(segment.equals("..")) {
+                if(segments.isEmpty())
+                    throw new IllegalArgumentException("Native result XLSX relationship target escapes the package");
+                segments.remove(segments.size()-1);
+            } else segments.add(segment);
+        }
+        if(segments.isEmpty())
+            throw new IllegalArgumentException("Native result XLSX relationship target is unsafe");
+        String resolved=String.join("/",segments);
+        if(!safePath(resolved))throw new IllegalArgumentException("Native result XLSX relationship target is unsafe");
+        return resolved;
+    }
+
+    private static String relationshipBase(String path) {
+        if("_rels/.rels".equals(path))return "";
+        int marker=path.lastIndexOf("/_rels/");
+        if(marker<0||!path.substring(marker+7).matches("[^/]+\\.rels"))
+            throw new IllegalArgumentException("Native result XLSX relationship part path is invalid");
+        return path.substring(0,marker);
+    }
+
+    private static Document parseXml(byte[] bytes) throws Exception {
+        DocumentBuilderFactory factory=DocumentBuilderFactory.newInstance();factory.setNamespaceAware(true);
+        factory.setXIncludeAware(false);factory.setExpandEntityReferences(false);
+        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING,true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl",true);
+        factory.setFeature("http://xml.org/sax/features/external-general-entities",false);
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities",false);
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD,"");factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA,"");
+        var builder=factory.newDocumentBuilder();builder.setEntityResolver((publicId,systemId)->new InputSource(new StringReader("")));
+        return builder.parse(new ByteArrayInputStream(bytes));
+    }
+
+    private static void validateXmlWellFormed(byte[] bytes,boolean rejectFormula,long maxBytes) throws Exception {
+        SAXParserFactory factory=SAXParserFactory.newInstance();factory.setNamespaceAware(true);
+        factory.setXIncludeAware(false);factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING,true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl",true);
+        factory.setFeature("http://xml.org/sax/features/external-general-entities",false);
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities",false);
+        var parser=factory.newSAXParser();var reader=parser.getXMLReader();
+        reader.setEntityResolver((publicId,systemId)->new InputSource(new StringReader("")));
+        reader.setContentHandler(new DefaultHandler() {
+            private int depth;
+            private int elements;
+            @Override public void startElement(String uri,String local,String qualified,Attributes attributes) throws SAXException {
+                if(bytes.length>maxBytes||++depth>128||++elements>500_000)throw new SAXException("XLSX XML structure exceeds limits");
+                if(rejectFormula&&"f".equals(local))throw new SAXException("Native result XLSX formulas are not publishable");
+            }
+            @Override public void endElement(String uri,String local,String qualified) {depth--;}
+        });
+        reader.parse(new InputSource(new ByteArrayInputStream(bytes)));
+    }
+
+    private static String localName(Node node) {
+        return node.getLocalName()==null?node.getNodeName():node.getLocalName();
+    }
+
     private static void usage(Map<String,Map<String,Object>> target,String name,long value,long limit){
         Map<String,Object> row=new LinkedHashMap<>();row.put("usage",value);row.put("limit",limit);row.put("threshold",0.8d);target.put(name,row);
     }
@@ -553,6 +1115,16 @@ final class ArtifactArchive {
     }
 
     static VerifiedRead openVerified(Path archive, boolean digests) throws Exception {
+        return openVerified(archive,digests,null,false);
+    }
+
+    static VerifiedRead openVerified(Path archive,boolean digests,String expectedNativeRunId) throws Exception {
+        String runId=expectedNativeRunId==null?null:att.core.IdentifierValidator.runId(expectedNativeRunId);
+        return openVerified(archive,digests,runId,true);
+    }
+
+    private static VerifiedRead openVerified(Path archive,boolean digests,String expectedNativeRunId,
+                                             boolean enforceNativeRunIdentity) throws Exception {
         var before = Files.readAttributes(archive, java.nio.file.attribute.BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         if (before.isSymbolicLink() || !before.isRegularFile() || before.size() > MAX_ARCHIVE_BYTES)
             throw new IllegalArgumentException("Invalid artifact archive");
@@ -560,6 +1132,9 @@ final class ArtifactArchive {
         ZipFile zip = new ZipFile(archive.toFile());
         try {
             Map<String,Object> manifest = verifyManifest(zip, digests);
+            if(enforceNativeRunIdentity)verifyNativeWorkbookIdentity(zip,manifest,expectedNativeRunId);
+            else if(hasNativeSourceWorkbook(manifest))
+                verifyNativeWorkbookIdentity(zip,manifest,nativeSourceWorkbookRunId(manifest));
             var after = Files.readAttributes(archive, java.nio.file.attribute.BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
             if (!after.isRegularFile() || before.size() != after.size() || !before.lastModifiedTime().equals(after.lastModifiedTime())
                     || !java.util.Objects.equals(before.fileKey(), after.fileKey()))
@@ -573,9 +1148,23 @@ final class ArtifactArchive {
         try (VerifiedRead read = openVerified(archive, digests)) { return read.manifest; }
     }
 
+    static Map<String,Object> verify(Path archive,boolean digests,String expectedNativeRunId) throws Exception {
+        try(VerifiedRead read=openVerified(archive,digests,expectedNativeRunId)){return read.manifest;}
+    }
+
     /** Small publication-time projection used by Overview without opening or enumerating the archive later. */
     static Map<String,Object> overviewSummary(Path archive) throws Exception {
-        Map<String,Object> manifest=verify(archive,false);
+        return overviewSummary(archive,false,null);
+    }
+
+    static Map<String,Object> overviewSummary(Path archive,String expectedNativeRunId) throws Exception {
+        return overviewSummary(archive,true,expectedNativeRunId);
+    }
+
+    private static Map<String,Object> overviewSummary(Path archive,boolean enforceNativeRunIdentity,
+                                                       String expectedNativeRunId) throws Exception {
+        Map<String,Object> manifest=enforceNativeRunIdentity
+                ?verify(archive,false,expectedNativeRunId):verify(archive,false);
         List<Map<?,?>> entries=(List<Map<?,?>>)(List<?>)manifest.get("entries");
         List<String> reports=new ArrayList<>();
         for(Map<?,?> entry:entries)if(Boolean.TRUE.equals(entry.get("report"))&&entry.get("path") instanceof String path
@@ -640,21 +1229,29 @@ final class ArtifactArchive {
         for (Object value : entries) {
             if (!(value instanceof Map<?,?> row) || !row.keySet().equals(Set.of("path", "mediaType", "size", "sha256", "classification", "decision", "report", "preview"))
                     || !(row.get("path") instanceof String path) || !safePath(path)
-                    || MANIFEST.equalsIgnoreCase(path) || !approved.add(path.toLowerCase(Locale.ROOT)) || !SAFE_EXTENSIONS.contains(extension(path)))
+                    || MANIFEST.equalsIgnoreCase(path) || !approved.add(path.toLowerCase(Locale.ROOT))
+                    || !SAFE_EXTENSIONS.contains(extension(path))&&!isNativeResultWorkbook(path)&&!isNativeSourceWorkbook(path))
                 throw new IllegalArgumentException("Invalid manifest entry");
             ZipEntry entry = zip.getEntry(path);
+            boolean binaryWorkbook=isNativeResultWorkbook(path)||isNativeSourceWorkbook(path);
+            String expectedClassification=binaryWorkbook?XLSX_CLASSIFICATION:"textual-output";
+            boolean expectedPreview=!binaryWorkbook;
+            boolean validDecision=binaryWorkbook
+                    ?"att-export-approved-bytes-v1".equals(manifest.get("policy"))&&"preserved".equals(row.get("decision"))
+                    :("att-export-approved-bytes-v1".equals(manifest.get("policy"))&&"preserved".equals(row.get("decision")))
+                        ||("att-export-safe-text-v2".equals(manifest.get("policy"))&&"sanitized-once".equals(row.get("decision")));
             if (entry == null || !integral(row.get("size")) || ((Number) row.get("size")).longValue() != entry.getSize()
                     || !(row.get("sha256") instanceof String digest) || !digest.matches("[a-f0-9]{64}")
-                    || !mediaType(path).equals(row.get("mediaType")) || !"textual-output".equals(row.get("classification"))
-                    || !(("att-export-approved-bytes-v1".equals(manifest.get("policy")) && "preserved".equals(row.get("decision")))
-                        || ("att-export-safe-text-v2".equals(manifest.get("policy")) && "sanitized-once".equals(row.get("decision"))))
-                    || !Boolean.TRUE.equals(row.get("preview"))
-                    || !Boolean.valueOf(Set.of("html","htm").contains(extension(path))).equals(row.get("report")))
+                    || !mediaType(path).equals(row.get("mediaType")) || !expectedClassification.equals(row.get("classification"))
+                    || !validDecision
+                    || !Boolean.valueOf(expectedPreview).equals(row.get("preview"))
+                    || !Boolean.valueOf(!binaryWorkbook&&Set.of("html","htm").contains(extension(path))).equals(row.get("report")))
                 throw new IllegalArgumentException("Archive does not match manifest");
             if (digests) try (InputStream input = zip.getInputStream(entry)) {
                 byte[] bytes = input.readNBytes((int)MAX_ENTRY_BYTES + 1);
                 countVerificationRead(bytes.length);
                 if (bytes.length != entry.getSize() || !sha256(bytes).equals(digest) || !validCrc(entry,bytes)) throw new IllegalArgumentException("Archive integrity check failed");
+                if(isNativeResultWorkbook(path))validateNativeResultWorkbook(bytes);
             }
         }
         return manifest;
@@ -772,6 +1369,15 @@ final class ArtifactArchive {
         return true;
     }
     private static String extension(String path) { int dot = path.lastIndexOf('.'); return dot < 0 ? "" : path.substring(dot + 1).toLowerCase(Locale.ROOT); }
-    private static String mediaType(String path) { return switch (extension(path)) { case "html", "htm" -> "text/html"; case "json" -> "application/json"; case "yaml", "yml" -> "application/yaml"; case "xml" -> "application/xml"; case "css" -> "text/css"; case "csv" -> "text/csv"; case "md" -> "text/markdown"; default -> "text/plain"; }; }
-    static String sha256(byte[] bytes) throws Exception { byte[] hash = MessageDigest.getInstance("SHA-256").digest(bytes); StringBuilder out = new StringBuilder(); for (byte b : hash) out.append(String.format("%02x", b)); return out.toString(); }
+    private static String mediaType(String path) { return switch (extension(path)) { case "xlsx" -> XLSX_MEDIA_TYPE; case "html", "htm" -> "text/html"; case "json" -> "application/json"; case "yaml", "yml" -> "application/yaml"; case "xml" -> "application/xml"; case "css" -> "text/css"; case "csv" -> "text/csv"; case "md" -> "text/markdown"; default -> "text/plain"; }; }
+    static String sha256(byte[] bytes) throws java.io.IOException {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(bytes);
+            StringBuilder out = new StringBuilder();
+            for (byte b : hash) out.append(String.format(Locale.ROOT,"%02x", b));
+            return out.toString();
+        } catch (java.security.NoSuchAlgorithmException unavailable) {
+            throw new java.io.IOException("SHA-256 is unavailable",unavailable);
+        }
+    }
 }

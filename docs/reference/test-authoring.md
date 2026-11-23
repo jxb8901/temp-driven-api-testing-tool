@@ -9,7 +9,7 @@ A Testcase is one normalized workbook row; Run creates one Case execution from e
 3. Validate the package with ./att.sh validate --package.
 4. Use [Debug](execution-modes/debug.md) to isolate a Template, Flow, or Tool, then use [Run](execution-modes/run.md) to create Case executions.
 
-The following sections define each authoring contract. See [Advanced workbook and Snapshot details](#advanced-workbook-and-snapshot-details) for formula cells, multi-row headers, and XML serialization.
+The workflow above describes legacy workbook authoring. The Native Test Case Definition workflow is documented below. See [Advanced workbook and Snapshot details](#advanced-workbook-and-snapshot-details) for formula cells, multi-row headers, and XML serialization.
 
 ## Distinguish Testcases from Case executions
 
@@ -30,19 +30,57 @@ This page explains the normal day-to-day workflow in the same order that data mo
 
 ## Native Test Case Definition
 
-The 4.5.0 development candidate registers `att-testcase/v1` and supports discovery, resolution, and RUN for singleton and multi-record inline Definitions through the Native Case CLI and validated Server draft flow. Excel-backed Definitions retain their S01 schema contract but require the S04 Excel adapter; they are not executable by this inline resolver. Existing workbook/Sidecar/Snapshot RUN remains supported.
+The ATT 4.6.0 release target includes an active `att-testcase/v1` schema and Native Case CLI and validated Server draft-flow support for discovery, resolution, and RUN of singleton, inline, and Excel-backed Definitions. The implementation is in the open release-target stack; no 4.6.0 release or tag has been published. Deployed acceptance remains open for Native RUN, report integration, and Default Package adoption; shared-editor deployment evidence is tracked separately. Native LOAD Case targets, advanced Testdata and generators, and Debug interoperability are excluded from this target; existing direct LOAD and Debug paths remain supported.
 
-The v1 contract defines a singleton inline Case with a complete typed `inputs` map and the fixed Resolved Case ID `default`, or a multi-record inline/Excel Data Source with stable source IDs. Definition IDs are Package-scoped, case-preserving dotted IDs; Resolved Case IDs are one path-safe segment. A `caseIdExpression` can override the resolved ID using only one `${DATA.key}` lookup. Empty, duplicate, malformed, missing, or colliding IDs and empty resolution results are errors; they never produce an all-PASS result.
+The native Excel adapter reads a package-contained `.xlsx` workbook without modifying it, reuses the legacy Sidecar header and `dataColumns` mapping rules, and records workbook revision, sheet, row, and column provenance on each resolved Case. It accepts at most 32 MiB of compressed workbook bytes; before POI loads the workbook, ZIP preflight caps it at 256 entries, 32 MiB per expanded entry, and 64 MiB total expanded data. The selected worksheet is capped at 100,000 physical rows, including blank rows. Header scanning is capped at 1,000,000 header cells, and Resolution accepts at most 10,000 nonblank records; preview output remains bounded. YAML cells use the shared parser limits of 3,000,000 code points, 50 collection aliases, and 50 nested levels; resulting value graphs are further capped at depth 64 and 100,000 values. Non-finite numbers and recursive aliases are rejected. It does not create or update the legacy XML Snapshot. Existing workbook/Sidecar/Snapshot RUN remains supported.
 
-For data-driven Cases, omitted `inputs` means same-name projection from `DATA`; a supplied projection replaces that identity mapping and uses `{from: DATA.key}` or `{value: <typed value>}`. Excel `dataColumns` remains the `att-sidecar/v2.2` comma-separated string syntax, including aliases, `(yaml)` parsing, and quoted delimiters. Omitted or blank `dataColumns` selects no business columns into `DATA` (Case ID and tags selectors are never auto-exposed); declare `dataColumns` explicitly when Excel inputs are required. Excel `path` values must be portable Package-relative `.xlsx` paths. A source-workbook report template is only valid with an Excel source and always writes to a new workbook.
+The v1 contract defines a singleton inline Case with a complete typed `inputs` map and the fixed Resolved Case ID `default`, or a multi-record inline/Excel Data Source with stable source IDs. Definition IDs are Package-scoped, case-preserving dotted IDs; Resolved Case IDs are one path-safe segment. Excel Case IDs must be literal text cells matching `[A-Za-z0-9_-]{1,128}`; formulas, numeric/date/boolean/error cells, blank markers, surrounding whitespace, reserved device names, and case-fold collisions are rejected. A `caseIdExpression` can override the resolved ID using only one `${DATA.key}` lookup. Empty, duplicate, malformed, missing, or colliding IDs and empty resolution results are errors; they never produce an all-PASS result.
+
+For data-driven Cases, omitted `inputs` means same-name projection from `DATA`; a supplied projection replaces that identity mapping and uses `{from: DATA.key}` or `{value: <typed value>}`. Excel `dataColumns` remains the `att-sidecar/v2.2` comma-separated string syntax, including aliases, `(yaml)` parsing, and quoted delimiters. Omitted or blank `dataColumns` selects no business columns into `DATA` (Case ID and tags selectors are never auto-exposed); declare `dataColumns` explicitly when Excel inputs are required. Excel `path` values must be portable Package-relative `.xlsx` paths.
+
+Every Native RUN writes the source-independent result workbook at `workbooks/native-cases.result.xlsx`; it contains the selected Case results and does not depend on the source workbook. An Excel-backed Definition may also set `report: {format: xlsx, template: sourceWorkbook}` to request the optional source-workbook-shaped artifact at `workbooks/native-cases.source-workbook.xlsx`. Before RUN starts, Engine pins and verifies the workbook bytes, formula inventory, and selected physical row identities. It writes results only to those selected rows in a separate file, preserves source formulas, and leaves the Package workbook unchanged.
+
+The optional artifact is limited to one Excel Definition and worksheet, a nonempty selection of at most 1,000 Cases, and an output size of at most 16 MiB. Before publication, ATT redacts sensitive source columns on every worksheet, including columns whose headers or mapped aliases are classified as sensitive, and masks registered secret values elsewhere. If redaction could leave a sensitive cached formula result or safely verifying/publishing the source-shaped file fails, ATT omits that optional artifact and records a fallback diagnostic; the standard result workbook and Case results remain available. A workbook that changed after resolution or no longer matches the pinned rows is rejected before execution rather than silently falling back to stale source data.
+
+The source-shaped artifact contains the workbook's other rows and sheets, with sensitive values redacted. The Server publishes and serves it only when the Job's Package source permission is current; it rechecks Package editor permission for the artifact listing, each entry read, and the archive download. Users without that permission can still access the source-independent standard result workbook and other Job artifacts under the normal artifact policy.
 
 See the [active schema](../../schemas/att-testcase-v1.schema.json), [single inline example](../adr/examples/att-testcase-v1/inline-single.yaml), [multi-record inline example](../adr/examples/att-testcase-v1/inline-multi.yaml), [Excel example](../adr/examples/att-testcase-v1/excel.yaml), [Excel omitted-`dataColumns` example](../adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml), and [ADR-0001](../adr/0001-flow-centric-testcase-resolution.md) for the complete contract and validation boundary.
+
+The Default Package ships offline Native Quick Start Definitions under `packages/default/testcase/quick-start/**/testcase.yaml` bound to Flow `quick.start.v1`. Use the [Default Package Native Quick Start guide](../quick-start.md) and the [S12 migration matrix](../maintenance/native-case-default-package-migration-s12.md). S07 adds source-workbook-shaped reports for Excel-backed Definitions.
+
+### Author in Studio
+
+In Explorer, choose **New native Test Case** or open an indexed `testcase.yaml`. The guided editor sets the Package-scoped Definition ID, name, tags, canonical Flow, typed inputs, and either one Case or inline records. Advanced YAML remains available for fields outside the guided form. New files must be placed under the Package's configured `resources.testcaseRoot` (default `testcase/`).
+
+**Preview / Resolve** sends the current editor candidate and Package-relative `testcase.yaml` path to the authenticated Server. The Server checks the exact USER/editor authority and Package source revisions, then resolves the candidate through the bounded Test Case resolver and S04 Excel adapter. Preview output is capped at 1,000 Cases and returns the Package source revision, Definition revision, and workbook revision when applicable. Excel row errors include sheet, row, and column locations. Typed inputs use the Server's configured redaction policy. Preview does not create a Job or RunDraft, write Package source, or modify a workbook; RUN validation resolves and freezes the selected Case IDs again.
+
+Use **Add to Change Set** to stage a create or replacement through the existing Package source workflow: Draft → Validate → Review → Publish. The current Package source stays active until Publish. After publication, preview the latest source and select the Case IDs to validate and submit a RUN. Native Case RUN is available only when the Server advertises `att-execution/v2`; the Server validates and freezes the source and selected IDs for the Job.
+
+Excel-backed definitions use the same read-only S04 adapter as native resolution, with row and column diagnostics shown in Studio. The existing Workbook/Sidecar editor remains available for legacy suites.
+
+### Run an implicit Native Case Suite
+
+The 4.6.0 release target adds Suite selection over resolved Cases without an authored `suite.yaml`. Declare one or more Definition IDs, then select all Cases, explicit qualified Case IDs, or Cases matching one or more tags. Excluded tags take precedence over included tags.
+
+This local command selects every `smoke` Case from two Definitions except Cases tagged `destructive`:
+
+```sh
+att --local --package payments run native-suite --definition fpp.transfer --definition fpp.refund --tag smoke --exclude-tag destructive --fail-fast
+```
+
+To select named Cases, use `--qualified-case-id` for each ID, such as `fpp.transfer.customerA`. Each ID must belong to one of the declared Definitions. The Server backend uses the same selectors through the validated `att-execution/v2` RUN draft flow.
+
+ATT orders Definitions by ID and keeps each Definition's source record order. Duplicate Definition IDs, duplicate qualified Case IDs, unknown IDs, and empty selections fail validation. The accepted Server draft freezes its selected IDs and Definition source revisions before the Worker runs. Per-Case results use the existing RUN evidence and report pipeline.
+
+This implicit Suite is a runtime selection, not a reusable authored resource. It does not add LOAD targets or advanced Testdata/generator bindings; Debug interoperability remains deferred.
+
+Studio's Run editor also exposes this selection: enter one or more Definition IDs, then choose all Cases, explicit Qualified Case IDs, or Cases matching tags. Optional included and excluded tags further filter the selection, and replay preserves tag selectors returned in the saved definition. Native Suite `--rerun-failed` retries only failed, executed Cases from the latest eligible completed RUN for the same Package and Definitions. Local runs verify the latest-run pointer and manifest hash; Server drafts freeze the source Job/run, manifest digest, Package revision, and exact Qualified Case IDs. A stale draft or changed source is rejected, skipped Cases are not retried, and per-attempt execution/skipped counts remain separate from source and retry counts. Schedules retain the validated retry source.
 
 ## Workbook
 
 ### Workbook, Sidecar, and Snapshot relationship
 
-Every `.xlsx` workbook requires a YAML sidecar and generated XML snapshot with the same basename in the same directory:
+In the legacy Workbook/Sidecar/Snapshot workflow, every `.xlsx` workbook requires a YAML sidecar and generated XML snapshot with the same basename in the same directory:
 
 ```text
 testcase/payment_regression.xlsx

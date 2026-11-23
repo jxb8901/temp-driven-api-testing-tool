@@ -50,6 +50,16 @@ public class WorkerRequest {
     public List<String> nativeResolvedCaseIds;
     /** Exact package-relative testcase.yaml frozen by draft validation and included in the accepted source closure. */
     public String nativeCaseSourcePath;
+    /** Server-validated implicit Suite selectors; public callers cannot set these Worker fields directly. */
+    public List<String> nativeSuiteDefinitionIds;
+    public List<String> nativeSuiteQualifiedCaseIds;
+    public List<String> nativeSuiteTags;
+    public List<String> nativeSuiteExcludeTags;
+    public Boolean nativeSuiteAll;
+    /** Source Job/run and exact failed Qualified Case IDs frozen by Native Suite draft validation. */
+    public Map<String,Object> nativeSuiteRetry;
+    /** Exact package-relative Definition sources frozen by Suite draft validation, keyed by Definition ID. */
+    public Map<String,String> nativeSuiteSourcePaths;
     public List<String> tags;
     public List<String> excludeTags;
     public Boolean all;
@@ -89,6 +99,8 @@ public class WorkerRequest {
     public String inspectionQuery;
     public String inspectionSort;
     public String inspectionDirection;
+    /** Bounded editor-owned Test Case YAML used only by the read-only native-case preview inspection. */
+    public String nativeCasePreviewSource;
     /** Internal Server-authorized lossless source read; never populated from an untrusted public body. */
     public String authoringSourceKind;
     public String authoringResourceType;

@@ -264,6 +264,34 @@ public final class RemoteCommand {
             if(dryRun)return printNativeCasePreview(draft,plan,format);
             ObjectNode submission=RemoteHttpClient.JSON.createObjectNode();submission.put("packageId",packageId);submission.put("draftId",draftId);
             accepted=c.post("/jobs/run",submission);
+        } else if("run".equals(command)&&"native-suite".equals(targetKind)) {
+            boolean dryRun=plan.path("dryRun").asBoolean(false);
+            JsonNode versions=serverVersion.path("unifiedRunVersions");
+            if(!versions.isArray()||!containsText(versions,"att-execution/v2"))
+                throw new RemoteException("ATT Server does not advertise att-execution/v2; Native Suite RUN is unavailable on this Server");
+            JsonNode definitions=plan.get("definitionIds");
+            if(definitions==null||!definitions.isArray()||definitions.isEmpty()||definitions.size()>100)
+                throw new IllegalArgumentException("Native Suite RUN requires between 1 and 100 Definition IDs");
+            ObjectNode nativeDefinition=RemoteHttpClient.JSON.createObjectNode();
+            nativeDefinition.put("schemaVersion","att-execution/v2");nativeDefinition.put("executionType","run");
+            nativeDefinition.put("packageId",packageId);copyText(plan,nativeDefinition,"environment");
+            ObjectNode nativeTarget=nativeDefinition.putObject("target");nativeTarget.put("type","nativeSuite");
+            nativeTarget.set("definitionIds",definitions.deepCopy());
+            ObjectNode suiteSelection=nativeTarget.putObject("selection");
+            if(plan.path("rerunFailed").asBoolean(false))suiteSelection.put("rerunFailed",true);
+            else {
+                if(plan.path("all").asBoolean(false))suiteSelection.put("all",true);
+                copyArray(plan,suiteSelection,"qualifiedCaseIds");copyArray(plan,suiteSelection,"tags");copyArray(plan,suiteSelection,"excludeTags");
+            }
+            ObjectNode nativeOptions=nativeDefinition.putObject("options");nativeOptions.put("debug",false);
+            if(plan.path("failFast").asBoolean(false))nativeOptions.put("failFast",true);
+            copyText(plan,nativeOptions,"runId");
+            JsonNode draft=c.post("/drafts/run",nativeDefinition);
+            String draftId=draft.path("draftId").asText("");
+            if(!draftId.matches("R[0-9A-F]{32}"))throw new RemoteException("ATT Server returned an invalid Native Suite RUN draft ID");
+            if(dryRun)return printNativeSuitePreview(draft,plan,format);
+            ObjectNode submission=RemoteHttpClient.JSON.createObjectNode();submission.put("packageId",packageId);submission.put("draftId",draftId);
+            accepted=c.post("/jobs/run",submission);
         } else accepted=c.post("/jobs/"+command,body);
         String id=accepted.path("jobId").asText("");
         if(!id.matches("J[A-F0-9]{16}"))throw new RemoteException("ATT Server accepted a job without a valid job ID");
@@ -299,6 +327,23 @@ public final class RemoteCommand {
         } else {
             System.out.println("RUN VALIDATED (not submitted)");
             System.out.println("Definition: "+plan.path("target").asText());
+            System.out.println("Package: "+plan.path("packageId").asText());
+            if(draft.has("revisionDigest"))System.out.println("Revision: "+draft.path("revisionDigest").asText());
+            System.out.println("Preview: "+draft.toPrettyString());
+        }
+        return 0;
+    }
+    private static int printNativeSuitePreview(JsonNode draft,JsonNode plan,String format) throws Exception {
+        if("json".equals(format)) {
+            ObjectNode preview=RemoteHttpClient.JSON.createObjectNode();preview.put("schemaVersion","att-operation/v1");
+            preview.put("backend","SERVER");preview.put("command","run");preview.put("targetKind","native-suite");
+            preview.set("definitionIds",plan.path("definitionIds").deepCopy());
+            copyText(plan,preview,"packageId");copyText(plan,preview,"environment");
+            preview.put("status","VALIDATED");preview.put("exitCode",0);preview.put("submitted",false);preview.set("preview",draft.deepCopy());
+            System.out.println(preview.toString());
+        } else {
+            System.out.println("RUN VALIDATED (not submitted)");
+            System.out.println("Definitions: "+plan.path("definitionIds").toString());
             System.out.println("Package: "+plan.path("packageId").asText());
             if(draft.has("revisionDigest"))System.out.println("Revision: "+draft.path("revisionDigest").asText());
             System.out.println("Preview: "+draft.toPrettyString());

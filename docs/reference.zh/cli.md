@@ -1,6 +1,6 @@
 # CLI 參考
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
 
 ## 選擇命令
@@ -20,11 +20,11 @@
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
-上表列出 ATT 4.4.1 CLI command。獨立的 vNext proposal 尚未包含在此 release。
+上表列出舊版 CLI command。4.6.0 release-target stack 加入明確的 Native Case 和 Native Suite RUN command。4.6.0 release 和 tag 尚未發佈，部署驗收仍待完成。更廣泛的共用 vNext grammar 另列於[規劃中 proposal](../interfaces/cli/vnext-proposed.zh.md)。
 
-## ATT 4.4.1 的可用性
+## CLI 狀態與可用性
 
-本 Reference 說明 ATT 4.4.1 候選版本的 CLI。vNext grammar 是獨立的[規劃中 proposal](../interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
+本 Reference 區分現有 legacy CLI，以及開啟中的目標 stack 的 Native Case 和 Native Suite command。Native selector 語法和範例見[測試撰寫](test-authoring.md#native-test-case-definition)。Remote execution 使用已驗證的 Server draft。目標 stack 的行為不代表 4.6.0 release 或 tag 已存在。
 
 ## 編譯 source checkout
 
@@ -84,6 +84,10 @@ mvn -DskipTests -pl att-cli -am compile
 | `./att.sh run <selection> --format json` | 輸出機器可讀摘要 |
 | `./att.sh run <selection> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
 | `./att.sh run <selection> --verbose` | 為兼容性保留；詳細實時進度已是默認行為 |
+
+### Native Case 和 implicit Suite RUN
+
+4.6.0 release-target CLI 加入 `run native-case` 和 `run native-suite`。正式發佈目標尚未發佈。selector 和範例見[測試撰寫](test-authoring.md#native-test-case-definition)，Server draft 語義見 [Unified RUN](execution-modes/unified-run.md)。
 
 ### Debug component
 

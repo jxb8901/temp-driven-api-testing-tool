@@ -1,0 +1,65 @@
+.att-native-case-authoring {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.att-native-case-heading,
+.att-native-case-preview-toolbar,
+.att-native-case-actions,
+.att-native-case-run-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.att-native-case-heading h2,
+.att-native-case-heading p { margin-block: .25rem; }
+.att-native-case-editor,
+.att-native-case-preview,
+.att-native-case-source-workflow,
+.att-native-excel-source {
+  display: grid;
+  gap: .8rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle, #c8ced8);
+  border-radius: .75rem;
+  background: var(--surface, #fff);
+}
+
+.att-native-case-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: .8rem;
+}
+
+.att-native-case-authoring label { display: grid; gap: .35rem; font-weight: 600; }
+.att-native-case-authoring input,
+.att-native-case-authoring select {
+  min-width: 0;
+  max-width: 100%;
+  padding: .5rem .6rem;
+  border: 1px solid var(--border-subtle, #c8ced8);
+  border-radius: .35rem;
+  color: inherit;
+  background: var(--surface, #fff);
+  font: inherit;
+}
+
+.att-native-case-authoring small,
+.att-native-case-authoring [role="note"] { font-weight: 400; color: var(--text-muted, #586174); }
+.att-native-case-json .cm-editor { min-height: 8rem; }
+.att-native-case-preview-list { display: grid; gap: .75rem; list-style: none; margin: 0; padding: 0; }
+.att-native-case-preview-list > li { padding: .8rem; border: 1px solid var(--border-subtle, #c8ced8); border-radius: .5rem; }
+.att-native-case-preview-list label { display: flex; align-items: center; gap: .5rem; }
+.att-native-case-preview-list p { margin: .5rem 0; }
+.att-native-case-preview-list pre { overflow: auto; max-height: 16rem; padding: .7rem; background: var(--surface-muted, #f4f6f8); border-radius: .35rem; }
+.att-native-case-run-actions { justify-content: flex-start; }
+.att-native-case-authoring .att-native-excel-source { padding: .85rem; }
+
+@media (max-width: 650px) {
+  .att-native-case-heading { align-items: flex-start; flex-direction: column; }
+}

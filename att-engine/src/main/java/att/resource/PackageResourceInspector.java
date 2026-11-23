@@ -10,6 +10,7 @@ import att.config.ToolConfig;
 import att.core.StageCaseData;
 import att.core.TestCase;
 import att.excel.ExcelTestSuiteLoader;
+import att.excel.ExcelDataSourceAdapter;
 import att.flow.FlowDefinition;
 import att.flow.FlowRegistry;
 import att.template.StageTemplate;
@@ -324,6 +325,38 @@ public final class PackageResourceInspector implements AutoCloseable {
         result.put("resourceId",resource.resourceId);result.put("sourceType","testcase-sidecar");
         result.put("revisionDigest",index.revisionDigest);
         return result;
+    }
+
+    /** Returns the exact grammar-validated native Excel dataColumns scalar for narrow transport redaction. */
+    public static String nativeExcelDataColumnsMappingSource(String logicalPath,String sourceText) {
+        return AuthoringSourceSupport.nativeExcelDataColumnsSource(logicalPath,sourceText);
+    }
+
+    /** Replaces only a grammar-validated native Excel dataColumns scalar before generic text sanitization. */
+    public static String replaceNativeExcelDataColumnsMappingSource(String logicalPath,String sourceText,String replacement) {
+        return AuthoringSourceSupport.replaceNativeExcelDataColumns(logicalPath,sourceText,replacement);
+    }
+
+    /** Reads one bounded Package-relative native Definition for its owner-authorized Studio editor. */
+    public Map<String,Object> inspectAuthoringNativeTestcaseSource(String relativePath) throws Exception {
+        if(relativePath==null||relativePath.length()>1024||!relativePath.equals(relativePath.trim())
+                ||relativePath.startsWith("/")||relativePath.indexOf('\\')>=0||relativePath.contains("//")
+                ||relativePath.matches("^[A-Za-z]:.*")||!relativePath.endsWith("/testcase.yaml"))
+            throw new ResourceNotFoundException();
+        for(String segment:relativePath.split("/",-1))
+            if(segment.isEmpty()||".".equals(segment)||"..".equals(segment))throw new ResourceNotFoundException();
+        FrameworkConfig effective=frameworkConfig();
+        Path configured=effective.testcasesRoot().isAbsolute()?effective.testcasesRoot():packageRoot.resolve(effective.testcasesRoot());
+        Path safeRoot=resources.internalCandidate(configured);
+        Path candidate=resources.internalCandidate(packageRoot.resolve(relativePath));
+        if(candidate.equals(safeRoot)||!candidate.startsWith(safeRoot)||!"testcase.yaml".equals(candidate.getFileName().toString()))
+            throw new ResourceNotFoundException();
+        String logical=resources.packageRoot().relativize(candidate).toString().replace('\\','/');
+        if(!logical.equals(relativePath))throw new ResourceNotFoundException();
+        if(!Files.exists(candidate,LinkOption.NOFOLLOW_LINKS))return AuthoringSourceSupport.absent(logical);
+        PackageResourceResolver.PackageResource selected=resources.fromInternalPath(candidate,PackageResourceResolver.Kind.FILE);
+        return AuthoringSourceSupport.read(packageRoot,selected.canonicalPath(),selected.logicalName(),maxSourceBytes,
+                sensitivePaths,sensitiveFieldPatterns);
     }
 
     /** Returns a complete allowed UTF-8 file only when it is statically referenced by the selected Template/Flow. */
@@ -2604,6 +2637,7 @@ public final class PackageResourceInspector implements AutoCloseable {
                     throw new ResourceLimitException("resourceInspector.maxNativeDefinitionTotalBytes",
                             MAX_NATIVE_DEFINITION_TOTAL_BYTES, totalBytes);
                 indexFile(index, resource.canonicalPath());
+                indexNativeExcelWorkbook(index, resource);
             }
         } catch (ResourceLimitException limit) {
             throw limit;
@@ -2611,6 +2645,25 @@ public final class PackageResourceInspector implements AutoCloseable {
             throw invalid;
         } catch (Exception error) {
             throw invalidResourceRoot("resources.testcaseRoot");
+        }
+    }
+
+    /** Adds native Excel source bytes to the package execution revision without loading legacy Sidecars. */
+    private void indexNativeExcelWorkbook(Index index, PackageResourceResolver.PackageResource definition) {
+        try {
+            Object parsed = YamlSupport.parse(new String(Files.readAllBytes(definition.canonicalPath()), StandardCharsets.UTF_8));
+            if (!(parsed instanceof Map<?,?>)) return;
+            Object rawSource = ((Map<?,?>) parsed).get("dataSource");
+            if (!(rawSource instanceof Map<?,?>)) return;
+            Map<?,?> source = (Map<?,?>) rawSource;
+            if (!"excel".equals(source.get("type")) || !(source.get("path") instanceof String)) return;
+            Path workbook = ExcelDataSourceAdapter.resolveWorkbookPath(resources, definition.logicalName(),
+                    (String) source.get("path"));
+            long size = Files.size(workbook);
+            if (size <= MAX_WORKBOOK_BYTES) indexFile(index, workbook);
+        } catch (Exception invalidOrUnavailableSource) {
+            // The native resolver owns user diagnostics for malformed or unsafe Excel mappings.
+            // A source that cannot be resolved here cannot be executed and is not revision input.
         }
     }
 
@@ -3305,10 +3358,19 @@ public final class PackageResourceInspector implements AutoCloseable {
 
     private String scrubSourceText(String value, String logicalPath) {
         if (value == null) return null;
-        String result = sourcePathSafe(scrubSensitiveValues(value), safeFileExpressionTokens(value, logicalPath));
+        String nativeExcelColumns=AuthoringSourceSupport.nativeExcelDataColumnsSource(logicalPath,value);
+        String marker="ATT_NATIVE_EXCEL_DATA_COLUMNS_REDACTION_MARKER";
+        while(value.contains(marker))marker+="_";
+        String redactionInput=nativeExcelColumns==null?value
+                :AuthoringSourceSupport.replaceNativeExcelDataColumns(logicalPath,value,marker);
+        String result = sourcePathSafe(scrubSensitiveValues(redactionInput), safeFileExpressionTokens(value, logicalPath));
         if (redactionEnabled) result = SOURCE_PII_VALUE.matcher(result).replaceAll("$1[REDACTED]");
         if (redactionEnabled) result = XML_PII.matcher(result).replaceAll("$1[REDACTED]$3");
         if (logicalPath != null && logicalPath.toLowerCase(Locale.ROOT).endsWith(".csv")) result = scrubCsvPersonalData(result);
+        if(nativeExcelColumns!=null) {
+            nativeExcelColumns=sourcePathSafe(nativeExcelColumns,safeFileExpressionTokens(value,logicalPath));
+            result=result.replace(marker,nativeExcelColumns);
+        }
         return result;
     }
 

@@ -7,6 +7,7 @@ import type {
   DebugFormResponse, EffectiveConfigurationQuery, PackageSutMetricsCatalog, PackageSutMetricsDraft,
   PackageFileIndexPage, PackageSutMetricsDraftAction, PackageSutMetricsResource, PackageSutMetricsResourceDraftInput,
   PackageSutMetricsResourceKind, ResourceDetail, ResourceIdentity, SourceProjection, TestdataRecordsResponse,
+  NativeTestCasePreviewResponse,
   ResourcePage, ResourceQuery,
 } from './features/explorer/types';
 import type {
@@ -55,6 +56,8 @@ export interface ServerJobStorageMetrics {
 let csrfToken = '';
 let localAuthMode = false;
 let unifiedRunSupported = false;
+let nativeCaseRunSupported = false;
+let nativeSuiteRunSupported = false;
 const schedulesPath = () => unifiedRunSupported ? 'schedules' : 'load-schedules';
 
 export interface UserPreferences {
@@ -283,7 +286,10 @@ export const api = {
   async getVersion(signal?: AbortSignal): Promise<ServerVersion> {
     const version = await request<ServerVersion>('version', { signal });
     localAuthMode = version.authMode === 'local';
-    unifiedRunSupported = version.unifiedRunVersion === 'att-execution/v1';
+    const runVersions = new Set(version.unifiedRunVersions || (version.unifiedRunVersion ? [version.unifiedRunVersion] : []));
+    unifiedRunSupported = runVersions.has('att-execution/v1') || runVersions.has('att-execution/v2');
+    nativeCaseRunSupported = runVersions.has('att-execution/v2');
+    nativeSuiteRunSupported = runVersions.has('att-execution/v2');
     return version;
   },
   getCurrentUser(signal?: AbortSignal): Promise<{ loginId: string; displayName: string; role: 'ADMIN' | 'USER'; csrfToken?: string }> {
@@ -595,6 +601,9 @@ export const api = {
       environment: query.environment,
     }), { signal, cache: 'no-store' });
   },
+  previewNativeTestCase(packageId: string, input: { path: string; source: string }, signal?: AbortSignal): Promise<NativeTestCasePreviewResponse> {
+    return postJson<NativeTestCasePreviewResponse>('packages/' + encodeURIComponent(packageId) + '/native-testcase-preview', input, signal);
+  },
   getCentralAuthoringSource(path: string, signal?: AbortSignal): Promise<ManagedAuthoringSource> {
     return request('configuration/authoring-source' + queryString({ path }), { signal, cache: 'no-store' });
   },
@@ -714,8 +723,14 @@ export const api = {
     return request<DebugFormResponse>(resourcePath(identity) + '/debug-form' + queryString({ environment }), { signal });
   },
   previewRun(input: RunDefinition, signal?: AbortSignal): Promise<DraftResponse> {
+    if (input.target?.type === 'nativeCase' && !nativeCaseRunSupported) {
+      throw new Error('Native Case RUN requires a Server that advertises att-execution/v2. Publish and preview remain available without that capability.');
+    }
+    if (input.target?.type === 'nativeSuite' && !nativeSuiteRunSupported) {
+      throw new Error('Native Suite RUN requires an ATT Server that advertises att-execution/v2.');
+    }
     if (!unifiedRunSupported) {
-      if (input.selection || input.target?.type === 'case') {
+      if (input.selection || input.target?.type === 'case' || input.target?.type === 'nativeCase') {
         throw new Error('Case and batch Run validation require ATT Server 4.2.1 or newer. On older servers, use the legacy Case action in Explorer.');
       }
       if (input.target) {
@@ -724,6 +739,7 @@ export const api = {
     }
     return postJson<DraftResponse>('drafts/run', input, signal);
   },
+  supportsNativeCaseRun(): boolean { return unifiedRunSupported && nativeCaseRunSupported; },
   submitRun(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob> {
     return postJson<AcceptedJob>(input.draftId.startsWith('D') ? 'jobs/debug' : 'jobs/run', input, signal);
   },

@@ -1,10 +1,10 @@
-<!-- att-doc-status: current release=4.3.0 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
 # RUN 與 LOAD API
 
-## Native Test Case RUN（att-execution/v2；規劃於 4.5.0）
+## Native Test Case 和 Suite RUN（att-execution/v2）
 
-此 contract 規劃於 4.5.0 開發版本，仍須通過 release acceptance gate。只應在 Server 宣告支援 v2 時使用。Native inline Test Case 使用明確的 `nativeCase` target。`definitionId` 指向 Package 已設定的 Test Case root（預設為 `testcase/`）內的 Definition；`resolvedCaseIds` 則包含一個或多個不重複的 local Case ID（最多 1,000 個）。Server 會在 draft 中解析並驗證精確選取結果。不要把 Native Case 欄位直接提交至 `/jobs/run`，也不要將 local ID 轉成舊 Workbook `caseIds`。
+此 contract 納入尚未發佈的 ATT 4.6.0 正式 release target。4.6.0 release 和 tag 尚未發佈，Native RUN 的部署驗收由 [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) 跟進。只應在 Server 宣告支援 `att-execution/v2` 時使用。Native inline Test Case 使用明確的 `nativeCase` target。`definitionId` 指向 Package 已設定的 Test Case root（預設為 `testcase/`）內的 Definition；`resolvedCaseIds` 則包含一個或多個不重複的 local Case ID（最多 1,000 個）。Server 會在 draft 中解析並驗證精確選取結果。不要把 Native Case 欄位直接提交至 `/jobs/run`，也不要將 local ID 轉成舊 Workbook `caseIds`。
 
 建立已驗證的 draft：
 
@@ -36,6 +36,8 @@ Content-Type: application/json
 ```
 
 Draft 會固定 Definition 及 Package revision。提交前來源有變更時，draft 會失效；Job 接受後，Worker 會從不可變 Job source snapshot 讀取來源。結果沿用現有 Job、event、cancellation 及 artifact route，並在 evidence 保留 Definition、Qualified Case、local Case 及 execution identity。v2 的 `options.runId` 可選擇 ATT output Run ID，並會保留在已接受的 Worker request 中。
+
+Native implicit Suite 使用 `target.type: "nativeSuite"`、一個或多個 `definitionIds`，以及明確的 selection，例如 `all`、`qualifiedCaseIds` 或 included/excluded `tags`。`rerunFailed` selection 不能與明確 selector 同時使用，並會選取最新合資格且已完成的 Native Suite RUN。Server 會在相同的 v2 draft flow 驗證並固定 Definition 及所選 Case identity。
 <!-- att-docs:historical -->
 既有 `att-execution/v1` Workbook/Sidecar selection 與直接 Template/Flow/Tool target 行為不變。`GET /api/v1/version` 會保留 `unifiedRunVersion: att-execution/v1`，並另外透過 `unifiedRunVersions` 宣告支援版本，包括 v2。
 <!-- /att-docs:historical -->

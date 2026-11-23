@@ -112,6 +112,55 @@ export interface PackageFileIndexPage {
   };
 }
 
+export interface NativeTestCasePreviewDiagnostic {
+  code?: string;
+  summary?: string;
+  detail?: string;
+  file?: string;
+  field?: string;
+  sheet?: string;
+  row?: number;
+  column?: number;
+  suggestion?: string;
+}
+
+export interface NativeTestCasePreviewCase {
+  qualifiedCaseId: string;
+  caseId: string;
+  definitionId: string;
+  flowId: string;
+  tags: string[];
+  inputs: Record<string, unknown>;
+  redacted?: boolean;
+  provenance: {
+    sourceType: 'inline' | 'excel' | string;
+    sourceReference: string;
+    recordId?: string;
+    recordIndex?: number;
+    sheet?: string;
+    row?: number;
+    metadata?: Record<string, unknown>;
+  };
+}
+
+export interface NativeTestCasePreviewResponse {
+  kind: 'NativeTestCasePreview' | string;
+  valid: boolean;
+  sourceType: 'direct' | 'inline' | 'excel' | 'invalid' | string;
+  sourceReference?: string;
+  definitionRevision?: string;
+  packageSourceRevision?: string;
+  registryRevision?: string;
+  workbookRevision?: string;
+  resolvedCount: number;
+  selectedCount: number;
+  previewCount: number;
+  truncated: boolean;
+  cases: NativeTestCasePreviewCase[];
+  diagnostics: NativeTestCasePreviewDiagnostic[];
+  requestId?: string;
+}
+
 export interface ResourceDetail {
   resource: ResourceSummary;
   definition?: JsonValue;
@@ -387,6 +436,7 @@ export interface ExplorerApi {
   getResource(identity: ResourceIdentity, signal?: AbortSignal): Promise<ResourceDetail>;
   getSafeSource(identity: ResourceIdentity, signal?: AbortSignal): Promise<SourceProjection>;
   getManagedPackageAuthoringSource?(packageId: string, query: PackageAuthoringSourceQuery, signal?: AbortSignal): Promise<ManagedAuthoringSource>;
+  previewNativeTestCase?(packageId: string, input: { path: string; source: string }, signal?: AbortSignal): Promise<NativeTestCasePreviewResponse>;
   getCentralAuthoringSource?(path: string, signal?: AbortSignal): Promise<ManagedAuthoringSource>;
   stageSourceChangeSet?(domain: SourceDomain, scopeId: string, baseSourceRevision: string, registryRevision: string | undefined,
     operations: SourceOperation[], signal?: AbortSignal): Promise<SourceChangeSet>;
@@ -417,6 +467,7 @@ export interface ExplorerApi {
   }>;
   getDebugForm(identity: ResourceIdentity, environment?: string, signal?: AbortSignal): Promise<DebugFormResponse>;
   previewRun?(input: import('../run/RunPage').RunDefinition, signal?: AbortSignal): Promise<DraftResponse>;
+  supportsNativeCaseRun?(): boolean;
   submitRun?(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob>;
   previewDebug(input: DebugDraftRequest, signal?: AbortSignal): Promise<DraftResponse>;
   submitDebug(input: { packageId: string; draftId: string; principal?: string }, signal?: AbortSignal): Promise<AcceptedJob>;

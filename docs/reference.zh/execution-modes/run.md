@@ -1,8 +1,8 @@
 # Run 模式
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-ATT 4.4.1 Local CLI 的 run command 仍是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](unified-run.md)。
+舊版 `./att.sh run` command 仍是 Case adapter，會執行 Workbook 中選取的 authored Testcase。4.6.0 release-target CLI 亦加入明確的 Native Case 和 Native Suite command，詳見 [Unified RUN](unified-run.md) 及 [CLI Reference](../cli.md)。目標 release 和 tag 尚未發佈，部署驗收仍待完成。
 
 ```sh
 ./att.sh run --all

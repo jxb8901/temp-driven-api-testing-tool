@@ -1,26 +1,101 @@
 package att.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /** End-to-end Server contract for native Test Case draft validation and immutable execution. */
 class ServerRuntimeNativeRunTest {
     @TempDir Path temp;
+
+    @Test void nativeSuiteRetryRejectsWorkbookOnlyChangeWithStableCaseIdentity() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("excel-retry-allowed"));
+        Path packageRoot=Files.createDirectories(allowed.resolve("p"));
+        Path flow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+                .resolve("flow.yaml");
+        Files.createDirectories(packageRoot.resolve("testcase/payments"));
+        Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
+                +"description: Excel retry identity fixture\nactions:\n"
+                +"  verify: {type: assert, assert: 'false'}\n");
+        Path definition=packageRoot.resolve("testcase/payments/excel/testcase.yaml");
+        Files.createDirectories(definition.getParent());
+        Files.writeString(definition,excelDefinitionYaml());
+        Path workbook=writeExcelWorkbook(packageRoot.resolve("testdata/native-cases.xlsx"));
+
+        Path runtimeConfig=Files.createDirectories(temp.resolve("excel-retry-runtime/config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path data=temp.resolve("excel-retry-data"),serverConfig=temp.resolve("excel-retry-server.yaml");
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
+                +"\n  auth: {mode: local}\n  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"workers: {maxConcurrent: 1, queuedLimit: 2}\npackages:\n  allowedRoots: ["
+                +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
+        Path libs=Files.createDirectories(temp.resolve("excel-retry-libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
+            ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            JsonNode sourceBody=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.excel"),"selection",Map.of("all",true)),
+                    "options",Map.of("debug",false,"failFast",true,"runId","native-excel-retry-source")));
+            Map<String,Object> draft=runtime.createRunDraft(sourceBody,"alice");
+            Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",draft.get("draftId"))),"alice","alice");
+            String jobId=String.valueOf(accepted.get("jobId"));
+            Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,jobId);
+            assertEquals("FAIL",((Map<?,?>)result.get("job")).get("status"),result.toString());
+            awaitArtifactArchive(runtime,jobId);
+            Map<String,Object> archived=readArchivedRunManifest(runtime,jobId);
+            @SuppressWarnings("unchecked") Map<String,Object> run=(Map<String,Object>)archived.get("run");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> sourceCases=(List<Map<String,Object>>)run.get("caseSources");
+            assertEquals(3,sourceCases.size());
+            assertTrue(sourceCases.stream().allMatch(row->String.valueOf(row.get("workbookSha256")).matches("[a-f0-9]{64}")));
+            assertTrue(sourceCases.stream().allMatch(row->String.valueOf(row.get("resolvedInputDigest")).matches("[a-f0-9]{64}")));
+
+            try(InputStream input=Files.newInputStream(workbook);XSSFWorkbook changed=new XSSFWorkbook(input)) {
+                changed.getSheet("Cases").getRow(1).getCell(1).setCellValue(777);
+                try(var output=Files.newOutputStream(workbook)){changed.write(output);}
+            }
+            JsonNode retryBody=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.excel"),"selection",Map.of("rerunFailed",true)),
+                    "options",Map.of("debug",false,"runId","native-excel-retry-stale")));
+            ServerRuntime.JobConflictException stale=assertThrows(ServerRuntime.JobConflictException.class,
+                    ()->runtime.createRunDraft(retryBody,"alice"),
+                    "A workbook-only edit must invalidate a retry even when Case IDs do not change");
+            assertEquals("ATT-SERVER-NATIVE-SUITE-RETRY-REVISION-STALE",stale.code);
+            assertFalse(runtime.jobs.values().stream().anyMatch(job->"native-excel-retry-stale".equals(job.request.runId)),
+                    "A stale workbook retry must not create a Job");
+        }
+    }
 
     @Test void validatesExactNativeSelectionRejectsStaleDraftAndRunsAcceptedSourceSnapshot() throws Exception {
         Path allowed=Files.createDirectories(temp.resolve("allowed"));
@@ -35,6 +110,11 @@ class ServerRuntimeNativeRunTest {
         Path definition=packageRoot.resolve("testcase/payments/transfer/testcase.yaml");
         String original=definitionYaml(7,13);
         Files.writeString(definition,original);
+        Path excelDefinition=packageRoot.resolve("testcase/payments/excel/testcase.yaml");
+        Files.createDirectories(excelDefinition.getParent());
+        Files.writeString(excelDefinition,excelDefinitionYamlWithSourceWorkbookReport());
+        Path excelWorkbook=writeExcelWorkbook(packageRoot.resolve("testdata/native-cases.xlsx"));
+        byte[] originalExcel=Files.readAllBytes(excelWorkbook);
 
         Path runtimeConfig=Files.createDirectories(temp.resolve("runtime/config")).resolve("config.yaml");
         Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
@@ -45,9 +125,11 @@ class ServerRuntimeNativeRunTest {
         Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
                 +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
                 +"\n  auth: {mode: local}\n  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\n"
                 +"  scheduling: {enabled: true, minimumIntervalMinutes: 1, maxConcurrentRuns: 1}\n"
                 +"workers: {maxConcurrent: 1, queuedLimit: 2}\npackages:\n  allowedRoots: ["
-                +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
+                +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: {path: "+ServerRuntimeTestSupport.yaml(packageRoot)
+                +", editors: [alice]}}\n");
         Path libs=Files.createDirectories(temp.resolve("libs"));
         for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
             ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
@@ -125,6 +207,9 @@ class ServerRuntimeNativeRunTest {
             // then prove the Worker executes the frozen Definition rather than the live file.
             assertTrue(acceptedWorkerLaunch.await(10,TimeUnit.SECONDS),
                     "The accepted cold Worker must reach the launch barrier before the live Definition changes");
+            Path workerOutput=runtime.outputDirectoryForJob(jobId);
+            writeNativeResultWorkbook(workerOutput.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX),"root-canary");
+            writeNativeResultWorkbook(workerOutput.resolve("attacker-run").resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX),"other-run-canary");
             Files.writeString(definition,definitionYaml(70,130));
             releaseAcceptedWorker.countDown();
             Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,jobId);
@@ -132,7 +217,7 @@ class ServerRuntimeNativeRunTest {
             assertTrue(runtime.events(jobId).after(0).stream().anyMatch(event->"result".equals(event.get("event"))));
 
             try(ZipFile archive=new ZipFile(awaitArtifactArchive(runtime,jobId).toFile())) {
-                List<String> caseTrees=new ArrayList<>(),caseLogs=new ArrayList<>(),runManifests=new ArrayList<>();
+                List<String> caseTrees=new ArrayList<>(),caseLogs=new ArrayList<>(),runManifests=new ArrayList<>(),nativeWorkbooks=new ArrayList<>();
                 var entries=archive.entries();
                 while(entries.hasMoreElements()) {
                     ZipEntry entry=entries.nextElement();
@@ -141,6 +226,7 @@ class ServerRuntimeNativeRunTest {
                     if(name.endsWith("/case.yaml"))caseTrees.add(read(archive.getInputStream(entry)));
                     if(name.endsWith("/case.log"))caseLogs.add(read(archive.getInputStream(entry)));
                     if(name.endsWith("/run.yaml"))runManifests.add(name);
+                    if(name.endsWith("/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX))nativeWorkbooks.add(name);
                 }
                 assertEquals(1,caseTrees.size(),"Only the explicitly selected Native Case should produce case evidence");
                 assertTrue(caseTrees.get(0).contains("definitionId: payments.transfer"),caseTrees.get(0));
@@ -151,7 +237,110 @@ class ServerRuntimeNativeRunTest {
                 assertFalse(caseLogs.get(0).contains("amount=70"),caseLogs.get(0));
                 assertTrue(runManifests.stream().anyMatch(name->name.contains("native-first")),
                         "The explicit runId is used for the native execution output");
+                assertEquals(List.of("native-first/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX),nativeWorkbooks,
+                        "The production Server publisher keeps the Engine workbook and excludes Worker root/other Run ID canaries");
             }
+
+            Map<String,Object> excelDraft=runtime.createRunDraft(nativeRun("payments.excel","beta"),"alice");
+            assertEquals(List.of("beta"),excelDraft.get("selectedCaseIds"));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> excelCases=(List<Map<String,Object>>)excelDraft.get("cases");
+            assertEquals(1,excelCases.size(),"Excel preview exposes only the explicitly selected Case");
+            assertEquals("payments.excel.beta",excelCases.get(0).get("qualifiedCaseId"));
+            assertEquals("beta",excelCases.get(0).get("sourceRecordId"));
+            Map<?,?> excelProvenance=(Map<?,?>)excelCases.get(0).get("provenance");
+            assertEquals("excel",excelProvenance.get("sourceType"));
+            assertEquals("Cases",excelProvenance.get("sheet"));
+            assertEquals(Integer.valueOf(3),excelProvenance.get("row"));
+            assertArrayEquals(originalExcel,Files.readAllBytes(excelWorkbook),"Native Excel draft validation must not mutate the source workbook");
+
+            Files.write(excelWorkbook,"changed after validation".getBytes(StandardCharsets.UTF_8));
+            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",excelDraft.get("draftId"))),"alice","alice"),
+                    "Changing the source workbook after preview makes the accepted draft stale");
+            Files.write(excelWorkbook,originalExcel);
+
+            Map<String,Object> acceptedExcelDraft=runtime.createRunDraft(nativeRun("payments.excel","beta"),"alice");
+            Map<String,Object> acceptedExcel=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",acceptedExcelDraft.get("draftId"))),"alice","alice");
+            String excelJobId=String.valueOf(acceptedExcel.get("jobId"));
+            Job excelJob=runtime.jobs.get(excelJobId);
+            assertEquals("payments.excel",excelJob.request.nativeCaseDefinitionId);
+            Path frozenExcel=Path.of(excelJob.request.sourceSnapshotDirectory).resolve("package/testdata/native-cases.xlsx");
+            assertArrayEquals(originalExcel,Files.readAllBytes(frozenExcel),"Accepted Native RUN must pin the exact workbook revision");
+            Map<String,Object> excelResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,excelJobId);
+            assertEquals("PASS",((Map<?,?>)excelResult.get("job")).get("status"),excelResult.toString());
+            assertNativeCaseStatus(runtime,excelJobId,"payments.excel.beta","PASS");
+            Map<String,Object> excelArchiveIndex=runtime.artifactIndex(excelJobId,0,100);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> excelArchiveItems=(List<Map<String,Object>>)excelArchiveIndex.get("items");
+            Map<String,Object> nativeResultWorkbook=excelArchiveItems.stream()
+                    .filter(item->String.valueOf(item.get("path")).endsWith("/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX)
+                            ||ArtifactArchive.NATIVE_CASE_RESULT_XLSX.equals(item.get("path"))).findFirst().orElse(null);
+            assertNotNull(nativeResultWorkbook,"A Native Suite XLSX result must appear in the Server artifact index: "+excelArchiveIndex);
+            assertEquals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",nativeResultWorkbook.get("mediaType"));
+            assertEquals("binary-output",nativeResultWorkbook.get("classification"));
+            assertEquals(Boolean.FALSE,nativeResultWorkbook.get("preview"),"Binary workbooks are downloadable but are not text previews");
+            String publishedWorkbookPath=String.valueOf(nativeResultWorkbook.get("path"));
+            byte[] downloadedWorkbook=runtime.archiveEntry(excelJobId,publishedWorkbookPath);
+            assertArrayEquals(ArtifactArchive.read(awaitArtifactArchive(runtime,excelJobId),publishedWorkbookPath),downloadedWorkbook,
+                    "The archive-backed Server entry read returns the exact included Native Suite workbook bytes");
+            try(XSSFWorkbook publishedWorkbook=new XSSFWorkbook(new java.io.ByteArrayInputStream(downloadedWorkbook))) {
+                assertTrue(publishedWorkbook.getNumberOfSheets()>0,"The downloaded native result must remain an openable XLSX");
+            }
+            Map<String,Object> publishedSourceWorkbook=excelArchiveItems.stream()
+                    .filter(item->String.valueOf(item.get("path")).endsWith("/"+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX))
+                    .findFirst().orElse(null);
+            assertNotNull(publishedSourceWorkbook,
+                    "The optional source-workbook report must be included in the authorized Server archive: "+excelArchiveIndex);
+            String sourceWorkbookPath=String.valueOf(publishedSourceWorkbook.get("path"));
+            byte[] downloadedSourceWorkbook=runtime.archiveEntry(excelJobId,sourceWorkbookPath);
+            assertArrayEquals(ArtifactArchive.read(awaitArtifactArchive(runtime,excelJobId),sourceWorkbookPath),downloadedSourceWorkbook,
+                    "The archive-backed Server entry read returns the exact included source-workbook report bytes");
+            try(XSSFWorkbook sanitizedSourceWorkbook=new XSSFWorkbook(
+                    new java.io.ByteArrayInputStream(downloadedSourceWorkbook))) {
+                for(int sheetIndex=0;sheetIndex<sanitizedSourceWorkbook.getNumberOfSheets();sheetIndex++)
+                    assertTrue(sanitizedSourceWorkbook.getSheetAt(sheetIndex).getCellComments().isEmpty(),
+                            "Source-workbook comments and notes must not be downloadable from the Server archive");
+            }
+            assertArrayEquals(originalExcel,Files.readAllBytes(excelWorkbook),"Native Excel RUN must leave the source workbook byte-identical");
+
+            String threadedCommentCanary="server-threaded-comment-canary";
+            byte[] threadedExcel=addThreadedCommentParts(originalExcel,threadedCommentCanary);
+            Files.write(excelWorkbook,threadedExcel);
+            JsonNode threadedRun=nativeRun("payments.excel","beta");
+            ((com.fasterxml.jackson.databind.node.ObjectNode)threadedRun.get("options"))
+                    .put("runId","native-threaded-comments");
+            Map<String,Object> threadedDraft=runtime.createRunDraft(threadedRun,"alice");
+            Map<String,Object> threadedAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",threadedDraft.get("draftId"))),"alice","alice");
+            String threadedJobId=String.valueOf(threadedAccepted.get("jobId"));
+            Map<String,Object> threadedResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,threadedJobId);
+            assertEquals("PASS",((Map<?,?>)threadedResult.get("job")).get("status"),threadedResult.toString());
+            Map<String,Object> threadedArchiveIndex=runtime.artifactIndex(threadedJobId,0,100);
+            @SuppressWarnings("unchecked") List<Map<String,Object>> threadedArchiveItems=
+                    (List<Map<String,Object>>)threadedArchiveIndex.get("items");
+            assertFalse(threadedArchiveItems.stream().anyMatch(item->String.valueOf(item.get("path"))
+                            .endsWith("/"+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX)
+                            ||ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX.equals(item.get("path"))),
+                    "A source workbook with unsupported threaded comments must not enter the Server archive");
+            Map<String,Object> threadedNativeResult=threadedArchiveItems.stream()
+                    .filter(item->String.valueOf(item.get("path")).endsWith("/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX)
+                            ||ArtifactArchive.NATIVE_CASE_RESULT_XLSX.equals(item.get("path"))).findFirst().orElse(null);
+            assertNotNull(threadedNativeResult,"The standard Native Suite workbook must remain downloadable");
+            String threadedResultPath=String.valueOf(threadedNativeResult.get("path"));
+            byte[] downloadedThreadedResult=runtime.archiveEntry(threadedJobId,threadedResultPath);
+            assertArrayEquals(ArtifactArchive.read(awaitArtifactArchive(runtime,threadedJobId),threadedResultPath),
+                    downloadedThreadedResult,"The archive-backed read must return the published result bytes");
+            assertFalse(zipContainsText(downloadedThreadedResult,threadedCommentCanary),
+                    "The downloadable standard report must not contain the source threaded-comment payload");
+            Map<String,Object> threadedManifest=readArchivedRunManifest(runtime,threadedJobId);
+            @SuppressWarnings("unchecked") Map<String,Object> threadedManifestRun=(Map<String,Object>)threadedManifest.get("run");
+            @SuppressWarnings("unchecked") Map<String,Object> threadedSourceReport=
+                    (Map<String,Object>)threadedManifestRun.get("sourceWorkbookReport");
+            assertEquals("fallback",threadedSourceReport.get("status"));
+            assertEquals("SOURCE_WORKBOOK_UNAVAILABLE",threadedSourceReport.get("diagnosticCode"));
+            assertArrayEquals(threadedExcel,Files.readAllBytes(excelWorkbook),
+                    "Server execution must preserve the threaded-comment source workbook bytes");
+            Files.write(excelWorkbook,originalExcel);
 
             Files.writeString(definition,original);
             Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
@@ -217,6 +406,7 @@ class ServerRuntimeNativeRunTest {
         Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
                 +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
                 +"\n  auth: {mode: local}\n  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"  scheduling: {enabled: true, minimumIntervalMinutes: 1, maxConcurrentRuns: 1}\n"
                 +"workers: {maxConcurrent: 1, queuedLimit: 2}\npackages:\n  allowedRoots: ["
                 +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
         Path libs=Files.createDirectories(temp.resolve("libs"));
@@ -255,6 +445,236 @@ class ServerRuntimeNativeRunTest {
                 assertTrue(caseTrees.get(0).contains("status: FAIL"),caseTrees.get(0));
                 assertFalse(caseTrees.get(0).contains("payments.transfer.second"),caseTrees.get(0));
             }
+        }
+    }
+
+    @Test void implicitSuiteDraftFreezesSelectionForJobsAndSchedules() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("suite-allowed"));
+        Path packageRoot=Files.createDirectories(allowed.resolve("p"));
+        Path transferFlow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+                .resolve("flow.yaml");
+        Path refundFlow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/refund/v1"))
+                .resolve("flow.yaml");
+        String flow="schemaVersion: att-flow/v3.6\nid: %s\nname: %s\ndescription: Native Suite fixture\nactions:\n"
+                +"  verify: {type: assert, assert: '#{\u0024{EXEC.INPUT.amount} <= 13}'}\n"
+                +"  log: {type: log, message: 'amount=\u0024{EXEC.INPUT.amount}'}\n";
+        Files.writeString(transferFlow,String.format(flow,"payments.transfer.v1","Transfer"));
+        Files.writeString(refundFlow,String.format(flow,"payments.refund.v1","Refund"));
+        Path transferDefinition=packageRoot.resolve("testcase/payments/transfer/testcase.yaml");
+        Path refundDefinition=packageRoot.resolve("testcase/payments/refund/testcase.yaml");
+        Files.createDirectories(transferDefinition.getParent());Files.createDirectories(refundDefinition.getParent());
+        Files.writeString(transferDefinition,definitionYaml(7,13));
+        Files.writeString(refundDefinition,"schemaVersion: att-testcase/v1\nid: payments.refund\nname: Refund\n"
+                +"flow: payments.refund.v1\ndataSource:\n  type: inline\n  records:\n"
+                +"    - recordId: refund1\n      data: {amount: 5}\ninputs:\n  amount:\n    from: DATA.amount\n");
+        Path runtimeConfig=Files.createDirectories(temp.resolve("suite-runtime/config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path data=temp.resolve("suite-data"),serverConfig=temp.resolve("suite-server.yaml");
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
+                +"\n  auth: {mode: local}\n  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"  scheduling: {enabled: true, minimumIntervalMinutes: 1, maxConcurrentRuns: 1}\n"
+                +"workers: {maxConcurrent: 1, queuedLimit: 2}\npackages:\n  allowedRoots: ["
+                +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
+        Path libs=Files.createDirectories(temp.resolve("suite-libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
+            ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            JsonNode body=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.transfer","payments.refund"),
+                            "selection",Map.of("qualifiedCaseIds",List.of("payments.transfer.first","payments.refund.refund1"))),
+                    "options",Map.of("debug",false,"failFast",true,"runId","native-suite-cross-flow")));
+            assertThrows(IllegalArgumentException.class,()->runtime.submit("run",body,"alice"),
+                    "Native Suite requests must pass through validated draft inspection");
+            Map<String,Object> draft=runtime.createRunDraft(body,"alice");
+            assertEquals(List.of("payments.refund.refund1","payments.transfer.first"),draft.get("selectedCaseIds"),
+                    "Qualified identities are ordered by Definition ID, regardless of request order");
+            @SuppressWarnings("unchecked") List<Map<String,Object>> preview=(List<Map<String,Object>>)draft.get("cases");
+            assertEquals(List.of("payments.refund.v1","payments.transfer.v1"),preview.stream()
+                    .map(row->String.valueOf(row.get("flowId"))).toList());
+            Map<String,Object> accepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",draft.get("draftId"))),"alice","alice");
+            String jobId=String.valueOf(accepted.get("jobId"));Job job=runtime.jobs.get(jobId);
+            assertEquals("native-suite-cross-flow",job.request.runId);
+            assertEquals(Map.of("payments.refund","testcase/payments/refund/testcase.yaml",
+                    "payments.transfer","testcase/payments/transfer/testcase.yaml"),job.request.nativeSuiteSourcePaths);
+            Map<String,Object> result=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,jobId);
+            assertEquals("PASS",((Map<?,?>)result.get("job")).get("status"),result.toString());
+            @SuppressWarnings("unchecked") Map<String,Object> canonical=ServerRuntime.JSON.convertValue(result.get("result"),Map.class);
+            @SuppressWarnings("unchecked") Map<String,Object> summary=(Map<String,Object>)canonical.get("summary");
+            assertEquals(2,summary.get("total"));assertEquals(2,summary.get("passed"));
+            @SuppressWarnings("unchecked") List<Map<String,Object>> cases=(List<Map<String,Object>>)summary.get("cases");
+            assertEquals(List.of("payments.refund.refund1","payments.transfer.first"),cases.stream()
+                    .map(row->String.valueOf(row.get("qualifiedCaseId"))).toList());
+            assertEquals(List.of("payments.refund.v1","payments.transfer.v1"),cases.stream()
+                    .map(row->String.valueOf(row.get("flowId"))).toList());
+
+            JsonNode scheduledBody=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.transfer","payments.refund"),
+                            "selection",Map.of("qualifiedCaseIds",List.of("payments.transfer.first","payments.refund.refund1"))),
+                    "options",Map.of("debug",false,"failFast",true,"runId","native-suite-scheduled")));
+            Map<String,Object> scheduledDraft=runtime.createRunDraft(scheduledBody,"alice");
+            LoadSchedule schedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name","Native Suite schedule",
+                    "packageId","p","executionType","run","draftId",scheduledDraft.get("draftId"),
+                    "timezone","UTC","cron","0 2 * * *","enabled",false)),"alice");
+            assertEquals(List.of("payments.refund.refund1","payments.transfer.first"),
+                    schedule.runInput.get("nativeSuiteQualifiedCaseIds"));
+            Map<String,Object> occurrence=runtime.triggerLoadSchedule(schedule.id,"alice");
+            assertEquals("submitted",occurrence.get("status"),occurrence.toString());
+            Map<String,Object> scheduledResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,
+                    String.valueOf(occurrence.get("jobId")));
+            assertEquals("PASS",((Map<?,?>)scheduledResult.get("job")).get("status"),scheduledResult.toString());
+
+            JsonNode staleBody=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.transfer","payments.refund"),
+                            "selection",Map.of("all",true)),
+                    "options",Map.of("debug",false,"runId","native-suite-stale")));
+            Map<String,Object> staleDraft=runtime.createRunDraft(staleBody,"alice");
+            int jobsBeforeStaleSubmit=runtime.jobs.size();
+            Files.writeString(refundDefinition,Files.readString(refundDefinition)+"\n# changed after suite draft\n");
+            assertThrows(ServerRuntime.StaleDraftException.class,()->runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",staleDraft.get("draftId"))),"alice","alice"));
+            assertEquals(jobsBeforeStaleSubmit,runtime.jobs.size(),
+                    "A changed Definition must reject the complete Suite before creating a Job");
+        }
+    }
+
+    @Test void nativeSuiteRerunFailedFreezesOwnedSourceAndRetriesOnlyExecutedFailedCases() throws Exception {
+        Path allowed=Files.createDirectories(temp.resolve("retry-allowed"));
+        Path packageRoot=Files.createDirectories(allowed.resolve("p"));
+        Path flow=Files.createDirectories(packageRoot.resolve("templates/flows/payments/transfer/v1"))
+                .resolve("flow.yaml");
+        Files.createDirectories(packageRoot.resolve("testcase/payments/transfer"));
+        Files.writeString(flow,"schemaVersion: att-flow/v3.6\nid: payments.transfer.v1\nname: Transfer\n"
+                +"description: Native Suite retry fixture\nactions:\n"
+                +"  verify: {type: assert, assert: '#{${EXEC.INPUT.amount} <= 7}'}\n"
+                +"  log: {type: log, message: 'amount=${EXEC.INPUT.amount}'}\n");
+        Path definition=packageRoot.resolve("testcase/payments/transfer/testcase.yaml");
+        Files.writeString(definition,definitionYaml(7,13));
+
+        Path runtimeConfig=Files.createDirectories(temp.resolve("retry-runtime/config")).resolve("config.yaml");
+        Files.writeString(runtimeConfig,"schemaVersion: att-config/v2.12\nenvironment: SIT\nenvironments: {SIT: {}}\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n");
+        Path javaBin=Path.of(System.getProperty("java.home"),"bin",
+                System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
+        Path data=temp.resolve("retry-data"),serverConfig=temp.resolve("retry-server.yaml");
+        Files.writeString(serverConfig,"server:\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
+                +"\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)
+                +"\n  auth: {mode: local}\n  inspection: {enabled: true, maxConcurrent: 1, timeoutMs: 30000}\n"
+                +"  scheduling: {enabled: true, minimumIntervalMinutes: 1, maxConcurrentRuns: 1}\n"
+                +"workers: {maxConcurrent: 1, queuedLimit: 2}\npackages:\n  allowedRoots: ["
+                +ServerRuntimeTestSupport.yaml(allowed)+"]\n  entries: {p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"}\n");
+        Path libs=Files.createDirectories(temp.resolve("retry-libs"));
+        for(String module:List.of("att-worker","att-engine","att-server-api","att-security"))
+            ServerRuntimeTestSupport.addModuleJar(libs,module,Path.of(module+"/target/classes"));
+        ServerRuntimeTestSupport.addWorkerClasspathJars(libs);
+
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(serverConfig),libs.toString())) {
+            runtime.store.createAuthUser("alice","Alice","unused","USER","csrf");
+            JsonNode sourceBody=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.transfer"),"selection",Map.of("all",true)),
+                    "options",Map.of("debug",false,"failFast",true,"runId","native-suite-retry-source")));
+            Map<String,Object> sourceDraft=runtime.createRunDraft(sourceBody,"alice");
+            Map<String,Object> sourceAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",sourceDraft.get("draftId"))),"alice","alice");
+            String sourceJobId=String.valueOf(sourceAccepted.get("jobId"));
+            Map<String,Object> sourceResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,sourceJobId);
+            assertEquals("FAIL",((Map<?,?>)sourceResult.get("job")).get("status"),sourceResult.toString());
+            @SuppressWarnings("unchecked") Map<String,Object> sourceCanonical=ServerRuntime.JSON.convertValue(sourceResult.get("result"),Map.class);
+            @SuppressWarnings("unchecked") Map<String,Object> sourceSummary=(Map<String,Object>)sourceCanonical.get("summary");
+            assertEquals(2,sourceSummary.get("total"));
+            assertEquals(2,sourceSummary.get("executionCount"));
+            assertEquals(1,sourceSummary.get("failed"));
+            assertEquals(0,sourceSummary.get("skipped"));
+
+            JsonNode retryBody=ServerRuntime.JSON.valueToTree(Map.of("schemaVersion",RunDefinition.NATIVE_CASE_VERSION,
+                    "executionType","run","packageId","p","target",Map.of("type","nativeSuite",
+                            "definitionIds",List.of("payments.transfer"),"selection",Map.of("rerunFailed",true)),
+                    "options",Map.of("debug",false,"runId","native-suite-retry-attempt-1")));
+            Map<String,Object> staleRetryDraft=runtime.createRunDraft(retryBody,"alice");
+            var newerSourceBody=(com.fasterxml.jackson.databind.node.ObjectNode)sourceBody.deepCopy();
+            ((com.fasterxml.jackson.databind.node.ObjectNode)newerSourceBody.get("options")).put("runId","native-suite-retry-newer-source");
+            Map<String,Object> newerSourceDraft=runtime.createRunDraft(newerSourceBody,"alice");
+            Map<String,Object> newerSourceAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",newerSourceDraft.get("draftId"))),"alice","alice");
+            String newerSourceJobId=String.valueOf(newerSourceAccepted.get("jobId"));
+            Map<String,Object> newerSourceResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,newerSourceJobId);
+            assertEquals("FAIL",((Map<?,?>)newerSourceResult.get("job")).get("status"),newerSourceResult.toString());
+            int jobsBeforeStaleRetrySubmit=runtime.jobs.size();
+            assertThrows(ServerRuntime.JobConflictException.class,()->runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",staleRetryDraft.get("draftId"))),"alice","alice"),
+                    "A retry draft must be refreshed when a newer eligible Native Suite RUN completes");
+            assertEquals(jobsBeforeStaleRetrySubmit,runtime.jobs.size(),"A stale retry draft must not create a Job");
+
+            Map<String,Object> retryDraft=runtime.createRunDraft(retryBody,"alice");
+            assertEquals(List.of("payments.transfer.second"),retryDraft.get("selectedCaseIds"));
+            @SuppressWarnings("unchecked") Map<String,Object> frozenLineage=(Map<String,Object>)retryDraft.get("retryLineage");
+            assertEquals(newerSourceJobId,frozenLineage.get("sourceJobId"));
+            assertEquals("native-suite-retry-newer-source",frozenLineage.get("sourceRunId"));
+            assertEquals(2,frozenLineage.get("sourceSelectedCaseCount"));
+            assertEquals(1,frozenLineage.get("retryAttemptNumber"));
+            assertEquals(1,frozenLineage.get("retryCaseCount"));
+            assertEquals(List.of("payments.transfer.second"),frozenLineage.get("failedQualifiedCaseIds"));
+
+            Map<String,Object> retryAccepted=runtime.submitRunDraft(ServerRuntime.JSON.valueToTree(
+                    Map.of("packageId","p","draftId",retryDraft.get("draftId"))),"alice","alice");
+            String retryJobId=String.valueOf(retryAccepted.get("jobId"));
+            assertEquals(newerSourceJobId,runtime.jobs.get(retryJobId).rerunOfJobId);
+            assertEquals(newerSourceJobId,runtime.jobs.get(retryJobId).request.nativeSuiteRetry.get("sourceJobId"));
+            Map<String,Object> retryResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,retryJobId);
+            assertEquals("FAIL",((Map<?,?>)retryResult.get("job")).get("status"),retryResult.toString());
+            @SuppressWarnings("unchecked") Map<String,Object> retryCanonical=ServerRuntime.JSON.convertValue(retryResult.get("result"),Map.class);
+            @SuppressWarnings("unchecked") Map<String,Object> retrySummary=(Map<String,Object>)retryCanonical.get("summary");
+            assertEquals(1,retrySummary.get("total"));
+            assertEquals(1,retrySummary.get("executionCount"));
+            assertEquals(1,retrySummary.get("failed"));
+            assertEquals(0,retrySummary.get("skipped"));
+            Map<String,Object> retryManifest=readArchivedRunManifest(runtime,retryJobId);
+            @SuppressWarnings("unchecked") Map<String,Object> retryRun=(Map<String,Object>)retryManifest.get("run");
+            @SuppressWarnings("unchecked") Map<String,Object> recordedLineage=(Map<String,Object>)retryRun.get("retryLineage");
+            assertEquals(newerSourceJobId,recordedLineage.get("sourceJobId"));
+            assertEquals("native-suite-retry-newer-source",recordedLineage.get("sourceRunId"));
+            assertEquals(1,((Number)recordedLineage.get("retryExecutionCount")).intValue());
+            assertEquals(0,((Number)recordedLineage.get("retrySkippedCaseCount")).intValue());
+
+            var scheduledRetryBody=(com.fasterxml.jackson.databind.node.ObjectNode)retryBody.deepCopy();
+            ((com.fasterxml.jackson.databind.node.ObjectNode)scheduledRetryBody.get("options")).put("runId","native-suite-retry-scheduled");
+            Map<String,Object> scheduledRetryDraft=runtime.createRunDraft(scheduledRetryBody,"alice");
+            LoadSchedule retrySchedule=runtime.createLoadSchedule(ServerRuntime.JSON.valueToTree(Map.of("name","Native Suite retry schedule",
+                    "packageId","p","executionType","run","draftId",scheduledRetryDraft.get("draftId"),
+                    "timezone","UTC","cron","0 2 * * *","enabled",false)),"alice");
+            Map<String,Object> retryOccurrence=runtime.triggerLoadSchedule(retrySchedule.id,"alice");
+            String scheduledRetryJobId=String.valueOf(retryOccurrence.get("jobId"));
+            assertEquals("submitted",retryOccurrence.get("status"),retryOccurrence.toString());
+            assertEquals(retryJobId,runtime.jobs.get(scheduledRetryJobId).rerunOfJobId);
+            Map<String,Object> scheduledRetryResult=ServerRuntimeTestSupport.awaitUnifiedJob(runtime,scheduledRetryJobId);
+            assertEquals("FAIL",((Map<?,?>)scheduledRetryResult.get("job")).get("status"),scheduledRetryResult.toString());
+            Map<String,Object> scheduledManifest=readArchivedRunManifest(runtime,scheduledRetryJobId);
+            @SuppressWarnings("unchecked") Map<String,Object> scheduledRun=(Map<String,Object>)scheduledManifest.get("run");
+            @SuppressWarnings("unchecked") Map<String,Object> scheduledLineage=(Map<String,Object>)scheduledRun.get("retryLineage");
+            assertEquals(retryJobId,scheduledLineage.get("sourceJobId"));
+            assertEquals(2,scheduledLineage.get("retryAttemptNumber"));
+            assertEquals(1,((Number)scheduledLineage.get("retryExecutionCount")).intValue());
+            Map<String,Object> nextRetryDraft=runtime.createRunDraft(retryBody,"alice");
+            @SuppressWarnings("unchecked") Map<String,Object> nextRetryLineage=(Map<String,Object>)nextRetryDraft.get("retryLineage");
+            assertEquals(scheduledRetryJobId,nextRetryLineage.get("sourceJobId"));
+            assertEquals(3,nextRetryLineage.get("retryAttemptNumber"),
+                    "The next retry attempt must increment from the scheduled Job's retained lineage");
+            runtime.deleteLoadSchedule(retrySchedule.id,"alice");
+
+            Files.writeString(flow,Files.readString(flow)+"# changed after the completed retry\n");
+            assertThrows(ServerRuntime.JobConflictException.class,()->runtime.createRunDraft(retryBody,"alice"),
+                    "A retry draft must reject source revision changes since the latest eligible Native Suite RUN");
         }
     }
 
@@ -404,6 +824,101 @@ class ServerRuntimeNativeRunTest {
         return runtime.artifactArchivePath(jobId);
     }
 
+    private static byte[] addThreadedCommentParts(byte[] source,String canary) throws IOException {
+        Map<String,byte[]> entries=new LinkedHashMap<>();
+        try(ZipInputStream input=new ZipInputStream(new ByteArrayInputStream(source))) {
+            ZipEntry entry;byte[] buffer=new byte[4096];
+            while((entry=input.getNextEntry())!=null) {
+                ByteArrayOutputStream contents=new ByteArrayOutputStream();int count;
+                while((count=input.read(buffer))!=-1)contents.write(buffer,0,count);
+                entries.put(entry.getName(),contents.toByteArray());
+            }
+        }
+        String contentTypes=new String(entries.get("[Content_Types].xml"),StandardCharsets.UTF_8);
+        contentTypes=appendBeforeEnd(contentTypes,"</Types>",
+                "<Override PartName=\"/xl/threadedComments/threadedComment1.xml\" "
+                        +"ContentType=\"application/vnd.ms-excel.threadedcomments+xml\"/>"
+                        +"<Override PartName=\"/xl/persons/person.xml\" "
+                        +"ContentType=\"application/vnd.ms-excel.person+xml\"/>");
+        entries.put("[Content_Types].xml",contentTypes.getBytes(StandardCharsets.UTF_8));
+        String workbookRelationships=new String(entries.get("xl/_rels/workbook.xml.rels"),StandardCharsets.UTF_8);
+        workbookRelationships=appendBeforeEnd(workbookRelationships,"</Relationships>",
+                "<Relationship Id=\"rIdThreadedPerson\" "
+                        +"Type=\"http://schemas.microsoft.com/office/2017/10/relationships/person\" "
+                        +"Target=\"persons/person.xml\"/>");
+        entries.put("xl/_rels/workbook.xml.rels",workbookRelationships.getBytes(StandardCharsets.UTF_8));
+        entries.put("xl/worksheets/_rels/sheet1.xml.rels",("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                +"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                +"<Relationship Id=\"rIdThreadedComment\" "
+                +"Type=\"http://schemas.microsoft.com/office/2017/10/relationships/threadedComment\" "
+                +"Target=\"../threadedComments/threadedComment1.xml\"/></Relationships>")
+                .getBytes(StandardCharsets.UTF_8));
+        entries.put("xl/threadedComments/threadedComment1.xml",("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                +"<ThreadedComments xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments\">"
+                +"<threadedComment ref=\"A2\" dT=\"2025-01-01T00:00:00Z\" "
+                +"personId=\"{00000000-0000-0000-0000-000000000001}\" "
+                +"id=\"{00000000-0000-0000-0000-000000000002}\"><text>"+canary
+                +"</text></threadedComment></ThreadedComments>").getBytes(StandardCharsets.UTF_8));
+        entries.put("xl/persons/person.xml",("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                +"<personList xmlns=\"http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments\">"
+                +"<person displayName=\"Fixture User\" id=\"{00000000-0000-0000-0000-000000000001}\" "
+                +"userId=\"fixture\" providerId=\"None\"/></personList>")
+                .getBytes(StandardCharsets.UTF_8));
+        ByteArrayOutputStream output=new ByteArrayOutputStream();
+        try(ZipOutputStream zip=new ZipOutputStream(output)) {
+            for(Map.Entry<String,byte[]> entry:entries.entrySet())writeZipEntry(zip,entry.getKey(),entry.getValue());
+        }
+        return output.toByteArray();
+    }
+
+    private static String appendBeforeEnd(String xml,String closingTag,String fragment) {
+        int closing=xml.lastIndexOf(closingTag);
+        if(closing<0)throw new IllegalArgumentException("Expected OOXML closing tag "+closingTag);
+        return xml.substring(0,closing)+fragment+xml.substring(closing);
+    }
+
+    private static void writeZipEntry(ZipOutputStream zip,String name,byte[] contents)throws IOException {
+        zip.putNextEntry(new ZipEntry(name));zip.write(contents);zip.closeEntry();
+    }
+
+    private static boolean zipContainsText(byte[] zippedBytes,String expected)throws IOException {
+        try(ZipInputStream zip=new ZipInputStream(new ByteArrayInputStream(zippedBytes))) {
+            ZipEntry entry;byte[] buffer=new byte[4096];
+            while((entry=zip.getNextEntry())!=null) {
+                ByteArrayOutputStream contents=new ByteArrayOutputStream();int count;
+                while((count=zip.read(buffer))!=-1)contents.write(buffer,0,count);
+                if(new String(contents.toByteArray(),StandardCharsets.UTF_8).contains(expected))return true;
+            }
+        }
+        return false;
+    }
+
+    private static Map<String,Object> readArchivedRunManifest(ServerRuntime runtime,String jobId) throws Exception {
+        String yaml=null;
+        try(ZipFile archive=new ZipFile(awaitArtifactArchive(runtime,jobId).toFile())) {
+            var entries=archive.entries();
+            while(entries.hasMoreElements()) {
+                ZipEntry entry=entries.nextElement();
+                if(!entry.isDirectory()&&entry.getName().endsWith("/run.yaml")) {
+                    assertNull(yaml,"A completed Native Suite Job must publish one canonical run manifest");
+                    yaml=read(archive.getInputStream(entry));
+                }
+            }
+        }
+        assertNotNull(yaml,"A completed Native Suite Job must publish its run manifest");
+        Object loaded=new org.yaml.snakeyaml.Yaml().load(yaml);
+        assertInstanceOf(Map.class,loaded);
+        return ServerRuntime.JSON.convertValue(loaded,Map.class);
+    }
+
+    private static void writeNativeResultWorkbook(Path path,String value) throws Exception {
+        Files.createDirectories(path.getParent());
+        try(XSSFWorkbook workbook=new XSSFWorkbook();var stream=Files.newOutputStream(path)) {
+            workbook.createSheet("Cases").createRow(0).createCell(0).setCellValue(value);
+            workbook.write(stream);
+        }
+    }
+
     private static void assertDraftSelection(Map<String,Object> draft) {
         assertEquals(RunDefinition.NATIVE_CASE_VERSION,draft.get("schemaVersion"));
         assertEquals(Map.of("type","nativeCase","definitionId","payments.transfer"),draft.get("target"));
@@ -435,6 +950,44 @@ class ServerRuntimeNativeRunTest {
         Object intent=review.get("intentId");if(intent!=null)body.put("intentId",String.valueOf(intent));
         if(sourcePolicy!=null)body.put("sourcePolicy",sourcePolicy);
         return body;
+    }
+
+    private static String excelDefinitionYaml() {
+        return "schemaVersion: att-testcase/v1\nid: payments.excel\nname: Excel cases\nflow: payments.transfer.v1\n"
+                +"dataSource:\n  type: excel\n  path: testdata/native-cases.xlsx\n  sheet: Cases\n"
+                +"  caseId: Case ID\n  dataColumns: amount=Amount\n"
+                +"inputs:\n  amount:\n    from: DATA.amount\n";
+    }
+
+    private static String excelDefinitionYamlWithSourceWorkbookReport() {
+        return excelDefinitionYaml().replace("inputs:\n",
+                "report: {format: xlsx, template: sourceWorkbook}\ninputs:\n");
+    }
+
+    private static Path writeExcelWorkbook(Path path) throws Exception {
+        Files.createDirectories(path.getParent());
+        try(XSSFWorkbook workbook=new XSSFWorkbook()) {
+            org.apache.poi.ss.usermodel.Sheet sheet=workbook.createSheet("Cases");
+            Row header=sheet.createRow(0);
+            header.createCell(0).setCellValue("Case ID");
+            header.createCell(1).setCellValue("Amount");
+            String[] ids={"alpha","beta","gamma"};
+            int[] amounts={7,13,70};
+            for(int index=0;index<ids.length;index++) {
+                Row row=sheet.createRow(index+1);
+                row.createCell(0).setCellValue(ids[index]);
+                row.createCell(1).setCellValue(amounts[index]);
+            }
+            org.apache.poi.ss.usermodel.Drawing<?> drawing=sheet.createDrawingPatriarch();
+            org.apache.poi.ss.usermodel.ClientAnchor anchor=workbook.getCreationHelper().createClientAnchor();
+            anchor.setCol1(1);anchor.setCol2(2);anchor.setRow1(1);anchor.setRow2(2);
+            org.apache.poi.ss.usermodel.Comment comment=drawing.createCellComment(anchor);
+            comment.setAuthor("acceptance-fixture");
+            comment.setString(workbook.getCreationHelper().createRichTextString("api-key=source-comment-canary"));
+            sheet.getRow(1).getCell(1).setCellComment(comment);
+            try(java.io.OutputStream output=Files.newOutputStream(path)){workbook.write(output);}
+        }
+        return path;
     }
 
     private static String read(InputStream input) throws Exception {

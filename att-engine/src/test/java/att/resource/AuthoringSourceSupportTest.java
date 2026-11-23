@@ -110,6 +110,46 @@ class AuthoringSourceSupportTest {
                         Collections.<String>emptyList(),Collections.singletonList("custom.*")));
     }
 
+    @Test void nativeExcelColumnMappingsAreNotMistakenForCredentialAssignments() throws Exception {
+        Path root=Files.createDirectories(temp.resolve("native-excel-mapping"));
+        Path source=root.resolve("testcase.yaml");
+        String definition="# supplementary Unicode before the mapping: 🚀\n"
+                +"schemaVersion: att-testcase/v1\nid: native.case\nflow: checkout.v1\n"
+                +"dataSource:\n  type: excel\n  path: testcase/cases.xlsx\n  sheet: Cases\n"
+                +"  headerRows: 1\n  caseId: ID\n  dataColumns: id=ID, amount=Amount, password=Password\n";
+        Files.write(source,definition.getBytes(StandardCharsets.UTF_8));
+        assertEquals(definition,AuthoringSourceSupport.read(root,source,"testcase/native/testcase.yaml",4096).get("text"));
+        String mapping=AuthoringSourceSupport.nativeExcelDataColumnsSource("testcase/native/testcase.yaml",definition);
+        assertNotNull(mapping);
+        assertEquals("id=ID, amount=Amount, password=Password",mapping,
+                "SnakeYAML code-point marks must be converted to Java UTF-16 offsets");
+        String marker="ATT_NATIVE_EXCEL_DATA_COLUMNS_REDACTION_MARKER";
+        String protectedText=AuthoringSourceSupport.replaceNativeExcelDataColumns("testcase/native/testcase.yaml",definition,marker);
+        assertEquals(definition.replace("dataColumns: "+mapping,"dataColumns: "+marker),protectedText,
+                "Replacing the validated scalar must preserve every surrounding source character");
+        assertFalse(protectedText.contains("password=Password"));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,source,"testcase/native/testcase.yaml",4096,
+                        Collections.singletonList("dataSource.dataColumns"),Collections.<String>emptyList()),
+                "Configured sensitive paths must still apply to a mapped column field");
+
+        String nestedMapping=definition.replace("dataColumns: id=ID, amount=Amount, password=Password",
+                "dataColumns:\n    customerPin: 1234");
+        Files.write(source,nestedMapping.getBytes(StandardCharsets.UTF_8));
+        assertNull(AuthoringSourceSupport.nativeExcelDataColumnsSource("testcase/native/testcase.yaml",nestedMapping),
+                "Only a scalar accepted by the shared column parser receives the source-text exemption");
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,source,"testcase/native/testcase.yaml",4096,
+                        Collections.<String>emptyList(),Collections.singletonList("customerPin")),
+                "Nested values under malformed dataColumns must retain configured sensitive-field checks");
+
+        String credential=definition+"inputs: {password: actual-native-credential-canary}\n";
+        Files.write(source,credential.getBytes(StandardCharsets.UTF_8));
+        assertThrows(PackageResourceInspector.ResourceNotFoundException.class,
+                ()->AuthoringSourceSupport.read(root,source,"testcase/native/testcase.yaml",4096),
+                "Actual sensitive fields outside the mapping remain protected");
+    }
+
     @Test void failsClosedForProtectedRecordsEmbeddedInScalarContent() throws Exception {
         Path root=Files.createDirectories(temp.resolve("embedded-scalar-sources"));
         Path block=root.resolve("block.yaml");

@@ -156,6 +156,60 @@ class VNextCommandTest {
         }
     }
 
+    @Test void localNativeSuiteCommandSelectsAcrossDefinitionsAndFlowBindings() throws Exception {
+        Path home=packageRoot.resolve("native-suite-home");
+        Path pkg=home.resolve("packages/payments");
+        Path config=home.resolve("config/config.yaml");
+        Files.createDirectories(config.getParent());
+        Files.createDirectories(pkg.resolve("testcase"));
+        Files.createDirectories(pkg.resolve("templates"));
+        TestSchemas.install(home);
+        Files.write(config,("schemaVersion: att-config/v2.13\noutputDirectory: output\nenvironment: SIT\n"
+                +"templates: {root: templates}\ntestcase: {root: testcase}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(pkg.resolve("package.yaml"),"schemaVersion: att-package/v1\n".getBytes(StandardCharsets.UTF_8));
+        writeSuiteFlow(pkg,"payment.alpha.v1","alpha=${EXEC.INPUT.amount}");
+        writeSuiteFlow(pkg,"payment.zeta.v1","zeta=${EXEC.INPUT.amount}");
+        writeSuiteDefinition(pkg,"fpp.alpha","payment.alpha.v1","first",7);
+        writeSuiteDefinition(pkg,"fpp.zeta","payment.zeta.v1","third",11);
+
+        String previousHome=System.getProperty("att.home");
+        try {
+            System.setProperty("att.home",home.toString());
+            Captured captured=capture(()->VNextCommand.run(new String[]{"--local","--format","json","-p","payments",
+                    "--config",config.toString(),"--run-id","native-cli-suite","run","native-suite",
+                    "--definition","fpp.zeta","--definition","fpp.alpha",
+                    "--qualified-case-id","fpp.zeta.third","--qualified-case-id","fpp.alpha.first"}));
+            assertEquals(0,captured.exitCode,captured.stdout+captured.stderr);
+            Map<?,?> result=new ObjectMapper().readValue(captured.stdout,Map.class);
+            assertEquals("native-suite",result.get("targetKind"));
+            assertEquals("PASS",result.get("status"));
+            Map<?,?> summary=(Map<?,?>)result.get("summary");
+            List<?> cases=(List<?>)summary.get("cases");
+            assertEquals(2,cases.size());
+            assertEquals("fpp.alpha.first",((Map<?,?>)cases.get(0)).get("qualifiedCaseId"));
+            assertEquals("fpp.zeta.third",((Map<?,?>)cases.get(1)).get("qualifiedCaseId"));
+            assertEquals("payment.alpha.v1",((Map<?,?>)cases.get(0)).get("flowId"));
+            assertEquals("payment.zeta.v1",((Map<?,?>)cases.get(1)).get("flowId"));
+        } finally {
+            if(previousHome==null)System.clearProperty("att.home");else System.setProperty("att.home",previousHome);
+        }
+    }
+
+    private static void writeSuiteFlow(Path packageRoot,String id,String message) throws Exception {
+        Path path=packageRoot.resolve("templates/flows").resolve(id.replace('.', '/')).resolve("flow.yaml");
+        Files.createDirectories(path.getParent());
+        Files.write(path,("schemaVersion: att-flow/v3.6\nid: "+id+"\nname: "+id+"\ndescription: Native Suite CLI fixture\nactions:\n"
+                +"  show:\n    type: log\n    message: '"+message+"'\n").getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void writeSuiteDefinition(Path packageRoot,String id,String flow,String caseId,int amount) throws Exception {
+        Path path=packageRoot.resolve("testcase").resolve(id.replace('.', '/')).resolve("testcase.yaml");
+        Files.createDirectories(path.getParent());
+        Files.write(path,("schemaVersion: att-testcase/v1\nid: "+id+"\nflow: "+flow+"\ncaseIdExpression: \"${DATA.caseId}\"\n"
+                +"dataSource:\n  type: inline\n  records:\n    - recordId: "+caseId+"\n      data: {caseId: "+caseId+", amount: "+amount+"}\n")
+                .getBytes(StandardCharsets.UTF_8));
+    }
+
     @Test void additionalSingleTargetSelectorsFailBeforeLocalOrRemoteDispatch() throws Exception {
         String[][] prefixes={{"--local"},{"--server","https://example.invalid","-p","payments"}};
         String[][] commands={

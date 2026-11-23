@@ -38,7 +38,7 @@ async function installApi(page, state, unexpected) {
     const method = request.method();
 
     if (method === 'GET' && path === 'version') {
-      return send(route, { apiVersion: '1', version: '4.4.1', authMode: 'container', authenticationRequired: false });
+      return send(route, { apiVersion: '1', version: '4.6.0', authMode: 'container', authenticationRequired: false });
     }
     if (method === 'GET' && path === 'auth/capabilities') {
       return send(route, { capabilities: { operate: true, accountManage: false, systemSettingsWrite: false, configurationAdmin: false },
@@ -266,7 +266,7 @@ async function installTestdataApi(page, state, unexpected) {
     const method = request.method();
 
     if (method === 'GET' && path === 'version')
-      return send(route, { apiVersion: '1', version: '4.4.1', authMode: 'container', authenticationRequired: false });
+      return send(route, { apiVersion: '1', version: '4.6.0', authMode: 'container', authenticationRequired: false });
     if (method === 'GET' && path === 'auth/capabilities')
       return send(route, { capabilities: { operate: true, accountManage: false, systemSettingsWrite: false, configurationAdmin: false },
         operate: true, accountManage: false, systemSettingsWrite: false, configurationAdmin: false,

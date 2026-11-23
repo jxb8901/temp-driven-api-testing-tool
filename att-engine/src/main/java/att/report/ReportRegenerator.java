@@ -19,6 +19,7 @@ import java.util.Map;
 
 /** Rebuilds report HTML from the persisted completed run manifest. */
 public final class ReportRegenerator {
+    private static final String NATIVE_REPORT_PROTECTION_VERSION = "att-native-report/v1";
     @SuppressWarnings("unchecked")
     public Path regenerate(Path outputRoot, String runId) throws Exception {
         runId = IdentifierValidator.runId(runId);
@@ -32,11 +33,20 @@ public final class ReportRegenerator {
         if (!"att-run/v2.1".equals(String.valueOf(run.get("schemaVersion")))) throw new IllegalArgumentException("Run manifest is not V2.1: " + manifest);
         Map<String, Object> runNode = run.get("run") instanceof Map ? (Map<String, Object>) run.get("run") : run;
         if (!"COMPLETE".equals(String.valueOf(runNode.get(run.containsKey("run") ? "state" : "status")))) throw new IllegalArgumentException("Run is not COMPLETE: " + runId);
-        List<TestResult> results = new ArrayList<TestResult>();
+        verifyOptionalSourceWorkbook(runDir, run, runNode);
         Object cases = run.get("cases");
+        boolean nativeRun = "nativeCase".equals(String.valueOf(runNode.get("targetType")))
+                || "nativeSuite".equals(String.valueOf(runNode.get("targetType")));
+        if (!nativeRun && cases instanceof Iterable) for (Object item : (Iterable<?>) cases)
+            if (item instanceof Map && ((Map<?,?>) item).get("definitionId") != null) { nativeRun = true; break; }
+        if (nativeRun && !NATIVE_REPORT_PROTECTION_VERSION.equals(String.valueOf(runNode.get("nativeReportProtection"))))
+            throw new IllegalArgumentException("Native run manifest does not declare safe report projections; regenerate it with a version that protects execution secrets before report generation: " + runId);
+        List<TestResult> results = new ArrayList<TestResult>();
         if (cases instanceof Iterable) for (Object item : (Iterable<?>) cases) {
             if (!(item instanceof Map)) continue;
-            Map<String, Object> row = (Map<String, Object>) item;
+            Object safeRow = protectManifestValue(item);
+            if (!(safeRow instanceof Map)) continue;
+            Map<String, Object> row = (Map<String, Object>) safeRow;
             String caseId = String.valueOf(row.get("caseId"));
             Path log = String.valueOf(row.get("caseLog")).isEmpty() ? null : runDir.resolve(String.valueOf(row.get("caseLog"))).normalize();
             if (log != null && !log.startsWith(runDir)) throw new IllegalArgumentException("Unsafe case log path in manifest: " + row.get("caseLog"));
@@ -56,55 +66,106 @@ public final class ReportRegenerator {
                         text(action.get("expected")), text(action.get("actual")), text(action.get("message")),
                         diagnostic(action.get("diagnostic"))));
             }
+            boolean executionStarted = !row.containsKey("executed") || Boolean.parseBoolean(String.valueOf(row.get("executed")));
+            String executionId = row.containsKey("execId")
+                    ? (row.get("execId") == null ? null : String.valueOf(row.get("execId"))) : caseId;
+            String definitionId = text(row.get("definitionId"));
+            String flowId = text(row.get("flowId"));
+            String flowRevision = text(row.get("flowRevision"));
+            String sourceRevision = text(row.get("sourceRevision"));
+            Map<String, Object> sourceProvenance = row.get("sourceProvenance") instanceof Map
+                    ? new java.util.LinkedHashMap<String, Object>((Map<String, Object>) row.get("sourceProvenance"))
+                    : Collections.<String, Object>emptyMap();
             results.add(new TestResult(caseId, caseName, ResultStatus.valueOf(String.valueOf(row.get("status"))),
                     Duration.ofMillis(longValue(row.get("durationMs"))), text(row.get("expected")), text(row.get("actual")), log,
                     validations, workbookId, groupId, strings(row.get("tags")), diagnostic(row.get("diagnostic")),
-                    row.get("execId") == null ? caseId : String.valueOf(row.get("execId"))));
+                    executionId, definitionId.isEmpty() ? null : definitionId,
+                    text(row.get("qualifiedCaseId")).isEmpty() ? caseId : text(row.get("qualifiedCaseId")),
+                    executionStarted, flowId.isEmpty() ? null : flowId,
+                    flowRevision.isEmpty() ? null : flowRevision, sourceRevision.isEmpty() ? null : sourceRevision,
+                    sourceProvenance));
         }
         Instant ended = runNode.get("endedAt") == null ? Files.getLastModifiedTime(manifest).toInstant() : Instant.parse(String.valueOf(runNode.get("endedAt")));
         Instant started = runNode.get("startedAt") == null ? ended : Instant.parse(String.valueOf(runNode.get("startedAt")));
         RunSummary summary = new RunSummary(results, runDir);
         Path report = new HtmlReportGenerator().generate(runDir, runId, summary, started, ended);
         new CiReportWriter().writeJunitHtml(runDir, runId, summary, 10240);
+        if (results.stream().anyMatch(result -> result.definitionId() != null))
+            new NativeCaseExcelReportWriter().write(runDir, runId, results);
         return report;
     }
     private long longValue(Object value) { return value == null ? 0 : Long.parseLong(String.valueOf(value)); }
     private String text(Object value) { return value == null ? "" : String.valueOf(value); }
     private java.util.List<String> strings(Object value) { java.util.List<String> result = new java.util.ArrayList<String>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(String.valueOf(item)); return result; }
 
+    private void verifyOptionalSourceWorkbook(Path runDir, Map<String,Object> manifest,
+            Map<String,Object> runNode) throws Exception {
+        Object value = runNode.get("sourceWorkbookReport");
+        if (value == null) return;
+        if (!(value instanceof Map<?,?>))
+            throw new IllegalArgumentException("Native source-workbook report metadata is invalid");
+        Map<?,?> report = (Map<?,?>) value;
+        if (!"att-native-source-workbook-report/v1".equals(String.valueOf(report.get("schemaVersion"))))
+            throw new IllegalArgumentException("Native source-workbook report metadata is invalid");
+        String status = String.valueOf(report.get("status"));
+        Map<?,?> outputs = manifest.get("outputs") instanceof Map<?,?>
+                ? (Map<?,?>) manifest.get("outputs") : Collections.emptyMap();
+        if ("fallback".equals(status)) {
+            if (outputs.containsKey("sourceWorkbookXlsx") || report.containsKey("outputPath"))
+                throw new IllegalArgumentException("Native source-workbook fallback metadata includes an output artifact");
+            return;
+        }
+        if (!"written".equals(status)
+                || !NativeSourceWorkbookReportWriter.OUTPUT_PATH.equals(String.valueOf(report.get("outputPath")))
+                || !NativeSourceWorkbookReportWriter.OUTPUT_PATH.equals(String.valueOf(outputs.get("sourceWorkbookXlsx"))))
+            throw new IllegalArgumentException("Native source-workbook report metadata is invalid");
+        Path normalizedRun = runDir.toAbsolutePath().normalize();
+        Path output = normalizedRun.resolve(NativeSourceWorkbookReportWriter.OUTPUT_PATH).normalize();
+        Path directory = output.getParent();
+        if (!output.startsWith(normalizedRun) || Files.isSymbolicLink(normalizedRun)
+                || Files.isSymbolicLink(directory) || Files.isSymbolicLink(output)
+                || !Files.isRegularFile(output, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                || Files.size(output) > NativeSourceWorkbookReportWriter.MAX_OUTPUT_BYTES)
+            throw new IllegalArgumentException("Native source-workbook report artifact is missing or unsafe");
+        String expected = String.valueOf(report.get("outputSha256"));
+        if (!expected.matches("[a-f0-9]{64}") || !expected.equals(sha256(Files.readAllBytes(output))))
+            throw new IllegalArgumentException("Native source-workbook report artifact changed after the run completed");
+        String expectedFormulaDigest = String.valueOf(report.get("formulaSha256"));
+        byte[] outputBytes = Files.readAllBytes(output);
+        if (!expectedFormulaDigest.matches("[a-f0-9]{64}")
+                || !expectedFormulaDigest.equals(NativeSourceWorkbookReportWriter.formulaSha256(outputBytes)))
+            throw new IllegalArgumentException("Native source-workbook formula inventory changed after the run completed");
+    }
+
+    private String sha256(byte[] bytes) throws Exception {
+        byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+        StringBuilder value = new StringBuilder(digest.length * 2);
+        for (byte item : digest) value.append(String.format(java.util.Locale.ROOT, "%02x", item & 0xff));
+        return value.toString();
+    }
+
     @SuppressWarnings("unchecked")
+    private Object protectManifestValue(Object value) {
+        if (value instanceof Map) {
+            Map<String,Object> result = new java.util.LinkedHashMap<String,Object>();
+            for (Map.Entry<?,?> entry : ((Map<?,?>) value).entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                result.put(key, att.security.SecretProtection.sensitiveName(key)
+                        ? att.security.SecretProtection.REDACTED : protectManifestValue(entry.getValue()));
+            }
+            return result;
+        }
+        if (value instanceof Iterable) {
+            List<Object> result = new ArrayList<Object>();
+            for (Object item : (Iterable<?>) value) result.add(protectManifestValue(item));
+            return result;
+        }
+        if (value instanceof String) return att.security.SecretProtection.text((String) value);
+        return value;
+    }
+
     private att.validation.Diagnostic diagnostic(Object value) {
         if (!(value instanceof Map)) return null;
-        Map<String, Object> map = (Map<String, Object>) value;
-        att.validation.SourceLocation source = null;
-        Object sourceValue = map.get("source");
-        if (sourceValue instanceof Map) {
-            Map<String, Object> sourceMap = (Map<String, Object>) sourceValue;
-            source = new att.validation.SourceLocation(text(sourceMap.get("file")), integer(sourceMap.get("line"), 1), integer(sourceMap.get("column"), 1),
-                    integer(sourceMap.get("endLine"), integer(sourceMap.get("line"), 1)), integer(sourceMap.get("endColumn"), integer(sourceMap.get("column"), 1)),
-                    sourceMap.get("excerpt") == null ? null : text(sourceMap.get("excerpt")));
-        }
-        att.validation.DiagnosticContext context = att.validation.DiagnosticContext.EMPTY;
-        Object contextValue = map.get("context");
-        if (contextValue instanceof Map) {
-            Map<String, Object> contextMap = (Map<String, Object>) contextValue;
-            context = new att.validation.DiagnosticContext(textOrNull(contextMap.get("caseFile")), textOrNull(contextMap.get("caseId")),
-                    textOrNull(contextMap.get("stage")), textOrNull(contextMap.get("flowId")), strings(contextMap.get("callChain")));
-        }
-        att.validation.Diagnostic.Severity severity;
-        try { severity = att.validation.Diagnostic.Severity.valueOf(text(map.get("severity"))); }
-        catch (Exception ignored) { severity = att.validation.Diagnostic.Severity.ERROR; }
-        java.util.List<java.util.Map<String, Object>> schemaViolations = new java.util.ArrayList<java.util.Map<String, Object>>();
-        Object violationsValue = map.get("schemaViolations");
-        if (violationsValue instanceof Iterable) for (Object item : (Iterable<?>) violationsValue) {
-            if (item instanceof Map) schemaViolations.add(new java.util.LinkedHashMap<String, Object>((Map<String, Object>) item));
-        }
-        return new att.validation.Diagnostic(text(map.get("code")), severity, text(map.get("message")), textOrNull(map.get("file")),
-                textOrNull(map.get("field")), textOrNull(map.get("sheet")), nullableInteger(map.get("row")), nullableInteger(map.get("column")),
-                textOrNull(map.get("template")), textOrNull(map.get("action")), textOrNull(map.get("suggestion")),
-                textOrNull(map.get("summary")), textOrNull(map.get("detail")), source, context, schemaViolations);
+        return att.validation.Diagnostic.fromMap((Map<String,?>) value);
     }
-    private String textOrNull(Object value) { return value == null ? null : text(value); }
-    private Integer nullableInteger(Object value) { return value == null ? null : Integer.valueOf(String.valueOf(value)); }
-    private int integer(Object value, int fallback) { return value == null ? fallback : Integer.parseInt(String.valueOf(value)); }
 }

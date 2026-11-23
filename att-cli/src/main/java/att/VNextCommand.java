@@ -85,6 +85,8 @@ public final class VNextCommand {
         List<String> suites=new ArrayList<String>();for(Path path:options.suites())suites.add(path.toString());plan.put("suites",suites);
         plan.put("caseIds",new ArrayList<String>(options.caseIds()));plan.put("tags",new ArrayList<String>(options.tags()));
         if(!options.resolvedCaseIds().isEmpty())plan.put("resolvedCaseIds",new ArrayList<String>(options.resolvedCaseIds()));
+        if(!options.definitionIds().isEmpty())plan.put("definitionIds",new ArrayList<String>(options.definitionIds()));
+        if(!options.qualifiedCaseIds().isEmpty())plan.put("qualifiedCaseIds",new ArrayList<String>(options.qualifiedCaseIds()));
         plan.put("excludeTags",new ArrayList<String>(options.excludeTags()));plan.put("input",options.input()==null?null:options.input().toString());
         plan.put("overrides",new ArrayList<String>(options.overrides()));
         Map<String,String> load=new LinkedHashMap<String,String>();
@@ -102,6 +104,12 @@ public final class VNextCommand {
             String packageId=o.packageId()==null?root.getFileName().toString():o.packageId();
             result=new att.api.DefaultAttService().runNativeCases(new att.api.NativeCaseRunRequest(root,config,o.environment(),
                     o.outputDirectory(),o.runId(),packageId,o.target(),o.resolvedCaseIds(),o.dryRun(),o.failFast(),null));
+        } else if("native-suite".equals(o.targetKind())) {
+            String packageId=o.packageId()==null?root.getFileName().toString():o.packageId();
+            result=new att.api.DefaultAttService().runNativeCaseSuite(new att.api.NativeCaseSuiteRunRequest(root,config,
+                    o.environment(),o.outputDirectory(),o.runId(),packageId,o.definitionIds(),o.qualifiedCaseIds(),
+                    new ArrayList<String>(o.tags()),new ArrayList<String>(o.excludeTags()),o.all(),o.rerunFailed(),
+                    o.dryRun(),o.failFast(),null,null));
         } else if(isResource(o.targetKind())) {
             result=new att.api.DefaultAttService().debug(new DebugRequest(root,config,o.environment(),o.outputDirectory(),o.runId(),
                     o.targetKind(),o.target(),o.input(),false,null,o.runId(),o.overrides()));
@@ -586,5 +594,5 @@ public final class VNextCommand {
     }
     private static String safe(Exception error) {String message=error.getMessage();return message==null?error.getClass().getSimpleName():message.replaceAll("(?i)(password|authorization)\\s*[:=]\\s*[^ ,]+","$1=[REDACTED_SECRET]");}
     private static String safe(Throwable error) {String message=error.getMessage();return message==null?error.getClass().getSimpleName():message.replaceAll("(?i)(password|authorization)\\s*[:=]\\s*[^ ,]+","$1=[REDACTED_SECRET]");}
-    private static void help() {System.out.println("Usage: att [--local|--server <profile|url>] [options] <run|load|validate> <target-kind> [target-id/path]\nCommands: run, load, validate\nRun native cases: run native-case <definitionId> --resolved-case-id <localCaseId> [--resolved-case-id <localCaseId> ...]\nValidate scopes: config, package, case, suite, template, flow, tool, load, --all\nOptions: -p/--package <id>, -e/--env <profile>, --config <path> (local), --format human|json, --quiet, --verbose, --help, --version");}
+    private static void help() {System.out.println("Usage: att [--local|--server <profile|url>] [options] <run|load|validate> <target-kind> [target-id/path]\nCommands: run, load, validate\nRun native cases: run native-case <definitionId> --resolved-case-id <localCaseId> [--resolved-case-id <localCaseId> ...]\nRun an implicit native Suite: run native-suite --definition <definitionId> [--definition <definitionId> ...] (--all | --qualified-case-id <DefinitionID.localCaseID> | --tag <tag>)\nValidate scopes: config, package, case, suite, template, flow, tool, load, --all\nOptions: -p/--package <id>, -e/--env <profile>, --config <path> (local), --format human|json, --quiet, --verbose, --help, --version");}
 }

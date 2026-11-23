@@ -142,6 +142,8 @@ final class ServerRuntime implements AutoCloseable {
     private final Set<String> requestedLoadReportV2Jobs=ConcurrentHashMap.newKeySet();
     private final Object loadReportV2ScheduleLock=new Object();
     private final java.util.concurrent.locks.ReentrantReadWriteLock artifactLifecycle=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
+    /** Serializes archive replacement with reads whose source-workbook decision uses the archive manifest. */
+    private final java.util.concurrent.locks.ReentrantReadWriteLock artifactPublicationLock=new java.util.concurrent.locks.ReentrantReadWriteLock(true);
     final ConcurrentHashMap<String,Job> jobs=new ConcurrentHashMap<>();
     /** Pages of {@link JobStore#STORAGE_CANDIDATE_PAGE} examined in one size sweep. Tests lower this to hit the boundary. */
     int storageCandidateBatchLimit=50;
@@ -236,8 +238,7 @@ final class ServerRuntime implements AutoCloseable {
         this(config,workerLibs,processLauncher,Clock.systemUTC());
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock) throws Exception {
-        this(config,workerLibs,processLauncher,clock,(output,archive,validator)->
-                ArtifactArchive.build(output,archive,validator,config.archiveCompression));
+        this(config,workerLibs,processLauncher,clock,defaultArtifactPublisher(config.archiveCompression));
     }
     ServerRuntime(ServerConfig config,String workerLibs,WorkerProcessLauncher processLauncher,Clock clock,ArtifactPublisher artifactPublisher) throws Exception {
         this(config,workerLibs,processLauncher,clock,artifactPublisher,null);
@@ -720,7 +721,14 @@ final class ServerRuntime implements AutoCloseable {
                 }
             }
         }
-        return new JobExecutionSpec(definition,revision,sourcePath).withConfiguration(input.path("configurationProvenance").isObject()?configurationRevision(JSON.convertValue(input.get("configurationProvenance"),Map.class),revision):null);
+        JobExecutionSpec retained=new JobExecutionSpec(definition,revision,sourcePath).withConfiguration(
+                input.path("configurationProvenance").isObject()
+                        ?configurationRevision(JSON.convertValue(input.get("configurationProvenance"),Map.class),revision):null);
+        if(input.path("nativeSuiteRetry").isObject()) {
+            Map<String,Object> retry=JSON.convertValue(input.get("nativeSuiteRetry"),Map.class);
+            retained=retained.withNativeSuiteRetry(retry);
+        }
+        return retained;
     }
 
     /** Builds the retained snapshot from a server-validated draft without re-running its inspection Worker. */
@@ -738,12 +746,20 @@ final class ServerRuntime implements AutoCloseable {
             definition.set("scenario",scenario.deepCopy());
         } else {
             boolean nativeCase=input.path("nativeCaseDefinitionId").isTextual();
-            definition.put("schemaVersion",nativeCase?RunDefinition.NATIVE_CASE_VERSION:RunDefinition.VERSION);
+            boolean nativeSuite=input.path("nativeSuiteDefinitionIds").isArray();
+            definition.put("schemaVersion",nativeCase||nativeSuite?RunDefinition.NATIVE_CASE_VERSION:RunDefinition.VERSION);
             ObjectNode options=definition.putObject("options");options.put("debug","debug".equals(command)||input.path("diagnosticMode").asBoolean(false));
             if(nativeCase) {
                 ObjectNode target=definition.putObject("target");target.put("type","nativeCase");
                 target.put("definitionId",input.path("nativeCaseDefinitionId").asText());
                 ObjectNode selection=target.putObject("selection");selection.set("resolvedCaseIds",input.path("nativeResolvedCaseIds").deepCopy());
+                if(input.has("failFast"))options.set("failFast",input.get("failFast").deepCopy());
+                if(input.has("runId"))options.set("runId",input.get("runId").deepCopy());
+            } else if(nativeSuite) {
+                ObjectNode target=definition.putObject("target");target.put("type","nativeSuite");
+                target.set("definitionIds",input.path("nativeSuiteDefinitionIds").deepCopy());
+                ObjectNode selection=target.putObject("selection");
+                selection.set("qualifiedCaseIds",input.path("nativeSuiteQualifiedCaseIds").deepCopy());
                 if(input.has("failFast"))options.set("failFast",input.get("failFast").deepCopy());
                 if(input.has("runId"))options.set("runId",input.get("runId").deepCopy());
             } else if(input.path("target").isObject()) {
@@ -770,7 +786,12 @@ final class ServerRuntime implements AutoCloseable {
                 }
             }
         }
-        return new JobExecutionSpec(definition,revision,sourcePath).withConfiguration(input.path("configurationProvenance").isObject()?configurationRevision(JSON.convertValue(input.get("configurationProvenance"),Map.class),revision):null);
+        JobExecutionSpec retained=new JobExecutionSpec(definition,revision,sourcePath).withConfiguration(
+                input.path("configurationProvenance").isObject()
+                        ?configurationRevision(JSON.convertValue(input.get("configurationProvenance"),Map.class),revision):null);
+        if(input.path("nativeSuiteRetry").isObject())
+            retained=retained.withNativeSuiteRetry(JSON.convertValue(input.get("nativeSuiteRetry"),Map.class));
+        return retained;
     }
 
     private void verifyStrictReplayRevision(String packageId,String environment,String revision) throws Exception {
@@ -1123,8 +1144,8 @@ final class ServerRuntime implements AutoCloseable {
         if(!List.of("run","debug","load","validate").contains(command))throw new IllegalArgumentException("Unsupported job command");
         String packageId=required(input,"packageId");
         PackageRegistry.Snapshot registry=packageRegistry.snapshot();
-        if(!serverIssuedDraft&&"run".equals(command)&&"nativeCase".equals(input.path("target").path("type").asText()))
-            throw new IllegalArgumentException("Native Case RUN requires a validated /drafts/run request");
+        if(!serverIssuedDraft&&"run".equals(command)&&Set.of("nativeCase","nativeSuite").contains(input.path("target").path("type").asText()))
+            throw new IllegalArgumentException("Native Case and Suite RUNs require a validated /drafts/run request");
         LoadSchedule scheduledSource=null;String scheduledSourceOwner=null;JobSourceClosureStore.SourceSnapshot scheduledSnapshot=null;
         ScheduleSourceOverride sourceOverride=scheduleOccurrenceId==null?null:scheduledSourceOverrides.remove(scheduleOccurrenceId);
         if(sourceOverride!=null) {
@@ -1154,7 +1175,9 @@ final class ServerRuntime implements AutoCloseable {
                 ||input.has("expectedRevisionDigest")||input.has("expectedExecutionRevisionDigest")
                 ||input.has("expectedSchemaRegistryDigest")||input.has("draftResourceId")
                 ||input.has("configurationProvenance")||input.has("registeredPackageId")||input.has("sutMetricsSnapshot")
-                ||input.has("nativeCaseDefinitionId")||input.has("nativeResolvedCaseIds")||input.has("nativeCaseSourcePath")))
+                ||input.has("nativeCaseDefinitionId")||input.has("nativeResolvedCaseIds")||input.has("nativeCaseSourcePath")
+                ||input.has("nativeSuiteDefinitionIds")||input.has("nativeSuiteQualifiedCaseIds")
+                ||input.has("nativeSuiteSourcePaths")||input.has("nativeSuiteRetry")))
             throw new IllegalArgumentException("Inline execution fields require a server-issued draft");
         Map<String,Object> submittedSutSnapshot=null;
         if(input.has("sutMetricsSnapshot")) {
@@ -1233,6 +1256,15 @@ final class ServerRuntime implements AutoCloseable {
         request.runId=safeText(request.runId,128,"runId");request.debugId=safeText(request.debugId,128,"debugId");request.suiteDirectory=safeRelative(request.suiteDirectory,"suiteDirectory");
         request.scenario=safeRelative(request.scenario,"scenario");request.debugInput=safeRelative(request.debugInput,"debugInput");
         request.nativeCaseSourcePath=safeRelative(request.nativeCaseSourcePath,"nativeCaseSourcePath");
+        if(request.nativeSuiteSourcePaths!=null) {
+            Map<String,String> safeSources=new LinkedHashMap<>();
+            for(Map.Entry<String,String> entry:request.nativeSuiteSourcePaths.entrySet()) {
+                String definitionId=safeText(entry.getKey(),126,"nativeSuiteSourcePaths.definitionId");
+                String path=safeRelative(entry.getValue(),"nativeSuiteSourcePaths."+definitionId);
+                validatePackagePath(root,path,"nativeSuiteSourcePaths."+definitionId);safeSources.put(definitionId,path);
+            }
+            request.nativeSuiteSourcePaths=safeSources;
+        }
         request.unsafeFailureDetails=false;
         request.suites=safePaths(request.suites,"suites");
         validatePackagePath(root,request.suiteDirectory,"suiteDirectory");
@@ -1246,6 +1278,30 @@ final class ServerRuntime implements AutoCloseable {
                 throw new IllegalArgumentException("Native Case RUN requires an exact server-validated v2 draft");
         } else if(request.nativeResolvedCaseIds!=null||request.nativeCaseSourcePath!=null) {
             throw new IllegalArgumentException("Native Case RUN fields require a server-validated v2 draft");
+        }
+        if(request.nativeSuiteDefinitionIds!=null) {
+            if(!serverIssuedDraft||!"run".equals(command)||request.nativeSuiteQualifiedCaseIds==null
+                    ||request.nativeSuiteQualifiedCaseIds.isEmpty()||request.nativeSuiteSourcePaths==null
+                    ||request.nativeSuiteSourcePaths.size()!=request.nativeSuiteDefinitionIds.size()
+                    ||!request.nativeSuiteSourcePaths.keySet().containsAll(request.nativeSuiteDefinitionIds)
+                    ||request.nativeCaseDefinitionId!=null||request.target!=null||request.caseIds!=null)
+                throw new IllegalArgumentException("Native Suite RUN requires an exact server-validated v2 draft");
+            if(request.nativeSuiteRetry!=null) {
+                att.api.NativeSuiteRetryLineage retry=att.api.NativeSuiteRetryLineage.fromMap(request.nativeSuiteRetry);
+                if(retry.sourceJobId()==null||!retry.sourceJobId().equals(rerunOfJobId)
+                        ||!retry.sourceRevisionDigest().equals(request.expectedExecutionRevisionDigest)
+                        ||!retry.failedQualifiedCaseIds().equals(request.nativeSuiteQualifiedCaseIds))
+                    throw new IllegalArgumentException("Native Suite retry lineage does not match its frozen draft and source Job");
+                verifyFrozenNativeSuiteRetry(retry,principal,packageId,request.nativeSuiteDefinitionIds,
+                        scheduleOccurrenceId==null);
+                request.nativeSuiteRetry=JSON.convertValue(retry.toMap(),Map.class);
+            } else if(rerunOfJobId!=null) {
+                throw new IllegalArgumentException("Native Suite retry Jobs require frozen retry lineage");
+            }
+        } else if(request.nativeSuiteQualifiedCaseIds!=null||request.nativeSuiteTags!=null
+                ||request.nativeSuiteExcludeTags!=null||request.nativeSuiteAll!=null||request.nativeSuiteSourcePaths!=null
+                ||request.nativeSuiteRetry!=null) {
+            throw new IllegalArgumentException("Native Suite RUN fields require a server-validated v2 draft");
         }
         if("debug".equals(command)||("run".equals(command)&&request.target!=null))validateTarget(request.target);
         if("load".equals(command)&&request.target!=null)validateTarget(request.target);
@@ -1286,7 +1342,7 @@ final class ServerRuntime implements AutoCloseable {
                     request.expectedExecutionRevisionDigest,scheduleOccurrenceId,request);
         }
         if(executionSpec==null&&replayUnavailable==null)replayUnavailable="This job type or Server capability does not support safe replay. Configure a new run.";
-        if(rerunOfJobId!=null&&prevalidatedSpec!=null) {
+        if(rerunOfJobId!=null&&prevalidatedSpec!=null&&prevalidatedSpec.value.path("replay").isObject()) {
             JsonNode replay=prevalidatedSpec.value.path("replay");
             String policy=replay.path("sourcePolicy").asText("strict");
             String expected="strict".equals(policy)?replay.path("originalRevision").asText():replay.path("effectiveRevision").asText();
@@ -3654,6 +3710,58 @@ final class ServerRuntime implements AutoCloseable {
             if(!(sourcePath instanceof String path)||path.isBlank())
                 throw new IllegalArgumentException("Native RUN validation did not retain its Definition source");
             input.put("nativeCaseSourcePath",safeRelative(path,"nativeCaseSourcePath"));
+        } else if(run.nativeSuiteTarget) {
+            WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
+            request.protocolVersion="att-worker/v1";request.command="inspect";request.packageRoot=root.toString();
+            request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.inspectionAction="native-suite-input";
+            request.config=workerConfigPath().toString();request.registeredPackageId=packageId;
+            request.packageRegistryRevision=registry.revision;
+            request.nativeSuiteDefinitionIds=run.nativeDefinitionIds;
+            request.nativeSuiteQualifiedCaseIds=run.nativeSuiteRerunFailed?Collections.emptyList():run.qualifiedCaseIds;
+            request.nativeSuiteTags=run.nativeSuiteRerunFailed?Collections.emptyList():run.nativeSuiteTags;
+            request.nativeSuiteExcludeTags=run.nativeSuiteRerunFailed?Collections.emptyList():run.nativeSuiteExcludeTags;
+            request.nativeSuiteAll=run.nativeSuiteRerunFailed?Boolean.TRUE:run.nativeSuiteAll;
+            ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,packageId);
+            JSON.readerForUpdating(request).readValue(policy);
+            preview=executeInspection(root,request);revision=(String)preview.remove("revisionDigest");
+            Object selected=preview.get("selectedQualifiedCaseIds");
+            if(!(selected instanceof List<?> ids)||ids.isEmpty()||ids.size()>att.testcase.TestCaseSuiteResolver.MAX_SELECTED_CASES)
+                throw new IllegalArgumentException("Native Suite validation did not resolve a nonempty bounded selection");
+            if(run.nativeSuiteRerunFailed) {
+                preview=new LinkedHashMap<>(preview);
+                att.api.NativeSuiteRetryLineage retry=resolveLatestNativeSuiteRetry(principal,packageId,
+                        run.nativeDefinitionIds,revision,preview);
+                List<String> retryIds=retry.failedQualifiedCaseIds();
+                List<Map<String,Object>> retryCases=new ArrayList<>();
+                Object currentCases=preview.get("cases");
+                if(!(currentCases instanceof List<?> rows))throw new IllegalArgumentException("Native Suite validation did not retain Case source identities");
+                Set<String> retryIdSet=new LinkedHashSet<>(retryIds);
+                for(Object value:rows)if(value instanceof Map<?,?> row&&retryIdSet.contains(row.get("qualifiedCaseId")))
+                    retryCases.add(JSON.convertValue(row,Map.class));
+                if(retryCases.size()!=retryIds.size())throw new IllegalArgumentException("Native Suite validation did not preserve every frozen failed Qualified Case ID");
+                preview.put("selectedQualifiedCaseIds",retryIds);preview.put("selectedCount",retryIds.size());
+                preview.put("cases",retryCases);preview.put("retryLineage",retry.toMap());
+                preview.put("retrySourcePolicy","latest eligible completed Native Suite RUN");
+                selected=retryIds;
+                request.nativeSuiteQualifiedCaseIds=retryIds;request.nativeSuiteAll=Boolean.FALSE;
+                request.nativeSuiteTags=Collections.emptyList();request.nativeSuiteExcludeTags=Collections.emptyList();
+                request.nativeSuiteRetry=retry.toMap();
+                input.set("nativeSuiteRetry",JSON.valueToTree(retry.toMap()));
+            }
+            input.set("nativeSuiteQualifiedCaseIds",JSON.valueToTree(selected));
+            input.put("nativeSuiteAll",false);input.set("nativeSuiteTags",JSON.createArrayNode());
+            input.set("nativeSuiteExcludeTags",JSON.createArrayNode());
+            Object sourcePaths=preview.remove("sourcePaths");
+            if(!(sourcePaths instanceof Map<?,?> paths)||paths.size()!=run.nativeDefinitionIds.size())
+                throw new IllegalArgumentException("Native Suite validation did not retain every Definition source");
+            Map<String,String> retainedPaths=new LinkedHashMap<>();
+            for(String definitionId:run.nativeDefinitionIds) {
+                Object path=paths.get(definitionId);
+                if(!(path instanceof String text)||text.isBlank())
+                    throw new IllegalArgumentException("Native Suite validation did not retain Definition source: "+definitionId);
+                retainedPaths.put(definitionId,safeRelative(text,"nativeSuiteSourcePaths."+definitionId));
+            }
+            input.set("nativeSuiteSourcePaths",JSON.valueToTree(retainedPaths));
         } else {
             WorkerRequest request=applyWorkerPolicy(JSON.treeToValue(input,WorkerRequest.class));
             request.protocolVersion="att-worker/v1";request.command="inspect";request.packageRoot=root.toString();
@@ -3685,7 +3793,7 @@ final class ServerRuntime implements AutoCloseable {
     }
     private void resolveFailedCases(ObjectNode input,String principal,String packageId) throws Exception {
         byte[] selectedManifest=null;
-        for(Map<String,Object> previous:store.listOwned(100,principal)) {
+        for(Map<String,Object> previous:store.completedOwnedPackageRuns(principal,packageId)) {
             if(!principal.equals(previous.get("principal"))||!packageId.equals(previous.get("packageId"))||!"run".equals(previous.get("command"))||!List.of("PASS","FAIL","ERROR","INVALID").contains(previous.get("status")))continue;
             String previousJobId=String.valueOf(previous.get("jobId"));
             Path output=config.dataDir.resolve("jobs").resolve(previousJobId).resolve("output");
@@ -3720,6 +3828,220 @@ final class ServerRuntime implements AutoCloseable {
         if(failed.isEmpty())throw new IllegalArgumentException("Previous Case RUN has no failed cases matching this selection");
         input.set("caseIds",JSON.valueToTree(failed));input.remove("rerunFailed");
     }
+    private att.api.NativeSuiteRetryLineage resolveLatestNativeSuiteRetry(String principal,String packageId,
+            List<String> definitionIds,String currentRevision,Map<String,Object> currentPreview) throws Exception {
+        List<String> expectedDefinitions=new ArrayList<>(definitionIds);expectedDefinitions.sort(String::compareTo);
+        Object rawCurrentCases=currentPreview.get("cases");
+        if(!(rawCurrentCases instanceof List<?> currentRows))
+            throw new IllegalArgumentException("Native Suite validation did not retain Case source identities");
+        Map<String,Map<?,?>> currentById=new LinkedHashMap<>();
+        for(Object value:currentRows) {
+            if(!(value instanceof Map<?,?> row)||!(row.get("qualifiedCaseId") instanceof String id)
+                    ||currentById.put(id,row)!=null)
+                throw new IllegalArgumentException("Native Suite validation returned duplicate or invalid Case source identities");
+        }
+        for(Map<String,Object> previous:store.completedOwnedPackageRuns(principal,packageId)) {
+            if(!principal.equals(previous.get("principal"))||!packageId.equals(previous.get("packageId"))
+                    ||!"run".equals(previous.get("command"))
+                    ||!List.of("PASS","FAIL","ERROR","INVALID").contains(previous.get("status")))continue;
+            String sourceJobId=String.valueOf(previous.get("jobId"));
+            if(!sourceJobId.matches("J[A-F0-9]{16}"))continue;
+            Map<String,String> sourceRecord=store.executionSpec(sourceJobId);
+            if(sourceRecord==null||!principal.equals(sourceRecord.get("principal"))||sourceRecord.get("spec")==null)continue;
+            JobExecutionSpec sourceSpec;
+            try {sourceSpec=JobExecutionSpec.parse(sourceRecord.get("spec"));}
+            catch(Exception unreadable) {continue;}
+            JsonNode sourceDefinition=sourceSpec.definition();JsonNode sourceTarget=sourceDefinition.path("target");
+            if(!"nativeSuite".equals(sourceTarget.path("type").asText()))continue;
+            List<String> sourceDefinitions=JSON.convertValue(sourceTarget.path("definitionIds"),List.class);
+            sourceDefinitions.sort(String::compareTo);
+            if(!expectedDefinitions.equals(sourceDefinitions))continue;
+            if(!currentRevision.equals(sourceSpec.revision()))
+                throw new JobConflictException("ATT-SERVER-NATIVE-SUITE-RETRY-REVISION-STALE",
+                        "The latest eligible Native Suite RUN uses a different Package revision. Validate against that source revision or run a new Suite first.");
+            byte[] bytes=completedRunManifest(sourceJobId);
+            if(bytes==null)throw new IllegalArgumentException("The latest eligible completed Native Suite RUN manifest is unavailable");
+            if(bytes.length>8*1024*1024)throw new IllegalArgumentException("The latest Native Suite RUN manifest exceeds the retry limit");
+            String manifestDigest=sha256Bytes(bytes);
+            Object loaded=new Yaml().load(new String(bytes,StandardCharsets.UTF_8));
+            if(!(loaded instanceof Map<?,?> manifest)||!(manifest.get("run") instanceof Map<?,?> run)
+                    ||!(manifest.get("cases") instanceof List<?> cases))
+                throw new IllegalArgumentException("The latest eligible Native Suite RUN manifest is invalid");
+            if(!(run.get("id") instanceof String sourceRunId))
+                throw new IllegalArgumentException("The latest Native Suite RUN has no source run ID");
+            try {att.core.IdentifierValidator.runId(sourceRunId);}catch(IllegalArgumentException invalid){throw new IllegalArgumentException("The latest Native Suite RUN has an invalid run ID");}
+            List<String> manifestDefinitions=run.get("definitionIds") instanceof List<?>
+                    ?JSON.convertValue(run.get("definitionIds"),List.class):Collections.emptyList();
+            if(!"COMPLETE".equals(run.get("state"))||!"nativeSuite".equals(run.get("targetType"))
+                    ||!packageId.equals(run.get("packageId"))||!expectedDefinitions.equals(manifestDefinitions))
+                throw new IllegalArgumentException("The latest eligible Native Suite RUN identity does not match its retained Job");
+            Object rawSelectedCount=run.get("selectedCaseCount");
+            int sourceSelectedCount=rawSelectedCount instanceof Number?((Number)rawSelectedCount).intValue():-1;
+            Object rawSources=run.get("caseSources");
+            if(sourceSelectedCount<1||!(rawSources instanceof List<?> sourceCases)
+                    ||sourceCases.size()!=sourceSelectedCount||cases.size()!=sourceSelectedCount)
+                throw new IllegalArgumentException("The latest Native Suite RUN does not retain complete source identity evidence");
+            if(!(run.get("definitions") instanceof List<?> sourceDefinitionRows))
+                throw new IllegalArgumentException("The latest Native Suite RUN does not retain Definition revisions");
+            Map<String,String> currentRevisions=currentPreview.get("sourceRevisions") instanceof Map<?,?> values
+                    ?JSON.convertValue(values,Map.class):Collections.emptyMap();
+            Map<String,String> currentPaths=currentPreview.get("sourcePaths") instanceof Map<?,?> values
+                    ?JSON.convertValue(values,Map.class):Collections.emptyMap();
+            Map<String,Map<?,?>> sourceDefinitionsById=new LinkedHashMap<>();
+            for(Object value:sourceDefinitionRows)if(value instanceof Map<?,?> row&&row.get("definitionId") instanceof String id)
+                sourceDefinitionsById.put(id,row);
+            if(sourceDefinitionsById.size()!=expectedDefinitions.size())
+                throw new IllegalArgumentException("The latest Native Suite RUN has incomplete Definition revisions");
+            for(String id:expectedDefinitions) {
+                Map<?,?> source=sourceDefinitionsById.get(id);
+                if(source==null||!java.util.Objects.equals(source.get("sourceRevision"),currentRevisions.get(id))
+                        ||!java.util.Objects.equals(source.get("sourceReference"),currentPaths.get(id)))
+                    throw new JobConflictException("ATT-SERVER-NATIVE-SUITE-RETRY-REVISION-STALE",
+                            "Pinned Definition sources changed since the latest Native Suite RUN.");
+            }
+            Map<String,Map<?,?>> sourceCasesById=new LinkedHashMap<>();
+            for(Object value:sourceCases) {
+                if(!(value instanceof Map<?,?> row)||!(row.get("qualifiedCaseId") instanceof String id)
+                        ||sourceCasesById.put(id,row)!=null)
+                    throw new IllegalArgumentException("The latest Native Suite RUN contains duplicate or invalid source identities");
+            }
+            if(sourceCasesById.size()!=sourceSelectedCount)
+                throw new IllegalArgumentException("The latest Native Suite RUN has invalid source identity records");
+            for(Map.Entry<String,Map<?,?>> source:sourceCasesById.entrySet()) {
+                Map<?,?> current=currentById.get(source.getKey());
+                if(current==null||!sameNativeSuiteSourceIdentity(source.getValue(),current))
+                    throw new JobConflictException("ATT-SERVER-NATIVE-SUITE-RETRY-REVISION-STALE",
+                            "Pinned Case or Flow sources changed since the latest Native Suite RUN: " + source.getKey());
+            }
+            List<String> failed=failedExecutedNativeSuiteCaseIds(cases,sourceCasesById);
+            if(failed.isEmpty())throw new IllegalArgumentException("The latest eligible completed Native Suite RUN has no failed executed Cases");
+            if(failed.size()>att.testcase.TestCaseSuiteResolver.MAX_SELECTED_CASES)
+                throw new IllegalArgumentException("The latest Native Suite RUN exceeds the retry selection limit");
+            int attempt=1;JsonNode sourceRetry=sourceSpec.value.path("nativeSuiteRetry");
+            if(sourceRetry.isObject())attempt=Math.addExact(sourceRetry.path("retryAttemptNumber").asInt(0),1);
+            return new att.api.NativeSuiteRetryLineage(sourceJobId,sourceRunId,manifestDigest,sourceSpec.revision(),
+                    sourceSelectedCount,attempt,failed);
+        }
+        throw new IllegalArgumentException("No latest eligible completed Native Suite RUN is available for rerun-failed");
+    }
+    private static boolean sameNativeSuiteSourceIdentity(Map<?,?> source,Map<?,?> current) {
+        for(String key:List.of("definitionId","qualifiedCaseId","sourceReference","sourceRevision","flowId",
+                "flowRevision","sourceRecordId","recordIndex","dataSourceType","dataSourceReference",
+                "workbookSha256","resolvedInputDigest","dependencies"))
+            if(!java.util.Objects.deepEquals(source.get(key),current.get(key)))return false;
+        return true;
+    }
+    private static List<String> failedExecutedNativeSuiteCaseIds(List<?> cases,Map<String,Map<?,?>> sourceCasesById) {
+        List<String> failed=new ArrayList<>();Set<String> seen=new LinkedHashSet<>();
+        for(Object value:cases) {
+            if(!(value instanceof Map<?,?> row)||!(row.get("qualifiedCaseId") instanceof String id)
+                    ||!seen.add(id)||!sourceCasesById.containsKey(id)
+                    ||!(row.get("executed") instanceof Boolean)||!(row.get("status") instanceof String))
+                throw new IllegalArgumentException("The Native Suite RUN has invalid or incomplete Case result rows");
+            if(Boolean.TRUE.equals(row.get("executed"))&&List.of("FAIL","ERROR","INVALID").contains(row.get("status")))
+                failed.add(id);
+        }
+        if(!seen.equals(sourceCasesById.keySet()))
+            throw new IllegalArgumentException("The Native Suite RUN result IDs do not match its retained source identities");
+        return failed;
+    }
+    private byte[] completedRunManifest(String jobId) throws Exception {
+        Path output=config.dataDir.resolve("jobs").resolve(jobId).resolve("output");
+        if(Files.isDirectory(output,java.nio.file.LinkOption.NOFOLLOW_LINKS)&&!Files.isSymbolicLink(output)) {
+            List<Path> manifests;
+            try(var files=Files.walk(output,3)) {
+                manifests=files.filter(file->file.getFileName().toString().equals("run.yaml")
+                        &&Files.isRegularFile(file,java.nio.file.LinkOption.NOFOLLOW_LINKS)&&!Files.isSymbolicLink(file)).toList();
+            } catch(java.nio.file.NoSuchFileException archivedDuringScan) {manifests=List.of();}
+            if(manifests.size()>1)throw new IllegalArgumentException("The completed Native Suite RUN manifest is ambiguous");
+            if(manifests.size()==1) {
+                Path manifest=manifests.get(0);
+                if(Files.size(manifest)>8L*1024L*1024L)throw new IllegalArgumentException("The completed Native Suite RUN manifest exceeds the retry limit");
+                try{return Files.readAllBytes(manifest);}catch(java.nio.file.NoSuchFileException archivedDuringRead) { /* Read the verified archive below. */ }
+            }
+        }
+        return archivedCaseRunManifest(jobId);
+    }
+    private void verifyFrozenNativeSuiteRetry(att.api.NativeSuiteRetryLineage retry,String principal,
+            String packageId,List<String> definitionIds,boolean requireLatest) throws Exception {
+        Map<String,Object> sourceJob=store.get(retry.sourceJobId());
+        if(sourceJob==null||!principal.equals(sourceJob.get("principal"))||!packageId.equals(sourceJob.get("packageId"))
+                ||!"run".equals(sourceJob.get("command"))
+                ||!List.of("PASS","FAIL","ERROR","INVALID").contains(sourceJob.get("status")))
+            throw new IllegalArgumentException("The frozen Native Suite retry source Job is no longer eligible or owned by this principal");
+        Map<String,String> sourceRecord=store.executionSpec(retry.sourceJobId());
+        if(sourceRecord==null||!principal.equals(sourceRecord.get("principal"))||sourceRecord.get("spec")==null)
+            throw new IllegalArgumentException("The frozen Native Suite retry source execution snapshot is unavailable");
+        JobExecutionSpec sourceSpec=JobExecutionSpec.parse(sourceRecord.get("spec"));
+        JsonNode sourceDefinition=sourceSpec.definition(),sourceTarget=sourceDefinition.path("target");
+        if(!"nativeSuite".equals(sourceTarget.path("type").asText())
+                ||!packageId.equals(sourceDefinition.path("packageId").asText())
+                ||!retry.sourceRevisionDigest().equals(sourceSpec.revision()))
+            throw new JobConflictException("ATT-SERVER-NATIVE-SUITE-RETRY-REVISION-STALE",
+                    "The frozen Native Suite source Package revision changed after validation.");
+        List<String> expectedDefinitions=new ArrayList<>(definitionIds);expectedDefinitions.sort(String::compareTo);
+        List<String> sourceDefinitions=sourceTarget.path("definitionIds").isArray()
+                ?JSON.convertValue(sourceTarget.path("definitionIds"),List.class):Collections.emptyList();
+        sourceDefinitions.sort(String::compareTo);
+        if(!expectedDefinitions.equals(sourceDefinitions))
+            throw new IllegalArgumentException("The frozen Native Suite source uses different Definition IDs");
+        if(requireLatest&&!retry.sourceJobId().equals(latestEligibleNativeSuiteJobId(principal,packageId,expectedDefinitions)))
+            throw new JobConflictException("ATT-SERVER-NATIVE-SUITE-RETRY-SOURCE-STALE",
+                    "A newer eligible Native Suite RUN completed after this retry draft was validated. Validate the retry again to use the latest source.");
+        byte[] manifestBytes=completedRunManifest(retry.sourceJobId());
+        if(manifestBytes==null||manifestBytes.length>8L*1024L*1024L
+                ||!retry.sourceManifestSha256().equals(sha256Bytes(manifestBytes)))
+            throw new JobConflictException("ATT-SERVER-NATIVE-SUITE-RETRY-SOURCE-CHANGED",
+                    "The frozen Native Suite source manifest changed or is no longer available.");
+        Object loaded=new Yaml().load(new String(manifestBytes,StandardCharsets.UTF_8));
+        if(!(loaded instanceof Map<?,?> manifest)||!(manifest.get("run") instanceof Map<?,?> run)
+                ||!(manifest.get("cases") instanceof List<?> cases)
+                ||!"COMPLETE".equals(run.get("state"))||!"nativeSuite".equals(run.get("targetType"))
+                ||!packageId.equals(run.get("packageId"))||!retry.sourceRunId().equals(run.get("id")))
+            throw new IllegalArgumentException("The frozen Native Suite source manifest identity is invalid");
+        List<String> manifestDefinitions=run.get("definitionIds") instanceof List<?>
+                ?JSON.convertValue(run.get("definitionIds"),List.class):Collections.emptyList();
+        if(!expectedDefinitions.equals(manifestDefinitions)
+                ||!(run.get("selectedCaseCount") instanceof Number count)
+                ||count.intValue()!=retry.sourceSelectedCaseCount()||cases.size()!=retry.sourceSelectedCaseCount())
+            throw new IllegalArgumentException("The frozen Native Suite source counts or Definitions changed");
+        Object rawSources=run.get("caseSources");
+        if(!(rawSources instanceof List<?> sourceCases)||sourceCases.size()!=retry.sourceSelectedCaseCount())
+            throw new IllegalArgumentException("The frozen Native Suite source identities changed");
+        Map<String,Map<?,?>> sourceCasesById=new LinkedHashMap<>();
+        for(Object value:sourceCases) {
+            if(!(value instanceof Map<?,?> row)||!(row.get("qualifiedCaseId") instanceof String id)
+                    ||sourceCasesById.put(id,row)!=null)
+                throw new IllegalArgumentException("The frozen Native Suite source has duplicate or invalid source identities");
+        }
+        if(sourceCasesById.size()!=retry.sourceSelectedCaseCount())
+            throw new IllegalArgumentException("The frozen Native Suite source identities changed");
+        List<String> failed=failedExecutedNativeSuiteCaseIds(cases,sourceCasesById);
+        if(!failed.equals(retry.failedQualifiedCaseIds()))
+            throw new JobConflictException("ATT-SERVER-NATIVE-SUITE-RETRY-SOURCE-CHANGED",
+                    "The frozen failed Qualified Case IDs no longer match the source manifest.");
+    }
+    private String latestEligibleNativeSuiteJobId(String principal,String packageId,List<String> definitionIds) throws Exception {
+        List<String> expected=new ArrayList<>(definitionIds);expected.sort(String::compareTo);
+        for(Map<String,Object> candidate:store.completedOwnedPackageRuns(principal,packageId)) {
+            String jobId=String.valueOf(candidate.get("jobId"));Map<String,String> sourceRecord=store.executionSpec(jobId);
+            if(sourceRecord==null||!principal.equals(sourceRecord.get("principal"))||sourceRecord.get("spec")==null)continue;
+            JobExecutionSpec sourceSpec;
+            try {sourceSpec=JobExecutionSpec.parse(sourceRecord.get("spec"));}
+            catch(Exception unreadable) {continue;}
+            JsonNode target=sourceSpec.definition().path("target");
+            if(!"nativeSuite".equals(target.path("type").asText()))continue;
+            List<String> sourceDefinitions=target.path("definitionIds").isArray()
+                    ?JSON.convertValue(target.path("definitionIds"),List.class):Collections.emptyList();
+            sourceDefinitions.sort(String::compareTo);
+            if(expected.equals(sourceDefinitions))return jobId;
+        }
+        return null;
+    }
+    private static String sha256Bytes(byte[] bytes) throws Exception {
+        byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(bytes);StringBuilder result=new StringBuilder(64);
+        for(byte value:digest)result.append(String.format(java.util.Locale.ROOT,"%02x",value&255));return result.toString();
+    }
     private byte[] archivedCaseRunManifest(String jobId) throws Exception {
         try(ArtifactRead archive=openArtifactArchive(jobId,false)) {
             List<Map<?,?>> manifests=new ArrayList<>();
@@ -3737,13 +4059,23 @@ final class ServerRuntime implements AutoCloseable {
     private Map<String,Object> runDraftView(RunDraft draft) {
         Map<String,Object> view=new LinkedHashMap<>(draft.preview);
         boolean nativeCase=draft.workerInput.path("nativeCaseDefinitionId").isTextual();
-        view.put("draftId",draft.id);view.put("schemaVersion",nativeCase?RunDefinition.NATIVE_CASE_VERSION:RunDefinition.VERSION);view.put("executionType","run");
+        boolean nativeSuite=draft.workerInput.path("nativeSuiteDefinitionIds").isArray();
+        view.put("draftId",draft.id);view.put("schemaVersion",nativeCase||nativeSuite?RunDefinition.NATIVE_CASE_VERSION:RunDefinition.VERSION);view.put("executionType","run");
         view.put("packageId",draft.packageId);view.put("revisionDigest",draft.revision);view.put("expiresAt",draft.expiresAt.toString());
         if(nativeCase) {
             Map<String,Object> target=new LinkedHashMap<>();target.put("type","nativeCase");
             target.put("definitionId",draft.workerInput.path("nativeCaseDefinitionId").asText());
             view.put("target",target);
             view.put("selectedCaseIds",JSON.convertValue(draft.workerInput.path("nativeResolvedCaseIds"),List.class));
+        }
+        if(nativeSuite) {
+            Map<String,Object> target=new LinkedHashMap<>();target.put("type","nativeSuite");
+            target.put("definitionIds",JSON.convertValue(draft.workerInput.path("nativeSuiteDefinitionIds"),List.class));
+            target.put("selection",Map.of("qualifiedCaseIds",JSON.convertValue(draft.workerInput.path("nativeSuiteQualifiedCaseIds"),List.class)));
+            view.put("target",target);
+            view.put("selectedCaseIds",JSON.convertValue(draft.workerInput.path("nativeSuiteQualifiedCaseIds"),List.class));
+            if(draft.workerInput.path("nativeSuiteRetry").isObject())
+                view.put("retryLineage",JSON.convertValue(draft.workerInput.path("nativeSuiteRetry"),Map.class));
         }
         Map<String,Object> options=new LinkedHashMap<>();options.put("debug",draft.workerInput.path("diagnosticMode").asBoolean());
         if(draft.workerInput.path("failFast").isBoolean())options.put("failFast",draft.workerInput.path("failFast").booleanValue());
@@ -3772,7 +4104,8 @@ final class ServerRuntime implements AutoCloseable {
                     ?null:capturePrevalidatedExecutionSpec("run",draft.workerInput,null);
             ObjectNode internal=((ObjectNode)draft.workerInput).deepCopy();internal.put("expectedRevisionDigest",draft.revision);bindRegistryDraftForAdmission(internal,draft.id);
             try {
-                Map<String,Object> accepted=submit("run",internal,persistedPrincipal,true,null,false,null,null,retained);
+                String retrySourceJobId=internal.path("nativeSuiteRetry").path("sourceJobId").asText(null);
+                Map<String,Object> accepted=submit("run",internal,persistedPrincipal,true,null,false,retrySourceJobId,null,retained);
                 runDrafts.remove(draft.id,draft);
                 registryBoundDrafts.remove(draft.id);
                 return accepted;
@@ -5155,6 +5488,7 @@ final class ServerRuntime implements AutoCloseable {
         if(request==null)return;
         addSnapshotPath(paths,request.scenario);addSnapshotPath(paths,request.suiteDirectory);addSnapshotPath(paths,request.debugInput);
         addSnapshotPath(paths,request.nativeCaseSourcePath);
+        if(request.nativeSuiteSourcePaths!=null)for(String path:request.nativeSuiteSourcePaths.values())addSnapshotPath(paths,path);
         if(request.suites!=null)for(String path:request.suites)addSnapshotPath(paths,path);
     }
 
@@ -5242,6 +5576,45 @@ final class ServerRuntime implements AutoCloseable {
                 registry.editors.getOrDefault(packageId,List.of()));
     }
 
+    /**
+     * Source-workbook inclusion runs after the request thread that authorized a manual Job has
+     * ended. In container auth, USER role membership is available only through the live servlet
+     * request, so this path accepts only the server-persisted identity tuple from a manual Job and
+     * rechecks the current package editor policy. Artifact reads still recheck the live requester
+     * role through {@link #withPackageSourceAuthority(String, PackageSourceActiveUserCheck,
+     * PackageSourceAction)}.
+     */
+    boolean canPublishNativeSourceWorkbook(Map<String,Object> storedJob) throws Exception {
+        if(storedJob==null||!config.authenticationRequired||!config.packageConfiguration.sourceEditingEnabled)
+            return false;
+        String packageId=nullableText(storedJob.get("packageId"));
+        String principal=nullableText(storedJob.get("principal"));
+        String submittedBy=nullableText(storedJob.get("submittedBy"));
+        String executionPrincipal=nullableText(storedJob.get("executionPrincipal"));
+        String submissionSource=nullableText(storedJob.get("submissionSource"));
+        if(!"run".equals(storedJob.get("command"))||!"manual".equals(submissionSource)
+                ||principal==null||principal.isBlank()||RequestIdentity.ANONYMOUS.equals(principal)
+                ||!principal.equals(submittedBy)||!principal.equals(executionPrincipal)
+                ||!noText(storedJob.get("originatingScheduleId"))||!noText(storedJob.get("scheduleId"))
+                ||!noText(storedJob.get("scheduleOwner"))||!noText(storedJob.get("triggeredBy")))
+            return false;
+
+        PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+        if(packageId==null||!registry.packages.containsKey(packageId))return false;
+        if("local".equals(config.authMode))return canEditPackageContent(packageId,principal);
+
+        // In container mode, ServerRuntime records these fields only after ApiServlet's live
+        // authenticated USER-role gate. Re-evaluate the current Package/editor policy here; the
+        // live role is checked again against the requesting user before any private entry is read.
+        return SourceAuthorizationPolicy.canEditPackageContent(config.authenticationRequired,
+                config.packageConfiguration.sourceEditingEnabled,packageId,principal,true,
+                registry.editors.getOrDefault(packageId,List.of()));
+    }
+
+    private static boolean noText(Object value) {
+        return value==null||value instanceof String text&&text.isBlank();
+    }
+
     <T> T withPackageSourceAuthority(String loginId,PackageSourceActiveUserCheck activeUserCheck,
                                      PackageSourceAction<T> action) throws Exception {
         PackageSourceAuthority previous=packageSourceAuthority.get();
@@ -5282,6 +5655,42 @@ final class ServerRuntime implements AutoCloseable {
             if(!registry.revision.equals(packageRegistry.snapshot().revision)||!root.equals(packageRoot(packageId)))throw new StaleDraftException();
             Map<String,Object> response=new LinkedHashMap<>(source);response.putAll(editRevisions);
             return response;
+        } finally {admissionLifecycle.readLock().unlock();}
+    }
+
+    Map<String,Object> previewNativeTestCase(String packageId,String path,String source,String principal) throws Exception {
+        if(!config.inspection.enabled)throw new NotFoundException();
+        if(!canEditPackageContent(packageId,principal))throw new AuthoringSourceDeniedException();
+        if(path==null||source==null||source.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                >att.testcase.TestCaseDefinitionResolver.MAX_SOURCE_BYTES)
+            throw new IllegalArgumentException("Native Test Case preview source is missing or too large");
+        if(path.length()>1024||!path.equals(path.trim())||path.startsWith("/")||path.indexOf('\\')>=0
+                ||path.contains("//")||path.matches("^[A-Za-z]:.*")||!path.endsWith("/testcase.yaml")
+                ||java.util.Arrays.stream(path.split("/",-1)).anyMatch(part->part.isEmpty()||".".equals(part)||"..".equals(part)))
+            throw new IllegalArgumentException("A safe Package-relative testcase.yaml path is required");
+        admissionLifecycle.readLock().lock();
+        try {
+            PackageRegistry.Snapshot registry=packageRegistry.snapshot();
+            Path root=pinPackageRoot(registry,packageId);
+            if(root==null)throw new NotFoundException();
+            validatePackageRoot(root);root=root.toRealPath();
+            Map<String,String> before=changeSetPublisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,
+                    packageId,principal,false);
+            if(!registry.revision.equals(before.get("registryRevision")))throw new StaleDraftException();
+            WorkerRequest request=inspectionRequest(packageId,root,null);
+            request.inspectionAction="native-case-preview";request.inspectionPath=path;
+            request.nativeCasePreviewSource=source;
+            Map<String,Object> inspected=executeInspection(root,request);
+            PackageRegistry.Snapshot current=packageRegistry.snapshot();
+            if(!registry.revision.equals(current.revision)||!root.equals(packageRoot(packageId))
+                    ||!canEditPackageContent(packageId,principal))throw new StaleDraftException();
+            Map<String,String> after=changeSetPublisher.currentRevisions(ChangeSetPublisher.PACKAGE_SOURCE,
+                    packageId,principal,false);
+            if(!before.equals(after)||!registry.revision.equals(packageRegistry.snapshot().revision)
+                    ||!root.equals(packageRoot(packageId)))throw new StaleDraftException();
+            inspected.put("packageSourceRevision",after.get("baseSourceRevision"));
+            inspected.put("registryRevision",after.get("registryRevision"));
+            return inspected;
         } finally {admissionLifecycle.readLock().unlock();}
     }
 
@@ -5499,11 +5908,11 @@ final class ServerRuntime implements AutoCloseable {
                             +" action="+String.valueOf(request.inspectionAction)+" code="+code);
             throw new InspectionValidationException(code,diagnostics);
         }
-        boolean draftInspection=("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"run-input".equals(request.inspectionAction)||"native-run-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
+        boolean draftInspection=("package-configuration".equals(request.inspectionType)&&"validate".equals(request.inspectionAction))||"run-input".equals(request.inspectionAction)||"native-run-input".equals(request.inspectionAction)||"native-suite-input".equals(request.inspectionAction)||"debug-input".equals(request.inspectionAction)||"debug-form".equals(request.inspectionAction)
                 ||"quick-load-input".equals(request.inspectionAction)||"quick-load-form".equals(request.inspectionAction)
                 ||"load-templates".equals(request.inspectionAction)||"load-template-compose".equals(request.inspectionAction)
                 ||"quick-load-policy".equals(request.inspectionAction)||"load-scenario".equals(request.inspectionAction)
-                ||"load-detail".equals(request.inspectionAction);
+                ||"load-detail".equals(request.inspectionAction)||"native-case-preview".equals(request.inspectionAction);
         if(draftInspection&&("WORKER_REQUEST_INVALID".equals(workerError)
                 ||workerError!=null&&(workerError.startsWith("ATT-DEBUG")||workerError.startsWith("ATT-LOAD"))
                 ||envelope.get("diagnostics") instanceof List&&!((List<?>)envelope.get("diagnostics")).isEmpty())) {
@@ -5512,7 +5921,7 @@ final class ServerRuntime implements AutoCloseable {
             if(rawDiagnostics instanceof List)for(Object raw:(List<?>)rawDiagnostics)if(raw instanceof Map) {
                 @SuppressWarnings("unchecked") Map<String,Object> value=(Map<String,Object>)raw;
                 Map<String,Object> safe=new LinkedHashMap<String,Object>();
-                for(String key:List.of("code","summary","detail","field","file","suggestion","resourceId","sourceFile","packageId")) {
+                for(String key:List.of("code","summary","detail","field","file","sheet","suggestion","resourceId","sourceFile","packageId")) {
                     Object item=value.get(key);
                     if(item instanceof String) {
                         String text=att.server.api.internal.DiagnosticSanitizer.redactText((String)item);
@@ -5520,7 +5929,7 @@ final class ServerRuntime implements AutoCloseable {
                         safe.put(key,text);
                     }
                 }
-                for(String key:List.of("line","column","sourceColumn"))if(value.get(key) instanceof Number)safe.put(key,value.get(key));
+                for(String key:List.of("line","row","column","sourceColumn"))if(value.get(key) instanceof Number)safe.put(key,value.get(key));
                 if(!safe.isEmpty())diagnostics.add(safe);
             }
             if(diagnostics.isEmpty()) {
@@ -5548,9 +5957,41 @@ final class ServerRuntime implements AutoCloseable {
             throw new InspectionLimitException(safeResourceLimitDiagnostics(envelope.get("diagnostics")));
         if(workerError!=null)throw new IllegalStateException("Package inspection Worker failed: "+workerError);
         Object raw=envelope.get("inspection");if(!(raw instanceof Map))throw new IllegalStateException("Package inspection Worker returned an invalid response");
-        JsonNode safe=projectInspectionPaths(JSON.valueToTree(att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw)),root,"");
+        JsonNode safe=projectInspectionPaths(JSON.valueToTree(sanitizeInspectionResult(raw,request)),root,"");
         @SuppressWarnings("unchecked") Map<String,Object> result=JSON.convertValue(safe,Map.class);
         return result;
+    }
+    private static Object sanitizeInspectionResult(Object raw,WorkerRequest request) {
+        if("authoring-source".equals(request.inspectionAction)&&"native-testcase".equals(request.authoringSourceKind)
+                &&request.inspectionPath!=null&&request.inspectionPath.endsWith("/testcase.yaml")&&raw instanceof Map<?,?>) {
+            Map<?,?> source=(Map<?,?>)raw;
+            Object sourceText=source.get("text");
+            if(sourceText instanceof String) {
+                String mapping=att.resource.PackageResourceInspector.nativeExcelDataColumnsMappingSource(
+                        request.inspectionPath,(String)sourceText);
+                if(mapping!=null) {
+                    // Keep only the schema-validated mapping scalar out of generic text redaction;
+                    // sanitize the rest of the source and the response metadata as usual.
+                    String marker="__ATT_NATIVE_EXCEL_DATA_COLUMNS__";
+                    while(((String)sourceText).contains(marker))marker+="_";
+                    Map<String,Object> content=new LinkedHashMap<>();
+                    for(Map.Entry<?,?> entry:source.entrySet())if(entry.getKey() instanceof String)
+                        content.put((String)entry.getKey(),entry.getValue());
+                    content.put("text",att.resource.PackageResourceInspector.replaceNativeExcelDataColumnsMappingSource(
+                            request.inspectionPath,(String)sourceText,marker));
+                    Object sanitized=att.server.api.internal.DiagnosticSanitizer.sanitizeValue(content);
+                    if(sanitized instanceof Map<?,?>) {
+                        Map<String,Object> safe=new LinkedHashMap<>();
+                        for(Map.Entry<?,?> entry:((Map<?,?>)sanitized).entrySet())if(entry.getKey() instanceof String)
+                            safe.put((String)entry.getKey(),entry.getValue());
+                        Object safeText=safe.get("text");
+                        if(safeText instanceof String)safe.put("text",((String)safeText).replace(marker,mapping));
+                        return safe;
+                    }
+                }
+            }
+        }
+        return att.server.api.internal.DiagnosticSanitizer.sanitizeValue(raw);
     }
     private List<Map<String,Object>> safeResourceLimitDiagnostics(Object raw) {
         List<Map<String,Object>> result=new ArrayList<Map<String,Object>>();
@@ -6051,6 +6492,10 @@ final class ServerRuntime implements AutoCloseable {
             else if(schedule.runInput.get("nativeCaseDefinitionId") instanceof String definitionId) {
                 view.put("target",Map.of("type","nativeCase","definitionId",definitionId));
                 view.put("selectedCaseIds",schedule.runInput.get("nativeResolvedCaseIds"));
+            } else if(schedule.runInput.get("nativeSuiteDefinitionIds") instanceof List<?> definitionIds) {
+                view.put("target",Map.of("type","nativeSuite","definitionIds",definitionIds,
+                        "selection",Map.of("qualifiedCaseIds",schedule.runInput.get("nativeSuiteQualifiedCaseIds"))));
+                view.put("selectedCaseIds",schedule.runInput.get("nativeSuiteQualifiedCaseIds"));
             }
             else view.put("selectedCaseIds",schedule.runInput.get("caseIds"));
             Map<String,Object> runOptions=new LinkedHashMap<>();
@@ -6525,7 +6970,8 @@ final class ServerRuntime implements AutoCloseable {
         ObjectNode input=JSON.valueToTree(schedule.runInput);input.set("configurationProvenance",JSON.valueToTree(schedule.configuration));applyInspectionPolicy(input,schedule.packageId);
         JobExecutionSpec retained=capturePrevalidatedExecutionSpec("run",input,null);
         if(retained!=null)retained.withScheduleSnapshot(schedule.id,schedule.snapshotVersion);
-        return submit("run",input,executionPrincipal,true,occurrenceId,true,null,null,retained,false,provenance);
+        String retrySourceJobId=input.path("nativeSuiteRetry").path("sourceJobId").asText(null);
+        return submit("run",input,executionPrincipal,true,occurrenceId,true,retrySourceJobId,null,retained,false,provenance);
     }
     private void validateScheduledRun(LoadSchedule schedule,Path root) throws Exception {
         validateScheduledRun(schedule,root,workerConfigPath());
@@ -6537,7 +6983,8 @@ final class ServerRuntime implements AutoCloseable {
         WorkerRequest request=JSON.convertValue(schedule.runInput,WorkerRequest.class);
         request=applyWorkerPolicy(request);request.protocolVersion="att-worker/v1";request.command="inspect";
         request.jobId="I"+UUID.randomUUID().toString().replace("-","");request.packageRoot=root.toString();
-        request.config=configPath.toString();request.inspectionAction=request.nativeCaseDefinitionId==null?"run-input":"native-run-input";
+        request.config=configPath.toString();request.inspectionAction=request.nativeSuiteDefinitionIds!=null?"native-suite-input":
+                request.nativeCaseDefinitionId==null?"run-input":"native-run-input";
         request.registeredPackageId=schedule.packageId;request.packageRegistryRevision=packageRegistry.snapshot().revision;
         ObjectNode policy=JSON.createObjectNode();applyInspectionPolicy(policy,schedule.packageId);JSON.readerForUpdating(request).readValue(policy);
         Map<String,Object> inspected=executeInspection(root,request);
@@ -6546,6 +6993,11 @@ final class ServerRuntime implements AutoCloseable {
                     ||!(schedule.runInput.get("nativeResolvedCaseIds") instanceof List<?> saved)||!ids.equals(saved)
                     ||!java.util.Objects.equals(inspected.get("sourcePath"),schedule.runInput.get("nativeCaseSourcePath")))
                 throw new IllegalArgumentException("Scheduled Native Case RUN selection or source changed; review a replacement schedule");
+        } else if(request.nativeSuiteDefinitionIds!=null) {
+            if(!(inspected.get("selectedQualifiedCaseIds") instanceof List<?> ids)
+                    ||!(schedule.runInput.get("nativeSuiteQualifiedCaseIds") instanceof List<?> saved)||!ids.equals(saved)
+                    ||!java.util.Objects.equals(inspected.get("sourcePaths"),schedule.runInput.get("nativeSuiteSourcePaths")))
+                throw new IllegalArgumentException("Scheduled Native Suite RUN selection or source changed; review a replacement schedule");
         } else if(!(inspected.get("selectedCaseIds") instanceof List<?> ids)||!(schedule.runInput.get("caseIds") instanceof List<?> saved)
                 ||!new java.util.HashSet<>(ids).equals(new java.util.HashSet<>(saved)))
             throw new IllegalArgumentException("Scheduled RUN case selection changed; review a replacement schedule");
@@ -7530,11 +7982,13 @@ final class ServerRuntime implements AutoCloseable {
     void releaseArtifactReadSlot() { artifactReadSlots.release(); }
     Map<String,Object> artifactIndex(String id) throws Exception { return artifactIndex(id,0,100); }
     JobArtifactOverview artifactOverview(String id) throws Exception {
-        if(store.get(id)==null)throw new NotFoundException();
+        Map<String,Object> storedJob=store.get(id);if(storedJob==null)throw new NotFoundException();
         JsonNode publication=readArchiveStatus(artifactArchivePath(id).resolveSibling("archive-status.json"));
         String state=publication.path("state").asText("PENDING");
         if(store.workerQuarantined(id))state="FAILED";
         if("READY".equals(state)&&!Files.isRegularFile(artifactArchivePath(id)))state="FAILED";
+        if("READY".equals(state))try {ArtifactArchive.verify(artifactArchivePath(id),false,trustedArtifactRunId(id,storedJob));}
+        catch(Exception invalid){state="FAILED";}
         if(!"READY".equals(state))return new JobArtifactOverview(state,false,"UNVERIFIED",null,null,null,null,null,null,false);
         JsonNode value=publication.path("overview");
         if(publication.path("overviewVersion").asInt()!=1||!value.isObject())
@@ -7546,7 +8000,7 @@ final class ServerRuntime implements AutoCloseable {
         JsonNode rows=value.path("omissionCategories");
         if(rows.isArray())for(JsonNode row:rows) {
             String category=row.path("category").asText("");long count=row.path("count").asLong(-1L);
-            if(count>0L&&Set.of("unsafe_path","unsafe_entry","incomplete_load_report","recovery_checkpoint","reserved_manifest","unsupported_type","duplicate_path","entry_limit","oversized","rejected_text","reason_unavailable").contains(category))
+            if(count>0L&&Set.of("unsafe_path","unsafe_entry","incomplete_load_report","recovery_checkpoint","reserved_manifest","unsupported_type","duplicate_path","entry_limit","oversized","rejected_text","rejected_xlsx","reason_unavailable").contains(category))
                 omissions.add(new JobArtifactOverview.OmissionCategory(count,category));
         }
         boolean reportOmitted=omissions.stream().anyMatch(omission->"incomplete_load_report".equals(omission.category()));
@@ -7652,7 +8106,7 @@ final class ServerRuntime implements AutoCloseable {
             ArtifactDownload download;
             try {download=ArtifactDownload.open(archive,expectedSha256);}
             catch(Exception invalid){throw new ArchiveUnavailableException("FAILED");}
-            return new ArtifactRead(archive,null,download);
+            return new ArtifactRead(archive,null,download,false);
         } catch(Exception failure) { artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure; }
     }
     /**
@@ -7873,11 +8327,16 @@ final class ServerRuntime implements AutoCloseable {
         finally {artifactLifecycle.writeLock().unlock();}
     }
     Map<String,Object> artifactIndex(String id,int offset,int limit) throws Exception {
+        return artifactIndex(id,offset,limit,null);
+    }
+    Map<String,Object> artifactIndex(String id,int offset,int limit,String requester) throws Exception {
         if(offset<0||offset>1_000_000||limit<1||limit>100)throw new IllegalArgumentException("Artifact listing pagination is invalid");
         if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
         artifactLifecycle.readLock().lock();
+        artifactPublicationLock.readLock().lock();
         try {
-            if(store.get(id)==null)throw new NotFoundException();
+            Map<String,Object> storedJob=store.get(id);if(storedJob==null)throw new NotFoundException();
+            String expectedNativeRunId=trustedArtifactRunId(id,storedJob);
             Path archive=artifactArchivePath(id),statusFile=archive.resolveSibling("archive-status.json");
             Map<String,Object> out=new LinkedHashMap<>();
             JsonNode publication=readArchiveStatus(statusFile);
@@ -7888,9 +8347,14 @@ final class ServerRuntime implements AutoCloseable {
             if(quarantined){state="FAILED";out.put("reason","worker_unverified");}
             if(Files.isRegularFile(archive)&&"READY".equals(state)) {
                 try {
-                    Map<String,Object> data=ArtifactArchive.verify(archive,false);
+                    Map<String,Object> data=ArtifactArchive.verify(archive,false,expectedNativeRunId);
                     long archiveSize=Files.size(archive);
                     List<?> all=(List<?>)data.get("entries");
+                    boolean sourceWorkbookAllowed=requester==null
+                            ||canEditPackageContent(String.valueOf(storedJob.get("packageId")),requester);
+                    if(!sourceWorkbookAllowed)all=all.stream().filter(item->!(item instanceof Map<?,?> row)
+                            ||!(row.get("path") instanceof String entryPath)
+                            ||!isNativeSourceWorkbookEntry(entryPath,expectedNativeRunId)).toList();
                     int start=Math.min(offset,all.size()),end=Math.min(all.size(),start+limit);
                     out.put("items",all.subList(start,end));out.put("nextOffset",end<all.size()?end:null);
                     out.put("primaryReports",all.stream().filter(item->item instanceof Map<?,?> row&&Boolean.TRUE.equals(row.get("report"))).toList());
@@ -7917,7 +8381,7 @@ final class ServerRuntime implements AutoCloseable {
             out.put("retryable",!quarantined&&"FAILED".equals(out.get("archiveStatus"))&&Files.isDirectory(outputDirectoryForJob(id)));
             out.put("archiveMetrics",store.archiveMetrics(id));
             out.put("downloadPath","archive.zip");return out;
-        } finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
+        } finally {artifactPublicationLock.readLock().unlock();artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
     }
 
     private static String artifactCategory(String path) {
@@ -7933,33 +8397,84 @@ final class ServerRuntime implements AutoCloseable {
     }
 
     byte[] archiveEntry(String id,String requested) throws Exception {
+        return archiveEntry(id,requested,null);
+    }
+    byte[] archiveEntry(String id,String requested,String requester) throws Exception {
         if(!ArtifactArchive.safePath(requested)||ArtifactArchive.MANIFEST.equalsIgnoreCase(requested))throw new IllegalArgumentException("Invalid archive entry path");
-        try(ArtifactRead read=openArtifactArchive(id,false)) { return read.verified.read(requested); }
-        catch(java.io.FileNotFoundException missing){throw new NotFoundException();}
+        artifactLifecycle.readLock().lock();
+        artifactPublicationLock.readLock().lock();
+        try {
+            if(requester!=null) {
+                Map<String,Object> storedJob=store.get(id);if(storedJob==null)throw new NotFoundException();
+                String expectedNativeRunId=trustedArtifactRunId(id,storedJob);
+                if(isNativeSourceWorkbookEntry(requested,expectedNativeRunId)
+                        &&!canEditPackageContent(String.valueOf(storedJob.get("packageId")),requester))
+                    throw new AuthoringSourceDeniedException();
+            }
+            try(ArtifactRead read=openArtifactArchive(id,false)) { return read.verified.read(requested); }
+            catch(java.io.FileNotFoundException missing){throw new NotFoundException();}
+        } finally {
+            artifactPublicationLock.readLock().unlock();artifactLifecycle.readLock().unlock();
+        }
+    }
+    private static boolean isNativeSourceWorkbookEntry(String relative,String expectedRunId) {
+        return ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX.equals(relative)
+                ||expectedRunId!=null&&(expectedRunId+"/"+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX).equals(relative);
+    }
+    private static boolean archiveContainsNativeSourceWorkbook(Path archive,String expectedRunId) {
+        if(expectedRunId==null)return false;
+        try {
+            Map<String,Object> verified=ArtifactArchive.verify(archive,false,expectedRunId);
+            Object entries=verified.get("entries");
+            if(entries instanceof List<?> rows)for(Object value:rows)
+                if(value instanceof Map<?,?> row&&isNativeSourceWorkbookEntry(String.valueOf(row.get("path")),expectedRunId))return true;
+            return false;
+        } catch(Exception invalid) {
+            throw new ArchiveUnavailableException("FAILED");
+        }
     }
     final class ArtifactRead implements AutoCloseable {
         final Path path;
         final ArtifactArchive.VerifiedRead verified;
         final ArtifactDownload download;
-        ArtifactRead(Path path,ArtifactArchive.VerifiedRead verified,ArtifactDownload download){this.path=path;this.verified=verified;this.download=download;}
+        final boolean publicationReadLockHeld;
+        private final AtomicBoolean closed=new AtomicBoolean();
+        ArtifactRead(Path path,ArtifactArchive.VerifiedRead verified,ArtifactDownload download,boolean publicationReadLockHeld){
+            this.path=path;this.verified=verified;this.download=download;this.publicationReadLockHeld=publicationReadLockHeld;
+        }
         long length(){return download.length;}
         void writeTo(java.io.OutputStream output) throws java.io.IOException {download.writeTo(output);}
-        @Override public void close() throws java.io.IOException {try {if(download!=null)download.close();else verified.close();} finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}}
+        @Override public void close() throws java.io.IOException {
+            if(!closed.compareAndSet(false,true))return;
+            try {if(download!=null)download.close();else verified.close();}
+            finally {
+                try {if(publicationReadLockHeld)artifactPublicationLock.readLock().unlock();}
+                finally {artifactLifecycle.readLock().unlock();artifactReadSlots.release();}
+            }
+        }
     }
     ArtifactRead openArtifactArchive(String id,boolean digests) throws Exception {
+        return openArtifactArchive(id,digests,null);
+    }
+    ArtifactRead openArtifactArchive(String id,boolean digests,String requester) throws Exception {
         if(!artifactReadSlots.tryAcquire())throw new ArtifactCapacityException();
         artifactLifecycle.readLock().lock();
+        artifactPublicationLock.readLock().lock();
         try {
-            if(store.get(id)==null)throw new NotFoundException();
+            Map<String,Object> storedJob=store.get(id);if(storedJob==null)throw new NotFoundException();
+            String expectedNativeRunId=trustedArtifactRunId(id,storedJob);
             if(store.workerQuarantined(id))throw new ArchiveUnavailableException("FAILED");
             Path archive=artifactArchivePath(id),status=archive.resolveSibling("archive-status.json");
             String archiveState=readArchiveStatus(status).path("state").asText("FAILED");
             if(!"READY".equals(archiveState))throw new ArchiveUnavailableException(archiveState);
+            if(requester!=null&&digests&&archiveContainsNativeSourceWorkbook(archive,expectedNativeRunId)
+                    &&!canEditPackageContent(String.valueOf(storedJob.get("packageId")),requester))
+                throw new AuthoringSourceDeniedException();
             ArtifactArchive.VerifiedRead verified=null;ArtifactDownload download=null;
-            try { if(digests)download=ArtifactDownload.open(archive);else verified=ArtifactArchive.openVerified(archive,false); }
+            try { if(digests)download=ArtifactDownload.open(archive,null,expectedNativeRunId);else verified=ArtifactArchive.openVerified(archive,false,expectedNativeRunId); }
             catch(Exception invalid){throw new ArchiveUnavailableException("FAILED");}
-            return new ArtifactRead(archive,verified,download);
-        } catch(Exception failure){artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
+            return new ArtifactRead(archive,verified,download,true);
+        } catch(Exception failure){artifactPublicationLock.readLock().unlock();artifactLifecycle.readLock().unlock();artifactReadSlots.release();throw failure;}
     }
     private void archiveStatus(String id,String state,String reason) throws Exception { archiveStatus(id,state,reason,null); }
     private void archiveStatus(String id,String state,String reason,Map<String,Object> diagnostic) throws Exception {
@@ -7996,16 +8511,38 @@ final class ServerRuntime implements AutoCloseable {
         requestedArtifactRetries.add(id);
         scheduleArtifactArchive(id);
     }
+    private String trustedArtifactRunId(String id,Map<String,Object> storedJob) throws Exception {
+        if(!"run".equals(storedJob.get("command")))return null;
+        try {
+            Map<String,String> retained=store.executionSpec(id);
+            if(retained==null||retained.get("spec")==null)return null;
+            JsonNode definition=JobExecutionSpec.parse(retained.get("spec")).definition();
+            String targetType=definition.path("target").path("type").asText();
+            if(!Set.of("nativeCase","nativeSuite").contains(targetType))return null;
+            Object rawResult=storedJob.get("resultJson");
+            if(!(rawResult instanceof String resultJson)||resultJson.length()>2*1024*1024)return null;
+            JsonNode result=JSON.readTree(resultJson);
+            String runId=result.path("executionId").asText(null);
+            if(runId==null)return null;
+            String validated=att.core.IdentifierValidator.runId(runId);
+            JsonNode requested=definition.path("options").path("runId");
+            if(requested.isTextual()&&!validated.equals(requested.asText()))return null;
+            return validated;
+        } catch(Exception invalidOrUnavailable) { return null; }
+    }
     void scheduleArtifactArchive(String id) {
         if(closing||!pendingArtifactJobs.add(id))return;
         requestedArtifactRetries.remove(id);
         final long queuedAt=System.nanoTime();
         try { artifactWriters.execute(() -> {
             artifactLifecycle.readLock().lock();
+            artifactPublicationLock.writeLock().lock();
             Path output=outputDirectoryForJob(id), archive=artifactArchivePath(id);
             ArtifactMetricsRecorder metrics=null;
             try {
-                if(store.get(id)==null||!terminal(id))return;
+                Map<String,Object> storedJob=store.get(id);
+                if(storedJob==null||!terminal(id))return;
+                String expectedNativeRunId=trustedArtifactRunId(id,storedJob);
                 if(jobs.containsKey(id))return;
                 var previous=store.archiveMetrics(id);
                 metrics=new ArtifactMetricsRecorder(queuedAt,previous==null?1:Math.min(Long.MAX_VALUE-1,previous.attempts)+1);
@@ -8025,7 +8562,7 @@ final class ServerRuntime implements AutoCloseable {
                 }
                 if(Files.isRegularFile(archive)) {
                     metrics.phase("verification_fsync");
-                    try { ArtifactArchive.verify(archive,true); }
+                    try { ArtifactArchive.verify(archive,true,expectedNativeRunId); }
                     catch(Exception corrupt) {
                         // Verification failures are publication I/O, not artifact policy limits.
                         // Re-wrapping avoids IllegalArgumentException being audited as REJECTED_POLICY
@@ -8041,10 +8578,20 @@ final class ServerRuntime implements AutoCloseable {
                     if(!Files.isDirectory(output))throw new java.io.IOException("Worker output is unavailable");
                     cleanupArtifactStaging(archive.getParent());
                     // Preserve the exact bytes produced by the Engine/Worker; ZIP publication never rewrites them.
-                    artifactPublisher.publish(output,archive,ServerRuntime::validateApprovedArtifactBytes);
+                    boolean allowNativeSourceWorkbook=false;
+                    try {
+                        allowNativeSourceWorkbook=expectedNativeRunId!=null
+                                &&canPublishNativeSourceWorkbook(storedJob);
+                    } catch(Exception unavailable) {
+                        // Optional source-workbook reports fail closed without blocking standard artifacts.
+                        java.util.logging.Logger.getLogger(ServerRuntime.class.getName()).fine(
+                                "Native source-workbook report authorization was unavailable for Job "+id);
+                    }
+                    artifactPublisher.publish(output,archive,ServerRuntime::validateApprovedArtifactBytes,
+                            expectedNativeRunId,allowNativeSourceWorkbook);
                 }
                 metrics.phase("publication");
-                Map<String,Object> overview=ArtifactArchive.overviewSummary(archive);
+                Map<String,Object> overview=ArtifactArchive.overviewSummary(archive,expectedNativeRunId);
                 archiveStatus(id,"READY","",null,overview);
                 metrics.value.zipBytes=Files.size(archive);
                 metrics.value.outcome="READY";
@@ -8077,7 +8624,7 @@ final class ServerRuntime implements AutoCloseable {
                 // Transfer an accepted retry before releasing the retention
                 // fence, so expiry cannot delete its source between writers.
                 try {if(requestedArtifactRetries.remove(id))scheduleArtifactArchive(id);}
-                finally {artifactLifecycle.readLock().unlock();}
+                finally {artifactPublicationLock.writeLock().unlock();artifactLifecycle.readLock().unlock();}
             }
         }); } catch(RejectedExecutionException full) {
             pendingArtifactJobs.remove(id);
@@ -8709,7 +9256,32 @@ final class ServerRuntime implements AutoCloseable {
     private static void terminateTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroy);process.destroy();}
     private static void forceTree(Process process){process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly);process.destroyForcibly();}
     @FunctionalInterface interface WorkerProcessLauncher { Process start(ProcessBuilder builder) throws java.io.IOException; }
-    @FunctionalInterface interface ArtifactPublisher { Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator) throws Exception; }
+    private static ArtifactPublisher defaultArtifactPublisher(ServerConfig.ArchiveCompression compression) {
+        return new ArtifactPublisher() {
+            @Override public Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator) throws Exception {
+                return ArtifactArchive.build(output,archive,validator,compression);
+            }
+            @Override public Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator,
+                                          String expectedNativeRunId) throws Exception {
+                return ArtifactArchive.build(output,archive,validator,compression,expectedNativeRunId);
+            }
+            @Override public Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator,
+                                          String expectedNativeRunId,boolean allowNativeSourceWorkbook) throws Exception {
+                return ArtifactArchive.build(output,archive,validator,compression,expectedNativeRunId,
+                        allowNativeSourceWorkbook);
+            }
+        };
+    }
+    @FunctionalInterface interface ArtifactPublisher {
+        Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator) throws Exception;
+        default Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator,String expectedNativeRunId) throws Exception {
+            return publish(output,archive,validator);
+        }
+        default Path publish(Path output,Path archive,ArtifactArchive.EntryValidator validator,
+                             String expectedNativeRunId,boolean allowNativeSourceWorkbook) throws Exception {
+            return publish(output,archive,validator,expectedNativeRunId);
+        }
+    }
     @FunctionalInterface interface LoadProgressPersistence { void update(String jobId,String progressJson) throws Exception; }
     private static final class AdmissionLease {
         private final Semaphore admission,load;private final java.util.concurrent.atomic.AtomicBoolean released=new java.util.concurrent.atomic.AtomicBoolean();

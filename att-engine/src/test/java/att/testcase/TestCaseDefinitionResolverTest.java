@@ -2,10 +2,14 @@ package att.testcase;
 
 import att.validation.DiagnosticCodes;
 import att.validation.DiagnosticException;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -17,6 +21,8 @@ import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -82,6 +88,422 @@ class TestCaseDefinitionResolverTest {
         assertEquals(Arrays.asList("fpp", "regression", "smoke"), minimum.tags());
         assertEquals("minimum", minimum.data().get("caseKey"));
         assertEquals("zero", result.cases().get(1).caseId());
+    }
+
+    @Test void resolvesNativeExcelRowsWithSharedMappingsTypedValuesProvenanceAndSelection() throws Exception {
+        Path workbookPath = writeExcelWorkbook("native-cases.xlsx");
+        byte[] workbookBefore = Files.readAllBytes(workbookPath);
+        String yaml = "schemaVersion: att-testcase/v1\n"
+                + "id: fpp.transfer.excel\nflow: payment.transfer.v1\ntags: [fpp, common]\n"
+                + "caseIdExpression: \"${DATA.stableKey}\"\n"
+                + "dataSource:\n  type: excel\n  path: testdata/native-cases.xlsx\n  sheet: Cases\n"
+                + "  headerRows: 2\n  caseId: Case ID\n  tags: Tags\n"
+                + "  dataColumns: 'stableKey=Stable Key, amount=Amount, payload=\"Payload(yaml)\"(yaml), note=\"Note, details\"'\n"
+                + "inputs:\n  stableKey: {from: DATA.stableKey}\n  amount: {from: DATA.amount}\n  payload: {from: DATA.payload}\n  note: {from: DATA.note}\n";
+
+        TestCaseResolutionResult all = resolver.resolve(yaml, "testcase/excel.yaml", "payments",
+                packageRoot, templatesRoot, TestCaseDefinitionResolver.Options.defaults());
+
+        assertEquals(3, all.resolvedCount());
+        assertEquals(Arrays.asList("fpp.transfer.excel.alpha", "fpp.transfer.excel.beta", "fpp.transfer.excel.gamma"),
+                Arrays.asList(all.cases().get(0).qualifiedCaseId(), all.cases().get(1).qualifiedCaseId(), all.cases().get(2).qualifiedCaseId()));
+        assertTrue(all.cases().stream().allMatch(testCase -> "payment.transfer.v1".equals(testCase.flowId())));
+        ResolvedTestCase first = all.cases().get(0);
+        assertEquals("source-1", first.sourceRecordId());
+        assertEquals(Integer.valueOf(0), first.recordIndex());
+        assertEquals("12.5%", first.inputs().get("amount"));
+        assertEquals("first, note", first.inputs().get("note"));
+        assertEquals(Boolean.TRUE, ((Map<?,?>) first.inputs().get("payload")).get("enabled"));
+        assertEquals(2, ((Map<?,?>) first.inputs().get("payload")).get("retries"));
+        assertEquals(Arrays.asList("fpp", "common", "smoke"), first.tags());
+        Map<?,?> definitionSource = (Map<?,?>) all.definition().toMap().get("dataSource");
+        assertEquals("excel", definitionSource.get("type"));
+        assertEquals("testdata/native-cases.xlsx", definitionSource.get("path"));
+        assertFalse(definitionSource.containsKey("records"), "Excel Definition serialization retains authored mapping only");
+
+        TestCaseDefinitionResolver.Options selectedOptions = new TestCaseDefinitionResolver.Options(10, 10,
+                java.util.Collections.singleton("fpp.transfer.excel.beta"), null);
+        TestCaseResolutionResult selected = resolver.resolve(yaml, "testcase/excel.yaml", "payments",
+                packageRoot, templatesRoot, selectedOptions);
+        assertEquals(3, selected.resolvedCount());
+        assertEquals(1, selected.selectedCount());
+        assertEquals("fpp.transfer.excel.beta", selected.cases().get(0).qualifiedCaseId());
+        Map<?,?> caseMap = selected.cases().get(0).toMap();
+        Map<?,?> provenance = (Map<?,?>) ((Map<?,?>) caseMap.get("provenance")).get("dataSource");
+        assertEquals("excel", provenance.get("sourceType"));
+        assertEquals("testdata/native-cases.xlsx", provenance.get("sourceReference"));
+        assertEquals("Cases", provenance.get("sheet"));
+        assertEquals(Integer.valueOf(4), provenance.get("row"));
+        assertEquals(Integer.valueOf(1), provenance.get("recordIndex"));
+        Map<?,?> metadata = (Map<?,?>) provenance.get("metadata");
+        assertEquals(64, ((String) metadata.get("workbookSha256")).length());
+        assertEquals(Integer.valueOf(3), ((Map<?,?>) ((Map<?,?>) metadata.get("columns")).get("data")).get("stableKey"));
+        assertArrayEquals(workbookBefore, Files.readAllBytes(workbookPath), "Resolution must leave the Excel source byte-identical");
+    }
+
+    @Test void rejectsNativeExcelIdsAndFormulasWithWorkbookCellLocations() throws Exception {
+        Path workbookPath = writeExcelWorkbook("invalid-native.xlsx");
+        try (java.io.InputStream input = Files.newInputStream(workbookPath); XSSFWorkbook workbook = new XSSFWorkbook(input)) {
+            workbook.getSheet("Cases").getRow(2).getCell(0).setCellValue(123);
+            try (java.io.OutputStream output = Files.newOutputStream(workbookPath)) { workbook.write(output); }
+        }
+        DiagnosticException invalidId = assertThrows(DiagnosticException.class, () -> resolve(excelDefinition("testdata/invalid-native.xlsx")));
+        assertEquals("testdata/invalid-native.xlsx", invalidId.file());
+        assertEquals("Cases", invalidId.sheet());
+        assertEquals(Integer.valueOf(3), invalidId.row());
+        assertEquals(Integer.valueOf(1), invalidId.column());
+
+        Path formulaWorkbook = writeExcelWorkbook("formula-native.xlsx");
+        try (java.io.InputStream input = Files.newInputStream(formulaWorkbook); XSSFWorkbook workbook = new XSSFWorkbook(input)) {
+            workbook.getSheet("Cases").getRow(2).getCell(3).setCellFormula("1+1");
+            try (java.io.OutputStream output = Files.newOutputStream(formulaWorkbook)) { workbook.write(output); }
+        }
+        DiagnosticException formula = assertThrows(DiagnosticException.class, () -> resolve(excelDefinition("testdata/formula-native.xlsx")));
+        assertEquals(Integer.valueOf(3), formula.row());
+        assertEquals(Integer.valueOf(4), formula.column());
+
+        Path formulaIdWorkbook = writeExcelWorkbook("formula-id-native.xlsx");
+        updateExcelWorkbook(formulaIdWorkbook, workbook -> workbook.getSheet("Cases").getRow(2).getCell(0).setCellFormula("\"case-1\""));
+        DiagnosticException formulaId = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/formula-id-native.xlsx")));
+        assertEquals(Integer.valueOf(3), formulaId.row());
+        assertEquals(Integer.valueOf(1), formulaId.column());
+    }
+
+    @Test void reportsDuplicateNativeExcelHeadersAtBothPhysicalColumns() throws Exception {
+        Path workbook = writeExcelWorkbook("duplicate-headers-native.xlsx");
+        updateExcelWorkbook(workbook,
+                value -> value.getSheet("Cases").getRow(1).getCell(2).setCellValue("Case ID"));
+
+        DiagnosticException duplicate = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/duplicate-headers-native.xlsx")));
+
+        assertEquals("testdata/duplicate-headers-native.xlsx", duplicate.file());
+        assertEquals("Cases", duplicate.sheet());
+        assertEquals(Integer.valueOf(2), duplicate.row());
+        assertEquals(Integer.valueOf(3), duplicate.column());
+        assertTrue(duplicate.detail().contains("first occurrence at row 2, column 1"), duplicate.detail());
+        assertTrue(duplicate.detail().contains("duplicate at row 2, column 3"), duplicate.detail());
+    }
+
+    @Test void rejectsNativeExcelYamlNonFiniteAndRecursiveValuesWithWorkbookCellLocations() throws Exception {
+        for (String yamlValue : Arrays.asList(".nan", ".inf", "-.inf")) {
+            Path workbook = writeExcelWorkbook("unsafe-yaml-native.xlsx");
+            updateExcelWorkbook(workbook, value -> value.getSheet("Cases").getRow(2).getCell(4).setCellValue(yamlValue));
+
+            DiagnosticException failure = assertThrows(DiagnosticException.class,
+                    () -> resolve(excelDefinition("testdata/unsafe-yaml-native.xlsx")));
+            assertEquals("testdata/unsafe-yaml-native.xlsx", failure.file());
+            assertEquals("dataSource.dataColumns.payload", failure.field());
+            assertEquals("Cases", failure.sheet());
+            assertEquals(Integer.valueOf(3), failure.row());
+            assertEquals(Integer.valueOf(5), failure.column());
+            assertTrue(failure.detail().contains("non-finite"), failure.detail());
+        }
+
+        Path recursiveWorkbook = writeExcelWorkbook("recursive-yaml-native.xlsx");
+        updateExcelWorkbook(recursiveWorkbook,
+                value -> value.getSheet("Cases").getRow(2).getCell(4).setCellValue("&loop [*loop]"));
+
+        DiagnosticException recursive = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/recursive-yaml-native.xlsx")));
+        assertEquals("testdata/recursive-yaml-native.xlsx", recursive.file());
+        assertEquals("dataSource.dataColumns.payload", recursive.field());
+        assertEquals("Cases", recursive.sheet());
+        assertEquals(Integer.valueOf(3), recursive.row());
+        assertEquals(Integer.valueOf(5), recursive.column());
+        assertTrue(recursive.detail().contains("recursive YAML alias"), recursive.detail());
+
+        StringBuilder aliasExpansion = new StringBuilder("a0: &a0 [");
+        for (int index = 0; index < 100; index++) {
+            if (index > 0) aliasExpansion.append(", ");
+            aliasExpansion.append(index);
+        }
+        aliasExpansion.append("]\n");
+        String previous = "a0";
+        for (int index = 1; index <= 20; index++) {
+            String current = "a" + index;
+            aliasExpansion.append(current).append(": &").append(current).append(" [*")
+                    .append(previous).append(", *").append(previous).append("]\n");
+            previous = current;
+        }
+        Path expandedWorkbook = writeExcelWorkbook("expanded-yaml-native.xlsx");
+        updateExcelWorkbook(expandedWorkbook,
+                value -> value.getSheet("Cases").getRow(2).getCell(4).setCellValue(aliasExpansion.toString()));
+
+        DiagnosticException expanded = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/expanded-yaml-native.xlsx")));
+        assertEquals("testdata/expanded-yaml-native.xlsx", expanded.file());
+        assertEquals("dataSource.dataColumns.payload", expanded.field());
+        assertEquals("Cases", expanded.sheet());
+        assertEquals(Integer.valueOf(3), expanded.row());
+        assertEquals(Integer.valueOf(5), expanded.column());
+        assertTrue(expanded.detail().contains("maximum value count"), expanded.detail());
+    }
+
+    @Test void caseIdExpressionAliasCaseIdPointsToMappedExcelColumn() throws Exception {
+        Path workbook = writeExcelWorkbook("caseid-alias-native.xlsx");
+        updateExcelWorkbook(workbook,
+                value -> value.getSheet("Cases").getRow(3).getCell(2).setCellValue("alpha"));
+        String yaml = excelDefinition("testdata/caseid-alias-native.xlsx")
+                .replace("${DATA.stableKey}", "${DATA.caseId}")
+                .replace("stableKey=Stable Key", "caseId=Stable Key");
+
+        DiagnosticException failure = assertThrows(DiagnosticException.class,
+                () -> resolve(yaml));
+        assertEquals("dataSource.caseId", failure.field());
+        assertEquals("Cases", failure.sheet());
+        assertEquals(Integer.valueOf(4), failure.row());
+        assertEquals(Integer.valueOf(3), failure.column(),
+                "An expression alias named caseId identifies the mapped DATA column, not the source-ID column");
+    }
+
+    @Test void rejectsNativeExcelBlankWhitespaceReservedDuplicateAndResolvedIdCollisions() throws Exception {
+        Path workbook = writeExcelWorkbook("invalid-identities.xlsx");
+        updateExcelWorkbook(workbook, value -> value.getSheet("Cases").getRow(2).getCell(0).setCellValue("N/A"));
+        DiagnosticException blank = assertThrows(DiagnosticException.class, () -> resolve(excelDefinition("testdata/invalid-identities.xlsx")));
+        assertEquals(Integer.valueOf(3), blank.row());
+        assertEquals(Integer.valueOf(1), blank.column());
+
+        workbook = writeExcelWorkbook("invalid-identities.xlsx");
+        updateExcelWorkbook(workbook, value -> value.getSheet("Cases").getRow(2).getCell(0).setCellValue(" alpha"));
+        DiagnosticException whitespace = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/invalid-identities.xlsx")));
+        assertEquals(Integer.valueOf(3), whitespace.row());
+        assertTrue(whitespace.detail().contains("surrounding whitespace"));
+
+        workbook = writeExcelWorkbook("invalid-identities.xlsx");
+        updateExcelWorkbook(workbook, value -> value.getSheet("Cases").getRow(2).getCell(0).setCellValue("COM1"));
+        DiagnosticException reserved = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/invalid-identities.xlsx")));
+        assertEquals(Integer.valueOf(3), reserved.row());
+        assertTrue(reserved.detail().contains("path-safe"));
+
+        workbook = writeExcelWorkbook("invalid-identities.xlsx");
+        updateExcelWorkbook(workbook, value -> value.getSheet("Cases").getRow(3).getCell(0).setCellValue("source-1"));
+        DiagnosticException duplicate = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/invalid-identities.xlsx")));
+        assertEquals(Integer.valueOf(4), duplicate.row());
+        assertEquals(Integer.valueOf(1), duplicate.column());
+        assertTrue(duplicate.detail().contains("collide under ASCII case folding"));
+
+        workbook = writeExcelWorkbook("invalid-identities.xlsx");
+        updateExcelWorkbook(workbook, value -> value.getSheet("Cases").getRow(3).getCell(2).setCellValue("alpha"));
+        DiagnosticException resolvedCollision = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/invalid-identities.xlsx")));
+        assertEquals(Integer.valueOf(4), resolvedCollision.row());
+        assertEquals(Integer.valueOf(3), resolvedCollision.column());
+        assertTrue(resolvedCollision.detail().contains("Resolved Case IDs collide"));
+    }
+
+    @Test void rejectsNativeExcelMergedConfiguredDataCellsAndInvalidMappings() throws Exception {
+        Path mergedWorkbook = writeExcelWorkbook("merged-native.xlsx");
+        try (java.io.InputStream input = Files.newInputStream(mergedWorkbook); XSSFWorkbook workbook = new XSSFWorkbook(input)) {
+            workbook.getSheet("Cases").addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(2, 2, 3, 4));
+            try (java.io.OutputStream output = Files.newOutputStream(mergedWorkbook)) { workbook.write(output); }
+        }
+        DiagnosticException merged = assertThrows(DiagnosticException.class, () -> resolve(excelDefinition("testdata/merged-native.xlsx")));
+        assertEquals(Integer.valueOf(3), merged.row());
+        assertEquals(Integer.valueOf(4), merged.column());
+
+        String invalidMapping = excelDefinition("testdata/merged-native.xlsx").replace("stableKey=Stable Key", "bad.key=Stable Key");
+        DiagnosticException mapping = assertThrows(DiagnosticException.class, () -> resolve(invalidMapping));
+        assertEquals("dataSource.dataColumns", mapping.field());
+    }
+
+    @Test void enforcesNativeExcelMissingHeaderAndConfiguredRecordBounds() throws Exception {
+        writeExcelWorkbook("bounded-native.xlsx");
+        String missingHeader = excelDefinition("testdata/bounded-native.xlsx").replace("caseId: Case ID", "caseId: Missing ID");
+        DiagnosticException missing = assertThrows(DiagnosticException.class, () -> resolve(missingHeader));
+        assertEquals("dataSource.caseId", missing.field());
+        assertEquals("Cases", missing.sheet());
+        assertEquals(Integer.valueOf(2), missing.row());
+
+        TestCaseDefinitionResolver.Options twoRows = new TestCaseDefinitionResolver.Options(2, 10, null, null);
+        DiagnosticException bounded = assertThrows(DiagnosticException.class, () -> resolver.resolve(
+                excelDefinition("testdata/bounded-native.xlsx"), "testcase/test.yaml", "payments",
+                packageRoot, templatesRoot, twoRows));
+        assertTrue(bounded.detail().contains("record limit"));
+        assertEquals("Cases", bounded.sheet());
+        assertEquals(Integer.valueOf(5), bounded.row());
+    }
+
+    @Test void rejectsNativeExcelSymlinkAndOversizedWorkbookSources() throws Exception {
+        Path workbook = writeExcelWorkbook("contained-native.xlsx");
+        Path symlink = workbook.resolveSibling("linked-native.xlsx");
+        Files.createSymbolicLink(symlink, workbook.getFileName());
+        DiagnosticException unsafe = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/linked-native.xlsx")));
+        assertEquals("dataSource.path", unsafe.field());
+
+        Path oversized = packageRoot.resolve("testdata/oversized-native.xlsx");
+        try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(oversized.toFile(), "rw")) {
+            file.setLength(att.excel.ExcelDataSourceAdapter.MAX_WORKBOOK_BYTES + 1L);
+        }
+        DiagnosticException tooLarge = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/oversized-native.xlsx")));
+        assertEquals("dataSource.path", tooLarge.field());
+        assertTrue(tooLarge.detail().contains("32 MiB"));
+    }
+
+    @Test void preflightsNativeExcelArchiveAndPhysicalWorksheetRowLimits() throws Exception {
+        Path tooManyEntries = packageRoot.resolve("testdata/too-many-entries.xlsx");
+        writeExpandedZip(tooManyEntries, att.excel.ExcelDataSourceAdapter.MAX_WORKBOOK_ZIP_ENTRIES + 1, 0L);
+        DiagnosticException entryLimit = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/too-many-entries.xlsx")));
+        assertEquals("dataSource.path", entryLimit.field());
+        assertTrue(entryLimit.detail().contains("ZIP entry limit"));
+
+        Path oversizedEntry = packageRoot.resolve("testdata/oversized-entry.xlsx");
+        writeExpandedZip(oversizedEntry, 1,
+                att.excel.ExcelDataSourceAdapter.MAX_WORKBOOK_UNCOMPRESSED_ENTRY_BYTES + 1L);
+        DiagnosticException entryBytes = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/oversized-entry.xlsx")));
+        assertEquals("dataSource.path", entryBytes.field());
+        assertTrue(entryBytes.detail().contains("uncompressed entry limit"));
+
+        Path oversizedArchive = packageRoot.resolve("testdata/oversized-expanded-archive.xlsx");
+        long expandedEntryBytes = att.excel.ExcelDataSourceAdapter.MAX_WORKBOOK_UNCOMPRESSED_BYTES / 3L + 1L;
+        writeExpandedZip(oversizedArchive, 3, expandedEntryBytes);
+        DiagnosticException archiveBytes = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/oversized-expanded-archive.xlsx")));
+        assertEquals("dataSource.path", archiveBytes.field());
+        assertTrue(archiveBytes.detail().contains("total uncompressed ZIP limit"));
+
+        Path tooManyRows = writeExcelWorkbook("too-many-rows.xlsx");
+        updateExcelWorkbook(tooManyRows, value -> value.getSheet("Cases")
+                .createRow(att.excel.ExcelDataSourceAdapter.MAX_WORKSHEET_ROWS).createCell(0).setCellValue("unused"));
+        DiagnosticException rowLimit = assertThrows(DiagnosticException.class,
+                () -> resolve(excelDefinition("testdata/too-many-rows.xlsx")));
+        assertEquals("Cases", rowLimit.sheet());
+        assertEquals(Integer.valueOf(att.excel.ExcelDataSourceAdapter.MAX_WORKSHEET_ROWS + 1), rowLimit.row());
+        assertTrue(rowLimit.detail().contains("physical row limit"));
+    }
+
+    @Test void rejectsSparseNativeExcelHeaderRangeOverScanBudgetWithSourceCoordinates() throws Exception {
+        Path workbook = packageRoot.resolve("testdata/sparse-header-budget.xlsx");
+        writeSparseHeaderWorkbook(workbook);
+        String yaml = excelDefinition("testdata/sparse-header-budget.xlsx")
+                .replace("headerRows: 2", "headerRows: " + att.excel.ExcelDataSourceAdapter.MAX_HEADER_ROWS);
+
+        DiagnosticException budget = assertThrows(DiagnosticException.class, () -> resolve(yaml));
+
+        assertEquals("testdata/sparse-header-budget.xlsx", budget.file());
+        assertEquals("dataSource.headerRows", budget.field());
+        assertEquals("Cases", budget.sheet());
+        assertEquals(Integer.valueOf(att.excel.ExcelDataSourceAdapter.MAX_HEADER_ROWS), budget.row());
+        assertEquals(Integer.valueOf(16384), budget.column(), "XFD is Excel column 16,384");
+        assertTrue(budget.detail().contains("cell scan budget"), budget.detail());
+        assertTrue(budget.detail().contains("1000000"), budget.detail());
+    }
+
+    private String excelDefinition(String workbookPath) {
+        return "schemaVersion: att-testcase/v1\n"
+                + "id: fpp.transfer.excel\nflow: payment.transfer.v1\n"
+                + "caseIdExpression: \"${DATA.stableKey}\"\n"
+                + "dataSource:\n  type: excel\n  path: " + workbookPath + "\n  sheet: Cases\n"
+                + "  headerRows: 2\n  caseId: Case ID\n  tags: Tags\n"
+                + "  dataColumns: 'stableKey=Stable Key, amount=Amount, payload=\"Payload(yaml)\"(yaml), note=\"Note, details\"'\n";
+    }
+
+    private Path writeExcelWorkbook(String name) throws Exception {
+        Path path = packageRoot.resolve("testdata").resolve(name);
+        Files.createDirectories(path.getParent());
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("Cases");
+            Row firstHeader = sheet.createRow(0);
+            String[] groupHeaders = {"Identity", "Labels", "Identity", "Values", "Values", "Values"};
+            for (int index = 0; index < groupHeaders.length; index++) firstHeader.createCell(index).setCellValue(groupHeaders[index]);
+            Row secondHeader = sheet.createRow(1);
+            String[] headers = {"Case ID", "Tags", "Stable Key", "Amount", "Payload(yaml)", "Note, details"};
+            for (int index = 0; index < headers.length; index++) secondHeader.createCell(index).setCellValue(headers[index]);
+            CellStyle percent = workbook.createCellStyle();
+            percent.setDataFormat(workbook.createDataFormat().getFormat("0.0%"));
+            String[][] values = {
+                    {"source-1", "smoke, common", "alpha", "0.125", "enabled: true\nretries: 2", "first, note"},
+                    {"source-2", "common, regression", "beta", "0.25", "enabled: false\nretries: 3", "second"},
+                    {"source-3", "nightly", "gamma", "0.5", "enabled: true\nretries: 4", "third"}
+            };
+            for (int rowIndex = 0; rowIndex < values.length; rowIndex++) {
+                Row row = sheet.createRow(rowIndex + 2);
+                row.createCell(0).setCellValue(values[rowIndex][0]);
+                row.createCell(1).setCellValue(values[rowIndex][1]);
+                row.createCell(2).setCellValue(values[rowIndex][2]);
+                row.createCell(3).setCellValue(Double.parseDouble(values[rowIndex][3]));
+                row.getCell(3).setCellStyle(percent);
+                row.createCell(4).setCellValue(values[rowIndex][4]);
+                row.createCell(5).setCellValue(values[rowIndex][5]);
+            }
+            try (java.io.OutputStream output = Files.newOutputStream(path)) { workbook.write(output); }
+        }
+        return path;
+    }
+
+    private void updateExcelWorkbook(Path path, java.util.function.Consumer<XSSFWorkbook> update) throws Exception {
+        try (java.io.InputStream input = Files.newInputStream(path); XSSFWorkbook workbook = new XSSFWorkbook(input)) {
+            update.accept(workbook);
+            try (java.io.OutputStream output = Files.newOutputStream(path)) { workbook.write(output); }
+        }
+    }
+
+    private void writeExpandedZip(Path path, int entryCount, long expandedEntryBytes) throws Exception {
+        Files.createDirectories(path.getParent());
+        byte[] buffer = new byte[8192];
+        Arrays.fill(buffer, (byte) 'A');
+        try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(path))) {
+            for (int index = 0; index < entryCount; index++) {
+                output.putNextEntry(new ZipEntry("entry-" + index));
+                long remaining = expandedEntryBytes;
+                while (remaining > 0L) {
+                    int count = (int) Math.min(buffer.length, remaining);
+                    output.write(buffer, 0, count);
+                    remaining -= count;
+                }
+                output.closeEntry();
+            }
+        }
+    }
+
+    private void writeSparseHeaderWorkbook(Path path) throws Exception {
+        Files.createDirectories(path.getParent());
+        try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(path))) {
+            writeZipEntry(output, "[Content_Types].xml",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+                    + "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
+                    + "<Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+                    + "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>"
+                    + "<Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
+                    + "</Types>");
+            writeZipEntry(output, "_rels/.rels",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                    + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>"
+                    + "</Relationships>");
+            writeZipEntry(output, "xl/workbook.xml",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" "
+                    + "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
+                    + "<sheets><sheet name=\"Cases\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>");
+            writeZipEntry(output, "xl/_rels/workbook.xml.rels",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                    + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/>"
+                    + "</Relationships>");
+            writeZipEntry(output, "xl/worksheets/sheet1.xml",
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+                    + "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
+                    + "<dimension ref=\"A1:XFD86400\"/><sheetData>"
+                    + "<row r=\"1\"><c r=\"XFD1\" t=\"inlineStr\"><is><t>Case ID</t></is></c></row>"
+                    + "<row r=\"86400\"><c r=\"A86400\" t=\"inlineStr\"><is><t></t></is></c></row>"
+                    + "</sheetData></worksheet>");
+        }
+    }
+
+    private void writeZipEntry(ZipOutputStream output, String name, String value) throws Exception {
+        output.putNextEntry(new ZipEntry(name));
+        output.write(value.getBytes(StandardCharsets.UTF_8));
+        output.closeEntry();
     }
 
     @Test void discoversOneCasePreservingDefinitionIdUnderThePackageTestcaseRoot() throws Exception {

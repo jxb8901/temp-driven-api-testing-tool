@@ -1,5 +1,6 @@
 package att.api;
 
+import att.report.ReportRegenerator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayOutputStream;
@@ -8,6 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +24,29 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AttServiceTest {
     @TempDir Path temp;
+
+    @Test void nativeSuiteApiUsesTheSchemaTagLengthLimit() {
+        String tooLongTag=String.join("",Collections.nCopies(129,"x"));
+        assertThrows(IllegalArgumentException.class,()->new NativeCaseSuiteRunRequest(temp,null,null,null,null,
+                "payments",Collections.singletonList("fpp.transfer"),Collections.<String>emptyList(),
+                Collections.singletonList(tooLongTag),Collections.<String>emptyList(),false,false,false,null));
+    }
+
+    @Test void nativeSuiteApiQualifiedSelectorLimitMatchesExecutionV2() {
+        List<String> atLimit=new java.util.ArrayList<String>();
+        for(int index=0;index<att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS;index++)
+            atLimit.add("fpp.transfer.case"+index);
+        NativeCaseSuiteRunRequest request=new NativeCaseSuiteRunRequest(temp,null,null,null,null,
+                "payments",Collections.singletonList("fpp.transfer"),atLimit,Collections.<String>emptyList(),
+                Collections.<String>emptyList(),false,false,false,null);
+        assertEquals(att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS,request.qualifiedCaseIds().size());
+
+        atLimit.add("fpp.transfer.over-limit");
+        assertThrows(IllegalArgumentException.class,()->new NativeCaseSuiteRunRequest(temp,null,null,null,null,
+                "payments",Collections.singletonList("fpp.transfer"),atLimit,Collections.<String>emptyList(),
+                Collections.<String>emptyList(),false,false,false,null));
+    }
+
     @Test void validationIsInvokableThroughTypedRequestWithoutCliArgumentsOrConsoleOutput() throws Exception {
         Path root=temp.resolve("package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates"));
         Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("tools"));
@@ -96,8 +122,503 @@ class AttServiceTest {
         assertTrue(Files.isRegularFile(runDirectory.resolve("run.yaml")));
         assertTrue(Files.isRegularFile(runDirectory.resolve("ci/summary.json")));
         assertTrue(Files.isRegularFile(runDirectory.resolve("ci/junit.xml")));
+        Path standardWorkbook = runDirectory.resolve(att.report.NativeCaseExcelReportWriter.OUTPUT_PATH);
+        assertTrue(Files.isRegularFile(standardWorkbook), "Native RUN must always write standard XLSX without a source workbook");
+        String runManifest = new String(Files.readAllBytes(runDirectory.resolve("run.yaml")), StandardCharsets.UTF_8);
+        assertTrue(runManifest.contains("flowId: payment.transfer.v1"), runManifest);
+        assertTrue(runManifest.contains("flowRevision:"), runManifest);
+        assertTrue(runManifest.contains("sourceRevision:"), runManifest);
+        assertTrue(runManifest.contains("sourceProvenance:"), runManifest);
+        assertTrue(runManifest.contains("xlsx: workbooks/native-cases.result.xlsx"), runManifest);
+        String ciJson = new String(Files.readAllBytes(runDirectory.resolve("ci/summary.json")), StandardCharsets.UTF_8);
+        assertTrue(ciJson.contains("\"definitionId\":\"fpp.transfer\""), ciJson);
+        assertTrue(ciJson.contains("\"flowId\":\"payment.transfer.v1\""), ciJson);
+        assertTrue(ciJson.contains("\"flowRevision\":"), ciJson);
+        assertTrue(ciJson.contains("\"sourceRevision\":"), ciJson);
+        assertTrue(ciJson.contains("\"sourceType\":\"inline\""), ciJson);
+        String junitXml = new String(Files.readAllBytes(runDirectory.resolve("ci/junit.xml")), StandardCharsets.UTF_8);
+        assertTrue(junitXml.contains("classname=\"fpp.transfer.payment.transfer.v1\""), junitXml);
+        assertTrue(junitXml.contains("ATT.FLOW_REVISION"), junitXml);
+        assertTrue(junitXml.contains("ATT.SOURCE_REVISION"), junitXml);
+        assertTrue(junitXml.contains("ATT.SOURCE_PROVENANCE"), junitXml);
+        try (java.io.InputStream input = Files.newInputStream(standardWorkbook);
+             org.apache.poi.ss.usermodel.Workbook workbook = org.apache.poi.ss.usermodel.WorkbookFactory.create(input)) {
+            org.apache.poi.ss.usermodel.Row reportRow = workbook.getSheet("Cases").getRow(1);
+            assertEquals("fpp.transfer", reportRow.getCell(1).getStringCellValue());
+            assertEquals("fpp.transfer.second", reportRow.getCell(2).getStringCellValue());
+            assertEquals("second", reportRow.getCell(3).getStringCellValue());
+            assertEquals("payment.transfer.v1", reportRow.getCell(4).getStringCellValue());
+            assertTrue(reportRow.getCell(5).getStringCellValue().length() > 0);
+            assertTrue(reportRow.getCell(6).getStringCellValue().length() > 0);
+            assertEquals("inline", reportRow.getCell(7).getStringCellValue());
+            assertEquals("second", reportRow.getCell(11).getStringCellValue());
+        }
         assertEquals(runDirectory.resolve("configuration.json").toRealPath().toString(),
                 result.paths().get("configuration"));
+    }
+
+    @Test void nativeReportsRedactRegisteredCanaryFromResultsProvenanceAndRegeneration() throws Exception {
+        String canary = "violet-sequence-6fb1";
+        Path root = temp.resolve("native-secret-projection-package");
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("testcase/fpp/transfer"));
+        Files.createDirectories(root.resolve("templates/flows/payment/transfer/v1"));
+        Files.createDirectories(root.resolve("tools"));
+        Files.createDirectories(root.resolve("testdata"));
+        att.TestSchemas.install(root);
+        Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.15\noutputDirectory: output\n"
+                + "environment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet(canary);
+            org.apache.poi.ss.usermodel.Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Case ID");
+            header.createCell(1).setCellValue("Password");
+            org.apache.poi.ss.usermodel.Row data = sheet.createRow(1);
+            data.createCell(0).setCellValue("case1");
+            data.createCell(1).setCellValue(canary);
+            try (java.io.OutputStream output = Files.newOutputStream(root.resolve("testdata/native-cases.xlsx"))) {
+                workbook.write(output);
+            }
+        }
+        Files.write(root.resolve("testcase/fpp/transfer/testcase.yaml"), ("schemaVersion: att-testcase/v1\n"
+                + "id: fpp.transfer\nflow: payment.transfer.v1\n"
+                + "dataSource:\n  type: excel\n  path: testdata/native-cases.xlsx\n"
+                + "  sheet: " + canary + "\n  caseId: Case ID\n  dataColumns: 'password=Password'\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("tools/echo.yaml"), ("schemaVersion: att-tool/v1\nid: echo\nname: Echo\n"
+                + "description: Echo one value\ncommand: [/usr/bin/printf, '%s', '${password}']\nstdoutFormat: text\n"
+                + "arguments:\n  password: {name: Password, description: Echo value, required: true}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("tools/broken.yaml"), ("schemaVersion: att-tool/v1\nid: broken\nname: Broken\n"
+                + "description: Fail while passing the resolved argument to a static executable\n"
+                + "command: ['/missing-att-tool', '${password}']\nstdoutFormat: text\n"
+                + "arguments:\n  password: {name: Password, description: Failure value, required: true}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/flows/payment/transfer/v1/flow.yaml"), ("schemaVersion: att-flow/v3.6\n"
+                + "id: payment.transfer.v1\nname: Transfer\ndescription: Secret projection fixture\nactions:\n"
+                + "  echo:\n    type: tool\n    call: \"#{echo(password=${EXEC.INPUT.password})}\"\n"
+                + "    assert: \"${output.result} == 'a-different-value'\"\n"
+                + "    expected: ${EXEC.INPUT.password}\n    actual: ${output.result}\n"
+                + "  broken:\n    type: tool\n    call: \"#{broken(password=${EXEC.INPUT.password})}\"\n")
+                .getBytes(StandardCharsets.UTF_8));
+
+        RunResult result = new DefaultAttService().runNativeCases(new NativeCaseRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-secret-projection", "payments",
+                "fpp.transfer", Collections.singletonList("case1"), false, false, null));
+
+        assertTrue("ERROR".equals(result.status()) || "FAIL".equals(result.status()), result.status());
+        Path runDirectory = root.resolve("output/native-secret-projection");
+        String manifest = new String(Files.readAllBytes(runDirectory.resolve("run.yaml")), StandardCharsets.UTF_8);
+        String html = new String(Files.readAllBytes(runDirectory.resolve("report/index.html")), StandardCharsets.UTF_8);
+        String ciJson = new String(Files.readAllBytes(runDirectory.resolve("ci/summary.json")), StandardCharsets.UTF_8);
+        String junit = new String(Files.readAllBytes(runDirectory.resolve("ci/junit.xml")), StandardCharsets.UTF_8);
+        String junitHtml = new String(Files.readAllBytes(runDirectory.resolve("report/junit.html")), StandardCharsets.UTF_8);
+        Path executionDirectory;
+        try (java.util.stream.Stream<Path> executions = Files.list(runDirectory.resolve("executions"))) {
+            executionDirectory = executions.findFirst().orElse(null);
+        }
+        assertNotNull(executionDirectory, "Native report should retain execution evidence");
+        String caseLog = new String(Files.readAllBytes(executionDirectory.resolve("case.log")), StandardCharsets.UTF_8);
+        String caseYaml = new String(Files.readAllBytes(executionDirectory.resolve("case.yaml")), StandardCharsets.UTF_8);
+        assertTrue(manifest.contains("att-native-report/v1"), manifest);
+        assertTrue(manifest.contains("sourceIdentityDigest:"), manifest);
+        assertTrue(manifest.contains("qualifiedCaseId: fpp.transfer.case1"), manifest);
+        assertCanaryAbsent(canary, manifest, html, ciJson, junit, junitHtml, caseLog, caseYaml);
+        Path workbook = runDirectory.resolve(att.report.NativeCaseExcelReportWriter.OUTPUT_PATH);
+        assertFalse(workbookText(workbook).contains(canary), workbook.toString());
+
+        Path regenerated = new ReportRegenerator().regenerate(root.resolve("output"), "native-secret-projection");
+        String regeneratedHtml = new String(Files.readAllBytes(regenerated), StandardCharsets.UTF_8);
+        String regeneratedJunit = new String(Files.readAllBytes(runDirectory.resolve("report/junit.html")), StandardCharsets.UTF_8);
+        assertCanaryAbsent(canary, regeneratedHtml, regeneratedJunit);
+        assertFalse(workbookText(workbook).contains(canary), workbook.toString());
+
+        String legacyManifest = manifest.replaceAll("(?m)^[ \\t]*nativeReportProtection:.*(?:\\r?\\n|$)", "")
+                .replace("[REDACTED_SECRET]", canary);
+        assertTrue(legacyManifest.contains(canary), "fixture must emulate a pre-fix unsafe manifest value");
+        assertNotEquals(manifest, legacyManifest, "fixture must contain the native report-safety marker");
+        Files.write(runDirectory.resolve("run.yaml"), legacyManifest.getBytes(StandardCharsets.UTF_8));
+        assertThrows(IllegalArgumentException.class,
+                () -> new ReportRegenerator().regenerate(root.resolve("output"), "native-secret-projection"));
+        assertCanaryAbsent(canary,
+                new String(Files.readAllBytes(runDirectory.resolve("report/index.html")), StandardCharsets.UTF_8),
+                new String(Files.readAllBytes(runDirectory.resolve("report/junit.html")), StandardCharsets.UTF_8));
+        assertFalse(workbookText(workbook).contains(canary), workbook.toString());
+    }
+
+    private void assertCanaryAbsent(String canary, String... projections) {
+        for (String projection : projections) assertFalse(projection.contains(canary), projection);
+    }
+
+    private String workbookText(Path path) throws Exception {
+        StringBuilder result = new StringBuilder();
+        try (java.io.InputStream input = Files.newInputStream(path);
+             org.apache.poi.ss.usermodel.Workbook workbook = org.apache.poi.ss.usermodel.WorkbookFactory.create(input)) {
+            for (int sheetIndex = 0; sheetIndex < workbook.getNumberOfSheets(); sheetIndex++) {
+                org.apache.poi.ss.usermodel.Sheet sheet = workbook.getSheetAt(sheetIndex);
+                for (org.apache.poi.ss.usermodel.Row row : sheet)
+                    for (org.apache.poi.ss.usermodel.Cell cell : row) result.append(cell.toString()).append('\n');
+            }
+        }
+        return result.toString();
+    }
+
+    @Test void implicitSuiteRunsEveryResolvedCaseFromOneDefinitionWithoutSuiteFile() throws Exception {
+        Path root = nativeSuitePackage("single-suite-package");
+        writeNativeDefinition(root, "fpp.transfer", "payment.transfer.v1", ""
+                + "- {recordId: first, data: {caseId: first, amount: 7}}\n"
+                + "- {recordId: second, data: {caseId: second, amount: 13}}\n"
+                + "- {recordId: third, data: {caseId: third, amount: 17}}\n");
+
+        RunResult result = new DefaultAttService().runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-suite-all", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, false, false, null));
+
+        assertEquals("PASS", result.status());
+        assertEquals(3L, result.summary().get("total"));
+        assertEquals(3, result.summary().get("resolved"));
+        assertEquals(3, result.summary().get("selected"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> cases = (List<Map<String,Object>>) result.summary().get("cases");
+        assertEquals(Arrays.asList("fpp.transfer.first", "fpp.transfer.second", "fpp.transfer.third"),
+                cases.stream().map(item -> String.valueOf(item.get("qualifiedCaseId"))).collect(java.util.stream.Collectors.toList()));
+        assertTrue(Files.isRegularFile(root.resolve("output/native-suite-all/run.yaml")));
+        assertFalse(Files.exists(root.resolve("suite.yaml")), "An implicit Suite must not require a suite file");
+    }
+
+    @Test void failFastReportsSelectedButUnstartedCasesAsSkippedWithoutExecutionIds() throws Exception {
+        Path root = nativeSuitePackage("native-suite-fail-fast-package");
+        writeNativeDefinition(root, "fpp.transfer", "payment.transfer.v1", ""
+                + "- {recordId: first, data: {caseId: first, amount: 7}}\n"
+                + "- {recordId: second, data: {caseId: second, amount: 13}}\n"
+                + "- {recordId: third, data: {caseId: third, amount: 17}}\n");
+        Files.write(root.resolve("templates/flows/payment/transfer/v1/flow.yaml"),
+                ("schemaVersion: att-flow/v3.6\nid: payment.transfer.v1\nname: Transfer\n"
+                        + "description: Fail-fast aggregate fixture\nactions:\n"
+                        + "  reject: {type: assert, assert: 'false'}\n").getBytes(StandardCharsets.UTF_8));
+
+        List<ExecutionEvent> observed=new ArrayList<ExecutionEvent>();
+        RunResult result = new DefaultAttService().runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-suite-fail-fast", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, false, true, observed::add));
+
+        assertEquals("FAIL", result.status());
+        assertEquals(3L, result.summary().get("total"));
+        assertEquals(3, result.summary().get("selected"));
+        assertEquals(1L, result.summary().get("executionCount"));
+        assertEquals(1L, result.summary().get("failed"));
+        assertEquals(2L, result.summary().get("skipped"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> cases = (List<Map<String,Object>>) result.summary().get("cases");
+        assertEquals(Arrays.asList("FAIL", "SKIPPED", "SKIPPED"), cases.stream()
+                .map(item -> String.valueOf(item.get("status"))).collect(java.util.stream.Collectors.toList()));
+        assertEquals(Boolean.TRUE, cases.get(0).get("executed"));
+        for (int index = 1; index < cases.size(); index++) {
+            assertEquals(Boolean.FALSE, cases.get(index).get("executed"));
+            assertNull(cases.get(index).get("execId"));
+            assertTrue(String.valueOf(cases.get(index).get("notStartedReason"))
+                    .contains("Not started because failFast"));
+        }
+
+        Path runDirectory = root.resolve("output/native-suite-fail-fast");
+        @SuppressWarnings("unchecked") Map<String,Object> manifest = (Map<String,Object>) new org.yaml.snakeyaml.Yaml()
+                .load(new String(Files.readAllBytes(runDirectory.resolve("run.yaml")), StandardCharsets.UTF_8));
+        @SuppressWarnings("unchecked") Map<String,Object> run = (Map<String,Object>) manifest.get("run");
+        assertEquals(3, run.get("selectedCaseCount"));
+        assertEquals(1, ((Number) run.get("executionCount")).intValue());
+        assertEquals(2, ((Number) run.get("skippedCaseCount")).intValue());
+        @SuppressWarnings("unchecked") List<Map<String,Object>> manifestCases=(List<Map<String,Object>>)manifest.get("cases");
+        assertEquals(Boolean.TRUE,manifestCases.get(0).get("executed"));
+        for(int index=1;index<manifestCases.size();index++) {
+            assertEquals(Boolean.FALSE,manifestCases.get(index).get("executed"));
+            assertNull(manifestCases.get(index).get("execId"));
+            assertEquals("",manifestCases.get(index).get("caseLog"));
+        }
+        List<String> events = Files.readAllLines(runDirectory.resolve("events.jsonl"), StandardCharsets.UTF_8);
+        assertEquals(3, events.size());
+        assertEquals(2L, events.stream().filter(line -> line.contains("\"executionStarted\":false"))
+                .count());
+        assertTrue(events.stream().filter(line -> line.contains("\"executionStarted\":false"))
+                .allMatch(line -> line.contains("\"notStartedReason\":\"Not started because failFast")));
+        List<ExecutionEvent> notStartedEvents=observed.stream().filter(event->
+                event.type()==ExecutionEvent.Type.PROGRESS&&"CASE_FINISHED".equals(event.data().get("event"))
+                        &&Boolean.FALSE.equals(event.data().get("executionStarted")))
+                .collect(java.util.stream.Collectors.toList());
+        assertEquals(2,notStartedEvents.size());
+        assertTrue(notStartedEvents.stream().allMatch(event->"failFast".equals(event.data().get("notStartedReason"))));
+
+        com.fasterxml.jackson.databind.JsonNode ci = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(Files.readAllBytes(runDirectory.resolve("ci/summary.json")));
+        assertEquals(3, ci.path("summary").path("total").asInt());
+        assertEquals(1, ci.path("summary").path("executionCount").asInt());
+        assertEquals(2, ci.path("summary").path("skipped").asInt());
+        assertFalse(ci.path("cases").get(1).path("executed").asBoolean());
+        assertTrue(ci.path("cases").get(1).path("execId").isNull());
+        String junit = new String(Files.readAllBytes(runDirectory.resolve("ci/junit.xml")), StandardCharsets.UTF_8);
+        assertTrue(junit.contains("tests=\"3\""), junit);
+        assertTrue(junit.contains("skipped=\"2\""), junit);
+        assertTrue(junit.contains("name=\"ATT.EXECUTED\" value=\"false\""), junit);
+
+        Path regenerated=new ReportRegenerator().regenerate(root.resolve("output"),"native-suite-fail-fast");
+        String regeneratedHtml=new String(Files.readAllBytes(regenerated),StandardCharsets.UTF_8);
+        assertTrue(regeneratedHtml.contains("data-caseid=\"fpp.transfer.second\" data-execid=\"\""),regeneratedHtml);
+        assertTrue(regeneratedHtml.contains("data-status=\"SKIPPED\""),regeneratedHtml);
+        String regeneratedJunit=new String(Files.readAllBytes(runDirectory.resolve("report/junit.html")),StandardCharsets.UTF_8);
+        assertTrue(regeneratedJunit.contains("· Skipped 2"),regeneratedJunit);
+        assertTrue(regeneratedJunit.contains("fpp.transfer.third"),regeneratedJunit);
+    }
+
+    @Test void nativeSuiteRerunFailedRetriesOnlyExecutedFailuresAndKeepsCountsSeparate() throws Exception {
+        Path root = nativeSuitePackage("native-suite-retry-package");
+        writeNativeDefinition(root, "fpp.transfer", "payment.transfer.v1",
+                "- {recordId: first, data: {caseId: first, amount: 7}}\n"
+              + "- {recordId: second, data: {caseId: second, amount: 13}}\n"
+              + "- {recordId: third, data: {caseId: third, amount: 17}}\n");
+        Files.write(root.resolve("templates/flows/payment/transfer/v1/flow.yaml"),
+                String.join("\n", "schemaVersion: att-flow/v3.6", "id: payment.transfer.v1", "name: Transfer",
+                        "description: Native Suite retry fixture", "actions:",
+                        "  verify: {type: assert, assert: '#{${EXEC.INPUT.amount} <= 7}'}", "")
+                        .getBytes(StandardCharsets.UTF_8));
+        DefaultAttService service = new DefaultAttService();
+        RunResult source = service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-retry-source", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, false, true, null));
+        assertEquals("FAIL", source.status());
+        assertEquals(3L, source.summary().get("total"));
+        assertEquals(2L, source.summary().get("executionCount"));
+        assertEquals(1L, source.summary().get("skipped"));
+
+        RunResult dryRun = service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-retry-dry-run", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, true, false, null));
+        assertEquals("SKIPPED", dryRun.status());
+        RunResult otherPackage = service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-retry-other-package", "other-payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, false, true, null));
+        assertEquals("FAIL", otherPackage.status());
+        @SuppressWarnings("unchecked") Map<String,Object> latest = (Map<String,Object>)new org.yaml.snakeyaml.Yaml()
+                .load(new String(Files.readAllBytes(root.resolve("output/latest-run.yaml")),StandardCharsets.UTF_8));
+        assertEquals("native-retry-other-package", latest.get("runId"),
+                "The global latest pointer may advance independently of this Package's retry history");
+
+        NativeCaseSuiteRunRequest retryRequest = new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-retry-first", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), false, true, false, false,
+                null, null);
+        RunResult retry = service.runNativeCaseSuite(retryRequest);
+        assertEquals("FAIL", retry.status());
+        assertEquals(1L, retry.summary().get("total"));
+        assertEquals(1, ((Number) retry.summary().get("selected")).intValue());
+        assertEquals(1L, retry.summary().get("executionCount"));
+        assertEquals(0L, retry.summary().get("skipped"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> cases =
+                (List<Map<String,Object>>) retry.summary().get("cases");
+        assertEquals(Collections.singletonList("fpp.transfer.second"), cases.stream()
+                .map(item -> String.valueOf(item.get("qualifiedCaseId")))
+                .collect(java.util.stream.Collectors.toList()));
+
+        @SuppressWarnings("unchecked") Map<String,Object> manifest = (Map<String,Object>)
+                new org.yaml.snakeyaml.Yaml().load(new String(Files.readAllBytes(
+                        root.resolve("output/native-retry-first/run.yaml")), StandardCharsets.UTF_8));
+        @SuppressWarnings("unchecked") Map<String,Object> run = (Map<String,Object>) manifest.get("run");
+        @SuppressWarnings("unchecked") Map<String,Object> lineage = (Map<String,Object>) run.get("retryLineage");
+        assertEquals("native-retry-source", lineage.get("sourceRunId"));
+        assertEquals(3, lineage.get("sourceSelectedCaseCount"));
+        assertEquals(1, lineage.get("retryAttemptNumber"));
+        assertEquals(1, lineage.get("retryCaseCount"));
+        assertEquals(1, ((Number) lineage.get("retryExecutionCount")).intValue());
+        assertEquals(0, ((Number) lineage.get("retrySkippedCaseCount")).intValue());
+        assertEquals(Collections.singletonList("fpp.transfer.second"), lineage.get("failedQualifiedCaseIds"));
+
+        RunResult retryAgain = service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-retry-second", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), false, true, false, false,
+                null, null));
+        assertEquals(1L, retryAgain.summary().get("total"));
+        @SuppressWarnings("unchecked") Map<String,Object> secondManifest = (Map<String,Object>)
+                new org.yaml.snakeyaml.Yaml().load(new String(Files.readAllBytes(
+                        root.resolve("output/native-retry-second/run.yaml")), StandardCharsets.UTF_8));
+        @SuppressWarnings("unchecked") Map<String,Object> secondRun = (Map<String,Object>) secondManifest.get("run");
+        @SuppressWarnings("unchecked") Map<String,Object> secondLineage = (Map<String,Object>) secondRun.get("retryLineage");
+        assertEquals("native-retry-first", secondLineage.get("sourceRunId"));
+        assertEquals(2, secondLineage.get("retryAttemptNumber"));
+        assertEquals(1, secondLineage.get("sourceSelectedCaseCount"));
+        assertEquals(Collections.singletonList("fpp.transfer.second"), secondLineage.get("failedQualifiedCaseIds"));
+    }
+
+    @Test void nativeSuiteRetryRejectsExcelWorkbookOnlyChangeWithUnchangedCaseIdentity() throws Exception {
+        Path root = nativeSuitePackage("native-suite-excel-retry-package");
+        Path workbook = root.resolve("testdata/retry-cases.xlsx");
+        Files.createDirectories(workbook.getParent());
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook book = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+             java.io.OutputStream output = Files.newOutputStream(workbook)) {
+            org.apache.poi.ss.usermodel.Sheet sheet = book.createSheet("Cases");
+            org.apache.poi.ss.usermodel.Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("Case ID");
+            header.createCell(1).setCellValue("Amount");
+            org.apache.poi.ss.usermodel.Row row = sheet.createRow(1);
+            row.createCell(0).setCellValue("TC01");
+            row.createCell(1).setCellValue("100");
+            book.write(output);
+        }
+        Path definition = root.resolve("testcase/fpp/transfer/testcase.yaml");
+        Files.createDirectories(definition.getParent());
+        Files.write(definition, ("schemaVersion: att-testcase/v1\nid: fpp.transfer\nflow: payment.transfer.v1\n"
+                + "dataSource:\n  type: excel\n  path: testdata/retry-cases.xlsx\n  sheet: Cases\n"
+                + "  headerRows: 1\n  caseId: Case ID\n  dataColumns: amount=Amount\n"
+                + "inputs:\n  amount: {from: DATA.amount}\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("templates/flows/payment/transfer/v1/flow.yaml"),
+                String.join("\n", "schemaVersion: att-flow/v3.6", "id: payment.transfer.v1", "name: Transfer",
+                        "description: Excel retry fixture", "actions:",
+                        "  verify: {type: assert, assert: 'false'}", "")
+                        .getBytes(StandardCharsets.UTF_8));
+
+        DefaultAttService service = new DefaultAttService();
+        RunResult source = service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-excel-retry-source", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, false, false, null));
+        assertEquals("FAIL", source.status());
+        @SuppressWarnings("unchecked") Map<String,Object> manifest = (Map<String,Object>)
+                new org.yaml.snakeyaml.Yaml().load(new String(Files.readAllBytes(
+                        root.resolve("output/native-excel-retry-source/run.yaml")), StandardCharsets.UTF_8));
+        @SuppressWarnings("unchecked") Map<String,Object> run = (Map<String,Object>) manifest.get("run");
+        @SuppressWarnings("unchecked") List<Map<String,Object>> caseSources =
+                (List<Map<String,Object>>) run.get("caseSources");
+        assertEquals(1, caseSources.size());
+        assertEquals(64, String.valueOf(caseSources.get(0).get("workbookSha256")).length());
+        assertEquals(64, String.valueOf(caseSources.get(0).get("resolvedInputDigest")).length());
+        assertEquals("excel", caseSources.get(0).get("dataSourceType"));
+        assertEquals("testdata/retry-cases.xlsx", caseSources.get(0).get("dataSourceReference"));
+
+        try (java.io.InputStream input = Files.newInputStream(workbook);
+             org.apache.poi.xssf.usermodel.XSSFWorkbook book = new org.apache.poi.xssf.usermodel.XSSFWorkbook(input)) {
+            book.getSheet("Cases").getRow(1).getCell(1).setCellValue("200");
+            try (java.io.OutputStream output = Files.newOutputStream(workbook)) { book.write(output); }
+        }
+
+        NativeCaseSuiteRunRequest retryRequest = new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-excel-retry-stale", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), false, true, false, false,
+                null, null);
+        IllegalArgumentException stale = assertThrows(IllegalArgumentException.class,
+                () -> service.runNativeCaseSuite(retryRequest));
+        assertTrue(stale.getMessage().contains("source changed") || stale.getMessage().contains("workbook"),
+                stale.getMessage());
+        assertFalse(Files.exists(root.resolve("output/native-excel-retry-stale/run.yaml")));
+    }
+
+    @Test void nativeSuiteRetryRejectsChangedFlowRevisionAndTamperedLatestManifest() throws Exception {
+        Path root = nativeSuitePackage("native-suite-retry-stale-package");
+        writeNativeDefinition(root, "fpp.transfer", "payment.transfer.v1",
+                "- {recordId: first, data: {caseId: first, amount: 13}}\n");
+        Path flow = root.resolve("templates/flows/payment/transfer/v1/flow.yaml");
+        byte[] originalFlow = Files.readAllBytes(flow);
+        Files.write(flow, String.join("\n", "schemaVersion: att-flow/v3.6", "id: payment.transfer.v1",
+                "name: Transfer", "description: Native Suite retry stale fixture", "actions:",
+                "  verify: {type: assert, assert: 'false'}", "").getBytes(StandardCharsets.UTF_8));
+        DefaultAttService service = new DefaultAttService();
+        RunResult source = service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-stale-source", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), true, false, false, null));
+        assertEquals("FAIL", source.status());
+
+        NativeCaseSuiteRunRequest retryRequest = new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-stale-retry", "payments",
+                Collections.singletonList("fpp.transfer"), Collections.<String>emptyList(),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), false, true, false, false,
+                null, null);
+        Files.write(flow, originalFlow);
+        IllegalArgumentException stale = assertThrows(IllegalArgumentException.class,
+                () -> service.runNativeCaseSuite(retryRequest));
+        assertTrue(stale.getMessage().contains("source changed"), stale.getMessage());
+
+        Path manifest = root.resolve("output/native-stale-source/run.yaml");
+        Files.write(manifest, (new String(Files.readAllBytes(manifest), StandardCharsets.UTF_8)
+                + "# tampered after completion\n").getBytes(StandardCharsets.UTF_8));
+        IllegalArgumentException tampered = assertThrows(IllegalArgumentException.class,
+                () -> service.runNativeCaseSuite(retryRequest));
+        assertTrue(tampered.getMessage().contains("hash does not match"), tampered.getMessage());
+        assertFalse(Files.exists(root.resolve("output/native-stale-retry/run.yaml")));
+    }
+
+    @Test void crossDefinitionSelectionRunsCasesFromDistinctFlowsAndKeysAggregateEvidence() throws Exception {
+        Path root = nativeSuitePackage("cross-suite-package");
+        writeNativeFlow(root, "payment.alpha.v1", "alpha=${EXEC.INPUT.amount}");
+        writeNativeFlow(root, "payment.zeta.v1", "zeta=${EXEC.INPUT.amount}");
+        writeNativeDefinition(root, "fpp.alpha", "payment.alpha.v1",
+                "- {recordId: first, data: {caseId: first, amount: 7}}\n"
+              + "- {recordId: spare, data: {caseId: spare, amount: 9}}\n");
+        writeNativeDefinition(root, "fpp.zeta", "payment.zeta.v1",
+                "- {recordId: third, data: {caseId: third, amount: 11}}\n");
+
+        RunResult result = new DefaultAttService().runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,
+                Paths.get("config/config.yaml"), "SIT", null, "native-suite-cross", "payments",
+                Arrays.asList("fpp.zeta", "fpp.alpha"), Arrays.asList("fpp.zeta.third", "fpp.alpha.first"),
+                Collections.<String>emptyList(), Collections.<String>emptyList(), false, false, false, null));
+
+        assertEquals("PASS", result.status());
+        assertEquals(2L, result.summary().get("total"));
+        @SuppressWarnings("unchecked") List<Map<String,Object>> cases = (List<Map<String,Object>>) result.summary().get("cases");
+        assertEquals(Arrays.asList("fpp.alpha.first", "fpp.zeta.third"),
+                cases.stream().map(item -> String.valueOf(item.get("qualifiedCaseId"))).collect(java.util.stream.Collectors.toList()));
+        assertEquals(Arrays.asList("payment.alpha.v1", "payment.zeta.v1"),
+                cases.stream().map(item -> String.valueOf(item.get("flowId"))).collect(java.util.stream.Collectors.toList()));
+        assertEquals("fpp.alpha", cases.get(0).get("definitionId"));
+        assertEquals("fpp.zeta", cases.get(1).get("definitionId"));
+        Path runDirectory = root.resolve("output/native-suite-cross");
+        for (Map<String,Object> item : cases) {
+            Path caseLog = runDirectory.resolve("executions").resolve(String.valueOf(item.get("execId"))).resolve("case.log");
+            String content = new String(Files.readAllBytes(caseLog), StandardCharsets.UTF_8);
+            if ("fpp.alpha".equals(item.get("definitionId"))) assertTrue(content.contains("alpha=7"), content);
+            else assertTrue(content.contains("zeta=11"), content);
+        }
+        String manifest = new String(Files.readAllBytes(runDirectory.resolve("run.yaml")), StandardCharsets.UTF_8);
+        assertTrue(manifest.contains("targetType: nativeSuite"), manifest);
+        assertTrue(manifest.contains("definitionId: fpp.alpha"), manifest);
+        assertTrue(manifest.contains("definitionId: fpp.zeta"), manifest);
+        assertTrue(Files.isRegularFile(runDirectory.resolve("ci/summary.json")));
+        assertTrue(Files.isRegularFile(runDirectory.resolve("ci/junit.xml")));
+    }
+
+    private Path nativeSuitePackage(String name) throws Exception {
+        Path root = temp.resolve(name);
+        Files.createDirectories(root.resolve("config"));
+        Files.createDirectories(root.resolve("templates"));
+        Files.createDirectories(root.resolve("testcase"));
+        att.TestSchemas.install(root);
+        Files.write(root.resolve("config/config.yaml"), ("schemaVersion: att-config/v2.12\noutputDirectory: output\n"
+                + "environment: SIT\ntemplates: {root: templates}\ntestcase: {root: testcase}\n")
+                .getBytes(StandardCharsets.UTF_8));
+        writeNativeFlow(root, "payment.transfer.v1", "transfer=${EXEC.INPUT.amount}");
+        return root;
+    }
+
+    private void writeNativeDefinition(Path root, String id, String flowId, String records) throws Exception {
+        Path definition = root.resolve("testcase").resolve(id.replace('.', '/')).resolve("testcase.yaml");
+        Files.createDirectories(definition.getParent());
+        StringBuilder yaml = new StringBuilder("schemaVersion: att-testcase/v1\nid: ").append(id)
+                .append("\nflow: ").append(flowId).append("\ncaseIdExpression: \"${DATA.caseId}\"\n")
+                .append("dataSource:\n  type: inline\n  records:\n");
+        for (String line : records.split("\\n")) if (!line.isEmpty()) yaml.append("    ").append(line).append('\n');
+        Files.write(definition, yaml.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void writeNativeFlow(Path root, String id, String message) throws Exception {
+        Path flow = root.resolve("templates/flows").resolve(id.replace('.', '/')).resolve("flow.yaml");
+        Files.createDirectories(flow.getParent());
+        Files.write(flow, ("schemaVersion: att-flow/v3.6\nid: " + id + "\nname: " + id
+                + "\ndescription: Native suite fixture\nactions:\n"
+                + "  show:\n    type: log\n    message: '" + message + "'\n")
+                .getBytes(StandardCharsets.UTF_8));
     }
 
     @Test void validationChecksIdentityFormatSyntaxBeforeAnyRunStarts() throws Exception {

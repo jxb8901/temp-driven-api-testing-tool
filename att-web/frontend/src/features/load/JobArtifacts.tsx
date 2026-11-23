@@ -95,7 +95,8 @@ export function JobArtifacts({ api, jobId, refresh, onMetrics }: { api: LoadJobs
         setSelected(previous => {
           if (!previous) return null;
           const entry = [...data.items, ...data.primaryReports].find(item => item.path === previous.path);
-          return data.archiveStatus === 'READY' && entry && entry.size === previous.size && entry.sha256 === previous.sha256 ? previous : null;
+          return data.archiveStatus === 'READY' && entry && entry.preview !== false
+            && entry.size === previous.size && entry.sha256 === previous.sha256 ? previous : null;
         });
         onMetrics?.(data.archiveMetrics || null);
         if (['PENDING', 'ARCHIVING'].includes(data.archiveStatus) || data.archiveMetrics?.outcome === 'RUNNING') timer = setTimeout(() => void load(), 2000);
@@ -107,7 +108,7 @@ export function JobArtifacts({ api, jobId, refresh, onMetrics }: { api: LoadJobs
 
   useEffect(() => {
     setText(null); setPreviewError('');
-    if (!selected || /\.html?$/i.test(selected.path)) return;
+    if (!selected || selected.preview === false || /\.html?$/i.test(selected.path)) return;
     const controller = new AbortController();
     if (!features.getJobArtifactText) { setPreviewError('Text preview is unavailable.'); return; }
     features.getJobArtifactText(jobId, selected.path, controller.signal).then(value => {
@@ -139,11 +140,13 @@ export function JobArtifacts({ api, jobId, refresh, onMetrics }: { api: LoadJobs
 
   const query = search.trim().toLocaleLowerCase();
   const matches = (item: JobArtifact) => !query || item.path.toLocaleLowerCase().includes(query);
+  const download = (item: JobArtifact) => <a href={api.artifactHref(jobId, item.path)} download
+    aria-label={`Download ${item.path}`} title={item.path}>Download {item.path.slice(item.path.lastIndexOf('/') + 1)}</a>;
   const entry = (item: JobArtifact) => <li key={item.path}>
-    <button type="button" className="att-link-button" aria-label={`${item.report ? 'View report' : 'Preview'} ${item.path}`}
-      title={item.path} onClick={() => setSelected(item)}>{item.report ? 'View Report: ' : ''}{item.path.slice(item.path.lastIndexOf('/') + 1)}</button>
+    {item.preview === false ? download(item) : <button type="button" className="att-link-button" aria-label={`${item.report ? 'View report' : 'Preview'} ${item.path}`}
+      title={item.path} onClick={() => setSelected(item)}>{item.report ? 'View Report: ' : ''}{item.path.slice(item.path.lastIndexOf('/') + 1)}</button>}
     {item.size != null && <span> ({formatArchiveSize(item.size)})</span>}{' '}
-    <a href={formatRoute({ kind: 'job-artifact', jobId, path: item.path })} target="_blank" rel="noopener noreferrer" title={item.path}>Open in new tab</a>
+    {item.preview === false ? null : <a href={formatRoute({ kind: 'job-artifact', jobId, path: item.path })} target="_blank" rel="noopener noreferrer" title={item.path}>Open in new tab</a>}
     <details><summary>Full path</summary><code>{item.path}</code></details>
   </li>;
   return <section aria-label="Job artifact archive">
@@ -190,10 +193,10 @@ export function JobArtifacts({ api, jobId, refresh, onMetrics }: { api: LoadJobs
     {selected && <section aria-label="Artifact preview">
       <h3>{selected.path}</h3>
       <div className="att-review-actions">
-        <a href={formatRoute({ kind: 'job-artifact', jobId, path: selected.path })} target="_blank" rel="noopener noreferrer">Open in new tab</a>
+        {selected.preview === false ? download(selected) : <a href={formatRoute({ kind: 'job-artifact', jobId, path: selected.path })} target="_blank" rel="noopener noreferrer">Open in new tab</a>}
         <button type="button" onClick={() => setSelected(null)}>Close preview</button>
       </div>
-      {/\.html?$/i.test(selected.path) ? (
+      {selected.preview === false ? <p>Binary artifact. Download it to view.</p> : /\.html?$/i.test(selected.path) ? (
         features.getJobArtifactText
           ? <ReportPreview key={jobId + ':' + selected.path} jobId={jobId} path={selected.path} readText={features.getJobArtifactText} />
           : <p role="alert">Authenticated report preview is unavailable.</p>

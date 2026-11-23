@@ -1,10 +1,10 @@
 # 統一 RUN 與排程
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-ATT 4.4.1 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+功能性單次執行使用共用 **RUN** model，支援 Case、Template、Flow 和 Tool。**Debug** 是部分 RUN target 的診斷模式。**LOAD** 保留效能引擎、負載控制和專用報告。4.6.0 release-target stack 透過 `run native-case` 和 `run native-suite` 加入明確 Native Case 與 implicit Native Suite 選取；release 和 tag 尚未發佈，部署驗收仍待完成。
 
-已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](../../interfaces/cli/vnext-proposed.zh.md)。
+舊版 Local CLI 保留其相容邊界：`./att.sh run` 選取 workbook Case，standalone `debug` 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。Native Server RUN 需要經驗證的 `att-execution/v2` draft，不會透過舊式 raw Case selector 提交。更廣泛的共用 CLI grammar 仍屬[規劃中 proposal](../../interfaces/cli/vnext-proposed.zh.md)。
 
 ## 驗證及執行 RUN
 
@@ -55,7 +55,7 @@ ATT 4.4.1 將功能性單次執行統一為 **RUN**，支援 Case、Template、F
 
 `suites` 與 `suiteDirectory` 互斥；後者選取套件內的 group 目錄。Case/tag 篩選沿用 CLI 交集規則，任一要求的 tag 可匹配，excludeTags 則排除匹配 Case。`all:true` 表示套件選取。陣列必須非空、不重複，最多 1000 個值。驗證會解析並固定最多 10000 個 Case ID；空選取不會退回執行全部 Case。
 
-`rerunFailed:true` 從呼叫者最近 100 個擁有的工作中，選取同套件最近一個已完成 Case RUN 的失敗項目，與明確 Case/tag 篩選取交集，再固定 ID。Manifest 不可用或沒有匹配失敗項目會驗證失敗。既有 CLI `--rerun-failed` 繼續使用本機 output history。
+Native Suite 的 `rerunFailed:true` 會從同一擁有人、Package、Definition ID 和 Package revision 中最近一個符合資格且已完成的 Native Suite RUN，選取曾執行但失敗的 Case。Server 按完成時間排列候選，不限於最近 100 個 Job。本機執行使用依 Package/Definition 區分且驗證 manifest hash 的 Native Suite pointer；dry-run 及不相關 RUN 不會取代此 pointer。Draft 會凍結來源 Job/run、manifest digest、revision、來源選取數、retry attempt number 和精確失敗 Qualified Case ID；提交時會重新驗證來源，若 draft 驗證後有更新的相符 RUN 完成，就拒絕過期 draft。來源內 Skipped Case 不會重跑。新 RUN 只報告本次選取／執行／略過數，並把 retry 次數和來源統計分開保存。Schedule 會在每次執行時保留已驗證的來源 lineage。Manifest 不可用或不一致、來源變更，或沒有已執行的失敗 Case 都會驗證失敗。既有 Workbook／Sidecar `rerunFailed:true` 行為和本機 history 維持不變。
 
 ## 啟用 Debug 診斷
 

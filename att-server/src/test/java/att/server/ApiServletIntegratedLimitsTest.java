@@ -14,10 +14,16 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.FilterOutputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.net.InetSocketAddress;
@@ -87,6 +93,169 @@ class ApiServletIntegratedLimitsTest {
             assertEquals("READY",overview.path("archiveStatus").asText());
             assertEquals("FAILED",overview.path("loadReportV2").path("state").asText());
         }
+    }
+
+    @Test void nativeResultWorkbookArchiveEntryDownloadsWithXlsxHeaders() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("native-xlsx-download-packages"));
+        createPackage(packages.resolve("p"));
+        try(ServerRuntime runtime=runtime(packages,sharedRuntimeConfig(),"native-xlsx-download-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("native-xlsx-download-libs"))) {
+            String id="J0000000000000781";
+            Path output=Files.createDirectories(runtime.outputDirectoryForJob(id));
+            String runId="native-download";
+            Path runDirectory=Files.createDirectories(output.resolve(runId));
+            Path workbookPath=runDirectory.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX);Files.createDirectories(workbookPath.getParent());
+            try(org.apache.poi.xssf.usermodel.XSSFWorkbook workbook=new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+                java.io.OutputStream stream=Files.newOutputStream(workbookPath)) {
+                workbook.createSheet("Cases").createRow(0).createCell(0).setCellValue("Case ID");
+                workbook.write(stream);
+            }
+            Files.writeString(runDirectory.resolve("run.yaml"),"schemaVersion: att-run/v2.1\nrun:\n"
+                    +"  id: "+runId+"\n  targetType: nativeCase\n  nativeReportProtection: att-native-report/v1\n"
+                    +"outputs:\n  html: report/index.html\n  xlsx: workbooks/native-cases.result.xlsx\n");
+            byte[] expected=Files.readAllBytes(workbookPath);
+            Job job=new Job(id,"run","p","alice",new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
+            job.executionSpec=nativeExecutionSpec("p",runId);
+            job.resultJson=ServerRuntime.JSON.writeValueAsString(Map.of("executionId",runId,"status","PASS","exitCode",0));
+            runtime.store.insert(job,"{}");job.status="PASS";job.finishedAt=Instant.now();runtime.store.update(job);
+            ArtifactArchive.build(output,runtime.artifactArchivePath(id));
+            Files.writeString(runtime.artifactArchivePath(id).resolveSibling("archive-status.json"),"{\"state\":\"READY\"}");
+
+            ApiServlet servlet=servlet(runtime);
+            Captured indexResponse=invoke(servlet,"GET","/jobs/"+id+"/artifacts",Collections.emptyMap(),new byte[0]);
+            JsonNode index=ServerRuntime.JSON.readTree(indexResponse.body());
+            assertEquals(200,indexResponse.status,index.toString());
+            JsonNode workbookEntry=null;
+            String expectedPath=runId+"/"+ArtifactArchive.NATIVE_CASE_RESULT_XLSX;
+            for(JsonNode item:index.path("items"))if(expectedPath.equals(item.path("path").asText()))workbookEntry=item;
+            assertNotNull(workbookEntry,"The XLSX must be visible in the archive-backed artifact index");
+            assertEquals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",workbookEntry.path("mediaType").asText());
+            assertFalse(workbookEntry.path("preview").asBoolean());
+
+            Captured download=invoke(servlet,"GET","/jobs/"+id+"/artifacts/view/"+expectedPath,
+                    Collections.emptyMap(),new byte[0]);
+            assertEquals(200,download.status);
+            assertEquals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",download.headers.get("Content-Type"));
+            assertEquals("attachment; filename=\"native-cases.result.xlsx\"",download.headers.get("Content-Disposition"));
+            assertArrayEquals(expected,download.body());
+        }
+    }
+
+    @Test void nativeSourceWorkbookArchiveRequiresCurrentPackageEditor() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("native-source-xlsx-packages"));
+        Path packageRoot=createPackage(packages.resolve("alice"));
+        Path runtimeConfig=sharedRuntimeConfig("native-source-xlsx-runtime");
+        Path data=temp.resolve("native-source-xlsx-data");
+        Path serverFile=temp.resolve("native-source-xlsx-server.yaml");
+        Path libs=workerLibraries("native-source-xlsx-libs");
+        String server="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(data)+"\n"
+                +"  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)+"\n"
+                +"  authenticationRequired: true\n  auth: {mode: local}\n"
+                +"  packageConfiguration: {sourceEditingEnabled: true}\n  inspection: {enabled: true}\nworkers: {}\npackages:\n"
+                +"  allowedRoots: ["+ServerRuntimeTestSupport.yaml(packages)+"]\n  entries:\n"
+                +"    alice:\n      path: "+ServerRuntimeTestSupport.yaml(packageRoot)+"\n";
+        try(ServerRuntime runtime=new ServerRuntime(ServerConfig.load(Files.writeString(serverFile,server)),libs.toString())) {
+            runtime.auth.createUser("alice","Alice","unused Alice password","USER");
+            runtime.auth.createUser("bob","Bob","unused Bob password","USER");
+            String id="J0000000000000791",runId="native-source-download";
+            byte[] sourceWorkbookBytes=workbookBytes("Source",true);
+            byte[] resultWorkbookBytes=workbookBytes("Cases",false);
+            createScheduledNativeSourceWorkbookFixture(runtime,id,runId,"alice",sourceWorkbookBytes,resultWorkbookBytes);
+            String nonEditorJobId="J0000000000000792",nonEditorRunId="native-source-no-editor";
+            createScheduledNativeSourceWorkbookFixture(runtime,nonEditorJobId,nonEditorRunId,"bob",
+                    sourceWorkbookBytes,resultWorkbookBytes);
+
+            ApiServlet servlet=servlet(runtime);
+            String sourcePath=runId+"/"+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX;
+            Captured editorZip=invokeAs(servlet,"alice","GET","/jobs/"+id+"/artifacts/archive.zip",Collections.emptyMap(),new byte[0],false);
+            assertEquals(200,editorZip.status);
+            Captured editorWorkbook=invokeAs(servlet,"alice","GET","/jobs/"+id+"/artifacts/view/"+sourcePath,Collections.emptyMap(),new byte[0],false);
+            assertEquals(200,editorWorkbook.status);
+            assertEquals("attachment; filename=\"native-cases.source-workbook.xlsx\"",editorWorkbook.headers.get("Content-Disposition"));
+            assertArrayEquals(sourceWorkbookBytes,editorWorkbook.body());
+
+            Captured nonEditorZip=invokeAs(servlet,"bob","GET","/jobs/"+id+"/artifacts/archive.zip",Collections.emptyMap(),new byte[0],false);
+            assertEquals(403,nonEditorZip.status,"A RUN-only USER cannot download an archive containing the source workbook");
+            Captured nonEditorWorkbook=invokeAs(servlet,"bob","GET","/jobs/"+id+"/artifacts/view/"+sourcePath,Collections.emptyMap(),new byte[0],false);
+            assertEquals(403,nonEditorWorkbook.status,"A RUN-only USER cannot download the source workbook entry");
+            Captured nonEditorStandardReport=invokeAs(servlet,"bob","GET","/jobs/"+id+"/artifacts/view/case.log",Collections.emptyMap(),new byte[0],false);
+            assertEquals(200,nonEditorStandardReport.status,"Standard artifacts retain their existing access policy");
+            Captured nonEditorIndex=invokeAs(servlet,"bob","GET","/jobs/"+id+"/artifacts",Collections.emptyMap(),new byte[0],false);
+            assertFalse(new String(nonEditorIndex.body(),StandardCharsets.UTF_8).contains(sourcePath),
+                    "The source-workbook path is not listed after editor access is revoked or absent");
+
+            String excludedPath=nonEditorRunId+"/"+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX;
+            Captured nonEditorJobZip=invokeAs(servlet,"bob","GET","/jobs/"+nonEditorJobId+"/artifacts/archive.zip",Collections.emptyMap(),new byte[0],false);
+            assertEquals(200,nonEditorJobZip.status,"A non-editor Job still receives ordinary artifacts when its source workbook is omitted at build time");
+            Captured nonEditorJobIndex=invokeAs(servlet,"bob","GET","/jobs/"+nonEditorJobId+"/artifacts",Collections.emptyMap(),new byte[0],false);
+            assertFalse(new String(nonEditorJobIndex.body(),StandardCharsets.UTF_8).contains(excludedPath),
+                    "A source workbook is omitted when the stored Job principal is not a current Package editor");
+
+            runtime.auth.disable("alice");
+            assertThrows(ServerRuntime.AuthoringSourceDeniedException.class,()->runtime.openArtifactArchive(id,true,"alice"),
+                    "A revoked editor loses access to the containing archive");
+            assertThrows(ServerRuntime.AuthoringSourceDeniedException.class,()->runtime.archiveEntry(id,sourcePath,"alice"),
+                    "A revoked editor loses access to the individual source workbook");
+        }
+    }
+
+    private static void createScheduledNativeSourceWorkbookFixture(ServerRuntime runtime,String id,String runId,
+            String principal,byte[] sourceWorkbookBytes,byte[] resultWorkbookBytes) throws Exception {
+        Path output=Files.createDirectories(runtime.outputDirectoryForJob(id));
+        Files.writeString(output.resolve("case.log"),"ordinary report remains available\n");
+        Path runDirectory=Files.createDirectories(output.resolve(runId));
+        Path sourceWorkbook=runDirectory.resolve(ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX);
+        Path resultWorkbook=runDirectory.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX);
+        Files.createDirectories(sourceWorkbook.getParent());Files.write(sourceWorkbook,sourceWorkbookBytes);
+        Files.createDirectories(resultWorkbook.getParent());Files.write(resultWorkbook,resultWorkbookBytes);
+        String outputDigest=sha256(sourceWorkbookBytes);
+        String formulaDigest=att.report.NativeSourceWorkbookReportWriter.formulaInventorySha256(sourceWorkbookBytes);
+        Files.writeString(runDirectory.resolve("run.yaml"),"schemaVersion: att-run/v2.1\nrun:\n"
+                +"  id: "+runId+"\n  targetType: nativeCase\n  nativeReportProtection: att-native-report/v1\n"
+                +"  sourceWorkbookReport:\n    schemaVersion: att-native-source-workbook-report/v1\n"
+                +"    status: written\n    outputPath: "+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX+"\n"
+                +"    sourceSha256: "+outputDigest+"\n    outputSha256: "+outputDigest+"\n"
+                +"    formulaSha256: "+formulaDigest+"\noutputs:\n"
+                +"  html: report/index.html\n  xlsx: "+ArtifactArchive.NATIVE_CASE_RESULT_XLSX+"\n"
+                +"  sourceWorkbookXlsx: "+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX+"\n");
+
+        Job job=new Job(id,"run","alice",principal,new WorkerRequest(),new JobEvents(output.getParent().resolve("events.jsonl"),100));
+        job.submissionSource="manual";
+        job.submittedBy=principal;
+        job.executionPrincipal=principal;
+        job.executionSpec=nativeExecutionSpec("alice",runId);
+        job.resultJson=ServerRuntime.JSON.writeValueAsString(Map.of("executionId",runId,"status","PASS","exitCode",0));
+        runtime.store.insert(job,"{}");job.status="PASS";job.finishedAt=Instant.now();runtime.store.update(job);
+        runtime.scheduleArtifactArchive(id);
+        Path status=runtime.artifactArchivePath(id).resolveSibling("archive-status.json");
+        for(int attempt=0;attempt<400;attempt++) {
+            if(Files.isRegularFile(status)) {
+                JsonNode state=ServerRuntime.JSON.readTree(status.toFile()).path("state");
+                if("READY".equals(state.asText()))return;
+                if("FAILED".equals(state.asText()))throw new AssertionError("Archive publication failed for "+id+": "+Files.readString(status));
+            }
+            Thread.sleep(25L);
+        }
+        fail("Timed out waiting for artifact archive for "+id);
+    }
+
+    private static byte[] workbookBytes(String sheetName,boolean includeFormula) throws Exception {
+        try(XSSFWorkbook workbook=new XSSFWorkbook();ByteArrayOutputStream bytes=new ByteArrayOutputStream()) {
+            Sheet sheet=workbook.createSheet(sheetName);Row header=sheet.createRow(0);header.createCell(0).setCellValue("ID");
+            Row row=sheet.createRow(1);row.createCell(0).setCellValue("case-1");
+            if(includeFormula)row.createCell(1).setCellFormula("1+1");
+            workbook.write(bytes);return bytes.toByteArray();
+        }
+    }
+
+    private static String nativeExecutionSpec(String packageId,String runId) throws Exception {
+        var definition=ServerRuntime.JSON.createObjectNode();
+        definition.put("schemaVersion",RunDefinition.NATIVE_CASE_VERSION);
+        definition.put("executionType","run");definition.put("packageId",packageId);
+        var target=definition.putObject("target");target.put("type","nativeCase");target.put("definitionId","fixture.case");
+        target.putObject("selection").putArray("resolvedCaseIds").add("one");
+        definition.putObject("options").put("runId",runId);
+        return new JobExecutionSpec(definition,"a".repeat(64),null).json();
     }
 
     @Test void staleCentralImpactReturnsConflictThroughPublishRoute() throws Exception {
@@ -1611,6 +1780,95 @@ class ApiServletIntegratedLimitsTest {
         }
     }
 
+    @Test void nativeTestCasePreviewIsOwnerOnlyReadOnlyAndIncludesExcelRevisionAndDiagnostics() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("native-preview-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path workbook=writeNativePreviewPackage(ownerPackage,"case-1","17");
+        Path runtimeConfig=sharedRuntimeConfig();
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"native-preview-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,null,workerLibraries("native-preview-libs"),"container")) {
+            ApiServlet servlet=servlet(runtime);
+            byte[] sourceBefore=Files.readAllBytes(ownerPackage.resolve("testcase/native/testcase.yaml"));
+            byte[] workbookBefore=Files.readAllBytes(workbook);
+            int jobsBefore=runtime.jobs.size(),draftsBefore=runDraftCount(runtime);
+
+            Captured editableSource=invokeAs(servlet,"alice","GET","/packages/alice/authoring-source",
+                    Map.of("type","native-testcase","path","testcase/native/testcase.yaml"),new byte[0]);
+            JsonNode sourceBody=ServerRuntime.JSON.readTree(editableSource.body());
+            assertEquals(200,editableSource.status,new String(editableSource.body(),StandardCharsets.UTF_8));
+            assertEquals("testcase/native/testcase.yaml",sourceBody.path("logicalPath").asText());
+            assertEquals(new String(sourceBefore,StandardCharsets.UTF_8),sourceBody.path("text").asText(),
+                    "A supplementary Unicode comment before dataColumns must not shift source redaction offsets");
+            assertTrue(sourceBody.path("text").asText().contains("password=Password"),sourceBody.toString());
+            assertTrue(sourceBody.path("baseSourceRevision").asText().matches("[a-f0-9]{64}"));
+            assertTrue(sourceBody.path("registryRevision").asText().matches("[a-f0-9]{64}"));
+
+            Captured response=invokeAs(servlet,"alice","POST","/packages/alice/native-testcase-preview",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("path","testcase/native/testcase.yaml","source",nativePreviewDefinition())));
+            JsonNode body=ServerRuntime.JSON.readTree(response.body());JsonNode item=body.path("cases").path(0);
+            assertEquals(200,response.status,new String(response.body(),StandardCharsets.UTF_8));
+            assertTrue(body.path("valid").asBoolean(),body.toString());
+            assertTrue(body.path("packageSourceRevision").asText().matches("[a-f0-9]{64}"),body.toString());
+            assertTrue(body.path("registryRevision").asText().matches("[a-f0-9]{64}"),body.toString());
+            assertEquals(1,body.path("resolvedCount").asInt());
+            assertEquals("native.case.case-1",item.path("qualifiedCaseId").asText());
+            assertEquals("Cases",item.path("provenance").path("sheet").asText());
+            assertEquals(2,item.path("provenance").path("row").asInt());
+            assertEquals(sha256(workbookBefore),body.path("workbookRevision").asText());
+            assertEquals("[REDACTED_SECRET]",item.path("inputs").path("password").asText());
+            assertTrue(item.path("redacted").asBoolean());
+            assertFalse(new String(response.body(),StandardCharsets.UTF_8).contains("native-preview-secret-canary"));
+            assertArrayEquals(sourceBefore,Files.readAllBytes(ownerPackage.resolve("testcase/native/testcase.yaml")));
+            assertArrayEquals(workbookBefore,Files.readAllBytes(workbook),"The source workbook must not be modified by preview");
+            assertEquals(jobsBefore,runtime.jobs.size(),"Read-only preview must not create a Job");
+            assertEquals(draftsBefore,runDraftCount(runtime),"Read-only preview must not create a RunDraft");
+
+            Path badWorkbook=ownerPackage.resolve("testcase/native/bad-cases.xlsx");
+            writeNativePreviewWorkbook(badWorkbook,"not-used","17",true);
+            String badDefinition=nativePreviewDefinition().replace("testcase/native/cases.xlsx","testcase/native/bad-cases.xlsx");
+            Captured invalid=invokeAs(servlet,"alice","POST","/packages/alice/native-testcase-preview",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("path","testcase/native/testcase.yaml","source",badDefinition)));
+            JsonNode invalidBody=ServerRuntime.JSON.readTree(invalid.body());JsonNode diagnostic=invalidBody.path("diagnostics").path(0);
+            assertEquals(200,invalid.status,new String(invalid.body(),StandardCharsets.UTF_8));
+            assertFalse(invalidBody.path("valid").asBoolean(),invalidBody.toString());
+            assertEquals("Cases",diagnostic.path("sheet").asText(),diagnostic.toString());
+            assertEquals(2,diagnostic.path("row").asInt(),diagnostic.toString());
+            assertEquals(1,diagnostic.path("column").asInt(),diagnostic.toString());
+            assertFalse(new String(invalid.body(),StandardCharsets.UTF_8).contains("native-preview-secret-canary"));
+
+            Captured denied=invokeAsAdmin(servlet,"admin","POST","/packages/alice/native-testcase-preview",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("path","testcase/native/testcase.yaml","source",nativePreviewDefinition())));
+            assertEquals(403,denied.status,new String(denied.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-PACKAGE-SOURCE-DENIED",ServerRuntime.JSON.readTree(denied.body()).path("error").path("code").asText());
+            stopInspectionProcesses(runtime);
+        }
+    }
+
+    @Test void nativeTestCasePreviewRejectsPackageMutationDuringWorkerResolution() throws Exception {
+        Path packages=Files.createDirectories(temp.resolve("native-preview-stale-packages"));
+        Path ownerPackage=createPackage(packages.resolve("alice"));
+        Path workbook=writeNativePreviewPackage(ownerPackage,"case-1","17");
+        Path runtimeConfig=sharedRuntimeConfig();
+        java.util.concurrent.atomic.AtomicBoolean changed=new java.util.concurrent.atomic.AtomicBoolean();
+        ServerRuntime.WorkerProcessLauncher mutatingLauncher=builder->{
+            try{return mutateWorkbookAfterPreviewRequest(builder,workbook,changed);}
+            catch(Exception failure){throw new IllegalStateException("Unable to launch mutating preview worker",failure);}
+        };
+        try(ServerRuntime runtime=authoringRuntime(packages,ownerPackage,runtimeConfig,"native-preview-stale-data",
+                DEFAULT_INSPECTION_TIMEOUT_MS,mutatingLauncher,workerLibraries("native-preview-stale-libs"))) {
+            addAuthoringUsers(runtime);ApiServlet servlet=servlet(runtime);
+            byte[] before=Files.readAllBytes(workbook);
+            Captured stale=invokeAs(servlet,"alice","POST","/packages/alice/native-testcase-preview",Collections.emptyMap(),
+                    ServerRuntime.JSON.writeValueAsBytes(Map.of("path","testcase/native/testcase.yaml","source",nativePreviewDefinition())));
+            assertTrue(changed.get(),"The test mutator must change the workbook after Server revision capture and before Worker resolution");
+            assertEquals(409,stale.status,new String(stale.body(),StandardCharsets.UTF_8));
+            assertEquals("ATT-PACKAGE-SOURCE-CONFLICT",ServerRuntime.JSON.readTree(stale.body()).path("error").path("code").asText());
+            assertFalse(java.util.Arrays.equals(before,Files.readAllBytes(workbook)));
+            assertEquals(0,runtime.jobs.size());assertEquals(0,runDraftCount(runtime));
+            stopInspectionProcesses(runtime);
+        }
+    }
+
     @Test void realChangeSetServletResponsesMatchVersionedSchemaAndNoStoreContract() throws Exception {
         Path packages=Files.createDirectories(temp.resolve("change-set-schema-packages"));
         Path ownerPackage=createPackage(packages.resolve("alice"));
@@ -2193,16 +2451,100 @@ class ApiServletIntegratedLimitsTest {
 
     private ServerRuntime authoringRuntime(Path packages,Path ownerPackage,Path runtimeConfig,String dataName,int timeout,
                                             ServerRuntime.WorkerProcessLauncher launcher,Path libs) throws Exception {
+        return authoringRuntime(packages,ownerPackage,runtimeConfig,dataName,timeout,launcher,libs,"local");
+    }
+
+    private ServerRuntime authoringRuntime(Path packages,Path ownerPackage,Path runtimeConfig,String dataName,int timeout,
+                                            ServerRuntime.WorkerProcessLauncher launcher,Path libs,String authMode) throws Exception {
         Path yaml=temp.resolve(dataName+".yaml");
         String config="server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve(dataName))
                 +"\n  runtimeConfigPath: "+ServerRuntimeTestSupport.yaml(runtimeConfig)
-                +"\n  authenticationRequired: true\n  auth: {mode: local}\n  centralConfigurationEditingEnabled: true\n"
+                +"\n  authenticationRequired: true\n  auth: {mode: "+authMode+"}\n  centralConfigurationEditingEnabled: true\n"
                 +"  packageConfiguration: {sourceEditingEnabled: true}\n  inspection:\n    enabled: true\n    maxConcurrent: 1\n"
                 +"    queuedLimit: 0\n    timeoutMs: "+timeout+"\nworkers:\n  maxConcurrent: 1\n  queuedLimit: 0\n"
                 +"packages:\n  allowedRoots: ["+ServerRuntimeTestSupport.yaml(packages)+"]\n  entries:\n    alice: "
                 +ServerRuntimeTestSupport.yaml(ownerPackage)+"\n";
         ServerConfig serverConfig=ServerConfig.load(Files.writeString(yaml,config));
         return new ServerRuntime(serverConfig,libs.toString(),launcher==null?ProcessBuilder::start:launcher);
+    }
+
+    private Path writeNativePreviewPackage(Path packageRoot,String caseId,String amount) throws Exception {
+        Path workbook=packageRoot.resolve("testcase/native/cases.xlsx");
+        writeNativePreviewWorkbook(workbook,caseId,amount,false);
+        Files.createDirectories(packageRoot.resolve("templates/flows/checkout/v1"));
+        Files.writeString(packageRoot.resolve("templates/flows/checkout/v1/flow.yaml"),
+                "schemaVersion: att-flow/v3.6\nid: checkout.v1\nname: Checkout\ndescription: Preview fixture\nactions:\n"
+                        +"  record:\n    type: log\n    message: Preview must not execute a Flow\n");
+        Files.createDirectories(packageRoot.resolve("testcase/native"));
+        // Keep the active editor source safe to return; the unsaved preview candidate below adds a sensitive input mapping.
+        Files.writeString(packageRoot.resolve("testcase/native/testcase.yaml"),nativePreviewDefinition());
+        return workbook;
+    }
+
+    private void writeNativePreviewWorkbook(Path path,String caseId,String amount,boolean numericCaseId) throws Exception {
+        Files.createDirectories(path.getParent());
+        try(Workbook workbook=new XSSFWorkbook();OutputStream output=Files.newOutputStream(path)) {
+            Sheet sheet=workbook.createSheet("Cases");Row header=sheet.createRow(0);
+            header.createCell(0).setCellValue("ID");header.createCell(1).setCellValue("Amount");header.createCell(2).setCellValue("Password");
+            Row row=sheet.createRow(1);
+            if(numericCaseId)row.createCell(0).setCellValue(17);else row.createCell(0).setCellValue(caseId);
+            row.createCell(1).setCellValue(amount);row.createCell(2).setCellValue("native-preview-secret-canary");
+            workbook.write(output);
+        }
+    }
+
+    private static String nativePreviewDefinition() {
+        return "# supplementary Unicode before dataColumns: 🚀\n"
+                +"schemaVersion: att-testcase/v1\nid: native.case\nflow: checkout.v1\n"
+                +"caseIdExpression: \"${DATA.id}\"\ndataSource:\n  type: excel\n"
+                +"  path: testcase/native/cases.xlsx\n  sheet: Cases\n  headerRows: 1\n  caseId: ID\n"
+                +"  dataColumns: id=ID, amount=Amount, password=Password\n";
+    }
+
+    private Process mutateWorkbookAfterPreviewRequest(ProcessBuilder builder,Path workbook,
+                                                       java.util.concurrent.atomic.AtomicBoolean changed) throws Exception {
+        Process delegate=builder.start();
+        OutputStream observed=new FilterOutputStream(delegate.getOutputStream()) {
+            private final StringBuilder request=new StringBuilder();
+            private void inspect(String value) throws java.io.IOException {
+                request.append(value);
+                if(!changed.get()&&request.indexOf("\"inspectionAction\":\"native-case-preview\"")>=0
+                        &&changed.compareAndSet(false,true)) {
+                    try {writeNativePreviewWorkbook(workbook,"case-1","99",false);}
+                    catch(Exception failure){throw new java.io.IOException("Unable to mutate preview workbook for the stale-source regression",failure);}
+                }
+                if(request.length()>2_000_000)request.setLength(0);
+            }
+            @Override public void write(byte[] bytes,int offset,int length)throws java.io.IOException {
+                inspect(new String(bytes,offset,length,StandardCharsets.UTF_8));out.write(bytes,offset,length);
+            }
+            @Override public void write(int value)throws java.io.IOException {
+                inspect(String.valueOf((char)(value&0xff)));out.write(value);
+            }
+        };
+        return new Process() {
+            @Override public OutputStream getOutputStream(){return observed;}
+            @Override public InputStream getInputStream(){return delegate.getInputStream();}
+            @Override public InputStream getErrorStream(){return delegate.getErrorStream();}
+            @Override public int waitFor() throws InterruptedException{return delegate.waitFor();}
+            @Override public boolean waitFor(long timeout,TimeUnit unit)throws InterruptedException{return delegate.waitFor(timeout,unit);}
+            @Override public int exitValue(){return delegate.exitValue();}
+            @Override public void destroy(){delegate.destroy();}
+            @Override public Process destroyForcibly(){delegate.destroyForcibly();return this;}
+            @Override public boolean isAlive(){return delegate.isAlive();}
+        };
+    }
+
+    private int runDraftCount(ServerRuntime runtime) throws Exception {
+        Field field=ServerRuntime.class.getDeclaredField("runDrafts");field.setAccessible(true);
+        return ((Map<?,?>)field.get(runtime)).size();
+    }
+
+    private static String sha256(byte[] bytes) throws Exception {
+        byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+        StringBuilder result=new StringBuilder(digest.length*2);
+        for(byte value:digest)result.append(String.format(java.util.Locale.ROOT,"%02x",value&0xff));
+        return result.toString();
     }
 
     @Test void centralAuthoringSourceWithholdsProtectedEmbeddedScalarsFromActiveRevision() throws Exception {
@@ -2581,6 +2923,7 @@ class ApiServletIntegratedLimitsTest {
             if("setStatus".equals(called.getName()))response.status=(Integer)args[0];
             if("getOutputStream".equals(called.getName()))return response.stream;
             if("setHeader".equals(called.getName()))response.headers.put(String.valueOf(args[0]),String.valueOf(args[1]));
+            if("setContentType".equals(called.getName()))response.headers.put("Content-Type",String.valueOf(args[0]));
             return defaultValue(called.getReturnType());
         });
         servlet.service(request,httpResponse);

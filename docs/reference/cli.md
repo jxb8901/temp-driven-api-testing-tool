@@ -1,6 +1,6 @@
 # CLI reference
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
 
 ## Choose a command
@@ -20,11 +20,11 @@
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
-The commands in this table are the ATT 4.4.1 CLI. The separate vNext proposal is not part of this release.
+The legacy CLI surface from the 4.3.1 code line includes workbook Case, validation, snapshot, Debug, LOAD, and report commands. The 4.6.0 release-target stack adds explicit Native Case and Native Suite RUN commands. The 4.6.0 release and tag have not been published; deployed acceptance is still pending. The broader shared vNext grammar remains a separate [planned proposal](../interfaces/cli/vnext-proposed.md).
 
-## Availability in ATT 4.4.1
+## CLI status and availability
 
-This Reference describes the CLI shipped with ATT 4.4.1. The vNext grammar is a separate [Planned proposal](../interfaces/cli/vnext-proposed.md); it is not a current command interface. Legacy commands remain supported in this release.
+This Reference distinguishes the existing legacy CLI from the Native Case and Native Suite commands in the open release-target stack. Native selector syntax and examples are documented in [Test authoring](test-authoring.md#native-test-case-definition). Remote execution uses a validated Server draft. Do not treat target-stack behavior as evidence that a 4.6.0 release or tag exists.
 
 ## Build a source checkout
 
@@ -87,6 +87,10 @@ On Windows, `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not in
 | `./att.sh run <selection> --format json` | Emit machine-readable summary |
 | `./att.sh run <selection> --quiet` | Suppress detailed live progress; keep the final summary and errors |
 | `./att.sh run <selection> --verbose` | Accepted for compatibility; detailed live progress is already the default |
+
+### Native Case and implicit Suite RUN
+
+The 4.6.0 release-target CLI adds `run native-case` and `run native-suite`. The formal release target remains unpublished. See [Test authoring](test-authoring.md#native-test-case-definition) for selectors and examples and [Unified RUN](execution-modes/unified-run.md) for Server draft semantics.
 
 ### Debug a component
 

@@ -1,7 +1,7 @@
-# ATT v4.4.1 使用手冊與參考
+# ATT v4.6.0 使用手冊與參考
 
 Author: Jeffrey + ChatGPT
-Version: 4.4.1
+Version: 4.6.0
 Status: 規範性使用者文件；由模組化來源自動生成
 
 <!-- GENERATED FILE. Edit docs/reference*/ modules, not this combined output. -->
@@ -102,7 +102,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [API paths](#api-paths)
 - [CLI 參考](#cli-參考)
   - [選擇命令](#選擇命令)
-  - [ATT 4.4.1 的可用性](#att-441-的可用性)
+  - [CLI 狀態與可用性](#cli-狀態與可用性)
   - [編譯 source checkout](#編譯-source-checkout)
   - [按任務查閱語法、option 和範例](#按任務查閱語法option-和範例)
   - [透過 CLI 使用 ATT Server](#透過-cli-使用-att-server)
@@ -229,7 +229,7 @@ Testcase 是一個正規化 Workbook row；Run 會為每個選中的 row 建立�
 3. 使用 ./att.sh validate --package 驗證 package。
 4. 使用 [Debug](reference.zh/execution-modes/debug.md) 隔離 Template、Flow 或 Tool，再使用 [Run](reference.zh/execution-modes/run.md) 建立 Case execution。
 
-以下各節定義 authoring contract。公式單元格、多行表頭和 XML 序列化詳情見[進階 Workbook 與 Snapshot 細節](#進階-workbook-與-snapshot-細節)。
+以下各節定義 authoring contract。上面的工作流描述舊式 Workbook authoring；Native Test Case Definition 工作流見下節。公式單元格、多行表頭和 XML 序列化詳情見[進階 Workbook 與 Snapshot 細節](#進階-workbook-與-snapshot-細節)。
 
 ### 區分 Testcase 與 Case execution
 
@@ -250,19 +250,57 @@ Testcase 是一個正規化 Workbook row；Run 會為每個選中的 row 建立�
 
 ### Native Test Case Definition
 
-4.5.0 開發候選版已在 Engine 登錄 `att-testcase/v1`，並支援透過 Native Case CLI 及經驗證的 Server draft flow discovery、resolution 和 RUN singleton 與多筆 inline Definition。Excel Definition 保留 S01 的 schema 契約，但須等待 S04 Excel adapter，現時 inline resolver 不會執行 Excel source。現有 Workbook／Sidecar／Snapshot RUN 亦維持支援。
+ATT 4.6.0 發佈目標包含已啟用的 `att-testcase/v1` schema，以及 Native Case CLI 和經驗證 Server draft flow 對 singleton、inline 和 Excel Definition 的 discovery、resolution 及 RUN 支援。實作已在開啟中的發佈目標 PR stack；4.6.0 release 和 tag 尚未建立。Native RUN、報告整合及 Default Package 採納的部署驗收仍待完成；共享編輯器部署驗收另行跟進。Native LOAD Case target、進階 Testdata／generator 及 Debug interoperability 不屬於此目標；現有直接 LOAD 和 Debug 路徑仍受支援。
 
-V1 契約定義兩種資料形態：含完整 typed `inputs` map、Resolved Case ID 固定為 `default` 的 singleton inline Case；或含穩定來源 ID 的多筆 inline／Excel Data Source。Definition ID 在 Package 範圍內唯一、保留大小寫並使用點號分段；Resolved Case ID 是單一 path-safe 段落。`caseIdExpression` 只可用單一 `${DATA.key}` lookup 覆蓋 resolved ID。空白、重複、格式錯誤、缺少或衝突的 ID，以及空的 resolution 結果都屬錯誤，不會當作全部 PASS。
+Native Excel adapter 只讀取 Package 內 `.xlsx`，沿用 Sidecar header、`dataColumns`、blank normalization 和安全 YAML cell parsing 規則，並在每個 resolved Case 保留 workbook revision、sheet、row 及 column provenance。壓縮後的 workbook 上限為 32 MiB；POI 載入前會預檢 ZIP archive，最多 256 個 entries、每個解壓 entry 32 MiB、總解壓資料 64 MiB。選取的 worksheet 最多 100,000 個實體 rows（包括空白列）；header scan 最多 1,000,000 個 header cells；Resolution 最多接受 10,000 筆非空白 records。Preview 亦有上限。YAML cells 沿用共用 parser 限制：3,000,000 code points、50 個 collection aliases 及 50 層巢狀；解析後的 value graph 最多 64 層及 100,000 個值。系統拒絕非有限數字和遞迴 aliases。Adapter 不會建立或更新舊式 XML Snapshot。現有 Workbook／Sidecar／Snapshot RUN 亦維持支援。
 
-Data-driven Case 省略 `inputs` 時，會把 `DATA` 同名映射到 Flow inputs；提供 projection 時，該 projection 會完全取代 identity mapping，只接受 `{from: DATA.key}` 或 `{value: <typed value>}`。Excel `dataColumns` 保留 `att-sidecar/v2.2` 逗號分隔字串語法，包括 alias、`(yaml)` parsing 和引號分隔符。省略或空白的 `dataColumns` 不會把任何業務欄選入 `DATA`（Case ID／tags selector 也不會自動暴露）；需要 Excel 輸入時必須明確宣告 `dataColumns`。Excel `path` 必須是可移植的 Package 相對 `.xlsx` 路徑。Source-workbook report template 只可用於 Excel Data Source，並永遠寫入新 Workbook。
+V1 契約定義兩種資料形態：含完整 typed `inputs` map、Resolved Case ID 固定為 `default` 的 singleton inline Case；或含穩定來源 ID 的多筆 inline／Excel Data Source。Definition ID 在 Package 範圍內唯一、保留大小寫並使用點號分段；Resolved Case ID 是單一 path-safe 段落。Excel Case ID 必須是符合 `[A-Za-z0-9_-]{1,128}` 的 literal text cell；公式、數字／日期／boolean／error cell、blank markers、前後空白、保留裝置名稱和 case-fold collision 都會被拒絕。`caseIdExpression` 只可用單一 `${DATA.key}` lookup 覆蓋 resolved ID。空白、重複、格式錯誤、缺少或衝突的 ID，以及空的 resolution 結果都屬錯誤，不會當作全部 PASS。
+
+Data-driven Case 省略 `inputs` 時，會把 `DATA` 同名映射到 Flow inputs；提供 projection 時，該 projection 會完全取代 identity mapping，只接受 `{from: DATA.key}` 或 `{value: <typed value>}`。Excel `dataColumns` 保留 `att-sidecar/v2.2` 逗號分隔字串語法，包括 alias、`(yaml)` parsing 和引號分隔符。省略或空白的 `dataColumns` 不會把任何業務欄選入 `DATA`（Case ID／tags selector 也不會自動暴露）；需要 Excel 輸入時必須明確宣告 `dataColumns`。Excel `path` 必須是可移植的 Package 相對 `.xlsx` 路徑。
+
+每次 Native RUN 都會在 `workbooks/native-cases.result.xlsx` 建立不依賴來源 Workbook 的結果報告，內容包括所選 Case 的結果。Excel-backed Definition 可額外設定 `report: {format: xlsx, template: sourceWorkbook}`，要求產生選用的來源 Workbook 版面 artifact：`workbooks/native-cases.source-workbook.xlsx`。RUN 開始前，Engine 會 pin 及驗證 workbook bytes、formula inventory 和所選實體來源列身份。結果只寫入獨立檔案中的所選列，保留來源公式，且不修改 Package 內原始 Workbook。
+
+選用 artifact 限於單一 Excel Definition 和 worksheet、非空且不超過 1,000 個 Case 的 selection，以及不超過 16 MiB 的輸出。發佈前，ATT 會在每個 worksheet 遮蔽敏感來源欄，包括 header 或 mapping alias 被分類為敏感的欄，並在其他位置遮蔽已登記的 secret value。如果遮蔽可能留下敏感的 cached formula result，或無法安全驗證／發佈來源版面檔案，ATT 會省略此選用 artifact 並記錄 fallback diagnostic；標準結果 Workbook 和 Case 結果仍可用。如果 Workbook 在解析後改變，或已不符合 pinning 的資料列，ATT 會在執行前拒絕，不會改用過時來源資料而靜默 fallback。
+
+來源版面報告包含已遮蔽敏感值的 Workbook 其他工作表和資料列。Server 只有在 Job 建立時的原始 principal 目前仍有該 Package 的 editor 權限時才會將可選報告放入 archive；讀取 artifact 清單、每個 entry 和整個 archive 時，也會重新檢查目前的 Package editor 權限。沒有該權限的使用者仍可按一般 artifact 權限讀取不依賴來源的標準結果 Workbook 和其他 Job artifacts。
 
 完整契約和驗證界線見[active Schema](../schemas/att-testcase-v1.schema.json)、[Singleton inline 範例](adr/examples/att-testcase-v1/inline-single.yaml)、[多筆 inline 範例](adr/examples/att-testcase-v1/inline-multi.yaml)、[Excel 範例](adr/examples/att-testcase-v1/excel.yaml)、[省略 `dataColumns` 的 Excel 範例](adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml)及[ADR-0001](adr/0001-flow-centric-testcase-resolution.zh.md)。
+
+Default Package 已附上離線 Native Quick Start Definitions（`packages/default/testcase/quick-start/**/testcase.yaml`），綁定 Flow `quick.start.v1`。請參閱[Default Package Native 快速入門指南](quick-start.zh.md)與 [S12 遷移矩陣](maintenance/native-case-default-package-migration-s12.md)。S07 亦提供上述可選的來源 Workbook 版面報告。
+
+#### 在 Studio 編寫
+
+在 Explorer 選擇 **New native Test Case**，或開啟索引中的 `testcase.yaml`。引導式編輯器可設定 Package 範圍的 Definition ID、名稱、標籤、canonical Flow、typed inputs，以及單一 Case 或 inline records。進階 YAML 可編輯引導式表單以外的欄位。新檔案必須位於 Package 已配置的 `resources.testcaseRoot` 之下（預設為 `testcase/`）。
+
+**Preview / Resolve** 會把目前編輯器中的 candidate 及 Package-relative `testcase.yaml` 路徑提交至已驗證身份的 Server。Server 會檢查精確 USER/editor 權限和 Package source revisions，再透過有界的 Test Case resolver 及 S04 Excel adapter 解析 candidate。預覽最多回傳 1,000 個 Case，並提供 Package source revision、Definition revision，以及適用時的 workbook revision。Excel row 錯誤會標示 sheet、row 和 column。Typed inputs 依照 Server 設定的 redaction policy 處理。預覽不會建立 Job 或 RunDraft、不會寫入 Package source，也不會修改 Workbook；RUN validation 會再次解析並凍結已選的 Case ID。
+
+使用 **Add to Change Set**，透過現有 Package source 工作流暫存新增或替換：Draft → Validate → Review → Publish。發布前目前 Package source 仍保持啟用。發布後請預覽最新 source，再選擇 Case ID 進行 RUN 驗證和提交。只有在 Server 宣告支援 `att-execution/v2` 時，Native Case RUN 才可用；Server 會為 Job 驗證並凍結 source 和已選的 ID。
+
+Excel-backed Definition 使用與 native resolution 相同的唯讀 S04 adapter，並在 Studio 顯示 row 和 column diagnostics。Legacy suite 仍可使用現有 Workbook／Sidecar 編輯器。
+
+#### 執行 implicit Native Case Suite
+
+4.6.0 發佈目標可在已解析的 Case 上建立 Suite selection，毋須作者建立 `suite.yaml`。先指定一個或多個 Definition ID，再選取全部 Case、指定完整 Qualified Case ID，或按一個或多個 tags 選取。被排除的 tags 優先於包含的 tags。
+
+以下本地命令會從兩個 Definition 選取所有 `smoke` Case，但排除帶有 `destructive` tags 的 Case：
+
+```sh
+att --local --package payments run native-suite --definition fpp.transfer --definition fpp.refund --tag smoke --exclude-tag destructive --fail-fast
+```
+
+若要選取指定 Case，為每個 ID 使用 `--qualified-case-id`，例如 `fpp.transfer.customerA`。每個 ID 必須屬於已指定的 Definition。Server backend 會透過已驗證的 `att-execution/v2` RUN draft flow 使用相同選取器。
+
+ATT 會按 ID 排列 Definition，並保留每個 Definition 的來源記錄順序。重複 Definition ID、重複 Qualified Case ID、不存在的 ID，以及空選取都會在驗證時失敗。Worker 執行前，Server draft 會凍結選取 ID 和 Definition source revision。每個 Case 的結果沿用現有 RUN evidence 和報告流程。
+
+Implicit Suite 是 runtime selection，並非可重用的 authored Definition。這項功能不會新增 LOAD target 或進階 Testdata/generator binding；Debug interoperability 仍屬後續工作。
+
+Studio Run editor 亦提供這項選取功能：輸入一個或多個 Definition ID，再選擇全部 Case、指定 Qualified Case ID，或按 tags 選取 Case。可用 Include Tags 和 Exclude Tags 進一步篩選；重播時會保留保存定義傳回的 tag selector。Native Suite `--rerun-failed` 只會重跑同一 Package 和 Definition 集合中最近一個合資格已完成 RUN 內曾執行但失敗的 Case。Local RUN 會驗證 latest-run pointer 和 manifest hash；Server draft 會凍結來源 Job/run、manifest digest、Package revision 和精確 Qualified Case ID。過期 draft 或來源變更會被拒絕，Skipped Case 不會重跑，每次嘗試的執行／略過數會與來源及 retry 次數分開記錄。Schedule 會保留已驗證的 retry source。
 
 ### Workbook
 
 #### Workbook、Sidecar 和 Snapshot 之間的關系
 
-每個 `.xlsx` Workbook 都要求有一個 YAML Sidecar 和一個生成的 XML Snapshot，它們必須具有相同的基名且位於同一目錄：
+在舊式 Workbook／Sidecar／Snapshot 工作流中，每個 `.xlsx` Workbook 都要求有一個 YAML Sidecar 和一個生成的 XML Snapshot，它們必須具有相同的基名且位於同一目錄：
 
 ```text
 testcase/payment_regression.xlsx
@@ -971,11 +1009,11 @@ RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型�
 
 ### 統一 RUN 與排程
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-ATT 4.4.1 將功能性單次執行統一為 **RUN**，支援 Case、Template、Flow、Tool，以及所選 Case 批次。**Debug** 是 RUN 的診斷選項。**LOAD** 保留效能引擎、負載控制和專用報告。
+功能性單次執行使用共用 **RUN** model，支援 Case、Template、Flow 和 Tool。**Debug** 是部分 RUN target 的診斷模式。**LOAD** 保留效能引擎、負載控制和專用報告。4.6.0 release-target stack 透過 `run native-case` 和 `run native-suite` 加入明確 Native Case 與 implicit Native Suite 選取；release 和 tag 尚未發佈，部署驗收仍待完成。
 
-已發行的 Local CLI 保留其 interface-specific 相容邊界：run verb 選取 workbook Case，standalone debug 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。此共用 RUN model 不代表 proposed vNext CLI grammar 已發行；請參閱[規劃中的 vNext page](interfaces/cli/vnext-proposed.zh.md)。
+舊版 Local CLI 保留其相容邊界：`./att.sh run` 選取 workbook Case，standalone `debug` 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。Native Server RUN 需要經驗證的 `att-execution/v2` draft，不會透過舊式 raw Case selector 提交。更廣泛的共用 CLI grammar 仍屬[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)。
 
 #### 驗證及執行 RUN
 
@@ -1026,7 +1064,7 @@ ATT 4.4.1 將功能性單次執行統一為 **RUN**，支援 Case、Template、F
 
 `suites` 與 `suiteDirectory` 互斥；後者選取套件內的 group 目錄。Case/tag 篩選沿用 CLI 交集規則，任一要求的 tag 可匹配，excludeTags 則排除匹配 Case。`all:true` 表示套件選取。陣列必須非空、不重複，最多 1000 個值。驗證會解析並固定最多 10000 個 Case ID；空選取不會退回執行全部 Case。
 
-`rerunFailed:true` 從呼叫者最近 100 個擁有的工作中，選取同套件最近一個已完成 Case RUN 的失敗項目，與明確 Case/tag 篩選取交集，再固定 ID。Manifest 不可用或沒有匹配失敗項目會驗證失敗。既有 CLI `--rerun-failed` 繼續使用本機 output history。
+Native Suite 的 `rerunFailed:true` 會從同一擁有人、Package、Definition ID 和 Package revision 中最近一個符合資格且已完成的 Native Suite RUN，選取曾執行但失敗的 Case。Server 按完成時間排列候選，不限於最近 100 個 Job。本機執行使用依 Package/Definition 區分且驗證 manifest hash 的 Native Suite pointer；dry-run 及不相關 RUN 不會取代此 pointer。Draft 會凍結來源 Job/run、manifest digest、revision、來源選取數、retry attempt number 和精確失敗 Qualified Case ID；提交時會重新驗證來源，若 draft 驗證後有更新的相符 RUN 完成，就拒絕過期 draft。來源內 Skipped Case 不會重跑。新 RUN 只報告本次選取／執行／略過數，並把 retry 次數和來源統計分開保存。Schedule 會在每次執行時保留已驗證的來源 lineage。Manifest 不可用或不一致、來源變更，或沒有已執行的失敗 Case 都會驗證失敗。既有 Workbook／Sidecar `rerunFailed:true` 行為和本機 history 維持不變。
 
 #### 啟用 Debug 診斷
 
@@ -1109,9 +1147,9 @@ Schedule 使用一般已驗證 draft 合約。RUN Debug 仍使用 `options.debug
 
 ### Run 模式
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-ATT 4.4.1 Local CLI 的 run command 仍是 legacy Case adapter，會執行 Workbook 中選取的 authored Testcase。較完整的 functional model 與 direct resource target 定義於 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
+舊版 `./att.sh run` command 仍是 Case adapter，會執行 Workbook 中選取的 authored Testcase。4.6.0 release-target CLI 亦加入明確的 Native Case 和 Native Suite command，詳見 [Unified RUN](reference.zh/execution-modes/unified-run.md) 及 [CLI Reference](reference.zh/cli.md)。目標 release 和 tag 尚未發佈，部署驗收仍待完成。
 
 ```sh
 ./att.sh run --all
@@ -3024,7 +3062,7 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 
 ## CLI 參考
 
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
 
 ### 選擇命令
@@ -3044,11 +3082,11 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
-上表列出 ATT 4.4.1 CLI command。獨立的 vNext proposal 尚未包含在此 release。
+上表列出舊版 CLI command。4.6.0 release-target stack 加入明確的 Native Case 和 Native Suite RUN command。4.6.0 release 和 tag 尚未發佈，部署驗收仍待完成。更廣泛的共用 vNext grammar 另列於[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)。
 
-### ATT 4.4.1 的可用性
+### CLI 狀態與可用性
 
-本 Reference 說明 ATT 4.4.1 候選版本的 CLI。vNext grammar 是獨立的[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)，並非目前 command interface。本版本繼續支援 legacy command。
+本 Reference 區分現有 legacy CLI，以及開啟中的目標 stack 的 Native Case 和 Native Suite command。Native selector 語法和範例見[測試撰寫](reference.zh/test-authoring.md#native-test-case-definition)。Remote execution 使用已驗證的 Server draft。目標 stack 的行為不代表 4.6.0 release 或 tag 已存在。
 
 ### 編譯 source checkout
 
@@ -3108,6 +3146,10 @@ mvn -DskipTests -pl att-cli -am compile
 | `./att.sh run <selection> --format json` | 輸出機器可讀摘要 |
 | `./att.sh run <selection> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
 | `./att.sh run <selection> --verbose` | 為兼容性保留；詳細實時進度已是默認行為 |
+
+#### Native Case 和 implicit Suite RUN
+
+4.6.0 release-target CLI 加入 `run native-case` 和 `run native-suite`。正式發佈目標尚未發佈。selector 和範例見[測試撰寫](reference.zh/test-authoring.md#native-test-case-definition)，Server draft 語義見 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
 
 #### Debug component
 
@@ -3381,7 +3423,13 @@ Run ID 和 Case ID 在校驗後保持原樣。只有 `run.yaml` 狀態為 `COMPL
 
 `report/index.html` 是主要終端用戶報表，可以直接從磁盤打開。組按 `workbookId.groupId` 彙總；界面把 `groupId` 標記為 Sheet。Cases view 支持 Workbook/Sheet/Status 下拉框、對 workbook/group/full Case ID/tag 的大小寫不敏感搜索，以及每列標題的升序/降序排序。Duration 按數值排序。
 
+Native Inline Case 和 implicit Suite 在沒有輸入 Workbook 時，也會生成標準 HTML、CI JSON、JUnit 及 `workbooks/native-cases.result.xlsx`。每個結果會保留 Definition ID、qualified Case ID、Flow ID、Definition/Flow source revision、execution ID，以及來源資料 record 可用的 provenance。此 XLSX 是表格式結果 Workbook；複製 Excel source Workbook 的版面仍依賴 S04，並非此輸出的一部分。
+
+作為 Server Job artifact 發佈時，native XLSX 會列為 binary 下載項、不作文字預覽，並以 `.xlsx` 附件提供。
+
 展開的 Case 包含完整 Case ID、名稱、狀態、持續時間、Expected 和 Actual 結果、每條記錄 Action 結果的一行、詳細執行日誌，以及 `.log`/`case.yaml` 的顯式鏈接。Action Results 每行獨立顯示最終渲染的 Description，並寫入 `run.yaml` 與 CI JSON。為兼容既有報表，Expected 仍是所有 assert Action 非空最終 description 與 `expected` 的有序 LF 聯接；Actual 是所有非空運行時 `actual` 的有序 LF 聯接。
+
+Native Case 的 JUnit `classname` 表示 Definition 和 Flow，`name` 使用 qualified Case ID；ATT properties 會記錄 Definition/Flow source revision、execution 及 source-record provenance。
 
 ### 診斷 Tool evidence collector 失敗
 
@@ -3421,6 +3469,8 @@ ATT 會復制源 Workbook，並使用 `report.mode: append-to-copy` 追加配置
 ### 查看 CI JSON 彙總
 
 `ci/summary.json` 使用 `schemaVersion: att-ci-summary/v2.1`，包含 ATT/Run ID、環境、時間、聚合狀態/統計、持續時間統計、每個 Case 記錄、診斷計數、報表/產物路徑以及輸入清單哈希。
+
+Native Case 記錄會額外包含 Definition ID、qualified Case ID、Flow ID、Definition/Flow source revision 和 source provenance。`run.yaml` 也記錄相同 identity，並列出標準 XLSX 路徑。`report --run-id <id>` 會從完成清單重建 HTML 報告與 native 標準 XLSX。
 
 ### 重現 Run
 
@@ -3559,7 +3609,7 @@ Assertion 為 false 會令 Case execution 變成 FAIL。無效表達式語法/�
 ```json
 {
   "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.4.1",
+  "attVersion": "4.6.0",
   "valid": false,
   "mode": "package",
   "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
@@ -3779,7 +3829,7 @@ Unsupported schema version 會在 execution 前失敗並提供 migration guidanc
 <!-- att-docs:historical -->
 ### 歷史的集中式 SUT Metrics catalog
 
-ATT 4.3.1 之前，global config `att-config/v2.14` 可管理有界的 `sutMetrics.dataSources`、`metricSources`、`groups` 和 `profiles` lists；沒有 `sutMetrics` 的 `att-config/v2.13` 檔案仍受支援。4.3.1 的 global `att-config/v2.15` 保留 Data Source 描述檔路徑，各 Package 則管理自己的 Metric Source、Group 和 Profile。升級時請依照 [Package-local SUT Metrics migration guide](guides/sut-metrics-config-migration.zh.md) 操作。舊的 `data/sut-metrics-catalog.json` 不是 Package 定義的有效來源，也沒有自動 dry-run/apply 遷移命令；停用前請先與各定義擁有者明確協調及整理內容。
+Package-local SUT Metrics 遷移前，global config `att-config/v2.14` 可管理有界的 `sutMetrics.dataSources`、`metricSources`、`groups` 和 `profiles` lists；沒有 `sutMetrics` 的 `att-config/v2.13` 檔案仍受支援。遷移後，global `att-config/v2.15` 保留 Data Source 描述檔路徑，各 Package 則管理自己的 Metric Source、Group 和 Profile。請依照 [Package-local SUT Metrics migration guide](guides/sut-metrics-config-migration.zh.md) 操作。舊的 `data/sut-metrics-catalog.json` 不是 Package 定義的有效來源，也沒有自動 dry-run/apply 遷移命令；停用前請先與各定義擁有者明確協調及整理內容。
 <!-- /att-docs:historical -->
 
 

@@ -1,8 +1,8 @@
-<!-- att-doc-status: current release=4.3.1 -->
+<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
 # Documentation architecture and truth matrix
 
-本頁記錄 ATT 4.4.1 release candidate 的文件 owner、feature/interface availability 及 migration 決策。產品 capability 以本分支 source、schema、test 及已合併行為核實；尚未完成或未核實的 acceptance issue 仍標示為 Pending。
+本頁記錄 ATT 4.6.0 release target 的文件 owner、feature/interface availability 及 migration 決策。尚未發佈正式 4.6.0 release 或 tag；4.3.1 只用來標識較早的 CLI code line，並非已核實的 GitHub Release。產品 capability 會區分開啟中的目標 stack implementation 與部署驗收；未完成或未核實的 acceptance 仍標示為 Pending。
 
 ## Inventory 與 link impact
 
@@ -17,19 +17,20 @@ Documentation release gate 會檢查目前 entry point、配對 source module、
 
 ## Feature、interface 及 availability matrix
 
-| Capability | ATT 4.4.1 候選 Local CLI | ATT Remote 相容 CLI | Studio 及 REST | Engine 或 Server | Status |
+| Capability | ATT 4.6.0 目標 Local CLI | ATT Remote 相容 CLI | Studio 及 REST | Engine 或 Server | Status |
 |---|---|---|---|---|---|
-| Functional Case execution | Current run command 選擇 workbook Case | Current remote run 提交 Server 工作 | Current unified RUN 支援 Case 及選取的 Case batch | Engine 執行 Case；Server 驗證 draft 並擁有 Job | Current |
+| Legacy Workbook Case execution | `./att.sh run` 選擇 workbook Case | `att remote run` 提交舊版 Server 工作 | 現有 Case 和 batch route 繼續可用 | Engine 執行 legacy Case adapter | 保留相容行為 |
+| Native Case 和 implicit Suite RUN | 目標 CLI 提供 `run native-case` 和 `run native-suite` | `att remote` 保留舊版行為；目標 CLI 的 `--server` 路徑使用已驗證 Native draft | 目標 stack 已有 Native authoring、preview 和 RUN draft flow | Engine 解析及執行選取的 Case；Server 驗證 `att-execution/v2` draft 並擁有 Job | 已在目標 stack 實作；部署驗收待完成 |
 | Template、Flow、Tool execution | Current standalone debug command | Current remote debug command | Current unified RUN 支援這些 resource；Debug 是選用診斷模式 | 共用 execution 及 Action contract | Current；local CLI command 是 legacy |
 | LOAD | Current load scenario、Quick Load 及 Load Template CLI | Current remote load | Current 六種 Template catalog 及 validated builder | Current scheduler、workload mix 及 arrival-rate execution | Current |
 | VALIDATE | Current Package 及 selected dependency validation | Current remote validation | Current Studio 及 REST validation flow | Read-only validation；不執行 business work | Current |
 | Shared Configuration 及 Package Manifest | Current config 及 Package validation | Remote work 使用 Server-owned configuration | Current inspector 及 Package authoring flow | Global Runtime Configuration；選用 Package Manifest 與 Package Testdata | Current |
 | Jobs 及 Schedules | 只有 Local Run ID 及 output | Current Job list、watch、result、cancel 及 artifact command | Current Job、Schedule 及 history view | Server 持久化 Job 與 Schedule definition | Server capability；沒有 Local Job store |
-| CLI vNext 共用 run、load、validate grammar | 規劃於未來 release 提供 | Proposed Local/Server selection syntax | 此 proposal 不會移除 Studio 或 REST capability | parser contract 仍維持獨立的 Planned proposal | Planned；只可於 release 核實後升級 |
+| 更廣泛的 CLI vNext grammar 及 migration | 目標 parser 已涵蓋 Native Case/Suite；更廣泛的共用 grammar 仍屬 proposal | 舊版 ATT Remote 繼續支援 | 現有 Studio 和 REST capability 保留 | Native remote RUN 使用已驗證 draft；不使用舊版 raw Case submission | Native target 已實作；更廣泛 proposal 仍屬 Planned |
 | #294 CLI management resource | 不提供 | 不包括在 proposed grammar | Server 及 Studio resource 分開提供 | 未來 P3 proposal | Planned future work |
 | Workbook Snapshot generation | Current 明確的 snapshot authoring command | 不適用 | Studio authoring tool 分開處理 | Snapshot generation 不是 VALIDATE 副作用 | Current |
 
-產品 feature、interface 及 release status 是不同事實。Server 或 Studio capability 不代表 Local CLI 也有對應 command。Proposed vNext command 只有 run、load 及 validate；它不會移除目前相容 verb 或 Server resource。
+產品 feature、interface 及 release status 是不同事實。Server 或 Studio capability 不代表舊版 CLI 有對應 command。目標 CLI 提供明確 Native Case/Suite command，而更廣泛的 grammar 仍屬 proposal。4.6.0 target stack 尚未發佈；有 implementation 不代表部署驗收已完成。
 
 ## Semantic ownership matrix
 
@@ -59,7 +60,7 @@ Documentation release gate 會檢查目前 entry point、配對 source module、
 |---|---|---|
 | Root README | 以 Package-oriented platform 及可執行的 current workflow 重寫 | [README](../../README.md) |
 | docs/README.md | 以讀者、任務及 availability 導航取代單一 workflow | [Documentation map](../README.md) |
-| docs/reference/cli.md 及中文配對 | 保留已發行的 legacy verb 為 Current；從 current Reference 移除 proposal | [CLI Reference](../reference.zh/cli.md) |
+| docs/reference/cli.md 及中文配對 | 保留 legacy verb 和目標 stack Native Case/Suite command 為 Current；清楚標示尚未發佈的 target behavior | [CLI Reference](../reference.zh/cli.md) |
 | CLI Reference 的 vNext 部分及 proposed example | 移至獨立 Planned 文件，直到核實 release | [Proposed CLI vNext](../interfaces/cli/vnext-proposed.zh.md) |
 | docs/remote-client.md 及中文配對 | 保留為 legacy ATT Remote profile、Job 及 artifact 指南 | [ATT Remote guide](../remote-client.zh.md) |
 | docs/server-deployment.md 及中文配對 | 保留舊路徑與 heading anchor 作為 compatibility stub | [Deployment](../operations/server-deployment.zh.md)、[Configuration](../operations/server-configuration.zh.md)、[Security](../operations/security.zh.md) 及 [API v1](../interfaces/server-api/README.zh.md) |
@@ -74,18 +75,18 @@ Documentation release gate 會檢查目前 entry point、配對 source module、
 
 ## Current 與 Planned CLI migration
 
-ATT 4.4.1 保留明確的 workbook Snapshot authoring、Package validation 及 legacy Case execution。Current Quick Start 仍可在此 interface 執行。VALIDATE 會讀取並檢查 authored file，絕不產生或更新 Snapshot。
+上一個 Local CLI 基線保留明確的 workbook Snapshot authoring、Package validation 及 legacy Case execution。4.6.0 target Quick Start 使用明確的 `run native-case` command，見[目前 CLI Reference](../reference.zh/cli.md)。VALIDATE 會讀取並檢查 authored file，絕不產生或更新 Snapshot。此目標尚未發佈。
 
-| Legacy 相容語法 | Proposed vNext 語法 | 狀態 |
+| Interface 路徑 | 目前目標或規劃語法 | 狀態 |
 |---|---|---|
-| 使用 workbook suite 與 Case selection 執行 run | 用明確 Local selection 執行 run suite 或 case | Planned |
-| 對 Template、Flow 或 Tool 使用 standalone debug | 以 typed target 執行 run，並可選 Debug diagnostics | Planned |
-| 載入 authored scenario 或 Quick Load target | 使用共用 Local/Server routing 載入 scenario 或 typed target | Planned |
-| 透過 att remote 提交 remote run、load 或 validate | 在 run、load 或 validate 前選擇 Server profile | Planned |
-| snapshot、docs、report、build、clean 及 remote Job management | 三個 command proposal 沒有定義等價 command | 保留目前 compatibility 行為；未來變更須另作 release 決策 |
-| remote jobs、watch、artifacts、cancel 及 detach | 不包括在精簡 run/load/validate grammar | 保留在目前 legacy Remote guide；#294 management resource 仍屬未來工作 |
+| `./att.sh run --suite ...` 及 legacy Case selection | Workbook/Sidecar Case adapter | 保留相容行為 |
+| `run native-case` 和 `run native-suite` | 明確 Native Case 及 implicit Suite selector | 已在 4.6.0 目標 stack 實作；release 和部署驗收待完成 |
+| standalone Debug、直接 LOAD、Snapshot、docs、report、build 和 clean | 現有 command 路徑 | 保留相容行為 |
+| `att remote` Job、event、artifact 及管理 | 現有 Remote profile 和 REST/SSE client | 保留相容行為 |
+| 更廣泛的共用 Local/Server run、load 和 validate grammar | 見獨立的[Proposed CLI vNext](../interfaces/cli/vnext-proposed.zh.md) | Native target command 以外仍屬規劃中 |
+| #294 CLI management resource | 不屬於精簡 proposal | 未來工作 |
 
-本表說明預期 migration path，不代表完全行為等價。只有 #287 發行且 parser、help、Local/Server 行為、diagnostics、output 及 compatibility test 通過後，才更新 current entry point。
+本表說明目前 target-stack coverage，不代表已完成 migration 或語義等價。4.6.0 release/tag 尚不存在；Native RUN、report、shared-editor 和 Default Package adoption 的部署驗收分別跟進。更廣泛的 migration 需要獨立 implementation 及 release 核實。
 
 ## Documentation-as-code contract
 

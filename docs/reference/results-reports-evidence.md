@@ -102,9 +102,15 @@ Run and Case IDs appear unchanged after validation. A run is completed only when
 
 `report/index.html` is the primary end-user report. It can be opened without a web server. Groups are summarized by `workbookId.groupId`; the interface labels `groupId` as Sheet because it maps to one physical sheet. The Cases view supports Workbook/Sheet/Status dropdowns, case-insensitive search over workbook/group/full Case ID/tags, and ascending/descending sorting from every column heading. Duration sorting is numeric.
 
+Native Inline Cases and implicit Suites also produce standard HTML, CI JSON, JUnit, and `workbooks/native-cases.result.xlsx` outputs when no input Workbook exists. The report keeps Definition ID, qualified Case ID, Flow ID, Definition/Flow source revisions, execution ID, and available source-record provenance with each result. The XLSX is a tabular result workbook; copying an Excel source workbook's layout remains dependent on S04 and is not part of this output.
+
+When published as a Server Job artifact, the native XLSX is indexed as a binary download, excluded from text preview, and served as an `.xlsx` attachment.
+
 An expanded case contains the full Case ID and name, status and duration, Expected and Actual results, one row per recorded action result, a bounded detailed execution-log preview, and explicit `.log`/`case.yaml` artifact links. Each Action Results row has independent Stage, Action, Description, Status, and Message columns; Description is the final rendered action description and is also persisted in `run.yaml` and CI JSON. `report.html.caseLogInlineLimitBytes` controls the head/tail preview; `0` keeps only the artifact link. For compatibility, Expected remains the ordered LF-joined non-blank assert descriptions and `expected` values; Actual is the ordered LF-joined non-blank runtime `actual` values. `case.yaml` holds the complete structured final Stage/Template/Action/Tool/DB state. Depending on what ran, these artifacts include selected templates, executed or skipped stages/actions, assertion messages, Tool argv/stdout/stderr/retry evidence, DB source/parameter/result/finalization evidence, diagnostics, and saved payload/Tool/DB-output paths. Workbook ID, group ID, and tags are persisted per case in `run.yaml`, so `report --run-id` regenerates equivalent controls and grouping.
 
 `report/junit.html` is a human-readable JUnit projection. It displays counts and one row per testcase with status, duration, and embedded case-log content or a relative artifact link.
+
+For native Cases, JUnit `classname` identifies the Definition and Flow, `name` is the qualified Case ID, and ATT properties carry Definition/Flow source revisions, execution, and source-record provenance.
 
 ## Diagnose Tool evidence collector failures
 
@@ -144,6 +150,8 @@ Text is XML-escaped. JUnit XML and HTML use `report.junit.caseLogEmbedThresholdB
 ## Read the CI JSON summary
 
 `ci/summary.json` uses `schemaVersion: att-ci-summary/v2.1` and contains ATT/run IDs, environment, timing, aggregate status/counts, duration statistics, per-case records, diagnostic counts, report/artifact paths, and the input-manifest hash.
+
+Native Case records additionally include Definition ID, qualified Case ID, Flow ID, Definition/Flow source revisions, and source provenance. `run.yaml` records the same identities and lists the standard XLSX path. `report --run-id <id>` regenerates the HTML reports and native standard XLSX from the completed manifest.
 
 ## Reproduce a Run
 

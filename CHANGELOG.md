@@ -1,19 +1,32 @@
-# ATT 4.4.1 - release candidate (2026-11-21; acceptance pending)
+Warning: truncated output (original token count: 13174)
+Total output lines: 396
 
-- Add trusted shared Package editors for online edits, ZIP imports, Testcase snapshot publication, Manifest publication, and source history; access remains limited to active USER identities, grants remain Package-scoped, and grant or root changes invalidate outstanding drafts (#387).
-- Add a focused Server integration covering shared-editor publish against accepted/queued/running Jobs and pinned Schedules, plus no elevated ADMIN/Central rights from editor grants; document the remaining deployed multi-role operator acceptance matrix (#387).
-- Freeze the proposed `att-testcase/v1` field, typed input, stable ID, singleton/inline multi-record/Excel syntax, input projection precedence and `att-sidecar/v2.2` mapping compatibility; keep the proposal outside the active runtime schema catalog (#391).
-- Add proposed-schema catalog validation, valid/invalid fixtures, focused schema tests, bilingual contract documentation, and repairs for the #389 documentation-gate findings. Runtime discovery, resolution and execution remain follow-up work.
-- Clarify that omitted Excel `dataColumns` selects an empty `DATA` map, harden the portable Excel path grammar, and reject malformed additional proposed-catalog entries (#400).
-- Require absolute end-of-input for proposed identity/path patterns and reject duplicate proposed-catalog top-level fields (#400).
-- Release acceptance is pending. Do not tag or publish until shared-editor publication, revocation, history, exact-head hosted CI, and the deployed multi-role operator matrix pass.
+# ATT 4.6.0 — formal release (2026-11-23)
 
-# ATT 4.5.0 - development candidate (acceptance pending)
+## Native Test Authoring
 
-- Promote `att-testcase/v1` from the S01 proposal bundle into the active Engine schema registry; S03 implements singleton and inline-record resolution/RUN, while Excel source execution remains S04 work. Active/embedded copies track the finalized S01 identity, portable Excel path, and explicit-empty `dataColumns` contracts from #391.
-- Add the bounded Native Test Case Definition resolver and explicit `att-execution/v2` Native Case RUN targets in local CLI, remote CLI, and the validated Server draft flow. Preserve explicit `--run-id` values across Remote draft validation, Job acceptance, scheduled execution, and native output. Execute selected inline Cases through the existing Flow runner and preserve Definition, Qualified Case, local Case, execution, Flow, and source provenance in result evidence (#392, #393).
-- Pin the accepted Definition and Package source revision into the Job snapshot, reject stale drafts, and revalidate frozen selections for scheduled RUNs. Keep `att-execution/v1` Workbook/Sidecar selection and direct Template/Flow/Tool RUN behavior compatible. Native draft preview and fail-fast execution share S01 Definition/source order for multi-case selections.
-- This is a development candidate, not a release. V1 S02 scope is settled as inline resolution only; runtime Testdata bindings and generators remain future #388/S09 work. LOAD Case targets, Excel-backed native sources, and Debug/editor interoperability remain separate follow-ups. Do not bump the released product version or tag 4.5.0 before the release acceptance gates pass.
+- Activate the `att-testcase/v1` Definition and Flow binding model; resolve inline and Excel-backed Cases with stable IDs, typed inputs, bounded parsing, source provenance, preview and revision checks (#391–#394).
+- Add validated Native Case RUN through local/Remote CLI and Server drafts, including immutable Package source closure, preserved run IDs, per-Case evidence, retry lineage and stale-source rejection (#393).
+- Add the Studio Native Test Case editor and read-only preview, with revision-fenced Change Set publishing, secret redaction and workbook row diagnostics (#395).
+- Add implicit cross-Definition Suites, qualified Case and tag selection, deterministic ordering, bounded selectors, fail-fast/skipped evidence and retry of the latest eligible failed Cases (#396).
+- Add source-independent HTML, CI JSON, JUnit and XLSX reports with protected report regeneration and Run-bound Server publication. Excel-backed Definitions may also request a separate source-workbook-shaped XLSX; the accepted workbook is captured before RUN, rows are matched by pinned provenance, sensitive values are redacted across worksheets, and formula caches that could retain redacted values cause deterministic fallback to the standard report (#397).
+- Resolve source-workbook OOXML relationships within the package root during Server archive validation, preserving safe relative relationships while rejecting true root traversal (#397).
+- Keep optional LOAD report downloads from holding the native archive publication lock, and make artifact-read cleanup release its lock and capacity exactly once (#397).
+- Add the S10 bilingual Template–Flow–Stage compatibility matrix and paired golden fixture. Keep the Stage runtime path supported; the fixture does not prove external compensation or database rollback (#398).
+- Add Default Package Native Case examples, bilingual Quick Start and a resource migration matrix while retaining legacy Workbook/Sidecar/XML and direct LOAD examples without forced conversion (#413).
+- Align Server version responses, UI fallback text and browser acceptance fixtures with the 4.6.0 release version.
+
+## Package Source Management
+
+- Add trusted Package-scoped editor grants for shared Packages, covering Online Edit, ZIP import, Change Set publication, source history and restore. Grants remain restricted to active USER identities and current Package authorization; they do not grant ADMIN or Central Runtime Config access (#387).
+
+## Open follow-ups tracked outside the 4.6.0 release scope
+
+- #387 retains deployed multi-role operator acceptance. #393 and #397 retain deployment and cross-PR integration evidence; #413 retains any remaining Default Package migration acceptance.
+- S08 Native LOAD Case targets are tracked by #418; S09 ATT Testdata and bounded generated Case sources by #419; S11 Debug and Native Case interoperability by #420.
+- Helper-specific external compensation and teardown validation from the S10 analysis is tracked by #421. Bilingual ADR-0001 review and approval for overall architecture closure is tracked by #422. #388 remains open for these follow-ups and overall acceptance.
+
+The 4.4.1 and 4.5.0 development trains were not published as separate releases; their included changes are recorded above under 4.6.0.
 
 # ATT 4.4.0 - release candidate (2026-11-18; acceptance pending)
 
@@ -76,242 +89,7 @@
 
 # ATT 4.2.9 - 2026-11-05
 
-- Allow operational users to rerun shared Jobs while keeping replay drafts private and preserving execution checks.
-- Show saved Job execution identity, improve evidence layout, and add navigation to LOAD reports.
-- Separate Studio Workspace context from historical views and execution inputs.
-
-# ATT 4.2.8 - 2026-10-31
-
-- Diagnose broken idle MQ connections at LOAD teardown (MQRC 2009): keep the job ERROR, record per-physical-session confirmation separately from pre-teardown pool counters, and add optional idle validation, max-idle and max-lifetime recycling without an extra MQ call on the default borrow path. A connect or disconnect still running at the shutdown deadline stays one frozen timeout record, including a connect that has not returned a connection object yet; idle validation still running at shutdown is not counted as a failed disconnect, and that worker clears its interrupt status before disconnect. A validated session is not leased when it is known-dead, marked by an independent outage, or the borrower was cancelled. Outage disconnects run off the caller. Configured max-idle and max-lifetime also close never-reborrowed idle sessions on a sweep about every 30 seconds. That sweep waits out its interval instead of running on borrow or return notifications, and `close()` stops it immediately. A borrower already waiting is woken when a cancelled validation returns its healthy session to idle, without resetting that session's idle age. Invalidating a lease queues the physical disconnect and releases the borrow permit immediately. Each pool runs at most 4 disconnects at once, and shutdown still counts queued and running closes (#329).
-- Improve MQ load pool capacity accounting and timeout diagnostics, including bounded async shutdown for stuck creates and disconnects with residual reservation reporting.
-- Add private saved load scenarios and versioned schedule execution reviews.
-- Complete schedule execution editing for environment, thresholds, evidence, testdata and related overrides; prefill retained advanced/RUN values for authorized editors only; refresh Server limits when reopening saved template scenarios; reopen API-authored saved scenarios in the Advanced Load editor.
-
-# ATT 4.2.7 - 2026-10-29
-
-- Preserve completed LOAD metrics and report publication when teardown fails, expose typed safe cleanup diagnostics, and keep execution failures primary (#319).
-- Add authorized read-only Monitoring snapshots and a responsive Studio page with bounded polling, safe availability states, and per-job journal detail (#320).
-- Allowlist the current offline report script hash in Server and Studio, with generated-byte parity and rendered SVG geometry coverage (#321).
-- Add compact verified archive overview metadata for Jobs, and keep result status, performance thresholds, approved files, and omissions distinct (#322).
-
-# ATT 4.2.6 - 2026-10-29
-
-- Treat missing optional Package resource roots as empty inventories, including fail-closed handling for inaccessible roots, and return sanitized typed diagnostics for invalid roots (#308).
-- Persist immutable Job provenance with separate source, execution identity and Schedule Owner filters, using the Schedules filter layout (#309).
-- Store language and theme preferences per authenticated account in Server H2, report save state for every edited field, and retain failed edits for retry (#310).
-- Enforce an exclusive LOAD arrival-generation deadline at admission, reject overdue arrivals, and drain all admitted work even when a queued task starts after generation ends (#312).
-- Use versioned MurmurHash3 sampling, append-only time-window retention, and accurate LOAD evidence quota/disposition coverage across JSON, HTML, and Studio reports (#313).
-- Add bounded per-entry STORED/DEFLATE/AUTO artifact compression with a safe 200:1 fallback and publication metrics (#314).
-- Exclude routine checkpoints only for a verified complete report with `executionStatus: PASS`, retain recovery evidence for cancelled/error or unavailable-report runs, share exactly equal single-workload detail payloads with measured byte savings, and categorize artifact browsing (#315).
-- Bound Job event journal reload, line size, retained memory, cache size, and on-disk growth; stop oversized payload serialization at the byte cap, account for in-memory failure diagnostics, keep terminal results bounded and immutable after append, use gap-aware amortized compaction with generation-guarded recovery from stale async snapshots, and retry rejected listener dispatch without blocking appends (#316).
-- Run LOAD phases in Ramp-up → Warm-up → Steady → Ramp-down order, exclude both preparation phases from measured metrics, and warn that saved LOAD reruns use the corrected order (#317).
-- Raise the configured LOAD envelope limit to 10 days and apply root plus workload timing consistently across drafts, schedules, and replay validation (#306).
-- Add bounded live LOAD progress to Job Results and Metrics, with persisted history, throughput trends, phase counts, and latency estimates (#306).
-- Improve workload summaries, console retention, structured event previews, and replay timing review in Studio (#306).
-
-# ATT 4.2.5 - 2026-10-27
-
-- Publish compact, versioned LOAD terminal results with artifact-backed details, durable failure causes, and Studio evidence access (#297).
-- Inventory internal capacity limits, classify limit outcomes, and expose structured capacity diagnostics across execution, artifacts, and API responses (#298).
-- Add lossless LOAD outcome accounting, bounded five-minute metrics checkpoints, checksummed staged report publication, and truthful partial evidence on interruption (#299).
-- Add current-Package and strict Job rerun choices plus a principal-bound editable RUN/LOAD draft flow with safe prefill, typed overrides, stale-revision checks and `rerunOfJobId` provenance (#300).
-
-# ATT 4.2.4 - 2026-10-24
-
-- Prepare referenced DB/MQ/HTTP resources before LOAD scheduler start, with bounded readiness, live diagnostics, and no business requests during preflight (#285).
-- Add event-time all/measured/steady Load metrics and window-scoped thresholds, render offline charts in archived and Studio ZIP previews, and preserve report units and counts during path redaction (#290).
-- Present target-first Jobs with complete Server-side filtering, grouping, pagination, compact row actions and page-scoped pin/deletion menus (#286).
-- Add reversible, audited pending deletion with background cleanup; expose LOAD schedule targets and planned rates, and full standalone Job Details.
-- Move complete historical Target indexing off startup, isolate malformed legacy metadata with transactional diagnostics, and keep explicit exact Job-ID lookup available during migration.
-- Use accessible Rerun/Schedule review modals; enforce grouped A–Z ordering and document measured indexing/search costs.
-
-# ATT 4.2.3 - 2026-10-22
-
-- Add a unified six-mode Load Template catalog, modal editors and shared CLI bindings; consolidate LOAD history under Jobs and results (#276).
-- Move LOAD to `att-load/v1.8` with run-owned sequential execution IDs, durable namespace claims and actionable rejection of custom Load ID formats (#277).
-
-- Resolve Schedule History/List/Edit routes by view and schedule ID, preserving dirty forms during refresh (#271).
-- Add strict, auto-pause, and revalidate-latest schedule package-change policies; preserve stale schedule metadata editing and immutable execution sources (#272).
-- Drain runtime-owned event compactions before closing H2 and unregister only ATT-owned JDBC drivers on WAR undeploy (#273).
-- Render standalone Job consoles in a dedicated viewport-filling shell without Studio navigation or window controls (#275).
-
-- Retain bounded, versioned safe RUN/LOAD execution definitions for Job rerun and schedule creation, with current-source validation and explicit historical/unsafe-input fallback (#237).
-- Add confirmation reviews in Jobs, Job Details and LOAD history; submit independent Jobs with durable replay intents and `rerunOfJobId` lineage.
-- Open the unified New Schedule form from a revalidated Job snapshot, retain source-job provenance, and distinguish originating schedule edits from new schedule creation.
-
-# ATT 4.2.2 - 2026-10-21
-
-- Distinguish measured SUT failures, runtime/total errors, successful throughput and execution outcome in Load summaries/reports; add optional runtime/total thresholds and bounded failure diagnostics independent of full evidence (#263).
-- Persist shared Job pins, protect pinned evidence from existing retention, and support confirmed single/bulk whole-Job deletion with lifecycle fencing and audit records (#264).
-- Configure published Live Output entry limits through trusted per-Job Worker policy, with bounded UTF-8 journal retention and explicit truncation indicators (#265).
-- Round-1 review fixes: lazily render and cache Events payloads, add accessible deletion confirmation with readable outcomes and 202 recovery status, surface pin/delete conflict messages, and support pin reasons plus bulk pin actions.
-- Correct whole-Job deletion to use confirmed `POST /api/v1/jobs/{jobId}/delete`, preserve `DELETE /api/v1/jobs/{jobId}` cancellation, and surface 409 deletion outcome maps in Studio.
-- Document the structured Live Output journal allow-list and `droppedFields`, complete pin/deletion status-code and reconciliation contracts, and describe current Load report threshold and failure-sample wording.
-- Add a persistent detachable Job Console for RUN, DEBUG, and LOAD monitoring: floating, minimize/restore, drag/resize, Live Output and Events views, and encoded same-origin standalone console tabs with shared bounded per-tab SSE streams (#267).
-- Improve Studio performance for #266: downsample only large chart displays while preserving exact metric data, isolate hidden-aware schedule/catalog countdowns, fetch catalog packages with bounded concurrency, and lazy-load Explorer with reviewed route chunk reporting.
-
-# ATT 4.2.1 - 2026-10-16
-
-- Share one plain-text console formatter across CLI, Worker, and Server so Studio Live Output shows RUN, DEBUG, and bounded LOAD lines from the Job event journal (#258).
-- Add an optional size quota for `dataDir/jobs` that evicts the oldest complete Jobs, hides a Job while it is deleting, and reports the sweep without counting or compacting H2 (#259).
-- Keep LOAD Live Output progress periodic while a run is active, including when no iteration events arrive, and report a size sweep that hits its candidate budget as `partial` instead of `quota_unmet`.
-- Resume a partial size sweep after the last candidate it examined, and keep quarantined or artifact-recovery Jobs out of that candidate budget so a protected prefix cannot block eviction. A resumed sweep that finishes a pass already started at the oldest candidate reports `quota_unmet` when only protected Jobs remain.
-- Publish bounded, sanitized RUN/LOAD Job artifacts as atomic ZIP archives with a versioned integrity manifest, shared USER authorization, ZIP-backed previews, retryable failures, and removal of loose output after verification (#236, #243).
-- Unify functional execution as RUN with optional Debug diagnostics, validated drafts, frozen Case selections, shared RUN/LOAD schedules and one-time triggers; preserve absolute shared-config paths in immutable RUN schedule snapshots (#220).
-- Preserve legacy CLI, Debug, Case Run and Load schedule interfaces; add Studio Run and bilingual migration contracts (#220).
-- Fix Studio startup and scheduled-job ownership: lazy-load Load, keep unsaved Debug drafts across cache invalidation, list only active environments with retry, refresh occurrence status and history, and validate independent Load evidence caps (#231).
-- Open Schedules on a unified RUN/LOAD list with explicit New/Edit views, linked occurrence history, shared USER access, guarded drafts, and confirmed actions; normalize blank shared-config fields on schedule updates while preserving validated execution snapshots and legacy schedule links (#235, #246).
-- Redesign Explorer and Run around a full-width resource catalog with separate resource, RUN, and Quick LOAD pages; remove duplicate navigation while preserving batch execution and deep links (#245).
-- Use one ordinary Package model with explicit Server registration, package IDs independent of login IDs, strict package-local business-resource resolution, and shared runtime configuration and trusted schemas outside package roots; allow safe-source inspection of shared config files (#232).
-- Separate ADMIN system and account management from USER operations; active USERs share eligible packages, runs, jobs, results, artifacts, and schedules across accounts, while active execution identities govern schedule availability (#246).
-- Separate manual schedule execution from recurring execution identity; preserve the original creator, migrate an active legacy ADMIN-owned schedule to the active USER who first runs it, and fail closed for disabled or missing owners (#246).
-- Add the LOAD Catalog for executable scenarios and Quick LOAD templates, with safe previews, validation, scheduling, and shared job history (#242 / #234).
-- Resolve Quick LOAD target identity independently from Load scenario validation, carry opaque resource and logical IDs through Explorer and target pickers, and surface sanitized discovery diagnostics with retry.
-- Complete the #245 Schedule and LOAD Catalog follow-ups with short-lived identity/environment/revision-bound Catalog drafts, expired-draft recovery, structured resource detail pages with optional YAML, profile-aware action reasons, and shared responsive filters, tables, and page gutters.
-- Align Schedule and Execution History controls with compact shared tokens, preserve copyable full Occurrence IDs, and cover sidebar, mobile touch targets, action states, and detail navigation in UI acceptance checks (#245).
-- Make the matching Engine JAR's classpath-embedded Runtime Schema Registry the sole runtime authority; package only Catalog-registered schemas, preserve catalogued historical versions, ignore external and package-local schema folders at runtime, bind Engine, registry, shared config, Package and Environment revisions, verify Worker registry identity, and safely prune unused old cache versions (#232).
-- Parse the embedded schema catalog and versions once per JVM, validate JSON Schema bytes directly from the Classpath with a bounded registry-digest-keyed validator cache, reject non-local `$ref` targets, and validate JUnit XML from an embedded schema stream. Keep the verified content-addressed disk cache only as a transitional Path compatibility layer (#232).
-- Restore typed RUN sidecar defaults and protected-value handling, make validated scheduling a committed handoff, return successful saves to Schedules with the saved ID and History access, and add Explorer's Batch RUN entry; safely share and lease trusted schema cache files across Worker JVMs, and timestamp release archive contents at build time (#232, #245, #247).
-- Diagnose Scheduled Load screenshot drift against the current browser, viewport, theme, and changed-pixel ratios, publish a job-summary report with artifact links, and provide label/manual full-matrix runs for PR heads while keeping the fast Chromium PR gate (#240).
-- Refresh platform visual baselines only with a recorded review rationale, and add a validated `ATT_MAVEN_THREADS` setting, low-resource release guidance, focused Maven failure diagnostics, and jsdom Range geometry plus timeout fixes for local Vitest failures (#240).
-
-# ATT 4.2.0 - 2026-10-14
-
-- Reuse bounded Studio query and Worker configuration caches, prefer idle inspectors with matching package state, and add optional asynchronous warm-up and inspection metrics (#227).
-- Add shared mandatory secret protection across Engine, Worker, API, Server results, logs, inspections, and textual downloads, plus exact trusted-origin handling for API and authentication paths (#224).
-- Add MQHelper v1.3 request-queue routing with single, round-robin, and random selection while preserving v1.2 descriptors (#225).
-- Add Load v1.7 independent per-workload success and failure evidence quotas with cancellation-safe accounting and report/Studio coverage (#226).
-
-- Add a standalone Configuration workspace and improve Explorer navigation, source browsing, Testdata inspection, and environment comparison (#216).
-- Improve Debug and Load authoring with editable sidecar defaults, threshold and evidence forms, Quick Load, and schedule entry points (#216).
-- Add shared syntax-aware source viewing with ATT expression and package-file navigation (#216).
-
-# ATT 4.1.4 - 2026-10-14
-
-- Add ATT-managed local accounts, crash-safe one-time administrator bootstrap, bounded password verification, revocable sessions, CSRF protection, secure-transport checks for every password endpoint, and Login/Logout UI for ATT Server (#198).
-- Preserve Tomcat container authentication as the default mode and isolate local users' drafts and jobs.
-- Add bounded, canonical source access for eligible `&{...}` referenced text while keeping credentials, personal data, and protected package paths redacted or unavailable (#215).
-- Show ordinary configuration and Testdata values by default, retain protected credential and personal-data masking, and add paged Testdata previews and Engine-compatible Helper reference resolution (#215).
-- Apply anonymous permissions only to enabled Server features, keep cookie CSRF checks when origin equality is relaxed, and scope configuration comparisons by section before pagination (#215).
-
-# ATT 4.1.3 - 2026-10-13
-
-- Add the responsive Server UI shell, shared light/dark design tokens, API-backed dashboard, and collection routes (#204).
-- Modernize package, resource, and configuration exploration while preserving existing Run, Validate, Debug, and Quick Load actions (#205).
-- Add the visual Advanced Load builder and tabbed Jobs/results workspace with honest API-backed metrics and latest-100 job coverage (#206).
-
-# ATT 4.1.2 - 2026-10-13
-
-- Resolve ATT Remote servers from a profile or direct HTTP(S) URL, with explicit CLI and environment precedence.
-- Add safe automatic Basic authentication detection, explicit `auto`/`basic`/`none` modes, and redirect and TLS protections.
-- Support fully anonymous Web UI, REST, and Remote operations when `server.authenticationRequired: false`, keeping one shared authorization identity across inspection, drafts, jobs, and audit (#199).
-- Add optional self-declared anonymous job labels stored as `Name(anonym)` in the existing `principal` field; support UI/Remote entry and principal search without changing authorization.
-- Warn at Server startup and document the shared-access limitations and network restrictions for anonymous mode.
-
-# ATT 4.1.1 - 2026-10-12
-
-- Launch normal and inspection Workers from the matching `$ATT_HOME/lib/att-local-4.1.1.jar`; keep `workers.libraryDirs` additive.
-- Combine Local ATT modules into `att-local-4.1.1.jar` and Server, Server API, and Web UI modules into `WEB-INF/lib/att-server-4.1.1.jar`; keep third-party libraries separate.
-- Support packed WAR deployment and document the shared runtime requirement.
-
-# ATT 4.1.0 - 2026-10-10
-
-- Upgrade the ATT product version to 4.1.0.
-- Define the phased Package/Config Explorer and resource-scoped inline job contracts for issue #176.
-
-# ATT 4.0.1 - 2026-10-10
-
-- Remove implicit Maven and `javac` compilation from the Unix and Windows launchers; source checkouts now require an explicit build before commands can run (#177).
-- Add launcher checks for prebuilt source classes and clearer build instructions for source and packaged installations.
-
-# ATT 4.0.0 - 2026-10-07
-
-- Implement ATT Server v1 as a Java 17 Jakarta Servlet WAR for external Tomcat 10.1+ (#165).
-- Add container Principal consumption, a read-only configured Package Registry, bounded Worker jobs, persistent control-plane metadata, cancellation, and retained SSE events.
-- Include the Server WAR in the binary distribution while preserving Java 8 compatibility for CLI, Engine, and Worker.
-- Add the Java 8 `att-server-api` contract and `att-remote` REST/SSE client; expose `att remote` through the existing CLI for discovery, Run/Debug/Load/Validate, job management, and safe artifact downloads (#171).
-- Add HTTPS-only Basic authentication, secret-environment profiles, SSE replay, structured JSON results, and remote exit code `4` for transport/protocol failures.
-
-## 3.8.0 - 2026-10-06
-
-- Add a package resource resolver with deterministic package-root and descriptor-relative lookup, and remove package filesystem paths from the author Context (#170).
-- Restructure ATT into the minimal multi-module Maven layout with `att-cli`, empty `att-server`, and packaging-only `att-dist` (#162).
-- Keep the current CLI/distribution on Java 8-compatible bytecode while allowing future modules to choose newer Java baselines independently.
-- Upgrade ATT product version to 3.8.0.
-
-## 3.7.4 - 2026-10-05
-
-- Unify final-value coercion for native helper and configured Tool arguments, including nested file-content and pure built-in results; add optional declared Tool argument types (#153).
-- Replace public project-file expression terminology with file-content expressions and publish the package boundary as `META.PACKAGE_ROOT` (#154).
-- Validate discovered Debug sidecars during package validation using Debug's schema/input validation path (#155).
-- Render multiline Case-log strings as readable blocks while preserving CRLF, LF and lone CR line endings (#156).
-- Upgrade ATT product version to 3.7.4.
-
-## 3.7.3 - 2026-10-04
-
-- Adopt the Google Developer Documentation Style Guide as the editorial baseline for current ATT documentation, with ATT-specific terminology and identifier exceptions (#144).
-- Add deterministic editorial checks for standalone-page H1 counts, numbered headings, ambiguous abbreviations, and selected positional references; exclude generated Reference outputs from editorial lint while preserving freshness and EN/ZH structure checks.
-- Remove sequence numbers from Quick Start headings and clarify current documentation wording covered by the new checks.
-- Refactor the bilingual Quick Start into task procedures and define Testcase versus Case execution terminology (#147).
-- Separate public Load contracts from scheduler, telemetry-storage, and soak-verification implementation details (#148).
-- Organize CLI and major Reference pages around user tasks, with descriptive navigation and advanced authoring details grouped separately (#149).
-- Upgrade ATT product version to 3.7.3.
-
-## 3.7.2 - 2026-10-04
-
-- Implement issue #52: add deterministic weighted closed-VU mixes across pre-resolved Template, Flow and Tool targets, with shared run resources, VU-scoped testdata state, mix identity, bounded per-entry metrics, and evidence/report attribution.
-- Advance Load scenarios to `att-load/v1.6` and Load summaries to `att-load-summary/v1.1`; preserve v1.5 and v1.0 schemas as historical contracts.
-- Remove direct local file-path arguments from HTTPHelper and MQHelper; use `&{...}` Strings as HTTP bodies and MQ payloads (#133).
-- Make SSHHelper upload content-based and remove native SSH download (#133).
-- Normalize ATT-owned local Paths in Case logs to `$ATT_HOME` presentation and bound external Path values (#134).
-- Upgrade ATT product version to 3.7.2.
-
-## 3.7.1 - 2026-10-02
-
-- Parse structured HTTP and MQ responses directly from readers, avoiding an intermediate full-body String for bounded response payloads (#121).
-- Make Load failure-log capture stop when `maxSamples` is zero or retained/reserved evidence has exhausted capacity; cover zero and full capacity.
-- Preserve a full deferred log when a success-reserved sampled iteration fails and uses its reserved slot for failure evidence.
-- Describe Load case-log behavior using effective success/failure policies, including independent overrides.
-- Upgrade ATT product version to 3.7.1.
-
-## 3.7.0 - 2026-10-02
-
-- Implement issue #63: add layered environment and Load-local testdata registries, literal and virtual sequence records, typed input mapping, deterministic per-scope selection, Load scope/exhaustion policies, bounded selection evidence, and package validation.
-- Add the `att-testdata/v1.0` descriptor contract, advance global configuration to `att-config/v2.11` and Load scenarios to `att-load/v1.5`, and preserve the previous config/Load schemas under `schemas/history/`.
-- Document testdata authoring, mapping, Load policies, and migration in English and Traditional Chinese.
-
-## 3.6.2 - 2026-10-01
-
-- Remove presentation-only dbText/prettyPrint aliases and user-authored Log.level; migrate to typed Log value + format and plain Case-log entries (#109).
-- Remove local file built-ins/aliases and add typed SSHHelper SFTP stat, mkdirs, move and non-recursive delete using the existing selection, concurrency, timeout and identity handling (#110).
-- Document shared DB/MQ/HTTP evidence.output presentation, retain automatic Case-log visibility and deferred Load materialization, and redact credentials before formatting/truncation (#111).
-
-- Classify MQ request PUT followed by correlated reply MQRC 2033 as canonical TIMEOUT, preserve native completion/reason/wait metadata, and retain standalone receive polling semantics (issue #92).
-- Add common optional Boolean `retry.when` for Tool Actions, including DB queries, evaluated against current-attempt output only after retryOn matches; validate pure expressions, preserve suppressed TIMEOUT/FAIL outcomes, and record retry decisions. Document the MQ 2033 replay-suppression example and the duplicate-request risk of unconditional TIMEOUT retry (issue #92).
-- Correct typed expression source spans when retry conditions repeat literal values, preserving current-attempt DB timeout checks.
-
-- Add native SSH Resource Helper `execute`, `upload`, and `download` operations with typed stdout, bounded concurrency, one Action deadline, stable error categories, redacted diagnostics, controlled transfer paths, and timeout retry for `execute` only (issue #89).
-- Unify current Load descriptors on `att-load/v1.4`, preserve historical v1.3 threshold semantics, and keep policy-only Quick Load descriptors non-executable (issue #102).
-- Link retained Load evidence and Case Logs safely in portable reports, including canonical path containment and symlink-escape checks (issue #100).
-- Replace `DocumentValue` and `templateFormat` handling with String values at the Render boundary (issue #101), then retire Render Actions from current `att-template/v3.5` and `att-flow/v3.5`; retain v3.4 as a historical contract and migrate shipped templates, flows, examples, and EN/ZH manuals to project-file expressions (issue #107).
-- Add typed `&{project-file}` expressions that return exactly one UTF-8 String, enforce canonical project-root containment and static locators, and reject absolute paths, globs, unsafe targets, and nested file expressions inside project-file content in v1 (issue #107).
-- Cache immutable compiled file plans in Run/Debug, re-evaluate their Context/call nodes for each use, and freeze validated file identities, content, and plans for Load. Evaluate authored nodes once without rescanning runtime Context values, Tool results, or file output as expression syntax (issue #107).
-- Validate Context scope and Action ordering plus Tool/Helper call dependencies inside referenced files using the normal authoring contracts; add regression coverage for literal runtime locators, invalid dependencies, and consistent nested-file rejection across Run/Debug/Load (issue #107).
-
-## 3.6.1 - 2026-09-30
-
-- Preserve evidence collector root causes, structured resource evidence, diagnostics, and retry history for continue/stop handling (issue #94).
-- Attribute nested Tool, assertion, and evidence collector failures to their source fields, retaining Flow source locations (issue #95).
-
-## 3.6.0 - 2026-09-30
-
-- Implement Issues #87 and #88: replace common result representation settings with typed `DocumentValue` results, preserve rendered documents through HTTP/MQ requests, add explicit log/resource evidence formatting, and configure Load `EXEC.ID` with runtime expressions.
-- Document curated `META` fields and invocation lifecycles, and expose `EXEC.RUN_ID` / `EXEC.ID` navigation for reports and retained evidence.
-- Advance active schemas and migrate shipped configuration/examples to the 3.6.0 contracts.
-
-## 3.5.3 - 2026-09-29
-
-- Complete Issues #70–#74: harden HTTPHelper result/header contracts and schema-catalog enforcement; unify typed Action and Tool results; add bounded, secret-redacted internal exception stacks to Case logs; and allow MQ send/receive/request queue defaults with explicit argument precedence.
+- Allow operational users to rerun shared Jobs while keeping replay drafts private and prese…7174 tokens truncated…eive/request queue defaults with explicit argument precedence.
 - Advance current configuration, Tool Group, Template, and Flow schemas to `att-config/v2.9`, `att-tool-group/v2.8`, `att-template/v3.2`, and `att-flow/v3.2`, retaining every previous schema at its catalog-registered `schemas/history/` path.
 - Expand English and Traditional Chinese HTTPHelper, MQHelper, Tool/result, validation, and migration guidance; update runnable SIT/UAT examples to the current `result.format` contract.
 

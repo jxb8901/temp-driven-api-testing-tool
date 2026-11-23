@@ -37,6 +37,7 @@ public final class WorkerMain {
     private final LinkedHashMap<String,Map<String,Object>> inspectionAggregates=new LinkedHashMap<String,Map<String,Object>>(16,.75f,true);
     private String jobId;
     private String currentCommand;
+    private WorkerRequest currentWorkerRequest;
     private boolean inspectionDaemon;
     private boolean prewarmed;
     private boolean inspectionRequest;
@@ -168,6 +169,7 @@ public final class WorkerMain {
             return fail("WORKER_SOURCE_SNAPSHOT_INVALID","The accepted source snapshot is unavailable or failed integrity verification");
         }
         currentCommand=request.command;
+        currentWorkerRequest=request;
         try { consoleOptions=att.console.ExecutionConsoleFormatter.Options.published(
                 request.liveOutputMaxEntryChars==null?4000:request.liveOutputMaxEntryChars,
                 request.liveOutputMaxEntryLines==null?40:request.liveOutputMaxEntryLines); }
@@ -310,7 +312,9 @@ public final class WorkerMain {
                     ||"load-detail".equals(request.inspectionAction)
                     ||"load-source".equals(request.inspectionAction)
                     ||"run-input".equals(request.inspectionAction)
-                    ||"native-run-input".equals(request.inspectionAction));
+                    ||"native-run-input".equals(request.inspectionAction)
+                    ||"native-case-preview".equals(request.inspectionAction)
+                    ||"native-suite-input".equals(request.inspectionAction));
             if(draftInspection) {
                 String safeMessage=DiagnosticSanitizer.redactText(message==null?"ATT operation failed":message);
                 diagnostic.put("summary",safeMessage);
@@ -321,6 +325,9 @@ public final class WorkerMain {
                 if(typed.detail()!=null)diagnostic.put("detail",DiagnosticSanitizer.redactText(typed.detail()));
                 if(typed.file()!=null)diagnostic.put("file",DiagnosticSanitizer.redactText(typed.file()));
                 if(typed.field()!=null)diagnostic.put("field",DiagnosticSanitizer.redactText(typed.field()));
+                if(typed.sheet()!=null)diagnostic.put("sheet",DiagnosticSanitizer.redactText(typed.sheet()));
+                if(typed.row()!=null)diagnostic.put("row",typed.row());
+                if(typed.column()!=null)diagnostic.put("column",typed.column());
                 if(typed.suggestion()!=null)diagnostic.put("suggestion",DiagnosticSanitizer.redactText(typed.suggestion()));
                 if(typed.source()!=null) {
                     diagnostic.put("sourceFile",DiagnosticSanitizer.redactText(typed.source().file()));
@@ -367,6 +374,24 @@ public final class WorkerMain {
         executionOutput=output==null?null:(output.isAbsolute()?output:root.resolve(output)).normalize();
         AttService service=new DefaultAttService();
         if("run".equals(r.command)&&r.expectedExecutionRevisionDigest!=null) verifyRevision(root,config,r);
+        if("run".equals(r.command)&&r.nativeSuiteDefinitionIds!=null) {
+            if(r.nativeSuiteQualifiedCaseIds==null||r.nativeSuiteQualifiedCaseIds.isEmpty()
+                    ||r.nativeSuiteSourcePaths==null||r.registeredPackageId==null)
+                throw new IllegalArgumentException("Native Suite RUN is missing its server-validated selection or source identity");
+            Map<String,Object> pinned=resolveNativeSuiteInput(r,root,config);
+            if(!r.nativeSuiteSourcePaths.equals(pinned.get("sourcePaths")))
+                throw new IllegalArgumentException("Native Suite Definition sources do not match the accepted source closure");
+            if(!r.nativeSuiteQualifiedCaseIds.equals(pinned.get("selectedQualifiedCaseIds")))
+                throw new IllegalArgumentException("Native Suite selection changed after draft validation");
+            att.api.NativeSuiteRetryLineage retryLineage=r.nativeSuiteRetry==null?null
+                    :att.api.NativeSuiteRetryLineage.fromMap(r.nativeSuiteRetry);
+            if(retryLineage!=null&&!r.nativeSuiteQualifiedCaseIds.equals(retryLineage.failedQualifiedCaseIds()))
+                throw new IllegalArgumentException("Native Suite retry selection does not match its frozen failed Qualified Case IDs");
+            return service.runNativeCaseSuite(new NativeCaseSuiteRunRequest(root,config,r.environment,output,r.runId,
+                    r.registeredPackageId,r.nativeSuiteDefinitionIds,r.nativeSuiteQualifiedCaseIds,
+                    Collections.<String>emptyList(),Collections.<String>emptyList(),false,false,bool(r.dryRun),bool(r.failFast),
+                    retryLineage,event -> emitRunExecution(event,r.diagnosticMode)));
+        }
         if("run".equals(r.command)&&r.nativeCaseDefinitionId!=null) {
             if(r.nativeResolvedCaseIds==null||r.nativeResolvedCaseIds.isEmpty()||r.nativeCaseSourcePath==null)
                 throw new IllegalArgumentException("Native Case RUN is missing its server-validated selection or source identity");
@@ -430,6 +455,7 @@ public final class WorkerMain {
         if("snapshot".equals(r.command)) return service.snapshot(new SnapshotRequest(root,config,r.environment,paths(r.suites),path(r.suiteDirectory),set(r.caseIds),bool(r.all)));
         if("inspect".equals(r.command)) {
             if("cli-validation".equals(r.inspectionAction)) return validateVNext(r,root,config);
+            if("native-case-preview".equals(r.inspectionAction)) return previewNativeTestCase(r,root,config);
             if("authoring-source".equals(r.inspectionAction)) {
                 int maxSourceBytes=r.maxSourceBytes==null?65536:r.maxSourceBytes;
                 int maxResponseBytes=r.maxResponseBytes==null?262144:r.maxResponseBytes;
@@ -456,6 +482,9 @@ public final class WorkerMain {
                     case "testcase":
                         source=resourceInspector(root,config,r).inspectAuthoringTestcaseSource(
                                 r.inspectionResourceId,r.authoringSourceSelector);
+                        break;
+                    case "native-testcase":
+                        source=resourceInspector(root,config,r).inspectAuthoringNativeTestcaseSource(r.inspectionPath);
                         break;
                     case "central":
                         source=new PackageConfigurationInspector(root,config,maxResponseBytes,
@@ -562,6 +591,30 @@ public final class WorkerMain {
                 return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
                         Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
             }
+            if("native-suite-input".equals(r.inspectionAction)) {
+                String revision=inspector.executionRevisionDigest();
+                Map<String,Object> inspected=resolveNativeSuiteInput(r,root,config);
+                java.util.Set<String> flowIds=new java.util.LinkedHashSet<String>();
+                for(Object value:(List<?>)inspected.get("cases")) {
+                    Map<?,?> item=(Map<?,?>)value;flowIds.add(String.valueOf(item.get("flowId")));
+                }
+                for(String flowId:flowIds) {
+                    ValidateResult flowValidation=service.validateSelectedResource(new ValidateRequest(root,config,r.environment,
+                            Collections.<Path>emptyList(),null,Collections.<String>emptySet(),Collections.<String>emptySet(),
+                            Collections.<String>emptySet(),false,"selected-resource"),"flow",flowId);
+                    if(flowValidation.exitCode()!=0) {
+                        for(att.validation.Diagnostic diagnostic:flowValidation.diagnostics()) {
+                            Map<String,Object> value=diagnostic.toMap();
+                            value.put("outcome",att.server.api.LimitOutcome.SUBMISSION_REJECTED.name());
+                            value.put("stage","validation");emit(WorkerEvent.Type.DIAGNOSTIC,value);
+                        }
+                        return flowValidation;
+                    }
+                }
+                inspector.verifyRevision(revision);inspected.put("revisionDigest",revision);
+                return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                        Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",inspected));
+            }
             if("revision".equals(r.inspectionAction)) {
                 Map<String,String> revisions=inspector.sourceRevisionDigests(r.expectedExecutionRevisionDigest);
                 Map<String,Object> result=new LinkedHashMap<String,Object>();
@@ -650,6 +703,129 @@ public final class WorkerMain {
         throw new IllegalArgumentException("Unsupported Worker command: "+r.command);
     }
 
+    private OperationResult previewNativeTestCase(WorkerRequest request,Path root,Path config) throws Exception {
+        String source=request.nativeCasePreviewSource;
+        String sourcePath=request.inspectionPath;
+        if(source==null||sourcePath==null||source.length()==0)
+            throw new IllegalArgumentException("Native Test Case preview requires a source path and candidate YAML");
+        if(source.getBytes(StandardCharsets.UTF_8).length>att.testcase.TestCaseDefinitionResolver.MAX_SOURCE_BYTES)
+            throw new IllegalArgumentException("Native Test Case Definition source exceeds its size limit");
+        if(sourcePath.length()>1024||!sourcePath.equals(sourcePath.trim())||sourcePath.startsWith("/")
+                ||sourcePath.indexOf('\\')>=0||sourcePath.contains("//")||sourcePath.matches("^[A-Za-z]:.*")
+                ||sourcePath.contains("\u0000")||java.util.Arrays.stream(sourcePath.split("/",-1))
+                        .anyMatch(part->part.isEmpty()||".".equals(part)||"..".equals(part))
+                ||!sourcePath.endsWith("/testcase.yaml"))
+            throw new IllegalArgumentException("Native Test Case preview path must be a safe Package-relative testcase.yaml");
+        if(request.registeredPackageId==null||request.registeredPackageId.codePoints().allMatch(Character::isWhitespace))
+            throw new IllegalArgumentException("Native Test Case preview requires a registered Package");
+
+        Path selectedConfig=RuntimeConfigPath.resolve(config,root);
+        att.config.FrameworkConfig effective=new att.config.FrameworkConfigLoader().load(selectedConfig,
+                RuntimeConfigPath.root(selectedConfig),root,request.environment);
+        att.resource.PackageResourceResolver resources=new att.resource.PackageResourceResolver(root);
+        Path testcaseRoot=effective.testcasesRoot().isAbsolute()?effective.testcasesRoot():root.resolve(effective.testcasesRoot());
+        Path safeTestcaseRoot=resources.internalCandidate(testcaseRoot);
+        Path candidate=resources.internalCandidate(root.resolve(sourcePath));
+        if(!candidate.startsWith(safeTestcaseRoot)||candidate.equals(safeTestcaseRoot)
+                ||!"testcase.yaml".equals(candidate.getFileName().toString()))
+            throw new IllegalArgumentException("Native Test Case preview path is outside the configured testcase root");
+        String logicalPath=resources.packageRoot().relativize(candidate).toString().replace('\\','/');
+        if(!sourcePath.equals(logicalPath))
+            throw new IllegalArgumentException("Native Test Case preview path must use its canonical Package-relative spelling");
+
+        att.testcase.TestCaseDefinitionResolver resolver=new att.testcase.TestCaseDefinitionResolver(
+                att.validation.SchemaFiles.resolve(root,"att-testcase-v1.schema.json"));
+        att.testcase.TestCaseDefinitionResolver.Options options=new att.testcase.TestCaseDefinitionResolver.Options(
+                att.testcase.TestCaseDefinitionResolver.MAX_RECORDS,att.testcase.TestCaseDefinitionResolver.MAX_PREVIEW_CASES,
+                null,()->Thread.currentThread().isInterrupted());
+        try {
+            att.testcase.TestCaseResolutionResult resolution=resolver.resolve(source,logicalPath,
+                    request.registeredPackageId,root,effective.templatesRoot(),options);
+            Map<String,Object> result=new LinkedHashMap<String,Object>();
+            result.put("kind","NativeTestCasePreview");result.put("valid",Boolean.TRUE);
+            result.put("sourceType",resolution.definition().dataSourceType()==null?"direct":resolution.definition().dataSourceType());
+            result.put("sourceReference",resolution.sourceReference());result.put("definitionRevision",resolution.sourceRevision());
+            result.put("resolvedCount",Integer.valueOf(resolution.resolvedCount()));
+            result.put("selectedCount",Integer.valueOf(resolution.selectedCount()));
+            result.put("previewCount",Integer.valueOf(resolution.previewCases().size()));
+            result.put("truncated",Boolean.valueOf(resolution.truncated()));
+            List<Map<String,Object>> cases=new ArrayList<Map<String,Object>>();
+            att.resource.PackageConfigurationInspector projector=new att.resource.PackageConfigurationInspector(root,
+                    selectedConfig,request.maxResponseBytes==null?262144:request.maxResponseBytes,
+                    !Boolean.FALSE.equals(request.redactionEnabled),request.sensitivePaths,request.sensitiveFieldPatterns);
+            String workbookRevision=null;
+            for(att.testcase.ResolvedTestCase testCase:resolution.previewCases()) {
+                boolean[] redacted=new boolean[]{false};
+                Object safeInputs=projector.projectPackageValue(testCase.inputs(),
+                        "testcase."+testCase.definitionId()+".cases["+cases.size()+"].inputs",redacted);
+                Map<String,Object> item=new LinkedHashMap<String,Object>();
+                item.put("qualifiedCaseId",testCase.qualifiedCaseId());item.put("caseId",testCase.caseId());
+                item.put("definitionId",testCase.definitionId());item.put("flowId",testCase.flowId());
+                item.put("tags",testCase.tags());item.put("inputs",safeInputs);item.put("redacted",Boolean.valueOf(redacted[0]));
+                Map<String,Object> provenance=new LinkedHashMap<String,Object>();
+                provenance.put("sourceType",testCase.sourceProvenance().sourceType());
+                provenance.put("sourceReference",testCase.sourceProvenance().sourceReference());
+                if(testCase.sourceRecordId()!=null)provenance.put("recordId",testCase.sourceRecordId());
+                if(testCase.recordIndex()!=null)provenance.put("recordIndex",testCase.recordIndex());
+                if(testCase.sourceProvenance().sheet()!=null)provenance.put("sheet",testCase.sourceProvenance().sheet());
+                if(testCase.sourceProvenance().row()!=null)provenance.put("row",testCase.sourceProvenance().row());
+                if(!testCase.sourceProvenance().metadata().isEmpty()) {
+                    Map<String,Object> metadata=new LinkedHashMap<String,Object>(testCase.sourceProvenance().metadata());
+                    Object revision=metadata.get("workbookSha256");
+                    if(workbookRevision==null&&revision instanceof String)workbookRevision=(String)revision;
+                    provenance.put("metadata",metadata);
+                }
+                item.put("provenance",provenance);cases.add(item);
+            }
+            result.put("cases",cases);
+            if(workbookRevision!=null)result.put("workbookRevision",workbookRevision);
+            result.put("diagnostics",Collections.emptyList());
+            return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                    Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",result));
+        } catch(att.validation.DiagnosticException invalid) {
+            return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                    Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",
+                    nativeCasePreviewFailure(invalid,root,sourcePath)));
+        } catch(IllegalArgumentException invalid) {
+            Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code","ATT-TESTCASE-INVALID");
+            diagnostic.put("summary",safePreviewText(invalid.getMessage(),root));
+            diagnostic.put("file",sourcePath);diagnostic.put("field","definition");
+            diagnostic.put("suggestion","Correct the Test Case source and retry Preview / Resolve.");
+            Map<String,Object> result=new LinkedHashMap<String,Object>();result.put("kind","NativeTestCasePreview");
+            result.put("valid",Boolean.FALSE);result.put("sourceType","invalid");result.put("sourceReference",sourcePath);
+            result.put("cases",Collections.emptyList());
+            result.put("resolvedCount",Integer.valueOf(0));result.put("selectedCount",Integer.valueOf(0));
+            result.put("previewCount",Integer.valueOf(0));result.put("truncated",Boolean.FALSE);
+            result.put("diagnostics",Collections.singletonList(diagnostic));
+            return new OperationResult(null,"PASS",0,0,Collections.<att.validation.Diagnostic>emptyList(),
+                    Collections.<String,String>emptyMap(),Collections.<String,Object>singletonMap("inspection",result));
+        }
+    }
+
+    private Map<String,Object> nativeCasePreviewFailure(att.validation.DiagnosticException failure,Path root,String fallbackPath) {
+        att.validation.DiagnosticException safe=failure.forPackage(root);
+        Map<String,Object> diagnostic=new LinkedHashMap<String,Object>();diagnostic.put("code",safe.code());
+        diagnostic.put("summary",safePreviewText(safe.summary(),root));
+        if(safe.detail()!=null)diagnostic.put("detail",safePreviewText(safe.detail(),root));
+        if(safe.file()!=null)diagnostic.put("file",safePreviewText(safe.file(),root));
+        if(safe.field()!=null)diagnostic.put("field",safePreviewText(safe.field(),root));
+        if(safe.sheet()!=null)diagnostic.put("sheet",safePreviewText(safe.sheet(),root));
+        if(safe.row()!=null)diagnostic.put("row",safe.row());
+        if(safe.column()!=null)diagnostic.put("column",safe.column());
+        if(safe.suggestion()!=null)diagnostic.put("suggestion",safePreviewText(safe.suggestion(),root));
+        Map<String,Object> result=new LinkedHashMap<String,Object>();result.put("kind","NativeTestCasePreview");
+        result.put("valid",Boolean.FALSE);result.put("sourceType","invalid");result.put("sourceReference",fallbackPath);
+        result.put("cases",Collections.emptyList());
+        result.put("resolvedCount",Integer.valueOf(0));result.put("selectedCount",Integer.valueOf(0));
+        result.put("previewCount",Integer.valueOf(0));result.put("truncated",Boolean.FALSE);
+        result.put("diagnostics",Collections.singletonList(diagnostic));return result;
+    }
+
+    private String safePreviewText(String value,Path root) {
+        String text=DiagnosticSanitizer.redactText(value==null?"Test Case preview failed":value);
+        return DiagnosticSanitizer.redactAbsolutePaths(text,root);
+    }
+
     private Map<String,Object> resolveNativeRunInput(WorkerRequest request,Path root,Path config) throws Exception {
         if(request.nativeCaseDefinitionId==null||request.nativeResolvedCaseIds==null
                 ||request.nativeResolvedCaseIds.isEmpty()||request.nativeResolvedCaseIds.size()>1000
@@ -705,6 +881,45 @@ public final class WorkerMain {
         result.put("selectedCaseIds",orderedIds);result.put("qualifiedCaseIds",qualifiedIds);result.put("cases",cases);
         result.put("selectedCount",cases.size());result.put("truncated",Boolean.FALSE);
         return result;
+    }
+
+    private Map<String,Object> resolveNativeSuiteInput(WorkerRequest request,Path root,Path config) throws Exception {
+        if(request.nativeSuiteDefinitionIds==null||request.nativeSuiteDefinitionIds.isEmpty()
+                ||request.nativeSuiteDefinitionIds.size()>att.testcase.TestCaseSuiteResolver.MAX_DEFINITIONS
+                ||request.registeredPackageId==null)
+            throw new IllegalArgumentException("Native Suite RUN requires between 1 and 100 Definition IDs");
+        Path selectedConfig=RuntimeConfigPath.resolve(config,root);
+        att.config.FrameworkConfig effective=new att.config.FrameworkConfigLoader().load(selectedConfig,
+                RuntimeConfigPath.root(selectedConfig),root,request.environment);
+        att.testcase.TestCaseSuiteResolver resolver=new att.testcase.TestCaseSuiteResolver(
+                att.validation.SchemaFiles.resolve(root,"att-testcase-v1.schema.json"));
+        att.testcase.TestCaseSuiteResolutionResult resolution=resolver.resolve(root,request.registeredPackageId,
+                effective.templatesRoot(),effective.testcasesRoot(),request.nativeSuiteDefinitionIds,
+                request.nativeSuiteQualifiedCaseIds,request.nativeSuiteTags,request.nativeSuiteExcludeTags,
+                bool(request.nativeSuiteAll),()->Thread.currentThread().isInterrupted());
+        if(resolution.truncated())throw new IllegalArgumentException("Native Suite selection is truncated; narrow the source before execution");
+        if(resolution.emptySelection())throw new IllegalArgumentException("Native Suite selection is empty after applying the requested selectors");
+        Map<String,String> sourcePaths=new LinkedHashMap<String,String>();
+        Map<String,String> sourceRevisions=new LinkedHashMap<String,String>();
+        for(att.testcase.TestCaseResolutionResult definition:resolution.definitions()) {
+            sourcePaths.put(definition.definition().id(),definition.sourceReference());
+            sourceRevisions.put(definition.definition().id(),definition.sourceRevision());
+        }
+        List<String> selectedIds=new ArrayList<String>();List<Map<String,Object>> cases=new ArrayList<Map<String,Object>>();
+        for(att.testcase.ResolvedTestCase testCase:resolution.cases()) {
+            selectedIds.add(testCase.qualifiedCaseId());
+            Map<String,Object> item=new LinkedHashMap<String,Object>(
+                    att.testcase.NativeSuiteRetryResolver.caseSourceIdentity(testCase));
+            item.put("caseId",testCase.caseId());
+            item.put("tags",testCase.tags());item.put("provenance",testCase.sourceProvenance().toMap());
+            cases.add(item);
+        }
+        Map<String,Object> result=new LinkedHashMap<String,Object>();
+        result.put("definitionIds",new ArrayList<String>(sourcePaths.keySet()));
+        result.put("sourcePaths",sourcePaths);result.put("sourceRevisions",sourceRevisions);
+        result.put("selectedQualifiedCaseIds",selectedIds);result.put("cases",cases);
+        result.put("resolvedCount",resolution.resolvedCount());result.put("selectedCount",selectedIds.size());
+        result.put("kind","ImplicitTestCaseSuite");return result;
     }
 
     private OperationResult validateVNext(WorkerRequest request,Path packageRoot,Path configPath) throws Exception {
@@ -1026,9 +1241,12 @@ public final class WorkerMain {
     }
     private synchronized void emit(WorkerEvent.Type type,Map<String,Object> data) throws Exception {
         resourceTelemetry.sample();
+        PreservedNativeTestCaseSource preservedSource=inspectionDaemon&&type==WorkerEvent.Type.RESULT
+                ?withoutValidatedNativeTestCaseSourceText(data):null;
+        Map<String,Object> sanitizeInput=preservedSource==null?data:preservedSource.data;
         Map<String,Object> safe;
-        if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&data.containsKey("inspectionMetrics")) {
-            Map<String,Object> content=new LinkedHashMap<String,Object>(data);
+        if(inspectionDaemon&&type==WorkerEvent.Type.RESULT&&sanitizeInput.containsKey("inspectionMetrics")) {
+            Map<String,Object> content=new LinkedHashMap<String,Object>(sanitizeInput);
             Object metrics=content.remove("inspectionMetrics");
             safe=DiagnosticSanitizer.sanitize(content);
             // These locally constructed metrics contain only fixed counters, numeric JMX
@@ -1036,7 +1254,8 @@ public final class WorkerMain {
             // classification of every counter name adds work to every inspection read.
             // Authored results, diagnostics and Worker telemetry still pass the sanitizer.
             safe.put("inspectionMetrics",metrics);
-        } else safe=DiagnosticSanitizer.sanitize(data);
+        } else safe=DiagnosticSanitizer.sanitize(sanitizeInput);
+        if(preservedSource!=null)restoreValidatedNativeTestCaseMapping(safe,preservedSource.marker,preservedSource.mapping);
         if(!inspectionDaemon&&!inspectionRequest) {
             attachConsole(type,safe);
             WorkerProtocol.Frame frame;
@@ -1072,6 +1291,44 @@ public final class WorkerMain {
         }
         protocol.println(line);protocol.flush();
         if(inspectionDaemon)inspectionResponseBytes+=bytes;
+    }
+    private PreservedNativeTestCaseSource withoutValidatedNativeTestCaseSourceText(Map<String,Object> data) {
+        WorkerRequest request=currentWorkerRequest;
+        if(request==null||!"inspect".equals(request.command)||!"authoring-source".equals(request.inspectionAction)
+                ||!"native-testcase".equals(request.authoringSourceKind)||request.inspectionPath==null
+                ||!request.inspectionPath.endsWith("/testcase.yaml"))return null;
+        Object rawResult=data.get("result");if(!(rawResult instanceof Map<?,?>))return null;
+        Map<String,Object> content=new LinkedHashMap<>(data);
+        Map<String,Object> result=new LinkedHashMap<>((Map<String,Object>)rawResult);
+        Object rawSummary=result.get("summary");if(!(rawSummary instanceof Map<?,?>))return null;
+        Map<String,Object> summary=new LinkedHashMap<>((Map<String,Object>)rawSummary);
+        Object rawInspection=summary.get("inspection");if(!(rawInspection instanceof Map<?,?>))return null;
+        Map<String,Object> inspection=new LinkedHashMap<>((Map<String,Object>)rawInspection);
+        Object text=inspection.get("text");if(!(text instanceof String))return null;
+        String sourceText=(String)text;
+        String mapping=PackageResourceInspector.nativeExcelDataColumnsMappingSource(request.inspectionPath,sourceText);
+        if(mapping==null)return null;
+        String marker="__ATT_NATIVE_EXCEL_DATA_COLUMNS__";
+        while(sourceText.contains(marker))marker+="_";
+        inspection.put("text",PackageResourceInspector.replaceNativeExcelDataColumnsMappingSource(
+                request.inspectionPath,sourceText,marker));
+        summary.put("inspection",inspection);result.put("summary",summary);content.put("result",result);
+        return new PreservedNativeTestCaseSource(content,marker,mapping);
+    }
+    @SuppressWarnings("unchecked") private static void restoreValidatedNativeTestCaseMapping(Map<String,Object> safe,String marker,String mapping) {
+        Object rawResult=safe.get("result");if(!(rawResult instanceof Map<?,?>))return;
+        Map<String,Object> result=(Map<String,Object>)rawResult;
+        Object rawSummary=result.get("summary");if(!(rawSummary instanceof Map<?,?>))return;
+        Map<String,Object> summary=(Map<String,Object>)rawSummary;
+        Object rawInspection=summary.get("inspection");if(!(rawInspection instanceof Map<?,?>))return;
+        Object text=((Map<String,Object>)rawInspection).get("text");
+        if(text instanceof String)((Map<String,Object>)rawInspection).put("text",((String)text).replace(marker,mapping));
+    }
+    private static final class PreservedNativeTestCaseSource {
+        final Map<String,Object> data;final String marker;final String mapping;
+        PreservedNativeTestCaseSource(Map<String,Object> data,String marker,String mapping) {
+            this.data=data;this.marker=marker;this.mapping=mapping;
+        }
     }
     private static boolean isCompactLoadResult(Map<String,Object> event) {
         Object value=event.get("result");

@@ -86,6 +86,54 @@ class VNextOptionsTest {
                 "--resolved-case-id",""}));
     }
 
+    @Test void nativeSuiteRequiresExplicitDefinitionsAndUsesQualifiedSelectors() {
+        String[] selectedArgs={"--local","run","native-suite","--definition","fpp.alpha",
+                "--definition","fpp.zeta","--qualified-case-id","fpp.zeta.third",
+                "--qualified-case-id","fpp.alpha.first","--tag","smoke","--exclude-tag","skip"};
+        assertTrue(VNextOptions.isVNextRequest(selectedArgs));
+        VNextOptions selected=VNextOptions.parse(selectedArgs);
+        assertEquals("native-suite",selected.targetKind());
+        assertNull(selected.target());
+        assertEquals(java.util.Arrays.asList("fpp.alpha","fpp.zeta"),selected.definitionIds());
+        assertEquals(java.util.Arrays.asList("fpp.zeta.third","fpp.alpha.first"),selected.qualifiedCaseIds());
+        assertEquals(java.util.Collections.singleton("smoke"),selected.tags());
+        assertEquals(java.util.Collections.singleton("skip"),selected.excludeTags());
+
+        VNextOptions all=VNextOptions.parse(new String[]{"--server","sit","-p","payments","run","native-suite",
+                "--definition","fpp.transfer","--all"});
+        assertTrue(all.all());
+        assertEquals("payments",all.packageId());
+        VNextOptions retry=VNextOptions.parse(new String[]{"--server","sit","-p","payments","run","native-suite",
+                "--definition","fpp.transfer","--rerun-failed"});
+        assertTrue(retry.rerunFailed());
+        assertFalse(retry.all());
+        assertTrue(retry.qualifiedCaseIds().isEmpty());
+
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--all","--qualified-case-id","fpp.transfer.one"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--qualified-case-id","fpp.other.one"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","fpp.transfer","--all","--definition","fpp.transfer"}));
+        String longTag=String.join("",java.util.Collections.nCopies(129,"x"));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--tag",longTag}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--all","--exclude-tag",longTag}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--all","--rerun-failed"}));
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{"run","native-suite","--definition","fpp.transfer","--tag","smoke","--rerun-failed"}));
+    }
+
+    @Test void nativeSuiteQualifiedSelectorLimitMatchesExecutionV2() {
+        java.util.List<String> atLimit=new java.util.ArrayList<String>();
+        atLimit.add("--local");atLimit.add("run");atLimit.add("native-suite");
+        atLimit.add("--definition");atLimit.add("fpp.transfer");
+        for(int index=0;index<att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS;index++) {
+            atLimit.add("--qualified-case-id");atLimit.add("fpp.transfer.case"+index);
+        }
+        assertEquals(att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS,
+                VNextOptions.parse(atLimit.toArray(new String[0])).qualifiedCaseIds().size());
+
+        atLimit.add("--qualified-case-id");atLimit.add("fpp.transfer.over-limit");
+        assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(atLimit.toArray(new String[0])));
+    }
+
     @Test void directLoadRejectsInputUntilBothAdaptersSupportIt() {
         assertThrows(IllegalArgumentException.class,()->VNextOptions.parse(new String[]{
                 "--local","load","flow","PAYMENT.submit","--input","templates/flows/PAYMENT.submit/load.yaml"}));

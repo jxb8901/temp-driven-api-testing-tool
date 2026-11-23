@@ -8,6 +8,7 @@ import { SourceAuthoringWorkspace } from './SourceAuthoringWorkspace';
 import { PackageFileCatalog } from './PackageFileCatalog';
 import { SourceViewer } from './SourceViewer';
 import { TestcaseAuthoringWorkspace } from './TestcaseAuthoringWorkspace';
+import { NativeTestCaseAuthoringWorkspace } from './NativeTestCaseAuthoringWorkspace';
 import { ActionInspector } from './ActionInspector';
 import { CodeEditor } from '../code/CodeEditor';
 import { AuthoringWorkflow, type AuthoringStepState } from './AuthoringWorkflow';
@@ -1010,6 +1011,8 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
   const [typeFilter, setTypeFilter] = useState<ResourceSummary['type'] | 'all'>(initialListState.typeFilter);
   const [listView, setListView] = useState<'resources' | 'support'>('resources');
   const [newTestcaseOpen, setNewTestcaseOpen] = useState(false);
+  const [nativeCaseEditorOpen, setNativeCaseEditorOpen] = useState(false);
+  const [nativeCaseEditorPath, setNativeCaseEditorPath] = useState('');
   const [sortKey, setSortKey] = useState<ResourceSortField>(initialListState.sortKey);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(initialListState.sortDirection);
   const [resources, setResources] = useState<ResourceSummary[]>([]);
@@ -1364,18 +1367,21 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
   return <main className="page-content att-explorer-page">
     {runConfirmationDialog}
     <header className="att-explorer-page-heading">
-      <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>{identity ? 'Resource details' : newTestcaseOpen ? 'New Testcase' : listView === 'support' ? 'Supporting Package sources' : 'Package Explorer'}</h1>
-        <p>{identity ? 'View the safe definition, source, and dependencies for this resource.' : newTestcaseOpen ? 'Create a new executable Testcase in this Package.' : listView === 'support'
+      <div><p className="att-explorer-breadcrumb">Packages / {packageId} / Explorer</p><h1>{identity ? 'Resource details' : nativeCaseEditorOpen ? nativeCaseEditorPath ? 'Edit native Test Case' : 'New native Test Case' : newTestcaseOpen ? 'New Testcase' : listView === 'support' ? 'Supporting Package sources' : 'Package Explorer'}</h1>
+        <p>{identity ? 'View the safe definition, source, and dependencies for this resource.' : nativeCaseEditorOpen ? 'Create, preview, and publish a Flow-bound native Test Case Definition.' : newTestcaseOpen ? 'Create a new executable Testcase in this Package.' : listView === 'support'
           ? 'Manage Package-owned supporting sources separately from executable resources.'
           : 'Browse executable Package resources. Choose an execution environment from the RUN or Quick LOAD editor.'}</p></div>
     </header>
 
     <div className={`att-explorer-workspace${identity ? ' has-selected-resource' : ' is-list-first'}${identity ? '' : ' att-query-workspace'}`}>
-      <aside className="att-explorer-navigation" aria-label="Resource navigation" hidden={Boolean(identity || newTestcaseOpen)}>
+      <aside className="att-explorer-navigation" aria-label="Resource navigation" hidden={Boolean(identity || newTestcaseOpen || nativeCaseEditorOpen)}>
         <nav className="att-explorer-view-nav" aria-label="Package Explorer views">
           <button type="button" aria-pressed={listView === 'resources'} onClick={() => setListView('resources')}>Executable resources</button>
           <button type="button" aria-pressed={listView === 'support'} onClick={() => setListView('support')}>Supporting sources</button>
-          {listView === 'resources' && canManagePackageSource && <button type="button" onClick={() => setNewTestcaseOpen(true)}>New Testcase</button>}
+          {listView === 'resources' && canManagePackageSource && <>
+            <button type="button" onClick={() => setNewTestcaseOpen(true)}>New legacy Testcase</button>
+            <button type="button" onClick={() => { setNativeCaseEditorPath(''); setNativeCaseEditorOpen(true); }}>New native Test Case</button>
+          </>}
         </nav>
         <section className="att-explorer-supporting-sources" aria-label="Supporting Package sources" hidden={listView !== 'support'}>
           <header><h2>Supporting Package sources</h2>
@@ -1385,6 +1391,7 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
             {onOpenPackageConfiguration && <button type="button" className="button button-quiet" onClick={onOpenPackageConfiguration}>Package manifest</button>}
           </div>
           <PackageFileCatalog api={api} packageId={packageId} active={listView === 'support'} locale={locale}
+            onOpenNativeTestCase={path => { setNativeCaseEditorPath(path); setNativeCaseEditorOpen(true); }}
             onOpenFile={(path, origin, reference) => onOpenConfigurationFile?.(path, origin, reference)}
             onOpenResource={(target, actionId) => onResourceRouteChange({ ...target, tab: 'definition', ...(actionId ? { actionId } : {}) })} />
           <PackageSutMetricsPanel api={api} packageId={packageId} environment={environment} refreshKey={resourceRefresh + inspectionRefresh}
@@ -1443,10 +1450,13 @@ export function ExplorerPage({ api, packageId, resourceRoute, environment,
         </section>
       </aside>
 
-      <section className="att-explorer-detail" aria-label={newTestcaseOpen ? 'New Testcase authoring' : 'Resource details'} hidden={!identity && !newTestcaseOpen}>
-        {!identity && !newTestcaseOpen && <div className="att-explorer-empty-state"><h2>Select a resource</h2><p>Choose a Case, Template, Flow, or Tool from the resource list.</p></div>}
+      <section className="att-explorer-detail" aria-label={nativeCaseEditorOpen ? 'Native Test Case authoring' : newTestcaseOpen ? 'New Testcase authoring' : 'Resource details'} hidden={!identity && !newTestcaseOpen && !nativeCaseEditorOpen}>
+        {!identity && !newTestcaseOpen && !nativeCaseEditorOpen && <div className="att-explorer-empty-state"><h2>Select a resource</h2><p>Choose a Case, Template, Flow, or Tool from the resource list.</p></div>}
         {!identity && newTestcaseOpen && <TestcaseAuthoringWorkspace key={`${packageId}:new-testcase`} api={api} packageId={packageId}
           onBack={() => setNewTestcaseOpen(false)} registerUnsavedChanges={registerUnsavedChanges} />}
+        {!identity && nativeCaseEditorOpen && <NativeTestCaseAuthoringWorkspace key={`${packageId}:${nativeCaseEditorPath || 'new-native-case'}`}
+          api={api} packageId={packageId} sourcePath={nativeCaseEditorPath || undefined} onJobAccepted={onJobAccepted}
+          onBack={() => setNativeCaseEditorOpen(false)} registerUnsavedChanges={registerUnsavedChanges} />}
         {identity && <>
           <button className="button button-quiet" type="button" onClick={() => onResourceRouteChange(null)}>Back to resources</button>
           <header className="att-resource-title">

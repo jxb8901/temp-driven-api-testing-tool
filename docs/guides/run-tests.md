@@ -1,6 +1,6 @@
 # Run functional tests
 
-This guide uses the current ATT 4.4.1 Local CLI. It keeps Snapshot creation explicit and runs the checked-in offline Case.
+This guide shows the legacy workbook/Sidecar/Snapshot compatibility path and runs a checked-in offline Case with `./att.sh run`. For Native Case commands in the unpublished 4.6.0 release-target stack, see the [Quick Start](../quick-start.md) and [current CLI Reference](../reference/cli.md).
 
 ## Build the source checkout
 

@@ -127,7 +127,8 @@ class ServerWarUiIT {
         Files.writeString(failingTemplate.resolve("debug.yaml"),"schemaVersion: att-debug/v1.2\ninputs: {}\n");
         for(String target:List.of("HOLD","TIMEOUT")) {
             Path targetTemplate=Files.createDirectories(pkg.resolve("templates").resolve(target));
-            String timeout=target.equals("TIMEOUT")?", timeoutMs: 300":"";
+            // Let a cold Worker launch the Tool before exercising its action timeout.
+            String timeout=target.equals("TIMEOUT")?", timeoutMs: 5000":"";
             Files.writeString(targetTemplate.resolve("template.yaml"),"schemaVersion: att-template/v3.6\nname: "+target+"\n"
                     +"description: Packaged WAR "+target.toLowerCase(java.util.Locale.ROOT)+" parity\nactions:\n"
                     +"  hold: {type: tool, call: '#{hold()}'"+timeout+"}\n");
@@ -173,8 +174,10 @@ class ServerWarUiIT {
             assertPackagedParity(cold.cancelledDebug(),warm.cancelledDebug(),"cancelled DEBUG","CANCELLED",false);
             assertPackagedParity(cold.timedOutRun(),warm.timedOutRun(),"timed-out RUN",null,false);
             assertPackagedParity(cold.timedOutDebug(),warm.timedOutDebug(),"timed-out DEBUG",null,false);
-            assertNotEquals("PASS",cold.timedOutRun().status(),"Cold RUN Tool timeout must be terminal failure");
-            assertNotEquals("PASS",cold.timedOutDebug().status(),"Cold DEBUG Tool timeout must be terminal failure");
+            assertPackagedTimeout(cold.timedOutRun(),"cold RUN");
+            assertPackagedTimeout(warm.timedOutRun(),"warm RUN");
+            assertPackagedTimeout(cold.timedOutDebug(),"cold DEBUG");
+            assertPackagedTimeout(warm.timedOutDebug(),"warm DEBUG");
             assertEquals("cold",cold.run().dispatch());assertEquals("cold",cold.debug().dispatch());
             assertEquals("cold",warm.run().dispatch(),"Source-pinned RUN must use the isolated cold Worker");assertEquals("cold",warm.debug().dispatch(),"Source-pinned DEBUG must use the isolated cold Worker");
         } finally {
@@ -339,6 +342,12 @@ class ServerWarUiIT {
         JsonNode result=getJson(port,jobPath+"/result",auth);
         assertEquals(job.path("status").asText(),result.path("job").path("status").asText(),result.toString());
         JsonNode archive=awaitArchive(port,api,id,auth);
+        if("TIMEOUT".equals(template)) {
+            String caseLog=readArchiveEntryText(port,api+"/jobs/"+id+"/artifacts/archive.zip",auth,"case.log");
+            assertNotNull(caseLog,type+" archived Case log must preserve Tool timeout evidence");
+            assertTrue(caseLog.contains("status: TIMEOUT")&&caseLog.contains("timeoutMs: 5000"),
+                    type+" archived Case log must identify the action timeout: "+caseLog);
+        }
         List<String> artifactPaths=java.util.stream.StreamSupport.stream(archive.path("items").spliterator(),false)
                 .map(item->item.path("path").asText()).sorted().toList();
         List<String> primaryReports=java.util.stream.StreamSupport.stream(archive.path("primaryReports").spliterator(),false)
@@ -353,6 +362,10 @@ class ServerWarUiIT {
     private static void assertPackagedParity(PackagedExecutionCapture cold,PackagedExecutionCapture warm,
                                              String type,String expectedStatus) {
         assertPackagedParity(cold,warm,type,expectedStatus,true);
+    }
+
+    private static void assertPackagedTimeout(PackagedExecutionCapture capture,String label) {
+        assertNotEquals("PASS",capture.status(),label+" Tool timeout must be a terminal failure");
     }
 
     private static void assertPackagedParity(PackagedExecutionCapture cold,PackagedExecutionCapture warm,
@@ -528,7 +541,7 @@ class ServerWarUiIT {
                 for(JsonNode entry:manifest.path("entries")) {
                     String logical=entry.path("path").asText();
                     String extension=logical.substring(logical.lastIndexOf('.')+1).toLowerCase(java.util.Locale.ROOT);
-                    if(previewExtensions.add(extension)||entry.path("report").asBoolean())previewPaths.add(logical);
+                    if(entry.path("preview").asBoolean()&&(previewExtensions.add(extension)||entry.path("report").asBoolean()))previewPaths.add(logical);
                 }
                 try(var archive=new java.util.zip.ZipFile(zip.toFile())) {
                     for(JsonNode entry:manifest.path("entries")) {
@@ -634,6 +647,23 @@ class ServerWarUiIT {
             assertNotEquals("FAILED",index.path("archiveStatus").asText(),index.toString());Thread.sleep(30);
         }while(System.nanoTime()<deadline);
         fail("Archive did not become READY: "+index);return index;
+    }
+
+    private static String readArchiveEntryText(int port,String route,String authorization,String suffix) throws Exception {
+        HttpURLConnection connection=open(port,route,authorization);byte[] bytes;
+        try {
+            assertEquals(200,connection.getResponseCode(),"GET "+route);
+            try(var input=connection.getInputStream()){bytes=input.readAllBytes();}
+        } finally {connection.disconnect();}
+        try(var archive=new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(bytes))) {
+            java.util.zip.ZipEntry entry;
+            while((entry=archive.getNextEntry())!=null) {
+                if(entry.getName().endsWith(suffix))
+                    return new String(archive.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8);
+                archive.closeEntry();
+            }
+        }
+        return null;
     }
 
     @Test

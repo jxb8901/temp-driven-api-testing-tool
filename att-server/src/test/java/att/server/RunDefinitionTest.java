@@ -85,6 +85,85 @@ class RunDefinitionTest {
         assertThrows(IllegalArgumentException.class,()->RunDefinition.parseRetained(ServerRuntime.JSON.readTree(request)));
         assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,request));
     }
+
+    @Test void nativeSuiteV2EnforcesSchemaTagLengthAndAcceptsOnlyExclusiveRerunFailedSelection() throws Exception {
+        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
+        String tag128=String.join("",java.util.Collections.nCopies(128,"x"));
+        String valid=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":true,\"tags\":[\""+tag128+"\"]}}}");
+        att.validation.JsonSchemaVerifier.verifyJson(schema,valid);
+        assertEquals(tag128,parse(valid).nativeSuiteTags.get(0));
+
+        String tag129=tag128+"x";
+        String tooLong=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":true,\"tags\":[\""+tag129+"\"]}}}");
+        assertThrows(IllegalArgumentException.class,()->parse(tooLong));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,()->att.validation.JsonSchemaVerifier.verifyJson(schema,tooLong));
+
+        String rerun=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"rerunFailed\":true}}");
+        att.validation.JsonSchemaVerifier.verifyJson(schema,rerun);
+        assertTrue(parse(rerun).nativeSuiteRerunFailed);
+
+        for(String invalid:List.of(
+                "\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":true,\"rerunFailed\":true}}",
+                "\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"rerunFailed\":false}}",
+                "\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"rerunFailed\":true,\"tags\":[\"smoke\"]}}")) {
+            String request=requestV2(invalid);
+            assertThrows(IllegalArgumentException.class,()->parse(request));
+            assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                    ()->att.validation.JsonSchemaVerifier.verifyJson(schema,request));
+        }
+    }
+    @Test void nativeSuiteV2SchemaAndParserRejectIneffectiveSelectionAndC1Tags() throws Exception {
+        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
+        String empty=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],"
+                +"\"selection\":{\"all\":false}}}");
+        assertThrows(IllegalArgumentException.class,()->parse(empty));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                ()->att.validation.JsonSchemaVerifier.verifyJson(schema,empty));
+
+        String c1Tag="smoke"+String.valueOf((char)0x85);
+        String control=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],"
+                +"\"selection\":{\"tags\":[\""+c1Tag+"\"]}}}");
+        assertThrows(IllegalArgumentException.class,()->parse(control));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                ()->att.validation.JsonSchemaVerifier.verifyJson(schema,control));
+    }
+    @Test void nativeSuiteV2QualifiedSelectorLimitMatchesThePublicSchema() throws Exception {
+        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
+        String atLimit=nativeSuiteQualifiedIdsRequest(att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS);
+        att.validation.JsonSchemaVerifier.verifyJson(schema,atLimit);
+        assertEquals(att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS,parse(atLimit).qualifiedCaseIds.size());
+
+        String overLimit=nativeSuiteQualifiedIdsRequest(att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS+1);
+        assertThrows(IllegalArgumentException.class,()->parse(overLimit));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                ()->att.validation.JsonSchemaVerifier.verifyJson(schema,overLimit));
+    }
+    @Test void nativeSuiteV2RejectsAllFalseAloneAndC1ControlTagsWithSchemaParity() throws Exception {
+        java.nio.file.Path schema=java.nio.file.Path.of("schemas/att-execution-v2.schema.json");
+        String allFalseAlone=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":false}}}");
+        assertThrows(IllegalArgumentException.class,()->parse(allFalseAlone));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                ()->att.validation.JsonSchemaVerifier.verifyJson(schema,allFalseAlone));
+
+        String allTrue=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],\"selection\":{\"all\":true}}}");
+        att.validation.JsonSchemaVerifier.verifyJson(schema,allTrue);
+        assertTrue(parse(allTrue).nativeSuiteAll);
+
+        String c1Tag=requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],"
+                +"\"selection\":{\"all\":true,\"tags\":[\"smoke\\u0080\"]}}}");
+        assertThrows(IllegalArgumentException.class,()->parse(c1Tag));
+        assertThrows(att.validation.JsonSchemaVerifier.SchemaValidationException.class,
+                ()->att.validation.JsonSchemaVerifier.verifyJson(schema,c1Tag));
+    }
+    private static String nativeSuiteQualifiedIdsRequest(int count) {
+        StringBuilder ids=new StringBuilder();
+        for(int index=0;index<count;index++) {
+            if(index>0)ids.append(',');
+            ids.append("\"fpp.transfer.case").append(index).append("\"");
+        }
+        return requestV2("\"target\":{\"type\":\"nativeSuite\",\"definitionIds\":[\"fpp.transfer\"],"
+                +"\"selection\":{\"qualifiedCaseIds\":["+ids+"]}}");
+    }
     @Test void nativeCaseV2SchemaIsRegisteredInSourceAndEmbeddedRuntimeCatalogs() throws Exception {
         java.nio.file.Path rootCatalog=java.nio.file.Path.of("schemas/catalog.yaml");
         java.nio.file.Path runtimeCatalog=java.nio.file.Path.of("att-engine/src/main/resources/att-schemas/catalog.yaml");

@@ -1,6 +1,6 @@
 # 執行 functional test
 
-本指南使用目前 ATT 4.4.1 Local CLI，明確保留 Snapshot 建立步驟，並執行已提交的 offline Case。
+本指南示範舊版 workbook／Sidecar／Snapshot 相容路徑，並使用 `./att.sh run` 執行已提交的 offline Case。尚未發佈的 4.6.0 release-target stack 中的 Native Case command，請參閱[快速入門](../quick-start.zh.md)及[目前 CLI Reference](../reference.zh/cli.md)。
 
 ## 1. 編譯 source checkout
 

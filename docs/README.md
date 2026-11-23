@@ -1,6 +1,8 @@
 # ATT documentation
 
-This is the canonical documentation map for the ATT 4.4.1 release candidate. Acceptance is pending and this version is not released. The map separates task guidance from normative Reference contracts and identifies which interfaces are included, legacy-compatible or planned.
+This is the canonical documentation map for the ATT 4.6.0 formal release target. The release and tag have not been published; 4.3.1 identifies the earlier CLI code line and is not a verified GitHub Release. The map separates task guidance from normative Reference contracts and identifies which interfaces are included, legacy-compatible or planned.
+
+The target stack contains Native Case implementation work for inline and Excel sources, Studio editing and preview, implicit Suites, Native reports, and Default Package examples. Deployed acceptance remains open for Native RUN ([#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)), report integration ([#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)), and S12 adoption ([#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)); shared-editor deployment evidence remains separate ([#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387)). Native LOAD Case targets ([#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)), advanced Testdata and generators ([#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)), and Debug interoperability ([#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)) are excluded from this target.
 
 ## Start here
 
@@ -15,12 +17,11 @@ This is the canonical documentation map for the ATT 4.4.1 release candidate. Acc
 | Integrator | [Server API v1](interfaces/server-api/README.md) |
 | Contributor | [Documentation architecture](system-design/documentation-architecture.md) · [Reference source guide](reference/README.md) |
 
-The Quick Start is a current 4.3.1 workflow. Snapshot generation is explicit authoring; VALIDATE is read-only and does not create or update snapshots.
+The Quick Start leads with the Native Case happy path on the 4.6.0 release-target stack. VALIDATE is read-only. Legacy Workbook snapshot generation remains an explicit authoring step when you use that path.
 
 ~~~sh
-./att.sh snapshot --suite testcase/quick_start.xlsx
 ./att.sh validate --package
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
+./att.sh --local -p default run native-case quick.start.single --resolved-case-id default
 ~~~
 
 ## Common tasks
@@ -40,7 +41,7 @@ The Quick Start is a current 4.3.1 workflow. Snapshot generation is explicit aut
 | Choose one of the six LOAD modes | [Load model](concepts/load-model.md) · [Load Reference](reference/execution-modes/load.md) |
 | Run a Load test | [Load testing guide](guides/load-testing.md) |
 | See how a Local Run ID differs from a Server Job | [Run and Job lifecycle](concepts/jobs-and-runs.md) |
-| Use the current 4.3.1 CLI | [CLI Reference](reference/cli.md) |
+| Use the legacy CLI surface from the 4.3.1 code line | [CLI Reference](reference/cli.md) |
 | Review future vNext CLI syntax | [Proposed vNext CLI](interfaces/cli/vnext-proposed.md) — planned, not released |
 | Use ATT Server from the existing client | [Legacy ATT Remote guide](remote-client.md) |
 | Find REST, Jobs, events, or Schedule contracts | [Server API map](interfaces/server-api/README.md) |
@@ -48,18 +49,20 @@ The Quick Start is a current 4.3.1 workflow. Snapshot generation is explicit aut
 | Review schemas and versioned contracts | [Generated Reference Manual](reference.md) · [繁體中文 Reference](reference.zh.md) |
 | Build and package ATT | [CI and packaging operations](reference/ci-packaging-operations.md) |
 | Understand Engine execution flow | [Runtime execution design](system-design/runtime-execution.md) |
+| Compare legacy Stages with Native Flows | [Template–Flow–Stage compatibility matrix](system-design/template-flow-stage-compatibility.md) · [繁體中文版](system-design/template-flow-stage-compatibility.zh.md) |
 | Diagnose capacity limits and truncation | [Limits Reference](operations/limits-reference.md) · [繁體中文容量參考](operations/limits-reference.zh.md) · [Internal limits design](system-design/internal-limits-diagnostics.md) |
 | Design high-resolution LOAD history retention | [LOAD time-series retention follow-up for #299](system-design/load-time-series-retention.md) · [繁體中文設計](system-design/load-time-series-retention.zh.md) |
 
 ## Product and interface status
 
-| Capability | Local CLI in 4.3.1 | ATT Remote | Studio / REST | Availability note |
+| Capability | Legacy Local CLI (4.3.1 code line) | ATT Remote | Studio / REST | Availability note |
 |---|---|---|---|---|
 | Functional Case RUN | Current legacy run | Current legacy remote run | Current | Local CLI selection is workbook-based |
+| Native Case, Excel source, Studio editor, Suites, reports and examples | 4.6.0 target stack | Target-stack integration | Target-stack integration | Code is in open stacked PRs; deployed acceptance remains open under #393, #397 and #413; no release/tag exists |
 | Template, Flow and Tool execution | Current legacy debug | Current legacy remote debug | Current unified RUN | Standalone Debug remains a compatibility command |
 | LOAD | Current legacy load | Current legacy remote load | Current | Six workload shapes are documented in the Load model |
 | VALIDATE | Current local validate | Current remote validate | Current | Read-only checks; no business execution |
-| CLI vNext run, load, validate | Planned | Planned contract | Not a Studio or REST removal | The vNext grammar remains planned and is not part of ATT 4.4.1 |
+| CLI vNext run, load, validate | Planned | Planned contract | Not a Studio or REST removal | The vNext grammar remains planned and is not part of the ATT 4.6.0 release target |
 | Jobs and Schedules | Not Local CLI resources | Current att remote Job management | Current Server lifecycle | Local Run IDs are not Server Job IDs |
 | #294 management CLI resources | Not available | Not part of vNext proposal | Server/Studio capabilities are separate | Future P3 proposal |
 

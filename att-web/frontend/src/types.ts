@@ -30,6 +30,7 @@ export class ApiError extends Error {
 
 export interface ServerVersion {
   unifiedRunVersion?: string;
+  unifiedRunVersions?: string[];
   validationApiVersion?: string;
   validationRecordsApiVersion?: string;
   version?: string;

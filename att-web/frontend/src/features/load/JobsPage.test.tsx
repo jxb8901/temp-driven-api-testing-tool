@@ -439,6 +439,28 @@ describe('JobsPage React feature', () => {
     expect(host.textContent).toContain('load/run/checkpoints/workload-0001/');
   });
 
+  it('offers binary artifacts as authenticated downloads without opening a text preview', async () => {
+    const getArtifactText = vi.fn(async () => 'must not be read as text');
+    const api = makeApi({
+      getJobArtifactArchive: vi.fn(async () => ({ archiveStatus: 'READY' as const, items: [
+        { path: 'workbooks/native-cases.result.xlsx', size: 512, mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', preview: false },
+      ], primaryReports: [] })),
+      getJobArtifactText: getArtifactText,
+    });
+
+    await act(async () => root.render(<JobArtifacts api={api} jobId="JOB-204" refresh={0} />));
+    await advance();
+
+    const download = host.querySelector<HTMLAnchorElement>('a[download]');
+    expect(download?.textContent).toBe('Download native-cases.result.xlsx');
+    expect(download?.getAttribute('href')).toBe('/api/v1/jobs/JOB-204/artifacts/workbooks/native-cases.result.xlsx');
+    expect(download?.getAttribute('aria-label')).toBe('Download workbooks/native-cases.result.xlsx');
+    expect([...host.querySelectorAll('button')].some(button => button.textContent?.includes('native-cases.result.xlsx'))).toBe(false);
+    expect(host.querySelector('[aria-label="Artifact preview"]')).toBeNull();
+    expect(host.querySelector('.cm-editor')).toBeNull();
+    expect(getArtifactText).not.toHaveBeenCalled();
+  });
+
   it('reconciles 150 visible artifacts without closing an unchanged report on manual refresh', async () => {
     const report = { path: 'load/report/index.html', report: true, size: 900, sha256: 'original' };
     let changed = false;
