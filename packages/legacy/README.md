@@ -2,7 +2,7 @@
 
 [繁體中文](README.zh.md)
 
-This package is the registered home for example Templates and workbooks that are not Native Flow-bound Cases. It is a sibling of `packages/default`, selected by using this directory as the package root. The Template IDs and workbook Case IDs are unchanged.
+This package is a registerable home for example Templates and workbooks that are not Native Flow-bound Cases. `package.yaml` is the manifest. It does not by itself add the Package to a Server registry. Local CLI selects it with `ATT_PACKAGE_ROOT`. `config/att-server.example.yaml` lists `default` and `fpp-common` only. A deployment registers this Package by adding an entry whose id is `legacy` and whose path is this directory, inside `packages.allowedRoots` and `packages.entries`. Until that entry exists, Server and Studio do not list it. The Template IDs and workbook Case IDs are unchanged.
 
 These resources are not translated to `att-testcase/v1`. A translation would replace Stage selection, `runWhen` / `onFailure`, or workbook Case IDs, and there is no golden that preserves that behavior. Run and Debug them here. Do not point Quick or Advanced Load at `PAYMENT_*`, the FPP Templates, or the local-payment Template unless the scenario supplies an explicit business TestCase ID. `examples/load/closed.yaml` and `examples/load/closed-minimal.yaml` keep target id `V3_FLOW_EXAMPLE` and run with this package as the working directory.
 

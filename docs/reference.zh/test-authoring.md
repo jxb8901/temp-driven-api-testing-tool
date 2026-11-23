@@ -198,15 +198,15 @@ Stage 的 `required`、`runWhen` 與 `onFailure` 規則見 [Reliability](reliabi
 
 ## Flow
 
-Flow 是可重用的 Template logic，使用 `att-flow/v3.6`，並由 `flow.yaml` 定義。必填欄位為 `schemaVersion`、versioned canonical `id`（例如 `common.payment.v1`）、`name`、`description` 及非空有序 `actions` map。Template 的 Flow Action 以 `use: common.payment.v1` 呼叫它。每次 invocation 建立新的 `EXEC.ACTIONS` scope；回傳後恢復 caller scope。`META.FLOW` 只在 invocation 期間存在。[Actions](actions.md) 定義 Flow result 與 Assign behavior；[Context](runtime-context.md) 定義 lifetime。
+Flow 是一等的可重用有序 Actions，使用 `att-flow/v3.6`，並由 `flow.yaml` 定義。Native Test Case Definition 直接綁定該 Flow。必填欄位為 `schemaVersion`、versioned canonical `id`（例如 `common.payment.v1`）、`name`、`description` 及非空有序 `actions` map。舊式 Template 也可以用 Flow Action `use: common.payment.v1` 呼叫同一個 Flow。每次 invocation 建立新的 `EXEC.ACTIONS` scope；回傳後恢復 caller scope。`META.FLOW` 只在 invocation 期間存在。[Actions](actions.md) 定義 Flow result 與 Assign behavior；[Context](runtime-context.md) 定義 lifetime。
 
 ## Authoring lifecycle
 
-更新 Workbook 後產生 Snapshot，檢視並提交差異；編輯 Sidecar、Template、Flow 或 Resource 後執行 `./att.sh validate --package`。用 [Debug](execution-modes/debug.md) 隔離檢查，再以 [Run](execution-modes/run.md) 從 Testcase 建立 Case execution。循序建立第一個 package 請使用 [Quick Start](../quick-start.zh.md)。
+修改 Flow 或 Test Case Definition 後執行 `./att.sh validate --package`，再 RUN 所選的 Resolved Case。在受支援的 Legacy 路徑上，修改 Workbook 後產生 Snapshot、檢視並提交差異；修改 Sidecar 或 Template 後再驗證。用 [Debug](execution-modes/debug.md) 隔離單一 Template、Flow 或 Tool，再以 [Run](execution-modes/run.md) 建立 Case execution。循序建立第一個 package 請使用 [Quick Start](../quick-start.zh.md)。
 
 ## Test data ownership
 
-Workbook/Sidecar/Snapshot 定義 Testcase data；Testcase 與 Stage 的 business input 進入 `EXEC.INPUT`。[Context](runtime-context.md) 定義 scope 與 lifetime；Run 會把每個選中的 Testcase 轉為 Case execution。Environment selection 由 [Configuration](configuration.md) 定義。
+Native Test Case Definition 擁有自己的 Data Source 與 input projection。Resolution 讀取該來源，不會修改它。在受支援的 Legacy 路徑上，Workbook/Sidecar/Snapshot 定義 Testcase data，Testcase 與 Stage 的 business input 進入 `EXEC.INPUT`。[Context](runtime-context.md) 定義 scope 與 lifetime。Run 會把每個選中的 Resolved Case，或每個選中的 Legacy Testcase，轉為 Case execution。Environment selection 由 [Configuration](configuration.md) 定義。
 
 ## Testdata registry 與 input mapping
 

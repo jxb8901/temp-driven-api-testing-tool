@@ -65,7 +65,7 @@ ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh validate --package --format jso
 
 ## Relocated legacy resources
 
-[#426](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/426) moves the former blocked Templates and workbooks into the registered `packages/legacy` package. Template IDs and workbook Case IDs are unchanged. Run, Debug, and the closed LOAD scenarios that select `V3_FLOW_EXAMPLE` use `packages/legacy` as the working directory. Tool scenarios such as `closed-smoke.yaml` stay on `packages/default`. The common Flows and Tools copied into `packages/legacy` exist so that package resolves its own dependencies; the canonical copies stay in `packages/default`.
+[#426](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/426) moves the former blocked Templates and workbooks into the registerable `packages/legacy` package. `package.yaml` is the manifest. `config/att-server.example.yaml` does not list `legacy`; a Server deployment registers that id separately. Local CLI selects the directory with `ATT_PACKAGE_ROOT`. Template IDs and workbook Case IDs are unchanged. Run, Debug, and the closed LOAD scenarios that select `V3_FLOW_EXAMPLE` use `packages/legacy` as the working directory. Tool scenarios such as `closed-smoke.yaml` stay on `packages/default`. The common Flows and Tools copied into `packages/legacy` exist so that package resolves its own dependencies; the canonical copies stay in `packages/default`.
 
 These resources are not rewritten as `att-testcase/v1`. That rewrite would change Stage selection or Case IDs. `examples/load/closed.yaml` still selects Template id `V3_FLOW_EXAMPLE`. The per-file table is [example-migration-matrix.md](example-migration-matrix.md).
 

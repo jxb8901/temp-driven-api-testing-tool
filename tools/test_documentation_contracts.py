@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from documentation_contracts import (active_schemas, stale_claims,
                                      manifest_errors, structure_errors, overview_resource_errors,
-                                     product_model_order_errors,
+                                     product_model_order_errors, flow_authoring_errors,
                                      chapter_label_errors, editorial_errors,
                                      chapter_reference_errors,
                                      editorial_source_files, standalone_markdown,
@@ -290,6 +290,17 @@ schemas:
         buried = native.replace("## Product model", "## Later notes", 1)
         buried = "## Product model\nSee the workbook chain.\n" + buried
         self.assertTrue(product_model_order_errors(buried))
+
+    def test_flow_section_is_not_template_logic(self):
+        good = ("## Flow\nA Flow is a first-class reusable sequence of ordered Actions. "
+                "A Native Test Case Definition binds that Flow directly. "
+                "A legacy Template may also invoke the same Flow.\n## Next\n")
+        self.assertEqual([], flow_authoring_errors(good))
+        zh = ("## Flow\nFlow 是一等的可重用有序 Actions。Native Test Case Definition 直接綁定該 Flow。"
+              "舊式 Template 也可以呼叫同一個 Flow。\n## 下一節\n")
+        self.assertEqual([], flow_authoring_errors(zh))
+        stale = good.replace("ordered Actions", "reusable Template logic")
+        self.assertTrue(flow_authoring_errors(stale))
 
     def test_secondary_link_labels_use_current_taxonomy(self):
         for label, target in (

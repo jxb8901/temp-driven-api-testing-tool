@@ -1,6 +1,6 @@
 {
   "schemaVersion": "att-example-inventory/v1",
-  "description": "Example inventory. migrationStatus is current, planned, legacy, or blocked. runtimeSupport says whether ATT can execute or read the resource today. ciRunnable is only the offline native-suite fixture set and does not mean the resource is non-executable. status mirrors migrationStatus. executable mirrors ciRunnable. Nonconvertible Templates and workbooks live in the registered packages/legacy package. Their Template IDs and workbook Case IDs are unchanged.",
+  "description": "Example inventory. migrationStatus is current, planned, legacy, or blocked. runtimeSupport says whether ATT can execute or read the resource today. ciRunnable is only the offline native-suite fixture set and does not mean the resource is non-executable. status mirrors migrationStatus. executable mirrors ciRunnable. Nonconvertible Templates and workbooks live in the registerable packages/legacy package. Their Template IDs and workbook Case IDs are unchanged.",
   "entries": [
     {
       "id": "asset-001",
@@ -11,7 +11,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `CT001_Precheck.xml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `CT001_Precheck.xml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -25,7 +25,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `README.md`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `README.md`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -39,7 +39,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -53,7 +53,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `README.md`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `README.md`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -67,7 +67,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -81,7 +81,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -95,7 +95,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `debug.yaml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `debug.yaml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -109,7 +109,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payload.xml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payload.xml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -123,7 +123,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -137,7 +137,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -151,7 +151,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -165,7 +165,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -193,7 +193,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -291,7 +291,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `request.tmp.xml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `request.tmp.xml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -305,7 +305,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `template.yaml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -319,7 +319,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payment2.xlsx`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payment2.xlsx`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -333,7 +333,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payment2.xml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payment2.xml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -347,7 +347,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payment2.yaml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payment2.yaml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -361,7 +361,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payment_regression.xlsx`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payment_regression.xlsx`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -375,7 +375,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payment_regression.xml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payment_regression.xml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false
@@ -389,7 +389,7 @@
       "environment": "external",
       "expectedResult": "same Template or Case ID, executed from packages/legacy",
       "executable": false,
-      "reason": "Relocated into the registered packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payment_regression.yaml`.",
+      "reason": "Relocated into the registerable packages/legacy package. The Template ID and any workbook Case IDs are unchanged. Run, Debug, and closed LOAD scenarios that select this id use packages/legacy. The resource is not rewritten as att-testcase/v1 because that would change Stage selection or Case IDs. This file is `payment_regression.yaml`.",
       "migrationStatus": "legacy",
       "runtimeSupport": "legacy-compatible",
       "ciRunnable": false

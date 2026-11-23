@@ -444,15 +444,15 @@ See [Actions and Typed Values](reference/actions.md) for the complete field list
 
 ### Flow
 
-A Flow is reusable Template logic, declared in `flow.yaml` using `att-flow/v3.6`. Required fields are `schemaVersion`, a versioned canonical `id` such as `common.payment.v1`, `name`, `description`, and a non-empty ordered `actions` map. A Template invokes it through a Flow Action with `use: common.payment.v1`. Each invocation creates a fresh `EXEC.ACTIONS` scope and restores the caller's scope on return. `META.FLOW` exists during the invocation only. [Actions](reference/actions.md) owns Flow results and Assign behavior; [Context](reference/runtime-context.md) owns scope lifetime.
+A Flow is a first-class reusable sequence of ordered Actions, declared in `flow.yaml` using `att-flow/v3.6`. A Native Test Case Definition binds that Flow directly. Required fields are `schemaVersion`, a versioned canonical `id` such as `common.payment.v1`, `name`, `description`, and a non-empty ordered `actions` map. A legacy Template may also invoke the same Flow through a Flow Action with `use: common.payment.v1`. Each invocation creates a fresh `EXEC.ACTIONS` scope and restores the caller's scope on return. `META.FLOW` exists during the invocation only. [Actions](reference/actions.md) owns Flow results and Assign behavior; [Context](reference/runtime-context.md) owns scope lifetime.
 
 ### Authoring lifecycle
 
-After changing a Workbook, generate its Snapshot, review and commit the diff. After changing a Sidecar, Template, Flow or Resource, run `./att.sh validate --package`. Use [Debug](reference/execution-modes/debug.md) to isolate an authoring check and [Run](reference/execution-modes/run.md) to create Case executions from Testcases. Follow [Quick Start](quick-start.md) to build the first package.
+After changing a Flow or a Test Case Definition, run `./att.sh validate --package`, then RUN the selected Resolved Cases. On the supported legacy path, generate a Workbook Snapshot after changing the workbook, review and commit the diff, and validate again after changing a Sidecar or Template. Use [Debug](reference/execution-modes/debug.md) to isolate one Template, Flow, or Tool, and [Run](reference/execution-modes/run.md) to create Case executions. Follow [Quick Start](quick-start.md) to build the first package.
 
 ### Test data ownership
 
-Workbook/Sidecar/Snapshot defines Testcase data. Testcase and Stage business inputs enter `EXEC.INPUT`; [Context](reference/runtime-context.md) defines their scope and lifetime. Run turns each selected Testcase into a Case execution. Environment selection belongs to [Configuration](reference/configuration.md).
+A Native Test Case Definition owns its Data Source and input projections. Resolution reads that source and does not modify it. On the supported legacy path, Workbook/Sidecar/Snapshot defines Testcase data, and Testcase and Stage business inputs enter `EXEC.INPUT`. [Context](reference/runtime-context.md) defines their scope and lifetime. Run turns each selected Resolved Case, or each selected legacy Testcase, into a Case execution. Environment selection belongs to [Configuration](reference/configuration.md).
 
 ### Testdata registry and input mapping
 

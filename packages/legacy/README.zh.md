@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-這個 Package 是尚未成為 Native Flow Case 的範例 Template 與 workbook 的註冊位置。它與 `packages/default` 並列，使用本目錄作為 package root 即可選用。Template ID 與 workbook Case ID 維持不變。
+這個 Package 是尚未成為 Native Flow Case 的範例 Template 與 workbook 的可註冊位置。`package.yaml` 是 manifest，本身不會把 Package 加進 Server registry。Local CLI 用 `ATT_PACKAGE_ROOT` 選用它。`config/att-server.example.yaml` 只列出 `default` 和 `fpp-common`。部署要註冊時，在 `packages.allowedRoots` 與 `packages.entries` 加入 id 為 `legacy`、路徑指向本目錄的項目。在該項目存在之前，Server 和 Studio 不會列出它。Template ID 與 workbook Case ID 維持不變。
 
 這些資源沒有改寫成 `att-testcase/v1`。改寫會替換 Stage 選擇、`runWhen`／`onFailure` 或 workbook Case ID，而且沒有保留該行為的 golden。請在這裡執行 Run 與 Debug。除非 scenario 明確提供 business TestCase ID，否則不要把 `PAYMENT_*`、FPP Template 或本地付款 Template 當成 Quick 或 Advanced Load target。`examples/load/closed.yaml` 與 `examples/load/closed-minimal.yaml` 仍使用 target id `V3_FLOW_EXAMPLE`，並以這個 Package 為工作目錄執行。
 

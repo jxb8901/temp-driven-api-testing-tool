@@ -20,7 +20,7 @@
 | testdata-generated.yaml | 從 Load-local generated testdata 依 iteration 順序載入 QUICK_START Template；records 用盡時停止 workload。 |
 | quick-profile.yaml | 僅含 Load policy 的 Quick Load profile；複製到 `load/load.yaml` 後使用。 |
 
-`closed.yaml` and `closed-minimal.yaml` select Template `V3_FLOW_EXAMPLE`. That Template, and the common Flows it calls, are in the registered `packages/legacy` package. `./att.sh` changes into `packages/default` unless `ATT_PACKAGE_ROOT` names another package, and a scenario path is relative to that package. Tool scenarios such as `closed-smoke.yaml` stay on `packages/default`.
+`closed.yaml` and `closed-minimal.yaml` select Template `V3_FLOW_EXAMPLE`. That Template, and the common Flows it calls, are in the registerable `packages/legacy` package. `./att.sh` changes into `packages/default` unless `ATT_PACKAGE_ROOT` names another package, and a scenario path is relative to that package. Tool scenarios such as `closed-smoke.yaml` stay on `packages/default`.
 
 ~~~sh
 ./att.sh load ../../examples/load/closed-smoke.yaml

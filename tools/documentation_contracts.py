@@ -271,6 +271,24 @@ def product_model_order_errors(text):
     return errors
 
 
+def flow_authoring_errors(text):
+    """The Flow chapter defines a first-class Action sequence, not Template logic."""
+    errors = []
+    if re.search(r"reusable Template logic|可重用的 Template logic|可重用 Template 邏輯", text):
+        errors.append("Flow is defined as Template logic")
+    heading = re.search(r"^#{1,6} Flow\s*$", text, re.M)
+    if not heading:
+        return errors + ["missing Flow heading"]
+    section = _heading_section(text, heading)
+    if "Test Case Definition" not in section:
+        errors.append("Flow section does not bind a Native Test Case Definition")
+    if "ordered Actions" not in section and "有序 Actions" not in section:
+        errors.append("Flow section does not define ordered Actions")
+    if not re.search(r"legacy Template|舊式 Template", section):
+        errors.append("Flow section does not keep legacy Template invocation as compatibility")
+    return errors
+
+
 def chapter_label_errors(text):
     errors = []
     for line in current_blocks(text):
@@ -489,6 +507,9 @@ def validate(root=ROOT):
         errors += [lang + "/overview.md: " + e for e in overview_resource_errors(overview)]
         errors += [lang + "/overview.md: " + e for e in product_model_order_errors(overview)]
         errors += [lang + ".md: " + e for e in product_model_order_errors(assembled[lang])]
+        authoring = (module_root / "test-authoring.md").read_text(encoding="utf-8")
+        errors += [lang + "/test-authoring.md: " + e for e in flow_authoring_errors(authoring)]
+        errors += [lang + ".md: " + e for e in flow_authoring_errors(assembled[lang])]
         errors += [lang + ": " + e for e in structure_errors(assembled[lang])]
         matrix = (module_root / "appendices/schema-matrix.md").read_text(encoding="utf-8")
         found = {(m.group(1).lower(), m.group(2)) for m in SCHEMA_TOKEN.finditer(matrix)}
