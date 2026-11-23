@@ -2,7 +2,7 @@
 
 ## Choose your first diagnostic step
 
-Run `validate --package` and fix the diagnostic's file/field first. A **Testcase** is an authored normalized workbook row; a **Case execution** is one Run of that row, identified by the same Case ID. For runtime failures, inspect the Case execution's report status/message, then its `case.log`, `case.yaml`, and Action evidence. [Reliability and Execution Control](reliability-execution-control.md) defines FAIL versus ERROR, continuation, and retries; [Results, Reports, and Evidence](results-reports-evidence.md) identifies collector failure paths. [Limits, Security Guarantees, and Advanced Diagnostics](appendices/limits-defaults.md) covers Windows launchers, Java SSH negotiation, and stack-trace policy.
+Run `validate --package` and fix the diagnostic's file/field first. A Native **Resolved Case** is one selectable Case from a Test Case Definition. On the supported legacy workbook path, a **Testcase** is one authored, normalized workbook row. A **Case execution** is one Run of the selected Case, identified by that Case's ID. For runtime failures, inspect the Case execution's report status/message, then its `case.log`, `case.yaml`, and Action evidence. [Reliability and Execution Control](reliability-execution-control.md) defines FAIL versus ERROR, continuation, and retries; [Results, Reports, and Evidence](results-reports-evidence.md) identifies collector failure paths. [Limits, Security Guarantees, and Advanced Diagnostics](appendices/limits-defaults.md) covers Windows launchers, Java SSH negotiation, and stack-trace policy.
 
 ## Start with validation
 

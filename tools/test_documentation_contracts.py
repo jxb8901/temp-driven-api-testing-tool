@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from documentation_contracts import (active_schemas, stale_claims,
                                      manifest_errors, structure_errors, overview_resource_errors,
+                                     product_model_order_errors,
                                      chapter_label_errors, editorial_errors,
                                      chapter_reference_errors,
                                      editorial_source_files, standalone_markdown,
@@ -265,6 +266,30 @@ schemas:
         for text in variants:
             with self.subTest(text=text):
                 self.assertTrue(overview_resource_errors(text))
+
+    def test_first_product_model_is_flow_centric_and_legacy_is_scoped(self):
+        native = ("## Product model\n\x60\x60\x60text\n"
+                  "Test Case Definition\n  -> Resolved Case\n\x60\x60\x60\n"
+                  "A **Flow** is reusable ordered Actions.\n"
+                  "## Supported legacy compatibility\n\x60\x60\x60text\n"
+                  "Workbook row\n  `-- ordered Stage\n        `-- Template\n\x60\x60\x60\n")
+        self.assertEqual([], product_model_order_errors(native))
+        zh = native.replace("## Product model", "## 產品模型")
+        zh = zh.replace("## Supported legacy compatibility", "## 受支援的 Legacy 相容模型")
+        self.assertEqual([], product_model_order_errors(zh))
+        generated = native.replace("## Product model", "### Product model")
+        generated = generated.replace("## Supported legacy compatibility",
+                                      "### Supported legacy compatibility")
+        self.assertEqual([], product_model_order_errors(generated))
+        stale = ("## Product model\n\x60\x60\x60text\nTestcase\n"
+                 "  `-- ordered Stage\n        `-- Template\n\x60\x60\x60\n"
+                 "A **Flow** is reusable Template logic.\n"
+                 "## Supported legacy compatibility\n\x60\x60\x60text\n"
+                 "Workbook row\n  `-- ordered Stage\n\x60\x60\x60\n")
+        self.assertTrue(product_model_order_errors(stale))
+        buried = native.replace("## Product model", "## Later notes", 1)
+        buried = "## Product model\nSee the workbook chain.\n" + buried
+        self.assertTrue(product_model_order_errors(buried))
 
     def test_secondary_link_labels_use_current_taxonomy(self):
         for label, target in (

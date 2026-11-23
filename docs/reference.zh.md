@@ -10,6 +10,7 @@ Status: 規範性使用者文件；由模組化來源自動生成
 
 - [概覽與 Product model](#概覽與-product-model)
   - [產品模型](#產品模型)
+  - [受支援的 Legacy 相容模型](#受支援的-legacy-相容模型)
   - [RUN 與 LOAD 執行模型](#run-與-load-執行模型)
   - [五種 Resource 是同級概念](#五種-resource-是同級概念)
   - [Package 邊界](#package-邊界)
@@ -158,12 +159,37 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [Advanced diagnostics](#advanced-diagnostics)
 ## 概覽與 Product model
 
-ATT 把測試意圖與整合機制分離。測試數據以 workbook／sidecar／snapshot 版本化；Template 與 Flow 定義可重用行為；Resource 把這些行為連接到外部系統。
+ATT 把可重用的執行邏輯與業務資料分開。現行 Case 路徑是：Test Case Definition 綁定 Flow 與 Data Source，解析成所選的 Resolved Case，再以 Flow 的有序 Actions 和 Resource 執行每一個 Case。
 
 ### 產品模型
 
 ```text
-Testcase
+Test Case Definition (att-testcase/v1)
+  |-- Flow (att-flow/v3.6)
+  `-- Data Source
+        -> Resolution
+        -> Resolved Case
+        -> Suite selection
+        -> Case Execution
+              `-- Flow
+                    `-- ordered Actions
+                          |-- file-content expression / assert / log / assign / set
+                          `-- Resource
+                                |-- Tool
+                                |-- DBHelper
+                                |-- MQHelper
+                                |-- HTTPHelper
+                                `-- SSHHelper
+```
+
+**Test Case Definition**（`att-testcase/v1`，通常是 `testcase.yaml`）綁定一個 Flow 和一個 Data Source。**Flow** 是可重用的有序 Actions。**Resolution** 把 Definition 解析成 Resolved Cases。V1 把每一筆非空白來源紀錄正好解析成一個 **Resolved Case**；它不會把一筆紀錄展開、合併或額外產生多個 Case。**Suite selection** 選擇要執行哪些 Resolved Case。不需要強制的 `suite.yaml`。**Case execution** 是所選 Resolved Case 的一次 RUN。**Action** 是該 Flow 內的一個有序工作單元。**Resource** 是 Action 或允許的 expression call 所使用的 Tool、DBHelper、MQHelper、HTTPHelper 或 SSHHelper。
+
+### 受支援的 Legacy 相容模型
+
+Workbook、Sidecar、Snapshot、Stage 和 Template 仍是受支援的 runtime。本節不從 ATT 移除 Template。下面的圖是 Legacy 相容路徑，不是現行 Case 模型。
+
+```text
+Workbook row
   `-- ordered Stage
         `-- Template
               |-- Action
@@ -173,19 +199,19 @@ Testcase
               `-- Flow -> ordered Actions
 ```
 
-**Testcase** 是作者編寫並正規化的 Workbook row。**Case execution** 是 Run 對該 Testcase 的一次執行；其完整 Case ID 標識 Testcase，並沿用於執行結果和 evidence。討論 Workbook data 和 authoring 時使用 *Testcase*；討論 runtime status、日誌、報表和 artifacts 時使用 *Case execution*。**Stage** 選擇 Template 並提供 stage-private data；**Template** 是可執行 scenario 邊界；**Flow** 是具有獨立 Action scope 的可重用 Template 邏輯；**Action** 是一個有序工作單元；**Resource** 是 Action 或允許的 expression call 所使用的 Tool、DBHelper、MQHelper、HTTPHelper 或 SSHHelper。
+舊式 **Testcase** 是作者編寫並正規化的 Workbook row。**Stage** 選擇 Template 並提供 stage-private data。**Template** 是這條路徑的可執行 scenario 邊界，並可呼叫 Flow。Legacy RUN、Debug 和 LOAD 繼續執行這條路徑。
 
 ### RUN 與 LOAD 執行模型
 
-RUN 單次執行功能目標或 Case selection；Debug 為診斷選項；LOAD 保留效能引擎。請參閱[統一 RUN 與排程](reference.zh/execution-modes/unified-run.md)。舊 adapter 保留專用輸入及報告：
+RUN 執行一次所選的功能目標或 Case selection。Native RUN 以 qualified ID、tag 或 implicit Suite 選取 Resolved Case。Legacy RUN 選取 workbook Testcase 與 Stage selector。Debug 診斷單一 Template、Flow 或 Tool。LOAD 重複執行 Template、Flow 或 Tool workload。請參閱[統一 RUN 與排程](reference.zh/execution-modes/unified-run.md)。
 
 | 模式 | 主要輸入 | 重用內容 |
 |---|---|---|
-| Run | workbook Testcase 與 Stage selector | Template、Flow、Tool、DB/MQ/HTTP/SSH |
+| Run | Native：Resolved Case ID、tag 或 implicit Suite。Legacy：workbook Testcase 與 Stage selector | Flow 與 Actions；Legacy RUN 也使用 Template |
 | Debug | `att-debug/v1.2` sidecar 或 `--input` | 單一 Template、Flow 或 Tool target |
 | Load | `att-load/v1.9` scenario | 重複執行一個或多個 Template、Flow 或 Tool workload |
 
-可重用 Template/Flow 應依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`。執行模式與 scheduler identity 只保留在 framework evidence，不會成為 expression data。
+可重用 Flow 應依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`。執行模式與 scheduler identity 只保留在 framework evidence，不會成為 expression data。
 
 ### 五種 Resource 是同級概念
 
@@ -3412,7 +3438,7 @@ Worker 的 terminal RESULT 不代表 execution cleanup 已完成。Publication �
 
 選用的 `server.jobStorage` 配額可在 `dataDir/jobs` 超過高水位時刪除完整 Job。它預設關閉，只測量該目錄，不跟隨符號連結，測量未完成時不會清理。回收依最舊的已結束 Job 開始，並同時刪除 Job 目錄與 H2 列。`partial` 清掃會從上次檢查的最後一個候選之後繼續；隔離中與 artifact recovery 中的 Job 不會進入候選頁，因此受保護的前綴不能佔滿預算。已包含最舊候選的一輪若走到結尾且用量仍高於目標，結果為 `quota_unmet`。執行中、佇列中、隔離、復原中、使用中，以及仍在 `minRetentionHours` 內的 Job 會保留。配額不會壓縮 H2，也不會只因單一 Job 過大而刪除它。既有 `server.jobRetentionDays` 會連同 ZIP 一併到期刪除完整 Job；選取有界 expiry page 前會先排除 quarantined Jobs，避免其長期保留阻止其他已過期 Job 清理；active readers/writers 存在時會延後該次 sweep，不會阻塞 cleanup thread 或刪除使用中的 archive。Classification 及發佈結果寫入不含 raw values 的 audit。失敗的發佈不會刪除唯一未封存的來源。
 
-Run 會執行 authored Testcase，並為每個選中的 row 記錄一次 Case execution。Testcase 是 Workbook data；Case execution 是使用相同完整 Case ID 標識的 runtime result。閱讀 status、日誌、報表和 evidence 時使用 Case execution。
+Native RUN 執行所選的 Resolved Case，並為每一個記錄一次 Case execution。Legacy workbook RUN 執行 authored Testcase，並為每個選中的 row 記錄一次 Case execution。舊式 Testcase 是 Workbook data。Case execution 是 runtime result。閱讀 status、日誌、報表和 evidence 時使用 Case execution。
 
 | 任務 | 前往 |
 |---|---|
@@ -3543,7 +3569,7 @@ ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or IN
 
 ### 選擇第一個診斷步驟
 
-先執行 `validate --package` 並修正 diagnostic 的 file/field。**Testcase** 是作者編寫並正規化的 Workbook row；**Case execution** 是 Run 對該 row 的一次執行，兩者使用相同 Case ID。Runtime 失敗先看 Case execution 的 report status/message，再看其 `case.log`、`case.yaml` 與 Action evidence。`FAIL` 與 `ERROR` 的區分、continuation 與 Retry 見 [Reliability and Execution Control](reference.zh/reliability-execution-control.md)；collector failure path 見 [Results, Reports, and Evidence](reference.zh/results-reports-evidence.md)。[Limits, Security Guarantees, and Advanced Diagnostics](reference.zh/appendices/limits-defaults.md) 說明 Windows launcher、Java SSH negotiation 與 stack-trace policy。
+先執行 `validate --package` 並修正 diagnostic 的 file/field。Native **Resolved Case** 是 Test Case Definition 解析出的一個可選取 Case。在受支援的 Legacy workbook 路徑上，**Testcase** 是作者編寫並正規化的 Workbook row。**Case execution** 是所選 Case 的一次 Run，並使用該 Case 的 ID。Runtime 失敗先看 Case execution 的 report status/message，再看其 `case.log`、`case.yaml` 與 Action evidence。`FAIL` 與 `ERROR` 的區分、continuation 與 Retry 見 [Reliability and Execution Control](reference.zh/reliability-execution-control.md)；collector failure path 見 [Results, Reports, and Evidence](reference.zh/results-reports-evidence.md)。[Limits, Security Guarantees, and Advanced Diagnostics](reference.zh/appendices/limits-defaults.md) 說明 Windows launcher、Java SSH negotiation 與 stack-trace policy。
 
 ### 先從 Validation 開始
 

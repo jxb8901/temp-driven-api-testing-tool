@@ -226,6 +226,51 @@ def overview_resource_errors(text):
     return errors
 
 
+def _heading_section(text, match):
+    marks = re.match(r"^(#+)", text[match.start():])
+    level = len(marks.group(1))
+    rest = text[match.end():]
+    nxt = re.search(r"^#{1,%d} " % level, rest, re.M)
+    return rest[:nxt.start()] if nxt else rest
+
+
+def product_model_order_errors(text):
+    """The first Product Model diagram is Flow-centric; the Stage chain is legacy-scoped."""
+    errors = []
+    model = re.search(r"^#{1,6} (?:Product model|產品模型)\s*$", text, re.M)
+    if not model:
+        return ["missing Product model heading"]
+    section = _heading_section(text, model)
+    blocks = re.findall(r"(?:\x60{3}|~{3})text\n(.*?)(?:\x60{3}|~{3})", section, re.S)
+    if not blocks:
+        errors.append("Product model has no text diagram")
+    else:
+        first = blocks[0]
+        if "Resolved Case" not in first or not re.search(r"(?m)^Test Case Definition\b", first):
+            errors.append("first Product model diagram is not the Flow-centric Case path")
+        if "ordered Stage" in first:
+            errors.append("first Product model diagram is the legacy Stage chain")
+    legacy = re.search(
+        r"^#{1,6} (?:Supported legacy compatibility|受支援的 Legacy 相容模型)\s*$",
+        text, re.M)
+    if not legacy:
+        errors.append("missing Supported legacy compatibility heading")
+        return errors
+    if legacy.start() < model.start():
+        errors.append("legacy compatibility heading precedes the Product model")
+    primary = text[model.start():legacy.start()]
+    if re.search(r"reusable Template logic|可重用 Template 邏輯", primary):
+        errors.append("primary model defines Flow as Template logic")
+    if re.search(r"normalized workbook row|正規化的 Workbook row", primary):
+        errors.append("primary model defines a Testcase as a workbook row")
+    legacy_blocks = re.findall(
+        r"(?:\x60{3}|~{3})text\n(.*?)(?:\x60{3}|~{3})",
+        _heading_section(text, legacy), re.S)
+    if not legacy_blocks or "ordered Stage" not in legacy_blocks[0] or "Template" not in legacy_blocks[0]:
+        errors.append("legacy Stage/Template diagram is not under Supported legacy compatibility")
+    return errors
+
+
 def chapter_label_errors(text):
     errors = []
     for line in current_blocks(text):
@@ -442,6 +487,8 @@ def validate(root=ROOT):
         assembled[lang] = generated.read_text(encoding="utf-8") if generated.is_file() else text
         overview = (module_root / "overview.md").read_text(encoding="utf-8")
         errors += [lang + "/overview.md: " + e for e in overview_resource_errors(overview)]
+        errors += [lang + "/overview.md: " + e for e in product_model_order_errors(overview)]
+        errors += [lang + ".md: " + e for e in product_model_order_errors(assembled[lang])]
         errors += [lang + ": " + e for e in structure_errors(assembled[lang])]
         matrix = (module_root / "appendices/schema-matrix.md").read_text(encoding="utf-8")
         found = {(m.group(1).lower(), m.group(2)) for m in SCHEMA_TOKEN.finditer(matrix)}

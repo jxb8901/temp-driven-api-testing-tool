@@ -1,11 +1,36 @@
 # Overview and product model
 
-ATT separates test intent from integration mechanics. Test data is versioned in workbook/sidecar/snapshot form; Templates and Flows define reusable behavior; Resources connect that behavior to external systems.
+ATT separates reusable execution logic from business data. The current Case path binds a Flow and a Data Source in a Test Case Definition, resolves that Definition to selected Resolved Cases, and runs each Case as a Flow of ordered Actions and Resources.
 
 ## Product model
 
 ```text
-Testcase
+Test Case Definition (att-testcase/v1)
+  |-- Flow (att-flow/v3.6)
+  `-- Data Source
+        -> Resolution
+        -> Resolved Case
+        -> Suite selection
+        -> Case Execution
+              `-- Flow
+                    `-- ordered Actions
+                          |-- file-content expression / assert / log / assign / set
+                          `-- Resource
+                                |-- Tool
+                                |-- DBHelper
+                                |-- MQHelper
+                                |-- HTTPHelper
+                                `-- SSHHelper
+```
+
+A **Test Case Definition** (`att-testcase/v1`, usually `testcase.yaml`) binds one Flow and one Data Source. A **Flow** is reusable ordered Actions. **Resolution** turns the Definition into Resolved Cases. V1 resolves each nonblank source record to exactly one **Resolved Case**; it does not expand, join, or generate extra Cases from one record. **Suite selection** chooses which Resolved Cases to run. There is no mandatory `suite.yaml`. A **Case execution** is one RUN of one selected Resolved Case. An **Action** is one ordered unit of work inside that Flow. A **Resource** is a configured Tool, DBHelper, MQHelper, HTTPHelper or SSHHelper used by Actions or permitted expression calls.
+
+## Supported legacy compatibility
+
+Workbook, Sidecar, Snapshot, Stage, and Template remain a supported runtime. This section does not remove Template from ATT. The diagram below is the legacy compatibility path, not the current Case model.
+
+```text
+Workbook row
   `-- ordered Stage
         `-- Template
               |-- Action
@@ -15,19 +40,19 @@ Testcase
               `-- Flow -> ordered Actions
 ```
 
-A **Testcase** is one authored, normalized workbook row. A **Case execution** is one Run execution of that Testcase; its full Case ID identifies the Testcase and is reused in execution results and evidence. Use *Testcase* when discussing workbook data and authoring, and *Case execution* when discussing runtime status, logs, reports, and artifacts. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary. A **Flow** is reusable Template logic with an isolated Action scope. An **Action** is one ordered unit of work. A **Resource** is a configured Tool, DBHelper, MQHelper, HTTPHelper or SSHHelper used by Actions or permitted expression calls.
+A legacy **Testcase** is one authored, normalized workbook row. A **Stage** selects a Template and contributes stage-private data. A **Template** is the executable scenario boundary on this path and may call a Flow. Legacy RUN, Debug, and LOAD continue to execute that path.
 
 ## RUN and LOAD execution models
 
-RUN executes a functional target or Case selection once. Debug is an optional diagnostic mode; LOAD retains its performance engine. See [Unified RUN and schedules](execution-modes/unified-run.md). Legacy adapters retain their specialized inputs and reports:
+RUN executes one selected functional target or Case selection. Native RUN selects Resolved Cases by qualified ID, tag, or an implicit Suite. Legacy RUN selects workbook Testcases and Stage selectors. Debug diagnoses one Template, Flow, or Tool. LOAD repeats Template, Flow, or Tool workloads. See [Unified RUN and schedules](execution-modes/unified-run.md).
 
 | Mode | Primary input | Reuses |
 |---|---|---|
-| Run | workbook Testcases and Stage selectors | Templates, Flows, Tools, DB/MQ/HTTP/SSH |
+| Run | Native: Resolved Case IDs, tags, or an implicit Suite. Legacy: workbook Testcases and Stage selectors | Flows and Actions; legacy RUN also uses Templates |
 | Debug | `att-debug/v1.2` sidecar or `--input` | one Template, Flow or Tool target |
 | Load | `att-load/v1.9` scenario | one or more Template, Flow or Tool workloads repeatedly |
 
-Reusable Templates/Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.
+Reusable Flows depend on `EXEC.INPUT`, `EXEC.VARS`, `EXEC.ACTIONS`, `META`, and Action-local `output`. Execution mode and scheduler identity are framework diagnostics in retained evidence, not expression data.
 
 ## Resources are peers
 

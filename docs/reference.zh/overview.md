@@ -1,11 +1,36 @@
 # 概覽與 Product model
 
-ATT 把測試意圖與整合機制分離。測試數據以 workbook／sidecar／snapshot 版本化；Template 與 Flow 定義可重用行為；Resource 把這些行為連接到外部系統。
+ATT 把可重用的執行邏輯與業務資料分開。現行 Case 路徑是：Test Case Definition 綁定 Flow 與 Data Source，解析成所選的 Resolved Case，再以 Flow 的有序 Actions 和 Resource 執行每一個 Case。
 
 ## 產品模型
 
 ```text
-Testcase
+Test Case Definition (att-testcase/v1)
+  |-- Flow (att-flow/v3.6)
+  `-- Data Source
+        -> Resolution
+        -> Resolved Case
+        -> Suite selection
+        -> Case Execution
+              `-- Flow
+                    `-- ordered Actions
+                          |-- file-content expression / assert / log / assign / set
+                          `-- Resource
+                                |-- Tool
+                                |-- DBHelper
+                                |-- MQHelper
+                                |-- HTTPHelper
+                                `-- SSHHelper
+```
+
+**Test Case Definition**（`att-testcase/v1`，通常是 `testcase.yaml`）綁定一個 Flow 和一個 Data Source。**Flow** 是可重用的有序 Actions。**Resolution** 把 Definition 解析成 Resolved Cases。V1 把每一筆非空白來源紀錄正好解析成一個 **Resolved Case**；它不會把一筆紀錄展開、合併或額外產生多個 Case。**Suite selection** 選擇要執行哪些 Resolved Case。不需要強制的 `suite.yaml`。**Case execution** 是所選 Resolved Case 的一次 RUN。**Action** 是該 Flow 內的一個有序工作單元。**Resource** 是 Action 或允許的 expression call 所使用的 Tool、DBHelper、MQHelper、HTTPHelper 或 SSHHelper。
+
+## 受支援的 Legacy 相容模型
+
+Workbook、Sidecar、Snapshot、Stage 和 Template 仍是受支援的 runtime。本節不從 ATT 移除 Template。下面的圖是 Legacy 相容路徑，不是現行 Case 模型。
+
+```text
+Workbook row
   `-- ordered Stage
         `-- Template
               |-- Action
@@ -15,19 +40,19 @@ Testcase
               `-- Flow -> ordered Actions
 ```
 
-**Testcase** 是作者編寫並正規化的 Workbook row。**Case execution** 是 Run 對該 Testcase 的一次執行；其完整 Case ID 標識 Testcase，並沿用於執行結果和 evidence。討論 Workbook data 和 authoring 時使用 *Testcase*；討論 runtime status、日誌、報表和 artifacts 時使用 *Case execution*。**Stage** 選擇 Template 並提供 stage-private data；**Template** 是可執行 scenario 邊界；**Flow** 是具有獨立 Action scope 的可重用 Template 邏輯；**Action** 是一個有序工作單元；**Resource** 是 Action 或允許的 expression call 所使用的 Tool、DBHelper、MQHelper、HTTPHelper 或 SSHHelper。
+舊式 **Testcase** 是作者編寫並正規化的 Workbook row。**Stage** 選擇 Template 並提供 stage-private data。**Template** 是這條路徑的可執行 scenario 邊界，並可呼叫 Flow。Legacy RUN、Debug 和 LOAD 繼續執行這條路徑。
 
 ## RUN 與 LOAD 執行模型
 
-RUN 單次執行功能目標或 Case selection；Debug 為診斷選項；LOAD 保留效能引擎。請參閱[統一 RUN 與排程](execution-modes/unified-run.md)。舊 adapter 保留專用輸入及報告：
+RUN 執行一次所選的功能目標或 Case selection。Native RUN 以 qualified ID、tag 或 implicit Suite 選取 Resolved Case。Legacy RUN 選取 workbook Testcase 與 Stage selector。Debug 診斷單一 Template、Flow 或 Tool。LOAD 重複執行 Template、Flow 或 Tool workload。請參閱[統一 RUN 與排程](execution-modes/unified-run.md)。
 
 | 模式 | 主要輸入 | 重用內容 |
 |---|---|---|
-| Run | workbook Testcase 與 Stage selector | Template、Flow、Tool、DB/MQ/HTTP/SSH |
+| Run | Native：Resolved Case ID、tag 或 implicit Suite。Legacy：workbook Testcase 與 Stage selector | Flow 與 Actions；Legacy RUN 也使用 Template |
 | Debug | `att-debug/v1.2` sidecar 或 `--input` | 單一 Template、Flow 或 Tool target |
 | Load | `att-load/v1.9` scenario | 重複執行一個或多個 Template、Flow 或 Tool workload |
 
-可重用 Template/Flow 應依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`。執行模式與 scheduler identity 只保留在 framework evidence，不會成為 expression data。
+可重用 Flow 應依賴 `EXEC.INPUT`、`EXEC.VARS`、`EXEC.ACTIONS`、`META` 和 Action-local `output`。執行模式與 scheduler identity 只保留在 framework evidence，不會成為 expression data。
 
 ## 五種 Resource 是同級概念
 

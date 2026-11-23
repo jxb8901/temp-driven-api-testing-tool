@@ -2,7 +2,7 @@
 
 ## 選擇第一個診斷步驟
 
-先執行 `validate --package` 並修正 diagnostic 的 file/field。**Testcase** 是作者編寫並正規化的 Workbook row；**Case execution** 是 Run 對該 row 的一次執行，兩者使用相同 Case ID。Runtime 失敗先看 Case execution 的 report status/message，再看其 `case.log`、`case.yaml` 與 Action evidence。`FAIL` 與 `ERROR` 的區分、continuation 與 Retry 見 [Reliability and Execution Control](reliability-execution-control.md)；collector failure path 見 [Results, Reports, and Evidence](results-reports-evidence.md)。[Limits, Security Guarantees, and Advanced Diagnostics](appendices/limits-defaults.md) 說明 Windows launcher、Java SSH negotiation 與 stack-trace policy。
+先執行 `validate --package` 並修正 diagnostic 的 file/field。Native **Resolved Case** 是 Test Case Definition 解析出的一個可選取 Case。在受支援的 Legacy workbook 路徑上，**Testcase** 是作者編寫並正規化的 Workbook row。**Case execution** 是所選 Case 的一次 Run，並使用該 Case 的 ID。Runtime 失敗先看 Case execution 的 report status/message，再看其 `case.log`、`case.yaml` 與 Action evidence。`FAIL` 與 `ERROR` 的區分、continuation 與 Retry 見 [Reliability and Execution Control](reliability-execution-control.md)；collector failure path 見 [Results, Reports, and Evidence](results-reports-evidence.md)。[Limits, Security Guarantees, and Advanced Diagnostics](appendices/limits-defaults.md) 說明 Windows launcher、Java SSH negotiation 與 stack-trace policy。
 
 ## 先從 Validation 開始
 
