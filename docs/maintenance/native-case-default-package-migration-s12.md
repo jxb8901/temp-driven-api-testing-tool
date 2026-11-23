@@ -1,7 +1,7 @@
 <!-- att-doc-status: planned release=4.6.0 issue=413 acceptance=pending -->
 # Default Package Native Case migration matrix (S12 / #413)
 
-S12 originated on S05 PR #409, which includes S03 Native RUN and S04 Excel Data Source. This record tracks the Default Package migration for the ATT 4.6.0 release target; no release or tag has been published. The combined target stack includes S06 and S07 implementation work in downstream PRs #406 and #411, but their integrated/deployed acceptance remains open under [#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) and [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397). Native RUN acceptance remains open under [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393), and S12 adoption acceptance remains open under [#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413). Shared-editor deployment evidence is separate ([#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387)).
+This record tracks Default Package migration on the current default branch. No 4.6.0 release or tag has been published. Native RUN, Excel Data Source, Studio editing, implicit Suites, and Native reports are implemented and integrated on master. They are not open stacked PRs. Issue [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) is closed for Native RUN acceptance. Suite acceptance ([#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396)), report acceptance ([#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)), and S12 adoption ([#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)) remain open. Shared-editor deployment evidence is separate ([#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387)).
 
 ## Classification legend
 
@@ -11,6 +11,8 @@ S12 originated on S05 PR #409, which includes S03 Native RUN and S04 Excel Data 
 | **Supported legacy compatibility fixture** | Older Workbook/Sidecar/Snapshot (or LOAD) path that remains runnable and labeled |
 | **Active example awaiting migration** | Still useful; Native parallel only when semantics are proven |
 | **Deferred** | Needs a later workstream (Suite, reports, Stage/Flow equivalence, LOAD Case targets, …) |
+| **Blocked tracked exception** | Stays at its current path. A copy under `packages/legacy` without a cutover is not a migration. The reason and dependency are recorded |
+| **Relocated legacy** | Physically moved under `examples/legacy/` with a README that says it is not the current path |
 
 ## Resource inventory and decisions
 
@@ -27,15 +29,15 @@ S12 originated on S05 PR #409, which includes S03 Native RUN and S04 Excel Data 
 | `packages/default/templates/flows/common/*` | Nested identity/decorate/compose Flows | Cross-mode examples | **Unchanged** | Already Flow-native helpers | Existing LoadCrossMode / Package validate |
 | `packages/default/tools/**` | Package-owned Tools | Legacy + Native Quick Start sample Tool | **Unchanged** | #352 ownership preserved | Package validate |
 | `examples/load/**` | `att-load/v1.9` direct targets | LOAD guides | **Supported legacy / current LOAD path** | Native LOAD Case targets are S08 (deferred) | Existing load smoke examples |
-| Implicit Native Suite (`run native-suite`) | S06 / #396 | — | **Implemented in target stack; acceptance pending** | Included in downstream PR #406; S06 remains open for integration and acceptance | [S06 #396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) |
-| Native standard XLSX without workbook (`workbooks/native-cases.result.xlsx`) | S07 / #397 | — | **Implemented in target stack; acceptance pending** | Included in downstream PR #411; S07 integrated/report acceptance remains open | [S07 #397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397) |
-| Studio Native editor + Preview | S05 / #395 | Studio | **Implemented in target stack; acceptance pending** | Preview/Resolve for `testcase.yaml`; release has not been published | [S05 #395](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/395) |
+| Implicit Native Suite (`run native-suite`, including rerun-failed) | S06 / #396, `att-execution/v2` | CLI, Studio Run editor, Engine | **Implemented and integrated on master; acceptance open** | Not an open stacked PR. Studio Explorer, CLI, and Reference agree that rerun-failed retries only failed executed Cases. #396 remains open. No 4.6.0 release tag | [S06 #396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) |
+| Native standard XLSX (`workbooks/native-cases.result.xlsx`) and optional source-workbook XLSX | S07 / #397, `att-testcase/v1` report | Native RUN | **Implemented and integrated on master; acceptance open** | Not an open stacked PR. Multi-Definition Suites fall back to the standard workbook. #397 remains open. No 4.6.0 release tag | [S07 #397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397) |
+| Studio Native editor + Preview | S05 / #395 | Studio | **Implemented and integrated on master; acceptance open** | Preview/Resolve for `testcase.yaml`. #395 remains open. No 4.6.0 release tag | [S05 #395](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/395) |
 
 ## Before / after (Default Package user-facing Case sources)
 
 | Before (master without S12) | After (this PR) |
 |---|---|
-| Only legacy `quick_start` / `payment2` / `payment_regression` under `testcase/` | Same three legacy suites **plus** three Native Definitions under `testcase/quick-start/**/testcase.yaml` |
+| Only legacy `quick_start` / `payment2` / `payment_regression` under `testcase/` | Same three legacy suites, the Quick Start Native Definitions, and the offline payments Suite under `testcase/payments/` |
 | Quick Start docs lead with Excel → Stage → Template | Quick Start docs lead with Package → Flow → `testcase.yaml` → Preview/Resolve → Select → RUN |
 | No Default Package `att-testcase/v1` example | Offline Native single / inline-multi / Excel examples with Flow `quick.start.v1` |
 
@@ -61,7 +63,15 @@ S12 originated on S05 PR #409, which includes S03 Native RUN and S04 Excel Data 
 ```
 
 
-## Release-target boundary and pending acceptance
+## Tracked exceptions (#426)
+
+`payment2`, `payment_regression`, the payment Stage templates, the FPP templates, `V3_FLOW_EXAMPLE`, and `付款/本地付款` stay in `packages/default`. Issue [#398](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/398) has not produced the golden evidence required before a Flow translation. Issue [#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418) keeps direct LOAD targets on the legacy path. These files are also the verified compatibility route used by package validation, the legacy Quick Start, and the payment regression dry-run. Moving them into `packages/legacy` without changing every consumer would be a duplicate without a cutover, which this migration does not do. `packages/legacy` is therefore not created.
+
+The physical relocation in this change is the former SUT Metrics Settings catalog, now under `examples/legacy/sut-metrics/`. The v2 schema samples stay at `examples/load/sut-metrics/v2/` because server contract tests load them there. The current ownership example stays at `examples/package-local-sut-metrics/`.
+
+The per-file table is [example-migration-matrix.md](example-migration-matrix.md). The machine-readable inventory is [../example-inventory.json](../example-inventory.json).
+
+## Current-branch boundary and pending acceptance
 
 - Forced conversion or deletion of `payment2` / `payment_regression` / committed Snapshots
 - S06 and S07 acceptance owned by their own issues; this S12 matrix does not close [#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) or [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)
