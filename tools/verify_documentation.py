@@ -713,6 +713,18 @@ def check_critical_examples():
         "packages/default/testcase/quick-start/inline-multi/testcase.yaml",
         "packages/default/testcase/quick-start/excel/testcase.yaml",
         "packages/default/testdata/quick-start-native.xlsx",
+        "packages/default/templates/flows/payments/offline-authorize/flow.yaml",
+        "packages/default/templates/flows/payments/offline-settle/flow.yaml",
+        "packages/default/testcase/payments/offline-authorize/testcase.yaml",
+        "packages/default/testcase/payments/offline-settle/testcase.yaml",
+        "packages/default/testdata/payments-offline-settle.xlsx",
+        "docs/guides/native-payments.md",
+        "docs/guides/native-payments.zh.md",
+        "docs/example-inventory.json",
+        "examples/legacy/sut-metrics/README.md",
+        "examples/legacy/sut-metrics/source.json",
+        "examples/package-local-sut-metrics/README.md",
+        "examples/package-local-sut-metrics/README.zh.md",
         "docs/maintenance/native-case-default-package-migration-s12.md",
         "examples/load/closed-smoke.yaml",
         "examples/load/arrival-smoke.yaml",
@@ -824,6 +836,67 @@ def check_ownership_links():
                  path.relative_to(ROOT))
 
 
+def check_example_inventory():
+    inventory_path = DOCS / "example-inventory.json"
+    if not inventory_path.is_file():
+        fail("missing example inventory: docs/example-inventory.json")
+        return
+    inventory = json.loads(read(inventory_path))
+    if inventory.get("schemaVersion") != "att-example-inventory/v1":
+        fail("docs/example-inventory.json schemaVersion must be att-example-inventory/v1")
+    entries = inventory.get("entries")
+    if not isinstance(entries, list) or not entries:
+        fail("docs/example-inventory.json has no entries")
+        return
+    seen = set()
+    covered = set()
+    executable = []
+    for entry in entries:
+        entry_id = entry.get("id")
+        rel = entry.get("path")
+        status = entry.get("status")
+        if not entry_id or entry_id in seen:
+            fail("example inventory id is missing or duplicated: %s" % entry_id)
+        seen.add(entry_id)
+        if status not in ("current", "planned", "legacy", "blocked"):
+            fail("example inventory status is invalid for %s: %s" % (entry_id, status))
+        if not isinstance(rel, str) or not (ROOT / rel).is_file():
+            fail("example inventory path is missing: %s" % rel)
+            continue
+        covered.add(rel)
+        if status == "legacy" and not (rel.startswith("examples/legacy/") or rel.startswith("examples/history/")):
+            fail("legacy inventory entry is outside examples/legacy and examples/history: %s" % rel)
+        if status == "blocked" and not rel.startswith("packages/default/"):
+            fail("blocked inventory entry must remain in packages/default: %s" % rel)
+        if status == "current" and rel.startswith("examples/legacy/"):
+            fail("current inventory entry points at examples/legacy: %s" % rel)
+        if entry.get("executable"):
+            if status != "current" or entry.get("environment") != "offline" or entry.get("kind") != "native-suite":
+                fail("executable inventory entry must be a current offline native suite: %s" % entry_id)
+            executable.append(rel)
+        if status == "planned" and entry.get("executable"):
+            fail("planned inventory entry must not be executable: %s" % entry_id)
+    if not executable:
+        fail("example inventory does not name an executable current Native Suite fixture")
+    expected = []
+    for base in ("packages/default/templates", "packages/default/testcase", "packages/default/testdata",
+                 "packages/default/tools", "examples"):
+        for path in (ROOT / base).rglob("*"):
+            if path.is_file():
+                expected.append(path.relative_to(ROOT).as_posix())
+    missing = sorted(path for path in expected if path not in covered)
+    if missing:
+        fail("example inventory does not classify every Package/example file: %s" % ", ".join(missing[:12]))
+    load_readme = read(ROOT / "examples/load/README.md")
+    if "Register `source.json`" in load_readme:
+        fail("examples/load/README.md still tells readers to register the retired SUT Metrics catalog")
+    if "examples/package-local-sut-metrics" not in load_readme or "examples/legacy/sut-metrics" not in load_readme:
+        fail("examples/load/README.md must point at the package-local example and the archived catalog")
+    matrix = read(DOCS / "maintenance/example-migration-matrix.md")
+    if "packages/legacy" not in matrix or "packages/default" not in matrix:
+        fail("migration matrix must explain why blocked files stay in packages/default")
+
+
 def main():
     version = product_version()
 
@@ -855,6 +928,7 @@ def main():
     check_critical_examples()
     check_documentation_status()
     check_documented_examples()
+    check_example_inventory()
     check_ownership_links()
 
     markdown_files = [ROOT / "README.md", HISTORY_INDEX]

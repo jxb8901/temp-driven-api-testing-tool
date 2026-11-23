@@ -124,6 +124,33 @@ LOCAL_PACKAGE_ROOT="$LOCAL_PACKAGE_DIR/packages/default"
 for required in att.sh att.bat lib config/att-server.example.yaml config/config.yaml config/dbhelpers config/mqhelpers packages/default/package.yaml packages/default/testcase packages/default/templates packages/default/testdata packages/default/tools; do
   if [ ! -e "$LOCAL_PACKAGE_DIR/$required" ]; then echo "Local archive is missing required layout path: $required" >&2; exit 2; fi
 done
+for packaged in \
+  packages/default/templates/flows/payments/offline-authorize/flow.yaml \
+  packages/default/templates/flows/payments/offline-settle/flow.yaml \
+  packages/default/testcase/payments/offline-authorize/testcase.yaml \
+  packages/default/testcase/payments/offline-settle/testcase.yaml \
+  packages/default/testdata/payments-offline-settle.xlsx \
+  docs/guides/native-payments.md \
+  docs/guides/native-payments.zh.md \
+  docs/example-inventory.json \
+  docs/maintenance/example-migration-matrix.md
+do
+  if [ ! -f "$LOCAL_PACKAGE_DIR/$packaged" ]; then echo "Local archive is missing packaged example file: $packaged" >&2; exit 2; fi
+done
+for packaged in \
+  examples/legacy/sut-metrics/README.md \
+  examples/legacy/sut-metrics/README.zh.md \
+  examples/legacy/sut-metrics/source.json \
+  examples/package-local-sut-metrics/packages/payments/package.yaml \
+  examples/load/sut-metrics/v2/metric-source-db-wide-row.json \
+  packages/default/testcase/payments/offline-settle/testcase.yaml \
+  docs/example-inventory.json
+do
+  case "$SOURCE_ENTRIES" in
+    *"$SOURCE_PACKAGE_NAME/$packaged"*) ;;
+    *) echo "Source archive is missing packaged example file: $packaged" >&2; exit 2 ;;
+  esac
+done
 if [ -e "$LOCAL_PACKAGE_DIR/schemas" ]; then
   echo "Local archive must not install an ATT_HOME/schemas runtime source: $LOCAL_ARCHIVE" >&2; exit 2
 fi
