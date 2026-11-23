@@ -54,7 +54,7 @@ class WindowsLauncherTest {
         assertTrue(binary.contains("<destName>att.bat</destName>"));
         assertTrue(binary.contains("<destName>att-local-${project.version}.jar</destName>"));
         assertTrue(binary.contains("<outputDirectory>config</outputDirectory>"));
-        assertTrue(binary.contains("<outputDirectory>packages/default/templates</outputDirectory>"));
+        assertTrue(binary.contains("<outputDirectory>packages/default/flows</outputDirectory>"));
         assertTrue(binary.contains("<outputDirectory>packages/default/testdata</outputDirectory>"));
         assertTrue(binary.contains("../config</directory>"));
         assertFalse(binary.contains("../schemas</directory>"),
@@ -219,7 +219,10 @@ class WindowsLauncherTest {
         Files.copy(Paths.get("att.bat"), root.resolve("att.bat"));
         createApplicationJar(lib.resolve("att-local-"+projectVersion()+".jar"));
         Path sourcePackage = Paths.get("packages/default");
-        for (String directory : new String[]{"templates", "testcase", "load", "tools", "testdata", "sql"}) {
+        Path packageYaml = sourcePackage.resolve("package.yaml");
+        if (Files.isRegularFile(packageYaml))
+            Files.copy(packageYaml, packageRoot.resolve("package.yaml"), StandardCopyOption.REPLACE_EXISTING);
+        for (String directory : new String[]{"flows", "testcase", "load", "tools", "testdata", "sql"}) {
             Path source = sourcePackage.resolve(directory);
             Path destination = packageRoot.resolve(directory);
             if (Files.isDirectory(source)) copyTree(source, destination);

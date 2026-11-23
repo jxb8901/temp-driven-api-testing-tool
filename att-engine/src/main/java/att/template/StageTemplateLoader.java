@@ -54,7 +54,13 @@ public final class StageTemplateLoader {
         this.projectRoot = projectRoot;
         PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
         Path configured = templatesRoot.isAbsolute() ? templatesRoot : projectRoot.resolve(templatesRoot);
-        this.root = resources.fromInternalPath(configured, PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
+        Path candidate = resources.internalCandidate(configured);
+        // Native Packages may omit templates/ entirely; treat an absent root as an empty catalog.
+        if (!Files.exists(candidate, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            this.root = candidate;
+            return;
+        }
+        this.root = resources.fromInternalPath(candidate, PackageResourceResolver.Kind.DIRECTORY).canonicalPath();
         index(validateAll);
     }
 

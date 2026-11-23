@@ -902,9 +902,12 @@ def check_example_inventory():
     if not executable:
         fail("example inventory does not name an executable current Native Suite fixture")
     expected = []
-    for base in ("packages/default/templates", "packages/default/testcase", "packages/default/testdata",
+    for base in ("packages/default/flows", "packages/default/testcase", "packages/default/testdata",
                  "packages/default/tools", "packages/legacy", "examples"):
-        for path in (ROOT / base).rglob("*"):
+        base_path = ROOT / base
+        if not base_path.is_dir():
+            continue
+        for path in base_path.rglob("*"):
             if path.is_file():
                 expected.append(path.relative_to(ROOT).as_posix())
     missing = sorted(path for path in expected if path not in covered)
