@@ -5,6 +5,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import java.nio.charset.StandardCharsets;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -13,11 +15,80 @@ import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class ArtifactArchiveTest {
     @TempDir Path temporary;
+
+    @Test void acceptsPoiSanitizedLegacyCommentSourceWorkbook() throws Exception {
+        String runId="legacy-comment-run";
+        Path output=Files.createDirectory(temporary.resolve("legacy-comment-source-output"));
+        Path runDirectory=Files.createDirectories(output.resolve(runId));
+        byte[] original;
+        try(XSSFWorkbook workbook=new XSSFWorkbook();ByteArrayOutputStream bytes=new ByteArrayOutputStream()) {
+            org.apache.poi.ss.usermodel.Sheet sheet=workbook.createSheet("Cases");
+            sheet.createRow(0).createCell(0).setCellValue("Case ID");
+            sheet.getRow(0).createCell(1).setCellValue("Amount");
+            sheet.createRow(1).createCell(0).setCellValue("beta");
+            sheet.getRow(1).createCell(1).setCellValue(13);
+            org.apache.poi.ss.usermodel.Drawing<?> drawing=sheet.createDrawingPatriarch();
+            org.apache.poi.ss.usermodel.ClientAnchor anchor=workbook.getCreationHelper().createClientAnchor();
+            anchor.setCol1(1);anchor.setCol2(2);anchor.setRow1(1);anchor.setRow2(2);
+            org.apache.poi.ss.usermodel.Comment comment=drawing.createCellComment(anchor);
+            comment.setAuthor("fixture");
+            comment.setString(workbook.getCreationHelper().createRichTextString("api-key=source-comment-canary"));
+            sheet.getRow(1).getCell(1).setCellComment(comment);
+            workbook.write(bytes);original=bytes.toByteArray();
+        }
+
+        byte[] sanitized;
+        try(XSSFWorkbook workbook=new XSSFWorkbook(new ByteArrayInputStream(original));
+                ByteArrayOutputStream bytes=new ByteArrayOutputStream()) {
+            for(int index=0;index<workbook.getNumberOfSheets();index++) {
+                org.apache.poi.ss.usermodel.Sheet sheet=workbook.getSheetAt(index);
+                for(org.apache.poi.ss.util.CellAddress address:new ArrayList<>(sheet.getCellComments().keySet()))
+                    sheet.getRow(address.getRow()).getCell(address.getColumn()).removeCellComment();
+            }
+            workbook.getSheet("Cases").getRow(0).createCell(2).setCellValue("Test Result");
+            workbook.getSheet("Cases").getRow(1).createCell(2).setCellValue("PASS");
+            workbook.write(bytes);sanitized=bytes.toByteArray();
+        }
+
+        String sourceDigest=ArtifactArchive.sha256(original),outputDigest=ArtifactArchive.sha256(sanitized);
+        String formulaDigest=att.report.NativeSourceWorkbookReportWriter.formulaSha256(sanitized);
+        Path sourceWorkbook=runDirectory.resolve(ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX);
+        Files.createDirectories(sourceWorkbook.getParent());Files.write(sourceWorkbook,sanitized);
+        writeNativeWorkbook(runDirectory.resolve(ArtifactArchive.NATIVE_CASE_RESULT_XLSX),"accepted");
+        Files.writeString(runDirectory.resolve("run.yaml"),"schemaVersion: att-run/v2.1\nrun:\n"
+                +"  id: "+runId+"\n  targetType: nativeCase\n  nativeReportProtection: att-native-report/v1\n"
+                +"  sourceWorkbookReport:\n    schemaVersion: att-native-source-workbook-report/v1\n"
+                +"    status: written\n    outputPath: "+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX+"\n"
+                +"    sourceSha256: "+sourceDigest+"\n    outputSha256: "+outputDigest+"\n"
+                +"    formulaSha256: "+formulaDigest+"\noutputs:\n"
+                +"  xlsx: "+ArtifactArchive.NATIVE_CASE_RESULT_XLSX+"\n"
+                +"  sourceWorkbookXlsx: "+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX+"\n");
+
+        Path archive=temporary.resolve("legacy-comment-source.zip");
+        ArtifactArchive.build(output,archive,ServerRuntime::validateApprovedArtifactBytes,
+                ServerConfig.ArchiveCompression.defaults(),runId,true);
+        String sourcePath=runId+"/"+ArtifactArchive.NATIVE_SOURCE_WORKBOOK_XLSX;
+        assertNotNull(manifestEntry(archive,sourcePath));
+        assertFalse(zipContainsText(ArtifactArchive.read(archive,sourcePath),"api-key=source-comment-canary"),
+                "The sanitized source workbook must not retain legacy comment text in any OOXML part");
+    }
+
+    @Test void resolvesRelationshipTargetsWithinPackageRootAndRejectsEscape() {
+        assertEquals("xl/drawings/vmlDrawing1.vml",
+                ArtifactArchive.resolveXlsxTarget("xl/worksheets","../drawings/vmlDrawing1.vml"));
+        assertEquals("xl/worksheets/sheet1.xml",
+                ArtifactArchive.resolveXlsxTarget("xl/worksheets","./sheet1.xml"));
+        assertThrows(IllegalArgumentException.class,
+                ()->ArtifactArchive.resolveXlsxTarget("xl/worksheets","../../../escape.xml"));
+        assertThrows(IllegalArgumentException.class,
+                ()->ArtifactArchive.resolveXlsxTarget("xl/worksheets","%2e%2e/escape.xml"));
+    }
 
     @Test void publishesOnlyTheValidatedNativeResultWorkbookAndKeepsOtherXlsxFenced() throws Exception {
         Path output=Files.createDirectory(temporary.resolve("native-xlsx-output"));
@@ -99,6 +170,18 @@ class ArtifactArchiveTest {
             workbook.createSheet("Cases").createRow(0).createCell(0).setCellValue(value);
             workbook.write(stream);
         }
+    }
+
+    private static boolean zipContainsText(byte[] zippedBytes,String expected) throws Exception {
+        try(ZipInputStream zip=new ZipInputStream(new ByteArrayInputStream(zippedBytes))) {
+            ZipEntry entry;
+            while((entry=zip.getNextEntry())!=null) {
+                ByteArrayOutputStream content=new ByteArrayOutputStream();
+                zip.transferTo(content);
+                if(content.toString(StandardCharsets.UTF_8).contains(expected))return true;
+            }
+        }
+        return false;
     }
 
     @Test void rejectsUnsafeAndOverexpandedPathsInsideNativeResultXlsx() throws Exception {
