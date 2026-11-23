@@ -115,6 +115,18 @@ class PackageFlowRootsTest {
         assertNotNull(failure.getMessage());
     }
 
+    @Test void rejectsOverlappingConfiguredFlowRootAndLegacyCompanion() throws Exception {
+        Path pkg = Files.createDirectories(temp.resolve("overlap"));
+        writeFlow(pkg.resolve("templates/flows/example"), "example.v1", "Nested");
+        Files.write(pkg.resolve("package.yaml"),
+                ("schemaVersion: att-package/v2\nresources:\n  flowRoot: templates\n  templatesRoot: templates\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        PackageConfig manifest = PackageConfig.load(pkg);
+        Exception failure = assertThrows(Exception.class, () -> PackageFlowRoots.resolve(pkg, manifest));
+        assertTrue(failure.getMessage().contains("must not overlap"), failure.getMessage());
+        assertFalse(failure.getMessage().contains("Duplicate Flow ID"), failure.getMessage());
+    }
+
     @Test void rejectsDuplicateIdsAcrossCustomFlowRootAndLegacyCompanion() throws Exception {
         Path pkg = Files.createDirectories(temp.resolve("custom-dual"));
         writeFlow(pkg.resolve("custom-flows/shared"), "shared.v1", "Custom canonical");

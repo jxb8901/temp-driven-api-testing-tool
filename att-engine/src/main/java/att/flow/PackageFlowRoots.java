@@ -41,11 +41,28 @@ public final class PackageFlowRoots {
         Path configured = canonicalizeCandidate(resources, packageCanonical, flowRoot == null ? DEFAULT_FLOW_ROOT : flowRoot);
         Path templates = templatesRoot == null ? Paths.get("templates") : templatesRoot;
         Path legacyCompanion = canonicalizeCandidate(resources, packageCanonical, templates.resolve("flows"));
+        rejectOverlappingRoots(configured, legacyCompanion);
         List<Path> existing = new ArrayList<Path>();
         Set<String> seen = new LinkedHashSet<String>();
         addExistingRoot(existing, seen, configured);
         if (!samePath(configured, legacyCompanion)) addExistingRoot(existing, seen, legacyCompanion);
         return new Resolution(configured, legacyCompanion, Collections.unmodifiableList(existing));
+    }
+
+    /**
+     * Rejects nested/overlapping Flow roots such as {@code resources.flowRoot: templates} with the
+     * migration companion {@code templates/flows}. Those would otherwise walk the same descriptor
+     * twice and report a false duplicate Flow ID.
+     */
+    private static void rejectOverlappingRoots(Path configured, Path companion) {
+        if (configured == null || companion == null || samePath(configured, companion)) return;
+        Path left = configured.toAbsolutePath().normalize();
+        Path right = companion.toAbsolutePath().normalize();
+        if (right.startsWith(left) || left.startsWith(right))
+            throw new IllegalArgumentException(
+                    "resources.flowRoot must not overlap <templatesRoot>/flows ("
+                            + left + " overlaps " + right
+                            + "). Choose a distinct Flow root such as flows/, or set flowRoot to the companion path itself.");
     }
 
     private static void addExistingRoot(List<Path> existing, Set<String> seen, Path candidate) throws Exception {

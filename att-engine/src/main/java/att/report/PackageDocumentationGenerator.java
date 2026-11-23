@@ -37,30 +37,104 @@ public final class PackageDocumentationGenerator {
         GeneratedOutputCleaner.deleteDirectory(output);
         Files.createDirectories(output);
         Map<String, Set<String>> filters = filterValues(projectRoot, config);
-        String controls = "<nav aria-label=\"Package index\"><div class=\"index-links\"><strong>Index</strong><a href=\"#testcases\">Testcases</a><a href=\"#templates\">Templates</a><a href=\"#flows\">Flows</a><a href=\"#tools\">Tools</a><a href=\"#dbhelpers\">DB helpers</a><a href=\"#builtins\">Built-ins</a></div><div class=\"filters\"><input id=\"search\" type=\"search\" placeholder=\"Search any keyword\">" + select("workbookFilter", "All workbooks", filters.get("workbook")) + select("sheetFilter", "All sheets", filters.get("sheet")) + select("caseFilter", "All Case IDs", filters.get("caseid")) + select("toolFilter", "All tools / DB helpers / built-ins", filters.get("tool")) + "</div></nav>";
-        String single = page("ATT V" + Version.PRODUCT + " Single-page Reference", "<header><h1>ATT V" + Version.PRODUCT + " Package Reference</h1><p>Testcases · Templates · Flows · Tools · DB helpers · Built-ins</p></header>" + controls
+        boolean hasLegacyWorkbooks = !filters.get("workbook").isEmpty();
+        StringBuilder indexLinks = new StringBuilder("<strong>Index</strong><a href=\"#testcases\">Cases</a><a href=\"#flows\">Flows</a>");
+        if (hasTemplates(projectRoot, config)) indexLinks.append("<a href=\"#templates\">Templates</a>");
+        indexLinks.append("<a href=\"#tools\">Tools</a><a href=\"#dbhelpers\">DB helpers</a><a href=\"#builtins\">Built-ins</a>");
+        StringBuilder filterControls = new StringBuilder("<input id=\"search\" type=\"search\" placeholder=\"Search any keyword\">")
+                .append(select("caseFilter", "All Case IDs", filters.get("caseid")))
+                .append(select("toolFilter", "All tools / DB helpers / built-ins", filters.get("tool")));
+        if (hasLegacyWorkbooks) {
+            filterControls.append(select("workbookFilter", "All workbooks", filters.get("workbook")))
+                    .append(select("sheetFilter", "All sheets", filters.get("sheet")));
+        } else {
+            filterControls.append("<select id=\"workbookFilter\" hidden><option value=\"\"></option></select>")
+                    .append("<select id=\"sheetFilter\" hidden><option value=\"\"></option></select>");
+        }
+        String controls = "<nav aria-label=\"Package index\"><div class=\"index-links\">" + indexLinks
+                + "</div><div class=\"filters\">" + filterControls + "</div></nav>";
+        String single = page("ATT V" + Version.PRODUCT + " Single-page Reference",
+                "<header><h1>ATT V" + Version.PRODUCT + " Package Reference</h1>"
+                        + "<p>Native Cases · Flows · Tools · DB helpers · Built-ins</p></header>" + controls
                 + section("testcases", testcasePage(projectRoot, config, new ArrayList<String>()))
-                + section("templates", templatePage(projectRoot, config, new ArrayList<String>()))
                 + section("flows", flowPage(projectRoot, config))
+                + section("templates", templatePage(projectRoot, config, new ArrayList<String>()))
                 + section("tools", toolPage(config, new ArrayList<String>()))
                 + section("dbhelpers", dbHelperPage(config))
                 + section("builtins", builtInPage())
-                + "<script>(()=>{const q=document.querySelector('#search'),w=document.querySelector('#workbookFilter'),s=document.querySelector('#sheetFilter'),c=document.querySelector('#caseFilter'),t=document.querySelector('#toolFilter');function apply(){const term=q.value.trim().toLowerCase();document.querySelectorAll('.doc-item').forEach(x=>{const d=x.dataset;x.hidden=!((!term||x.innerText.toLowerCase().includes(term))&&(!w.value||d.workbook===w.value)&&(!s.value||d.sheet===s.value)&&(!c.value||d.caseid===c.value)&&(!t.value||(d.tool||'').split(' ').includes(t.value)))})}[q,w,s,c,t].forEach(x=>x.addEventListener(x===q?'input':'change',apply));apply()})();</script>");
+                + "<script>(()=>{const q=document.querySelector('#search'),w=document.querySelector('#workbookFilter'),s=document.querySelector('#sheetFilter'),c=document.querySelector('#caseFilter'),t=document.querySelector('#toolFilter');function apply(){const term=q.value.trim().toLowerCase();document.querySelectorAll('.doc-item').forEach(x=>{const d=x.dataset;x.hidden=!((!term||x.innerText.toLowerCase().includes(term))&&(!w.value||d.workbook===w.value)&&(!s.value||d.sheet===s.value)&&(!c.value||d.caseid===c.value)&&(!t.value||(d.tool||'').split(' ').includes(t.value)))})}[q,w,s,c,t].forEach(x=>x&&x.addEventListener(x===q?'input':'change',apply));apply()})();</script>");
         Path index = output.resolve("index.html");
         write(index, single);
         return index;
     }
 
     private String testcasePage(Path root, FrameworkConfig global, List<String> search) throws Exception {
-        StringBuilder body = new StringBuilder("<h1>Testcases</h1><p><a href=\"../index.html\">Home</a></p>");
+        StringBuilder body = new StringBuilder("<h1>Cases</h1><p>Native Case Definitions bind a Flow by static ID. "
+                + "For older packages, see Legacy documentation.</p>");
+        appendNativeDefinitions(body, root, global, search);
+        appendLegacyWorkbooks(body, root, global, search);
+        return page("Cases", body.toString());
+    }
+
+    private void appendNativeDefinitions(StringBuilder body, Path root, FrameworkConfig global, List<String> search)
+            throws Exception {
+        List<Path> definitions = files(root.resolve(global.testcasesRoot()), "testcase.yaml");
+        if (definitions.isEmpty()) return;
+        body.append("<h2>Native Case Definitions</h2><table><tr><th>Definition ID</th><th>Name</th><th>Flow</th>"
+                + "<th>Source</th><th>Path</th></tr>");
+        for (Path definition : definitions) {
+            Map<String, Object> yaml = yaml(definition);
+            String id = String.valueOf(yaml.get("id") == null ? "" : yaml.get("id"));
+            String name = String.valueOf(yaml.get("name") == null ? id : yaml.get("name"));
+            String flow = String.valueOf(yaml.get("flow") == null ? "" : yaml.get("flow"));
+            String source = nativeSourceSummary(yaml);
+            String relative = root.relativize(definition).toString().replace('\\', '/');
+            String searchable = (id + " " + name + " " + flow + " " + source + " " + relative)
+                    .toLowerCase(java.util.Locale.ROOT);
+            body.append("<tr class=\"doc-item\" data-search=\"").append(escape(searchable))
+                    .append("\" data-caseid=\"").append(escape(id))
+                    .append("\" data-workbook=\"\" data-sheet=\"\" data-tool=\"\">")
+                    .append("<td><code>").append(escape(id)).append("</code></td><td>").append(escape(name))
+                    .append("</td><td>");
+            if (!flow.isEmpty() && !"null".equals(flow))
+                body.append("<a href=\"#").append(anchor(flow)).append("\"><code>").append(escape(flow)).append("</code></a>");
+            body.append("</td><td>").append(escape(source)).append("</td><td><code>").append(escape(relative))
+                    .append("</code></td></tr>");
+            search.add(id); search.add(name); search.add(flow);
+        }
+        body.append("</table>");
+    }
+
+    private static String nativeSourceSummary(Map<String, Object> yaml) {
+        Object dataSource = yaml.get("dataSource");
+        if (dataSource instanceof Map<?, ?>) {
+            Map<?, ?> source = (Map<?, ?>) dataSource;
+            String type = String.valueOf(source.get("type") == null ? "dataSource" : source.get("type"));
+            String path = String.valueOf(source.get("path") == null ? "" : source.get("path"));
+            return path.isEmpty() || "null".equals(path) ? type : type + ": " + path;
+        }
+        if (yaml.get("inputs") instanceof Map<?, ?>) return "inline inputs";
+        return "definition";
+    }
+
+    private void appendLegacyWorkbooks(StringBuilder body, Path root, FrameworkConfig global, List<String> search)
+            throws Exception {
         Path templatesDirectory = global.templatesRoot().isAbsolute()
                 ? global.templatesRoot() : root.resolve(global.templatesRoot());
-        StageTemplateLoader templateLoader = Files.isDirectory(templatesDirectory)
-                ? new StageTemplateLoader(root, global.templatesRoot()) : null;
+        StageTemplateLoader templateLoader = null;
+        boolean listedHeading = false;
         for (Path workbook : files(root.resolve(global.testcasesRoot()), ".xlsx")) {
-            if (templateLoader == null)
-                throw new IllegalArgumentException("Workbook documentation requires a Package templates/ root");
-            if (!Files.isRegularFile(workbook.resolveSibling(workbook.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ".yaml")))) continue;
+            Path sidecar = workbook.resolveSibling(workbook.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ".yaml"));
+            if (!Files.isRegularFile(sidecar)) continue;
+            if (templateLoader == null) {
+                if (!Files.isDirectory(templatesDirectory))
+                    throw new IllegalArgumentException("Legacy workbook documentation requires a Package templates/ root");
+                templateLoader = new StageTemplateLoader(root, global.templatesRoot());
+            }
+            if (!listedHeading) {
+                body.append("<h2>Legacy workbooks</h2><p>For older packages, see Legacy documentation.</p>");
+                listedHeading = true;
+            }
             FrameworkConfig suite = new SuiteConfigResolver(root, global).resolve(workbook);
             List<TestCase> cases = new ExcelTestSuiteLoader(suite).load(workbook);
             Map<String, List<TestCase>> casesBySheet = new LinkedHashMap<String, List<TestCase>>();
@@ -68,10 +142,10 @@ public final class PackageDocumentationGenerator {
                 if (!casesBySheet.containsKey(test.sheetName())) casesBySheet.put(test.sheetName(), new ArrayList<TestCase>());
                 casesBySheet.get(test.sheetName()).add(test);
             }
-            body.append("<h2>").append(escape(workbook.getFileName().toString())).append("</h2>");
+            body.append("<h3>").append(escape(workbook.getFileName().toString())).append("</h3>");
             search.add(workbook.getFileName().toString());
             for (Map.Entry<String, List<TestCase>> sheet : casesBySheet.entrySet()) {
-                body.append("<section class=\"sheet-group\" data-sheet=\"").append(escape(sheet.getKey())).append("\"><h3>Sheet: ").append(escape(sheet.getKey())).append("</h3><table><tr><th>Case ID</th><th>Name</th><th>Tags</th><th>Stages → Templates</th><th>Expected Result</th></tr>");
+                body.append("<section class=\"sheet-group\" data-sheet=\"").append(escape(sheet.getKey())).append("\"><h4>Sheet: ").append(escape(sheet.getKey())).append("</h4><table><tr><th>Case ID</th><th>Name</th><th>Tags</th><th>Stages → Templates</th><th>Expected Result</th></tr>");
                 for (TestCase test : sheet.getValue()) {
                     String templates = test.stages().values().stream().map(StageCaseData::templateName).reduce((a,b)->a+" "+b).orElse("");
                     Set<String> usedTools = new LinkedHashSet<String>();
@@ -97,7 +171,11 @@ public final class PackageDocumentationGenerator {
                 body.append("</table></section>");
             }
         }
-        return page("Testcases", body.toString());
+    }
+
+    private boolean hasTemplates(Path root, FrameworkConfig config) throws Exception {
+        Path templateRoot = config.templatesRoot().isAbsolute() ? config.templatesRoot() : root.resolve(config.templatesRoot());
+        return !files(templateRoot, "template.yaml").isEmpty();
     }
 
     private String expectedResult(Path root, FrameworkConfig suite, TestCase test, StageTemplateLoader loader) throws Exception {
@@ -130,7 +208,7 @@ public final class PackageDocumentationGenerator {
     @SuppressWarnings("unchecked")
     private String templatePage(Path root, FrameworkConfig config, List<String> search) throws Exception {
         Path templateRoot = config.templatesRoot().isAbsolute() ? config.templatesRoot() : root.resolve(config.templatesRoot());
-        StringBuilder body = new StringBuilder("<h1>Templates</h1><p><a href=\"../index.html\">Home</a></p>");
+        StringBuilder body = new StringBuilder("<h1>Templates</h1><p>Legacy Template descriptors. For older packages, see Legacy documentation.</p>");
         for (Path file : files(templateRoot, "template.yaml")) {
             Map<String, Object> yaml = yaml(file);
             String path = templateRoot.relativize(file.getParent()).toString().replace('\\', '/');
@@ -232,6 +310,11 @@ public final class PackageDocumentationGenerator {
     private Map<String, Set<String>> filterValues(Path root, FrameworkConfig global) throws Exception {
         Map<String, Set<String>> values = new LinkedHashMap<String, Set<String>>();
         values.put("workbook", new LinkedHashSet<String>()); values.put("sheet", new LinkedHashSet<String>()); values.put("caseid", new LinkedHashSet<String>()); values.put("tool", new LinkedHashSet<String>());
+        for (Path definition : files(root.resolve(global.testcasesRoot()), "testcase.yaml")) {
+            Map<String, Object> yaml = yaml(definition);
+            Object id = yaml.get("id");
+            if (id != null) values.get("caseid").add(String.valueOf(id));
+        }
         for (Path workbook : files(root.resolve(global.testcasesRoot()), ".xlsx")) {
             if (!Files.isRegularFile(workbook.resolveSibling(workbook.getFileName().toString().replaceFirst("(?i)\\.xlsx$", ".yaml")))) continue;
             FrameworkConfig suite = new SuiteConfigResolver(root, global).resolve(workbook);

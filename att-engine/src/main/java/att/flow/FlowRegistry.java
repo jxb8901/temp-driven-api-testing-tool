@@ -201,12 +201,14 @@ public final class FlowRegistry {
             }
         }
         Collections.sort(files);
+        Set<Path> seenDescriptors = new LinkedHashSet<Path>();
         for (Path descriptor : files) {
             if (!snapshotMode && (Files.isSymbolicLink(descriptor) || !Files.isRegularFile(descriptor, java.nio.file.LinkOption.NOFOLLOW_LINKS)))
                 throw att.validation.DiagnosticException.of(att.validation.DiagnosticCodes.PATH_INVALID,
                         "Unsafe Flow descriptor", "Flow descriptor must be a regular non-symlink file: " + descriptor,
                         "Use a regular flow.yaml below the Package Flow roots.").withLocation(descriptor.toString(), "flow", null, null, null, null, null);
             Path real = snapshotMode ? descriptor : descriptor.toRealPath();
+            if (!seenDescriptors.add(real)) continue;
             if (!underAnyRoot(real, allowedRoots))
                 throw att.validation.DiagnosticException.of(att.validation.DiagnosticCodes.PATH_INVALID,
                         "Flow descriptor escapes Flow root", "resolvedPath=" + real + ", allowedRoots=" + allowedRoots,
