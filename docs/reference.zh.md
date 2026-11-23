@@ -15,8 +15,8 @@ Status: 規範性使用者文件；由模組化來源自動生成
   - [Package 邊界](#package-邊界)
   - [如何使用本手冊](#如何使用本手冊)
 - [Test authoring](#test-authoring)
-  - [編寫並執行 Testcase](#編寫並執行-testcase)
-  - [區分 Testcase 與 Case execution](#區分-testcase-與-case-execution)
+  - [撰寫 Native Case](#撰寫-native-case)
+  - [區分 Resolved Case 與 Case execution](#區分-resolved-case-與-case-execution)
   - [編寫契約](#編寫契約)
   - [Native Test Case Definition](#native-test-case-definition)
   - [Workbook](#workbook)
@@ -220,37 +220,49 @@ Reference 定義 public contract；README、Quick Start 與 examples 按特定�
 
 ## Test authoring
 
-### 編寫並執行 Testcase
+### 撰寫 Native Case
 
-Testcase 是一個正規化 Workbook row；Run 會為每個選中的 row 建立一次 Case execution。按以下流程編寫、驗證和執行變更。
+新的 Case 使用這條路徑。Workbook、Stage 和 Template 仍受支援，說明見 [Workbook](#workbook)。它們不是唯一的 Case 撰寫模型。
 
-1. 編輯 Workbook，並在 Sidecar 中映射欄位。
-2. 產生 Snapshot 並檢查差異。
-3. 使用 ./att.sh validate --package 驗證 package。
-4. 使用 [Debug](reference.zh/execution-modes/debug.md) 隔離 Template、Flow 或 Tool，再使用 [Run](reference.zh/execution-modes/run.md) 建立 Case execution。
+~~~text
+Flow + testcase.yaml + Data Source -> Resolution -> Resolved Case -> Suite selection -> Case Execution
+~~~
 
-以下各節定義 authoring contract。上面的工作流描述舊式 Workbook authoring；Native Test Case Definition 工作流見下節。公式單元格、多行表頭和 XML 序列化詳情見[進階 Workbook 與 Snapshot 細節](#進階-workbook-與-snapshot-細節)。
+1. 撰寫或重用一個 Flow（`att-flow/v3.6`）。
+2. 撰寫綁定該 Flow 和一個 Data Source 的 Test Case Definition（`att-testcase/v1`）。
+3. Resolve 該 Definition。Preview 是唯讀的，不會建立 Job。
+4. 選擇 Resolved Cases：單一 Case、明確的 qualified ID、tags，或 implicit Suite。不需要強制的 `suite.yaml`。
+5. 驗證 Package，然後 RUN。每個被選中的 Resolved Case 會成為一次 Case Execution，各自擁有 execution ID、狀態和 evidence。
 
-### 區分 Testcase 與 Case execution
+`att-testcase/v1` 是精確的 1:1 來源紀錄契約，由本頁和 schema `att-testcase/v1` 定義：
 
-**Testcase** 是 Sidecar mapping 和 Snapshot normalization 後由作者編寫的 Workbook row。它的完整 Case ID 格式為 `workbookId.groupId.rowCaseId`。**Case execution** 是 Run 對該 Testcase 的一次 runtime 執行，並有自己的 status 和 evidence。兩者共用 identifier，但概念不同。本頁使用 *Testcase* 表示 Workbook 內容，使用 *Case execution* 表示執行工作。
+- 只有 typed `inputs` map、沒有 Data Source 時，會解析成一個 ID 為 `default` 的 Case。
+- 每一筆非空白的 inline 或 Excel 紀錄正好解析成一個 Resolved Case。Resolution 不會把一筆紀錄展開成多個 Case。
+- `caseIdExpression` 只是一次 `${DATA.key}` 查詢，不是 generator。
+- Excel `dataColumns` 沿用 `att-sidecar/v2.2` 的逗號分隔語法，包含別名、`(yaml)` 解析和引號分隔。
+- Definition `id` 屬於 Package。Resolved Case ID 是一個 path-safe 片段。Qualified ID 是 `definitionId.caseId`。
+- typed input 投影、報告和 Package 檔案互相隔離。Resolution 和 RUN 不會修改 Definition 或來源 Workbook。
+
+n 對 m generator 不屬於 `att-testcase/v1`，仍然延後。舊式 Workbook 的公式單元格、多行表頭和 XML 序列化仍見[進階 Workbook 與 Snapshot 細節](#進階-workbook-與-snapshot-細節)。
+
+### 區分 Resolved Case 與 Case execution
+
+**Resolved Case** 是 Resolution 產生的一個可選邏輯 Case。**Case execution** 是該 Resolved Case 的一次 runtime 執行。Qualified Case ID 在多次 RUN 之間保持穩定；execution ID、狀態和 evidence 屬於單次執行。在仍受支援的舊式 Workbook 路徑上，作者撰寫的 Testcase 仍是一個正規化 workbook row，完整 Case ID 為 `workbookId.groupId.rowCaseId`。本頁用 *Resolved Case* 表示 Native 內容，用 *Testcase* 表示舊式 Workbook 內容，用 *Case execution* 表示執行工作。
 
 ### 編寫契約
 
-本頁說明正常日常工作流中的數據流轉順序。
-
-| 需求 | 使用 |
-|---|---|
-| Stage execution entry point | Template |
-| 可重用 Template logic | Flow |
-| 一個有序 operation | Action |
-| 外部能力 | Resource |
-| Testcase/Stage business input | EXEC.INPUT |
-| 跨 Action mutable state | EXEC.VARS |
+| 需求 | 現行 Native 路徑 | 受支援的舊式路徑 |
+|---|---|---|
+| 可重用的有序 Actions | Flow | Template，並可呼叫 Flow |
+| 一個有序 operation | Action | Action |
+| 外部能力 | Resource | Resource |
+| 業務輸入 | Definition `inputs` 或 `DATA` 投影 | 來自 Stage 和 workbook row 的 `EXEC.INPUT` |
+| 跨 Action 的可變狀態 | `EXEC.VARS` | `EXEC.VARS` |
+| Case 選取 | Resolved Case ID、tags 或 implicit Suite | Workbook row、Stage、tag 或舊式 Suite selector |
 
 ### Native Test Case Definition
 
-ATT 4.6.0 發佈目標包含已啟用的 `att-testcase/v1` schema，以及 Native Case CLI 和經驗證 Server draft flow 對 singleton、inline 和 Excel Definition 的 discovery、resolution 及 RUN 支援。實作已在開啟中的發佈目標 PR stack；4.6.0 release 和 tag 尚未建立。Native RUN、報告整合及 Default Package 採納的部署驗收仍待完成；共享編輯器部署驗收另行跟進。Native LOAD Case target、進階 Testdata／generator 及 Debug interoperability 不屬於此目標；現有直接 LOAD 和 Debug 路徑仍受支援。
+現行契約是 `att-testcase/v1`。目前的 default branch 已包含 Native Case CLI，以及經驗證的 Server draft flow，支援 singleton、inline 和 Excel Definition 的 discovery、resolution 和 RUN。這些程式已整合在這個 branch。Native RUN 已在此實作。4.6.0 release 和 tag 尚未發佈。implicit Suite 驗收、Native 報告驗收，以及剩餘的 Default Package 採納仍然開啟。Native LOAD Case target、n 對 m generator 和 Debug interoperability 維持延後。現有直接 LOAD 和 Debug 路徑仍受支援。
 
 Native Excel adapter 只讀取 Package 內 `.xlsx`，沿用 Sidecar header、`dataColumns`、blank normalization 和安全 YAML cell parsing 規則，並在每個 resolved Case 保留 workbook revision、sheet、row 及 column provenance。壓縮後的 workbook 上限為 32 MiB；POI 載入前會預檢 ZIP archive，最多 256 個 entries、每個解壓 entry 32 MiB、總解壓資料 64 MiB。選取的 worksheet 最多 100,000 個實體 rows（包括空白列）；header scan 最多 1,000,000 個 header cells；Resolution 最多接受 10,000 筆非空白 records。Preview 亦有上限。YAML cells 沿用共用 parser 限制：3,000,000 code points、50 個 collection aliases 及 50 層巢狀；解析後的 value graph 最多 64 層及 100,000 個值。系統拒絕非有限數字和遞迴 aliases。Adapter 不會建立或更新舊式 XML Snapshot。現有 Workbook／Sidecar／Snapshot RUN 亦維持支援。
 
@@ -278,7 +290,7 @@ Default Package 已附上離線 Native Quick Start Definitions（`packages/defau
 
 Excel-backed Definition 使用與 native resolution 相同的唯讀 S04 adapter，並在 Studio 顯示 row 和 column diagnostics。Legacy suite 仍可使用現有 Workbook／Sidecar 編輯器。
 
-#### 執行 implicit Native Case Suite
+#### Run an implicit Native Case Suite
 
 4.6.0 發佈目標可在已解析的 Case 上建立 Suite selection，毋須作者建立 `suite.yaml`。先指定一個或多個 Definition ID，再選取全部 Case、指定完整 Qualified Case ID，或按一個或多個 tags 選取。被排除的 tags 優先於包含的 tags。
 
@@ -294,9 +306,11 @@ ATT 會按 ID 排列 Definition，並保留每個 Definition 的來源記錄順�
 
 Implicit Suite 是 runtime selection，並非可重用的 authored Definition。這項功能不會新增 LOAD target 或進階 Testdata/generator binding；Debug interoperability 仍屬後續工作。
 
-Studio Run editor 亦提供這項選取功能：輸入一個或多個 Definition ID，再選擇全部 Case、指定 Qualified Case ID，或按 tags 選取 Case。可用 Include Tags 和 Exclude Tags 進一步篩選；重播時會保留保存定義傳回的 tag selector。Native Suite `--rerun-failed` 只會重跑同一 Package 和 Definition 集合中最近一個合資格已完成 RUN 內曾執行但失敗的 Case。Local RUN 會驗證 latest-run pointer 和 manifest hash；Server draft 會凍結來源 Job/run、manifest digest、Package revision 和精確 Qualified Case ID。過期 draft 或來源變更會被拒絕，Skipped Case 不會重跑，每次嘗試的執行／略過數會與來源及 retry 次數分開記錄。Schedule 會保留已驗證的 retry source。
+Studio Run editor 亦提供這項選取功能：輸入一個或多個 Definition ID，再選擇全部 Case、指定 Qualified Case ID，或按 tags 選取 Case。可用 Include Tags 和 Exclude Tags 進一步篩選；重播時會保留保存定義傳回的 tag selector。Native Suite `--rerun-failed` 只會重跑同一 Package 和 Definition 集合中最近一個合資格已完成 RUN 內曾執行但失敗的 Case。Local RUN 會驗證 latest-run pointer 和 manifest hash；Server draft 會凍結來源 Job/run、manifest digest、Package revision 和精確 Qualified Case ID。過期 draft 或來源變更會被拒絕，Skipped Case 不會重跑，每次嘗試的執行／略過數會與來源及 retry 次數分開記錄。Schedule 會保留已驗證的 retry source。同一個 selector 可在 Studio Run editor 和 CLI 使用。它已在目前的 default branch 實作並整合。implicit Suite 驗收仍然開啟，且尚未發佈 4.6.0 release tag。
 
 ### Workbook
+
+Workbook、Stage 和 Template 仍是受支援的 runtime。需要 Stage 選取、`runWhen` / `onFailure`，或既有 Snapshot identity 時，使用這條路徑。它不是唯一的 Case 撰寫模型。
 
 #### Workbook、Sidecar 和 Snapshot 之間的關系
 
@@ -1011,7 +1025,7 @@ RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型�
 
 <!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-功能性單次執行使用共用 **RUN** model，支援 Case、Template、Flow 和 Tool。**Debug** 是部分 RUN target 的診斷模式。**LOAD** 保留效能引擎、負載控制和專用報告。4.6.0 release-target stack 透過 `run native-case` 和 `run native-suite` 加入明確 Native Case 與 implicit Native Suite 選取；release 和 tag 尚未發佈，部署驗收仍待完成。
+功能性單次執行使用共用 **RUN** model，支援 Case、Template、Flow 和 Tool。**Debug** 是部分 RUN target 的診斷模式。**LOAD** 保留效能引擎、負載控制和專用報告。目前的 default branch 透過 `run native-case` 和 `run native-suite` 加入明確 Native Case 與 implicit Native Suite 選取（`att-testcase/v1`、`att-execution/v2`）。這項選取已實作並整合在此。Native RUN 已在這個 branch 實作。4.6.0 release 和 tag 尚未發佈。implicit Suite 驗收仍然開啟。
 
 舊版 Local CLI 保留其相容邊界：`./att.sh run` 選取 workbook Case，standalone `debug` 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。Native Server RUN 需要經驗證的 `att-execution/v2` draft，不會透過舊式 raw Case selector 提交。更廣泛的共用 CLI grammar 仍屬[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)。
 
@@ -1149,7 +1163,7 @@ Schedule 使用一般已驗證 draft 合約。RUN Debug 仍使用 `options.debug
 
 <!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-舊版 `./att.sh run` command 仍是 Case adapter，會執行 Workbook 中選取的 authored Testcase。4.6.0 release-target CLI 亦加入明確的 Native Case 和 Native Suite command，詳見 [Unified RUN](reference.zh/execution-modes/unified-run.md) 及 [CLI Reference](reference.zh/cli.md)。目標 release 和 tag 尚未發佈，部署驗收仍待完成。
+舊版 `./att.sh run` command 仍是 Case adapter，會執行 Workbook 中選取的 authored Testcase。目前的 default branch 亦加入明確的 Native Case 和 Native Suite command，詳見 [Unified RUN](reference.zh/execution-modes/unified-run.md) 及 [CLI Reference](reference.zh/cli.md)。這些 command 已整合在此。Native RUN 已在這個 branch 實作。4.6.0 release 和 tag 尚未發佈。implicit Suite 驗收仍然開啟。
 
 ```sh
 ./att.sh run --all
@@ -3082,11 +3096,11 @@ python tools/migrate_package_config.py --config config/config.yaml --server-conf
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
-上表列出舊版 CLI command。4.6.0 release-target stack 加入明確的 Native Case 和 Native Suite RUN command。4.6.0 release 和 tag 尚未發佈，部署驗收仍待完成。更廣泛的共用 vNext grammar 另列於[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)。
+上表列出舊版 CLI command。目前的 default branch 加入明確的 Native Case 和 Native Suite RUN command（`att-testcase/v1`、`att-execution/v2`）。這些 command 已整合在此。Native RUN 已在這個 branch 實作。4.6.0 release 和 tag 尚未發佈。implicit Suite 驗收仍然開啟。更廣泛的共用 vNext grammar 另列於[規劃中 proposal](interfaces/cli/vnext-proposed.zh.md)。
 
 ### CLI 狀態與可用性
 
-本 Reference 區分現有 legacy CLI，以及開啟中的目標 stack 的 Native Case 和 Native Suite command。Native selector 語法和範例見[測試撰寫](reference.zh/test-authoring.md#native-test-case-definition)。Remote execution 使用已驗證的 Server draft。目標 stack 的行為不代表 4.6.0 release 或 tag 已存在。
+本 Reference 區分現有 legacy CLI，以及目前 default branch 已整合的 Native Case 和 Native Suite command（`att-testcase/v1`、`att-execution/v2`）。Native selector 語法和範例見[測試撰寫](reference.zh/test-authoring.md#native-test-case-definition)。Remote execution 使用已驗證的 Server draft。整合在這個 branch 不代表 4.6.0 release 或 tag 已發佈。Native RUN 已實作。implicit Suite 驗收仍然開啟。
 
 ### 編譯 source checkout
 
@@ -3149,7 +3163,7 @@ mvn -DskipTests -pl att-cli -am compile
 
 #### Native Case 和 implicit Suite RUN
 
-4.6.0 release-target CLI 加入 `run native-case` 和 `run native-suite`。正式發佈目標尚未發佈。selector 和範例見[測試撰寫](reference.zh/test-authoring.md#native-test-case-definition)，Server draft 語義見 [Unified RUN](reference.zh/execution-modes/unified-run.md)。
+目前的 default branch 加入 `run native-case` 和 `run native-suite`。它們已在此實作並整合（`att-execution/v2`）。4.6.0 release 和 tag 尚未發佈。selector 和範例見[測試撰寫](reference.zh/test-authoring.md#native-test-case-definition)，Server draft 語義見 [Unified RUN](reference.zh/execution-modes/unified-run.md)。Native Suite `--rerun-failed` 可用，並與 Studio Run editor 一致。
 
 #### Debug component
 
@@ -3423,7 +3437,7 @@ Run ID 和 Case ID 在校驗後保持原樣。只有 `run.yaml` 狀態為 `COMPL
 
 `report/index.html` 是主要終端用戶報表，可以直接從磁盤打開。組按 `workbookId.groupId` 彙總；界面把 `groupId` 標記為 Sheet。Cases view 支持 Workbook/Sheet/Status 下拉框、對 workbook/group/full Case ID/tag 的大小寫不敏感搜索，以及每列標題的升序/降序排序。Duration 按數值排序。
 
-Native Inline Case 和 implicit Suite 在沒有輸入 Workbook 時，也會生成標準 HTML、CI JSON、JUnit 及 `workbooks/native-cases.result.xlsx`。每個結果會保留 Definition ID、qualified Case ID、Flow ID、Definition/Flow source revision、execution ID，以及來源資料 record 可用的 provenance。此 XLSX 是表格式結果 Workbook；複製 Excel source Workbook 的版面仍依賴 S04，並非此輸出的一部分。
+每次 Native RUN，包括 Inline Case 和 implicit Suite，都會寫入標準 HTML、CI JSON、JUnit，以及不依賴來源的 `workbooks/native-cases.result.xlsx`。每個結果會保留 Definition ID、qualified Case ID、Flow ID、Definition/Flow source revision、execution ID，以及來源資料 record 可用的 provenance。標準 XLSX 是表格式結果 Workbook，不需要輸入 Workbook。Excel-backed Definition 還可以設定 `report: {format: xlsx, template: sourceWorkbook}`，要求另外產生 `workbooks/native-cases.source-workbook.xlsx`。該檔是新的輸出：RUN 在執行前 pin 來源 bytes，只把結果寫入複本中被選中的列，且不修改 Package 內的 Workbook。跨多個 Definition 的 Suite、非 Excel 來源，或無法安全發佈的報告，會退回標準 Workbook 並記錄 diagnostic。這份報告契約已在目前的 default branch 實作並整合（`att-testcase/v1`）。Native 報告驗收仍然開啟，且尚未發佈 4.6.0 release tag。欄位行為由[測試撰寫](reference.zh/test-authoring.md#native-test-case-definition)定義。
 
 作為 Server Job artifact 發佈時，native XLSX 會列為 binary 下載項、不作文字預覽，並以 `.xlsx` 附件提供。
 

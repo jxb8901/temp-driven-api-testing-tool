@@ -96,7 +96,7 @@ Run ID 和 Case ID 在校驗後保持原樣。只有 `run.yaml` 狀態為 `COMPL
 
 `report/index.html` 是主要終端用戶報表，可以直接從磁盤打開。組按 `workbookId.groupId` 彙總；界面把 `groupId` 標記為 Sheet。Cases view 支持 Workbook/Sheet/Status 下拉框、對 workbook/group/full Case ID/tag 的大小寫不敏感搜索，以及每列標題的升序/降序排序。Duration 按數值排序。
 
-Native Inline Case 和 implicit Suite 在沒有輸入 Workbook 時，也會生成標準 HTML、CI JSON、JUnit 及 `workbooks/native-cases.result.xlsx`。每個結果會保留 Definition ID、qualified Case ID、Flow ID、Definition/Flow source revision、execution ID，以及來源資料 record 可用的 provenance。此 XLSX 是表格式結果 Workbook；複製 Excel source Workbook 的版面仍依賴 S04，並非此輸出的一部分。
+每次 Native RUN，包括 Inline Case 和 implicit Suite，都會寫入標準 HTML、CI JSON、JUnit，以及不依賴來源的 `workbooks/native-cases.result.xlsx`。每個結果會保留 Definition ID、qualified Case ID、Flow ID、Definition/Flow source revision、execution ID，以及來源資料 record 可用的 provenance。標準 XLSX 是表格式結果 Workbook，不需要輸入 Workbook。Excel-backed Definition 還可以設定 `report: {format: xlsx, template: sourceWorkbook}`，要求另外產生 `workbooks/native-cases.source-workbook.xlsx`。該檔是新的輸出：RUN 在執行前 pin 來源 bytes，只把結果寫入複本中被選中的列，且不修改 Package 內的 Workbook。跨多個 Definition 的 Suite、非 Excel 來源，或無法安全發佈的報告，會退回標準 Workbook 並記錄 diagnostic。這份報告契約已在目前的 default branch 實作並整合（`att-testcase/v1`）。Native 報告驗收仍然開啟，且尚未發佈 4.6.0 release tag。欄位行為由[測試撰寫](test-authoring.md#native-test-case-definition)定義。
 
 作為 Server Job artifact 發佈時，native XLSX 會列為 binary 下載項、不作文字預覽，並以 `.xlsx` 附件提供。
 

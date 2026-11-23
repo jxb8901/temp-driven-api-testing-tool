@@ -2,7 +2,7 @@
 
 <!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-The legacy `./att.sh run` command remains a Case adapter: it executes selected authored Testcases from a workbook. The 4.6.0 release-target CLI also adds explicit Native Case and Native Suite commands, documented in [Unified RUN](unified-run.md) and the [CLI Reference](../cli.md). The target release and tag are unpublished; deployed acceptance remains pending.
+The legacy `./att.sh run` command remains a Case adapter: it executes selected authored Testcases from a workbook. The current default branch also adds explicit Native Case and Native Suite commands, documented in [Unified RUN](unified-run.md) and the [CLI Reference](../cli.md). Those commands are integrated here. Native RUN is implemented on this branch. No 4.6.0 release or tag has been published. Implicit Suite acceptance remains open.
 
 ```sh
 ./att.sh run --all

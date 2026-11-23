@@ -2,7 +2,7 @@
 
 <!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
 
-舊版 `./att.sh run` command 仍是 Case adapter，會執行 Workbook 中選取的 authored Testcase。4.6.0 release-target CLI 亦加入明確的 Native Case 和 Native Suite command，詳見 [Unified RUN](unified-run.md) 及 [CLI Reference](../cli.md)。目標 release 和 tag 尚未發佈，部署驗收仍待完成。
+舊版 `./att.sh run` command 仍是 Case adapter，會執行 Workbook 中選取的 authored Testcase。目前的 default branch 亦加入明確的 Native Case 和 Native Suite command，詳見 [Unified RUN](unified-run.md) 及 [CLI Reference](../cli.md)。這些 command 已整合在此。Native RUN 已在這個 branch 實作。4.6.0 release 和 tag 尚未發佈。implicit Suite 驗收仍然開啟。
 
 ```sh
 ./att.sh run --all

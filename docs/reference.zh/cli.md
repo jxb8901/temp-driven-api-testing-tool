@@ -20,11 +20,11 @@
 | `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
 | `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
 
-上表列出舊版 CLI command。4.6.0 release-target stack 加入明確的 Native Case 和 Native Suite RUN command。4.6.0 release 和 tag 尚未發佈，部署驗收仍待完成。更廣泛的共用 vNext grammar 另列於[規劃中 proposal](../interfaces/cli/vnext-proposed.zh.md)。
+上表列出舊版 CLI command。目前的 default branch 加入明確的 Native Case 和 Native Suite RUN command（`att-testcase/v1`、`att-execution/v2`）。這些 command 已整合在此。Native RUN 已在這個 branch 實作。4.6.0 release 和 tag 尚未發佈。implicit Suite 驗收仍然開啟。更廣泛的共用 vNext grammar 另列於[規劃中 proposal](../interfaces/cli/vnext-proposed.zh.md)。
 
 ## CLI 狀態與可用性
 
-本 Reference 區分現有 legacy CLI，以及開啟中的目標 stack 的 Native Case 和 Native Suite command。Native selector 語法和範例見[測試撰寫](test-authoring.md#native-test-case-definition)。Remote execution 使用已驗證的 Server draft。目標 stack 的行為不代表 4.6.0 release 或 tag 已存在。
+本 Reference 區分現有 legacy CLI，以及目前 default branch 已整合的 Native Case 和 Native Suite command（`att-testcase/v1`、`att-execution/v2`）。Native selector 語法和範例見[測試撰寫](test-authoring.md#native-test-case-definition)。Remote execution 使用已驗證的 Server draft。整合在這個 branch 不代表 4.6.0 release 或 tag 已發佈。Native RUN 已實作。implicit Suite 驗收仍然開啟。
 
 ## 編譯 source checkout
 
@@ -87,7 +87,7 @@ mvn -DskipTests -pl att-cli -am compile
 
 ### Native Case 和 implicit Suite RUN
 
-4.6.0 release-target CLI 加入 `run native-case` 和 `run native-suite`。正式發佈目標尚未發佈。selector 和範例見[測試撰寫](test-authoring.md#native-test-case-definition)，Server draft 語義見 [Unified RUN](execution-modes/unified-run.md)。
+目前的 default branch 加入 `run native-case` 和 `run native-suite`。它們已在此實作並整合（`att-execution/v2`）。4.6.0 release 和 tag 尚未發佈。selector 和範例見[測試撰寫](test-authoring.md#native-test-case-definition)，Server draft 語義見 [Unified RUN](execution-modes/unified-run.md)。Native Suite `--rerun-failed` 可用，並與 Studio Run editor 一致。
 
 ### Debug component
 

@@ -22,7 +22,8 @@ Total output lines: 396
 
 ## Open follow-ups tracked outside the 4.6.0 release scope
 
-- #387 retains deployed multi-role operator acceptance. #393 and #397 retain deployment and cross-PR integration evidence; #413 retains any remaining Default Package migration acceptance.
+- #387 retains deployed multi-role operator acceptance. #393 is closed: that closure accepts Native RUN for the issue and is not a published 4.6.0 GitHub Release. #394, #395, #396, and #397 remain open for their own acceptance even though the implementation is integrated on master. #413 retains any remaining Default Package migration acceptance.
+- Concepts, Reference, Studio Explorer, and Quick Start now lead with Flow + `testcase.yaml` + Data Source → Resolution → Resolved Case → Suite selection → Case Execution. Workbook/Stage/Template stays a supported legacy path. `att-testcase/v1` remains an exact 1:1 record-to-case contract; n-to-m generators stay deferred under #419 (#424).
 - S08 Native LOAD Case targets are tracked by #418; S09 ATT Testdata and bounded generated Case sources by #419; S11 Debug and Native Case interoperability by #420.
 - Helper-specific external compensation and teardown validation from the S10 analysis is tracked by #421. Bilingual ADR-0001 review and approval for overall architecture closure is tracked by #422. #388 remains open for these follow-ups and overall acceptance.
 

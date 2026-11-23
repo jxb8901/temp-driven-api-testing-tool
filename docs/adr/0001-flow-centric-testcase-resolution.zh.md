@@ -3,7 +3,7 @@
 - **狀態：** Proposed（提案中，尚未接受為已實作契約）
 - **日期：** 2026-11-20
 - **適用範圍：** ATT 下一代 Test Authoring 提案；本文記錄架構方向，不會自動定義 runtime compatibility
-- **Native Case 狀態：** 4.6.0 發佈目標包含 S03 inline resolution 和 RUN 實作；release 和 tag 尚未發佈，部署驗收仍由 [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) 跟進。
+- **Native Case 狀態：** 目前的 default branch 包含 S03 inline resolution 和 RUN 實作。Issue [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) 已關閉，代表該 RUN issue 的驗收完成。4.6.0 release 和 tag 尚未發佈。
 - **相關工作：** [Issue #388](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/388)、[Source Management #233](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/233)、[PR #386](https://github.com/jxb8901/temp-driven-api-testing-tool/pull/386)
 - **英文主文件：** [ADR-0001](0001-flow-centric-testcase-resolution.md)
 - **S10 相容性證據：** [Template–Flow–Stage 矩陣及 golden fixture](../system-design/template-flow-stage-compatibility.zh.md)
@@ -16,7 +16,7 @@
 
 目前 `att-flow/v3.6` 已具備有序 Actions 與巢狀 Flow；Debug 可利用 `att-debug/v1.2` 的 Input 獨立執行 Flow；LOAD 已能重複執行 Flow、Template、Tool Target。因此下一代模型應**重用 Flow**，而不是另外發明 Steps 執行語言。
 
-本文仍屬 **Proposed**，記錄架構方向及分階段實作範圍。尚未發佈的 4.6.0 release-target stack 包含 S03–S07 和 S12 的實作工作，包括 Native Case RUN、Excel source、Studio 編輯、implicit Suite、報告及 Default Package examples。程式碼仍在開啟中的 stacked PR；Native RUN（[#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)）、報告整合（[#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)）及 S12 採納（[#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)）的部署驗收仍未完成。共享編輯器部署驗收由獨立的 [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387) 跟進。S10/#398 只提供相容性分析和 golden fixture，不會改變 FrameworkEngine runtime semantics。Native LOAD target（[#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)）、進階 Testdata／generator（[#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)）、Debug interoperability（[#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)）及 Helper rollback／teardown 驗證（[#421](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/421)）均屬目標以外的後續工作。ADR approval 和 architecture closure 會在目標工作之後由 [#422](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/422) 跟進，不是發佈阻礙。
+本文仍屬 **Proposed**，記錄架構方向及分階段實作範圍。目前的 default branch 包含 S03–S07 和 S12 的實作，包括 Native Case RUN、Excel source、Studio 編輯、implicit Suite、報告及 Default Package examples。這些程式已整合在 master，不是開啟中的 stacked PR，且 4.6.0 release 和 tag 尚未發佈。Native RUN 驗收（[#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)）已關閉。報告驗收（[#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397)）及 S12 採納（[#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413)）仍然開啟。共享編輯器部署驗收由獨立的 [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387) 跟進。S10/#398 只提供相容性分析和 golden fixture，不會改變 FrameworkEngine runtime semantics。Native LOAD target（[#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)）、進階 Testdata／generator（[#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)）、Debug interoperability（[#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)）及 Helper rollback／teardown 驗證（[#421](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/421)）均屬目標以外的後續工作。ADR approval 和 architecture closure 會在目標工作之後由 [#422](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/422) 跟進，不是發佈阻礙。
 
 ## 決策
 

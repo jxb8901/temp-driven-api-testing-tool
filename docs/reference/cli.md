@@ -20,11 +20,11 @@
 | `clean` | Remove documented ATT-generated output | No |
 | `remote` | Submit and manage jobs through ATT Server's REST/SSE API | ATT Server |
 
-The legacy CLI surface from the 4.3.1 code line includes workbook Case, validation, snapshot, Debug, LOAD, and report commands. The 4.6.0 release-target stack adds explicit Native Case and Native Suite RUN commands. The 4.6.0 release and tag have not been published; deployed acceptance is still pending. The broader shared vNext grammar remains a separate [planned proposal](../interfaces/cli/vnext-proposed.md).
+The legacy CLI surface from the 4.3.1 code line includes workbook Case, validation, snapshot, Debug, LOAD, and report commands. The current default branch adds explicit Native Case and Native Suite RUN commands. They are integrated here. No 4.6.0 release or tag has been published, and implicit Suite acceptance remains open. The broader shared vNext grammar remains a separate [planned proposal](../interfaces/cli/vnext-proposed.md).
 
 ## CLI status and availability
 
-This Reference distinguishes the existing legacy CLI from the Native Case and Native Suite commands in the open release-target stack. Native selector syntax and examples are documented in [Test authoring](test-authoring.md#native-test-case-definition). Remote execution uses a validated Server draft. Do not treat target-stack behavior as evidence that a 4.6.0 release or tag exists.
+This Reference distinguishes the existing legacy CLI from the Native Case and Native Suite commands integrated on the current default branch (`att-testcase/v1`, `att-execution/v2`). Native selector syntax and examples are documented in [Test authoring](test-authoring.md#native-test-case-definition). Remote execution uses a validated Server draft. Integration on this branch is not a published 4.6.0 release or tag. Native RUN is implemented here. Implicit Suite acceptance remains open.
 
 ## Build a source checkout
 
@@ -90,7 +90,7 @@ On Windows, `att.bat snapshot`, `att.bat validate`, and `att.bat docs` do not in
 
 ### Native Case and implicit Suite RUN
 
-The 4.6.0 release-target CLI adds `run native-case` and `run native-suite`. The formal release target remains unpublished. See [Test authoring](test-authoring.md#native-test-case-definition) for selectors and examples and [Unified RUN](execution-modes/unified-run.md) for Server draft semantics.
+The current default branch adds `run native-case` and `run native-suite`. They are implemented and integrated here (`att-execution/v2`). No 4.6.0 release or tag has been published. See [Test authoring](test-authoring.md#native-test-case-definition) for selectors and examples and [Unified RUN](execution-modes/unified-run.md) for Server draft semantics. Native Suite `--rerun-failed` is available and matches the Studio Run editor.
 
 ### Debug a component
 

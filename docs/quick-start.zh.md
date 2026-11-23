@@ -2,7 +2,7 @@
 
 [English Quick Start](quick-start.md) · [Reference Manual](reference.zh.md) · [遷移矩陣](maintenance/native-case-default-package-migration-s12.md)
 
-本指南示範預計納入 ATT 4.6.0 的 Native Case 流程。4.6.0 尚未發佈或建立 tag。目標 stack 已包含 inline 和 Excel Native RUN 實作，但部署驗收仍待完成（[#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393)）；Default Package 採納驗收由 [#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413) 跟進。報告整合由 [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397) 跟進；共享編輯器部署驗收則由獨立的 [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387) 跟進。
+本指南示範目前 default branch 上的 Native Case 流程。4.6.0 尚未發佈或建立 tag。inline 和 Excel Native RUN 已整合在此。Issue [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) 的 Native RUN 驗收已關閉；關閉該 issue 並不是產品 release。Default Package 採納驗收由 [#413](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/413) 跟進。報告驗收由 [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397) 跟進。共享編輯器部署驗收由獨立的 [#387](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/387) 跟進。
 
 Native LOAD Case target（[#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418)）、進階 Testdata／generator（[#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419)）及 Debug interoperability（[#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420)）不屬於此發佈目標；現有直接 LOAD 和 Debug 路徑仍受支援。
 
@@ -125,7 +125,7 @@ output/native-qs-single/
 | `INVALID` | 驗證阻止執行 |
 | `SKIPPED` | Dry-run 只做 Resolve，未執行 Flow |
 
-在此 S05 基底上，HTML／CI／JUnit 證據沿用現有 Native RUN 路徑。**不依賴來源 Workbook 的標準 native XLSX 報告屬於 S07，本文件不宣稱已交付。**
+這次執行也會在 HTML、CI 和 JUnit artifact 旁寫入不依賴來源的 `workbooks/native-cases.result.xlsx`。該報告已在這個 branch 以 `att-testcase/v1` 實作。Issue [#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397) 的報告驗收仍然開啟。[離線付款導覽](guides/native-payments.zh.md)說明多 Flow Suite、每個 Case 的 PASS／FAIL evidence、標準 XLSX，以及選用的來源 Workbook 報告。
 
 ## RUN 多個 inline Case
 
@@ -162,10 +162,12 @@ Qualified ID 分別為 `quick.start.inline.basic` 與 `quick.start.inline.with-t
 
 | 能力 | 狀態 |
 |---|---|
-| Implicit Suite（`run native-suite`、跨 Definition 標籤） | S06 / #396 — 已納入發佈目標 stack；驗收待完成 |
-| 不依賴來源 Workbook 的 native XLSX 報告 | S07 / #397 — 已納入發佈目標 stack；整合驗收待完成 |
-| Native LOAD Case targets | S08 — 延後 |
-| 自動 Stage/Template → Flow 轉換 | #398 — 分析軌道；保留舊式 suites |
+| Implicit Suite（`run native-suite`、tags、excludes、fail-fast、rerun-failed） | 已在這個 branch 實作並整合（`att-execution/v2`）。[#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396) 驗收仍然開啟。這不是 4.6.0 release |
+| 標準 native XLSX 和選用的來源 Workbook 報告 | 已在這個 branch 實作並整合（`att-testcase/v1` 報告契約）。[#397](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/397) 驗收仍然開啟 |
+| Native LOAD Case targets | 由 [#418](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/418) 延後 |
+| n 對 m generator | 由 [#419](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/419) 延後 |
+| Debug 互通 | 由 [#420](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/420) 延後 |
+| 自動 Stage/Template 轉 Flow | [#398](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/398) 分析軌道；保留舊式 suites |
 
 ## 舊式 Workbook 快速入門（支援中）
 
@@ -200,4 +202,5 @@ packages/default/templates/QUICK_START/template.yaml
 | S12 盤點／遷移決策 | [遷移矩陣](maintenance/native-case-default-package-migration-s12.md) |
 | Debug Template／Flow | [Debug](reference.zh/execution-modes/debug.md) |
 | LOAD（既有直接 targets） | [Load](reference.zh/execution-modes/load.md) |
+| 多 Flow 離線付款 Suite、報告和 rerun-failed | [Native 付款導覽](guides/native-payments.zh.md) |
 | CLI 語法（含 `run native-case` 和 `run native-suite`） | [目前 CLI Reference](reference.zh/cli.md) |

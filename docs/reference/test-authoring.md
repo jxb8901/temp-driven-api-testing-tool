@@ -1,36 +1,48 @@
 # Test authoring
 
-## Author and run a Testcase
+## Author a Native Case
 
-A Testcase is one normalized workbook row; Run creates one Case execution from each selected row. Use this workflow to author, validate, and execute a change.
+New Cases follow this path. Workbook, Stage, and Template remain supported under [Workbook](#workbook). They are not the only Case authoring model.
 
-1. Edit the workbook and map its columns in the Sidecar.
-2. Generate the Snapshot and review its diff.
-3. Validate the package with ./att.sh validate --package.
-4. Use [Debug](execution-modes/debug.md) to isolate a Template, Flow, or Tool, then use [Run](execution-modes/run.md) to create Case executions.
+~~~text
+Flow + testcase.yaml + Data Source -> Resolution -> Resolved Case -> Suite selection -> Case Execution
+~~~
 
-The workflow above describes legacy workbook authoring. The Native Test Case Definition workflow is documented below. See [Advanced workbook and Snapshot details](#advanced-workbook-and-snapshot-details) for formula cells, multi-row headers, and XML serialization.
+1. Author or reuse a Flow (`att-flow/v3.6`).
+2. Author a Test Case Definition (`att-testcase/v1`) that binds that Flow and a Data Source.
+3. Resolve the Definition. Preview is read-only and does not create a Job.
+4. Select Resolved Cases: one Case, explicit qualified IDs, tags, or an implicit Suite. There is no mandatory `suite.yaml`.
+5. Validate the Package, then RUN. Each selected Resolved Case becomes one Case Execution with its own execution ID, status, and evidence.
 
-## Distinguish Testcases from Case executions
+`att-testcase/v1` is an exact 1:1 source-record contract, owned by this page and schema `att-testcase/v1`:
 
-A **Testcase** is the authored workbook row after sidecar mapping and snapshot normalization. Its full Case ID is `workbookId.groupId.rowCaseId`. A **Case execution** is one runtime execution of that Testcase by Run, with its own status and evidence. The identifier is shared; the concepts are not synonyms. This page uses *Testcase* for workbook content and *Case execution* for runtime work.
+- A typed `inputs` map with no Data Source resolves to one Case whose ID is `default`.
+- Each nonblank inline or Excel record resolves to exactly one Resolved Case. Resolution does not expand one record into many Cases.
+- `caseIdExpression` is a single `${DATA.key}` lookup. It is not a generator.
+- Excel `dataColumns` keeps the `att-sidecar/v2.2` comma-separated syntax, including aliases, `(yaml)` parsing, and quoted delimiters.
+- The Definition `id` is Package-scoped. A Resolved Case ID is one path-safe segment. The qualified ID is `definitionId.caseId`.
+- Typed input projections, reports, and Package files stay isolated. Resolution and RUN do not modify the Definition or the source workbook.
+
+n-to-m generators are outside `att-testcase/v1` and remain deferred. Formula cells, multi-row headers, and XML serialization for the legacy workbook path remain in [Advanced workbook and Snapshot details](#advanced-workbook-and-snapshot-details).
+
+## Distinguish Resolved Cases from Case executions
+
+A **Resolved Case** is one selectable logical Case produced by Resolution. A **Case execution** is one runtime execution of that Resolved Case. The qualified Case ID is stable across RUNs; the execution ID, status, and evidence belong to one execution. On the supported legacy workbook path, the authored Testcase is still one normalized workbook row whose full Case ID is `workbookId.groupId.rowCaseId`. This page uses *Resolved Case* for Native content, *Testcase* for legacy workbook content, and *Case execution* for runtime work.
 
 ## Authoring contracts
 
-This page explains the normal day-to-day workflow in the same order that data moves through ATT.
-
-| Need | Use |
-|---|---|
-| Stage execution entry point | Template |
-| Reusable Template logic | Flow |
-| One ordered operation | Action |
-| External capability | Resource |
-| Testcase/Stage business input | EXEC.INPUT |
-| Cross-Action mutable state | EXEC.VARS |
+| Need | Current Native path | Supported legacy path |
+|---|---|---|
+| Reusable ordered Actions | Flow | Template, which may call a Flow |
+| One ordered operation | Action | Action |
+| External capability | Resource | Resource |
+| Business input | Definition `inputs` or a `DATA` projection | `EXEC.INPUT` from the Stage and workbook row |
+| Cross-Action mutable state | `EXEC.VARS` | `EXEC.VARS` |
+| Case selection | Resolved Case IDs, tags, or an implicit Suite | Workbook row, Stage, tag, or legacy Suite selectors |
 
 ## Native Test Case Definition
 
-The ATT 4.6.0 release target includes an active `att-testcase/v1` schema and Native Case CLI and validated Server draft-flow support for discovery, resolution, and RUN of singleton, inline, and Excel-backed Definitions. The implementation is in the open release-target stack; no 4.6.0 release or tag has been published. Deployed acceptance remains open for Native RUN, report integration, and Default Package adoption; shared-editor deployment evidence is tracked separately. Native LOAD Case targets, advanced Testdata and generators, and Debug interoperability are excluded from this target; existing direct LOAD and Debug paths remain supported.
+The active contract is `att-testcase/v1`. The current default branch includes Native Case CLI and validated Server draft-flow support for discovery, resolution, and RUN of singleton, inline, and Excel-backed Definitions. That code is integrated on this branch. Native RUN is implemented here. No 4.6.0 release or tag has been published. Implicit Suite acceptance, Native report acceptance, and remaining Default Package adoption stay open. Native LOAD Case targets, n-to-m generators, and Debug interoperability stay deferred. Existing direct LOAD and Debug paths remain supported.
 
 The native Excel adapter reads a package-contained `.xlsx` workbook without modifying it, reuses the legacy Sidecar header and `dataColumns` mapping rules, and records workbook revision, sheet, row, and column provenance on each resolved Case. It accepts at most 32 MiB of compressed workbook bytes; before POI loads the workbook, ZIP preflight caps it at 256 entries, 32 MiB per expanded entry, and 64 MiB total expanded data. The selected worksheet is capped at 100,000 physical rows, including blank rows. Header scanning is capped at 1,000,000 header cells, and Resolution accepts at most 10,000 nonblank records; preview output remains bounded. YAML cells use the shared parser limits of 3,000,000 code points, 50 collection aliases, and 50 nested levels; resulting value graphs are further capped at depth 64 and 100,000 values. Non-finite numbers and recursive aliases are rejected. It does not create or update the legacy XML Snapshot. Existing workbook/Sidecar/Snapshot RUN remains supported.
 
@@ -74,9 +86,11 @@ ATT orders Definitions by ID and keeps each Definition's source record order. Du
 
 This implicit Suite is a runtime selection, not a reusable authored resource. It does not add LOAD targets or advanced Testdata/generator bindings; Debug interoperability remains deferred.
 
-Studio's Run editor also exposes this selection: enter one or more Definition IDs, then choose all Cases, explicit Qualified Case IDs, or Cases matching tags. Optional included and excluded tags further filter the selection, and replay preserves tag selectors returned in the saved definition. Native Suite `--rerun-failed` retries only failed, executed Cases from the latest eligible completed RUN for the same Package and Definitions. Local runs verify the latest-run pointer and manifest hash; Server drafts freeze the source Job/run, manifest digest, Package revision, and exact Qualified Case IDs. A stale draft or changed source is rejected, skipped Cases are not retried, and per-attempt execution/skipped counts remain separate from source and retry counts. Schedules retain the validated retry source.
+Studio's Run editor also exposes this selection: enter one or more Definition IDs, then choose all Cases, explicit Qualified Case IDs, or Cases matching tags. Optional included and excluded tags further filter the selection, and replay preserves tag selectors returned in the saved definition. Native Suite `--rerun-failed` retries only failed, executed Cases from the latest eligible completed RUN for the same Package and Definitions. Local runs verify the latest-run pointer and manifest hash; Server drafts freeze the source Job/run, manifest digest, Package revision, and exact Qualified Case IDs. A stale draft or changed source is rejected, skipped Cases are not retried, and per-attempt execution/skipped counts remain separate from source and retry counts. Schedules retain the validated retry source. The same selector is available in Studio's Run editor and on the CLI. It is implemented and integrated on the current default branch. Implicit Suite acceptance remains open, and no 4.6.0 release tag has been published.
 
 ## Workbook
+
+Workbook, Stage, and Template remain a supported runtime. Use this path when Stage selection, `runWhen` / `onFailure`, or an existing Snapshot identity is required. It is not the only Case authoring model.
 
 ### Workbook, Sidecar, and Snapshot relationship
 
