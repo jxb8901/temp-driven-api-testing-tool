@@ -992,13 +992,29 @@ final class ArtifactArchive {
             throw new IllegalArgumentException("Native result XLSX external relationships are not publishable");
     }
 
-    private static String resolveXlsxTarget(String base,String target) {
+    static String resolveXlsxTarget(String base,String target) {
         if(target==null||target.isBlank()||target.startsWith("/")||target.indexOf('\\')>=0
                 ||target.indexOf(':')>=0||target.indexOf('?')>=0||target.indexOf('#')>=0||target.indexOf('%')>=0)
             throw new IllegalArgumentException("Native result XLSX relationship target is unsafe");
-        for(String segment:target.split("/",-1))if(segment.isBlank()||segment.equals(".")||segment.equals(".."))
-            throw new IllegalArgumentException("Native result XLSX relationship target escapes the package");
-        String resolved=base.isEmpty()?target:base+"/"+target;
+        List<String> segments=new ArrayList<>();
+        if(!base.isEmpty())for(String segment:base.split("/",-1)) {
+            if(segment.isBlank()||segment.equals(".")||segment.equals(".."))
+                throw new IllegalArgumentException("Native result XLSX relationship base is unsafe");
+            segments.add(segment);
+        }
+        for(String segment:target.split("/",-1)) {
+            if(segment.isBlank())
+                throw new IllegalArgumentException("Native result XLSX relationship target is unsafe");
+            if(segment.equals("."))continue;
+            if(segment.equals("..")) {
+                if(segments.isEmpty())
+                    throw new IllegalArgumentException("Native result XLSX relationship target escapes the package");
+                segments.remove(segments.size()-1);
+            } else segments.add(segment);
+        }
+        if(segments.isEmpty())
+            throw new IllegalArgumentException("Native result XLSX relationship target is unsafe");
+        String resolved=String.join("/",segments);
         if(!safePath(resolved))throw new IllegalArgumentException("Native result XLSX relationship target is unsafe");
         return resolved;
     }
