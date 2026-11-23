@@ -1,264 +1,115 @@
-# CLI 參考
+# CLI Reference
 
-<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
-
-
-## 選擇命令
-
-| 命令 | 目的 | 是否調用外部 Tool |
-|---|---|---:|
-| `help` | 顯示語法和選項；無命令時默認 | 否 |
-| `version` | 輸出 ATT 版本 | 否 |
-| `validate` | 校驗包或選中依賴閉包 | 否 |
-| `snapshot` | 生成同名規範 testcase XML | 否 |
-| `run` | 校驗並執行已選 Case | 是，dry-run 除外 |
-| `debug` | 使用 debug sidecar 執行一個 Template、Flow 或 Tool | 是 |
-| `load` | 執行已聲明的 scenario，或將 Debug sidecar promotion 為 Quick Load | 是 |
-| `docs` | 生成可搜索的包文檔 | 否 |
-| `report` | 為已完成 run 重新生成報表 | 否 |
-| `build` | 歸檔最新已完成 run | 否 |
-| `clean` | 刪除文檔化的 ATT 生成輸出 | 否 |
-| `remote` | 透過 ATT Server REST/SSE API 提交及管理工作 | ATT Server |
-
-上表列出舊版 CLI command。目前的 default branch 加入明確的 Native Case 和 Native Suite RUN command（`att-testcase/v1`、`att-execution/v2`）。這些 command 已整合在此。Native RUN 已在這個 branch 實作。4.6.0 release 和 tag 尚未發佈。implicit Suite 驗收仍然開啟。更廣泛的共用 vNext grammar 另列於[規劃中 proposal](../interfaces/cli/vnext-proposed.zh.md)。
-
-## CLI 狀態與可用性
-
-本 Reference 區分現有 legacy CLI，以及目前 default branch 已整合的 Native Case 和 Native Suite command（`att-testcase/v1`、`att-execution/v2`）。Native selector 語法和範例見[測試撰寫](test-authoring.md#native-test-case-definition)。Remote execution 使用已驗證的 Server draft。整合在這個 branch 不代表 4.6.0 release 或 tag 已發佈。Native RUN 已實作。implicit Suite 驗收仍然開啟。
+現行 CLI 可執行 Native Case、驗證 Package resource、診斷 Flow 或 Tool，以及執行 Flow 或 Tool 的 Load workload。既有 Package 格式請參閱[舊版 CLI 指南](../legacy/cli.zh.md)。
 
 ## 編譯 source checkout
 
-Source checkout 的 launcher 只會執行已預先編譯的 classes，不會自行編譯。請使用 JDK 和 Maven 明確編譯支援 Java 8 的 CLI、Engine、Remote 及 Server API module：
+Source checkout launcher 會執行已編譯的 class。若 class 缺失，請編譯 Java CLI、Engine、Worker 和 Server API module：
 
-```sh
+~~~sh
 mvn -DskipTests -pl att-cli -am compile
-```
+~~~
 
-之後在 macOS/Linux 執行 `./att.sh`，在 Windows 執行 `att.bat`。若缺少所需 classes，launcher 會以錯誤訊息列出 build command，並停止執行。已打包的 release 內含 application JAR，只需要 Java 8 或以上的 runtime，無須 Maven。使用相關 integration 時，可把可選 JDBC 或 IBM MQ driver JAR 放入 `lib/`。Server WAR 需要 Java 17 或以上版本。
+macOS/Linux 使用 `./att.sh`，Windows 使用 `att.bat`。Packaged release 內含已編譯的 application JAR，使用 Java 8 或更新版本；Server WAR 使用 Java 17 或更新版本。
 
-## 按任務查閱語法、option 和範例
+## 常用命令
 
-### 查看 help 和版本
-
-| 語法 | 說明 |
+| 工作 | 命令 |
 |---|---|
-| `./att.sh` 或 `./att.sh help` | 顯示幫助 |
-| `./att.sh version` | 輸出版本 |
+| 顯示 help | `./att.sh` 或 `./att.sh help` |
+| 顯示版本 | `./att.sh version` |
+| 驗證 Package | `./att.sh validate --package` |
+| 驗證指定 dependency closure | `./att.sh validate --selected <selection>` |
+| 執行一個 Native Definition | `./att.sh --local -p default run native-case quick.start.single --resolved-case-id default` |
+| 執行 Native Suite | `./att.sh --local -p default run native-suite --all` |
+| 診斷 Flow | `./att.sh debug flow <id>` |
+| 診斷 Tool | `./att.sh debug tool <id>` |
+| 執行 Flow 或 Tool workload | `./att.sh load --debug flow <id> --load-template builtin:single-vu --preview` |
+| 執行已聲明的 Load scenario | `./att.sh load examples/load/closed-smoke.yaml` |
+| 重建已完成 Run 的報表 | `./att.sh report --run-id <id>` |
+| 產生本地文件 | `./att.sh docs` |
+| 封存最近完成的 Run | `./att.sh build` |
+| 移除 ATT 說明的生成檔案 | `./att.sh clean` |
 
-### 產生 Workbook snapshot
+[測試撰寫](test-authoring.md)定義 Native selector 語法和 source ownership。Native Definition 綁定 Flow 與 Data Source；其 Case 可按 qualified ID、tag 或 Suite 條件選擇。
 
-| 語法 | 說明 |
-|---|---|
-| `./att.sh snapshot` | 未指定 selector 時遞歸生成 `testcase.root` 下所有 Snapshot；等同於 `--all` |
-| `./att.sh snapshot --suite <xlsx>` | 生成一個同名 XML Snapshot |
-| `./att.sh snapshot --all` | 遞歸生成 `testcase.root` 下所有 Snapshot |
-| `./att.sh snapshot --suite-dir <dir>` | 在某目錄下遞歸生成 Snapshot |
+## 執行 Case 或 Suite
 
-### 驗證 package
+~~~sh
+./att.sh --local -p default run native-case quick.start.single --resolved-case-id default
+./att.sh --local -p default run native-case quick.start.inline --resolved-case-id basic --resolved-case-id with-tool
+./att.sh --local -p default run native-suite --all --tag smoke --exclude-tag slow
+~~~
 
-| 語法 | 說明 |
-|---|---|
-| `./att.sh validate --package` | 校驗整個包；默認範圍 |
-| `./att.sh validate --selected <selection>` | 校驗選中依賴閉包 |
-| `./att.sh validate --package --format json` | 向 stdout 輸出單個校驗 JSON 文檔 |
+`--dry-run` 只驗證並解析 selection，不執行 Actions。Native Suite 使用 `--rerun-failed` 會從最近符合資格且已完成的 Run 選取曾執行但失敗的 Case。`--fail-fast` 會在失敗後停止安排新的 execution。
 
-在 Windows 上，`att.bat snapshot`、`att.bat validate` 和 `att.bat docs` 不會調用已配置的 Testcase Tool。Validation 會檢查 `.sh` path 和文件是否存在，但不檢查 POSIX launch/executable compatibility；warning 會列出受影響的 Tool。Validation PASS 只確認這些腳本的配置，不能證明它們可在 Windows 執行。執行 `run` 前，請提供並測試 Windows-native equivalent。啟動器和 Tool 相容性見 [Windows launcher and Tool compatibility](appendices/limits-defaults.md)。
+## 驗證 Package
 
-### 執行 Testcase
+~~~sh
+./att.sh validate --package
+./att.sh validate --selected testcase/quick-start/single/testcase.yaml
+~~~
 
-| 語法 | 說明 |
-|---|---|
-| `./att.sh run --all` | 運行所有發現的 Case |
-| `./att.sh run --suite <xlsx>` | 運行一個 Workbook；可重復 |
-| `./att.sh run --suite-dir <dir>` | 在目錄下發現 Workbook |
-| `./att.sh run <selection> --case <workbookId.groupId.rowCaseId>` | 包含一個完整 Case ID |
-| `./att.sh run <selection> --tag <tag>` | 包含一個標簽 |
-| `./att.sh run <selection> --exclude-tag <tag>` | 排除一個標簽 |
-| `./att.sh run <selection> --dry-run` | 僅校驗/規劃，不執行 Tool |
-| `./att.sh run <selection> --update-snapshot` | 在校驗前顯式刷新已更改的完整 WorkbookSnapshot |
-| `./att.sh run <selection> --fail-fast` | 在首次 FAIL/ERROR 後停止調度 |
-| `./att.sh run <selection> --rerun-failed` | 重新選擇先前 FAIL/ERROR 的 Case |
-| `./att.sh run <selection> --run-id <id>` | 設置最終 run 目錄名 |
-| `./att.sh run <selection> --output-dir <dir>` | 覆蓋輸出根目錄 |
-| `./att.sh run <selection> --ci-output junit,json` | 寫出 CI XML/JSON 與 JUnit HTML |
-| `./att.sh run <selection> --format json` | 輸出機器可讀摘要 |
-| `./att.sh run <selection> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
-| `./att.sh run <selection> --verbose` | 為兼容性保留；詳細實時進度已是默認行為 |
+Validation 會檢查所選 Definition、Flow、Tools、Testdata、Runtime Configuration、schemas 和 resource references。不會執行 Actions 或啟動 Load scheduler。
 
-### Native Case 和 implicit Suite RUN
+## 診斷 Flow 或 Tool
 
-目前的 default branch 加入 `run native-case` 和 `run native-suite`。它們已在此實作並整合（`att-execution/v2`）。4.6.0 release 和 tag 尚未發佈。selector 和範例見[測試撰寫](test-authoring.md#native-test-case-definition)，Server draft 語義見 [Unified RUN](execution-modes/unified-run.md)。Native Suite `--rerun-failed` 可用，並與 Studio Run editor 一致。
+~~~sh
+./att.sh debug flow common.payment.v1 --input debug/payment.yaml --env SIT
+./att.sh debug tool sample.getAcDate --set arg.date=2026-11-23
+~~~
 
-### Debug component
+`--input` 選擇 Debug input file。可重複使用 `--set input.path=value`、`--set vars.path=value` 或 `--set arg.name=value` 提供 typed value。Flow target 接受 input 和 vars；Tool target 接受 input、vars 及已聲明的 arguments。Debug discovery、受保護路徑、output 和 result 行為見 [Debug](execution-modes/debug.md)。
 
-| 語法 | 說明 |
-|---|---|
-| `./att.sh debug` | 發現可運行的 Tool、Template 和 Flow；只顯示實際存在的默認 sidecar |
-| `./att.sh debug template <id>` | 執行一個 Template；自動發現 `<template-dir>/debug.yaml` |
-| `./att.sh debug flow <id>` | 執行一個規範 Flow；自動發現 `<flow-dir>/debug.yaml` |
-| `./att.sh debug tool <id>` | 執行一個 Package Tool；自動發現 `tools/debug/<tool-id>.yaml` |
-| `./att.sh debug <type> <id> --input <file>` | 覆蓋目標自動發現的 debug 輸入 |
-| `./att.sh debug <type> <id> --set input.path=<yaml-value>` | 覆蓋 typed `EXEC.INPUT` 值；可重復使用 |
-| `./att.sh debug tool <id> --set arg.name=<yaml-value>` | 覆蓋一個 Tool argument；可重復使用 |
-| `./att.sh debug <type> <id> --set vars.path=<yaml-value>` | 在 expression evaluation 前覆蓋 Template/Flow bootstrap `EXEC.VARS` |
-| `./att.sh debug <type> <id> --debug-id <id>` | 指定 standalone Debug 的 exact directory identity |
-| `./att.sh debug <type> <id> --unsafe-failure-details` | 為此次 standalone local Debug 展開 collector failure diagnostics；會先警告並保留 secret redaction |
-| `./att.sh debug <type> <id> --output-dir <dir>` | 將 debug 輸出隔離到 `<dir>/debug/<debugId>/` |
-| `./att.sh debug <type> <id> --profile` | 將 CLI 啟動及 Debug phase timing 寫入 `performance.json` |
-| `./att.sh debug <type> <id> --format json` | 輸出緊湊機器可讀摘要；完整證據仍在 `result.yaml` |
-| `./att.sh debug <type> <id> --quiet` | 抑制詳細實時進度；保留最終摘要和錯誤 |
+## 執行 Load workload
 
-### 執行 Load scenario
+Direct Load workload 以 Flow 或 Tool 為 target。已聲明的 scenario 可包含通過驗證的 Flow 和 Tool workloads。
 
-| 語法 | 說明 |
-|---|---|
-| `./att.sh load` | 發現 `load/` 下有效的 `att-load/*` scenario；報告無效的已聲明 scenario |
-| `./att.sh load <scenario.yaml> --quiet` | 抑制定期實時進度；保留最終摘要和錯誤 |
-| `./att.sh load <scenario.yaml> --verbose` | 為兼容性保留；有界實時進度已是默認行為 |
-| `./att.sh load --debug <type> <id>` | 使用 `load/load.yaml` policy，將 Debug sidecar promotion 為普通單 workload Load run |
-| `./att.sh load <scenario.yaml> --set input.path=<yaml-value>` | 覆蓋單 workload `EXEC.INPUT`；多 workload scenario 不支持未限定覆蓋 |
-| `./att.sh load <scenario.yaml> --set arg.name=<yaml-value>` | 覆蓋單 workload Tool scenario 的 argument |
-| `./att.sh load <scenario.yaml> --set vars.path=<yaml-value>` | 覆蓋單 workload Template/Flow bootstrap vars |
+~~~sh
+./att.sh load --debug flow common.payment.v1 --load-template builtin:single-vu --preview
+./att.sh load examples/load/closed-smoke.yaml --users 1 --duration 100ms
+~~~
 
-### 管理報表和 package 輸出
+List 和 preview 不會啟動 traffic。[Load 模式](execution-modes/load.md)說明 pacing、Testdata、evidence、threshold 和 scenario composition。
 
-| 語法 | 說明 |
-|---|---|
-| `./att.sh report --run-id <id>` | 重建 `report/index.html` 和 `report/junit.html` |
-| `./att.sh docs` | 生成 `build/docs/index.html` |
-| `./att.sh build` | 在 `build/` 中歸檔最新完成 run |
-| `./att.sh clean` | 刪除文檔化生成輸出 |
+## 執行 Server 命令
 
-## 透過 CLI 使用 ATT Server
+本機命令在目前機器執行。加入 `remote` 將支援的操作提交至 ATT Server：
 
-Remote command 使用 ATT Server 公開的 `/api/v1` contract。現有 `run`、`debug`、`load` 及 `validate` 命令仍在本機執行，只有明確加入 `remote` 才會連接 Server。
-
-```sh
+~~~sh
 ./att.sh remote --server sit packages
-./att.sh remote --server sit --no-auth packages
-./att.sh remote --server https://att-sit.example.com/att packages
-ATT_SERVER=sit ./att.sh remote packages
-./att.sh remote --server sit run payments --suite testcase/smoke.xlsx --env SIT --tag smoke
-./att.sh remote --server sit --no-auth run payments --all --principal Bob
-./att.sh remote --server sit jobs --principal 'Bob(anonym)'
-./att.sh remote --server ci run payments --all --detach
+./att.sh remote --server sit run payments --detach
+./att.sh remote --server sit jobs
 ./att.sh remote --server sit watch J0123456789ABCDEF
-./att.sh remote --server sit load payments --scenario load/payment.yaml --users 2 --duration 30s
-./att.sh remote --server sit artifacts J0123456789ABCDEF --download ./results
-```
+~~~
 
-`--server` 選擇 `~/.att/servers.yaml` 中的 profile；設定 `ATT_REMOTE_CONFIG` 可使用其他 profile 檔案。`ATT_SERVER_CONFIG` 保留給 Server deployment YAML。`ATT_SERVER` 會覆蓋 default profile 的 URL；明確指定的 `--server` profile 優先。Remote package、suite、config、scenario 及 Debug input 必須是 Server package 的相對邏輯名稱。CLI 不會傳送本機絕對路徑或 `--output-dir`。
+Remote Package 名稱、Definition selection、configuration 和 scenario 路徑都是由 Server 解析的邏輯值；不會傳送用戶端絕對路徑或本機 output directory。[ATT Remote client](../remote-client.zh.md)說明連線 profile、authentication、streaming 和 troubleshooting。
 
-Profile 可保存 URL、Basic Auth username 及 CI secret 環境變數名稱，但不能保存 password。若沒有設定 `passwordEnv`，CLI 會在有 terminal 時隱藏輸入 password。Basic authentication 必須使用 HTTPS；TLS certificate 及 hostname 檢查維持啟用。
+## 常用 options
 
-Attached Run、Debug、Load 及 Validate 只提交一次工作，透過 SSE 追蹤進度，以 `Last-Event-ID` 重新連線，再取得 canonical result。`--detach` 會輸出已接受工作 ID 並結束。使用 `jobs`、`job`、`watch`、`result`、`artifacts`、`artifact` 或 `cancel` 管理已保留的工作。Artifact 只會下載到所選本機目錄，不會覆寫現有檔案。
+Options 只適用於支援該 option 的 command。
 
-Remote exit code：PASS/成功為 `0`、ATT FAIL 為 `1`、INVALID 為 `2`、ATT ERROR/CANCELLED 為 `3`；若連線、驗證或 protocol 問題令 client 無法取得可信結果，則為 `4`。Profile、options、reconnect 及 troubleshooting 見 [ATT Remote client](../remote-client.zh.md)。
+| Option | 用途 |
+|---|---|
+| `--config <file>`、`--env <name>` | 選擇共用 Runtime Configuration 和 Environment |
+| `--run-id <id>`、`--debug-id <id>` | 設定 Run 或 Debug output identity |
+| `--output-dir <dir>` | 為支援的本機命令選擇 output root |
+| `--format human` 或 `--format json` | 選擇 terminal output |
+| `--quiet`、`--verbose` | 控制 progress detail |
+| `--profile` | 寫入支援的 phase timing 和 counters |
+| `--queue`、`--allow-parallel-runs` | 設定 output-root process concurrency 行為 |
+| `--substitute-package-root`、`--substitute-external-basename` | 隱藏顯示診斷中的絕對路徑 |
+| `--help` | 顯示 command-specific help |
 
-Remote-only option 包括 `--server <profile|url>`、`--no-auth`、`--principal <name>`、`--detach`、`--download <directory>` 及 `--scenario <package-relative-path>`。只有 Server 明確允許匿名存取時，`--no-auth` 才會略過 profile credentials。匿名模式下，`--principal` 只提供自我聲稱的 label，Server 會在既有 `principal` 欄位儲存 `<name>(anonym)`；不影響存取或授權。驗證模式會忽略此 option。`jobs --principal <text>` 會以不區分大小寫的子字串搜尋該欄位，因此搜尋 `alice` 亦會匹配 `alice(anonym)`。`--format human|json` 及已記錄的 ATT selection、environment、Debug、Load option，會在符合 remote job contract 時使用。Remote command list 見上述指南。
+Native Definition 可重複指定 `--resolved-case-id`。Suite selection 使用 `--all`、`--tag` 和 `--exclude-tag`。各 command 會驗證 options；不支援的組合會回傳錯誤。
 
+## Exit code
 
-## Typed overrides and quick Load
-
-`--set` 可重複使用，並且只接受一個 namespace：`input`、`arg` 或 `vars`。值使用安全 YAML 解析，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可使用 map key 和數字 list index，例如 `input.customer.ids[0]=42`。重複賦值按順序套用，最後一個值生效。解析 override 時不會評估 ATT expression；若 shell 可能展開類似 expression 的值，請加上引號。`arg.*` 僅適用於 Tool，`vars.*` 僅適用於 Template/Flow。多 workload Load scenario 不接受未限定的 override。
-
-`load/load.yaml` 是可選的 policy-only `att-load/v1.9` 檔案，可包含 `load`、`execution`、`thresholds`、`evidence` 和 `seed`，但不包含 target 或 business inputs。`load --debug` 會將 sidecar `inputs` 提升為 `EXEC.INPUT`、Template/Flow `vars` 提升為 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，然後使用一般 Load validator、scheduler 和 evidence pipeline 執行。若 sidecar 含 Debug-local `testdata` imports，`load --debug` 會拒絕；請把 imports 宣告於 Load scenario。明確的 CLI pacing fields 會覆蓋 policy；沒有 policy 時，請直接在 CLI 指定完整 policy。
-
-## Debug input 與 output
-
-CLI 的 target、`--input`、`--set` 與 `--env` 語法見本頁 option matrix。Input discovery、bootstrap vars、保護 roots 與 output lifecycle 見 [Debug](execution-modes/debug.md)。
-
-## 退出碼
-
-| 代碼 | 含義 |
+| Code | 意義 |
 |---:|---|
-| 0 | 命令/運行成功，且無 FAIL、ERROR、INVALID |
-| 1 | 至少一個 FAIL，且無 ERROR/INVALID |
-| 2 | CLI/配置/校驗/INVALID 失敗 |
-| 3 | 至少一個 ERROR，或不可恢復運行時失敗 |
+| 0 | Command 成功，沒有 FAIL、ERROR 或 INVALID |
+| 1 | 一個或多個 Case 或 assertion 失敗 |
+| 2 | Command、configuration 或 validation 無效 |
+| 3 | Runtime 或 infrastructure failure |
 
-## 完整 CLI option matrix
-
-`--config <file>` 選擇 base configuration；`--env <name>` 從 `att-config/v2.15` 選擇 environment profile，適用於 `run`、`validate`、`debug` 和 `load`。`--help` 顯示說明。`--case-id` 是 `--case` 的相容別名。`--parallel` 是已棄用的 `--allow-parallel-runs` 相容拼法，應優先使用後者。`--queue` 與 `--allow-parallel-runs` 控制共用 output root 的 process-level concurrency，不會在單一 run 內增加 Case worker。`--profile` 為 `run` 和 `load` 寫入 performance diagnostics，並為選定的 `debug` target 寫入啟動及執行 phase timing。
-
-Load 以 scenario 為基礎；明確提供的 workload option 會先覆蓋對應欄位，再重新驗證 effective scenario：
-
-```sh
-./att.sh load ../../examples/load/closed-smoke.yaml --config config/config.yaml --env SIT --users 2 --duration 5s
-./att.sh load ../../examples/load/arrival-smoke.yaml --config config/config.yaml --env UAT \
-  --arrival-rate 5/s --ramp-up 1s --warmup 1s --duration 5s --ramp-down 1s \
-  --max-concurrent 4 --overload-policy drop --format json
-```
-
-無 target 的 `debug` 和 `load` 是唯讀 discovery。Debug 會驗證可執行 target，但不呼叫 Tool，也不建立 output。Load 只掃描宣告 `att-load/*` 的 YAML、驗證 target，並回報無效的已宣告 descriptor；其他 YAML 會忽略。Discovery 模式支援 `--config`、`--env`、`--format`、`--quiet` 和 `--verbose`。
-
-## 路徑顯示
-
-本機 CLI 預設顯示絕對路徑。加入 `--substitute-package-root`，可將 package 內路徑顯示為 `$ATT_PACKAGE_ROOT` 或 `$ATT_PACKAGE_ROOT/<relative-path>`；加入 `--substitute-external-basename`，可將其他絕對路徑顯示為 `$EXTERNAL/<basename>`。兩個 option 可獨立使用，適用於 `run`、`validate`、`snapshot`、`debug` 及 `load` 的人類可讀診斷、結構化結果與顯示的報表路徑。這只會改變呈現方式，不會改變檔案存取或儲存的 package data。這些 CLI options 只適用於本機 CLI；為避免洩露 host path，Server Worker 在 API 和 Studio 輸出中一律強制啟用兩種替換，並優先於 CLI 設定。升級至 4.2.4 後，如要恢復舊有本機 CLI 呈現方式，請明確加入相應旗標。
-
-```sh
-./att.sh validate --package --substitute-package-root
-ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --substitute-external-basename
-```
-
-`--set` 可重複使用，namespace 只能是 `input`、`arg` 或 `vars`。值使用 safe YAML 解析並保留型別，例如 `42`、`true`、`null`、`[a, b]` 或 `{id: 7}`；nested path 可用 map key 及數字 list index，例如 `input.customer.ids[0]=42`。重複賦值依序套用，最後一個值生效。解析時不會執行 ATT expression；shell 可能展開的值要加引號。`arg.*` 僅適用 Tool，`vars.*` 僅適用 Template/Flow。多 workload Load scenario 會拒絕未限定的 override。
-
-可選的 `load/load.yaml` 使用現行 policy-only `att-load/v1.9`，不能包含 target 或 business inputs。它可設定 `load`，以及可選的 `execution`、`thresholds`、`evidence` 和 `seed`。`load --debug` 會將 sidecar `inputs` promotion 到 `EXEC.INPUT`、Template/Flow `vars` promotion 到 bootstrap `EXEC.VARS`，或將 Tool `arguments` 傳入 Tool call，之後使用正常 Load validator、scheduler 和 evidence pipeline；不會先執行 Debug。明確的 CLI pacing 會覆蓋 policy。沒有 policy 時，請在命令列提供完整 policy：
-
-```yaml
-schemaVersion: att-load/v1.9
-load: {users: 2, duration: 10s}
-execution: {thinkTime: 250ms}
-evidence: {mode: failures}
-```
-
-```sh
-./att.sh debug
-./att.sh load
-ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh load --debug template PAYMENT_INVOKE
-./att.sh load --debug tool fpp.invokeApi --users 1 --duration 10s --set arg.requestId=42
-./att.sh load --debug flow common.payment --users 4 --duration 5s --set input.customer.ids[0]=42
-```
-
-重複的 `--set <input|arg|vars>.<path>=<yaml-value>` 會在 expression evaluation 前以安全 YAML 型別覆寫 definition。`debug`、單 workload Load scenario，以及 `load --debug template|flow|tool <id>` 都支援。Quick Load 會使用可選的 `load/load.yaml`；若沒有 profile，請在 command line 提供完整 policy。例如：
-
-```sh
-ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh debug template PAYMENT_INVOKE --set 'vars.reference=${EXEC.INPUT.reference}'
-./att.sh load --debug flow common.payment --users 2 --duration 10s --set 'vars.reference=${EXEC.INPUT.reference}'
-```
-
-完整 workload override 為 `--users`、`--arrival-rate`、`--ramp-up`、`--warmup`、`--duration`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`；`--think-time` 只適用 closed-VU。其餘 selection/output 選項仍受各 command 約束：`--suite`、`--suite-dir`、`--case`/`--case-id`、`--tag`、`--exclude-tag`、`--all`、`--run-id`（Run/Load identity）、`--debug-id`（standalone Debug identity）、`--output-dir`、`--format`、`--quiet`、`--verbose`、`--ci-output`、`--dry-run`、`--fail-fast`、`--rerun-failed`、`--update-snapshot`、`--package`、`--selected`、`--input`、`--set`、`--queue`、`--parallel`、`--allow-parallel-runs`、`--profile`、`--config`、`--env` 和 `--help` 只在對應 command contract 允許時有效。
-
-### 診斷信任邊界與必要機密保護
-
-`att-security` 為 Engine、Worker、Server 與檢視器提供共同且不能關閉的 Secret
-Protection。password/passphrase、secret/token/credential、authorization、cookie、
-API/access/private key 與 identity-file 欄位屬保留分類，整個值（包括未知巢狀結構）
-均受保護。文字中的 Bearer/Basic、URL 憑證、PEM 私鑰、`!secret`、CSV 機密欄及
-XML/JSON/YAML 機密值同樣受保護。Resource adapter登記的機密字串在 Case Log 中持續遮蔽；
-`includeAllFields` 不會解除必要保護。未知物件、循環或過深結構採 fail-closed。
-
-| 輸出邊界 | 路徑政策 | 機密政策 |
-| --- | --- | --- |
-| CLI console | 兩種別名預設關閉；兩個選項可獨立啟用 | 必要保護持續啟用 |
-| CLI `case.log` | typed 路徑及完整絕對路徑診斷依選項顯示；命令、相對表達式、URL 及遠端路徑保留原文 | 必要保護與已登記機密 |
-| Server Worker `case.log` | 別名關閉，受信任本機證據保留原始診斷路徑 | 相同必要保護 |
-| Run/Debug/Load `case.yaml` 與失敗證據 | typed 本機路徑依程序政策呈現，相對表達式保留 | 結構化機密欄位與已登記機密受保護 |
-| Worker JSON Lines | 受信任程序通道保留位置資訊供 Server 使用 | 每個 event/result 套用共同必要保護 |
-| Server API、SSE、Job Result | 使用固定 `package:` / `artifact:` 或外部 basename；用戶不能關閉 | 每次公開投影均受必要保護 |
-| Source/Configuration | package-relative 位置，Server 隱藏外部主機路徑 | 必要保護與獨立可選欄位/PII 遮蔽 |
-| 公開 artifact 下載 | 最多 16 MiB 的 UTF-8 文字安全投影，磁碟原檔不變；二進位、無效 UTF-8 或過大檔案須經受信任檔案系統存取 | 下載前套用必要機密保護 |
-
-`&{./Pacs008.xml}`、`&{../request.xml}`、`${...}`、`#{...}`、XML 結束標籤、
-Unicode、URL 與 SSH 遠端路徑保持原文；另以 `file`、`line`、`column`/`sourceColumn`
-提供導覽。公開投影可重複套用而不持續改寫內容，下載內容因此是原始證據的安全檢視。
-
-`server.inspection.redaction.enabled: false` 時，獲授權使用者可查看普通 host/port/user、
-client ID、queue/channel、Content-Type、非機密 DB properties/evidence 設定及 email/address
-等可選 PII。`includeAllFields` 可顯示原本因展示政策隱藏的普通欄位，權限由 Server 的
-configuration-admin 角色驗證。必要機密永不解除：欄位回傳 `state: hidden`、
-`value: '[REDACTED]'`、`reasonCode: MANDATORY_SECRET`；政策不可用欄位使用 `[HIDDEN]`
-及 `UNAVAILABLE_BY_POLICY` 或 `OPTIONAL_FIELD_POLICY`。Source traversal、symlink、
-deny-glob、敏感檔名與大小限制維持啟用。
-
-Load Template CLI: `load --list-templates [--format json]`, `load --debug <type> <id> --load-template <id> [--preview]`, or `load --debug --load-template <id> --bindings <file> [--preview]`. See [Load Templates](execution-modes/load.md) for the versioned contract, precedence, migration and safe preview. Windows `att.bat` accepts the same arguments.
+Windows 使用 `att.bat`，並接受相同的 Native Case、Flow、Tool 和 Load arguments。

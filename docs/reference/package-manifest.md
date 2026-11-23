@@ -6,6 +6,8 @@ A Package ID and its filesystem root come from trusted registration or the suppo
 
 ## Declare Package defaults
 
+The current schema exposes `resources.templatesRoot` as the Package root used to resolve Flow assets. The current `att-package/v2` schema does not define an independent `resources.flowRoot` property.
+
 This example selects an existing central profile and declares two Package-owned Testdata files. Create those descriptors before validating the Package.
 
 ```yaml
@@ -43,9 +45,9 @@ Existing `att-package/v1` Manifests remain in compatibility mode and keep their 
 
 Paths use forward slashes and stay relative to the selected Package. Absolute paths, `..`, unsafe symlinks, and escapes are rejected. The canonical file is limited to 262144 UTF-8 bytes. Unknown fields, duplicate YAML keys, aliases, anchors, and `x-` extensions are rejected.
 
-Without a Manifest, the Package uses conventional `templates` and `testcase` roots and an empty Package Testdata inventory. Global `templates.root` and `testcase.root` no longer choose business roots.
+Without a Manifest, the Package uses its conventional Flow and Test Case Definition roots and an empty Package Testdata inventory.
 
-The conventional `templates/`, `testcase/`, and `load/` directories are optional for inspection. If a directory is absent, Explorer, LOAD Catalog, and Quick Load return an empty inventory for that root. If a configured or conventional root exists but is not a readable directory, or resolves outside the canonical Package, inspection fails with a sanitized `ATT-RESOURCE-ROOT-INVALID` diagnostic; it never follows an unsafe path or treats an invalid present root as empty.
+The conventional Flow, Test Case Definition, and `load/` roots are optional for inspection. If a directory is absent, Explorer, LOAD Catalog, and Quick Load return an empty inventory for that root. If a configured or conventional root exists but is not a readable directory, or resolves outside the canonical Package, inspection fails with a sanitized `ATT-RESOURCE-ROOT-INVALID` diagnostic; it never follows an unsafe path or treats an invalid present root as empty.
 
 ## Resolve an Environment
 
@@ -107,7 +109,7 @@ Source reading uses the existing source browsing policy and structured masking. 
 
 Manifest publication fingerprints the central Runtime Config, explicitly listed Tool/Helper descriptors across its declared profiles, every candidate Testdata descriptor layer, business root bindings, and the embedded Schema Registry. It checks the fingerprint before and after validation and again at publication. It does not scan unrelated business files, archives, or unreferenced central files. The validation dependency set is bounded to 10000 distinct descriptor paths and 256 MiB of file content; these are dependency limits, not a total Package size limit. Execution and Job revisions retain their separate business dependency checks.
 
-Edited source and pending drafts participate in Studio navigation protection. Refresh and view switching stay disabled until the source is staged or explicitly discarded. A conflict requires a fresh draft. Publication records an audit intent before replacement and a completion record afterward. History stays in private Server data; the API returns revision identifiers rather than raw historical source, ordered by stored modification time newest first with an ascending digest tie-breaker. **Stage rollback** creates another candidate that must pass the same validation and review gates. Restoring pre-Manifest defaults produces a canonical empty `att-package/v2` file, as shown in review.
+Edited source and pending drafts participate in Studio navigation protection. Refresh and view switching stay disabled until the source is staged or explicitly discarded. A conflict requires a fresh draft. Publication records an audit intent before replacement and a completion record afterward. History stays in private Server data; the API returns revision identifiers rather than raw historical source, ordered by stored modification time newest first with an ascending digest tie-breaker. **Create rollback draft** creates another candidate that must pass the same validation and review gates. Restoring pre-Manifest defaults produces a canonical empty `att-package/v2` file, as shown in review.
 
 The trusted deployment policy is optional and defaults to editing disabled:
 

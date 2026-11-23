@@ -22,8 +22,8 @@ This record tracks Default Package migration on the current default branch. No 4
 | `packages/default/testcase/quick-start/inline-multi/testcase.yaml` | `att-testcase/v1` inline multi → `basic`, `with-tool` | Quick Start multi-Case demo | **Native canonical example** | Stable Qualified IDs from `caseIdExpression` | `… run native-case quick.start.inline --resolved-case-id basic --resolved-case-id with-tool` |
 | `packages/default/testcase/quick-start/excel/testcase.yaml` + `testdata/quick-start-native.xlsx` | `att-testcase/v1` Excel DS → `QS001`, `QS002` | Quick Start Excel Data Source demo | **Native canonical example** | Read-only workbook provenance; no Snapshot | `… run native-case quick.start.excel --resolved-case-id QS001` |
 | `packages/default/templates/flows/quick-start/flow.yaml` (`quick.start.v1`) | `att-flow/v3.6` | Bound by the three Definitions above | **Native canonical example** | Offline assign/log/assert (+ optional `sample.getAcDate`) | Package validate + Native RUN |
-| `packages/default/testcase/quick_start.xlsx` + `.yaml` + `.xml` | Sidecar `att-sidecar/v2.2` + Snapshot `att-testcases/v2.4` + Template `QUICK_START` | Legacy Quick Start appendix, `QuickStartDocumentationTest`, packaging | **Supported legacy compatibility fixture** | Retain original Case IDs and Stage/Template path; do not rewrite | `./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001` |
-| `packages/default/templates/QUICK_START/template.yaml` | `att-template/v3.6` | Legacy Quick Start Stage | **Supported legacy compatibility fixture** | Stage/Template entry remains valid; Native path uses Flow instead | Legacy suite RUN |
+| `packages/legacy/testcase/quick_start.xlsx` + `.yaml` + `.xml` | Sidecar `att-sidecar/v2.2` + Snapshot `att-testcases/v2.4` + Template `QUICK_START` | Legacy Quick Start guide, `QuickStartDocumentationTest`, packaging | **Relocated legacy** | Retain original Case IDs and Stage/Template path; do not rewrite | `ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001` |
+| `packages/legacy/templates/QUICK_START/template.yaml` | `att-template/v3.6` | Legacy Quick Start Stage | **Relocated legacy** | Stage/Template entry remains valid; Native path uses Flow instead | Legacy suite RUN |
 | `packages/legacy/testcase/payment2.xlsx` (+ sidecar/XML) | Legacy single-Stage payment demo | Docs/debug examples, `DocumentationExamplesTest` | **Relocated legacy** | Business Template stages and external-style inputs; not offline-safe as a Native Quick Start. Case IDs unchanged | Dry-run from `packages/legacy` remains green |
 | `packages/legacy/testcase/payment_regression.xlsx` (+ sidecar/XML) | Legacy multi-Stage prepare/invoke/verify/rollback/cleanup | Payment regression coverage | **Relocated legacy** | Per-Stage Template selection, `runWhen`/`onFailure`, and Case ID mapping are not 1:1 with a single Flow binding | Offline dry-run from `packages/legacy`: `./att.sh run --suite testcase/payment_regression.xlsx --dry-run` → `total=22`, `skipped=22` (no FPP/MQ/DB I/O). Full business RUN against live systems is not part of this move |
 | `packages/default/templates/flows/common/*` | Nested identity/decorate/compose Flows | Cross-mode examples | **Unchanged** | Already Flow-native helpers | Existing LoadCrossMode / Package validate |
@@ -37,7 +37,7 @@ This record tracks Default Package migration on the current default branch. No 4
 
 | Before (master without S12) | After (this PR) |
 |---|---|
-| Only legacy `quick_start` / `payment2` / `payment_regression` under `packages/default/testcase/` | `quick_start` stays in `packages/default`. `payment2` and `payment_regression` live in `packages/legacy`. Quick Start Native Definitions and the offline payments Suite stay under `packages/default/testcase/` |
+| Legacy `quick_start` / `payment2` / `payment_regression` examples alongside Native examples in `packages/default/testcase/` | The `quick_start` workbook and the payment examples live in `packages/legacy`. Native Quick Start Definitions and the offline payments Suite stay under `packages/default/testcase/` |
 | Quick Start docs lead with Excel → Stage → Template | Quick Start docs lead with Package → Flow → `testcase.yaml` → Preview/Resolve → Select → RUN |
 | No Default Package `att-testcase/v1` example | Offline Native single / inline-multi / Excel examples with Flow `quick.start.v1` |
 
@@ -52,8 +52,8 @@ This record tracks Default Package migration on the current default branch. No 4
 ./att.sh --local -p default run native-case quick.start.inline --resolved-case-id basic --resolved-case-id with-tool
 ./att.sh --local -p default run native-case quick.start.excel --resolved-case-id QS001 --resolved-case-id QS002
 
-# Legacy Quick Start retained
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
+# Legacy Quick Start retained in the Legacy Package
+ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
 
 # Relocated multi-Stage fixture — launcher selects packages/legacy (no live FPP/MQ/DB)
 ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh run --suite testcase/payment_regression.xlsx --dry-run --format json --quiet
@@ -67,7 +67,7 @@ ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh validate --package --format jso
 
 [#426](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/426) moves the former blocked Templates and workbooks into the registerable `packages/legacy` package. `package.yaml` is the manifest. `config/att-server.example.yaml` does not list `legacy`; a Server deployment registers that id separately. Local CLI selects the directory with `ATT_PACKAGE_ROOT`. Template IDs and workbook Case IDs are unchanged. Run, Debug, and the closed LOAD scenarios that select `V3_FLOW_EXAMPLE` use `packages/legacy` as the working directory. Tool scenarios such as `closed-smoke.yaml` stay on `packages/default`. The common Flows and Tools copied into `packages/legacy` exist so that package resolves its own dependencies; the canonical copies stay in `packages/default`.
 
-These resources are not rewritten as `att-testcase/v1`. That rewrite would change Stage selection or Case IDs. `examples/load/closed.yaml` still selects Template id `V3_FLOW_EXAMPLE`. The per-file table is [example-migration-matrix.md](example-migration-matrix.md).
+These resources are not rewritten as `att-testcase/v1`. That rewrite would change Stage selection or Case IDs. `examples/legacy/load/closed.yaml` still selects Template id `V3_FLOW_EXAMPLE`. The per-file table is [example-migration-matrix.md](example-migration-matrix.md).
 
 The former SUT Metrics Settings catalog is under `examples/legacy/sut-metrics/`. The v2 schema samples stay at `examples/load/sut-metrics/v2/` because server contract tests load them there. The current ownership example stays at `examples/package-local-sut-metrics/`.
 

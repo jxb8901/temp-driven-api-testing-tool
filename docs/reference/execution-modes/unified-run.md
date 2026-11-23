@@ -1,75 +1,51 @@
 # Unified RUN and schedules
 
-<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
-
-Functional one-shot execution uses the shared **RUN** model for Cases, Templates, Flows and Tools. **Debug** is an optional diagnostic mode of supported RUN targets. **LOAD** retains its performance engine, pacing controls and specialized reports. The current default branch adds explicit Native Case and implicit Native Suite selection through `run native-case` and `run native-suite` (`att-testcase/v1`, `att-execution/v2`). That selection is implemented and integrated here. Native RUN is implemented on this branch. No 4.6.0 release or tag has been published. Implicit Suite acceptance remains open.
-
-The legacy Local CLI keeps its compatibility boundary: `./att.sh run` selects workbook Cases, and standalone `debug` runs one Template, Flow or Tool. ATT Remote retains its legacy Server commands. Native Server RUN requires a validated `att-execution/v2` draft; it is not submitted through the legacy raw Case selector. The broader shared CLI grammar remains a [planned proposal](../../interfaces/cli/vnext-proposed.md).
+Native RUN executes selected Resolved Cases from a Test Case Definition. Each Case resolves to a Flow and Data Source; ATT validates the selected dependency closure before execution. New work should start with the [Quick Start](../../quick-start.md). Existing Packages authored with an earlier model are covered by the [Legacy documentation](../../legacy/README.md).
 
 ## Validate and execute a RUN
 
-Use the same authenticated Server origin and context path as ATT Studio. Send this request to `POST /api/v1/drafts/run`:
+Use the authenticated Server origin and context path used by ATT Studio. Send a Native Case draft to `POST /api/v1/drafts/run`:
 
 <!-- att-doc-example: current id=unified-run-draft schema=att-execution/v2 format=json -->
-```json
+~~~json
 {
   "schemaVersion": "att-execution/v2",
   "executionType": "run",
   "packageId": "payments",
   "environment": "SIT",
-  "target": {"type": "template", "id": "PAYMENT"},
-  "input": {"schemaVersion": "att-debug/v1.2", "inputs": {"amount": 100}},
+  "target": {
+    "type": "nativeCase",
+    "definitionId": "payments.authorize",
+    "selection": {"resolvedCaseIds": ["accepted"]}
+  },
   "options": {"debug": false}
 }
-```
+~~~
 
-Replace `payments`, `SIT` and `PAYMENT` with configured package values. Review the safe preview, then send `{"packageId":"payments","draftId":"R..."}` to `POST /api/v1/jobs/run`. The accepted job uses the existing status, cancellation, events, results and artifact routes. Opening a page or changing a mode does not submit a job.
+Replace the package, environment, Definition, and local Case ID with registered values. Review the safe preview, then submit `{"packageId":"payments","draftId":"R..."}` to `POST /api/v1/jobs/run`. A draft is bound to the validating identity and Package revision and expires after ten minutes. Package changes require validation again. Preview and validation do not submit a Job.
 
-<!-- att-docs:historical -->
-Legacy RUN requests follow `schemas/history/att-execution-v1.schema.json`; new Native Case targets use `att-execution/v2`.
-<!-- /att-docs:historical -->
-Unknown fields and mixed target/selection requests fail validation. A draft expires after ten minutes, belongs to the validating identity, and binds the package revision. Package changes require validation again. Invalid input returns HTTP 400, unavailable drafts 404, changed revisions 409 and exhausted job/draft capacity 429. Inspection capacity/time/size limits remain in force.
+A Native Suite draft uses `target.type: nativeSuite`, a non-empty `definitionIds` list, and one selection: `all:true`, `qualifiedCaseIds`, or tag filters. Included tags use any-match semantics; excluded tags take precedence. Validation resolves and freezes at most 10,000 Case IDs. Empty or unknown selections fail rather than expanding to all Cases.
 
-For a single Case, use `target: {"type":"case","id":"payments.default.PAY001"}` and omit `input`. Case values continue to come from Excel/sidecar bindings. Template, Flow and Tool inputs retain Debug sidecar semantics, including omitted values, explicit null, literals, expressions, variables and Tool arguments. Do not translate Case parameters into resource input fields.
+Unknown fields and invalid combinations fail validation. Invalid input returns HTTP 400, unavailable drafts 404, changed revisions 409, and exhausted Job or draft capacity 429. Inspection size, time, and concurrency limits also apply.
 
-## Select a batch
+Each selected Resolved Case produces one Case execution with its own execution ID, status, and evidence. A Server draft freezes selected Case IDs and the Package source revision; a source change requires validation again. The accepted Job uses the standard status, cancellation, event, result, and artifact routes.
 
-Replace `target` and `input` with an explicit selection:
+## Rerun failed Cases
 
-<!-- att-docs:historical -->
-```json
-{
-  "schemaVersion": "att-execution/v1",
-  "executionType": "run",
-  "packageId": "payments",
-  "environment": "UAT",
-  "selection": {
-    "suites": ["testcase/payments.xlsx"],
-    "caseIds": ["payments.default.PAY001"],
-    "tags": ["smoke"],
-    "excludeTags": ["slow"]
-  },
-  "options": {"debug": true, "failFast": false}
-}
-```
-<!-- /att-docs:historical -->
+`rerunFailed:true` on a Native Suite selects only failed, executed Cases from the latest eligible completed Native Suite RUN for the same owner, Package, Definition IDs, and Package revision. The Server orders candidates by completion time and does not cap discovery at the latest 100 Jobs.
 
-`suites` and `suiteDirectory` are mutually exclusive. `suiteDirectory` selects a package-relative group directory. Case and tag filters retain CLI intersection rules; tags match any requested tag, and excluded tags remove matches. Use `all:true` for the package selection. Arrays must be nonempty, unique and contain at most 1000 values. Validation resolves and freezes at most 10000 selected Case IDs. An empty selection fails rather than falling back to all Cases.
-
-`rerunFailed:true` on a Native Suite selects only failed, executed Cases from the latest eligible completed Native Suite RUN for the same owner, Package, Definition IDs, and Package revision. The Server orders candidates by completion time and does not cap discovery at the latest 100 Jobs. Local execution uses a Package/Definition-scoped Native Suite pointer with a verified manifest hash; dry-runs and unrelated RUNs do not replace that pointer. The draft freezes the source Job/run, manifest digest, revision, selected source count, retry attempt number, and exact failed Qualified Case IDs; submit revalidates that source and rejects a stale draft if a newer matching RUN completed. Skipped source Cases are excluded. The new RUN reports only its own selected/executed/skipped counts and stores retry counts separately from source counts. A Schedule preserves its validated source lineage for each occurrence. An unavailable or inconsistent manifest, changed source, or empty failed selection is a validation error. Existing Workbook/Sidecar `rerunFailed:true` behavior and local history remain unchanged.
+Local execution uses a Package/Definition-scoped Native Suite pointer with a verified manifest hash. Dry runs and unrelated RUNs do not replace it. A Server draft freezes the source Job/run, manifest digest, revision, source selection count, retry attempt number, and exact failed Qualified Case IDs. Submission revalidates that source and rejects a stale draft if a newer matching RUN completed after validation. Skipped source Cases are excluded. The new RUN reports its own selected, executed, and skipped counts; retry counts remain separate from source counts. An unavailable or inconsistent manifest, changed source, or empty failed selection is a validation error.
 
 ## Enable Debug diagnostics
 
-Set `options.debug:true` to retain additional Debug execution events. This option does not repeat execution, increase concurrency, grant a role or enable unsafe failure details. Central Server size limits, disclosure policy, secret filtering and artifact controls still apply. Existing functional and resource report representations remain available through the shared job routes.
+Set `options.debug:true` to retain additional diagnostic execution events. This does not repeat execution, increase concurrency, grant a role, or enable unsafe failure details. Server size limits, disclosure policy, secret filtering, and artifact controls still apply.
 
-## Schedule the validated definition
+## Schedule a validated definition
 
-Canonical creation requests use `schemas/att-schedule-v2.schema.json`; legacy routes retain their existing optional fields.
-
-Create a RUN schedule by sending this body to `POST /api/v1/schedules`:
+Canonical schedule creation uses `att-schedule/v2`. Create a RUN schedule with a validated draft:
 
 <!-- att-doc-example: current id=run-schedule schema=att-schedule/v2 format=json -->
-```json
+~~~json
 {
   "schemaVersion": "att-schedule/v2",
   "name": "Nightly payment checks",
@@ -82,58 +58,22 @@ Create a RUN schedule by sending this body to `POST /api/v1/schedules`:
   "maxConcurrentRuns": 1,
   "enabled": false
 }
-```
+~~~
 
-Use the draft ID returned by validation. RUN schedules store the validated input/selection and revision, not a mutable query. A changed package, target, environment or configuration requires a fresh schedule. Protected package defaults use path-bound keep markers. Submitted sensitive overrides cannot be persisted in a schedule.
+RUN schedules preserve the validated inputs, Case selection, and source revision. A changed Package, target, environment, or configuration requires a fresh validated definition. Protected Package defaults use path-bound keep markers. Submitted sensitive overrides cannot be persisted in a schedule.
 
-LOAD schedules continue to accept package scenario paths and validated Load drafts. Their existing scenario validation and pacing limits remain authoritative. Legacy package-path LOAD schedules validate the current package scenario at each firing; the public `revisionPolicy` distinguishes them from revision-bound RUN snapshots.
+Use either five-field `cron` with an IANA timezone or a single `runAt` instant. Do not supply both. An update that supplies either trigger replaces the stored trigger; an update that supplies neither keeps it. One-time triggers are claimed once. Nonexistent local times during spring-forward are skipped; repeated local times during fall-back can produce two instants, subject to the configured minimum interval. Preview trigger times with `POST /api/v1/schedules/preview` before enabling.
 
-Use either five-field `cron` with an IANA timezone, or a single `runAt` instant such as `2026-10-20T02:00:00+08:00`. Do not supply both. A schedule keeps one trigger: an update that supplies either field replaces the stored trigger, and an update that supplies neither keeps it. One-time triggers are claimed once. Cron skips nonexistent local times during spring-forward; repeated local times during fall-back can produce two instants subject to the configured minimum interval. Preview trigger times with `POST /api/v1/schedules/preview` before enabling.
+The scheduler records an occurrence before admission. Per-schedule and global overlap limits skip an occurrence at capacity; ordinary Worker and Load admission limits also apply. Late or restart misfires are skipped without backfill. Failed submissions follow `server.scheduling.failurePolicy`; execution is not retried automatically. Cancelling a Job cancels that occurrence, while pausing a schedule prevents future firings. Job and occurrence retention use the configured Server limits.
 
-The shared scheduler records an occurrence before admission. Per-schedule/global overlap limits skip an occurrence at capacity; ordinary Worker and Load admission limits also apply. Late/restart misfires are skipped without backfill. Failed submissions follow `server.scheduling.failurePolicy`; there are no automatic execution retries. Cancelling a job cancels that occurrence, while pausing a schedule prevents future firings. Job and occurrence retention keep their existing Server limits.
+Every active local `USER` or authenticated container principal in `server.authorization.userRole` can manage shared schedules. `ADMIN` accounts have system and account administration only. The creator is retained for audit but does not restrict which active USER can view, edit, pause, trigger, or delete a schedule. Under local authentication, the creator must remain an active USER for scheduled RUN occurrences to submit. Container roles are checked for each management request; an operator must pause schedules if the creator loses the configured role because the background scheduler cannot query the external realm.
 
-Every active local `USER` or authenticated container principal in `server.authorization.userRole` can manage the shared RUN and LOAD schedules. `ADMIN` accounts have system and account administration only. A schedule's creator is retained for audit, but does not restrict which active USER can view, edit, pause, trigger, or delete it. Under local authentication, the creator must remain an active `USER` for scheduled RUN occurrences to submit. Container roles are checked for each management request; the background scheduler cannot query the external realm, so an operator must pause schedules when their creator loses the configured USER role. Scheduled RUN jobs keep the creator identity in their audit trail.
+## Replay or configure a new execution
 
-## Migrate existing clients
+From Jobs or Job Details, choose **Rerun with same settings** or **Configure & Rerun**. The Server creates an authorized draft and validates the current Package and Environment. The editor receives an opaque `draftRef` and fetches its sanitized definition from the Server; the definition is not put in the URL or browser storage.
 
-| Existing interface | Mapping in 4.3.1 |
-|---|---|
-| CLI `validate`, `run`, `report` | Existing validation, Case RUN and report commands remain valid |
-| CLI `--suite`, `--suite-dir`, `--case`, `--tag`, `--rerun-failed` | Existing selectors retain their behavior; Server batches use `selection` |
-| Debug CLI, sidecars, `/jobs/debug`, `/drafts/debug` | Compatibility resource RUN with legacy diagnostic behavior |
-| `/jobs/run` with legacy Case selection | Existing Case adapter remains valid |
-| `/load-schedules`, legacy `jobType:load/debug` | Shared scheduler compatibility routes; existing definitions remain readable |
-| `/jobs/...`, saved Studio job/result links | Existing shared history, cancellation, events and results routes |
+Rerun preserves safely retained parameters and presents the source and current revisions before confirmation. Strict source revision selection rejects a mismatch and offers review against the current Package. Configure & Rerun opens the standard editor with supported safe settings, validates any changes, and creates an independent Job. Cancel or Back leaves the source Job and Package unchanged. Secrets, transport data, host roots, and unsafe paths are never reconstructed from logs or artifacts.
 
-<!-- att-docs:historical -->
-This release does not remove legacy endpoints. `GET /api/v1/version` advertises `unifiedRunVersion:att-execution/v1`. New Studio resource forms can fall back to legacy Debug drafts when an older Server lacks this capability. Unified Case/batch drafts require 4.2.6; use the existing Explorer Case action on older deployments. Deploy matching Server/Worker components together; older Workers do not implement resource RUN dispatch.
-<!-- /att-docs:historical -->
+Draft references and confirmation intents are principal-bound and expire after ten minutes. They are held in Server memory, so a Server restart requires creating a new draft from the source Job. A stale Package, expired draft, removed Resource, invalid schema, or capacity rejection has a distinct response.
 
-Schedule persistence adds JSON fields in the existing H2 tables, leaving legacy LOAD rows unchanged. Before downgrade, stop scheduling, export new definitions, remove RUN/one-time definitions and restore the pre-upgrade database backup. An older scheduler must not interpret a new RUN definition as LOAD. Retained job artifacts remain separate from database metadata.
-
-## Replay and new execution from a Job
-
-In **Jobs**, **Job Details**, or **LOAD History**, choose **Rerun with same settings** or **Configure & Rerun**. Both actions create one authorized Server draft and validate the current Package/Environment before execution. The standard RUN or LOAD editor receives only an opaque `draftRef`; it fetches the sanitized definition from the Server on entry. It does not place the definition in a URL or browser storage.
-
-**Rerun with same settings** defaults to **Use current Package**: preserve the Job's safely retained execution parameters, resolve targets and configuration against the current Package, then show the original/current revisions and validation outcome before confirmation. It never silently replaces a retained scenario with the latest YAML defaults. **Require original revision (strict)** is the reproducibility choice. A mismatch returns `ATT-SERVER-REPLAY-REVISION-CONFLICT` and offers **Review with current Package**; stored metadata cannot restore missing historical source bytes. `server.scheduling.packageChangePolicy` and a Schedule-level `ignore` apply only to scheduled executions and do not change manual Rerun.
-
-**Configure & Rerun** opens the ordinary editor with supported safe settings prefilled. Edit the RUN target/Case selection, options and safe inputs, or LOAD timing, workloads, model-specific pacing, concurrency, thresholds, evidence and safe testdata selection. **Validate** creates a new review intent with bounded typed overrides; **Review changes** shows before/after values, summed LOAD phase duration, current revision and the distinction between configured arrival rate and measured TPS. **Run** creates an independent Job with `rerunOfJobId`; Cancel/Back leaves the source Job, report, Schedule and package files unchanged. Package-file-backed LOAD uses its retained safe package-relative source route and does not inherit the inline-draft-only duration ceiling.
-
-Schedules remain a separate workflow: **Edit existing schedule**, **Create new schedule**, or **Run now**. Existing schedule `strict`/`pause`/`ignore` behavior is unchanged.
-
-New retained execution specs use `att-job-execution/v2`; the parser still accepts v1. Replay drafts use `att-job-replay-draft/v1`. Draft references and confirmation intents are principal-bound and expire after ten minutes; they are held in Server memory, so Server restart loses them and the user must reopen the source Job to create a new draft. A source Job without a safe retained definition, a missing sensitive input, an expired draft, a removed resource, an invalid schema and capacity rejection have separate error responses. Secrets, Worker transport data, host roots and unsafe paths are never reconstructed from logs or artifacts.
-
-Historical Jobs without a retained definition show **Rerun unavailable for this historical job**. Validation-only Jobs, failed safe retention, and classified submitted inputs cannot be replayed exactly. Legacy direct submissions with raw overrides or unresolved `rerunFailed` history selection require a new validated draft before safe retention. Configure a new run and provide missing credentials through the normal protected input flow. Never reconstruct an execution from logs, artifacts or redacted previews. Safe definitions are limited to 256 KiB and exclude Worker transport fields and host roots.
-
-After upgrading from Worker source-snapshot v1, the Server marks those old leases **UNAVAILABLE** because they lack the executable metadata required for safe dispatch. The historical Job and value-free provenance remain readable; the Server does not rewrite or dispatch the old snapshot. To run it again, review and validate against the current Package, then explicitly confirm the rerun. The new Job receives a v2 source snapshot and keeps its own provenance.
-
-The Job lifecycle API uses the following endpoints under `/api/v1`:
-
-| Method and path | Result |
-| --- | --- |
-| `GET /jobs/{jobId}/replay` | Authorized safe definition and availability reason. |
-| `POST /jobs/{jobId}/replay-draft` with `{"sourcePolicy":"current"}` or `{"sourcePolicy":"strict","overrides":{...}}` | `att-job-replay-draft/v1` validation, opaque `draftRef` and confirmation `intentId`; no Job or Schedule is created. Omitted `sourcePolicy` preserves legacy strict behavior. |
-| `GET /jobs/{jobId}/replay-draft/{draftRef}` | Principal-authorized sanitized editor definition and current configuration provenance; no definition is carried in the route. |
-| `POST /jobs/{jobId}/rerun` with `{"intentId":"...","confirm":true,"sourcePolicy":"current"}` | New independent Job, HTTP 202 and `Location`; retries with the same intent return the accepted Job. |
-
-Schedule creation uses its normal validated draft contract. Debug remains `options.debug` on RUN. Replay access is restricted to the submitting identity or retained schedule execution owner. `ATT-SERVER-REPLAY-DRAFT-STALE` is returned when the Package changes after validation; `ATT-SERVER-REPLAY-DRAFT-EXPIRED` is returned for an expired or restart-lost draft; capacity returns HTTP 429. Repeating an accepted intent returns the same Job.
+The [Run mode reference](run.md) covers local Native execution and output paths. The [CLI Reference](../cli.md) owns command syntax and exit codes.

@@ -2,7 +2,7 @@
 
 ## ATT Server Job artifact 發佈
 
-Worker 檔案在 Server 核准前會留在私有目錄。Artifact producer 在寫檔前套用敏感資料保護。Archive 不是遮罩邊界：它驗證路徑、檔案類型、大小及 UTF-8 文字，然後原樣保留擷取到的 producer bytes。此邊界適用於 RUN（含 Debug mode、Case、Template、Flow、Tool、batch）、LOAD 及保留的 legacy Jobs。
+Worker 檔案在 Server 核准前會留在私有目錄。Artifact producer 在寫檔前套用敏感資料保護。Archive 不是遮罩邊界：它驗證路徑、檔案類型、大小及 UTF-8 文字，然後原樣保留擷取到的 producer bytes。此邊界適用於 Native RUN（含 Debug diagnostics）、LOAD 及其 Server Job artifacts。
 
 執行結束後，Server 非同步建立唯一的 `artifacts.zip`。Archive 狀態為 `PENDING`、`ARCHIVING`、`READY` 或 `FAILED`，與 Job result 分開；PASS/FAIL/ERROR/INVALID/CANCELLED 不會因發佈未完成而改變。驗證及原子發佈成功後刪除 loose output。ZIP 是唯一持久 artifact payload；metadata、audit、events 及 archive-status 記錄另行保留。
 
@@ -18,7 +18,7 @@ Engine 生成的 artifact data 會在寫檔前套用 path 及 secret projection�
 
 ### Manifest 及 Resource limits
 
-`export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-approved-bytes-v1`；新 entry 的 decision 為 `preserved`（仍可讀取舊版 `att-export-safe-text-v2` ZIP）。ZIP 完整保留 producer 輸出的核准 bytes；敏感值必須在 artifact 生成前完成遮罩。每個 entry 記錄 logical path、media type、精確 byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用相同的已擷取 bytes；GET 不會再次獨立遮罩。
+`export-manifest-v1.json` 使用 manifest version `1`、policy `att-export-approved-bytes-v1`；新 entry 的 decision 為 `preserved`（ZIP 使用 `att-export-approved-bytes-v1` publication policy）。ZIP 完整保留 producer 輸出的核准 bytes；敏感值必須在 artifact 生成前完成遮罩。每個 entry 記錄 logical path、media type、精確 byte size、SHA-256、report/preview eligibility、classification 及 publication decision。`complete` 和彙總 `omissions` 不包含被拒絕的檔名或值。ZIP、preview 及解壓檔案使用相同的已擷取 bytes；GET 不會再次獨立遮罩。
 
 Inventory 不受 `server.maxArtifacts` 限制：最多 50,000 filesystem candidates、深度 64、10,000 已發佈 entries、每項 16 MiB、總 bytes 128 MiB、manifest 8 MiB。超出總量上限會使發佈失敗並保留私有來源。ZIP 預設使用 STORED；Server 設定可選有界的逐 entry DEFLATE 或 AUTO，並維持 200:1 ratio 上限。Reader 拒絕不安全路徑、control characters、encoded traversal、重複或大小寫衝突名稱、過大或高壓縮比 entries、未列入 manifest 的 entries 及 integrity mismatch。Writer 為單一有界佇列，同時最多八個 artifact reads。
 
@@ -38,13 +38,13 @@ Index 亦會回報整份 archive 中 summaries/manifests、metrics/time series�
 
 Server 會分別驗證 report 完整性、execution status、performance verdict 及 archive status。只有 canonical report 通過完整性驗證而且 `executionStatus: PASS` 時，LOAD ZIP 才會排除一般 recovery checkpoint；`NOT_MET` performance verdict 會獨立呈現，不會改變此規則。Cancelled 或 runtime-error 的 run 即使已提交完整診斷 report，仍會保留每個 scope 最新兩代 integrity-verified checkpoints。Report 缺失、不完整、損壞、中斷或無法使用時，每個 scope 最多保留最新兩代 verified checkpoints。不完整或損壞的 report bundle 會整組省略，並保留可預覽的 verified checkpoints，同時如實回報 archive omissions。Report commit 驗證完成前不會刪除 source checkpoints。
 
-相同的大型 aggregate 與單一 workload series 共用 sidecar 時，版本化 detail manifest 會記錄重用的 sidecar 檔案數和精確省下的序列化 bytes。不同值或多 workload 執行仍保留各自 scoped files。
+相同的大型 aggregate 與單一 workload series 共用 detail files 時，版本化 manifest 會記錄重用檔案數和精確省下的序列化 bytes。不同值或多 workload 執行仍保留各自 scoped files。
 
 Authenticated archive index 僅在 ZIP 已驗證且為 READY 時回傳 `archiveSizeBytes`。Studio 在 ZIP download 旁顯示 human-readable size，不會為計算大小下載 ZIP 或發送 HEAD request。
 
-ZIP download 在 JVM 的 OS temporary directory 建立 request-private snapshot，每份最多 140 MiB。Server 先驗證完整副本及所有 entry digest，再設定 download headers；response length 取自該副本，並從相同 open handle 串流。每個 64 KiB buffer 在寫出前比對已保存的 SHA-256，因此 published pathname 後續被替換或原地修改，都不能以其他 bytes 取代 response。既有八個 concurrent reader 上限亦限制同時存在的 download snapshot，部署時須預留 temporary disk space。正常完成、disconnect 或 approval 失敗會關閉及刪除副本；process 突然終止可能留下 temporary files，須由 OS 或 operator 清理。Entry preview 仍使用獨立 request-scoped verified ZIP handle 及逐 entry digest/CRC 檢查。
+ZIP download 在 JVM 的 OS temporary directory 建立 request-private copy，每份最多 140 MiB。Server 先驗證完整副本及所有 entry digest，再設定 download headers；response length 取自該副本，並從相同 open file 串流。每個 64 KiB buffer 在寫出前比對已保存的 SHA-256，因此 published pathname 後續被替換或原地修改，都不能以其他 bytes 取代 response。既有八個 concurrent reader 上限亦限制同時存在的 download copies，部署時須預留 temporary disk space。正常完成、disconnect 或 approval 失敗會關閉及刪除副本；process 突然終止可能留下 temporary files，須由 OS 或 operator 清理。Entry preview 仍使用獨立 request-scoped verified ZIP handle 及逐 entry digest/CRC 檢查。
 
-**Jobs and results → Metrics** 的 **Artifact archive** 顯示獨立 Server 發佈指標，即使 terminal ERROR Job 沒有 Load result 亦可查看。Job detail 和 archive index 都提供 typed `archiveMetrics`（version 1），獨立持久化，不會混入 Worker execution metrics。Attempts/retries 跨重啟保留；時間和 resource 用量描述最新 writer attempt。Queue wait 至 writer 開始時結束；`publicationWallMs` 包括 writer finalization 和 cleanup，但不含 queue wait。Stage milliseconds 分別量度 scan、validation 和 byte capture、ZIP compression/write、verification/file-fsync 和 private/staging cleanup。Source file count/bytes 計入被拒絕的 regular file；included/omitted count 描述該次發佈。Ratio 為 approved uncompressed entry bytes 除以完整 ZIP bytes（包含 manifest），並非節省空間百分比。Source byte sum 最多為 signed 64-bit 上限。
+**Jobs and results → Metrics** 的 **Artifact archive** 顯示獨立 Server 發佈指標，即使 terminal ERROR Job 沒有 Load result 亦可查看。Job detail 和 archive index 都提供 typed `archiveMetrics`（version 1），獨立持久化，不會混入 Worker execution metrics。Attempts/retries 跨重啟保留；時間和 resource 用量描述最新 writer attempt。Queue wait 至 writer 開始時結束；`publicationWallMs` 包括 writer finalization 和 cleanup，但不含 queue wait。Timing buckets 分別量度 scan、validation 和 byte capture、ZIP compression/write、verification/file-fsync 和 private/staging cleanup。Source file count/bytes 計入被拒絕的 regular file；included/omitted count 描述該次發佈。Ratio 為 approved uncompressed entry bytes 除以完整 ZIP bytes（包含 manifest），並非節省空間百分比。Source byte sum 最多為 signed 64-bit 上限。
 
 `writerCpuMs` 僅量度 Server writer thread，且須 JVM 已支援並啟用 thread CPU timing。`writerAllocatedBytes` 是該 thread 的 allocated-byte delta，不是 retained memory、JVM heap 或 peak memory；不會量度 Worker CPU 或主動啟用 JVM instrumentation。不支援／未啟用的量度或未執行的 stage（例如重用既有 verified ZIP）回傳 `null` 並顯示 Unavailable，不會填入假零。真正 empty input 的 file/entry count 為零，但 ZIP 仍有 manifest。Outcome 和 failure phase/reason 僅使用固定安全 code，不包含 filename、data 或 exception message。RUNNING 代表 attempt 尚未完成；cleanup 失敗時為 CLEANUP_PENDING，但已驗證 ZIP 仍可下載。Metrics store 失敗會記錄安全 warning，不會改變 publication safety 或回退至 raw output。
 
@@ -61,135 +61,67 @@ ZIP download 在 JVM 的 OS temporary directory 建立 request-private snapshot�
 
 ### Recovery 及 expiry
 
-失敗時保留私有 output，並在可用時選擇 **Retry archive**。同時提出的 retry 會合併；若上一個 writer 正在結束，已接受的 retry 會保留為下一次 publication，不會被靜默丟棄。Startup 及每五分鐘的 reconciliation 使用持久化 recovery-needed flag 和 cursor，每次最多安排 64 個未完成的 terminal Jobs，並使用與 retention 分離的 maintenance executor。ZIP 驗證及 loose-output/staging cleanup 全部成功後才清除 flag；可重試的 FAILED 或中斷工作仍會納入；quarantined Jobs 不會自動納入。Database migration 只將既有 history 納入一次，再以相同有界批次處理，不會每次重掃已成功發佈的全部 history。Terminal legacy loose-output Jobs 使用相同發佈政策；recovery 會驗證已原子提交但狀態未更新的 ZIP，並清理 staging 及剩餘 loose output，不會直接提供 legacy raw files。若來源已不存在，損壞 ZIP 無法重建，archive 會維持不可用。
+失敗時保留私有 output，並在可用時選擇 **Retry archive**。同時提出的 retry 會合併；若上一個 writer 正在結束，已接受的 retry 會保留為下一次 publication，不會被靜默丟棄。Startup 及每五分鐘的 reconciliation 使用持久化 recovery-needed flag 和 cursor，每次最多安排 64 個未完成的 terminal Jobs，並使用與 retention 分離的 maintenance executor。ZIP 驗證及 loose-output/staging cleanup 全部成功後才清除 flag；可重試的 FAILED 或中斷工作仍會納入；quarantined Jobs 不會自動納入。Database migration 只將既有 history 納入一次，再以相同有界批次處理，不會每次重掃已成功發佈的全部 history。Recovery 會驗證已原子提交但狀態未更新的 ZIP，並清理 staging 及剩餘 loose output，不會直接提供未封存檔案。若來源已不存在，損壞 ZIP 無法重建，archive 會維持不可用。
 
 Worker 的 terminal RESULT 不代表 execution cleanup 已完成。Publication 會等到記憶體中的 execution 結束並釋放 admission lease。Server 每個 Job 最多保留 1,024 個已觀察的 process identity，包括 terminal delivery 前及 cancellation/error cleanup 時發現的 child。Graceful stop 和 forced escalation 使用相同 identity，即使 parent 已退出亦然；所有已觀察的 process 退出前，admission 和 publication 仍受 fence 保護。Enumeration 或 identity persistence 失敗不會授權 publication。獨立確認所有已知 process 均停止後，Server 先持久化 quarantine，才釋放 admission（包括 LOAD capacity）及移除 active Job fence。每秒執行的有界 reconciliation 會重試延後的 release，包括暫時的 quarantine-store failure；quarantine 成功保存前仍保留 admission。Quarantine 跨 restart 保留，阻止 publication 和 retention，archive reason 為 `worker_unverified`。即使 filesystem status 為 READY，archive index/read routes 仍會遵守持久化 quarantine，並停用一般 archive retry。Retry 不會清除 quarantine：operator 必須獨立確認完整 process containment，才可進行 offline recovery；本版沒有清除 quarantine 或匯出 raw output 的 API。Restart 後，publication 和 retention 會檢查 Worker PID/start time 及已保存的 observed-process ledger；相符的 live process，或 start identity 未知的 live PID，會阻止 publication/deletion。Archive status `FAILED`、reason `worker_active` 會保留 private output；請在 Worker 及已記錄的 descendant 停止後 retry。已知但不同的 start time 表示 PID reuse，而非原本的 Worker。Observed-process fence 尚不能證明在 observation 前已逃離的任意 detached descendant 已被限制及停止；完整 OS-level containment 及跨平台 acceptance 仍待完成。
 
 選用的 `server.jobStorage` 配額可在 `dataDir/jobs` 超過高水位時刪除完整 Job。它預設關閉，只測量該目錄，不跟隨符號連結，測量未完成時不會清理。回收依最舊的已結束 Job 開始，並同時刪除 Job 目錄與 H2 列。`partial` 清掃會從上次檢查的最後一個候選之後繼續；隔離中與 artifact recovery 中的 Job 不會進入候選頁，因此受保護的前綴不能佔滿預算。已包含最舊候選的一輪若走到結尾且用量仍高於目標，結果為 `quota_unmet`。執行中、佇列中、隔離、復原中、使用中，以及仍在 `minRetentionHours` 內的 Job 會保留。配額不會壓縮 H2，也不會只因單一 Job 過大而刪除它。既有 `server.jobRetentionDays` 會連同 ZIP 一併到期刪除完整 Job；選取有界 expiry page 前會先排除 quarantined Jobs，避免其長期保留阻止其他已過期 Job 清理；active readers/writers 存在時會延後該次 sweep，不會阻塞 cleanup thread 或刪除使用中的 archive。Classification 及發佈結果寫入不含 raw values 的 audit。失敗的發佈不會刪除唯一未封存的來源。
 
-Native RUN 執行所選的 Resolved Case，並為每一個記錄一次 Case execution。Legacy workbook RUN 執行 authored Testcase，並為每個選中的 row 記錄一次 Case execution。舊式 Testcase 是 Workbook data。Case execution 是 runtime result。閱讀 status、日誌、報表和 evidence 時使用 Case execution。
+## 查找 RUN artifacts
 
-| 任務 | 前往 |
-|---|---|
-| 查找 Run files 和 execution artifacts | [查找 Run artifacts](#查找-run-artifacts) |
-| 查看狀態或檢查失敗的 Action | [在 HTML 報表中查看 Case execution 結果](#在-html-報表中查看-case-execution-結果) |
-| 匯出 JUnit 或 CI 結果 | [匯出 JUnit 結果](#匯出-junit-結果)或[查看 CI JSON 彙總](#查看-ci-json-彙總) |
-| 重現已完成的 Run | [重現 Run](#重現-run) |
+已完成的 Native RUN 會將 manifest、event stream、reports 和 Case execution evidence 寫入唯一 Run directory：
 
-## 查找 Run artifacts
-
-```text
+~~~text
 <outputDirectory>/<RunID>/
 ├── run.yaml
 ├── events.jsonl
-├── workbooks/
 ├── ci/summary.json
 ├── ci/junit.xml
 ├── report/index.html
 ├── report/junit.html
+├── workbooks/native-cases.result.xlsx
 └── executions/<EXEC.ID>/...
-```
+~~~
 
-Run ID 和 Case ID 在校驗後保持原樣。只有 `run.yaml` 狀態為 `COMPLETE` 才表示運行完成；中斷工作會直接保留在已保留的 Run ID 目錄中供調試。
+標準 XLSX 是生成的結果檔，與測試輸入格式無關。Server Job 會將它列為 binary download，並停用文字預覽。HTML report 和 CI outputs 會保留 Definition ID、qualified Case ID、Flow ID、source revisions、execution ID 及可用的 source-record provenance。
 
-## 在 HTML 報表中查看 Case execution 結果
+## 閱讀 Case 結果
 
-`report/index.html` 是主要終端用戶報表，可以直接從磁盤打開。組按 `workbookId.groupId` 彙總；界面把 `groupId` 標記為 Sheet。Cases view 支持 Workbook/Sheet/Status 下拉框、對 workbook/group/full Case ID/tag 的大小寫不敏感搜索，以及每列標題的升序/降序排序。Duration 按數值排序。
+HTML report 顯示 Case identity、status、duration、Expected 和 Actual values、Action results 及有界 execution-log previews。每個 Action result 均包含最後 render 的 description 和 status。`report.html.caseLogInlineLimitBytes` 控制 inline preview；設定為 `0` 時只保留 artifact link。`report/junit.html` 提供人類可讀的 JUnit view。
 
-每次 Native RUN，包括 Inline Case 和 implicit Suite，都會寫入標準 HTML、CI JSON、JUnit，以及不依賴來源的 `workbooks/native-cases.result.xlsx`。每個結果會保留 Definition ID、qualified Case ID、Flow ID、Definition/Flow source revision、execution ID，以及來源資料 record 可用的 provenance。標準 XLSX 是表格式結果 Workbook，不需要輸入 Workbook。Excel-backed Definition 還可以設定 `report: {format: xlsx, template: sourceWorkbook}`，要求另外產生 `workbooks/native-cases.source-workbook.xlsx`。該檔是新的輸出：RUN 在執行前 pin 來源 bytes，只把結果寫入複本中被選中的列，且不修改 Package 內的 Workbook。跨多個 Definition 的 Suite、非 Excel 來源，或無法安全發佈的報告，會退回標準 Workbook 並記錄 diagnostic。這份報告契約已在目前的 default branch 實作並整合（`att-testcase/v1`）。Native 報告驗收仍然開啟，且尚未發佈 4.6.0 release tag。欄位行為由[測試撰寫](test-authoring.md#native-test-case-definition)定義。
+每次 Case execution 對應一個 JUnit `<testcase>`。PASS 沒有 failure 子節點；FAIL 對應 `<failure>`；ERROR 和 INVALID 對應 `<error>`；SKIPPED 對應 `<skipped>`。文字會做 XML escaping。`report.junit.caseLogEmbedThresholdBytes` 控制 inline log；設定為 `0` 時一律使用相對連結。
 
-作為 Server Job artifact 發佈時，native XLSX 會列為 binary 下載項、不作文字預覽，並以 `.xlsx` 附件提供。
+## 查看 CI summary
 
-展開的 Case 包含完整 Case ID、名稱、狀態、持續時間、Expected 和 Actual 結果、每條記錄 Action 結果的一行、詳細執行日誌，以及 `.log`/`case.yaml` 的顯式鏈接。Action Results 每行獨立顯示最終渲染的 Description，並寫入 `run.yaml` 與 CI JSON。為兼容既有報表，Expected 仍是所有 assert Action 非空最終 description 與 `expected` 的有序 LF 聯接；Actual 是所有非空運行時 `actual` 的有序 LF 聯接。
+`ci/summary.json` 使用 `att-ci-summary/v2.1`，記錄 Run identity、environment、時間、aggregate status/count、duration statistics、Case records、diagnostic counts、report paths 和 input-manifest hash。Native Case entries 亦記錄 Definition/Flow identity 及 source revisions。Generated Run manifest 使用 `att-run/v2.1`。
 
-Native Case 的 JUnit `classname` 表示 Definition 和 Flow，`name` 使用 qualified Case ID；ATT properties 會記錄 Definition/Flow source revision、execution 及 source-record provenance。
+## 診斷 Tool evidence collectors
 
-## 診斷 Tool evidence collector 失敗
+Evidence collector 是 operation 後的 observability，不是 primary Tool result。使用 `onFailure: continue` 時，primary Action 可維持 `PASS`，而 collector 獨立記錄為 `ERROR`。
 
-Evidence collector 是 operation 完成後的 observability，不是 primary Tool result。使用 `onFailure: continue` 時，primary Action 可以維持 `PASS`，而 collector 會獨立記錄為 `ERROR`：
-
-```yaml
+~~~yaml
 evidence:
   appLog:
     call: >-
       #{ssh.app.execute(command='grep "${EXEC.INPUT.txnId}" /app/log/payment.log | tail -100')}
     timeoutMs: 5000
     onFailure: continue
-```
+~~~
 
-請查看 `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>`（或等價的 `ACTIONS` compatibility view）。Record 包含 `status`、`success`、`invocationId`、`result`、`error`，以及 bounded/redacted 的 underlying operation `evidence`；operation 有提供 structured diagnostics 時會在 `operationDiagnostic` 保留 native operation diagnostic 的安全 field。`diagnostic` 則記錄 collector failure 及其 source file/field。`error.message` 會從 underlying exception、operation status/exit code 或安全 fallback 填入。若 executor 有提供，SSH helper/instance、exit code、bounded stderr、MQ reason code、HTTP status 和 timeout detail 等 resource identity/field 會留在 `evidence`。Failed collector evidence 會被 bounded/redacted；raw input、payload、argv、output、resolved command text 與 failed `result` 不會發布。完整 projection、numeric budgets 與 security guarantees 見 [Limits, Security Guarantees, and Advanced Diagnostics](appendices/limits-defaults.md)。
+請查看 `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>`。Record 包含 status、success、invocation ID、result、error，以及有界和已遮罩的 operation evidence。Failed collector evidence 不會發布 raw input、payload、argv、output、resolved command text 或 failed result。Projection 規則和數值上限見[Limits, Security Guarantees, and Advanced Diagnostics](appendices/limits-defaults.md)。
 
-有 retry 時，請查看 `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`。即使後一個 attempt 成功，較早的 failed collector record 仍會保留；top-level collector record 代表最後／勝出的 attempt。使用 `onFailure: stop` 時，Action 可以失敗，但其 diagnostic 仍會包含 collector root-cause message 和保留的 evidence。同一 structured record 也會寫入 `case.log` 的 `EVIDENCE <action> attempt=<n> collector=<id>` block，因此不必打開 internal exception trace，便可看到基本 resource、category、message、exit code 和 bounded stderr。既有 capture limit 與 secret redaction 仍然有效；collector wrapper 不會開放無上限 raw output。
+重試時請查看 `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`。後續 attempt 成功後，較早失敗的 collector records 仍會保留；top-level record 代表最後或勝出的 attempt。
 
-## 將 execution 結果寫入 Workbook
+## 重現 RUN
 
-ATT 會復制源 Workbook，並使用 `report.mode: append-to-copy` 追加配置的結果列。`report.mode: none` 跳過 result Workbook，適合不需要 copy 的 CI 或大型 run。Global `report.fileNamePattern` 控制檔名。Sidecar `report.columns` 只修改 Workbook 標簽。支持的映射包括 `result`、`durationMs`、`expectedResult`、`actualResult`、`caseLog`、`reportLink`、`runTime`；Expected/Actual 單元格保留 LF 字符並以換行文本顯示。結果回填使用與 testcase loader 相同的 Excel 顯示格式和空白規範化規則讀取 Case ID，因此帶前導零等數字格式的 ID 在執行與報表寫入時會匹配同一 Case。
+`run.yaml` 記錄 ATT/build identity、runtime 資訊、Environment、時間、status、outputs，以及有效 configuration、Package files、Tools、SQL resources、Testdata 和 schema registry 的 SHA-256 inputs。使用保留的 revision 和 manifest identity 比較 runs。`report --run-id <id>` 可從已完成 evidence 重建 HTML reports，不會執行 Package。
 
-## 匯出 JUnit 結果
+## 閱讀 Case logs
 
-每個 Case execution 對應一個 JUnit `<testcase>`：
-
-| ATT 狀態 | JUnit 表示 |
-|---|---|
-| PASS | 無 failure 子節點 |
-| FAIL | `<failure>` |
-| ERROR | `<error>` |
-| SKIPPED | `<skipped>` |
-| INVALID | `<error type="ATTValidationError">` |
-
-文本會被 XML 轉義。JUnit XML 與 HTML 使用 `report.junit.caseLogEmbedThresholdBytes`。低於或等於閾值的日誌會被嵌入；更大的日誌使用相對鏈接。`0` 始終使用鏈接。
-
-## 查看 CI JSON 彙總
-
-`ci/summary.json` 使用 `schemaVersion: att-ci-summary/v2.1`，包含 ATT/Run ID、環境、時間、聚合狀態/統計、持續時間統計、每個 Case 記錄、診斷計數、報表/產物路徑以及輸入清單哈希。
-
-Native Case 記錄會額外包含 Definition ID、qualified Case ID、Flow ID、Definition/Flow source revision 和 source provenance。`run.yaml` 也記錄相同 identity，並列出標準 XLSX 路徑。`report --run-id <id>` 會從完成清單重建 HTML 報告與 native 標準 XLSX。
-
-## 重現 Run
-
-`run.yaml` 使用 `schemaVersion: att-run/v2.1`，記錄 ATT/構建身份、Java/OS/locale/timezone、校驗模式、環境、時間戳、狀態/摘要、輸出路徑，以及有效配置、Tool group 文件、call-backed Tool SQL 文件（`tool-sql`）、Workbook、Sidecar、解析 Template/負載、包內 Tool 文件和 schema/catalog 版本的 SHA-256 hash。
-
-## 生成文檔並管理 package 輸出
-
-| 命令 | 輸出/行為 |
-|---|---|
-| `docs` | 在 `build/docs/index.html` 生成可搜索離線包文檔；Testcases 按 Workbook 和 Sheet 分組 |
-| `report --run-id <id>` | 從完成證據重建兩個 HTML 報告 |
-| `build` | 歸檔最新完成 run，不執行測試 |
-| `clean` | 刪除配置輸出目錄、`build/docs` 與 `build/att-*.tar.gz` |
-
-## 從 execution identity 追蹤 artifact
-
-| Identity | 意義 | Scope | Artifact 用途 |
-|---|---|---|---|
-| EXEC.RUN_ID | 外層 ATT run。 | Run。 | Run root、summary、report。 |
-| EXEC.ID | 目前 Case/Debug/Load execution。 | Execution。 | Workspace 建立時作為 log/evidence key。 |
-| EXEC.OUTPUT_DIR | 與 EXEC.ID 關聯的 workspace。 | Execution。 | Run/Debug 實體 workspace 或 Load planned lazy workspace。 |
-
-一般 Run 的功能性 Case 位於 output/<RUN_ID>/executions/<EXEC.ID>/。Load 執行期間，EXEC.OUTPUT_DIR 固定指向 output/load/<RUN_ID>/executions/<EXEC.ID>/。Iteration 被保留時，artifact 也會複製到 samples/<EXEC.ID>/ 或 failures/<EXEC.ID>/。Metrics-only iteration 有 EXEC.ID；scheduler 清理暫存 workspace 後不保留 per-iteration 目錄。Load report 顯示 retained rows 的 EXEC.ID，有保留 case.log 時提供連結。Debug 使用同一 debug ID 作為 EXEC.RUN_ID 與 EXEC.ID。
-
-DIAG 是 evidence-only。Expression 不可讀取 DIAG、EXEC.MODE 或任意 scheduler counter；業務差異請透過 EXEC.INPUT 傳入。
-
-
-## 查閱 generated-output schemas
-
-| 產物 | 頂層必需契約 |
-|---|---|
-| `run.yaml` | `schemaVersion`、`att`、`runtime`、`run`、`validation`、`inputs`、`cases`、`summary`、`outputs` |
-| Validation JSON | `schemaVersion`、`attVersion`、`valid`、`mode`、`summary`、`diagnostics` |
-| CI summary JSON | `schemaVersion`、`attVersion`、`runId`、`environment`、`startedAt`、`endedAt`、`status`、`summary`、`durationStatistics`、`cases`、`diagnosticCounts`、`report`、`inputManifestHash` |
-| JUnit XML | 一個 testsuite，含 test/failure/error/skipped 計數，以及每個 Case execution 的 testcase |
-
-## Reading `case.log` and `case.yaml`
-
-Case log structured entries use YAML. The human log records each normal Action and each Tool/DB invocation once; duplicated attempt fields and persisted TOOL/DB subtrees are omitted from this projection. Complete final Stage/Template/Action/Tool/DB state remains in `case.yaml`. `caseLog.yamlAnchors: false` fully expands shared Map/List objects; `true` permits YAML anchor markers, which carry no ATT identifier semantics.
-
-巢狀 structured entry 中的 multiline String 會以易讀的 YAML block content 顯示。ATT 保留 LF、CRLF 或單獨 CR 分隔符，不會解析、修剪或重排 business text。Raw process 與 user content 也保留原始換行。Live console mirror 與已寫入的 `case.log` 使用相同的 render text。
-
-ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or INVALID with `【!!!!!】`. Search for that marker to find abnormal blocks; PASS, SKIPPED and informational blocks remain unmarked.
+Structured Case log entries 使用 YAML。ATT 會保留內嵌文字的 line endings，不會解析或重排 business text。Live console 和保存的 `case.log` 使用相同的 rendered text。ERROR、FAIL 或 INVALID block 會使用 `【!!!!!】` marker；PASS、SKIPPED 和 informational blocks 不會加上 marker。
 
 ## 離線 SUT Metrics 報告
 
-完成的 LOAD 若有 SUT collection evidence，可另外發佈獨立版本化的離線報告 archive。Publisher 會驗證來源 manifest 及每個 observation sidecar，逐 byte 保留原本 sealed native archive，並以不可變 snapshot 發佈。`att-load-report-extension/v2` manifest 會引用 source-neutral 的 `att-load-offline-observations/v1` record。`att-load-offline-observation/v1` entries 記錄 source、metric、profile、target、UTC window、phase、單位、quality 和 checksum；time-series 會提供有界 chart preview，business metric 則提供單一數值、scope、不可變 Workload/mix identity、call-group metadata、mapping quality 及 unmatched-row count。若 Job snapshot 固定了 Metric Groups，報告只會包含安全的 Group metadata（schema version、ID、title、order、`groupBy` 欄位及 display mode），以及每個 observation 的 `groupView` assignment、labels 和 `groupBy` values；原始 `match` selectors 不會發佈。靜態 Group index 會連結每個已分組 instance 與其 metric observation；unassigned 和 ambiguous observations 仍會連同 diagnostics 列出。此 index 只提供導覽 metadata，不會重新查詢或改寫 source observations。Group 欄位為 optional，因此舊報告 archive 仍相容。Unavailable value 會保留為 null；完整 sidecar 使用 normalized `att-sut-metrics-observation/v1` 和 v2 forms。Partial 或 unavailable source data 會明確標示，不會改變 native Job result。
+完成的 LOAD 若有 SUT collection evidence，可發佈版本化的離線報告 archive。Publisher 會驗證 manifest 和每個 normalized observation file，逐 byte 保留已封存的 source archive，並在驗證通過後發佈報告。`att-load-report-extension/v2` manifest 引用 `att-load-offline-observations/v1`。Observation records 包含 source、metric、profile、target、UTC window、phase、單位、quality 和 checksums。Time series 提供有界 chart previews；business metrics 提供數值、scope、Workload identity、mapping quality 及 unmatched-row count。
 
-報告可在沒有 network access 時使用，並採用 restrictive Content Security Policy。報告不會評估 performance threshold。如有獨立版本化的 `att-load-verdict/v1` record，報告只顯示其 evaluation state 與 evidence reference，不會重新計算 verdict。只有在驗證發佈成功後，才可透過 authenticated Job download route 取得 archive。
+若 Job 的 approved execution definition 包含 Metric Groups，報告會發布安全的 group metadata 和 assignments，不含 raw selectors。未分組和有歧義的 observations 仍會連同 diagnostics 列出。報告可離線使用並套用 restrictive Content Security Policy；它不會評估 performance thresholds。如有 `att-load-verdict/v1` record，報告只顯示該 record 的 state 和 evidence reference，不會重算 verdict。驗證發佈成功後，可透過 authenticated Job download route 取得 archive。

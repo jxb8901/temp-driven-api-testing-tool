@@ -2,7 +2,7 @@
 
 ## ATT Server Job artifact publication
 
-Worker files remain private until the Server's publication step approves them. Artifact producers apply their sensitive-data protections before writing files. The archive is not a redaction boundary: it validates paths, file types, sizes and UTF-8 text, then preserves captured producer bytes exactly. This boundary applies to RUN (including Debug mode, Case, Template, Flow, Tool and batch), LOAD, and retained legacy Jobs.
+Worker files remain private until the Server's publication step approves them. Artifact producers apply their sensitive-data protections before writing files. The archive is not a redaction boundary: it validates paths, file types, sizes and UTF-8 text, then preserves captured producer bytes exactly. This boundary applies to Native RUN (including Debug diagnostics), LOAD, and their Server Job artifacts.
 
 After execution ends, the Server asynchronously builds one `artifacts.zip`. Its status is independent of the Job result: `PENDING`, `ARCHIVING`, `READY`, or `FAILED`. A PASS/FAIL/ERROR/INVALID/CANCELLED Job remains terminal while publication runs. On successful verification and atomic publication, loose output is removed. The ZIP is the only persistent artifact payload; metadata, audit, events and archive-status records remain separate.
 
@@ -22,13 +22,13 @@ Engine-generated artifact data applies path and secret projection before writing
 
 ### Manifest and resource limits
 
-`export-manifest-v1.json` uses manifest version `1` and policy `att-export-approved-bytes-v1`; new entries use decision `preserved` (legacy `att-export-safe-text-v2` ZIPs remain readable). Approved producer bytes are preserved exactly; producers must mask sensitive values before emitting artifacts. Each entry records its logical path, media type, exact byte size, SHA-256, report/preview eligibility, classification and publication decision. `complete` and aggregate `omissions` describe excluded output without rejected filenames or values. ZIP, preview and extracted files use the same captured bytes; GET requests never independently redact them.
+`export-manifest-v1.json` uses manifest version `1` and policy `att-export-approved-bytes-v1`; entries use decision `preserved`. Approved producer bytes are preserved exactly; producers must mask sensitive values before emitting artifacts. Each entry records its logical path, media type, exact byte size, SHA-256, report/preview eligibility, classification and publication decision. `complete` and aggregate `omissions` describe excluded output without rejected filenames or values. ZIP, preview and extracted files use the same captured bytes; GET requests never independently redact them.
 
 Inventory is independent of `server.maxArtifacts`: up to 50,000 filesystem candidates, depth 64, 10,000 published entries, 16 MiB per entry and 128 MiB total published bytes. The manifest is limited to 8 MiB. Crossing aggregate limits fails publication and preserves private source output. The default ZIP method is STORED; server configuration may select bounded per-entry DEFLATE or AUTO while respecting the 200:1 ratio limit. Readers reject unsafe paths, control characters, encoded traversal, duplicate/case-colliding names, oversized or high-ratio entries, unmanifested entries and integrity mismatches. Publication uses one writer with a bounded queue; at most eight artifact reads run concurrently.
 
 Readers also check the ZIP central directory against local headers before trusting the manifest. Link, special-file and Windows reparse attributes, file/directory prefix collisions, filename-override extra fields, comments, hidden prefixes or records, overlapping entries, multipart archives and ZIP64 are rejected. The bounded export profile permits STORED or Deflate entries and timestamp-only extra metadata; STORED remains the default. Manifest parsing rejects duplicate keys, trailing documents, fractional versions/sizes, unknown fields and non-policy omission text. A structurally readable ZIP is not sufficient proof of an approved export.
 
-ZIP downloads use a request-private snapshot in the JVM's OS temporary directory. The Server copies at most 140 MiB per download, verifies the complete copied ZIP and all entry digests before setting download headers, and streams the same open snapshot with its captured length. Each 64 KiB buffer is checked against its captured SHA-256 before writing, so later replacement or in-place modification of the published pathname cannot substitute response bytes. The existing eight-reader limit also bounds concurrent download snapshots; allow temporary disk space for these copies. Normal completion, disconnect and failed approval close/delete the copy. Abrupt process termination can leave temporary files for OS or operator cleanup. Entry previews retain their separate request-scoped verified ZIP handle and per-entry digest/CRC checks.
+ZIP downloads use a request-private copy in the JVM's OS temporary directory. The Server copies at most 140 MiB per download, verifies the complete copy and all entry digests before setting download headers, and streams from that same open file with its captured length. Each 64 KiB buffer is checked against its captured SHA-256 before writing, so later replacement or in-place modification of the published pathname cannot substitute response bytes. The existing eight-reader limit also bounds concurrent download copies; allow temporary disk space for these copies. Normal completion, disconnect and failed approval close/delete the copy. Abrupt process termination can leave temporary files for OS or operator cleanup. Entry previews retain their separate request-scoped verified ZIP handle and per-entry digest/CRC checks.
 
 ### Detach and restore a Job console
 
@@ -46,9 +46,9 @@ The index also reports full-archive entry counts and uncompressed bytes for summ
 
 The Server validates report completeness independently from execution status, performance verdict and archive status. Routine recovery checkpoints are omitted only when the canonical report is verified complete and `executionStatus: PASS`; a `NOT_MET` performance verdict remains separate and does not change this policy. Cancelled or runtime-error runs retain up to the latest two integrity-verified checkpoint generations per scope even if they committed a complete diagnostic report. If the report is absent, incomplete, corrupt, interrupted, or unavailable, up to the latest two verified generations per scope are retained. An incomplete or corrupt report bundle is omitted as a bundle, while verified checkpoints remain previewable and the archive reports its omissions. Source checkpoints are not deleted before report-commit validation.
 
-When identical large aggregate and single-workload series are shared, the versioned detail manifest reports the exact number of reused sidecar files and serialized bytes saved. Values that differ or belong to multi-workload runs keep their separately scoped files.
+When identical large aggregate and single-workload series share detail files, the versioned manifest reports how many files were reused and the serialized bytes saved. Values that differ or belong to multi-workload runs keep their separately scoped files.
 
-**Artifact archive metrics** appear under **Jobs and results → Metrics**, including terminal ERROR Jobs without Load results. Both Job detail and archive index expose the typed `archiveMetrics` object (version 1), persisted independently of Worker execution metrics. Attempts/retries survive restart; timings and resource measurements describe the latest writer attempt. Queue wait ends when the writer starts; `publicationWallMs` includes the writer's finalization and cleanup, not queue wait. Stage milliseconds cover scan, validation and byte capture, ZIP compression/write, verification/file-fsync, and private/staging cleanup. Regular source file count/bytes include rejected regular files; included/omitted counts describe the attempted publication. The ratio is approved uncompressed entry bytes divided by complete ZIP bytes (including the manifest), not percentage space saved. Source byte sums saturate at the signed 64-bit maximum.
+**Artifact archive metrics** appear under **Jobs and results → Metrics**, including terminal ERROR Jobs without Load results. Both Job detail and archive index expose the typed `archiveMetrics` object (version 1), persisted independently of Worker execution metrics. Attempts/retries survive restart; timings and resource measurements describe the latest writer attempt. Queue wait ends when the writer starts; `publicationWallMs` includes the writer's finalization and cleanup, not queue wait. Timing buckets cover scan, validation and byte capture, ZIP compression/write, verification/file-fsync, and private/staging cleanup. Regular source file count/bytes include rejected regular files; included/omitted counts describe the attempted publication. The ratio is approved uncompressed entry bytes divided by complete ZIP bytes (including the manifest), not percentage space saved. Source byte sums saturate at the signed 64-bit maximum.
 
 `writerCpuMs` measures only the Server writer thread when JVM thread CPU timing is already supported/enabled. `writerAllocatedBytes` is that thread's allocated-byte delta, not retained memory, JVM heap use, or peak memory. Telemetry does not enable JVM instrumentation or measure Worker CPU. Unsupported/disabled measurements and stages not executed (for example, reusing an existing verified ZIP) are `null` and displayed as Unavailable, never fabricated zeros. Real empty input has zero file/entry counts but a nonempty manifest ZIP. Outcome and failure phase/reason use fixed safe codes, never filenames, data or exception messages. RUNNING metrics identify an unfinished attempt; cleanup failure is CLEANUP_PENDING while an already verified ZIP stays downloadable. A metrics-store failure is logged without changing publication safety or falling back to raw output.
 
@@ -67,145 +67,67 @@ Every route requires the shared OPERATE capability. Active USER accounts can acc
 
 ### Recover and expire archives
 
-After a failure, keep the private output and use **Retry archive** when available. Concurrent retries are coalesced; a retry accepted while the previous writer is finishing is retained for one follow-up publication instead of being silently dropped. Startup and five-minute reconciliation use a persisted recovery-needed flag and a cursor, scheduling at most 64 unfinished terminal Jobs per pass on maintenance isolated from retention. Successful ZIP verification plus loose-output/staging cleanup clears the flag; Retryable FAILED or interrupted work remains eligible; quarantined Jobs are excluded. Existing history is enrolled once during database migration and processed in these bounded batches, not rescanned after every successful publication. Legacy loose-output Jobs use the same publication contract. Recovery validates a ZIP committed before its status update and removes abandoned staging and leftover loose output. It never serves legacy raw files directly. A missing private source cannot be reconstructed from a corrupt ZIP; the archive remains unavailable.
+After a failure, keep the private output and use **Retry archive** when available. Concurrent retries are coalesced; a retry accepted while the previous writer is finishing is retained for one follow-up publication instead of being silently dropped. Startup and five-minute reconciliation use a persisted recovery-needed flag and a cursor, scheduling at most 64 unfinished terminal Jobs per pass on maintenance isolated from retention. Successful ZIP verification plus loose-output/staging cleanup clears the flag; Retryable FAILED or interrupted work remains eligible; quarantined Jobs are excluded. Existing history is enrolled once during database migration and processed in these bounded batches, not rescanned after every successful publication. Recovery validates a ZIP committed before its status update and removes abandoned staging and leftover loose output. It never serves unarchived loose files. A missing private source cannot be reconstructed from a corrupt ZIP; the archive remains unavailable.
 
 A terminal Worker RESULT is not an execution-cleanup fence. Publication waits until the in-memory execution has finished and its admission lease is released. The Server retains up to 1,024 observed process identities per Job, including children seen before terminal delivery and cancellation/error cleanup. Graceful stop and forced escalation use those same identities even after a parent exits; admission and publication remain fenced until all observed processes have exited. Enumeration/identity-persistence failure never authorizes publication. After every known process has independently been confirmed stopped, the Server persists a quarantine before releasing admission (including LOAD capacity) and removing the active Job fence. Bounded one-second reconciliation retries deferred release, including transient quarantine-store failures; until the quarantine is durable, admission remains held. The quarantine survives restart and blocks both publication and retention, with archive reason `worker_unverified`. Archive index/read routes honor the durable quarantine even if filesystem status says READY; ordinary archive retry is disabled. Retry cannot clear it: operators must independently establish complete process containment before any offline recovery; this release provides no API to clear quarantine or export raw output. On restart, publication and retention check both the Worker PID/start time and the persisted observed-process ledger; a matching live process, or a live PID with unknown start identity, prevents publication/deletion. Archive status `FAILED` with reason `worker_active` preserves the private output; retry after the Worker and recorded descendants have stopped. A different known start time identifies PID reuse, not the original Worker. This observed-process fencing does not yet prove containment of arbitrary detached descendants that escape before observation. Full OS-level containment and its cross-platform acceptance remain outstanding.
 
 The optional `server.jobStorage` quota can also remove complete Jobs when `dataDir/jobs` exceeds its high watermark. It is disabled by default, measures only that directory, never follows symbolic links, and skips a sweep when measurement is incomplete. Eviction is oldest-terminal-first and deletes the Job directory together with its H2 row. A partial sweep resumes after the last candidate it examined, and quarantined or artifact-recovery Jobs are omitted from those pages so a protected prefix cannot fill the budget. Finishing a pass that already included the oldest candidate reports `quota_unmet` when usage is still above the target. Running, queued, quarantined, recovering, in-use, and Jobs inside `minRetentionHours` stay. The quota does not compact H2 or delete a Job only because that one Job is large. The existing `server.jobRetentionDays` policy expires the complete Job, including its ZIP. Quarantined Jobs are excluded before selecting the bounded expiry page, so their indefinite preservation cannot starve ordinary expired Jobs. Retention defers its sweep while archive readers/writers are active; it does not block the cleanup thread or delete a file in use. Classification and publication outcomes are audited without raw values. Publication failures never delete the only unarchived source.
 
-Native RUN executes selected Resolved Cases and records one Case execution for each. Legacy workbook RUN executes authored Testcases and records one Case execution for each selected row. A legacy Testcase is workbook data. A Case execution is the runtime result. Use the runtime term when reading statuses, logs, reports, and evidence.
+## Find artifacts for a RUN
 
-| Task | Go to |
-|---|---|
-| Find run files and execution artifacts | [Find artifacts for a Run](#find-artifacts-for-a-run) |
-| Read a status or inspect a failed Action | [Find Case execution results](#find-case-execution-results-in-the-html-report) |
-| Export JUnit or CI results | [Export JUnit results](#export-junit-results) or [Read the CI JSON summary](#read-the-ci-json-summary) |
-| Reproduce a completed run | [Reproduce a Run](#reproduce-a-run) |
+A completed Native RUN writes its manifest, event stream, reports, and Case execution evidence under a unique Run directory:
 
-## Find artifacts for a Run
-
-```text
+~~~text
 <outputDirectory>/<RunID>/
 ├── run.yaml
 ├── events.jsonl
-├── workbooks/
 ├── ci/summary.json
 ├── ci/junit.xml
 ├── report/index.html
 ├── report/junit.html
+├── workbooks/native-cases.result.xlsx
 └── executions/<EXEC.ID>/...
-```
+~~~
 
-Run and Case IDs appear unchanged after validation. A run is completed only when its `run.yaml` state is `COMPLETE`; interrupted work remains directly below its reserved Run ID for debugging.
+The standard XLSX is generated output and is independent of test inputs. A Server Job indexes it as a binary download; text preview is disabled. The HTML report and CI outputs retain Definition ID, qualified Case ID, Flow ID, source revisions, execution ID, and available source-record provenance.
 
-## Find Case execution results in the HTML report
+## Read a Case result
 
-`report/index.html` is the primary end-user report. It can be opened without a web server. Groups are summarized by `workbookId.groupId`; the interface labels `groupId` as Sheet because it maps to one physical sheet. The Cases view supports Workbook/Sheet/Status dropdowns, case-insensitive search over workbook/group/full Case ID/tags, and ascending/descending sorting from every column heading. Duration sorting is numeric.
+The HTML report shows Case identity, status, duration, Expected and Actual values, Action results, and bounded execution-log previews. Each Action result includes its final rendered description and status. The setting `report.html.caseLogInlineLimitBytes` controls the preview; `0` keeps only the artifact link. `report/junit.html` provides a human-readable JUnit view.
 
-Every Native RUN, including Inline Cases and implicit Suites, writes standard HTML, CI JSON, JUnit, and the source-independent workbook `workbooks/native-cases.result.xlsx`. The report keeps Definition ID, qualified Case ID, Flow ID, Definition/Flow source revisions, execution ID, and available source-record provenance with each result. The standard XLSX is a tabular result workbook and does not require an input Workbook. An Excel-backed Definition may also set `report: {format: xlsx, template: sourceWorkbook}` to request a separate `workbooks/native-cases.source-workbook.xlsx`. That file is new output: RUN pins the source bytes before execution, writes results only into the selected rows of the copy, and leaves the Package workbook unchanged. A multi-Definition Suite, a non-Excel source, or a report that cannot be published safely falls back to the standard workbook and records a diagnostic. This report contract is implemented and integrated on the current default branch (`att-testcase/v1`). Native report acceptance remains open, and no 4.6.0 release tag has been published. Field-level behavior is owned by [Test authoring](test-authoring.md#native-test-case-definition).
+Every Case execution maps to one JUnit `<testcase>`. PASS has no failure child; FAIL maps to `<failure>`, ERROR and INVALID to `<error>`, and SKIPPED to `<skipped>`. Text is XML-escaped. `report.junit.caseLogEmbedThresholdBytes` controls inline log content; `0` always uses a relative link.
 
-When published as a Server Job artifact, the native XLSX is indexed as a binary download, excluded from text preview, and served as an `.xlsx` attachment.
+## Read the CI summary
 
-An expanded case contains the full Case ID and name, status and duration, Expected and Actual results, one row per recorded action result, a bounded detailed execution-log preview, and explicit `.log`/`case.yaml` artifact links. Each Action Results row has independent Stage, Action, Description, Status, and Message columns; Description is the final rendered action description and is also persisted in `run.yaml` and CI JSON. `report.html.caseLogInlineLimitBytes` controls the head/tail preview; `0` keeps only the artifact link. For compatibility, Expected remains the ordered LF-joined non-blank assert descriptions and `expected` values; Actual is the ordered LF-joined non-blank runtime `actual` values. `case.yaml` holds the complete structured final Stage/Template/Action/Tool/DB state. Depending on what ran, these artifacts include selected templates, executed or skipped stages/actions, assertion messages, Tool argv/stdout/stderr/retry evidence, DB source/parameter/result/finalization evidence, diagnostics, and saved payload/Tool/DB-output paths. Workbook ID, group ID, and tags are persisted per case in `run.yaml`, so `report --run-id` regenerates equivalent controls and grouping.
+`ci/summary.json` uses `att-ci-summary/v2.1` and records Run identity, environment, timing, aggregate status and counts, duration statistics, Case records, diagnostic counts, report paths, and the input-manifest hash. Native Case entries also record Definition/Flow identity and source revisions. The generated Run manifest uses `att-run/v2.1`.
 
-`report/junit.html` is a human-readable JUnit projection. It displays counts and one row per testcase with status, duration, and embedded case-log content or a relative artifact link.
+## Diagnose Tool evidence collectors
 
-For native Cases, JUnit `classname` identifies the Definition and Flow, `name` is the qualified Case ID, and ATT properties carry Definition/Flow source revisions, execution, and source-record provenance.
+An evidence collector is post-operation observability, not the primary Tool result. With `onFailure: continue`, the primary Action may remain `PASS` while the collector is independently recorded as `ERROR`.
 
-## Diagnose Tool evidence collector failures
-
-An evidence collector is post-operation observability, not the primary Tool result. With `onFailure: continue`, the primary Action may remain `PASS` while the collector is independently recorded as `ERROR`:
-
-```yaml
+~~~yaml
 evidence:
   appLog:
     call: >-
       #{ssh.app.execute(command='grep "${EXEC.INPUT.txnId}" /app/log/payment.log | tail -100')}
     timeoutMs: 5000
     onFailure: continue
-```
+~~~
 
-Inspect `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>` (or the equivalent `ACTIONS` compatibility view). The record contains `status`, `success`, `invocationId`, `result`, `error`, and the bounded/redacted underlying operation `evidence`; when an operation supplies structured diagnostics, `operationDiagnostic` retains safe fields from the native operation diagnostic. `diagnostic` identifies the collector failure and its source file/field. `error.message` is populated from the underlying exception, operation status/exit code, or a safe fallback. Resource identity and fields such as SSH helper/instance, exit code, bounded stderr, MQ reason codes, HTTP status, and timeout details remain under `evidence` when provided by the executor. Failed collector evidence is bounded/redacted; raw input, payload, argv, output, resolved command text and the failed `result` are not published. See [Limits, Security Guarantees, and Advanced Diagnostics](appendices/limits-defaults.md) for the exact projection, numeric budgets and security guarantees.
+Inspect `EXEC.ACTIONS.<actionId>.output.evidence.collectors.<collectorId>`. The record contains status, success, invocation ID, result, error, and bounded/redacted operation evidence. Failed collector evidence does not publish raw input, payload, argv, output, resolved command text, or the failed result. See [Limits, Security Guarantees, and Advanced Diagnostics](appendices/limits-defaults.md) for projection rules and numeric budgets.
 
-For retries, inspect `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`. Earlier failed collector records remain available after a later successful attempt; the top-level collector record follows the final/winning attempt. With `onFailure: stop`, the Action can fail, but its diagnostic still includes the collector's root-cause message and preserved evidence. The same structured record is written to the `EVIDENCE <action> attempt=<n> collector=<id>` block in `case.log`, so the basic resource, category, message, exit code, and bounded stderr can be diagnosed without opening internal exception traces. Existing capture limits and secret redaction continue to apply; collector wrapping does not enable unbounded raw output.
+For retries, inspect `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<collectorId>`. Earlier failed collector records remain available after a later successful attempt; the top-level record follows the final or winning attempt.
 
-## Add execution results to a Workbook
+## Reproduce a RUN
 
-ATT copies the source workbook and appends configured result columns using `report.mode: append-to-copy`. Set `report.mode: none` for CI or large runs that do not need a copied workbook. Global `report.fileNamePattern` controls the copy filename. Sidecar `report.columns` changes workbook labels only. Supported mappings include `result`, `durationMs`, `expectedResult`, `actualResult`, `caseLog`, `reportLink`, and `runTime`; Expected/Actual cells retain LF characters and use wrapped text. Row matching reads the Testcase's Case ID with the same Excel `DataFormatter` and whitespace normalization as Testcase loading, so displayed formats such as numeric leading zeroes identify the same Testcase in execution results.
+`run.yaml` records ATT/build identity, runtime information, Environment, timestamps, status, outputs, and SHA-256 inputs for effective configuration, Package files, Tools, SQL resources, Testdata, and schema registry. Use the retained revision and manifest identity to compare runs. `report --run-id <id>` regenerates HTML reports from completed evidence without executing the Package.
 
-## Export JUnit results
+## Read Case logs
 
-Each Case execution maps to one JUnit `<testcase>`:
+Structured Case log entries use YAML. ATT preserves embedded text line endings and does not parse or reformat business text. The live console and persisted `case.log` use the same rendered text. Blocks with ERROR, FAIL, or INVALID status use the `【!!!!!】` marker; PASS, SKIPPED, and informational blocks are unmarked.
 
-| ATT status | JUnit representation |
-|---|---|
-| PASS | no failure child |
-| FAIL | `<failure>` |
-| ERROR | `<error>` |
-| SKIPPED | `<skipped>` |
-| INVALID | `<error type="ATTValidationError">` |
+## Offline SUT Metrics report
 
-Text is XML-escaped. JUnit XML and HTML use `report.junit.caseLogEmbedThresholdBytes`. Logs at or below the threshold are embedded; larger logs use a relative link. `0` always links.
+A completed LOAD with SUT collection evidence can publish a versioned offline report archive. The publisher verifies its manifest and each normalized observation file, preserves the sealed source archive byte-for-byte, and publishes the report only after verification. The `att-load-report-extension/v2` manifest references `att-load-offline-observations/v1`. Observation records include source, metric, profile, target, UTC window, phase, units, quality, and checksums. Time series include bounded chart previews; business metrics include their value, scope, Workload identity, mapping quality, and unmatched-row count.
 
-## Read the CI JSON summary
-
-`ci/summary.json` uses `schemaVersion: att-ci-summary/v2.1` and contains ATT/run IDs, environment, timing, aggregate status/counts, duration statistics, per-case records, diagnostic counts, report/artifact paths, and the input-manifest hash.
-
-Native Case records additionally include Definition ID, qualified Case ID, Flow ID, Definition/Flow source revisions, and source provenance. `run.yaml` records the same identities and lists the standard XLSX path. `report --run-id <id>` regenerates the HTML reports and native standard XLSX from the completed manifest.
-
-## Reproduce a Run
-
-`run.yaml` uses `schemaVersion: att-run/v2.1` and records ATT/build identity, Java/OS/locale/timezone, validation mode, environment, timestamps, status/summary, output paths, and SHA-256 inputs for effective configuration, tool-group files, call-backed Tool SQL files (`tool-sql`), workbook, sidecar, resolved templates/payloads, package-local tool files, and schema/catalog version.
-
-## Generate docs and manage package output
-
-| Command | Output/behavior |
-|---|---|
-| `docs` | Generates searchable offline package documentation at `build/docs/index.html`; Testcases are grouped by workbook and Sheet |
-| `report --run-id <id>` | Regenerates both HTML reports from completed evidence |
-| `build` | Archives the latest completed run without executing tests |
-| `clean` | Removes configured output directory, `build/docs`, and `build/att-*.tar.gz` |
-
-The build archive contains reports, workbooks, case logs, referenced artifacts, redacted configuration/template snapshots, manifest, and hashes. Exact YAML keys named `password`, `token`, `secret`, or `authorization` are redacted case-insensitively; this is not a general log/result redactor.
-
-The Testcases section renders one table per Sheet below each workbook heading. The Sheet column is omitted because the group heading supplies that context. Each table includes Expected Result, formed in stage/action order from every assert action's validation-time `description` and `expected`; unresolved runtime placeholders remain visible and line endings are normalized to LF.
-
-Clean never removes testcase, template, tool, configuration, documentation, schema, or other source files. It canonicalizes paths, rejects source/package roots and external symlink targets, is idempotent, and reports what it removed.
-
-## Trace execution identity to an artifact
-
-| Identity | Meaning | Scope | Artifact role |
-|---|---|---|---|
-| EXEC.RUN_ID | Enclosing ATT run. | Run. | Run root, summary and report. |
-| EXEC.ID | Current Case/Debug/Load execution. | Execution. | Key for logs/evidence when a workspace exists. |
-| EXEC.OUTPUT_DIR | Workspace path associated with EXEC.ID. | Execution. | Physical Run/Debug workspace or planned lazy Load workspace. |
-
-Normal Run stores functional Cases under output/<RUN_ID>/executions/<EXEC.ID>/. In Load, EXEC.OUTPUT_DIR remains at output/load/<RUN_ID>/executions/<EXEC.ID>/ throughout the iteration. When retained, a copy of its artifacts is also stored under samples/<EXEC.ID>/ or failures/<EXEC.ID>/. Metrics-only iterations have EXEC.ID but no per-iteration directory after the scheduler releases their temporary workspace. Retained Load rows show EXEC.ID and link to case.log when present. Debug uses its debug ID as both EXEC.RUN_ID and EXEC.ID.
-
-DIAG is evidence-only. Do not reference DIAG, EXEC.MODE or arbitrary scheduler counters in expressions; pass business variation through EXEC.INPUT.
-
-
-## Inspect generated-output schemas
-
-| Artifact | Required top-level contract |
-|---|---|
-| `run.yaml` | `schemaVersion`, `att`, `runtime`, `run`, `validation`, `inputs`, `cases`, `summary`, `outputs` |
-| Validation JSON | `schemaVersion`, `attVersion`, `valid`, `mode`, `summary`, `diagnostics` |
-| CI summary JSON | `schemaVersion`, `attVersion`, `runId`, `environment`, `startedAt`, `endedAt`, `status`, `summary`, `durationStatistics`, `cases`, `diagnosticCounts`, `report`, `inputManifestHash` |
-| JUnit XML | one testsuite with test/failure/error/skipped counts and one testcase per ATT case |
-
-Generated envelopes reject additional top-level fields according to their schemas. JUnit HTML is a human-readable output and not an XML/JSON schema artifact.
-
-## Reading `case.log` and `case.yaml`
-
-Case log structured entries use YAML. The human log records each normal Action and each Tool/DB invocation once; duplicated attempt fields and persisted TOOL/DB subtrees are omitted from this projection. Complete final Stage/Template/Action/Tool/DB state remains in `case.yaml`. `caseLog.yamlAnchors: false` fully expands shared Map/List objects; `true` permits YAML anchor markers, which carry no ATT identifier semantics.
-
-Multiline String values nested in structured entries are shown as readable YAML block content. ATT preserves their LF, CRLF or lone-CR separators and does not parse, trim or reformat the business text. Raw process and user content also keeps its original line endings. The live console mirror uses the same rendered log text as the persisted `case.log`.
-
-ATT prefixes Case log blocks whose section or nested status is ERROR, FAIL or INVALID with `【!!!!!】`. Search for that marker to find abnormal blocks; PASS, SKIPPED and informational blocks remain unmarked.
-
-## Offline SUT metrics report
-
-A completed LOAD with SUT collection evidence can publish a separate, versioned offline report archive. The publisher verifies the source manifest and each observation sidecar, preserves the original sealed native archive byte-for-byte, and publishes an immutable snapshot. Its `att-load-report-extension/v2` manifest references the source-neutral `att-load-offline-observations/v1` record. The `att-load-offline-observation/v1` entries carry source, metric, profile, target, UTC window, phase, units, quality, checksums, and bounded chart previews for time series or one numeric value plus scope, immutable Workload/mix identity, call-group metadata, mapping quality, and unmatched-row count for a business metric. When the Job snapshot pins Metric Groups, the report includes safe group metadata (schema version, ID, title, order, `groupBy`, and display mode) and per-observation `groupView` assignments with labels and `groupBy` values; it does not publish raw `match` selectors. A static Group index links each assigned instance to its metric observation; unassigned and ambiguous observations remain listed with diagnostics. This index is navigation metadata and does not refetch or rewrite source observations. Group fields are optional, preserving compatibility with existing report archives. Unavailable values remain null; full sidecars retain normalized `att-sut-metrics-observation/v1` and v2 forms. Partial or unavailable source data is reported explicitly and does not change the native Job result.
-
-The report works without network access and uses a restrictive Content Security Policy. It does not evaluate performance thresholds. If a separately versioned `att-load-verdict/v1` record is supplied, the report displays its recorded evaluation state and evidence reference without recalculating the verdict. The archive is available through the authenticated Job download route only after verified publication.
+When the Job's approved execution definition includes Metric Groups, the report publishes safe group metadata and assignments without raw selectors. Unassigned and ambiguous observations remain listed with diagnostics. The report is usable offline and applies a restrictive Content Security Policy. It does not evaluate performance thresholds. If an `att-load-verdict/v1` record is supplied, the report displays its recorded state and evidence reference without recalculating the verdict. The archive is available through the authenticated Job download route after verified publication.

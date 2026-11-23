@@ -2,7 +2,7 @@
 
 [繁體中文](native-payments.zh.md) · [Quick Start](../quick-start.md) · [Test authoring](../reference/test-authoring.md)
 
-This walkthrough is an offline Default Package example. It uses two reusable Flows, inline records, and one Excel Data Source. It does not call a bank, database, MQ, or network, and it does not replace `payment2` or `payment_regression`. Those legacy suites now live in `packages/legacy` with the same workbook Case IDs. They are not rewritten as Native Cases.
+This walkthrough is an offline Default Package example. It uses two reusable Flows, inline records, and one Excel Data Source. It does not call a bank, database, MQ, or network.
 
 There is no `suite.yaml` and no Steps DSL. The Suite is the `run native-suite` selection.
 

@@ -378,11 +378,11 @@ class TestdataRuntimeTest {
 
     @Test void checkedInGeneratedLoadExampleImportsAndValidatesItsVirtualRecords() throws Exception {
         Path workspace = Paths.get("").toAbsolutePath().normalize();
-        Path scenarioFile = root.resolve("examples/load/testdata-generated.yaml");
+        Path scenarioFile = root.resolve("examples/legacy/load/testdata-generated.yaml");
         Path descriptorFile = root.resolve("examples/testdata/generated-account.yaml");
         Files.createDirectories(scenarioFile.getParent());
         Files.createDirectories(descriptorFile.getParent());
-        Files.copy(workspace.resolve("examples/load/testdata-generated.yaml"), scenarioFile);
+        Files.copy(workspace.resolve("examples/legacy/load/testdata-generated.yaml"), scenarioFile);
         Files.copy(workspace.resolve("examples/testdata/generated-account.yaml"), descriptorFile);
         LoadScenario scenario = new LoadScenarioLoader(root).load(scenarioFile);
         assertEquals(1, scenario.testdataDescriptors().size());

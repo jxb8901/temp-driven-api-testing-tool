@@ -2,7 +2,7 @@
 
 [English](native-payments.md) · [快速入門](../quick-start.zh.md) · [測試撰寫](../reference.zh/test-authoring.md)
 
-這是 Default Package 的離線範例。它使用兩個可重用 Flow、inline 紀錄和一個 Excel Data Source。它不會呼叫銀行、資料庫、MQ 或網路，也不取代 `payment2` 或 `payment_regression`。這兩個舊式 suite 現在位於 `packages/legacy`，workbook Case ID 維持不變，也沒有改寫成 Native Case。
+這是 Default Package 的離線範例。它使用兩個可重用 Flow、inline 紀錄和一個 Excel Data Source。它不會呼叫銀行、資料庫、MQ 或網路。
 
 沒有 `suite.yaml`，也沒有 Steps DSL。Suite 就是 `run native-suite` 的選取結果。
 

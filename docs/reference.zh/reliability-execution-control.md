@@ -1,67 +1,49 @@
 # 可靠性與執行控制
 
-本頁集中定義 cross-cutting public execution behavior。
+本頁定義 Native Flow Actions 及其 Resource calls 的共通行為。
 
 ## Assertion 與 status
 
-Assertion 在文件規定的 assertion point、primary work 之後評估 boolean condition。False assertion 是 `FAIL`；exception/infrastructure problem 是 `ERROR`；authoring/configuration 無效是 `INVALID`；條件未選中是 `SKIPPED`；成功工作是 `PASS`。因此 operation failure 與 assertion failure 是不同概念。
+Assertion 會在文件指定的 assertion point、Action primary work 之後評估 boolean condition。False assertion 是 `FAIL`；exception 或 infrastructure problem 是 `ERROR`；authoring 或 configuration 無效是 `INVALID`；未選中的條件是 `SKIPPED`；成功工作是 `PASS`。Operation failure 與 assertion failure 是不同概念。
 
 ## `runWhen` 與 `onFailure`
 
-`runWhen` 決定 statically known Action/Stage 是否 eligible；`onFailure: stop|continue` 決定 failure 後是否繼續。`continue` 不會把 failed status 改成 PASS。Cleanup/diagnostic 應使用規範的 conditional execution semantics，而不是隱藏 failure。
+`runWhen` 決定 Action 是否 eligible to execute。`onFailure: stop|continue` 決定 failure 後是否繼續；`continue` 不會把 failed status 改為 PASS。Cleanup 和 diagnostics 應使用 conditional execution，而不是隱藏 primary operation failure。
 
 ## Timeout
 
-Timeout 依 backend 支援能力終止或放棄 operation，並記錄 diagnostic/evidence。Timeout 是 operational failure，不是 assertion false。Tool timeout 與 resource-specific DB/MQ/HTTP/SSH limit 分別由其 resource contract 定義。
+Timeout 會依 backend 支援能力終止或放棄 operation，並記錄 diagnostic evidence。Timeout 是 operational failure，不是 false assertion。Tool timeout 行為及 DB/MQ/HTTP/SSH limits 由各 Resource contract 定義。
 
 ## Retry 與 attempts
 
-在支援 retry 的位置，一個 logical Action 可以擁有多個 attempt。Retry policy 決定哪些 operation failure 可重試。最後／勝出的 operation 成為 top-level `output.result` / `output.evidence`；每次 attempt 保留在 `output.attempts[n]`。後續成功不會抹掉較早 attempt evidence。
+在支援 retry 的位置，一個 logical Action 可有多個 attempts。Retry policy 決定哪些 operation failure 可重試。最後或勝出的 operation 會成為 top-level `output.result` 與 `output.evidence`；每次 attempt 均保留在 `output.attempts[n]`。後續成功不會抹去較早的 attempt evidence。
 
 ## Evidence collectors
 
-Tool evidence collector 在 primary operation 發布 typed `output.result` 後、該 attempt assertion 前執行。Action active 時可使用 `${output.evidence.collectors.<id>.result}` 與 `${output.evidence.collectors.<id>.status}`；發布後的 canonical path 是 `${EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result}` 和 `.status`。Collector 有獨立 `timeoutMs` 與 `onFailure: continue|stop`；collector output 屬於該 attempt evidence，不會取代或修改 primary operation result。
+Tool evidence collectors 會在 primary operation 發布 typed `output.result` 後、該次 attempt assertion 前執行。Action 執行期間可用 `${output.evidence.collectors.<id>.result}` 與 `${output.evidence.collectors.<id>.status}`；發布後的 canonical path 為 `${EXEC.ACTIONS.<actionId>.output.evidence.collectors.<id>.result}` 與 `.status`。Collector 有獨立的 `timeoutMs` 和 `onFailure: continue|stop`。Collector output 屬於 attempt evidence，不會取代 primary operation result。
 
-每個 primary attempt 都會執行 collector。Top-level collector node 代表最後／勝出的 attempt，`output.attempts[n].evidence.collectors.<id>` 則保留各 attempt。`continue` 讓 primary/assertion outcome 在診斷收集失敗時仍可觀察；`stop` 令 collector failure 成為 Action error。若收集的值是 business/test data，而不是 pre-assertion 診斷資料，應使用普通 Tool/Log/Assign Action。
+每次 primary attempt 都會執行 collector。Top-level collector node 代表最後或勝出的 attempt；`output.attempts[n].evidence.collectors.<id>` 則保留各次 attempt。`continue` 會在 diagnostic collection 失敗時保留 primary outcome；`stop` 會令 collector failure 成為 Action error。若收集值是 business/test data，而不是 assertion 前的診斷資料，請使用一般 Tool 或 Log Action。
 
-## Transaction/Resource lifecycle
+## Transaction 與 Resource lifecycle
 
-DB transaction finalization 與 DB/MQ/HTTP/SSH resource cleanup 在相應 execution lifecycle boundary 進行。它們可能影響 operation success/diagnostic，但屬 internal resource state，不是 public Context namespace。
+DB transaction finalization 及 DB/MQ/HTTP/SSH cleanup 會在適當的 execution boundary 執行。這些機制可能影響 operation success 和 diagnostics，但屬於 internal Resource state，不是 public Context namespace。
 
 ## Aggregation
 
-多個 child outcome 聚合時保留嚴重度：
+多個 child outcome 聚合時會保留嚴重程度：
 
-```text
+~~~text
 ERROR > INVALID > FAIL > PASS > SKIPPED
-```
+~~~
 
-## Stage execution controls
+## Tool timeout precedence
 
-| Setting | Values/default | 說明 |
-|---|---|---|
-| `required` | boolean / `false` | Blank selector 是否為 error |
-| `runWhen` | `normal`（default）、`onSuccess`、`onFailure`、`always` | Stage eligibility |
-| `onFailure` | `stop`（default）、`continue` | Failure 後是否允許後續 eligible work |
-
-`continue` 不會把 FAIL 或 ERROR 改成 PASS。
-
-| Earlier outcome | Later `normal` | `onSuccess` | `onFailure` | `always` |
-|---|---:|---:|---:|---:|
-| PASS | Run | Run | Skip | Run |
-| FAIL/ERROR with `stop` | Skip | Skip | Run | Run |
-| FAIL/ERROR with `continue` | Run | Skip | Run | Run |
-
-Rollback/diagnostics 使用 `onFailure`；cleanup 或 final Evidence 使用 `always`。
-
-## Tool Timeout precedence
-
-Tool Action timeout 優先於 Tool descriptor timeout，再優先於 global timeout。Sidecar、Stage 與 Template 不定義 timeout/retry defaults。Call-backed DB Tool 的 DBHelper statement timeout 仍是 backend ceiling。每次 supported primary retry attempt 都會在 assertion 前執行 collectors。
+Tool Action timeout 優先於 Tool descriptor timeout，再優先於 global timeout。Call-backed DB Tool 的 DBHelper statement timeout 仍是 backend ceiling。每次支援的 primary retry attempt 都會在 assertion 前執行 collectors。
 
 ## Direct DB timeout 與 retry eligibility
 
-Direct DB Action 可設定 `timeoutMs`，範圍為 1 至 3,600,000 ms。明確的 Action timeout 會覆蓋 DBHelper `statement.timeoutSeconds` 預設值；未設定時才使用 helper timeout。JDBC statement timeout 以秒向上取整，ATT 仍保留毫秒級 deadline cancellation；每次 retry attempt 都重新取得完整 Action timeout，`retry.intervalMs` 的等待時間不計入該 attempt timeout。
+Direct DB Actions 可設定 `timeoutMs`，範圍為 1 至 3,600,000 ms。設定時，`Action.timeoutMs` 會覆蓋 `DBHelper.statement.timeoutSeconds`；否則使用 helper timeout。每次 retry attempt 都會重新取得完整 Action timeout，retry interval 不計入該 timeout。
 
-Direct `query` Action 亦可使用標準 retry block：`maxAttempts` 2–10、`intervalMs` 0–3,600,000，`retryOn` 必須是非空且不重複的 `ASSERTION` / `TIMEOUT` 列表。使用 `ASSERTION` 時必須同時定義 Action `assert`。一般 SQL error 為 terminal，不會自動 retry。啟用 retry 後，每次 query attempt 會保留在 `output.attempts[n]`；top-level `output.result` / `output.evidence` 永遠代表 final 或 winning attempt，並以 `winningAttempt` 或 `finalAttempt` 記錄終止 attempt 編號。
+Direct `query` Action 亦可使用標準 retry block：`maxAttempts` 2–10、`intervalMs` 0–3,600,000，`retryOn` 是非空且不重複的 `ASSERTION`、`TIMEOUT` 清單。使用 `ASSERTION` 必須同時定義 Action `assert`。一般 SQL errors 為 terminal。啟用 retry 後，每次 query attempt 會保留在 `output.attempts[n]`；top-level `output.result` 與 `output.evidence` 代表最後或勝出的 attempt，並以 `winningAttempt` 或 `finalAttempt` 記錄終止 attempt 編號。
 
-Direct `update` Action 支援 `timeoutMs`，但明確拒絕 `retry`。發生 timeout 或 database/transport failure 後，ATT 通常無法證明 mutation 是否已送達或 commit；自動重放可能造成重複業務變更。因此，需要 application-specific idempotent retry 時應由作者明確建模，而不是啟用通用 DB Action retry。
+Direct `update` Actions 支援 `timeoutMs`，但拒絕 `retry`。Timeout 或 database/transport failure 發生後，ATT 通常無法判定 mutation 是否已送達或 commit；自動重放可能重複修改業務資料。因此，application-specific idempotent retry 必須明確建模。

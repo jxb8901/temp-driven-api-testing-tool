@@ -21,10 +21,12 @@ The machine-readable copy is [example-inventory.json](../example-inventory.json)
 | `examples/load/README.md` | current | load-scenario | no | Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case. |
 | `examples/load/arrival-rate.yaml` | current | load-scenario | no | Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case. |
 | `examples/load/arrival-smoke.yaml` | current | load-scenario | no | Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case. |
-| `examples/load/closed-minimal.yaml` | current | load-scenario | no | Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case. |
 | `examples/load/closed-random-think.yaml` | current | load-scenario | no | Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case. |
 | `examples/load/closed-smoke.yaml` | current | load-scenario | no | Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case. |
-| `examples/load/closed.yaml` | current | load-scenario | no | Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case. |
+| `examples/legacy/load/README.md` | legacy | documentation | no | Legacy Template-target LOAD examples and package selection. |
+| `examples/legacy/load/README.zh.md` | legacy | documentation | no | Traditional Chinese guide for Legacy Template-target LOAD examples. |
+| `examples/legacy/load/closed-minimal.yaml` | legacy | load-scenario | no | Retained Template-target LOAD scenario using `packages/legacy`. |
+| `examples/legacy/load/closed.yaml` | legacy | load-scenario | no | Retained Template-target LOAD scenario using `packages/legacy`. |
 | `examples/load/independent-evidence.yaml` | current | load-scenario | no | Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case. |
 | `examples/load/mixed-closed.yaml` | current | load-scenario | no | Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case. |
 | `examples/load/multi-arrival.yaml` | current | load-scenario | no | Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case. |
@@ -35,7 +37,7 @@ The machine-readable copy is [example-inventory.json](../example-inventory.json)
 | `examples/load/sut-metrics/v2/metric-source-prometheus-multi-series.json` | current | contract-sample | no | Active v2 schema sample. Server tests load this path, so it stays here. |
 | `examples/load/sut-metrics/v2/observation-sampled-series.json` | current | contract-sample | no | Active v2 schema sample. Server tests load this path, so it stays here. |
 | `examples/load/sut-metrics/v2/profile-flat.json` | current | contract-sample | no | Active v2 schema sample. Server tests load this path, so it stays here. |
-| `examples/load/testdata-generated.yaml` | current | load-scenario | no | Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case. |
+| `examples/legacy/load/testdata-generated.yaml` | legacy | load-scenario | no | Retained Template-target LOAD scenario using `packages/legacy`. |
 | `examples/load/tool.yaml` | current | load-scenario | no | Direct LOAD scenario. Native LOAD Case targets remain deferred, so this file stays a LOAD scenario rather than a Native Case. |
 | `examples/package-local-sut-metrics/README.md` | current | contract-sample | no | Canonical global Data Source plus Package inventory. No live service in CI. |
 | `examples/package-local-sut-metrics/README.zh.md` | current | contract-sample | no | Canonical global Data Source plus Package inventory. No live service in CI. |
@@ -47,7 +49,7 @@ The machine-readable copy is [example-inventory.json](../example-inventory.json)
 | `examples/package-local-sut-metrics/packages/payments/load/sut-metrics/sources/app-runtime.yaml` | current | contract-sample | no | Canonical global Data Source plus Package inventory. No live service in CI. |
 | `examples/package-local-sut-metrics/packages/payments/package.yaml` | current | contract-sample | no | Canonical global Data Source plus Package inventory. No live service in CI. |
 | `examples/testdata/generated-account.yaml` | current | documentation | no | Current example note. |
-| `packages/default/templates/QUICK_START/template.yaml` | current | legacy-compatible | no | Supported workbook/Stage/Template route. QuickStartDocumentationTest executes the legacy Case IDs. Not part of the native-suite fixture set, and not a candidate for packages/legacy while that route remains the compatibility command. |
+| `packages/legacy/templates/QUICK_START/template.yaml` | legacy | legacy-compatible | no | Supported workbook/Stage/Template route. QuickStartDocumentationTest executes the legacy Case IDs. |
 | `packages/default/templates/flows/common/compose/flow.yaml` | current | executable-flow | no | Load cross-mode tests and package validation execute this Flow. It is already att-flow/v3.6, so it is not a blocked conversion and it is not part of the offline native-suite CI fixture set. |
 | `packages/default/templates/flows/common/decorate/flow.yaml` | current | executable-flow | no | Load cross-mode tests and package validation execute this Flow. It is already att-flow/v3.6, so it is not a blocked conversion and it is not part of the offline native-suite CI fixture set. |
 | `packages/default/templates/flows/common/identity/flow.yaml` | current | executable-flow | no | Load cross-mode tests and package validation execute this Flow. It is already att-flow/v3.6, so it is not a blocked conversion and it is not part of the offline native-suite CI fixture set. |
@@ -60,9 +62,9 @@ The machine-readable copy is [example-inventory.json](../example-inventory.json)
 | `packages/default/testcase/quick-start/excel/testcase.yaml` | current | native | no | Native Quick Start executed by QuickStartDocumentationTest. It is runnable, but it is not the offline native-suite CI fixture set. |
 | `packages/default/testcase/quick-start/inline-multi/testcase.yaml` | current | native | no | Native Quick Start executed by QuickStartDocumentationTest. It is runnable, but it is not the offline native-suite CI fixture set. |
 | `packages/default/testcase/quick-start/single/testcase.yaml` | current | native | no | Native Quick Start executed by QuickStartDocumentationTest. It is runnable, but it is not the offline native-suite CI fixture set. |
-| `packages/default/testcase/quick_start.xlsx` | current | legacy-compatible | no | Supported workbook/Stage/Template route. QuickStartDocumentationTest executes the legacy Case IDs. Not part of the native-suite fixture set, and not a candidate for packages/legacy while that route remains the compatibility command. |
-| `packages/default/testcase/quick_start.xml` | current | legacy-compatible | no | Supported workbook/Stage/Template route. QuickStartDocumentationTest executes the legacy Case IDs. Not part of the native-suite fixture set, and not a candidate for packages/legacy while that route remains the compatibility command. |
-| `packages/default/testcase/quick_start.yaml` | current | legacy-compatible | no | Supported workbook/Stage/Template route. QuickStartDocumentationTest executes the legacy Case IDs. Not part of the native-suite fixture set, and not a candidate for packages/legacy while that route remains the compatibility command. |
+| `packages/legacy/testcase/quick_start.xlsx` | legacy | legacy-compatible | no | Supported workbook/Stage/Template route. QuickStartDocumentationTest executes the legacy Case IDs. |
+| `packages/legacy/testcase/quick_start.xml` | legacy | legacy-compatible | no | Supported workbook/Stage/Template route. QuickStartDocumentationTest executes the legacy Case IDs. |
+| `packages/legacy/testcase/quick_start.yaml` | legacy | legacy-compatible | no | Supported workbook/Stage/Template route. QuickStartDocumentationTest executes the legacy Case IDs. |
 | `packages/default/testdata/accounts.yaml` | current | package-owned | no | The selected Package owns this Tool or testdata file. A Case or Debug command can execute a Tool. ciRunnable false only means it is outside the offline native-suite fixture set. |
 | `packages/default/testdata/payments-offline-settle.xlsx` | current | native | yes | Offline multi-Flow Native Suite fixture executed by NativePaymentsExampleTest. Not a conversion of payment2. |
 | `packages/default/testdata/quick-start-native.xlsx` | current | native | no | Native Quick Start executed by QuickStartDocumentationTest. It is runnable, but it is not the offline native-suite CI fixture set. |

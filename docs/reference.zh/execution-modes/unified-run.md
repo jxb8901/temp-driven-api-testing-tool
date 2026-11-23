@@ -1,73 +1,49 @@
 # 統一 RUN 與排程
 
-<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
-
-功能性單次執行使用共用 **RUN** model，支援 Case、Template、Flow 和 Tool。**Debug** 是部分 RUN target 的診斷模式。**LOAD** 保留效能引擎、負載控制和專用報告。目前的 default branch 透過 `run native-case` 和 `run native-suite` 加入明確 Native Case 與 implicit Native Suite 選取（`att-testcase/v1`、`att-execution/v2`）。這項選取已實作並整合在此。Native RUN 已在這個 branch 實作。4.6.0 release 和 tag 尚未發佈。implicit Suite 驗收仍然開啟。
-
-舊版 Local CLI 保留其相容邊界：`./att.sh run` 選取 workbook Case，standalone `debug` 執行一個 Template、Flow 或 Tool。ATT Remote 保留舊版 Server command。Native Server RUN 需要經驗證的 `att-execution/v2` draft，不會透過舊式 raw Case selector 提交。更廣泛的共用 CLI grammar 仍屬[規劃中 proposal](../../interfaces/cli/vnext-proposed.zh.md)。
+Native RUN 會執行 Test Case Definition 中所選的 Resolved Cases。每個 Case 會解析至 Flow 和 Data Source；開始執行前，ATT 會驗證所選的 dependency closure。新工作請從[快速入門](../../quick-start.zh.md)開始。以較早模型編寫的 Package 請參閱[舊版文件](../../legacy/README.zh.md)。
 
 ## 驗證及執行 RUN
 
-使用 ATT Studio 相同的已驗證 Server origin 和 context path，向 `POST /api/v1/drafts/run` 提交：
+使用 ATT Studio 相同的已驗證 Server origin 和 context path。向 `POST /api/v1/drafts/run` 提交 Native Case draft：
 
-```json
+~~~json
 {
   "schemaVersion": "att-execution/v2",
   "executionType": "run",
   "packageId": "payments",
   "environment": "SIT",
-  "target": {"type": "template", "id": "PAYMENT"},
-  "input": {"schemaVersion": "att-debug/v1.2", "inputs": {"amount": 100}},
+  "target": {
+    "type": "nativeCase",
+    "definitionId": "payments.authorize",
+    "selection": {"resolvedCaseIds": ["accepted"]}
+  },
   "options": {"debug": false}
 }
-```
+~~~
 
-將 `payments`、`SIT`、`PAYMENT` 換成已設定的套件值。檢閱安全預覽後，向 `POST /api/v1/jobs/run` 提交 `{"packageId":"payments","draftId":"R..."}`。工作沿用現有狀態、取消、事件、結果和 artifact 路徑。開啟頁面或切換模式不會提交工作。
+請將 package、environment、Definition 和 local Case ID 換成已登錄的值。檢閱安全預覽後，向 `POST /api/v1/jobs/run` 提交 `{"packageId":"payments","draftId":"R..."}`。Draft 綁定驗證身分及 Package revision，十分鐘後到期。Package 改變後必須重新驗證。Preview 和 validation 不會提交 Job。
 
-<!-- att-docs:historical -->
-舊版 RUN request 使用 `schemas/history/att-execution-v1.schema.json`；新的 Native Case target 使用 `att-execution/v2`。
-<!-- /att-docs:historical -->
-未知欄位及混合 target/selection 的請求均會被拒絕。Draft 有效期為十分鐘，綁定驗證身分及套件 revision。套件改變後必須重新驗證。無效輸入回傳 HTTP 400、不可用 draft 回傳 404、revision 改變回傳 409、工作或 draft 容量已滿回傳 429。Inspection 的容量、時間及大小限制仍然生效。
+Native Suite draft 使用 `target.type: nativeSuite`、非空 `definitionIds` 清單，以及一種 selection：`all:true`、`qualifiedCaseIds` 或 tag filters。Included tags 使用 any-match semantics；excluded tags 優先。Validation 最多解析並固定 10,000 個 Case ID。空 selection 或未知值會驗證失敗，不會擴大成全部 Cases。
 
-單一 Case 使用 `target:{"type":"case","id":"payments.default.PAY001"}`，並省略 `input`。Case 沿用 Excel/sidecar 綁定。Template、Flow、Tool 保留 Debug sidecar 的省略、明確 null、literal、expression、vars 和 Tool arguments 語義；不會將 Case 參數轉成Resource輸入。
+未知欄位或不合法組合會驗證失敗。輸入無效回傳 HTTP 400、不可用 draft 回傳 404、revision 改變回傳 409、Job 或 draft 容量已滿回傳 429。Inspection 大小、時間及並行上限亦適用。
 
-## 選取批次
+每個 Resolved Case 會產生一次 Case execution，各自有 execution ID、status 和 evidence。Server draft 會凍結所選 Case ID 和 Package source revision；source 改變後必須重新驗證。已接受的 Job 使用標準 status、取消、event、result 和 artifact routes。
 
-以明確 selection 取代 target 和 input：
+## 重跑失敗 Cases
 
-<!-- att-docs:historical -->
-```json
-{
-  "schemaVersion": "att-execution/v1",
-  "executionType": "run",
-  "packageId": "payments",
-  "environment": "UAT",
-  "selection": {
-    "suites": ["testcase/payments.xlsx"],
-    "caseIds": ["payments.default.PAY001"],
-    "tags": ["smoke"],
-    "excludeTags": ["slow"]
-  },
-  "options": {"debug": true, "failFast": false}
-}
-```
-<!-- /att-docs:historical -->
+Native Suite 的 `rerunFailed:true` 只會從同一 owner、Package、Definition IDs 和 Package revision 下，最近一個符合資格且已完成的 Native Suite RUN，選取已執行但失敗的 Cases。Server 按完成時間排列候選，不會只搜尋最近 100 個 Job。
 
-`suites` 與 `suiteDirectory` 互斥；後者選取套件內的 group 目錄。Case/tag 篩選沿用 CLI 交集規則，任一要求的 tag 可匹配，excludeTags 則排除匹配 Case。`all:true` 表示套件選取。陣列必須非空、不重複，最多 1000 個值。驗證會解析並固定最多 10000 個 Case ID；空選取不會退回執行全部 Case。
+本機執行會使用按 Package/Definition 區分並驗證 manifest hash 的 Native Suite pointer。Dry run 和不相關的 RUN 不會取代它。Server draft 會凍結來源 Job/run、manifest digest、revision、來源選取數、retry attempt number 和精確的失敗 Qualified Case ID。提交時會重新驗證來源；若驗證後有更新的相符 RUN 完成，便拒絕過期 draft。來源中的 Skipped Cases 不會重跑。新 RUN 只報告本次選取、執行和略過數；retry 次數與來源統計分開保存。Manifest 不可用或不一致、來源變更，或沒有已執行的失敗 Case 都會驗證失敗。
 
-Native Suite 的 `rerunFailed:true` 會從同一擁有人、Package、Definition ID 和 Package revision 中最近一個符合資格且已完成的 Native Suite RUN，選取曾執行但失敗的 Case。Server 按完成時間排列候選，不限於最近 100 個 Job。本機執行使用依 Package/Definition 區分且驗證 manifest hash 的 Native Suite pointer；dry-run 及不相關 RUN 不會取代此 pointer。Draft 會凍結來源 Job/run、manifest digest、revision、來源選取數、retry attempt number 和精確失敗 Qualified Case ID；提交時會重新驗證來源，若 draft 驗證後有更新的相符 RUN 完成，就拒絕過期 draft。來源內 Skipped Case 不會重跑。新 RUN 只報告本次選取／執行／略過數，並把 retry 次數和來源統計分開保存。Schedule 會在每次執行時保留已驗證的來源 lineage。Manifest 不可用或不一致、來源變更，或沒有已執行的失敗 Case 都會驗證失敗。既有 Workbook／Sidecar `rerunFailed:true` 行為和本機 history 維持不變。
+## 啟用 Debug diagnostics
 
-## 啟用 Debug 診斷
-
-`options.debug:true` 會保留額外 Debug 執行事件，不會增加次數、並行度、權限或啟用 unsafe failure details。Server 中央大小限制、披露政策、敏感資料過濾和 artifact 控制仍然適用。功能測試和 Resource 執行保留專用報告，並共用工作路徑。
+設定 `options.debug:true` 會保留額外診斷事件。這不會重複執行、增加並行度或權限，也不會啟用不安全的 failure details。Server 大小限制、披露政策、secret filtering 和 artifact controls 仍然適用。
 
 ## 排程已驗證的定義
 
-Canonical 建立請求使用 `schemas/att-schedule-v2.schema.json`；舊路由保留原有的選用欄位。
+標準排程建立使用 `att-schedule/v2`。使用已驗證的 draft 建立 RUN schedule：
 
-向 `POST /api/v1/schedules` 建立 RUN 排程：
-
-```json
+~~~json
 {
   "schemaVersion": "att-schedule/v2",
   "name": "Nightly payment checks",
@@ -80,58 +56,22 @@ Canonical 建立請求使用 `schemas/att-schedule-v2.schema.json`；舊路由�
   "maxConcurrentRuns": 1,
   "enabled": false
 }
-```
+~~~
 
-使用驗證回傳的 draft ID。RUN 排程保存已驗證輸入、Case 選取及 revision，而非可變查詢。套件、目標、environment、config 改變後必須建立新排程。受保護的套件預設值以路徑綁定 keep marker 表示；提交的敏感覆寫值不可持久化。
+RUN schedule 會保留已驗證的 inputs、Case selection 和 source revision。Package、target、environment 或 configuration 改變後，必須重新驗證並建立新定義。受保護的 Package defaults 會使用綁定路徑的 keep marker。提交的敏感 overrides 不可保存至 schedule。
 
-LOAD 排程繼續支援套件 scenario 路徑及已驗證 Load draft，沿用 scenario 驗證及負載上限。舊式 package-path LOAD 排程每次執行前驗證目前套件 scenario；公開 `revisionPolicy` 區分此模式與 revision 綁定 RUN snapshot。
+可使用五欄 `cron` 加 IANA timezone，或單次 `runAt` instant；不可同時提供。更新若提供任一 trigger，會取代已保存的 trigger；兩者皆未提供則保留現值。單次 trigger 只會被領取一次。春季 DST 不存在的本地時間會跳過；秋季重複時間可產生兩個 instants，但仍受最短間隔限制。啟用前可用 `POST /api/v1/schedules/preview` 預覽時間。
 
-可使用五欄 `cron` 加 IANA timezone，或單次 `runAt` instant，例如 `2026-10-20T02:00:00+08:00`；不可同時提供。排程只保留一個 trigger：更新時提供任一欄位會取代已儲存的 trigger，兩者皆未提供則保留現有 trigger。單次觸發只會被領取一次。春季 DST 不存在的本地時間會跳過；秋季重複時間可產生兩個 instant，但仍受最短間隔限制。啟用前可用 `POST /api/v1/schedules/preview` 預覽時間。
+Scheduler 會先記錄 occurrence，再提交執行。每 schedule 及全域 overlap 上限已滿時會跳過該次；一般 Worker 和 Load admission 上限仍生效。延遲或重啟期間錯過的觸發不會補跑。提交失敗遵循 `server.scheduling.failurePolicy`，不會自動重試 execution。取消 Job 只會取消該 occurrence；暫停 schedule 會阻止未來觸發。Job 和 occurrence retention 使用已設定的 Server limits。
 
-共用 scheduler 先記錄 occurrence，再提交工作。每排程及全域 overlap 容量已滿會跳過該次；一般 Worker/Load admission 上限仍生效。重啟或延誤 misfire 不會補跑。提交失敗遵循 `server.scheduling.failurePolicy`，不會自動重試執行。取消工作只取消該次 occurrence，暫停排程則阻止未來觸發。工作與 occurrence retention 沿用 Server 上限。
+所有 active local `USER` 或符合 `server.authorization.userRole` 的 authenticated container principal 均可管理共用 schedule。`ADMIN` 僅有 system 和 account administration 權限。建立者會保留作為 audit，但不限制其他 active USER 查看、編輯、暫停、觸發或刪除 schedule。使用 local authentication 時，scheduled RUN 提交時建立者必須仍是 active USER。Container roles 會在每個管理請求檢查；建立者失去指定 role 時，operator 必須暫停 schedule，因背景 scheduler 無法查詢外部 realm。
 
-所有 active local `USER` 或通過 `server.authorization.userRole` 的 authenticated container principal 均可管理共用 RUN/LOAD 排程。`ADMIN` 僅有系統及帳戶管理權限。排程建立者會保留作為 audit 資訊，但不限制其他 active USER 查看、編輯、暫停、觸發或刪除排程。Local auth 的排程建立者在 scheduled RUN 觸發時必須仍是 active `USER`。Container role 會在每個管理請求檢查；背景 scheduler 無法查詢外部 realm，因此建立者失去 USER role 時，其他 operator 必須暫停排程。Scheduled RUN job 仍以建立者身分記錄 audit。
+## Replay 或設定新執行
 
-## 遷移既有用戶端
+在 Jobs 或 Job Details 選擇 **Rerun with same settings** 或 **Configure & Rerun**。Server 會建立獲授權的 draft，並以目前 Package 和 Environment 驗證。Editor 只收到不透明的 `draftRef`，再向 Server 取得 sanitized definition；定義不會放入 URL 或 browser storage。
 
-| 既有介面 | 4.3.1 對應 |
-|---|---|
-| CLI `validate`、`run`、`report` | 保留驗證、Case RUN、報告命令 |
-| CLI `--suite`、`--suite-dir`、`--case`、`--tag`、`--rerun-failed` | 保留選取行為；Server 批次使用 `selection` |
-| Debug CLI、sidecar、`/jobs/debug`、`/drafts/debug` | 相容Resource RUN，保留舊式診斷行為 |
-| `/jobs/run` 舊式 Case selection | 保留 Case adapter |
-| `/load-schedules`、`jobType:load/debug` | 共用 scheduler 相容路徑，保留既有定義 |
-| `/jobs/...`、既有 Studio 工作/結果連結 | 保留共用 history、取消、事件與結果路徑 |
+Rerun 會保留安全保存的參數，並在確認前顯示來源和目前 revisions。Strict source revision 選項在 revision 不符時拒絕執行，並讓使用者檢閱目前 Package。Configure & Rerun 會在一般 editor 預填支援且安全的設定，驗證變更後建立獨立 Job。Cancel 或 Back 不會修改來源 Job 或 Package。系統不會從 logs 或 artifacts 重建 secrets、transport data、host roots 或不安全路徑。
 
-<!-- att-docs:historical -->
-此 release 不會移除舊 endpoint。`GET /api/v1/version` 公開 `unifiedRunVersion:att-execution/v1`。新 Studio Resource表單在舊 Server 缺少此能力時，可使用舊 Debug draft。統一 Case/batch draft 需要 4.2.6；舊部署可繼續使用 Explorer Case 操作。Server/Worker 應配套部署，舊 Worker 不支援Resource RUN dispatch。
-<!-- /att-docs:historical -->
+Draft reference 和 confirmation intent 綁定 principal，十分鐘後到期，且保存在 Server 記憶體中。Server restart 後必須從來源 Job 建立新 draft。Package 過期、draft 到期、Resource 移除、schema 無效或容量已滿均有不同回應。
 
-持久化使用既有 H2 table 的附加 JSON 欄位，不改寫舊 LOAD row。降版前先停止排程、匯出新定義、移除 RUN/單次定義，再還原升級前資料庫備份，避免舊 scheduler 把 RUN 當成 LOAD。保留的 artifact 與資料庫 metadata 分開儲存。
-
-## Replay 與從 Job 建立新執行
-
-在 **Jobs**、**Job Details** 或 **LOAD History** 選擇 **Rerun with same settings** 或 **Configure & Rerun**。兩者都會建立一個獲授權的 Server draft，並在執行前依目前 Package/Environment 驗證。標準 RUN 或 LOAD editor 只會收到不透明的 `draftRef`，進入後再向 Server 取得 sanitized 定義；定義不會放入 URL 或 browser storage。
-
-**Rerun with same settings** 預設使用 **Use current Package**：沿用 Job 中安全保留的執行參數，依目前 Package 重新解析 Target 與設定，再顯示原始／目前 revision 及驗證結果供確認。它不會在無提示下以最新 YAML defaults 取代保留的 Scenario。**Require original revision (strict)** 是重現選項。Revision 不符時回傳 `ATT-SERVER-REPLAY-REVISION-CONFLICT`，並提供 **Review with current Package**；儲存的 metadata 無法還原已缺失的歷史 source bytes。`server.scheduling.packageChangePolicy` 及 Schedule 層級的 `ignore` 只套用於排程執行，不會控制手動 Rerun。
-
-**Configure & Rerun** 會在一般 editor 預填支援且安全保留的設定。可修改 RUN Target／Case selection、options 與安全 inputs，或 LOAD timing、workloads、模型專屬 pacing、concurrency、thresholds、evidence 及安全 testdata selection。**Validate** 會以有界 typed overrides 建立新 review intent；**Review changes** 顯示前後值、LOAD phases 總和、目前 revision，以及 configured arrival rate 與 measured TPS 的差異。按 **Run** 會以 `rerunOfJobId` 建立獨立 Job；Cancel／Back 不會修改來源 Job、報告、Schedule 或 package files。Package-file-backed LOAD 使用安全保留的 package-relative source route，不套用僅 inline draft 使用的 duration 上限。
-
-Schedule 維持獨立流程：**Edit existing schedule**、**Create new schedule** 或 **Run now**。既有排程 `strict`／`pause`／`ignore` 語意不變。
-
-新保留的 execution spec 使用 `att-job-execution/v2`，parser 仍接受 v1。Replay draft 使用 `att-job-replay-draft/v1`。Draft reference 和 confirmation intent 綁定目前 principal，十分鐘後到期；兩者存在 Server 記憶體，Server restart 後會失效，需重新從來源 Job 建立。沒有安全保留定義的來源 Job、缺少敏感輸入、draft 過期、Resource 移除、schema 無效及容量拒絕會使用不同錯誤回應。系統不會從 log 或 artifact 重建秘密、Worker transport data、host root 或不安全路徑。
-
-未保留執行定義的歷史 Job 會顯示 **Rerun unavailable for this historical job**。僅驗證的 Job、安全保留失敗或包含已分類敏感輸入的 Job，不能進行精確 replay。含有原始 overrides 或未解析 `rerunFailed` 歷史選擇的舊式直接提交，須先建立新的驗證 draft 才能安全保留。請設定新執行，並透過正常的受保護輸入流程補充憑證。不可從 log、artifact 或已遮罩預覽重建執行。安全定義上限為 256 KiB，不包含 Worker transport 欄位及主機根目錄。
-
-從 Worker source-snapshot v1 升級後，Server 會將舊 lease 標記為 **UNAVAILABLE**，因為舊 archive 缺少安全 dispatch 所需的 executable metadata。歷史 Job 及不含值的 provenance 仍可讀取；Server 不會改寫或 dispatch 舊 snapshot。若要再次執行，請先針對目前 Package 重新 review 及驗證，再明確確認 rerun。新 Job 會建立 v2 source snapshot，並保留自己的 provenance。
-
-Job lifecycle API 在 `/api/v1` 下提供以下 endpoint：
-
-| Method 與 path | 結果 |
-| --- | --- |
-| `GET /jobs/{jobId}/replay` | 已授權的安全定義及不可用原因。 |
-| `POST /jobs/{jobId}/replay-draft`，body 為 `{"sourcePolicy":"current"}` 或 `{"sourcePolicy":"strict","overrides":{...}}` | 驗證 `att-job-replay-draft/v1`、不透明 `draftRef` 及確認 `intentId`；不建立 Job 或 Schedule。省略 `sourcePolicy` 時沿用舊版 strict 行為。 |
-| `GET /jobs/{jobId}/replay-draft/{draftRef}` | 綁定 principal 的 sanitized editor 定義及目前 configuration provenance；route 不包含定義。 |
-| `POST /jobs/{jobId}/rerun`，body 為 `{"intentId":"...","confirm":true,"sourcePolicy":"current"}` | 建立獨立 Job，回傳 HTTP 202 及 `Location`；相同 intent 重試時回傳已接受的 Job。 |
-
-Schedule 使用一般已驗證 draft 合約。RUN Debug 仍使用 `options.debug`。Replay 限制於提交者或保留的排程執行 owner。若 Package 在驗證後改變，回傳 `ATT-SERVER-REPLAY-DRAFT-STALE`；draft 過期或 Server restart 後遺失則回傳 `ATT-SERVER-REPLAY-DRAFT-EXPIRED`；容量限制回傳 HTTP 429。重用已接受 intent 會回傳同一 Job。
+[Run mode Reference](run.md) 說明本機 Native execution 和 output paths。[CLI Reference](../cli.md) 定義 command syntax 和 exit code。

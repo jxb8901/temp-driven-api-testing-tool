@@ -1,21 +1,19 @@
 # Execution model
 
-ATT separates functional execution, Load generation and read-only validation.
+ATT separates functional RUN, LOAD traffic generation, and read-only VALIDATE.
 
 ## Functional RUN
 
-The execution model supports a Case, Template, Flow or Tool target, including a selected batch of Cases. ATT Studio and Server expose these through unified RUN drafts and Jobs. Debug is an optional RUN diagnostic mode for supported Server targets.
-
-The legacy Local CLI's `./att.sh run` command executes workbook Cases, while standalone `debug` runs one Template, Flow or Tool. The current default branch also provides `run native-case` and `run native-suite`, backed by Native resolution (`att-testcase/v1`). That CLI is integrated here. Issue [#393](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/393) is closed for Native RUN acceptance. No 4.6.0 release or tag has been published. Suite acceptance ([#396](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/396)) remains open. The legacy ATT Remote client keeps its Server commands. Command names do not define separate Engine semantics.
+Native RUN resolves a Test Case Definition to selected Resolved Cases. Each Case uses its bound Flow, typed inputs, and declared Resources. Server and Studio submit a validated RUN draft; the draft freezes the Package revision and selection. Debug runs one Flow or Tool with explicit inputs.
 
 ## LOAD
 
-LOAD runs workload definitions through the Load scheduler with VU or arrival-rate pacing, timing controls, thresholds and evidence policy. It is a separate performance execution model. The six authoring shapes are summarized in the [Load model](load-model.md); the [Load Reference](../reference/execution-modes/load.md) owns their schema and execution contract.
+LOAD runs Flow or Tool workloads through a scheduler with virtual-user or arrival-rate pacing, timing controls, thresholds, and evidence policy. Native Case LOAD targets remain deferred. See the [Load model](load-model.md) and [Load Reference](../reference/execution-modes/load.md).
 
 ## VALIDATE
 
-VALIDATE inspects configuration, Package resources, schemas and selected dependencies. It is read-only with respect to business execution: it does not execute Tools, send Load traffic or perform DB/MQ business operations. Snapshot generation remains an explicit authoring command.
+VALIDATE inspects Configuration, Package resources, schemas, and selected dependencies. It does not execute Tools, send LOAD traffic, or perform DB/MQ business operations. Validation does not create or update authored inputs.
 
 ## Contract ownership
 
-[Unified RUN](../reference/execution-modes/unified-run.md) owns RUN semantics. [Debug](../reference/execution-modes/debug.md) owns diagnostic inputs and outputs. [LOAD](../reference/execution-modes/load.md) owns workload behavior. [Validation and Diagnostics](../reference/validation-diagnostics.md) owns validation results and diagnostics.
+[RUN](../reference/execution-modes/run.md) owns Case selection and execution. [Debug](../reference/execution-modes/debug.md) owns diagnostic inputs and outputs. [LOAD](../reference/execution-modes/load.md) owns workload behavior. [Validation and Troubleshooting](../reference/validation-diagnostics.md) owns validation results and diagnostics. For a Package authored with an earlier model, use the [Legacy documentation](../legacy/README.md).

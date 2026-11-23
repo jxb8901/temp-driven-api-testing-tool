@@ -6,6 +6,8 @@ from documentation_contracts import (active_schemas, stale_claims,
                                      product_model_order_errors, flow_authoring_errors,
                                      chapter_label_errors, editorial_errors,
                                      chapter_reference_errors,
+                                     documentation_ownership_errors,
+                                     legacy_authoring_ownership_errors,
                                      editorial_source_files, standalone_markdown,
                                      standalone_page_errors, proposed_schemas)
 from build_reference_manual import rebase_headings, assembly_heading_offset
@@ -267,40 +269,50 @@ schemas:
             with self.subTest(text=text):
                 self.assertTrue(overview_resource_errors(text))
 
-    def test_first_product_model_is_flow_centric_and_legacy_is_scoped(self):
+    def test_first_product_model_is_flow_centric_and_legacy_chain_is_rejected(self):
         native = ("## Product model\n\x60\x60\x60text\n"
                   "Test Case Definition\n  -> Resolved Case\n\x60\x60\x60\n"
-                  "A **Flow** is reusable ordered Actions.\n"
-                  "## Supported legacy compatibility\n\x60\x60\x60text\n"
-                  "Workbook row\n  `-- ordered Stage\n        `-- Template\n\x60\x60\x60\n")
+                  "A **Flow** is reusable ordered Actions.\n")
         self.assertEqual([], product_model_order_errors(native))
         zh = native.replace("## Product model", "## 產品模型")
-        zh = zh.replace("## Supported legacy compatibility", "## 受支援的 Legacy 相容模型")
         self.assertEqual([], product_model_order_errors(zh))
         generated = native.replace("## Product model", "### Product model")
-        generated = generated.replace("## Supported legacy compatibility",
-                                      "### Supported legacy compatibility")
         self.assertEqual([], product_model_order_errors(generated))
         stale = ("## Product model\n\x60\x60\x60text\nTestcase\n"
                  "  `-- ordered Stage\n        `-- Template\n\x60\x60\x60\n"
-                 "A **Flow** is reusable Template logic.\n"
-                 "## Supported legacy compatibility\n\x60\x60\x60text\n"
-                 "Workbook row\n  `-- ordered Stage\n\x60\x60\x60\n")
+                  "A **Flow** is reusable Template logic.\n")
         self.assertTrue(product_model_order_errors(stale))
-        buried = native.replace("## Product model", "## Later notes", 1)
-        buried = "## Product model\nSee the workbook chain.\n" + buried
+        buried = native + "\n## Supported legacy compatibility\n"
         self.assertTrue(product_model_order_errors(buried))
 
     def test_flow_section_is_not_template_logic(self):
         good = ("## Flow\nA Flow is a first-class reusable sequence of ordered Actions. "
-                "A Native Test Case Definition binds that Flow directly. "
-                "A legacy Template may also invoke the same Flow.\n## Next\n")
+                "A Native Test Case Definition binds that Flow directly.\n## Next\n")
         self.assertEqual([], flow_authoring_errors(good))
         zh = ("## Flow\nFlow 是一等的可重用有序 Actions。Native Test Case Definition 直接綁定該 Flow。"
-              "舊式 Template 也可以呼叫同一個 Flow。\n## 下一節\n")
+              "\n## 下一節\n")
         self.assertEqual([], flow_authoring_errors(zh))
         stale = good.replace("ordered Actions", "reusable Template logic")
         self.assertTrue(flow_authoring_errors(stale))
+
+    def test_legacy_authoring_has_a_separate_bilingual_home(self):
+        root = Path(__file__).resolve().parents[1]
+        manifest = ["overview.md", "test-authoring.md"]
+        self.assertEqual([], documentation_ownership_errors(root, manifest))
+        self.assertTrue(documentation_ownership_errors(root, manifest + ["legacy/authoring.md"]))
+
+    def test_current_primary_docs_keep_legacy_authoring_in_its_own_home(self):
+        for sample in (
+                "## Workbook authoring\\nUse att-sidecar/v2.2 with a Template definition.",
+                "## Stage execution\\nWorkbook row -> ordered Stage -> Template",
+                "The META.TEMPLATE namespace is populated for each Sidecar input."):
+            with self.subTest(sample=sample):
+                self.assertTrue(legacy_authoring_ownership_errors(
+                    "docs/reference/example.md", sample))
+        self.assertEqual([], legacy_authoring_ownership_errors(
+            "docs/reference/load.md",
+            "Load uses the att-load-template/v1 preset schema.\\n"
+            "Its metrics snapshot is stored in the Job artifact index."))
 
     def test_secondary_link_labels_use_current_taxonomy(self):
         for label, target in (
@@ -324,7 +336,7 @@ schemas:
         self.assertEqual([], manifest_errors(["a.md", "x/b.md"]))
 
     def test_duplicate_number_missing_appendix_and_order_drift_fail(self):
-        good = "\n".join(["## Chapter %s" % n for n in range(1, 15)] +
+        good = "\n".join(["## Chapter %s" % n for n in range(1, 13)] +
                          ["## Appendix " + c + " — Lookup " + c for c in "ABCD"])
         self.assertEqual([], structure_errors(good))
         self.assertTrue(structure_errors(good.replace("Chapter 3", "Chapter 2")))
@@ -361,15 +373,15 @@ schemas:
             "docs/reference/reliability-execution-control.md":
                 "## `runWhen` and `onFailure`",
             "docs/reference/configuration.md":
-                "## `config.report.fileNamePattern`",
+                "## Configure execution identity and output",
             "docs/reference/results-reports-evidence.md":
-                "## Reading `case.log` and `case.yaml`",
+                "## Read Case logs",
             "docs/reference.zh/reliability-execution-control.md":
                 "## `runWhen` 與 `onFailure`",
             "docs/reference.zh/configuration.md":
-                "## `config.report.fileNamePattern`",
+                "## 設定 execution identity 和 output",
             "docs/reference.zh/results-reports-evidence.md":
-                "## Reading `case.log` and `case.yaml`",
+                "## 閱讀 Case logs",
             "docs/reference/actions.md": "## Tool, DB and Flow results",
             "docs/reference.zh/actions.md": "## Tool、DB 與 Flow 結果",
         }
@@ -378,6 +390,18 @@ schemas:
                 actual = [line for line in (root / rel).read_text(encoding="utf-8").splitlines()
                           if line.startswith("## ")]
                 self.assertIn(expected, actual)
+        for rel, expected in (
+                ("docs/legacy/configuration.md", "## Earlier Workbook configuration fields"),
+                ("docs/legacy/report-reference.md", "## Reading `case.log` and `case.yaml`"),
+                ("docs/legacy/configuration.zh.md", "## 較早的 Workbook configuration 欄位"),
+                ("docs/legacy/report-reference.zh.md", "## Reading `case.log` and `case.yaml`")):
+            with self.subTest(path=rel):
+                actual = [line for line in (root / rel).read_text(encoding="utf-8").splitlines()
+                          if line.startswith("## ")]
+                self.assertIn(expected, actual)
+        for rel in ("docs/legacy/configuration.md", "docs/legacy/configuration.zh.md"):
+            with self.subTest(path=rel, legacy_filename_contract=True):
+                self.assertIn("report.fileNamePattern", (root / rel).read_text(encoding="utf-8"))
         for rel, expected in (
                 ("docs/reference/actions.md", "## File-content expressions return a `String`"),
                 ("docs/reference/reliability-execution-control.md", "## Tool timeout precedence")):

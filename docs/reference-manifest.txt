@@ -23,6 +23,4 @@ results-reports-evidence.md
 validation-diagnostics.md
 ci-packaging-operations.md
 appendices/schema-matrix.md
-appendices/compatibility.md
-appendices/migrations.md
 appendices/limits-defaults.md

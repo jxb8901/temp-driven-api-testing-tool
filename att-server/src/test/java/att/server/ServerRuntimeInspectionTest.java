@@ -22,7 +22,7 @@ class ServerRuntimeInspectionTest {
     @TempDir Path temp;
 
     @Test void listsPackageResourcesThroughTheBoundedInspectorWorkerAndSignsPaginationCursors() throws Exception {
-        Path packageRoot=Path.of("").toRealPath().resolve("packages/default");Path allowed=packageRoot;
+        Path packageRoot=Path.of("").toRealPath().resolve("packages/legacy");Path allowed=packageRoot;
         Path javaBin=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase().contains("win")?"java.exe":"java");
         Path configFile=temp.resolve("inspection-runtime-server.yaml");
         Files.writeString(configFile,"server:\n  dataDir: "+ServerRuntimeTestSupport.yaml(temp.resolve("inspection-runtime-data"))+"\n  javaExecutable: "+ServerRuntimeTestSupport.yaml(javaBin)+"\n  inspection:\n    maxConcurrent: 1\n    queuedLimit: 2\n    timeoutMs: 30000\n    heapMaxMb: 256\nworkers: {}\npackages:\n  allowedRoots:\n    - "+ServerRuntimeTestSupport.yaml(allowed)+"\n  entries:\n    p: "+ServerRuntimeTestSupport.yaml(packageRoot)+"\n");

@@ -1,6 +1,6 @@
 # Actions and typed values
 
-This page defines the active ATT action contract. Templates use att-template/v3.6. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. For resource configuration, start with [Resources](resources/overview.md).
+This page defines the Native Action contract. Native Flow Actions use att-flow/v3.6. Each completed action publishes its logical typed value at output.result. Actions do not use a shared result.format/path/overwrite object. For resource configuration, start with [Resources](resources/overview.md).
 
 ## Action types
 
@@ -29,7 +29,7 @@ ATT keeps the logical operation result separate from human or wire representatio
 | Abstract Map/List sent over HTTP/MQ | requestFormat | Serializes the value at the outbound boundary. |
 | Log or resource evidence | format / evidence.output.format | Produces a human-readable representation. |
 
-DB results are already typed values. Tool, Action, Template, Flow and expression results remain typed while they move through ATT.
+DB results are already typed values. Tool, Action, Flow and expression results remain typed while they move through ATT.
 
 DB query, scalar, and update operations use the first-class DBHelper call forms `db.<helper>.query(...)`, `db.<helper>.scalar(...)`, and `db.<helper>.update(...)` inside a normal `type: tool` Action. A DB call accepts one String `sql` argument plus either positional `params` or named `parameters`; `sql=&{package-relative-file.sql}` supplies package SQL content. The historical `type: db` Action is retained only by archived schema versions.
 
@@ -41,12 +41,12 @@ The current replacement for the historical Render Action is the typed file-conte
 requestText:
   type: assign
   name: requestText
-  expression: "&{templates/payment/payload/request.xml}"
+  expression: "&{payload/payment/request.xml}"
 ~~~
 
 `${...}` remains a Context reference and `#{...}` remains an expression/call. `&{...}` is a static, one-file locator; v1 has no glob or dynamic locator form. The locator is relative to the canonical ATT package root. A descriptor-relative `./` or `../` path is allowed only when its canonical target remains inside that root. Absolute paths, missing files, directories, symlink escapes, non-UTF-8 bytes, surrounding whitespace and glob syntax fail validation.
 
-Ordinary UTF-8 files are returned unchanged. If the file contains `${...}` or `#{...}`, ATT compiles those nodes once and evaluates them for each execution; the compiled plan is immutable and dynamic values are not reparsed as a second template. Run and Debug reuse the plan until the file fingerprint changes. Load validates and captures the selected file identity, content and compiled dependency closure before scheduling, so active iterations see a stable snapshot.
+Ordinary UTF-8 files are returned unchanged. If the file contains `${...}` or `#{...}`, ATT compiles those nodes once and evaluates them for each execution; the compiled plan is immutable and dynamic values are not reparsed as a new expression source. Run and Debug reuse the plan until the file fingerprint changes. Load validates and captures the selected file identity, content and compiled dependency closure before scheduling, so active iterations see a immutable dependency closure.
 
 Use Assign when the String is reused by later Actions:
 
@@ -54,7 +54,7 @@ Use Assign when the String is reused by later Actions:
 requestText:
   type: assign
   name: requestText
-  expression: "&{templates/payment/payload/request.xml}"
+  expression: "&{payload/payment/request.xml}"
 sendRequest:
   type: tool
   call: "#{http.payment.post(body=${EXEC.VARS.requestText})}"
@@ -167,7 +167,7 @@ logOrder:
   format: yaml
 ~~~
 
-Log is a plain Case-log entry. The current v3.6 contract removes `level`; delete it when migrating. Historical v3.4/v3.5 Template and Flow descriptors still accept their schema-defined Log level for compatibility. Internal diagnostic severity remains separate. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
+Log is a plain Case-log entry. The current v3.6 contract removes `level`; delete it when migrating. Earlier Log-level behavior is documented in the [Legacy authoring guide](../legacy/authoring.md). Internal diagnostic severity remains separate. At least one of message or value is required. message is rendered as text. value accepts any typed value, including nested maps/lists. Exact ${...} and #{...} expressions preserve their native types; map/list children are evaluated recursively without converting numbers, booleans, nulls or nested values to strings. format accepts text, json, yaml, xml or sqlplus and controls only the emitted Case-log string. When format is present, value is required.
 
 When both message and value are supplied, Log emits the message, a newline, then the formatted value. output.result is that emitted string. A file-content String is emitted as-is when used as a value; Log does not infer or attach a document format. Log does not read a file and has no fields map. Put a typed map/list in value for structured log content.
 
@@ -175,7 +175,7 @@ When both message and value are supplied, Log emits the message, a newline, then
 
 Action expressions use the regular ATT expression engine. A complete ${...} or #{...} expression keeps its result type; embedding an expression in surrounding text produces a String. See [Expressions and Built-ins](expressions.md).
 
-assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Use set with the same name and expression fields to update an existing top-level EXEC.VARS value; set never declares a missing variable. Its expression reads the old Context value and publishes only after evaluation and its assertion succeed, preserving the native result type. A set may use the common Action retry block: each attempt evaluates against the unchanged variable, failed attempts leave its old value intact, and only the winning attempt publishes once. Attempt status and retry decisions remain in output.attempts. Both Actions share EXEC.VARS across Stages and nested Flow calls. A set of a Debug/Load bootstrap variable consumes its first-assign allowance; a later assign cannot overwrite that update. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; EXEC.VARS updates remain visible to the caller.
+assign publishes its typed value once below EXEC.VARS.<name>. The name must match [A-Za-z_][A-Za-z0-9_]* and be unique within the Case. Use set with the same name and expression fields to update an existing top-level EXEC.VARS value; set never declares a missing variable. Its expression reads the old Context value and publishes only after evaluation and its assertion succeed, preserving the native result type. A set may use the common Action retry block: each attempt evaluates against the unchanged variable, failed attempts leave its old value intact, and only the winning attempt publishes once. Attempt status and retry decisions remain in output.attempts. Both Actions share EXEC.VARS across Actions in sequence and nested Flow calls. A set of a Debug/Load bootstrap variable consumes its first-assign allowance; a later assign cannot overwrite that update. Action-local output is available at output.* while an Action runs and at EXEC.ACTIONS.<id>.output.* after publication. Flow invocation creates a temporary Action namespace; EXEC.VARS updates remain visible to the caller.
 
 ~~~yaml
 initializeCounter:
@@ -201,7 +201,7 @@ evidence:
     maxChars: 10000
 ~~~
 
-This adds a bounded human-readable snapshot beside operation metadata; it does not change output.result or response parsing. In Load, evidence.resources.output accepts inherit (default) or none. none skips resource-output formatting and file materialization. Metrics-only iterations create no execution directory. When iteration evidence is retained, eligible resource output is formatted lazily into that workspace.
+This adds a bounded bounded human-readable rendering beside operation metadata; it does not change output.result or response parsing. In Load, evidence.resources.output accepts inherit (default) or none. none skips resource-output formatting and file materialization. Metrics-only iterations create no execution directory. When iteration evidence is retained, eligible resource output is formatted lazily into that workspace.
 
 ## Action output and evidence paths
 
@@ -219,7 +219,7 @@ This adds a bounded human-readable snapshot beside operation metadata; it does n
 | `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.result/status` | Collector result/status for a specific retry attempt; earlier attempts remain after a later success. |
 | `EXEC.ACTIONS.<actionId>.output.attempts[n].evidence.collectors.<id>.error/evidence` | Failure summary and underlying evidence for that specific collector attempt. |
 
-Strings, numbers, booleans, null, maps and lists remain typed across Action/Template/Flow boundaries.
+Strings, numbers, booleans, null, maps and lists remain typed across Action/Flow boundaries.
 
 ## Common Retry and boolean conditions
 

@@ -1,56 +1,47 @@
 # Appendix A — schema 與 version matrix
 
-現行 active schemas（由版本相符 ATT Engine JAR 內嵌 registry 提供，repository `schemas/catalog.yaml` 為其 build input）：
+現行 schemas 由版本相符 ATT Engine JAR 內嵌 registry 提供；repository 的 `schemas/catalog.yaml` 是其 build input。
 
 | Artifact | 現行 schema |
 |---|---|
-| 排程建立 | att-schedule/v2 |
-| RUN 定義 | att-execution/v2 |
-| Native Test Case Definition | att-testcase/v1 |
-| Global configuration | att-config/v2.15 |
-| Package Manifest | att-package/v2 |
-| Testdata descriptor | att-testdata/v1.0 |
-| DBHelper | att-dbhelper/v2.6 |
-| MQHelper | att-mqhelper/v1.3 |
-| HTTPHelper | att-httphelper/v1.1 |
-| SSHHelper | att-sshhelper/v1.0 |
-| Package Tool | att-tool/v1 |
-| Package Tool Group | att-tool-group/v3.0 |
-| Workbook sidecar | att-sidecar/v2.2 |
-| Testcase snapshot | att-testcases/v2.4 |
-| Template | att-template/v3.6 |
-| Flow | att-flow/v3.6 |
-| Debug input | att-debug/v1.2 |
-| Load scenario | att-load/v1.9 |
-| LOAD observability binding | att-load-observability/v1 |
-| SUT Metrics Data Source | att-sut-metrics-source/v1 |
-| SUT Metrics Profile | att-sut-metrics-profile/v1 |
-| SUT Metrics Job snapshot | att-sut-metrics-snapshot/v1 |
-| SUT Metric Source acquisition and output mapping | att-sut-metrics-metric-source/v1 |
-| SUT logical Metric Group | att-sut-metrics-group/v1 |
-| SUT flat Metrics Profile | att-sut-metrics-profile/v2 |
-| SUT Metrics Job snapshot | att-sut-metrics-snapshot/v2 |
-| Server-private SUT Metrics execution payload | att-sut-metrics-execution-payload/v2 |
-| SUT Metrics collection manifest | att-sut-metrics-manifest/v1 |
-| 同一檔案內的 SUT Metrics Manifest 完整性歷程 | att-sut-metrics-manifest-integrity/v1 |
-| SUT Metrics normalized observation | att-sut-metrics-observation/v1 |
-| SUT Metrics normalized observation | att-sut-metrics-observation/v2 |
-| SUT Metrics series sidecar | att-sut-metrics-series/v1 |
-| SUT Metrics threshold evaluation record | att-sut-threshold-evaluation/v1 |
-| Load Template | `att-load-template/v1` | `schemas/att-load-template-v1.schema.json` |
-| Load bindings | `att-load-bindings/v1` | `schemas/att-load-bindings-v1.schema.json` |
-| Load summary | 直接 Engine／CLI：legacy summary contract (schema under `schemas/history/`)；封存報告：att-load-summary/v1.3 |
-| LOAD report detail files | att-load-detail-manifest/v1、att-load-detail-reference/v1、att-load-detail-series/v1、att-load-detail-series/v2（shared payload）、att-load-workload-detail/v1 |
-| Run manifest | att-run/v2.1 |
-| 舊版 Package validation JSON | `att-validation/v2.1` |
+| 排程建立 | `att-schedule/v2` |
+| Native RUN 定義 | `att-execution/v2` |
+| Native Test Case Definition | `att-testcase/v1` |
+| Global configuration | `att-config/v2.15` |
+| Package Manifest | `att-package/v2` |
+| Testdata descriptor | `att-testdata/v1.0` |
+| DBHelper | `att-dbhelper/v2.6` |
+| MQHelper | `att-mqhelper/v1.3` |
+| HTTPHelper | `att-httphelper/v1.1` |
+| SSHHelper | `att-sshhelper/v1.0` |
+| Package Tool | `att-tool/v1` |
+| Package Tool Group | `att-tool-group/v3.0` |
+| Flow | `att-flow/v3.6` |
+| Debug input | `att-debug/v1.2` |
+| Load scenario | `att-load/v1.9` |
+| LOAD observability binding | `att-load-observability/v1` |
+| SUT Metrics Data Source | `att-sut-metrics-source/v1` |
+| SUT Metric Source acquisition and output mapping | `att-sut-metrics-metric-source/v1` |
+| SUT logical Metric Group | `att-sut-metrics-group/v1` |
+| SUT Metrics Profile | `att-sut-metrics-profile/v1` |
+| SUT Metrics Profile | `att-sut-metrics-profile/v2` |
+| SUT Metrics execution binding | `att-sut-metrics-snapshot/v1`、`att-sut-metrics-snapshot/v2` |
+| Server-private SUT Metrics execution payload | `att-sut-metrics-execution-payload/v2` |
+| SUT Metrics collection manifest | `att-sut-metrics-manifest/v1` |
+| SUT Metrics manifest integrity history | `att-sut-metrics-manifest-integrity/v1` |
+| SUT Metrics normalized observation | `att-sut-metrics-observation/v1`、`att-sut-metrics-observation/v2` |
+| SUT Metrics series data | `att-sut-metrics-series/v1` |
+| SUT Metrics threshold evaluation record | `att-sut-threshold-evaluation/v1` |
+| Load preset | `att-load-template/v1` |
+| Load bindings | `att-load-bindings/v1` |
+| Load summary | Engine/CLI result contract；封存報告使用 `att-load-summary/v1.3` |
+| LOAD report detail files | `att-load-detail-manifest/v1`、`att-load-detail-reference/v1`、`att-load-detail-series/v1`、`att-load-detail-series/v2`、`att-load-workload-detail/v1` |
+| Run manifest | `att-run/v2.1` |
 | 精簡 CLI 階層式 validation report | `att-validation/v1` |
-| CI summary | att-ci-summary/v2.1 |
-| JUnit XML | att-junit/v2.1 |
+| Package validation JSON | `att-validation/v2.1` |
+| CI summary | `att-ci-summary/v2.1` |
+| JUnit XML | `att-junit/v2.1` |
 
-本次調整的 resource/config schema 舊版本位於 `schemas/history/`，除非嵌入的 Engine registry 登錄且支援，否則僅供歷史參考，不是 active execution contract。Unsupported version 會在 validation 失敗並提供 migration guidance。Repository `schemas/catalog.yaml` 僅為 build input；runtime 唯一權威來源是版本相符 ATT Engine JAR 內嵌 registry。Runtime 會從 classpath 讀取 schema files，並可在 private per-user temporary directory 建立經驗證、以內容 SHA-256 定位的相容快取。快取會保留目前及緊接上一版 registry 供 rollback；只有取得排他 OS lock 並確認沒有 Worker 使用後，才會刪除較舊版本。若清理中斷，下一次初始化會重試。不完整或遭竄改的快取只會在確認沒有程序持有 use lease 後重建；若仍有程序使用，validation 會 fail closed，並於 Worker 結束後重試。Validation revision 會綁定 Engine/registry identity、Package files、shared config files 及選定 Environment；Worker 處理請求前會驗證 Server 傳入的 registry identity。`ATT_HOME/schemas/` 及 package-local `schemas/` 不是 runtime 來源，也不能覆寫 registry。Package validation 會驗證 Engine 登錄的 schema resources；封存 schema 不會自動成為可用的 runtime contract。
+Engine 會從 classpath registry 讀取 schema bytes。Compiled validators 以 registry digest 和 schema resource 為 key，保存在有界記憶體 cache。Runtime 唯一權威來源是內嵌 registry；`ATT_HOME/schemas/` 及 Package-local `schemas/` 不能覆寫它。Validation revision 會綁定 Engine/registry identity、Package files、shared configuration files 和選定 Environment。Worker 處理請求前會驗證 Server 傳入的 registry identity。
 
-上表中的 SUT Metrics Data Source schema 仍是 registered connection 定義。新的 [Metric Source schema](../../../schemas/att-sut-metrics-metric-source-v1.schema.json) (`att-sut-metrics-metric-source/v1`) 定義一次 acquisition 及其 declared output mapping，不會另外登錄 Data Source、DBHelper 或 Package Tool。Server 私有的 [SUT Metrics execution payload schema](../../../schemas/att-sut-metrics-execution-payload-v2.schema.json) (`att-sut-metrics-execution-payload/v2`) 將可執行 fetch/call data 綁定至不可變 Job snapshot，且不會透過 API 或 report 回傳。離線報告 metadata 及外部提供的 verdict record 使用 `schemas/api/` 下的獨立 Server contracts，不屬於 Engine execution registry。詳見[離線 SUT Metrics 報告](../results-reports-evidence.md)。
-
-<!-- att-docs:historical -->
-Load v1.6 及 MQHelper v1.2 是 loader 支援的相容歷史 schema；既有 scalar routing 及 legacy evidence policy 維持。新路由／配額欄位須使用 active schema。
-<!-- /att-docs:historical -->
+SUT Metrics Data Source schema 定義已登錄的 connection。Metric Source schema 描述一次 acquisition 及其 declared output mapping，不會登錄另一個 Data Source、DBHelper 或 Package Tool。Server 私有 execution payload 會把 executable fetch/call data 綁定至已批准的 Job execution definition，且不會經 API 或 report 回傳。離線報告 metadata 及外部 verdict records 使用 `schemas/api/` 下獨立的 Server contracts，不屬於 Engine execution registry。詳見[離線 SUT Metrics 報告](../results-reports-evidence.md)。

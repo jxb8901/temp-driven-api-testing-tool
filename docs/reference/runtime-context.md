@@ -1,83 +1,51 @@
 # Runtime and Context model
 
-Run, Debug and Load share one canonical EXEC/META expression model. EXEC changes through framework lifecycle and explicit input/variable/action publication. META is curated, immutable and secret-safe.
+RUN, Debug, and LOAD share the canonical `EXEC` and `META` expression roots. `EXEC` holds identity, typed inputs, variables, and completed Actions. `META` describes the selected source, target, Flow, and active Resource invocation. These roots contain no secrets.
 
-Standalone Debug bootstrap values are mapped into these canonical roots: `inputs` populates `EXEC.INPUT`, while Template/Flow `vars` seeds `EXEC.VARS` before the target starts. See [Standalone Debug](execution-modes/debug.md) for the current schema, typed literal rules and protected framework roots.
+Standalone Debug maps `inputs` to `EXEC.INPUT`; optional `vars` seed `EXEC.VARS`. See [Standalone Debug](execution-modes/debug.md) for the input schema and protected roots.
 
-## Identity roots
+## EXEC roots
 
-| Path | Meaning and type | Availability |
-|---|---|---|
-| EXEC.ID | Current Case, Debug execution or Load iteration ID; String. | After execution initialization; generated before Load business actions. |
-| EXEC.RUN_ID | Enclosing ATT Run ID; String. | All modes; shared by Cases/iterations in a run. |
-| EXEC.STARTED_AT | Current execution start time; ISO-8601 String. | All modes. |
-| EXEC.RUN_STARTED_AT | Enclosing run start time; ISO-8601 String. | All modes. |
-| EXEC.OUTPUT_DIR | Absolute execution workspace path. | After initialization; in Load it may be planned and not yet exist. |
-| EXEC.INPUT | Case/stage, Debug sidecar or Load workload input map. | All modes. Stage inputs temporarily overlay Case inputs. |
-| EXEC.VARS | Typed values created by assign or updated by set. | All modes; empty before assignment or bootstrap. |
-| EXEC.ACTIONS | Completed Actions in the active Template/Flow scope. | After an Action is published; Flow has a nested scope. |
-| EXEC.LOAD.MODEL | closed or arrivalRate. | Load only; available before ID generation. |
-| EXEC.LOAD.WORKLOAD_ID | Configured workload ID. | Load only; available before ID generation. |
-| EXEC.LOAD.USER_ID | Stable virtual-user ID. | Closed Load only; absent for arrival-rate. |
-| EXEC.LOAD.ITERATION | Numeric iteration sequence. | Load only; available before ID generation. |
-| EXEC.LOAD.PHASE | RAMP_UP, WARMUP, STEADY or RAMP_DOWN. | Load only; available before ID generation. |
+| Path | Meaning and availability |
+|---|---|
+| `EXEC.ID` | Current Case execution, Debug execution, or LOAD iteration ID; available after initialization. |
+| `EXEC.RUN_ID` | Enclosing ATT Run ID; shared by Cases and iterations in a run. |
+| `EXEC.STARTED_AT` | Current execution start time as an ISO-8601 string. |
+| `EXEC.RUN_STARTED_AT` | Enclosing run start time as an ISO-8601 string. |
+| `EXEC.OUTPUT_DIR` | Execution workspace path; in LOAD it may be planned before the directory exists. |
+| `EXEC.INPUT` | Typed input map for a Case, Debug target, or LOAD workload. |
+| `EXEC.VARS` | Typed values created by `assign`, updated by `set`, or supplied as Debug bootstrap variables. |
+| `EXEC.ACTIONS` | Completed Actions in the active Flow scope. A nested Flow receives a separate scope. |
+| `EXEC.LOAD.*` | Workload and iteration identity available only during LOAD. `USER_ID` is absent for arrival-rate workloads. |
 
-EXEC.LOAD exposes stable identity. Scheduler counters, queue state and timing diagnostics stay in evidence-only DIAG.load, which is not an expression root.
+Scheduler counters, queue state, and timing diagnostics remain in evidence; they are not expression roots. A reusable Flow should receive business identifiers through its input contract, not infer them from `EXEC.ID`.
 
-`CASE.environment` contains the selected environment profile in Run, Debug and Load and is available before business Actions. `CASE.status` and `CASE.durationMs` describe a completed or failed execution; they are lifecycle/result fields, not portable inputs for an Action that is still running. The legacy Package `PAYMENT_ROLLBACK` example reads `CASE.status` only in its Run/Debug flow.
+## META inventory
 
-For a reusable Flow that needs the source TestCase ID when one exists and an execution identity in every mode, use `#{misc.coalesce(${META.SOURCE.caseId?}, ${EXEC.ID})}`. This preserves the TestCase or synthetic Debug Case ID in Run and Debug and uses the Load iteration's `EXEC.ID` when `META.SOURCE.caseId` is absent. These values are not interchangeable when a business or TestCase identifier is required; pass that identifier through an explicit input contract or keep the resource mode-specific.
+| Path | Meaning and availability |
+|---|---|
+| `META.SOURCE.type` | Source kind: `testcase`, `debug`, or `load`. |
+| `META.SOURCE.path` | Logical Package-relative source path when the source is file-backed. |
+| `META.SOURCE.caseId` | Qualified Case ID during a Case RUN; absent for Debug and LOAD. |
+| `META.SOURCE.scenario` | LOAD scenario identity; absent outside LOAD. |
+| `META.TARGET.type` | Resolved target kind: Case, Flow, or Tool. |
+| `META.TARGET.id` | Resolved target identifier. |
+| `META.FLOW.id` | Active Flow ID during a Flow invocation. |
+| `META.FLOW.invocationId` | Calling Action ID during that invocation. |
+| `META.FLOW.depth` | One-based nested Flow depth. |
+| `META.TOOL.id`, `META.TOOL.type` | Active configured Tool or built-in invocation. |
+| `META.DBHELPER.*`, `META.MQHELPER.*`, `META.HTTPHELPER.*`, `META.SSHHELPER.*` | Logical Resource identity during the corresponding invocation. |
 
-The legacy Package's `PAYMENT_PREPARE`, `PAYMENT_INVOKE`, `PAYMENT_VERIFY`, `PAYMENT_ROLLBACK`, `PAYMENT_CLEANUP`, `FPP_CTO_RTI_USMF`, `FPP_D3I_BATCH_SIT`, and local-payment integration examples require a business TestCase ID and are intended for Run/Debug from `packages/legacy`. Do not use them as Quick or Advanced Load targets without adding an explicit business-ID input contract; Load's `EXEC.ID` is an iteration ID. If an unsupported Load call evaluates a required `${META.SOURCE.caseId}`, ATT reports the source Action and explains which Load identity is available.
-
-## META field inventory and lifecycle
-
-The public META root contains `SOURCE`, `TARGET`, `TEMPLATE`, `FLOW`, `TOOL`, `DBHELPER`, `MQHELPER`, `HTTPHELPER`, and `SSHHELPER`. `META.PACKAGE_ROOT` and `CASE.outputDirectory` were removed from the author Context. Use `&{logical/package/resource}` to read package content and `EXEC.OUTPUT_DIR` for execution output. Legacy `META.PROJECT.id` and `META.PROJECT.root` are removed with no compatibility alias. Package resources use logical package-relative names; only `EXEC.OUTPUT_DIR` exposes an execution path. META contains descriptive fields only. A path may be absent when its component is not active.
-
-| Public path | Meaning, type and example | Modes and availability | Scope and when absent |
-|---|---|---|---|
-| META.SOURCE.type | Source kind; String: `testcase`, `debug` or `load`. | Run, Debug, Load. | Execution-wide. |
-| META.SOURCE.path | Logical package-relative source name; String, for example, `testcase/payment.xlsx`, `debug.yaml` or `load/payment.yaml`. | Run, Debug, Load when a source file exists. | Execution-wide; absent for an in-memory source. |
-| META.SOURCE.caseId | Canonical TestCase or synthetic Debug Case ID; String, for example, `payment.default.P001`. | Run, Debug. | Execution-wide; absent in Load. |
-| META.SOURCE.workbookId | Workbook identifier; String, for example, `payment`. | Run. | Execution-wide; absent outside workbook Cases. |
-| META.SOURCE.groupId | Workbook group identifier; String, for example, `default`. | Run. | Execution-wide; absent outside workbook Cases. |
-| META.SOURCE.rowCaseId | Case ID from the workbook row; String, for example, `P001`. | Run. | Execution-wide; absent outside workbook Cases. |
-| META.SOURCE.sheet | Workbook sheet name; String, for example, `Payment`. | Run when supplied by the workbook adapter. | Execution-wide; absent for Debug/Load or when unavailable. |
-| META.SOURCE.row | One-based workbook row number; Number, for example, `12`. | Run when supplied by the workbook adapter. | Execution-wide; absent for Debug/Load or when unavailable. |
-| META.SOURCE.workbook | Optional workbook label; String when present, for example, `payment_regression.xlsx`. | Run when supplied by the adapter. | Execution-wide; optional and otherwise absent. |
-| META.SOURCE.scenario | Load scenario basename without its suffix; String, for example, `payment-smoke`. | Load. | Execution-wide; absent outside Load. |
-| META.TARGET.type | Resolved target kind; String: `testcase`, `template`, `flow` or `tool`. | Run, Debug, Load; after target selection. | Execution-wide. |
-| META.TARGET.id | Resolved target identifier; String, for example, `PAYMENT_INVOKE` or `payment.flow.v1`. | Run, Debug, Load; after target selection. | Execution-wide. |
-| META.TEMPLATE.id | Active Template or resolved Load execution-wrapper ID; String, for example, `PAYMENT_INVOKE`. | Run/Debug while a Stage runs; Load after target resolution and while its wrapper runs. | Component scope; absent before target/template resolution, restored or removed after the scope. In Load Flow/Tool targets this is the resolved synthetic wrapper. |
-| META.TEMPLATE.path | Logical package-relative Template or execution-wrapper directory; String, for example, `templates/PAYMENT_INVOKE`. | Same availability as META.TEMPLATE.id. | Component scope; absent before resolution, restored or removed after the scope. |
-| META.FLOW.id | Active Flow ID; String, for example, `payment.request.v1`. | Run, Debug, Load while that Flow invocation runs. | Invocation scope; push on entry, restore on return, absent when inactive. |
-| META.FLOW.invocationId | Caller Action ID; String, for example, `sendRequest`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
-| META.FLOW.depth | One-based nested Flow depth; Number, for example, `1`. | Same availability as META.FLOW.id. | Invocation scope; absent when no Flow is active. |
-| META.TOOL.id | Active configured Tool or built-in name; String, for example, `payment.queryOrder` or `upper`. | Run, Debug, Load during the invocation. | Invocation scope; never retained as the “last Tool” after return. |
-| META.TOOL.type | Invocation kind; String, for example, `tool` or `builtin`. | Same availability as META.TOOL.id. | Invocation scope; absent after return unless an outer invocation remains. |
-| META.DBHELPER.id | Logical DBHelper ID; String, for example, `orders`. | Run, Debug, Load during a DBHelper operation/DB Action. | Invocation scope; absent after return unless an outer scope remains. |
-| META.DBHELPER.type | Resource kind; String, `dbhelper`. | Same availability as META.DBHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
-| META.MQHELPER.id | Logical MQHelper ID; String, for example, `payment`. | Run, Debug, Load during an MQHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
-| META.MQHELPER.type | Resource kind; String, `mqhelper`. | Same availability as META.MQHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
-| META.HTTPHELPER.id | Logical HTTPHelper ID; String, for example, `payment`. | Run, Debug, Load during an HTTPHelper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
-| META.HTTPHELPER.type | Resource kind; String, `httphelper`. | Same availability as META.HTTPHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
-| META.SSHHELPER.id | Logical SSHHelper ID; String, for example, `application`. | Run, Debug, Load during an SSH Resource Helper operation. | Invocation scope; push/restore; absent after return unless an outer scope remains. |
-| META.SSHHELPER.type | Resource kind; String, `sshhelper`. | Same availability as META.SSHHELPER.id. | Invocation scope; absent after return unless an outer scope remains. |
-
-META.SSHHELPER exposes only the logical helper ID and resource type. SSH endpoint, user, identity file and credentials stay private to the executor and are not META fields.
-
-ATT recursively filters credential-bearing keys such as password, secret, token, authorization/cookie, API key and private key. Expressions and adapters can read META but cannot mutate it.
+META is descriptive and immutable. An inactive component's fields are absent. Resource endpoints, usernames, identity files, and credentials remain inside the executor and are never published as META values.
 
 ## Invocation and scope rules
 
-Entering a Template, Flow, Tool or helper invocation publishes metadata for that active scope. Nested calls push a frame; exit restores previous metadata. When no invocation is active, its branch is absent. Consumers must not depend on “last invoked” state.
+Entering a Flow, Tool, or Resource invocation publishes its active metadata. Nested calls push a scope frame and restore the caller's metadata on return. With no active invocation, its branch is absent; do not depend on “last call” state.
 
-EXEC.INPUT is the canonical input map. A Stage temporarily overlays Case inputs and restores them after completion. EXEC.VARS is shared across later Stages in a Case. EXEC.ACTIONS is scoped to the active Template or Flow. An Action reads local output while running and publishes its envelope at EXEC.ACTIONS.<id>.output.
+`EXEC.INPUT` is the input map for the current execution. `EXEC.VARS` is available to later Actions in the same Flow invocation. `EXEC.ACTIONS` contains completed Action results in that Flow scope. During an Action, read its local `output`; after completion, the value is published at `EXEC.ACTIONS.<id>.output`.
 
-## Optional lookup and compatibility
+## Optional lookup
 
-${path} is strict. ${path?} returns null for an allowed missing map/list path; it does not make malformed syntax or illegal scope access valid. Legacy CASE, RUN and ACTIONS aliases remain only where they map one-to-one to canonical data. New Templates should use EXEC and META.
+`${path}` is a strict lookup. `${path?}` returns null only for an allowed missing map/list path; it does not make invalid syntax or disallowed scope access valid.
 
-## Lifecycle navigation
-
-[Actions](actions.md) owns Action-local `output` and publication at `EXEC.ACTIONS.<id>.output`. [Debug](execution-modes/debug.md) and [Load](execution-modes/load.md) own bootstrap variables, identity initialization and available scope. [Results](results-reports-evidence.md) owns artifact navigation.
+For existing Packages that rely on earlier Context names or metadata, use the [Legacy documentation](../legacy/README.md). The [Actions reference](actions.md) owns Action results; [Debug](execution-modes/debug.md) and [LOAD](execution-modes/load.md) own their input initialization rules.

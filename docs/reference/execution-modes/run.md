@@ -1,23 +1,21 @@
 # Run mode
 
-<!-- att-doc-status: current release-target=4.6.0 status=unpublished legacy-code-line=4.3.1 -->
+A Native RUN executes selected Resolved Cases from a Test Case Definition. A Case resolves to a Flow and Data Source; RUN validates the selected dependency closure before execution. New work should start with the [Quick Start](../../quick-start.md). For an existing Package authored with an earlier model, see the [Legacy documentation](../../legacy/README.md).
 
-The legacy `./att.sh run` command remains a Case adapter: it executes selected authored Testcases from a workbook. The current default branch also adds explicit Native Case and Native Suite commands, documented in [Unified RUN](unified-run.md) and the [CLI Reference](../cli.md). Those commands are integrated here. Native RUN is implemented on this branch. No 4.6.0 release or tag has been published. Implicit Suite acceptance remains open.
+## Select Cases
 
-```sh
-./att.sh run --all
-./att.sh run --suite testcase/payment.xlsx --case payment.payment.TC001
-./att.sh run --all --tag smoke --exclude-tag slow
-```
+Select one Case by qualified ID or use an implicit Suite to select Cases by Definition, ID, or tag. There is no required `suite.yaml`. Excluded tags take precedence over included tags. RUN rejects an unknown or empty selection rather than executing a different set.
 
-ATT loads the effective configuration/environment, verifies canonical workbook snapshots, validates the selected dependency closure, reserves a unique Run ID, then starts a Case execution for each selected Testcase. Stages run in order. Each Stage resolves its selector to a Template; Actions execute in YAML order subject to `runWhen` and `onFailure`.
+The [Unified RUN reference](unified-run.md) describes the Server draft and schedule lifecycle. The [CLI Reference](../cli.md) owns command syntax and exit codes.
 
-When `--run-id <id>` is absent, `execution.runIdFormat` can generate the outer Run ID; otherwise the existing `run.id.timestampFormat` default applies. The format is evaluated once during identity initialization, before `EXEC.RUN_ID` or an output path is published. Its allowed values and built-ins are listed in [package-wide configuration](../configuration.md#set-package-wide-options). The exact CLI ID takes precedence and is treated as a literal.
+## Validate and execute
 
-Run evidence is written directly below `output/<RunID>/`. The completed run publishes `run.yaml`, Case directories/logs, result workbooks, HTML/CI outputs as configured, and only after completion updates `latest-run.yaml`. A pre-existing Run ID is rejected rather than overwritten. `run --update-snapshot` is the explicit opt-in snapshot refresh path before validation/execution.
+Before a Case starts, ATT validates the Definition, resolved Data Source, Flow, and referenced Resource contracts. A Server draft freezes the selected Case IDs and Package source revision; a source change requires validation again. Preview and validation do not submit a Job.
 
-Status aggregation preserves severity: ERROR > INVALID > FAIL > PASS > SKIPPED. Process exit code is `0` when the run completes without failing status, `1` for test/assertion failure, `2` for invalid command/configuration/validation, and `3` for runtime/infrastructure error.
+Each selected Resolved Case produces one Case execution with its own execution ID, status, and evidence. RUN writes results under a unique run directory and updates `latest-run.yaml` only after completion. A pre-existing Run ID is rejected rather than overwritten.
 
-See the [CLI Reference](../cli.md) for selectors and options, [Reliability and Execution Control](../reliability-execution-control.md) for Stage and Action control, and [Results, Reports, and Evidence](../results-reports-evidence.md) for artifact contracts.
+## Results and failure status
 
-In Studio, **Configure & Rerun** from a Job preloads the safe retained RUN target or exact Case selection, environment, Debug/fail-fast options and eligible typed inputs into this standard RUN editor. Validate the edited definition against the current Package before review and submit. See [Job replay and new execution](unified-run.md#replay-and-new-execution-from-a-job) for source policy and API behavior.
+Status aggregation preserves severity: ERROR > INVALID > FAIL > PASS > SKIPPED. Process exit code is `0` when the run completes without failing status, `1` for a Case/assertion failure, `2` for invalid command/configuration/validation, and `3` for runtime or infrastructure error.
+
+In Studio, **Configure & Rerun** creates a new validated draft from a retained RUN definition. Review the Package revision and selection before submitting. See [Job replay and new execution](unified-run.md#replay-or-configure-a-new-execution).

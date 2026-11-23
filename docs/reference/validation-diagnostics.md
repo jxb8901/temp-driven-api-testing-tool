@@ -1,113 +1,45 @@
 # Validation and troubleshooting
 
-## Choose your first diagnostic step
+## Choose the first diagnostic step
 
-Run `validate --package` and fix the diagnostic's file/field first. A Native **Resolved Case** is one selectable Case from a Test Case Definition. On the supported legacy workbook path, a **Testcase** is one authored, normalized workbook row. A **Case execution** is one Run of the selected Case, identified by that Case's ID. For runtime failures, inspect the Case execution's report status/message, then its `case.log`, `case.yaml`, and Action evidence. [Reliability and Execution Control](reliability-execution-control.md) defines FAIL versus ERROR, continuation, and retries; [Results, Reports, and Evidence](results-reports-evidence.md) identifies collector failure paths. [Limits, Security Guarantees, and Advanced Diagnostics](appendices/limits-defaults.md) covers Windows launchers, Java SSH negotiation, and stack-trace policy.
+Run `./att.sh validate --package` and start with the reported file and field. A **Resolved Case** is one selectable Case from a Test Case Definition. A **Case execution** is one run of a selected Resolved Case. For runtime failures, inspect the execution status and message, then `case.log`, `case.yaml`, and Action evidence. For an existing Package authored with an earlier model, use the [Legacy documentation](../legacy/README.md).
 
-## Start with validation
+## Validate Native inputs
 
-Run this after every workbook, sidecar, template, helper, or tool change:
+Package validation checks Definitions, Flows, Tools, Testdata, Runtime Configuration, registered schemas, and semantic references. It does not execute Tools, submit a Server Job, or start a LOAD scheduler. It is read-only and never creates authoring inputs.
 
-```sh
-./att.sh validate --package
-```
-
-For one environment, use `./att.sh validate --config config/config.yaml --env SIT --package`. ATT validates descriptors against schemas in the matching ATT Engine JAR's embedded registry, listed in the [Schema and Version Matrix](appendices/schema-matrix.md). The repository `schemas/` tree is build input; it and any old `ATT_HOME/schemas/` or package-local directory are not runtime schema sources. Superseded schemas under the embedded registry's `schemas/history/` are historical references, not runtime compatibility contracts unless that Engine version explicitly supports them. Update the declared `schemaVersion` and migrate fields to the active contract before validation. Diagnostics retain the original violation, file, and YAML field location and provide migration guidance; they never rewrite descriptors. For example, replace a historical Render Action with an Assign using `&{path}` and pass the resulting String as described in [Actions and Typed Values](actions.md). Unsupported versions fail before execution.
-
-Current schema sources and their historical counterparts are in the repository's `schemas/` build-input tree, which is not installed under ATT_HOME. At runtime, `validate --package` checks every schema registered in the embedded Engine catalog, even when the Package does not use it. A missing, unreadable, unsafe, or duplicate embedded resource is a hard `PACKAGE_INVALID` error. The Engine parses the catalog once per JVM and validates JSON Schema and JUnit XML directly from embedded classpath bytes. Compiled JSON validators use a bounded in-memory cache keyed by Engine registry identity and schema resource. The private SHA-256 disk cache is retained only as a verified bridge for Path-based compatibility APIs; it does not supply validation rules. Validation never rewrites YAML. Review the migration guidance, update the file, then rerun package validation for each selected `--env`.
-
-Package validation also discovers existing Template, Flow and grouped or ungrouped Tool `debug.yaml` sidecars using the same discovery and schema/input validation as Debug execution. Historical schema versions and invalid current-schema structure are reported before invoking `att debug`; optional missing sidecars remain valid.
-
-Then use the diagnostic code and structured location. Do not automate against message text.
+Use a selected-validation option for fast feedback on one Definition or resource target. Before sharing a Package or promoting a build, validate the whole Package and each selected Environment. The [Schema and Version Matrix](appendices/schema-matrix.md) lists the contracts used by this release. Diagnostics retain the source file, field, and structured location; automation should use stable diagnostic codes rather than message text.
 
 | Category | Typical cause | Corrective action |
 |---|---|---|
-| `ATT-TC` | Missing/stale snapshot, sidecar/sheet/header error, or duplicate Case ID | Check snapshot/basenames, sheet mapping, effective headers, and full IDs |
-| `ATT-CTX` | Unknown or ambiguous Context path | Inspect requested/current/missing fields, nearest suggestion, or canonical candidates |
-| `ATT-STG` | Blank required selector, invalid selector YAML, duplicate stage key | Check selector form, `name`, aliases, and required flag |
-| `ATT-TPL` | Unknown/duplicate template, invalid action or payload | Check symbolic name/full path, descriptor, action type, and local files |
-| `ATT-CFG` | Unknown field, duplicate key, wrong schema/type/enum | Compare with [Configuration and Environments](configuration.md) and remove unsupported fields |
-| `ATT-TOOL` | Unknown/missing argument, process or parse failure | Compare call contract; inspect exit code and bounded stdout/stderr capture evidence |
-| `ATT-PATH` | Illegal ID or escaping path | Remove illegal characters and keep content below configured roots |
-| `ATT-RUN` | Timeout, non-zero exit, render/runtime failure | Inspect case log and action/tool evidence |
+| `ATT-TC` | Missing Definition, invalid Data Source, or duplicate Case ID | Check Definition ID, source records, and resolved Case IDs |
+| `ATT-CTX` | Unknown or ambiguous Context path | Check the requested path, current scope, and suggested canonical path |
+| `ATT-FLOW` | Unknown Flow, invalid Action, or unresolved dependency | Check the Flow ID, ordered Actions, and referenced resources/files |
+| `ATT-CFG` | Unknown field, duplicate key, or wrong type | Compare the value with the active Configuration schema |
+| `ATT-TOOL` | Unknown argument, process failure, or parse failure | Check the Tool contract, exit code, and bounded output evidence |
+| `ATT-PATH` | Illegal identifier or escaping path | Keep identifiers and files beneath configured Package roots |
+| `ATT-RUN` | Timeout, non-zero exit, or runtime exception | Inspect the Case log and Action evidence |
 
 ## Common questions
 
-### Why is the Testcase ID rejected although Excel displays it correctly?
+### Why was a Case ID rejected?
 
-ATT imports displayed cell text, then applies strict ID safety checks. Check hidden leading/trailing whitespace, trailing `.`, path characters, controls, and Windows device names. Store identifiers as text to preserve leading zeroes.
-
-### Can two sheets contain the same row ID?
-
-Yes. Give the sheets different group IDs. The rows then define different Testcases, such as `payment.payment.TC001` and `payment.batch.TC001`, and Run can create a separate Case execution for each.
-
-### Why did `N/A` become empty?
-
-ATT normalizes `N/A`, `NA`, `NULL`, `NONE`, empty, and whitespace-only values to blank before data mapping and stage selection.
+Resolved Case IDs must be unique and path-safe. For Excel sources, store IDs as text and check for blank values, leading or trailing whitespace, reserved device names, and case-fold collisions.
 
 ### Why does a Context variable fail?
 
-ATT treats an absent path as an authoring/runtime error instead of silently rendering it as empty. Follow `ATT-CTX-001` and its `requestedPath`, `currentNode`, `missingSegment`, and nearest suggestion to check the case-sensitive scope, physical header/alias, stage key, action ID, and availability point. A suffix shorthand must identify exactly one readable logical path; `ATT-CTX-002` lists every conflicting candidate so you can lengthen it. The diagnostic intentionally omits the full Context tree. A declared optional field with a blank value is still valid and renders as the empty string.
+ATT reports an absent path as an authoring or runtime error. Check the exact scope, source-field mapping, Action ID, and when the value becomes available. A declared optional blank value is valid and renders as an empty string.
 
-### Why did a fail become error?
+### Why did a Case fail or error?
 
-A false assertion makes the Case execution FAIL. Invalid expression syntax/navigation, Tool failure, timeout, parse failure, I/O failure, or runtime exception makes it ERROR. Inspect the Action evidence rather than only the final Run status.
+A false assertion makes the Case execution FAIL. Invalid expression syntax, Tool failure, timeout, parse failure, I/O failure, or runtime exception makes it ERROR. Inspect the Action evidence for the underlying cause.
 
-### Why did a Tool run more than once?
-
-Its action used retry and received an eligible non-zero exit code. Inspect the attempt list and final action record in the case log.
-
-### Can I use a shell pipeline in `command`?
-
-No. ATT passes `|`, `>`, and `<` literally. Put shell behavior inside a reviewed tool script.
-
-### Why does a required array argument reject `[]`?
-
-Required validation happens before argv expansion. An empty typed List is missing input; pass at least one scalar item or make the argument optional.
-
-### Should I use package or selected validation?
-
-Use selected mode for fast local feedback. Use package mode before release, CI promotion, or sharing a package.
-
-### Can reports be opened without a server?
+### Can a report be opened without a Server?
 
 Yes. Keep the generated run directory together so relative artifact links continue to work.
 
-### Does build execute tests again?
+## Security and structured diagnostics
 
-No. It archives one completed persisted run.
+Do not place passwords, tokens, private keys, or sensitive customer data in Definition inputs, Tool arguments, logs, or documentation examples. Use approved secret injection and review reports before sharing them.
 
-## Security reminders
-
-Do not place passwords, tokens, private keys, or sensitive customer data in workbook cells, template descriptors, command strings, stdout, or stderr. Prefer approved secret injection inside tool scripts. Review reports and archives before sharing.
-
-## Validation JSON contract
-
-```json
-{
-  "schemaVersion": "att-validation/v2.1",
-  "attVersion": "4.6.0",
-  "valid": false,
-  "mode": "package",
-  "summary": {"errors": 1, "warnings": 0, "suites": 1, "cases": 22, "templates": 7, "tools": 7},
-  "diagnostics": [{
-    "code": "ATT-TPL-104",
-    "severity": "ERROR",
-    "message": "assert action requires a non-blank expression",
-    "file": "templates/PAYMENT_VERIFY/template.yaml",
-    "field": "actions.assertStatus.expression",
-    "sheet": null,
-    "row": null,
-    "column": null,
-    "template": "PAYMENT_VERIFY",
-    "action": "assertStatus",
-    "suggestion": "Add expression to the assert action"
-  }]
-}
-```
-
-Every diagnostic always contains `code`, `severity`, `message`, `file`, `field`, `sheet`, `row`, `column`, `template`, `action`, and `suggestion`. Inapplicable fields are `null`. When package and case validation discover the same root failure, ATT emits one diagnostic with `occurrences` and, when applicable, an `affectedCases` list; `summary.errors` counts unique diagnostics while `summary.errorOccurrences` preserves the raw occurrence count. Codes are stable; automation must not parse human messages.
-
-ATT may also include `summary`, `detail`, `source`, `context`, and `schemaViolations`. `source` holds physical YAML or payload `line`, `column`, `endLine`, and `endColumn`; the top-level `row` and `column` continue to identify an Excel cell. For single-line plain or directly quoted YAML scalars, an expression syntax error points to its character. Folded, multiline, or escaped scalars use the YAML scalar range when an exact mapping is unavailable. Every schema violation retains its own path, keyword, message, and physical source. `context` may contain the Case, Stage, Flow ID, and nested call chain. Expression syntax details identify the containing tool-call argument (for example, `logFiles`), the unexpected token, and a bounded caret excerpt when it is safe to show; source excerpts are omitted when the field or line may contain credentials or secrets.
-
-Runtime Action failures preserve the same structure in Case YAML, `run.yaml`, regenerated reports, CI JSON, and JUnit failure detail. A nested Flow failure identifies the inner `flow.yaml` and Action while the call chain identifies how the Template reached it. Tool and DB evidence adds attempts, timeout, parse/capture, parameter binding, and cancellation details where available. File save failures include the configured path and allowed artifact root.
+Machine-readable validation uses `att-validation/v2.1`. Diagnostics include stable codes, severity, file and field, source location when available, and a safe suggestion. Codes are the supported automation interface; message wording can change.

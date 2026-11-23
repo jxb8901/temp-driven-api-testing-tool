@@ -386,35 +386,40 @@ def check_cli_documentation():
     source = read(ROOT / "att-cli/src/main/java/att/CliOptions.java")
     supported_options = set(re.findall(r'"(--[a-z][a-z0-9-]*)"', source))
     supported_options.update(("--server", "--no-auth", "--principal", "--detach", "--download", "--scenario"))
-    # Native Case / vNext Local options are implemented beside the legacy CLI (S03+) and may
-    # appear in Quick Start / current guides without expanding the released CLI Reference surface.
+    # Native Case / vNext Local options are implemented beside the compatibility CLI.
     native_case_options = set(("--local", "--resolved-case-id"))
     documented_command_options = set(supported_options)
     documented_command_options.update(native_case_options)
     public_commands = set(("run", "validate", "snapshot", "docs", "report",
                            "build", "clean", "version", "debug", "load", "help", "remote"))
 
-    for rel in ("reference/cli.md", "reference.zh/cli.md"):
+    for rel, legacy_rel in (("reference/cli.md", "legacy/cli.md"),
+                            ("reference.zh/cli.md", "legacy/cli.zh.md")):
         path = DOCS / rel
-        if not path.is_file():
+        legacy_path = DOCS / legacy_rel
+        if not path.is_file() or not legacy_path.is_file():
             fail("missing CLI Reference: docs/%s" % rel)
             continue
         text = read(path)
+        compatibility_text = read(legacy_path)
+        all_text = text + "\n" + compatibility_text
         for command in sorted(public_commands):
             if not re.search(r"(?:\./att\.sh|att\.bat)\s+%s\b" %
-                             re.escape(command), text):
+                             re.escape(command), all_text):
                 fail("%s does not document public command: %s" %
                      (path.relative_to(ROOT), command))
-        documented_options = set(re.findall(r"--[a-z][a-z0-9-]*", text))
+        documented_options = set(re.findall(r"--[a-z][a-z0-9-]*", all_text))
         for option in sorted(supported_options - documented_options):
-            fail("%s does not document supported CLI option: %s" %
-                 (path.relative_to(ROOT), option))
-        for option in sorted(documented_options - supported_options):
-            fail("%s documents unsupported CLI option: %s" %
-                 (path.relative_to(ROOT), option))
+            fail("current and Legacy CLI References do not document supported CLI option: %s" %
+                 option)
+        for option in sorted(documented_options - documented_command_options):
+            fail("current and Legacy CLI References document unsupported CLI option: %s" %
+                 option)
+        if not re.search(r"run native-case", text) or not re.search(r"run native-suite", text):
+            fail("%s does not define the Native Case and Suite commands" % path.relative_to(ROOT))
         for code in ("0", "1", "2", "3"):
             if not re.search(r"(?:exit(?:\s+code)?|退出码|退出碼)[^\n]{0,80}\b%s\b|\b%s\b[^\n]{0,80}(?:PASS|FAIL|INVALID|ERROR|runtime|validation)" %
-                             (code, code), text, re.I):
+                             (code, code), all_text, re.I):
                 fail("%s does not clearly cover exit code %s" %
                      (path.relative_to(ROOT), code))
 
@@ -503,7 +508,7 @@ def check_vnext_cli_contract():
         if documented_options != supported_options:
             fail("%s vNext options differ from VNextOptions: undocumented=%s unsupported=%s" %
                  (path.relative_to(ROOT), sorted(supported_options - documented_options),
-                  sorted(documented_options - supported_options)))
+                  sorted(documented_options - documented_command_options)))
 
         backtick = chr(96)
         if rel.endswith(".zh.md"):

@@ -1,15 +1,12 @@
-# RUN 與 LOAD 執行 adapter
+# Execution mode 概覽
 
-RUN 是 Case、選定 Cases 或單一 Template/Flow/Tool 的功能執行模型；Debug 是選用的診斷選項。LOAD 保留效能引擎與併發語義。驗證及遷移範例請參閱[統一 RUN 與排程](unified-run.md)。
+RUN 會執行所選 Case。Debug 會對單一 Flow 或 Tool execution 提供診斷。LOAD 透過 scheduler 重複執行 Flow 或 Tool workload。VALIDATE 會檢查所選 input，不會啟動 business execution。
 
-現有 Engine adapter 與輸出格式保持相容：
-
-| RUN/LOAD adapter | `EXEC.ID` | 執行單位 | 主要結果位置 |
+| Mode | Input | Output 位置 | 是否啟動 business work |
 |---|---|---|---|
-| RUN：Case runner | canonical Case ID | selected Testcase | `output/<RunID>/` |
-| RUN：Resource runner（舊 Debug adapter） | debug ID | 單一 target invocation | `output/debug/<debugId>/` |
-| LOAD | run 內唯一的 iteration execution ID | 重複 target iterations | `output/load/<runId>/` |
+| RUN | Definition 和所選 Resolved Case | `output/<runId>/` | 驗證後會 |
+| Debug | Flow 或 Tool target 和明確 inputs | `output/debug/<debugId>/` | 會，限所選 target |
+| LOAD | 已驗證的 Flow 或 Tool workload | `output/load/<runId>/` | Scheduler 啟動後會 |
+| VALIDATE | Package 或所選 dependency closure | Validation report | 不會 |
 
-`EXEC.RUN_ID` 表示外層 ATT run。模式與 scheduler 資料只保存在 evidence-only `DIAG`；`EXEC.MODE`、`EXEC.LOAD` 與 `DIAG` 均不能供 expression 使用。
-
-所有 adapter 都先解析 environment、建立 canonical Context、驗證 dependency closure，再使用相同的 Template/Flow/Tool/DB/MQ/HTTP/SSH contract。Selection、scheduling 與 reporting 不會建立另一套 expression 或參數綁定語義。啟用 Debug 診斷只影響診斷事件，不會改變呼叫次數或權限。
+各 mode 共用 Expression、Action 和 Resource contract。Selection 和 scheduler 會決定啟動哪些工作，不會另行定義 input binding 語義。較早撰寫模型請參閱[舊版文件](../../legacy/README.zh.md)。

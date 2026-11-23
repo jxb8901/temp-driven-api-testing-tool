@@ -25,17 +25,11 @@ Package → Flow → testcase.yaml → Preview/Resolve → Select Case(s) → Va
 ./att.sh --local -p default run native-case quick.start.single --resolved-case-id default
 ~~~
 
-Open [Quick Start](docs/quick-start.md) for the offline Native fixtures (single / inline-multi / Excel), Studio preview notes, and the labeled legacy Workbook appendix. The same guide is available in [繁體中文](docs/quick-start.zh.md). Migration decisions live in the [S12 matrix](docs/maintenance/native-case-default-package-migration-s12.md).
-
-Legacy Workbook + Sidecar + Snapshot remains supported:
-
-~~~sh
-./att.sh run --suite testcase/quick_start.xlsx --case quickStart.default.QS001
-~~~
+Open [Quick Start](docs/quick-start.md) for the offline Native fixtures (single / inline-multi / Excel) and Studio preview notes. The same guide is available in [繁體中文](docs/quick-start.zh.md). Migration decisions live in the [S12 matrix](docs/maintenance/native-case-default-package-migration-s12.md). Existing legacy Packages have a separate [Legacy documentation path](docs/legacy/README.md).
 
 ## What ATT provides
 
-- Package isolation and reusable authoring with Native Test Case Definitions (`testcase.yaml`), Flows, Actions, Tools and Resources; legacy Stages/Templates/Workbooks remain supported.
+- Package isolation and reusable authoring with Native Test Case Definitions (`testcase.yaml`), Flows, Actions, Tools and Resources; earlier Package formats remain supported through the Legacy path.
 - Functional RUN and separate LOAD execution, with read-only VALIDATE.
 - Shared Runtime Configuration, Environment profiles, optional Package Manifest defaults and Package-owned Testdata.
 - Local CLI, ATT Studio, REST/SSE integration and Server Jobs and Schedules.

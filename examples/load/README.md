@@ -6,8 +6,6 @@
 
 | 檔案 | 模型與用途 |
 |---|---|
-| closed-minimal.yaml | 最小 closed VU。 |
-| closed.yaml | 完整 closed workload、inputs、thinkTime、threshold 與 evidence。 |
 | closed-random-think.yaml | Seeded closed-VU think-time range。 |
 | closed-smoke.yaml | 短時間 closed smoke。 |
 | arrival-rate.yaml | 完整 fixed arrival-rate 範例。 |
@@ -17,14 +15,12 @@
 | multi-arrival.yaml | 多個獨立 arrival-rate workload。 |
 | independent-evidence.yaml | 每個 workload 各自獨立的 success/failure evidence caps，含 defaults 與 cap-only override。 |
 | tool.yaml | 呼叫包內 deterministic Tool 的短範例。 |
-| testdata-generated.yaml | 從 Load-local generated testdata 依 iteration 順序載入 QUICK_START Template；records 用盡時停止 workload。 |
 | quick-profile.yaml | 僅含 Load policy 的 Quick Load profile；複製到 `load/load.yaml` 後使用。 |
 
-`closed.yaml` and `closed-minimal.yaml` select Template `V3_FLOW_EXAMPLE`. That Template, and the common Flows it calls, are in the registerable `packages/legacy` package. `./att.sh` changes into `packages/default` unless `ATT_PACKAGE_ROOT` names another package, and a scenario path is relative to that package. Tool scenarios such as `closed-smoke.yaml` stay on `packages/default`.
+`./att.sh` changes into `packages/default` unless `ATT_PACKAGE_ROOT` names another package, and a scenario path is relative to that package. This directory contains current Flow and Tool targets. Earlier Template-target LOAD scenarios are kept in [Legacy LOAD examples](../legacy/load/README.md).
 
 ~~~sh
 ./att.sh load ../../examples/load/closed-smoke.yaml
-ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh load ../../examples/load/closed-minimal.yaml --users 1 --duration 100ms
 ~~~
 
 ## 最小 closed workload
@@ -33,7 +29,7 @@ ATT_PACKAGE_ROOT="$PWD/packages/legacy" ./att.sh load ../../examples/load/closed
 schemaVersion: att-load/v1.9
 workloads:
   - id: default
-    target: {type: template, id: V3_FLOW_EXAMPLE}
+    target: {type: flow, id: common.payment.v1}
     load:
       users: 20
       duration: 5m
@@ -43,17 +39,9 @@ workloads:
 
 `mixed-closed.yaml` 展示每次 iteration 依 workload seed、穩定 VU identity 和 iteration number 選擇 target；輸出會列出每個 mix entry 的選擇次數與 metrics。
 
-## Generated Testdata
-
-`testdata-generated.yaml` imports a four-record virtual sequence from `examples/testdata/generated-account.yaml`, maps the typed `amount` value into the offline `QUICK_START` Template, and uses `scope: iteration`. Its `exhaustion: stop` policy ends that workload cleanly after the records are consumed:
-
-~~~sh
-./att.sh load ../../examples/load/testdata-generated.yaml
-~~~
-
 ## Quick Load policy profile
 
-`quick-profile.yaml` 使用現行 `att-load/v1.9` policy-only descriptor，不包含 target 或 business data。複製到專案的 `load/load.yaml` 後，執行 `./att.sh load --debug template <id>`、`flow <id>` 或 `tool <id>`，即可將 sidecar inputs/vars/arguments 與此 policy 合併，再進入正常 Load runtime。CLI intensity options 會覆蓋 policy；若沒有 policy，命令列需提供完整 pacing policy。
+`quick-profile.yaml` 使用現行 `att-load/v1.9` policy-only descriptor，不包含 target 或 business data。複製到專案的 `load/load.yaml` 後，執行 `./att.sh load --debug flow <id>` 或 `tool <id>`，即可將明確指定的 inputs/vars/arguments 與此 policy 合併，再進入正常 Load runtime。CLI intensity options 會覆蓋 policy；若沒有 policy，命令列需提供完整 pacing policy。
 
 ~~~yaml
 schemaVersion: att-load/v1.9
@@ -64,13 +52,13 @@ evidence: {mode: failures}
 
 ## 每次 execution 的 typed vars
 
-Template/Flow workload 可設定 bootstrap `vars`。完整 reference 保留原生型別；expression 在每次 Load execution 的 EXEC.ID/EXEC.OUTPUT_DIR 初始化後評估：
+Flow workload 可設定 bootstrap `vars`。完整 reference 保留原生型別；expression 在每次 Load execution 的 EXEC.ID/EXEC.OUTPUT_DIR 初始化後評估：
 
 ~~~yaml
 schemaVersion: att-load/v1.9
 workloads:
   - id: payments
-    target: {type: template, id: PAYMENT_INVOKE}
+    target: {type: flow, id: common.payment.v1}
     inputs: {amount: 100}
     vars:
       amount: "${EXEC.INPUT.amount}"

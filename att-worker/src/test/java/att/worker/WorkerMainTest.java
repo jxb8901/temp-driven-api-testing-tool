@@ -703,10 +703,10 @@ class WorkerMainTest {
     @Test void cliWorkerAndDirectApiReturnEquivalentRunOutcomes() throws Exception {
         Path root=temp.resolve("run-package"); Files.createDirectories(root.resolve("config")); Files.createDirectories(root.resolve("templates")); Files.createDirectories(root.resolve("testcase")); Files.createDirectories(root.resolve("tools"));
         copyTree(Paths.get("schemas"),root.resolve("schemas"));
-        Files.copy(Paths.get("packages/default/testcase/quick_start.xlsx"),root.resolve("testcase/quick_start.xlsx"));
-        Files.copy(Paths.get("packages/default/testcase/quick_start.yaml"),root.resolve("testcase/quick_start.yaml"));
-        Files.copy(Paths.get("packages/default/testcase/quick_start.xml"),root.resolve("testcase/quick_start.xml"));
-        copyTree(Paths.get("packages/default/templates/QUICK_START"),root.resolve("templates/QUICK_START"));
+        Files.copy(Paths.get("packages/legacy/testcase/quick_start.xlsx"),root.resolve("testcase/quick_start.xlsx"));
+        Files.copy(Paths.get("packages/legacy/testcase/quick_start.yaml"),root.resolve("testcase/quick_start.yaml"));
+        Files.copy(Paths.get("packages/legacy/testcase/quick_start.xml"),root.resolve("testcase/quick_start.xml"));
+        copyTree(Paths.get("packages/legacy/templates/QUICK_START"),root.resolve("templates/QUICK_START"));
         Files.createDirectories(root.resolve("tools/sample"));
         Files.copy(Paths.get("packages/default/tools/sample/tool-group.yaml"),root.resolve("tools/sample/tool-group.yaml"));
         Files.copy(Paths.get("packages/default/tools/sample/getAcDate.yaml"),root.resolve("tools/sample/getAcDate.yaml"));
