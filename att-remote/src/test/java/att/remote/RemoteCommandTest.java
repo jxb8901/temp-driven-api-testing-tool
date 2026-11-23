@@ -156,6 +156,124 @@ class RemoteCommandTest {
         assertFalse(submission.has("caseIds"));
     }
 
+    @Test void nativeSuiteVNextMapsSelectorsIntoV2DraftBeforeSubmission() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public JsonNode get(String path)throws RemoteException {
+                if("/version".equals(path)) {
+                    ObjectNode version=RemoteHttpClient.JSON.createObjectNode().put("apiVersion",ServerApi.VERSION);
+                    version.putArray("unifiedRunVersions").add("att-execution/v2");return version;
+                }
+                return super.get(path);
+            }
+            @Override public JsonNode post(String path,JsonNode body)throws RemoteException {
+                posts++;postPaths.add(path);postBodies.add(body.deepCopy());lastPath=path;lastBody=body.deepCopy();requests.add(body.deepCopy());
+                if("/drafts/run".equals(path))return RemoteHttpClient.JSON.createObjectNode().put("draftId","R0123456789ABCDEF0123456789ABCDEF");
+                return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");
+            }
+        };
+        String plan="{\"command\":\"run\",\"targetKind\":\"native-suite\",\"packageId\":\"payments\","
+                +"\"environment\":\"SIT\",\"runId\":\"suite-smoke-1\",\"definitionIds\":[\"fpp.transfer\",\"fpp.refund\"],"
+                +"\"qualifiedCaseIds\":[\"fpp.transfer.customerA\"],\"tags\":[\"smoke\"],\"excludeTags\":[\"destructive\"],\"failFast\":true}";
+
+        int exit=RemoteCommand.run(new String[]{"--server","https://example.invalid","--format","json","vnext",plan},
+                java.util.Collections.<String,String>emptyMap(),null,null,(profile,password,username,provider)->client);
+
+        assertEquals(0,exit);
+        assertEquals(Arrays.asList("/drafts/run","/jobs/run"),client.postPaths);
+        JsonNode definition=client.postBodies.get(0);
+        assertEquals("att-execution/v2",definition.path("schemaVersion").asText());
+        assertEquals("run",definition.path("executionType").asText());
+        assertEquals("payments",definition.path("packageId").asText());
+        assertEquals("SIT",definition.path("environment").asText());
+        assertEquals("nativeSuite",definition.path("target").path("type").asText());
+        assertEquals(Arrays.asList("fpp.transfer","fpp.refund"),Arrays.asList(
+                definition.path("target").path("definitionIds").get(0).asText(),
+                definition.path("target").path("definitionIds").get(1).asText()));
+        JsonNode selection=definition.path("target").path("selection");
+        assertEquals("fpp.transfer.customerA",selection.path("qualifiedCaseIds").get(0).asText());
+        assertEquals("smoke",selection.path("tags").get(0).asText());
+        assertEquals("destructive",selection.path("excludeTags").get(0).asText());
+        assertFalse(selection.has("all"));
+        assertFalse(definition.has("selection"));
+        assertTrue(definition.path("options").path("failFast").asBoolean());
+        assertEquals("suite-smoke-1",definition.path("options").path("runId").asText());
+        JsonNode submission=client.postBodies.get(1);
+        assertEquals("payments",submission.path("packageId").asText());
+        assertEquals("R0123456789ABCDEF0123456789ABCDEF",submission.path("draftId").asText());
+        assertFalse(submission.has("definitionIds"));
+        assertFalse(submission.has("qualifiedCaseIds"));
+    }
+
+    @Test void nativeSuiteRerunFailedMapsOnlyTheExclusiveRetrySelector() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public JsonNode get(String path)throws RemoteException {
+                if("/version".equals(path)) {
+                    ObjectNode version=RemoteHttpClient.JSON.createObjectNode().put("apiVersion",ServerApi.VERSION);
+                    version.putArray("unifiedRunVersions").add("att-execution/v2");return version;
+                }
+                return super.get(path);
+            }
+            @Override public JsonNode post(String path,JsonNode body)throws RemoteException {
+                posts++;postPaths.add(path);postBodies.add(body.deepCopy());lastPath=path;lastBody=body.deepCopy();requests.add(body.deepCopy());
+                if("/drafts/run".equals(path))return RemoteHttpClient.JSON.createObjectNode()
+                        .put("draftId","R0123456789ABCDEF0123456789ABCDEF");
+                return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");
+            }
+        };
+        String plan="{\"command\":\"run\",\"targetKind\":\"native-suite\",\"packageId\":\"payments\","
+                +"\"definitionIds\":[\"fpp.transfer\"],\"rerunFailed\":true}";
+        int exit=RemoteCommand.run(new String[]{"--server","https://example.invalid","--format","json","vnext",plan},
+                java.util.Collections.<String,String>emptyMap(),null,null,(profile,password,username,provider)->client);
+
+        assertEquals(0,exit);
+        assertEquals(Arrays.asList("/drafts/run","/jobs/run"),client.postPaths);
+        JsonNode selection=client.postBodies.get(0).path("target").path("selection");
+        assertTrue(selection.path("rerunFailed").asBoolean());
+        assertFalse(selection.has("all"));
+        assertFalse(selection.has("qualifiedCaseIds"));
+        assertFalse(selection.has("tags"));
+        assertFalse(selection.has("excludeTags"));
+        assertEquals("R0123456789ABCDEF0123456789ABCDEF",client.postBodies.get(1).path("draftId").asText());
+    }
+
+    @Test void nativeSuiteDryRunValidatesDraftWithoutSubmittingJob() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public JsonNode get(String path)throws RemoteException {
+                if("/version".equals(path)) {
+                    ObjectNode version=RemoteHttpClient.JSON.createObjectNode().put("apiVersion",ServerApi.VERSION);
+                    version.putArray("unifiedRunVersions").add("att-execution/v2");return version;
+                }
+                return super.get(path);
+            }
+            @Override public JsonNode post(String path,JsonNode body)throws RemoteException {
+                posts++;postPaths.add(path);postBodies.add(body.deepCopy());lastPath=path;lastBody=body.deepCopy();
+                return RemoteHttpClient.JSON.createObjectNode().put("draftId","R0123456789ABCDEF0123456789ABCDEF")
+                        .put("revisionDigest","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                        .put("selectedCount",1);
+            }
+        };
+        ByteArrayOutputStream stdout=new ByteArrayOutputStream();PrintStream previous=System.out;int exit;
+        String plan="{\"command\":\"run\",\"targetKind\":\"native-suite\",\"packageId\":\"payments\","
+                +"\"definitionIds\":[\"fpp.transfer\"],\"all\":true,\"dryRun\":true}";
+        try {
+            System.setOut(new PrintStream(stdout,true,"UTF-8"));
+            exit=RemoteCommand.run(new String[]{"--server","https://example.invalid","--format","json","vnext",plan},
+                    java.util.Collections.<String,String>emptyMap(),null,null,(profile,password,username,provider)->client);
+        } finally { System.setOut(previous); }
+
+        assertEquals(0,exit);
+        assertEquals(java.util.Collections.singletonList("/drafts/run"),client.postPaths);
+        JsonNode definition=client.postBodies.get(0);
+        assertTrue(definition.path("target").path("selection").path("all").asBoolean());
+        assertFalse(definition.path("options").has("dryRun"));
+        JsonNode preview=RemoteHttpClient.JSON.readTree(new String(stdout.toByteArray(),StandardCharsets.UTF_8));
+        assertEquals("native-suite",preview.path("targetKind").asText());
+        assertFalse(preview.path("submitted").asBoolean(true));
+        assertEquals("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                preview.path("preview").path("revisionDigest").asText());
+        assertEquals(0,client.jobReads);
+    }
+
     @Test void nativeCaseVNextRequiresServerToAdvertiseV2BeforeCreatingDraft() throws Exception {
         MockClient client=new MockClient(){
             @Override public JsonNode get(String path)throws RemoteException {
@@ -207,6 +325,88 @@ class RemoteCommandTest {
         assertFalse(preview.path("submitted").asBoolean(true));
         assertEquals("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",preview.path("preview").path("revisionDigest").asText());
         assertEquals(0,client.jobReads);
+    }
+
+    @Test void nativeSuiteVNextTranslatesSelectorsAndDryRunSkipsJobSubmission() throws Exception {
+        MockClient client=new MockClient(){
+            @Override public JsonNode get(String path)throws RemoteException {
+                if("/version".equals(path)) {
+                    ObjectNode version=RemoteHttpClient.JSON.createObjectNode().put("apiVersion",ServerApi.VERSION);
+                    version.putArray("unifiedRunVersions").add("att-execution/v1").add("att-execution/v2");return version;
+                }
+                return super.get(path);
+            }
+            @Override public JsonNode post(String path,JsonNode body)throws RemoteException {
+                posts++;postPaths.add(path);postBodies.add(body.deepCopy());lastPath=path;lastBody=body.deepCopy();requests.add(body.deepCopy());
+                if("/drafts/run".equals(path))return RemoteHttpClient.JSON.createObjectNode()
+                        .put("draftId","R0123456789ABCDEF0123456789ABCDEF")
+                        .put("revisionDigest","bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+                        .put("selectedCount",2);
+                return RemoteHttpClient.JSON.createObjectNode().put("jobId",JOB).put("status","QUEUED");
+            }
+        };
+        String submitPlan="{\"command\":\"run\",\"targetKind\":\"native-suite\",\"packageId\":\"payments\","
+                +"\"environment\":\"SIT\",\"runId\":\"suite-smoke-2026\",\"failFast\":true,"
+                +"\"definitionIds\":[\"payments.transfer\",\"payments.refund\"],"
+                +"\"qualifiedCaseIds\":[\"payments.transfer.valid\",\"payments.refund.refund1\"],"
+                +"\"tags\":[\"smoke\"],\"excludeTags\":[\"destructive\"]}";
+        assertEquals(0,RemoteCommand.run(new String[]{"--server","https://example.invalid","--format","json","vnext",submitPlan},
+                java.util.Collections.<String,String>emptyMap(),null,null,(profile,password,username,provider)->client));
+        assertEquals(Arrays.asList("/drafts/run","/jobs/run"),client.postPaths);
+        JsonNode definition=client.postBodies.get(0);
+        assertEquals("att-execution/v2",definition.path("schemaVersion").asText());
+        assertEquals("nativeSuite",definition.path("target").path("type").asText());
+        assertEquals(Arrays.asList("payments.transfer","payments.refund"),Arrays.asList(
+                definition.path("target").path("definitionIds").get(0).asText(),
+                definition.path("target").path("definitionIds").get(1).asText()));
+        assertEquals(Arrays.asList("payments.transfer.valid","payments.refund.refund1"),Arrays.asList(
+                definition.path("target").path("selection").path("qualifiedCaseIds").get(0).asText(),
+                definition.path("target").path("selection").path("qualifiedCaseIds").get(1).asText()));
+        assertEquals("smoke",definition.path("target").path("selection").path("tags").get(0).asText());
+        assertEquals("destructive",definition.path("target").path("selection").path("excludeTags").get(0).asText());
+        assertFalse(definition.path("target").path("selection").path("all").asBoolean(false));
+        assertEquals("SIT",definition.path("environment").asText());
+        assertTrue(definition.path("options").path("failFast").asBoolean());
+        assertEquals("suite-smoke-2026",definition.path("options").path("runId").asText());
+        assertEquals("payments",client.postBodies.get(1).path("packageId").asText());
+        assertEquals("R0123456789ABCDEF0123456789ABCDEF",client.postBodies.get(1).path("draftId").asText());
+
+        MockClient dryRunClient=new MockClient(){
+            @Override public JsonNode get(String path)throws RemoteException {
+                if("/version".equals(path)) {
+                    ObjectNode version=RemoteHttpClient.JSON.createObjectNode().put("apiVersion",ServerApi.VERSION);
+                    version.putArray("unifiedRunVersions").add("att-execution/v2");return version;
+                }
+                return super.get(path);
+            }
+            @Override public JsonNode post(String path,JsonNode body)throws RemoteException {
+                posts++;postPaths.add(path);postBodies.add(body.deepCopy());lastPath=path;lastBody=body.deepCopy();
+                return RemoteHttpClient.JSON.createObjectNode().put("draftId","R0123456789ABCDEF0123456789ABCDEF")
+                        .put("revisionDigest","cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+                        .put("selectedCount",1);
+            }
+        };
+        ByteArrayOutputStream stdout=new ByteArrayOutputStream();PrintStream previous=System.out;int exit;
+        String dryRunPlan="{\"command\":\"run\",\"targetKind\":\"native-suite\",\"packageId\":\"payments\","
+                +"\"definitionIds\":[\"payments.transfer\"],\"all\":true,\"tags\":[\"smoke\"],\"dryRun\":true}";
+        try {
+            System.setOut(new PrintStream(stdout,true,"UTF-8"));
+            exit=RemoteCommand.run(new String[]{"--server","https://example.invalid","--format","json","vnext",dryRunPlan},
+                    java.util.Collections.<String,String>emptyMap(),null,null,(profile,password,username,provider)->dryRunClient);
+        } finally { System.setOut(previous); }
+        assertEquals(0,exit);
+        assertEquals(java.util.Collections.singletonList("/drafts/run"),dryRunClient.postPaths);
+        JsonNode dryRunDefinition=dryRunClient.postBodies.get(0);
+        assertEquals("nativeSuite",dryRunDefinition.path("target").path("type").asText());
+        assertTrue(dryRunDefinition.path("target").path("selection").path("all").asBoolean());
+        assertEquals("smoke",dryRunDefinition.path("target").path("selection").path("tags").get(0).asText());
+        assertFalse(dryRunDefinition.path("options").has("dryRun"));
+        JsonNode preview=RemoteHttpClient.JSON.readTree(new String(stdout.toByteArray(),StandardCharsets.UTF_8));
+        assertEquals("native-suite",preview.path("targetKind").asText());
+        assertFalse(preview.path("submitted").asBoolean(true));
+        assertEquals("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                preview.path("preview").path("revisionDigest").asText());
+        assertEquals(0,dryRunClient.jobReads);
     }
 
     @Test void vNextValidationFailuresStayOnStdoutAsAttValidationReports() throws Exception {

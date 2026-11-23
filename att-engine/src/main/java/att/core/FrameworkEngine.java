@@ -44,6 +44,8 @@ import att.testcase.CaseSourceProvenance;
 import att.testcase.ResolvedTestCase;
 import att.testcase.TestCaseDefinitionResolver;
 import att.testcase.TestCaseResolutionResult;
+import att.testcase.TestCaseSuiteResolutionResult;
+import att.testcase.TestCaseSuiteResolver;
 import att.excel.ExcelDataSourceAdapter;
 import att.resource.PackageResourceResolver;
 
@@ -68,8 +70,32 @@ public class FrameworkEngine {
     public RunSummary runNativeCases(TestCaseResolutionResult resolution, String requestedRunId,
             Path requestedOutputRoot, boolean dryRun, boolean failFast,
             att.api.ExecutionEventListener observer) throws Exception {
+        return runNativeCaseSuite(TestCaseSuiteResolutionResult.fromSingle(resolution), requestedRunId,
+                requestedOutputRoot, dryRun, failFast, observer);
+    }
+
+    /** Executes one bounded implicit Suite across one or more resolved native Definitions. */
+    public RunSummary runNativeCaseSuite(TestCaseSuiteResolutionResult resolution, String requestedRunId,
+            Path requestedOutputRoot, boolean dryRun, boolean failFast,
+            att.api.ExecutionEventListener observer) throws Exception {
+        return runNativeCaseSuite(resolution, requestedRunId, requestedOutputRoot, null,
+                dryRun, failFast, observer, null);
+    }
+
+    /** Executes a frozen retry selection while keeping its counts separate from this RUN's results. */
+    public RunSummary runNativeCaseSuite(TestCaseSuiteResolutionResult resolution, String requestedRunId,
+            Path requestedOutputRoot, boolean dryRun, boolean failFast,
+            att.api.ExecutionEventListener observer, att.api.NativeSuiteRetryLineage retryLineage) throws Exception {
+        return runNativeCaseSuite(resolution, requestedRunId, requestedOutputRoot, null,
+                dryRun, failFast, observer, retryLineage);
+    }
+
+    /** Executes a Suite with its Package identity for scoped local retry history. */
+    public RunSummary runNativeCaseSuite(TestCaseSuiteResolutionResult resolution, String requestedRunId,
+            Path requestedOutputRoot, String packageId, boolean dryRun, boolean failFast,
+            att.api.ExecutionEventListener observer, att.api.NativeSuiteRetryLineage retryLineage) throws Exception {
         config.requireExecutionConfig();
-        List<ResolvedTestCase> selected = validateNativeResolution(resolution);
+        List<ResolvedTestCase> selected = validateNativeSuiteResolution(resolution);
         String runId = IdentifierValidator.runId(requestedRunId);
         Path outputRoot = requestedOutputRoot == null ? resolve(config.outputDirectory()) : resolve(requestedOutputRoot);
         Path runDirectory = IdentifierValidator.strictChild(outputRoot, runId, "Run directory");
@@ -91,7 +117,7 @@ public class FrameworkEngine {
 
             Instant runStarted = Instant.now();
             emitNativeEvent(observer, "RUN_STARTED", runId, null, "RUNNING", null,
-                    nativeIdentityData(resolution.definition().id(), resolution.sourceReference(), resolution.sourceRevision(), null));
+                    nativeSuiteIdentityData(resolution, null));
             att.template.DefaultBuiltInProvider runBuiltIns = new att.template.DefaultBuiltInProvider(new att.template.SequenceService());
             ToolInvoker toolInvoker = new ToolInvoker(projectRoot, config);
             att.exec.DbHelperExecutor dbHelperExecutor = new att.exec.DbHelperExecutor(projectRoot, config);
@@ -104,6 +130,21 @@ public class FrameworkEngine {
             try {
                 for (ResolvedTestCase testCase : selected) {
                     if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("Native RUN was cancelled");
+                    if (stopRun) {
+                        String reason = "Not started because failFast stopped the Suite after an earlier Case failure";
+                        TestResult skipped = TestResult.notExecuted(testCase.qualifiedCaseId(), nativeCaseName(testCase),
+                                testCase.tags(), testCase.definitionId(), testCase.qualifiedCaseId(), reason);
+                        results.add(skipped);
+                        appendEvent(runDirectory, runId, skipped);
+                        Map<String,Object> identity = new LinkedHashMap<String,Object>();
+                        identity.put("definitionId", testCase.definitionId());
+                        identity.put("qualifiedCaseId", testCase.qualifiedCaseId());
+                        identity.put("notStartedReason", "failFast");
+                        identity.put("executionStarted", Boolean.FALSE);
+                        emitNativeEvent(observer, "CASE_FINISHED", runId, testCase.qualifiedCaseId(),
+                                ResultStatus.SKIPPED.name(), 0L, identity);
+                        continue;
+                    }
                     TestResult result = runNativeCase(testCase, runId, runStarted, runDirectory, templateEngine,
                             flows, dbHelperExecutor, dryRun, observer);
                     results.add(result);
@@ -112,7 +153,6 @@ public class FrameworkEngine {
                             || result.status() == ResultStatus.INVALID)) {
                         stopRun = true;
                     }
-                    if (stopRun) break;
                 }
             } finally {
                 try { dbHelperExecutor.close(); }
@@ -135,11 +175,14 @@ public class FrameworkEngine {
             att.config.ConfigurationEvidence.write(runDirectory, config);
             ExecutionOptions manifestOptions = nativeManifestOptions(runId, requestedOutputRoot, dryRun, failFast, ciOutputs);
             writeManifest(runDirectory, runId, results, runStarted, runEnded, html, manifestOptions, inputs,
-                    Collections.<att.validation.Diagnostic>emptyList(), nativeRunMetadata(resolution));
+                    Collections.<att.validation.Diagnostic>emptyList(), nativeRunMetadata(resolution, summary, retryLineage));
             writeLatest(outputRoot, runDirectory, runId, summary, runEnded);
+            if(!dryRun&&packageId!=null)writeLatest(outputRoot,runDirectory,runId,summary,runEnded,
+                    att.testcase.NativeSuiteRetryResolver.latestPointerFileName(packageId,
+                            resolution.definitions().stream().map(item->item.definition().id())
+                                    .collect(java.util.stream.Collectors.toList())));
             emitNativeEvent(observer, "RUN_FINISHED", runId, null, summary.status().name(),
-                    Duration.between(runStarted, runEnded).toMillis(), nativeIdentityData(
-                            resolution.definition().id(), resolution.sourceReference(), resolution.sourceRevision(), null));
+                    Duration.between(runStarted, runEnded).toMillis(), nativeSuiteIdentityData(resolution, null));
             return new RunSummary(results, html, runId);
         } finally {
             concurrencyGuard.close();
@@ -381,7 +424,8 @@ public class FrameworkEngine {
             writeCaseTree(caseOutputDir, context, caseLog);
             return new TestResult(testCase.caseId(), testCase.caseName(), finalStatus,
                     Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations), caseLogPath, validations,
-                    testCase.workbookId(), testCase.groupId(), testCase.tags(), null, validatedCaseId);
+                    testCase.workbookId(), testCase.groupId(), testCase.tags(), null, validatedCaseId,
+                    null, null, !options.dryRun());
         } catch (Exception e) {
             att.validation.DiagnosticException typed = att.validation.DiagnosticException.find(e);
             String errorMessage = typed == null ? message(e) : typed.format();
@@ -403,7 +447,7 @@ public class FrameworkEngine {
                 context.put("CASE.error", errorMessage);
             }
             return error(testCase, errorMessage, caseLogPath, Duration.between(started, Instant.now()),
-                    typed == null ? null : typed.toDiagnostic(), validatedCaseId);
+                    typed == null ? null : typed.toDiagnostic(), validatedCaseId, !options.dryRun());
         } finally {
             if (!dbFinalized) dbHelperExecutor.abortCase();
             caseLog.close();
@@ -483,7 +527,7 @@ public class FrameworkEngine {
                 TestResult result = new TestResult(testCase.qualifiedCaseId(), nativeCaseName(testCase), status,
                         Duration.between(started, Instant.now()), joinExpected(validations), joinActual(validations),
                         caseLogPath, validations, "", "", testCase.tags(), null, executionId,
-                        testCase.definitionId(), testCase.qualifiedCaseId());
+                        testCase.definitionId(), testCase.qualifiedCaseId(), !dryRun);
                 identity.put("executionId", executionId);
                 emitNativeEvent(observer, "CASE_FINISHED", runId, testCase.qualifiedCaseId(), status.name(),
                         result.duration().toMillis(), identity);
@@ -507,7 +551,7 @@ public class FrameworkEngine {
                 TestResult result = new TestResult(testCase.qualifiedCaseId(), nativeCaseName(testCase), ResultStatus.ERROR,
                         duration, "", errorMessage, caseLogPath, validations, "", "", testCase.tags(),
                         typed == null ? null : typed.toDiagnostic(), executionId, testCase.definitionId(),
-                        testCase.qualifiedCaseId());
+                        testCase.qualifiedCaseId(), !dryRun);
                 emitNativeEvent(observer, "CASE_FINISHED", runId, testCase.qualifiedCaseId(), ResultStatus.ERROR.name(),
                         duration.toMillis(), identity);
                 return result;
@@ -517,42 +561,51 @@ public class FrameworkEngine {
         }
     }
 
-    private List<ResolvedTestCase> validateNativeResolution(TestCaseResolutionResult resolution) {
-        if (resolution == null || resolution.definition() == null)
+    private List<ResolvedTestCase> validateNativeSuiteResolution(TestCaseSuiteResolutionResult resolution) {
+        if (resolution == null || resolution.definitions().isEmpty())
             throw new IllegalArgumentException("A resolved native Test Case Definition is required");
         if (resolution.truncated())
-            throw new IllegalArgumentException("A truncated Native Case preview cannot be executed; resolve the complete selection first");
+            throw new IllegalArgumentException("A truncated Native Case Suite cannot be executed; resolve the complete selection first");
         if (resolution.emptySelection() || resolution.selectedCount() == 0)
-            throw new IllegalArgumentException("Native Case selection is empty");
-        if (resolution.selectedCount() > TestCaseDefinitionResolver.MAX_PREVIEW_CASES)
-            throw new IllegalArgumentException("Native RUN supports at most " + TestCaseDefinitionResolver.MAX_PREVIEW_CASES + " selected Cases");
-        if (resolution.selectedCases().size() != resolution.selectedCount())
-            throw new IllegalArgumentException("Native Case resolution does not contain its complete selected Case set");
-        String definitionId = resolution.definition().id();
-        List<ResolvedTestCase> cases = new ArrayList<ResolvedTestCase>(resolution.selectedCases());
+            throw new IllegalArgumentException("Native Case Suite selection is empty");
+        if (resolution.selectedCount() > TestCaseSuiteResolver.MAX_SELECTED_CASES)
+            throw new IllegalArgumentException("Native RUN supports at most " + TestCaseSuiteResolver.MAX_SELECTED_CASES + " selected Cases");
+        Map<String,TestCaseResolutionResult> definitions = new LinkedHashMap<String,TestCaseResolutionResult>();
+        for (TestCaseResolutionResult definition : resolution.definitions()) {
+            if (definition == null || definition.definition() == null)
+                throw new IllegalArgumentException("Native Case Suite contains an incomplete Definition resolution");
+            if (definitions.put(definition.definition().id(), definition) != null)
+                throw new IllegalArgumentException("Native Case Suite contains a duplicate Definition ID");
+        }
+        List<ResolvedTestCase> cases = new ArrayList<ResolvedTestCase>(resolution.cases());
         Set<String> seen = new LinkedHashSet<String>();
         for (ResolvedTestCase testCase : cases) {
-            if (testCase == null || !definitionId.equals(testCase.definitionId())
-                    || !testCase.qualifiedCaseId().equals(definitionId + "." + testCase.caseId())
-                    || !resolution.sourceReference().equals(testCase.sourceReference())
-                    || !resolution.sourceRevision().equals(testCase.sourceRevision()))
+            TestCaseResolutionResult definition = testCase == null ? null : definitions.get(testCase.definitionId());
+            if (definition == null || !testCase.qualifiedCaseId().equals(testCase.definitionId() + "." + testCase.caseId())
+                    || !definition.sourceReference().equals(testCase.sourceReference())
+                    || !definition.sourceRevision().equals(testCase.sourceRevision()))
                 throw new IllegalArgumentException("Native Case resolution identity is inconsistent");
             if (!seen.add(testCase.qualifiedCaseId()))
                 throw new IllegalArgumentException("Native Case selection contains a duplicate Qualified Case ID: " + testCase.qualifiedCaseId());
         }
+        if (cases.size() != resolution.selectedCount())
+            throw new IllegalArgumentException("Native Case Suite does not contain its complete selected Case set");
         return cases;
     }
 
-    private List<Map<String,Object>> verifyNativeSources(TestCaseResolutionResult resolution,
+    private List<Map<String,Object>> verifyNativeSources(TestCaseSuiteResolutionResult resolution,
             List<ResolvedTestCase> cases, FlowRegistry flows) throws Exception {
         PackageResourceResolver resources = new PackageResourceResolver(projectRoot);
         Map<String,Map<String,Object>> captured = new LinkedHashMap<String,Map<String,Object>>();
-        Path definition = resources.resolvePackageRelative(resolution.sourceReference(), PackageResourceResolver.Kind.FILE).canonicalPath();
-        byte[] definitionBytes = readNativeSource(definition, TestCaseDefinitionResolver.MAX_SOURCE_BYTES, "Native Test Case Definition");
-        String actualDefinitionRevision = sha256Bytes(definitionBytes);
-        if (!actualDefinitionRevision.equals(resolution.sourceRevision()))
-            throw new IllegalArgumentException("Native Test Case Definition changed after resolution; resolve again before RUN");
-        addNativeInput(captured, "test-case-definition", resolution.sourceReference(), resolution.sourceRevision());
+        for (TestCaseResolutionResult definitionResolution : resolution.definitions()) {
+            Path definition = resources.resolvePackageRelative(definitionResolution.sourceReference(), PackageResourceResolver.Kind.FILE).canonicalPath();
+            byte[] definitionBytes = readNativeSource(definition, TestCaseDefinitionResolver.MAX_SOURCE_BYTES, "Native Test Case Definition");
+            String actualDefinitionRevision = sha256Bytes(definitionBytes);
+            if (!actualDefinitionRevision.equals(definitionResolution.sourceRevision()))
+                throw new IllegalArgumentException("Native Test Case Definition changed after resolution; resolve again before RUN: "
+                        + definitionResolution.definition().id());
+            addNativeInput(captured, "test-case-definition", definitionResolution.sourceReference(), definitionResolution.sourceRevision());
+        }
 
         Map<String,String> dependencyRevisions = new LinkedHashMap<String,String>();
         for (ResolvedTestCase testCase : cases) {
@@ -659,6 +712,31 @@ public class FrameworkEngine {
         return data;
     }
 
+    private Map<String,Object> nativeSuiteIdentityData(TestCaseSuiteResolutionResult resolution,
+            ResolvedTestCase testCase) {
+        if (testCase != null) return nativeIdentityData(testCase.definitionId(), testCase.sourceReference(),
+                testCase.sourceRevision(), testCase);
+        if (!resolution.implicitSuite() && resolution.definitions().size() == 1) {
+            TestCaseResolutionResult definition = resolution.definitions().get(0);
+            return nativeIdentityData(definition.definition().id(), definition.sourceReference(), definition.sourceRevision(), null);
+        }
+        Map<String,Object> data = new LinkedHashMap<String,Object>();
+        data.put("targetType", "nativeSuite");
+        List<Map<String,Object>> definitions = new ArrayList<Map<String,Object>>();
+        List<String> definitionIds = new ArrayList<String>();
+        for (TestCaseResolutionResult definition : resolution.definitions()) {
+            definitionIds.add(definition.definition().id());
+            Map<String,Object> item = new LinkedHashMap<String,Object>();
+            item.put("definitionId", definition.definition().id());
+            item.put("sourceReference", definition.sourceReference());
+            item.put("sourceRevision", definition.sourceRevision());
+            definitions.add(item);
+        }
+        data.put("definitionIds", definitionIds);
+        data.put("definitions", definitions);
+        return data;
+    }
+
     private void emitNativeEvent(att.api.ExecutionEventListener observer, String event, String runId,
             String caseId, String status, Long durationMs, Map<String,Object> data) {
         if (observer == null) return;
@@ -685,14 +763,48 @@ public class FrameworkEngine {
                 Collections.<String>emptyList()).withRunPolicies(ciOutputs, "reject", false);
     }
 
-    private Map<String,Object> nativeRunMetadata(TestCaseResolutionResult resolution) {
+    private Map<String,Object> nativeRunMetadata(TestCaseSuiteResolutionResult resolution, RunSummary summary,
+            att.api.NativeSuiteRetryLineage retryLineage) throws Exception {
         Map<String,Object> metadata = new LinkedHashMap<String,Object>();
-        metadata.put("executionType", "run"); metadata.put("targetType", "nativeCase");
-        metadata.put("packageId", resolution.selectedCases().get(0).packageId());
-        metadata.put("definitionId", resolution.definition().id());
-        metadata.put("sourceReference", resolution.sourceReference());
-        metadata.put("sourceRevision", resolution.sourceRevision());
+        metadata.put("executionType", "run");
+        metadata.put("targetType", resolution.implicitSuite() ? "nativeSuite" : "nativeCase");
+        metadata.put("packageId", resolution.cases().get(0).packageId());
+        List<Map<String,Object>> definitionValues = new ArrayList<Map<String,Object>>();
+        List<String> definitionIds = new ArrayList<String>();
+        for (TestCaseResolutionResult definition : resolution.definitions()) {
+            definitionIds.add(definition.definition().id());
+            Map<String,Object> value = new LinkedHashMap<String,Object>();
+            value.put("definitionId", definition.definition().id());
+            value.put("sourceReference", definition.sourceReference());
+            value.put("sourceRevision", definition.sourceRevision());
+            definitionValues.add(value);
+        }
+        metadata.put("definitionIds", definitionIds);
+        metadata.put("definitions", definitionValues);
+        if (resolution.definitions().size() == 1) {
+            TestCaseResolutionResult definition = resolution.definitions().get(0);
+            metadata.put("definitionId", definition.definition().id());
+            metadata.put("sourceReference", definition.sourceReference());
+            metadata.put("sourceRevision", definition.sourceRevision());
+        }
+        metadata.put("resolvedCaseCount", resolution.resolvedCount());
+        metadata.put("selectedCaseCount", resolution.selectedCount());
+        metadata.put("executionCount", summary.executionCount());
+        metadata.put("skippedCaseCount", summary.skipped());
+        List<Map<String,Object>> caseSources = new ArrayList<Map<String,Object>>();
+        for (ResolvedTestCase testCase : resolution.cases())
+            caseSources.add(att.testcase.NativeSuiteRetryResolver.caseSourceIdentity(testCase));
+        metadata.put("caseSources", caseSources);
+        metadata.put("sourceIdentityDigest", nativeSourceIdentityDigest(definitionValues, caseSources));
+        if (retryLineage != null) metadata.put("retryLineage", retryLineage.toManifestMap(
+                summary.executionCount(), summary.skipped()));
         return metadata;
+    }
+
+    private String nativeSourceIdentityDigest(List<Map<String,Object>> definitions,
+            List<Map<String,Object>> caseSources) throws Exception {
+        List<Object> identity=new ArrayList<Object>();identity.add(definitions);identity.add(caseSources);
+        return sha256Bytes(new Yaml().dump(identity).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private void verifyJunit(Path junitFile) throws Exception {
@@ -881,6 +993,7 @@ public class FrameworkEngine {
         Map<String, Object> summary = new LinkedHashMap<String, Object>();
         RunSummary runSummary = new RunSummary(results, runDirectory);
         summary.put("total", runSummary.total());
+        summary.put("executionCount", runSummary.executionCount());
         summary.put("passed", runSummary.passed());
         summary.put("failed", runSummary.failed());
         summary.put("error", runSummary.error());
@@ -898,6 +1011,7 @@ public class FrameworkEngine {
                 item.put("qualifiedCaseId", result.qualifiedCaseId());
             }
             item.put("caseName", result.caseName());
+            item.put("executed", result.executionStarted());
             item.put("workbookId", result.workbookId());
             item.put("groupId", result.groupId());
             item.put("tags", result.tags());
@@ -924,10 +1038,22 @@ public class FrameworkEngine {
     }
 
     private void writeLatest(Path outputRoot, Path runDirectory, String runId, RunSummary summary, Instant endedAt) throws Exception {
-        Map<String, Object> pointer = new LinkedHashMap<String, Object>(); pointer.put("schemaVersion", "att-latest-run/v2.1"); pointer.put("runId", runId); pointer.put("runDirectory", outputRoot.relativize(runDirectory).toString().replace('\\', '/')); pointer.put("completedAt", endedAt.toString()); pointer.put("status", summary.status().name()); pointer.put("manifestSha256", sha256(runDirectory.resolve("run.yaml")));
+        writeLatest(outputRoot,runDirectory,runId,summary,endedAt,"latest-run.yaml");
+    }
+
+    private void writeLatest(Path outputRoot,Path runDirectory,String runId,RunSummary summary,Instant endedAt,
+            String pointerFileName) throws Exception {
+        Path absoluteOutputRoot = IdentifierValidator.canonicalPath(outputRoot, "Output root");
+        Path absoluteRunDirectory = IdentifierValidator.canonicalPath(runDirectory, "Run directory");
+        if (!absoluteOutputRoot.equals(absoluteRunDirectory.getParent()))
+            throw new IllegalArgumentException("Run directory must be a direct child of the output directory: "
+                    + absoluteRunDirectory + " under " + absoluteOutputRoot);
+        Map<String, Object> pointer = new LinkedHashMap<String, Object>(); pointer.put("schemaVersion", "att-latest-run/v2.1"); pointer.put("runId", runId); pointer.put("runDirectory", absoluteOutputRoot.relativize(absoluteRunDirectory).toString().replace('\\', '/')); pointer.put("completedAt", endedAt.toString()); pointer.put("status", summary.status().name()); pointer.put("manifestSha256", sha256(absoluteRunDirectory.resolve("run.yaml")));
         byte[] bytes = new Yaml().dump(pointer).getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        Path latest = outputRoot.resolve("latest-run.yaml");
-        Path temporary = outputRoot.resolve("latest-run.yaml.tmp");
+        if(pointerFileName==null||!pointerFileName.matches("latest-(?:run|native-suite-[a-f0-9]{64})\\.yaml"))
+            throw new IllegalArgumentException("Invalid latest RUN pointer filename");
+        Path latest = absoluteOutputRoot.resolve(pointerFileName);
+        Path temporary = absoluteOutputRoot.resolve(pointerFileName+".tmp");
         Files.write(temporary, bytes);
         Files.move(temporary, latest, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
     }
@@ -1021,14 +1147,19 @@ public class FrameworkEngine {
     }
 
     private void appendEvent(Path runDirectory, String runId, TestResult result) throws Exception {
-        Map<String,Object> event = new LinkedHashMap<String,Object>(); event.put("runId", runId); event.put("caseId", result.caseId()); event.put("status", result.status().name()); event.put("durationMs", result.duration().toMillis()); event.put("caseLog", result.caseLogPath() == null ? "" : PathPresentation.displayPath(result.caseLogPath(), projectRoot));
+        Map<String,Object> event = new LinkedHashMap<String,Object>(); event.put("runId", runId); event.put("caseId", result.caseId()); event.put("status", result.status().name()); event.put("durationMs", result.duration().toMillis()); event.put("executionStarted", Boolean.valueOf(result.executionStarted())); event.put("caseLog", result.caseLogPath() == null ? "" : PathPresentation.displayPath(result.caseLogPath(), projectRoot));
+        if (result.executionId() != null) event.put("execId", result.executionId());
+        if (!result.executionStarted() && result.actual() != null && !result.actual().isEmpty())
+            event.put("notStartedReason", result.actual());
         String json = att.validation.JsonSupport.write(event) + "\n";
         Files.write(runDirectory.resolve("events.jsonl"), json.getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
     }
 
     private static TestResult skipped(TestCase testCase, String message) {
-        return result(testCase, ResultStatus.SKIPPED, Duration.ZERO, message, "", null);
+        return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.SKIPPED, Duration.ZERO,
+                message, "", null, Collections.<ValidationResult>emptyList(), testCase.workbookId(),
+                testCase.groupId(), testCase.tags(), null, null, null, null, false);
     }
 
     private static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration) {
@@ -1040,11 +1171,18 @@ public class FrameworkEngine {
     }
     private static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration,
                                    att.validation.Diagnostic diagnostic, String executionId) {
+        return error(testCase,message,outputXml,duration,diagnostic,executionId,true);
+    }
+    static TestResult error(TestCase testCase, String message, Path outputXml, Duration duration,
+                            att.validation.Diagnostic diagnostic, String executionId,boolean executionStarted) {
         return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.ERROR, duration, "", message, outputXml,
-                Collections.<ValidationResult>emptyList(), testCase.workbookId(), testCase.groupId(), testCase.tags(), diagnostic, executionId);
+                Collections.<ValidationResult>emptyList(), testCase.workbookId(), testCase.groupId(), testCase.tags(),
+                diagnostic, executionId, null, testCase.caseId(), executionStarted);
     }
     private static TestResult invalid(TestCase testCase, String message) {
-        return result(testCase, ResultStatus.INVALID, Duration.ZERO, "", message, null);
+        return new TestResult(testCase.caseId(), testCase.caseName(), ResultStatus.INVALID, Duration.ZERO,
+                "", message, null, Collections.<ValidationResult>emptyList(), testCase.workbookId(),
+                testCase.groupId(), testCase.tags(), null, null, null, null, false);
     }
     private static TestResult result(TestCase testCase, ResultStatus status, Duration duration, String expected, String actual, Path log) {
         return result(testCase, status, duration, expected, actual, log, null);

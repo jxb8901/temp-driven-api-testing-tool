@@ -3,6 +3,7 @@ package att.server;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -52,10 +53,11 @@ final class JobExecutionSpec {
         if((!currentVersion&&!legacyVersion)||!"reject-package-changes".equals(value.path("revisionPolicy").asText())
                 ||!value.path("revision").asText().matches("[a-f0-9]{64}")||!value.path("definition").isObject())
             throw new IllegalArgumentException("Unsupported execution snapshot");
-        value.fieldNames().forEachRemaining(field->{if(!Set.of("schemaVersion","revisionPolicy","revision","definition","sourcePath","configuration","replay","scheduleSnapshot","sourceProvenance").contains(field))throw new IllegalArgumentException("Unknown execution snapshot field");});
+        value.fieldNames().forEachRemaining(field->{if(!Set.of("schemaVersion","revisionPolicy","revision","definition","sourcePath","configuration","replay","scheduleSnapshot","sourceProvenance","nativeSuiteRetry").contains(field))throw new IllegalArgumentException("Unknown execution snapshot field");});
         if(value.has("configuration"))configuration();
         if(value.has("sourceProvenance"))validateSourceProvenance(value.path("sourceProvenance"));
         if(value.has("replay"))validateReplay(value.path("replay"),currentVersion);
+        if(value.has("nativeSuiteRetry"))validateNativeSuiteRetry(value.path("nativeSuiteRetry"),value.path("definition"));
         if(value.has("scheduleSnapshot")) {
             JsonNode snapshot=value.path("scheduleSnapshot");
             if(!snapshot.isObject()||!snapshot.path("scheduleId").asText("").matches("S[A-Za-z0-9_-]{1,79}")||!snapshot.path("version").isIntegralNumber()||snapshot.path("version").longValue()<1)
@@ -82,6 +84,21 @@ final class JobExecutionSpec {
         ObjectNode replay=value.putObject("replay");replay.put("sourceJobId",sourceJobId);replay.put("sourcePolicy",sourcePolicy);
         replay.put("originalRevision",originalRevision);replay.put("effectiveRevision",effectiveRevision);
         return this;
+    }
+    JobExecutionSpec withNativeSuiteRetry(Map<String,Object> retry) {
+        att.api.NativeSuiteRetryLineage lineage=att.api.NativeSuiteRetryLineage.fromMap(retry);
+        if(lineage.sourceJobId()==null)throw new IllegalArgumentException("Server Native Suite retry source Job ID is required");
+        value.set("nativeSuiteRetry",ServerRuntime.JSON.valueToTree(lineage.toMap()));validate();return this;
+    }
+    private void validateNativeSuiteRetry(JsonNode retry,JsonNode definition) {
+        Map<?,?> fields=ServerRuntime.JSON.convertValue(retry,Map.class);
+        att.api.NativeSuiteRetryLineage lineage=att.api.NativeSuiteRetryLineage.fromMap(fields);
+        if(lineage.sourceJobId()==null||!lineage.sourceRevisionDigest().equals(value.path("revision").asText())
+                ||!"nativeSuite".equals(definition.path("target").path("type").asText()))
+            throw new IllegalArgumentException("Invalid Native Suite retry source identity");
+        JsonNode ids=definition.path("target").path("selection").path("qualifiedCaseIds");
+        if(!ids.isArray()||!ServerRuntime.JSON.convertValue(ids,List.class).equals(lineage.failedQualifiedCaseIds()))
+            throw new IllegalArgumentException("Native Suite retry IDs do not match the retained execution selection");
     }
     private static void validateReplay(JsonNode replay,boolean required) {
         if(!replay.isObject()||!replay.path("sourceJobId").asText("").matches("J[A-F0-9]{16}")

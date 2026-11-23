@@ -15,7 +15,7 @@ att [--local | --server <profile|url>] [-p <packageId>] [-e <profile>] \
 
 | 命令 | 範例 | 行為 |
 |---|---|---|
-| `run` | `att --local -p payments run case quickStart.default.QS001` | 執行舊式 Case、Suite workbook、所有 Case、Template、Flow 或 Tool；Local 會同步執行。Native inline Case 使用明確的 [Native Case RUN command](#native-case-run)。 |
+| `run` | `att --local -p payments run case quickStart.default.QS001` | 執行舊式 Case、Suite workbook、所有 Case、Template、Flow 或 Tool；Local 會同步執行。Native inline Case 使用明確的 [Native Case RUN command](#native-case-run)。Implicit Suite 使用 [Native Suite RUN](#native-suite-run)。 |
 | `load` | `att --server sit -p payments load flow PAYMENT.submit --arrival-rate 5/s --duration 2m` | 透過現有 Load Engine 執行 Flow、Template、Tool 或已編寫的 Load Scenario。 |
 | `validate config` | `att --local -p payments -e SIT validate config` | 檢查共享 Runtime Config，以及所選 Package 的有效 Config 和 Testdata reference，不執行業務 I/O。 |
 | `validate package` | `att --server sit -p payments validate package` | 檢查完整的已註冊 Package inventory 和靜態依賴。 |
@@ -26,11 +26,15 @@ att [--local | --server <profile|url>] [-p <packageId>] [-e <profile>] \
 
 Validation 只讀：不執行 Tool、不發送 Load traffic、不連線探測 DB/MQ，也不修改 Config、Package 檔案或輸出。Human 輸出使用階層式 `PASS`/`FAIL`/`WARN`/`SKIP` 區段；`--format json` 會向 stdout 輸出單一 `att-validation/v1` report。Exit code：PASS 為 `0`、RUN/LOAD 功能失敗為 `1`、輸入或 validation 無效為 `2`、執行錯誤/取消為 `3`、Remote transport 或不可信結果為 `4`。持續性 Local Job 管理及背景提交不屬於此提案語法。
 
-常用 vNext option：`-p, --package`、`-e, --env`、`--format`、`--quiet`、`--verbose`、`--help` 和 `--version`。`--config <path>` 只適用 Local。RUN 選擇 option 包括 `--suite`、`--suite-dir`、`--case`（亦可用 `--case-id`）、`--tag`、`--exclude-tag`、`--all`、`--rerun-failed`、`--dry-run`（適用 Case/Suite/Native Case RUN）、`--fail-fast`、`--run-id`，以及僅限 Local 的 `--output-dir`。Template、Flow 及 Tool RUN 會拒絕 `--dry-run`，並支援 `--input <path>`；Resource RUN 和 LOAD 可重複使用 `--set`。直接 LOAD 會拒絕 `--input`。LOAD 可使用 `--users` 或 `--arrival-rate`，並可設定 `--ramp-up`、`--warmup`、`--duration`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`。`--users` 與 `--arrival-rate` 不能同時使用。未支援的 option 和無效組合會在提交工作或發送 traffic 前報錯。
+常用 vNext option：`-p, --package`、`-e, --env`、`--format`、`--quiet`、`--verbose`、`--help` 和 `--version`。`--config <path>` 只適用 Local。RUN 選擇 option 包括 `--suite`、`--suite-dir`、`--case`（亦可用 `--case-id`）、`--tag`、`--exclude-tag`、`--all`、`--rerun-failed`、`--dry-run`（適用 Case/Suite/Native Case/Native Suite RUN）、`--fail-fast`、`--run-id`，以及僅限 Local 的 `--output-dir`。Native Suite RUN 另接受可重複的 `--definition` 和 `--qualified-case-id`。Template、Flow 及 Tool RUN 會拒絕 `--dry-run`，並支援 `--input <path>`；Resource RUN 和 LOAD 可重複使用 `--set`。直接 LOAD 會拒絕 `--input`。LOAD 可使用 `--users` 或 `--arrival-rate`，並可設定 `--ramp-up`、`--warmup`、`--duration`、`--ramp-down`、`--think-time`、`--max-concurrent` 和 `--overload-policy`。`--users` 與 `--arrival-rate` 不能同時使用。未支援的 option 和無效組合會在提交工作或發送 traffic 前報錯。
 
 ### Native Case RUN
 
 Native RUN 使用 `run native-case <definitionId> --resolved-case-id <localCaseId>`，並可重複指定 selector（1–1000 個不重複 ID）。ID 屬於所選 Definition。明確 target 會保留 `run case <id>` 和 `--case` 給 Workbook/Sidecar Case；不會根據 dotted ID 推斷 target 類型。Local `--dry-run` 會解析並驗證選中的 Case，但不執行 Flow。Remote Native RUN 要求 Server 宣告支援 `att-execution/v2`；client 先建立經驗證的 RUN draft，再提交該 draft，不會以舊式 `/jobs/run` selector 直接執行。Remote `--run-id` 會透過 `options.runId` 保留在已驗證的 draft 和已接受的 Worker request 中。Remote `--dry-run` 會建立已驗證的 draft preview，然後跳過提交。
+
+### Native Suite RUN
+
+Native Suite RUN 使用 `run native-suite`，並以一個或多個 `--definition <definitionId>` 指定 Definition，再以 `--all`、可重複的 `--qualified-case-id <DefinitionID.localCaseId>`，或 `--tag` / `--exclude-tag` 選取 Case。此命令不接受 positional target。`--rerun-failed` 與上述 selector 互斥，只會重跑同一 Package 和 Definition 集合中最近一個符合資格且已完成的 Native Suite RUN 裏曾執行但失敗的 Case。Local 執行會驗證依 Package/Definition 區分的 Native Suite pointer 和 manifest hash；dry-run 及不相關 RUN 不會取代此 pointer。Remote 執行會解析呼叫者最近完成的 Job。經驗證的 draft 會凍結來源 Job/run、manifest digest、source revision 和確切 retry ID；來源變更或 draft 過期時會拒絕提交。Skipped Case 不會重跑。每次執行的選取、執行、略過及 retry 次數會在 summary 和 manifest 分開記錄。Schedule 會保留已驗證的 retry source。Local `--dry-run` 會解析並驗證 Suite，但不執行 Flow。Remote Native Suite RUN 要求 `att-execution/v2`，先建立經驗證的 draft 再提交；Remote `--dry-run` 只預覽 draft，不會提交 Job。
 
 ### 遷移既有命令
 

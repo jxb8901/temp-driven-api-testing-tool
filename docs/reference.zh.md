@@ -258,7 +258,7 @@ Data-driven Case 省略 `inputs` 時，會把 `DATA` 同名映射到 Flow inputs
 
 完整契約和驗證界線見[active Schema](../schemas/att-testcase-v1.schema.json)、[Singleton inline 範例](adr/examples/att-testcase-v1/inline-single.yaml)、[多筆 inline 範例](adr/examples/att-testcase-v1/inline-multi.yaml)、[Excel 範例](adr/examples/att-testcase-v1/excel.yaml)、[省略 `dataColumns` 的 Excel 範例](adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml)及[ADR-0001](adr/0001-flow-centric-testcase-resolution.zh.md)。
 
-Default Package 已附上離線 Native Quick Start Definitions（`packages/default/testcase/quick-start/**/testcase.yaml`），綁定 Flow `quick.start.v1`。請見[快速入門](quick-start.zh.md)與 [S12 遷移矩陣](maintenance/native-case-default-package-migration-s12.md)。Implicit Suite 選擇與不依賴來源 Workbook 的 native XLSX 報告仍屬 S06／S07 後續工作。
+Default Package 已附上離線 Native Quick Start Definitions（`packages/default/testcase/quick-start/**/testcase.yaml`），綁定 Flow `quick.start.v1`。請見[快速入門](quick-start.zh.md)與 [S12 遷移矩陣](maintenance/native-case-default-package-migration-s12.md)。不依賴來源 Workbook 的 native XLSX 報告仍屬 S07 後續工作。
 
 #### 在 Studio 編寫
 
@@ -269,6 +269,24 @@ Default Package 已附上離線 Native Quick Start Definitions（`packages/defau
 使用 **Add to Change Set**，透過現有 Package source 工作流暫存新增或替換：Draft → Validate → Review → Publish。發布前目前 Package source 仍保持啟用。發布後請預覽最新 source，再選擇 Case ID 進行 RUN 驗證和提交。只有在 Server 宣告支援 `att-execution/v2` 時，Native Case RUN 才可用；Server 會為 Job 驗證並凍結 source 和已選的 ID。
 
 Excel-backed Definition 使用與 native resolution 相同的唯讀 S04 adapter，並在 Studio 顯示 row 和 column diagnostics。Legacy suite 仍可使用現有 Workbook／Sidecar 編輯器。
+
+#### 執行 implicit Native Case Suite
+
+4.6.0 開發候選版可在已解析的 Case 上建立 Suite selection，毋須作者建立 `suite.yaml`。先指定一個或多個 Definition ID，再選取全部 Case、指定完整 Qualified Case ID，或按一個或多個 tags 選取。被排除的 tags 優先於包含的 tags。
+
+以下本地命令會從兩個 Definition 選取所有 `smoke` Case，但排除帶有 `destructive` tags 的 Case：
+
+```sh
+att --local --package payments run native-suite --definition fpp.transfer --definition fpp.refund --tag smoke --exclude-tag destructive --fail-fast
+```
+
+若要選取指定 Case，為每個 ID 使用 `--qualified-case-id`，例如 `fpp.transfer.customerA`。每個 ID 必須屬於已指定的 Definition。Server backend 會透過已驗證的 `att-execution/v2` RUN draft flow 使用相同選取器。
+
+ATT 會按 ID 排列 Definition，並保留每個 Definition 的來源記錄順序。重複 Definition ID、重複 Qualified Case ID、不存在的 ID，以及空選取都會在驗證時失敗。Worker 執行前，Server draft 會凍結選取 ID 和 Definition source revision。每個 Case 的結果沿用現有 RUN evidence 和報告流程。
+
+Implicit Suite 是 runtime selection，並非可重用的 authored Definition。這項功能不會新增 LOAD target 或進階 Testdata/generator binding；Debug interoperability 仍屬後續工作。
+
+Studio Run editor 亦提供這項選取功能：輸入一個或多個 Definition ID，再選擇全部 Case、指定 Qualified Case ID，或按 tags 選取 Case。可用 Include Tags 和 Exclude Tags 進一步篩選；重播時會保留保存定義傳回的 tag selector。Native Suite `--rerun-failed` 只會重跑同一 Package 和 Definition 集合中最近一個合資格已完成 RUN 內曾執行但失敗的 Case。Local RUN 會驗證 latest-run pointer 和 manifest hash；Server draft 會凍結來源 Job/run、manifest digest、Package revision 和精確 Qualified Case ID。過期 draft 或來源變更會被拒絕，Skipped Case 不會重跑，每次嘗試的執行／略過數會與來源及 retry 次數分開記錄。Schedule 會保留已驗證的 retry source。
 
 ### Workbook
 
@@ -1038,7 +1056,7 @@ ATT 4.4.1 將功能性單次執行統一為 **RUN**，支援 Case、Template、F
 
 `suites` 與 `suiteDirectory` 互斥；後者選取套件內的 group 目錄。Case/tag 篩選沿用 CLI 交集規則，任一要求的 tag 可匹配，excludeTags 則排除匹配 Case。`all:true` 表示套件選取。陣列必須非空、不重複，最多 1000 個值。驗證會解析並固定最多 10000 個 Case ID；空選取不會退回執行全部 Case。
 
-`rerunFailed:true` 從呼叫者最近 100 個擁有的工作中，選取同套件最近一個已完成 Case RUN 的失敗項目，與明確 Case/tag 篩選取交集，再固定 ID。Manifest 不可用或沒有匹配失敗項目會驗證失敗。既有 CLI `--rerun-failed` 繼續使用本機 output history。
+Native Suite 的 `rerunFailed:true` 會從同一擁有人、Package、Definition ID 和 Package revision 中最近一個符合資格且已完成的 Native Suite RUN，選取曾執行但失敗的 Case。Server 按完成時間排列候選，不限於最近 100 個 Job。本機執行使用依 Package/Definition 區分且驗證 manifest hash 的 Native Suite pointer；dry-run 及不相關 RUN 不會取代此 pointer。Draft 會凍結來源 Job/run、manifest digest、revision、來源選取數、retry attempt number 和精確失敗 Qualified Case ID；提交時會重新驗證來源，若 draft 驗證後有更新的相符 RUN 完成，就拒絕過期 draft。來源內 Skipped Case 不會重跑。新 RUN 只報告本次選取／執行／略過數，並把 retry 次數和來源統計分開保存。Schedule 會在每次執行時保留已驗證的來源 lineage。Manifest 不可用或不一致、來源變更，或沒有已執行的失敗 Case 都會驗證失敗。既有 Workbook／Sidecar `rerunFailed:true` 行為和本機 history 維持不變。
 
 #### 啟用 Debug 診斷
 

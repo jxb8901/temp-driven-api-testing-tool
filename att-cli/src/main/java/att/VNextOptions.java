@@ -11,7 +11,7 @@ import java.util.Set;
 /** Parsed public vNext command grammar. Legacy commands continue through CliOptions. */
 public final class VNextOptions {
     private static final Set<String> COMMANDS = set("run", "load", "validate");
-    private static final Set<String> TARGETS = set("case", "native-case", "cases", "suite", "template", "flow", "tool", "scenario", "package", "config", "load");
+    private static final Set<String> TARGETS = set("case", "native-case", "native-suite", "cases", "suite", "template", "flow", "tool", "scenario", "package", "config", "load");
     private final String command, targetKind, target, packageId, environment, server, format, runId;
     private final Path configPath, outputDirectory, input, suiteDirectory;
     private final boolean local, all, rerunFailed, dryRun, failFast, quiet, verbose, help, version;
@@ -19,6 +19,7 @@ public final class VNextOptions {
     private final List<Path> suites;
     private final Set<String> caseIds, tags, excludeTags;
     private final List<String> resolvedCaseIds;
+    private final List<String> definitionIds, qualifiedCaseIds;
     private final List<String> overrides;
 
     private VNextOptions(Builder b) {
@@ -32,6 +33,8 @@ public final class VNextOptions {
         suites=Collections.unmodifiableList(new ArrayList<Path>(b.suites));
         caseIds=Collections.unmodifiableSet(new LinkedHashSet<String>(b.caseIds));
         resolvedCaseIds=Collections.unmodifiableList(new ArrayList<String>(b.resolvedCaseIds));
+        definitionIds=Collections.unmodifiableList(new ArrayList<String>(b.definitionIds));
+        qualifiedCaseIds=Collections.unmodifiableList(new ArrayList<String>(b.qualifiedCaseIds));
         tags=Collections.unmodifiableSet(new LinkedHashSet<String>(b.tags));
         excludeTags=Collections.unmodifiableSet(new LinkedHashSet<String>(b.excludeTags));
         overrides=Collections.unmodifiableList(new ArrayList<String>(b.overrides));
@@ -50,7 +53,8 @@ public final class VNextOptions {
         for (int i=command+1;i<args.length;i++) {
             String arg=args[i];
             if (takesValue(arg) && i+1<args.length) { i++; continue; }
-            if ("--all".equals(arg)) return "validate".equals(args[command]) || "cases".equals(nextPositional(args, command));
+            if ("--all".equals(arg)) return "validate".equals(args[command]) || "cases".equals(nextPositional(args, command))
+                    || "native-suite".equals(nextPositional(args, command));
             if (!arg.startsWith("-")) return TARGETS.contains(arg);
         }
         return false;
@@ -128,6 +132,8 @@ public final class VNextOptions {
             if ("--suite-dir".equals(arg)) { b.suiteDirectory=Paths.get(value(args,++i,arg)); continue; }
             if ("--case".equals(arg)||"--case-id".equals(arg)) { b.caseIds.add(value(args,++i,arg)); continue; }
             if ("--resolved-case-id".equals(arg)) { b.resolvedCaseIds.add(value(args,++i,arg)); continue; }
+            if ("--definition".equals(arg)) { b.definitionIds.add(value(args,++i,arg)); continue; }
+            if ("--qualified-case-id".equals(arg)) { b.qualifiedCaseIds.add(value(args,++i,arg)); continue; }
             if ("--tag".equals(arg)) { b.tags.add(value(args,++i,arg)); continue; }
             if ("--exclude-tag".equals(arg)) { b.excludeTags.add(value(args,++i,arg)); continue; }
             if ("--users".equals(arg)) { b.users=value(args,++i,arg); continue; }
@@ -170,11 +176,11 @@ public final class VNextOptions {
         if (b.command==null) return;
         boolean validate="validate".equals(b.command), run="run".equals(b.command), load="load".equals(b.command);
         if (b.all) {
-            if (!validate && !(run&&"cases".equals(b.targetKind))) throw invalid("--all is available only for validate or run cases");
+            if (!validate && !(run&&("cases".equals(b.targetKind)||"native-suite".equals(b.targetKind)))) throw invalid("--all is available only for validate, run cases, or run native-suite");
             if (validate&&(b.targetKind!=null||b.packageId!=null||b.environment!=null||!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty()))
                 throw invalid("validate --all cannot be combined with a target, -p/--package, -e/--env, or selectors");
         }
-        if (b.rerunFailed||b.dryRun||b.failFast||!"reject".equals(b.concurrencyMode)||b.outputDirectory!=null||b.runId!=null||!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.resolvedCaseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty()) {
+        if (b.rerunFailed||b.dryRun||b.failFast||!"reject".equals(b.concurrencyMode)||b.outputDirectory!=null||b.runId!=null||!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.resolvedCaseIds.isEmpty()||!b.definitionIds.isEmpty()||!b.qualifiedCaseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty()) {
             if (!run) throw invalid("RUN selection and execution options are valid only for run");
         }
         if (b.input!=null && !(run&&isResource(b.targetKind)))
@@ -187,7 +193,7 @@ public final class VNextOptions {
             if (b.users!=null&&b.arrivalRate!=null) throw invalid("--users and --arrival-rate are mutually exclusive");
         }
         if (run) {
-            if (!set("case","native-case","cases","suite","template","flow","tool").contains(b.targetKind)) throw invalid("run target must be case, native-case, cases, suite, template, flow, or tool");
+            if (!set("case","native-case","native-suite","cases","suite","template","flow","tool").contains(b.targetKind)) throw invalid("run target must be case, native-case, native-suite, cases, suite, template, flow, or tool");
             if (b.dryRun&&isResource(b.targetKind))
                 throw invalid("run --dry-run is not available for Template, Flow, or Tool targets");
             if ("cases".equals(b.targetKind)) {
@@ -195,7 +201,7 @@ public final class VNextOptions {
                 if (b.all&&(!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.resolvedCaseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty()))
                     throw invalid("run cases --all cannot be combined with Case, Suite, or tag selectors");
                 if (!b.all&&b.suites.isEmpty()&&b.suiteDirectory==null&&b.caseIds.isEmpty()&&b.tags.isEmpty()) throw invalid("run cases requires --all, a suite, a Case, or a tag");
-            } else if (b.target==null||b.target.trim().isEmpty()) throw invalid("run "+b.targetKind+" requires a target ID or path");
+            } else if (!"native-suite".equals(b.targetKind)&&(b.target==null||b.target.trim().isEmpty())) throw invalid("run "+b.targetKind+" requires a target ID or path");
             if ("native-case".equals(b.targetKind)) {
                 if (b.target.length()>126||!b.target.matches("[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*"))
                     throw invalid("run native-case requires a valid case-preserving Definition ID");
@@ -208,7 +214,41 @@ public final class VNextOptions {
                     if(!unique.add(id)) throw invalid("--resolved-case-id values cannot contain duplicates");
                 }
             } else if (!b.resolvedCaseIds.isEmpty()) throw invalid("--resolved-case-id is available only for run native-case");
-            if (isResource(b.targetKind)&&(!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.resolvedCaseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty()))
+            if ("native-suite".equals(b.targetKind)) {
+                if (b.target!=null) throw invalid("run native-suite does not take a positional target; use --definition");
+                if (b.definitionIds.isEmpty()||b.definitionIds.size()>100)
+                    throw invalid("run native-suite requires between 1 and 100 --definition values");
+                if (!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.resolvedCaseIds.isEmpty())
+                    throw invalid("run native-suite cannot be combined with legacy Case or Suite selectors");
+                Set<String> definitions=new LinkedHashSet<String>();
+                for(String id:b.definitionIds) {
+                    if(id.length()>126||!id.matches("[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*")) throw invalid("--definition values must be valid native Definition IDs");
+                    if(!definitions.add(id)) throw invalid("--definition values cannot contain duplicates");
+                }
+                if(b.qualifiedCaseIds.size()>att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS)
+                    throw invalid("run native-suite accepts at most "+att.testcase.TestCaseSuiteResolver.MAX_QUALIFIED_CASE_IDS+" --qualified-case-id values");
+                for(String tag:b.tags) if(tag.length()>att.testcase.TestCaseSuiteResolver.MAX_TAG_LENGTH)
+                    throw invalid("--tag values must not exceed "+att.testcase.TestCaseSuiteResolver.MAX_TAG_LENGTH+" characters");
+                for(String tag:b.excludeTags) if(tag.length()>att.testcase.TestCaseSuiteResolver.MAX_TAG_LENGTH)
+                    throw invalid("--exclude-tag values must not exceed "+att.testcase.TestCaseSuiteResolver.MAX_TAG_LENGTH+" characters");
+                Set<String> selected=new LinkedHashSet<String>();
+                for(String id:b.qualifiedCaseIds) {
+                    int separator=id.lastIndexOf('.');
+                    String definition=separator<1?"":id.substring(0,separator);
+                    String local=separator<1?"":id.substring(separator+1);
+                    if(id.length()>255||!definition.matches("[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*")
+                            ||!local.matches("[A-Za-z0-9_-]{1,128}")) throw invalid("--qualified-case-id must use DefinitionID.localCaseID form");
+                    if(!definitions.contains(definition)) throw invalid("Each --qualified-case-id must belong to a declared --definition");
+                    if(!selected.add(id)) throw invalid("--qualified-case-id values cannot contain duplicates");
+                }
+                if(b.rerunFailed&&(b.all||!b.qualifiedCaseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty()))
+                    throw invalid("--rerun-failed selects the latest eligible completed Native Suite RUN and cannot be combined with explicit selectors");
+                if(b.all&&!b.qualifiedCaseIds.isEmpty()) throw invalid("--all cannot be combined with --qualified-case-id");
+                if(!b.rerunFailed&&!b.all&&b.qualifiedCaseIds.isEmpty()&&b.tags.isEmpty())
+                    throw invalid("run native-suite requires --all, a --qualified-case-id, or at least one --tag");
+            } else if (!b.definitionIds.isEmpty()||!b.qualifiedCaseIds.isEmpty())
+                throw invalid("--definition and --qualified-case-id are available only for run native-suite");
+            if (isResource(b.targetKind)&&(!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.resolvedCaseIds.isEmpty()||!b.definitionIds.isEmpty()||!b.qualifiedCaseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty()))
                 throw invalid("Resource targets cannot be combined with Case, Suite, or tag selectors");
             if ("case".equals(b.targetKind)&&(!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty())) throw invalid("run case cannot be combined with additional Case, Suite, or tag selectors");
             if ("suite".equals(b.targetKind)&&(!b.suites.isEmpty()||b.suiteDirectory!=null||!b.caseIds.isEmpty()||!b.tags.isEmpty()||!b.excludeTags.isEmpty())) throw invalid("run suite cannot be combined with additional Case, Suite, or tag selectors");
@@ -231,7 +271,7 @@ public final class VNextOptions {
         return null;
     }
     private static boolean takesValue(String arg) {
-        return set("--server","-p","--package","-e","--env","--config","--format","--output-dir","--run-id","--input","--set","--suite","--suite-dir","--case","--case-id","--resolved-case-id","--tag","--exclude-tag","--users","--arrival-rate","--warmup","--ramp-up","--duration","--ramp-down","--think-time","--max-concurrent","--overload-policy").contains(arg);
+        return set("--server","-p","--package","-e","--env","--config","--format","--output-dir","--run-id","--input","--set","--suite","--suite-dir","--case","--case-id","--resolved-case-id","--definition","--qualified-case-id","--tag","--exclude-tag","--users","--arrival-rate","--warmup","--ramp-up","--duration","--ramp-down","--think-time","--max-concurrent","--overload-policy").contains(arg);
     }
     private static String value(String[] args,int index,String option) { if(index>=args.length||args[index].startsWith("--"))throw invalid(option+" requires a value"); return args[index]; }
     private static IllegalArgumentException invalid(String message) { return new IllegalArgumentException(message); }
@@ -249,6 +289,7 @@ public final class VNextOptions {
     public String maxConcurrent(){return maxConcurrent;} public String overloadPolicy(){return overloadPolicy;}
     public List<Path> suites(){return suites;} public Path suiteDirectory(){return suiteDirectory;} public Set<String> caseIds(){return caseIds;}
     public List<String> resolvedCaseIds(){return resolvedCaseIds;}
+    public List<String> definitionIds(){return definitionIds;} public List<String> qualifiedCaseIds(){return qualifiedCaseIds;}
     public Set<String> tags(){return tags;} public Set<String> excludeTags(){return excludeTags;} public List<String> overrides(){return overrides;}
 
     private static final class Builder {
@@ -258,6 +299,7 @@ public final class VNextOptions {
         String concurrencyMode="reject";
         List<Path> suites=new ArrayList<Path>(); Set<String> caseIds=new LinkedHashSet<String>(),tags=new LinkedHashSet<String>(),excludeTags=new LinkedHashSet<String>();
         List<String> resolvedCaseIds=new ArrayList<String>();
+        List<String> definitionIds=new ArrayList<String>(),qualifiedCaseIds=new ArrayList<String>();
         List<String> overrides=new ArrayList<String>();
     }
 }

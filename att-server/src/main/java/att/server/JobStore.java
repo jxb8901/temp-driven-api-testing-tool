@@ -87,6 +87,7 @@ final class JobStore implements AutoCloseable {
             s.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS environment VARCHAR(128) DEFAULT '' NOT NULL");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_target_page_idx ON jobs(target_sort,target_group,created_at,job_id)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_created_page_idx ON jobs(created_at,job_id)");
+            s.execute("CREATE INDEX IF NOT EXISTS jobs_retry_source_idx ON jobs(principal,package_id,command,finished_at,job_id)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_delete_requested_idx ON jobs(retention_state,delete_requested_at,job_id)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_artifact_recovery_idx ON jobs(artifact_recovery,job_id)");
             s.execute("CREATE INDEX IF NOT EXISTS jobs_load_report_recovery_idx ON jobs(load_report_recovery,command,job_id)");
@@ -1748,6 +1749,29 @@ final class JobStore implements AutoCloseable {
         try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)) {
             int index=1;if(filter!=null)p.setString(index++,filter);p.setInt(index,limit);try(ResultSet r=p.executeQuery()){while(r.next()){var m=new java.util.LinkedHashMap<String,Object>();m.put("jobId",r.getString(1));m.put("command",r.getString(2));m.put("executionType",Job.executionType(r.getString(2)));m.put("packageId",r.getString(3));m.put("principal",r.getString(4));m.put("status",r.getString(5));m.put("createdAt",r.getString(6));m.put("startedAt",r.getString(7));m.put("finishedAt",r.getString(8));m.put("exitCode",r.getObject(9));m.put("pinned",r.getBoolean(12));m.put("pinnedAt",r.getString(13));m.put("pinnedBy",r.getString(14));m.put("pinReason",r.getString(15));out.add(m);}}
         } return out;
+    }
+    /** Completed owner/package RUN candidates ordered by completion, independent of unrelated recent Jobs. */
+    synchronized List<java.util.Map<String,Object>> completedOwnedPackageRuns(String principal,String packageId) throws Exception {
+        List<java.util.Map<String,Object>> out=new ArrayList<>();
+        String sql="SELECT job_id,command,package_id,principal,status,finished_at FROM jobs WHERE principal=? AND package_id=? "
+                +"AND command='run' AND status IN ('PASS','FAIL','ERROR','INVALID') AND finished_at IS NOT NULL "
+                +"AND (retention_state IS NULL OR retention_state<>'DELETING') ORDER BY finished_at DESC,job_id DESC";
+        try(Connection c=connect();PreparedStatement p=c.prepareStatement(sql)) {
+            p.setString(1,bounded(principal,256));p.setString(2,bounded(packageId,64));
+            try(ResultSet r=p.executeQuery()) {
+                while(r.next()) {
+                    Map<String,Object> row=new LinkedHashMap<>();row.put("jobId",r.getString(1));row.put("command",r.getString(2));
+                    row.put("packageId",r.getString(3));row.put("principal",r.getString(4));row.put("status",r.getString(5));
+                    row.put("finishedAt",r.getString(6));out.add(row);
+                }
+            }
+        }
+        // Instant.toString() may omit zero fractional digits, so order parsed instants rather than relying on
+        // lexicographic timestamp order. Job ID provides a stable tie-breaker for equal completion instants.
+        out.sort(java.util.Comparator.<Map<String,Object>,Instant>comparing(
+                row->Instant.parse(String.valueOf(row.get("finishedAt"))),java.util.Comparator.reverseOrder())
+                .thenComparing(row->String.valueOf(row.get("jobId")),java.util.Comparator.reverseOrder()));
+        return out;
     }
     // Job reads own their connection and result data; allow API polling alongside writes.
     java.util.Map<String,Object> get(String id) throws Exception {

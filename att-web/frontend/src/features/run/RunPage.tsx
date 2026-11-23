@@ -12,11 +12,15 @@ import type { JobReplay, JobReplayEditorDraft } from '../load/types';
 
 export interface RunDefinition {
   schemaVersion: 'att-execution/v1' | 'att-execution/v2'; executionType: 'run'; packageId: string; environment?: string;
-  target?: { type: string; id?: string; definitionId?: string; selection?: JsonObject }; selection?: JsonObject; input?: JsonObject;
+  target?: { type: string; id?: string; definitionId?: string; definitionIds?: string[]; selection?: JsonObject };
+  selection?: JsonObject; input?: JsonObject;
   options: { debug: boolean; failFast?: boolean; runId?: string };
 }
 function isDebugTarget(type: string): type is DebugResourceType {
   return type === 'template' || type === 'flow' || type === 'tool';
+}
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
 export function RunPage({ packageId: initialPackage = '', initialTarget, initialBatchMode = false, initialEnvironment = '', replayDraftId, replaySourceJobId, onAccepted, onSchedule, schedulingEnabled }: {
@@ -40,6 +44,11 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
   const [formValid, setFormValid] = useState(true);
   const [formResetKey, setFormResetKey] = useState(0);
   const [selection, setSelection] = useState('{"all": true}');
+  const [nativeSuiteDefinitionIds, setNativeSuiteDefinitionIds] = useState('');
+  const [nativeSuiteSelectionMode, setNativeSuiteSelectionMode] = useState<'all' | 'selected' | 'tags' | 'failed'>('all');
+  const [nativeSuiteQualifiedCaseIds, setNativeSuiteQualifiedCaseIds] = useState('');
+  const [nativeSuiteTags, setNativeSuiteTags] = useState('');
+  const [nativeSuiteExcludeTags, setNativeSuiteExcludeTags] = useState('');
   const [debug, setDebug] = useState(false);
   const [failFast, setFailFast] = useState(false);
   const [draft, setDraft] = useState<DraftResponse | null>(null);
@@ -66,11 +75,25 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
     api.getJobReplayEditorDraft(replaySourceJobId,replayDraftId).then((draft:JobReplayEditorDraft)=>{
       if(controller.signal.aborted)return;
       const retained=draft.definition as unknown as RunDefinition;
+      setNativeSuiteDefinitionIds('');setNativeSuiteSelectionMode('all');setNativeSuiteQualifiedCaseIds('');
+      setNativeSuiteTags('');setNativeSuiteExcludeTags('');
       replayEnvironmentOrigin.current=String(draft.configuration?.environmentOrigin||'');
       replayPackageDefaultEnvironment.current=replayEnvironmentOrigin.current==='package'?String(draft.configuration?.environment||''):'';
       setPackage(retained.packageId);setEnvironment(replayEnvironmentOrigin.current==='package'?'':retained.environment||String(draft.configuration?.environment||''));
       setMissingReplayFields(draft.missingFields||[]);
-      if(retained.target){setType(retained.target.type);setId(retained.target.id || retained.target.definitionId || '');}else if(retained.selection){setType('batch');setId('');}else{setType('case');setId('');}
+      if(retained.target){setType(retained.target.type==='nativeSuite'?'native-suite':retained.target.type);setId(retained.target.id || retained.target.definitionId || '');
+        if(retained.target.type==='nativeSuite') {
+          setNativeSuiteDefinitionIds(retained.target.definitionIds?.join('\n') || '');
+          const suiteSelection=retained.target.selection || {};
+          const ids=stringList(suiteSelection.qualifiedCaseIds);
+          const tags=stringList(suiteSelection.tags);
+          setNativeSuiteSelectionMode(suiteSelection.rerunFailed === true ? 'failed'
+            : suiteSelection.all === true ? 'all' : ids.length ? 'selected' : tags.length ? 'tags' : 'selected');
+          setNativeSuiteQualifiedCaseIds(ids.join('\n'));
+          setNativeSuiteTags(tags.join('\n'));
+          setNativeSuiteExcludeTags(stringList(suiteSelection.excludeTags).join('\n'));
+        }
+      }else if(retained.selection){setType('batch');setId('');}else{setType('case');setId('');}
       setSelection(JSON.stringify(retained.selection||{all:true},null,2));replayInputRef.current=JSON.stringify(retained.input||{},null,2);
       setInput(replayInputRef.current);setDebug(Boolean(retained.options?.debug));setFailFast(Boolean(retained.options?.failFast));
       setReplaySourceDefinition((draft.originalDefinition||retained) as unknown as RunDefinition);
@@ -154,9 +177,25 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
     try {
       if (isDebugTarget(targetType) && debugFormState === 'loading') throw new Error('Wait for the typed target defaults to load before validating.');
       if (debugForm && !formValid) throw new Error('Correct the typed fields or Advanced JSON before validating.');
-      const body: RunDefinition = { schemaVersion: 'att-execution/v1', executionType: 'run', packageId: packageId.trim(), options: { debug, ...(failFast?{failFast:true}:{}) } };
+      const isNativeSuite=targetType==='native-suite';
+      const body: RunDefinition = { schemaVersion: isNativeSuite ? 'att-execution/v2' : 'att-execution/v1', executionType: 'run', packageId: packageId.trim(), options: { debug, ...(failFast?{failFast:true}:{}) } };
       if (environment.trim()) body.environment = environment.trim();
-      if (targetType === 'batch') body.selection = object(selection);
+      if(isNativeSuite) {
+        const definitionIds=nativeSuiteDefinitionIds.split(/[\r\n,]+/).map(value=>value.trim()).filter(Boolean);
+        if(!definitionIds.length)throw new Error('Native Suite requires at least one Definition ID.');
+        const qualifiedCaseIds=nativeSuiteQualifiedCaseIds.split(/[\r\n,]+/).map(value=>value.trim()).filter(Boolean);
+        const tags=nativeSuiteTags.split(/[\r\n,]+/).map(value=>value.trim()).filter(Boolean);
+        const excludeTags=nativeSuiteExcludeTags.split(/[\r\n,]+/).map(value=>value.trim()).filter(Boolean);
+        if(nativeSuiteSelectionMode==='selected'&&!qualifiedCaseIds.length)throw new Error('Enter at least one Qualified Case ID.');
+        if(nativeSuiteSelectionMode==='tags'&&!tags.length)throw new Error('Enter at least one tag to select Cases.');
+        const suiteSelection:JsonObject=nativeSuiteSelectionMode==='failed'?{rerunFailed:true}
+          :nativeSuiteSelectionMode==='all'?{all:true}
+          :nativeSuiteSelectionMode==='selected'?{qualifiedCaseIds}:{tags};
+        if(nativeSuiteSelectionMode!=='failed'&&nativeSuiteSelectionMode!=='tags'&&tags.length)suiteSelection.tags=tags;
+        if(nativeSuiteSelectionMode!=='failed'&&excludeTags.length)suiteSelection.excludeTags=excludeTags;
+        body.target={type:'nativeSuite',definitionIds,selection:suiteSelection};
+      }
+      else if (targetType === 'batch') body.selection = object(selection);
       else {
         body.target = debugForm?.target || { type: targetType, id: targetId.trim() };
         if (targetType !== 'case') body.input = object(businessInput);
@@ -212,7 +251,8 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
       {initialTarget ? <p><strong>Package:</strong> {packageId}<br /><strong>Target:</strong> {initialTarget.type} · {initialTarget.resourceId}</p>
         : <label>Package ID<input value={packageId} disabled={Boolean(replaySourceJobId)} onChange={e => changed(() => {
           setPackage(e.target.value); setEnvironment(''); setId(''); setInput('{}');
-          setSelection('{"all": true}'); setDebugForm(null); setValidationDiagnostics([]);
+          setSelection('{"all": true}'); setNativeSuiteDefinitionIds(''); setNativeSuiteSelectionMode('all'); setNativeSuiteQualifiedCaseIds(''); setDebugForm(null); setValidationDiagnostics([]);
+          setNativeSuiteTags(''); setNativeSuiteExcludeTags('');
           replayInputRef.current = undefined;
         })} /></label>}
       {replaySourceJobId && <p>Replay uses the source Job's Package. Start a new RUN to use a different Package.</p>}
@@ -221,9 +261,23 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
       </select></label>
       <EnvironmentResolutionNotice packageId={packageId} environment={environment} />
       {!initialTarget && <label>Target type<select value={targetType} onChange={e => changed(() => setType(e.target.value))}>
-        <option value="case">Case</option><option value="template">Template</option><option value="flow">Flow</option><option value="tool">Tool</option><option value="batch">Batch selection</option>
+        <option value="case">Case</option><option value="template">Template</option><option value="flow">Flow</option><option value="tool">Tool</option><option value="batch">Batch selection</option><option value="native-suite">Native Suite</option>
       </select></label>}
-      {!initialTarget && targetType !== 'batch' && <label>Target ID<input value={targetId} onChange={e => changed(() => setId(e.target.value))} /></label>}
+      {!initialTarget && targetType !== 'batch' && targetType !== 'native-suite' && <label>Target ID<input value={targetId} onChange={e => changed(() => setId(e.target.value))} /></label>}
+      {targetType === 'native-suite' && <>
+        <label>Definition IDs (one per line)<textarea value={nativeSuiteDefinitionIds} onChange={e => changed(() => setNativeSuiteDefinitionIds(e.target.value))} /></label>
+        <label>Suite selection<select value={nativeSuiteSelectionMode} onChange={e => changed(() => setNativeSuiteSelectionMode(e.target.value as 'all'|'selected'|'tags'|'failed'))}>
+          <option value="all">All Cases</option><option value="selected">Selected Cases</option><option value="tags">Cases matching tags</option>
+          <option value="failed">Retry failed Cases</option>
+        </select></label>
+        {nativeSuiteSelectionMode === 'failed' && <p>Retries only failed executed Qualified Case IDs from the latest eligible completed Native Suite RUN. Validation freezes its source Job, run, and manifest digest.</p>}
+        {nativeSuiteSelectionMode === 'selected' && <label>Qualified Case IDs (one per line)<textarea value={nativeSuiteQualifiedCaseIds}
+          onChange={e => changed(() => setNativeSuiteQualifiedCaseIds(e.target.value))} /></label>}
+        <label>Tags (required for tag selection; optional filter otherwise)<textarea value={nativeSuiteTags}
+          onChange={e => changed(() => setNativeSuiteTags(e.target.value))} /></label>
+        <label>Exclude Tags (optional; one per line)<textarea value={nativeSuiteExcludeTags}
+          onChange={e => changed(() => setNativeSuiteExcludeTags(e.target.value))} /></label>
+      </>}
       {environmentState === 'error' && <p role="alert">Environment profiles could not be loaded. Package default remains available. <button className="button button-quiet" type="button" onClick={() => setEnvironmentReload(value => value + 1)}>Retry profiles</button></p>}
       {environmentNotice && <p role="status">{environmentNotice}</p>}
       {targetType === 'batch' ? <><p>Use suites, suiteDirectory, caseIds, tags, excludeTags, all or rerunFailed. Combined filters retain the existing CLI selection rules.</p>
@@ -263,7 +317,7 @@ export function RunPage({ packageId: initialPackage = '', initialTarget, initial
         const accepted = onSchedule({ packageId: definition.packageId, environment: definition.environment, draftId: draft.draftId,
           expiresAt: draft.expiresAt, executionType: 'run', legacyDebug: draft.draftId.startsWith('D'),
           previewYaml: draft.previewYaml || JSON.stringify(draft.preview || draft, null, 2),
-          ...(definition.target?.id ? { target: { type: definition.target.type, id: definition.target.id } } : {}) });
+          ...(definition.target?.type !== 'nativeSuite' && definition.target?.id ? { target: { type: definition.target.type, id: definition.target.id } } : {}) });
         if (accepted === false) {
           releaseNavigationGuard.current = navigation.registerUnsavedChanges(true, 'Run definition changes');
           setDirty(true);

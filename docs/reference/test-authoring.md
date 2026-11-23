@@ -38,7 +38,7 @@ For data-driven Cases, omitted `inputs` means same-name projection from `DATA`; 
 
 See the [active schema](../../schemas/att-testcase-v1.schema.json), [single inline example](../adr/examples/att-testcase-v1/inline-single.yaml), [multi-record inline example](../adr/examples/att-testcase-v1/inline-multi.yaml), [Excel example](../adr/examples/att-testcase-v1/excel.yaml), [Excel omitted-`dataColumns` example](../adr/examples/att-testcase-v1/excel-omitted-data-columns.yaml), and [ADR-0001](../adr/0001-flow-centric-testcase-resolution.md) for the complete contract and validation boundary.
 
-The Default Package ships offline Native Quick Start Definitions under `packages/default/testcase/quick-start/**/testcase.yaml` bound to Flow `quick.start.v1`. Follow [Quick Start](../quick-start.md) and the [S12 migration matrix](../maintenance/native-case-default-package-migration-s12.md). Implicit Suite selection and source-independent native XLSX reports remain S06/S07 follow-ups.
+The Default Package ships offline Native Quick Start Definitions under `packages/default/testcase/quick-start/**/testcase.yaml` bound to Flow `quick.start.v1`. Follow [Quick Start](../quick-start.md) and the [S12 migration matrix](../maintenance/native-case-default-package-migration-s12.md). Source-independent native XLSX reports remain an S07 follow-up.
 
 ### Author in Studio
 
@@ -49,6 +49,24 @@ In Explorer, choose **New native Test Case** or open an indexed `testcase.yaml`.
 Use **Add to Change Set** to stage a create or replacement through the existing Package source workflow: Draft → Validate → Review → Publish. The current Package source stays active until Publish. After publication, preview the latest source and select the Case IDs to validate and submit a RUN. Native Case RUN is available only when the Server advertises `att-execution/v2`; the Server validates and freezes the source and selected IDs for the Job.
 
 Excel-backed definitions use the same read-only S04 adapter as native resolution, with row and column diagnostics shown in Studio. The existing Workbook/Sidecar editor remains available for legacy suites.
+
+### Run an implicit Native Case Suite
+
+The 4.6.0 development candidate adds a Suite selection over resolved Cases without an authored `suite.yaml`. Declare one or more Definition IDs, then select all Cases, explicit qualified Case IDs, or Cases matching one or more tags. Excluded tags take precedence over included tags.
+
+This local command selects every `smoke` Case from two Definitions except Cases tagged `destructive`:
+
+```sh
+att --local --package payments run native-suite --definition fpp.transfer --definition fpp.refund --tag smoke --exclude-tag destructive --fail-fast
+```
+
+To select named Cases, use `--qualified-case-id` for each ID, such as `fpp.transfer.customerA`. Each ID must belong to one of the declared Definitions. The Server backend uses the same selectors through the validated `att-execution/v2` RUN draft flow.
+
+ATT orders Definitions by ID and keeps each Definition's source record order. Duplicate Definition IDs, duplicate qualified Case IDs, unknown IDs, and empty selections fail validation. The accepted Server draft freezes its selected IDs and Definition source revisions before the Worker runs. Per-Case results use the existing RUN evidence and report pipeline.
+
+This implicit Suite is a runtime selection, not a reusable authored resource. It does not add LOAD targets or advanced Testdata/generator bindings; Debug interoperability remains deferred.
+
+Studio's Run editor also exposes this selection: enter one or more Definition IDs, then choose all Cases, explicit Qualified Case IDs, or Cases matching tags. Optional included and excluded tags further filter the selection, and replay preserves tag selectors returned in the saved definition. Native Suite `--rerun-failed` retries only failed, executed Cases from the latest eligible completed RUN for the same Package and Definitions. Local runs verify the latest-run pointer and manifest hash; Server drafts freeze the source Job/run, manifest digest, Package revision, and exact Qualified Case IDs. A stale draft or changed source is rejected, skipped Cases are not retried, and per-attempt execution/skipped counts remain separate from source and retry counts. Schedules retain the validated retry source.
 
 ## Workbook
 

@@ -36,11 +36,49 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class FrameworkEngineTest {
     @TempDir Path projectRoot;
 
     @org.junit.jupiter.api.BeforeEach void installSchemas() throws Exception { att.TestSchemas.install(projectRoot); }
+
+    @Test void dryRunCaseIsNotCountedAsAnExecution() throws Exception {
+        writeText(projectRoot.resolve("templates/PAYMENT_INVOKE/template.yaml"),
+                "schemaVersion: att-template/v3.4\nname: PAYMENT_INVOKE\ndescription: dry-run count\nactions:\n"
+                        +"  show: {type: log, message: safe}\n");
+        writeWorkbook(projectRoot.resolve("testcase/payment.xlsx"));
+        writeText(projectRoot.resolve("testcase/payment.yaml"),
+                "schemaVersion: att-sidecar/v2.1\nid: payments\nexcel:\n  sheet: payment=支付測試案例集\n"
+                        +"  caseId: 案例編號\n  tags: 標籤\n  dataColumns: caseName=案例名稱\nstages:\n"
+                        +"  - key: invoke\n    template: 執行模板\n    required: true\n");
+        writeSnapshot(projectRoot.resolve("testcase/payment.xlsx"));
+
+        RunSummary summary=new FrameworkEngine(projectRoot,globalConfig()).run(
+                ExecutionOptionsTestSupport.parse(new String[]{"run","--suite",
+                        projectRoot.resolve("testcase/payment.xlsx").toString(),"--run-id","DRY-RUN-COUNT","--dry-run"}));
+
+        assertEquals(1,summary.skipped());
+        assertEquals(0,summary.executionCount());
+        assertFalse(summary.results().get(0).executionStarted());
+    }
+
+    @Test void dryRunErrorsAreNotCountedAsStartedExecutions() {
+        TestCase testCase=new TestCase(2,"payments","payment","case",Collections.<String>emptyList(),
+                Collections.<String,Object>emptyMap(),Collections.<String,StageCaseData>emptyMap(),null);
+        TestResult error=FrameworkEngine.error(testCase,"dry-run failure",null,java.time.Duration.ZERO,
+                null,"payments.payment.case",false);
+        assertEquals(ResultStatus.ERROR,error.status());
+        assertFalse(error.executionStarted());
+    }
+
+    @Test void relocatingNotStartedCasePreservesExecutionEvidence() {
+        TestResult skipped=TestResult.notExecuted("fpp.transfer.third","third",Collections.<String>emptyList(),
+                "fpp.transfer","fpp.transfer.third","failFast");
+        TestResult relocated=skipped.relocate(Paths.get("/old-run"),Paths.get("/new-run"));
+        assertFalse(relocated.executionStarted());
+        assertNull(relocated.executionId());
+    }
 
     @Test
     void runsNestedV31FlowThroughFullCaseLifecycle() throws Exception {

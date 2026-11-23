@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -73,6 +74,38 @@ class JobStoreTest {
         assertEquals(2.0,((Number)timings.get("resultToTerminationMs")).doubleValue());
         assertEquals(4096L,((Number)((Map<?,?>)performance.get("worker")).get("heapPeakUsedBytes")).longValue());
         store.close();
+    }
+
+    @Test void completedOwnedPackageRunsAreScopedAndOrderedByCompletion() throws Exception {
+        Path allowed=Files.createDirectory(temp.resolve("retry-packages"));
+        Path pkg=Files.createDirectory(allowed.resolve("p"));
+        Path other=Files.createDirectory(allowed.resolve("other"));
+        Path data=temp.resolve("retry-data");Path configFile=temp.resolve("retry-server.yaml");
+        Files.writeString(configFile,"server:\n  dataDir: "+data+"\nworkers: {}\npackages:\n  allowedRoots: ["+allowed+"]\n  entries:\n    p: "+pkg+"\n    other: "+other+"\n");
+        ServerConfig config=ServerConfig.load(configFile);
+        try(JobStore store=new JobStore(config)) {
+            String completedLater="J0000000000000001",createdLaterButCompletedEarlier="J0000000000000002";
+            insertCompleted(store,config,completedLater,"p","alice","run",Instant.parse("2026-11-22T10:00:00.100Z"));
+            insertCompleted(store,config,createdLaterButCompletedEarlier,"p","alice","run",Instant.parse("2026-11-22T10:00:00Z"));
+            insertCompleted(store,config,"J0000000000000003","p","bob","run",Instant.parse("2026-11-22T11:00:00Z"));
+            insertCompleted(store,config,"J0000000000000004","p","alice","debug",Instant.parse("2026-11-22T11:00:00Z"));
+            for(int i=0;i<105;i++)
+                insertCompleted(store,config,String.format(java.util.Locale.ROOT,"J%016X",100+i),"other","alice","run",
+                        Instant.parse("2026-11-22T12:00:00Z").plusSeconds(i));
+
+            List<Map<String,Object>> runs=store.completedOwnedPackageRuns("alice","p");
+            assertEquals(List.of(completedLater,createdLaterButCompletedEarlier),runs.stream()
+                    .map(row->String.valueOf(row.get("jobId"))).toList());
+            assertTrue(runs.stream().allMatch(row->"alice".equals(row.get("principal"))
+                    &&"p".equals(row.get("packageId"))&&"run".equals(row.get("command"))));
+        }
+    }
+
+    private static void insertCompleted(JobStore store,ServerConfig config,String id,String packageId,
+            String principal,String command,Instant finishedAt) throws Exception {
+        Job job=new Job(id,command,packageId,principal,new WorkerRequest(),
+                new JobEvents(config.dataDir.resolve("jobs").resolve(id).resolve("events.jsonl"),100));
+        store.insert(job,"{}");job.status="PASS";job.finishedAt=finishedAt;store.update(job);
     }
 
     @Test void replayIntentsAndOwnershipSurviveRestartAndOutputDeletion() throws Exception {

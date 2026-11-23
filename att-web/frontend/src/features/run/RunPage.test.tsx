@@ -7,11 +7,12 @@ import { api } from '../../api';
 import { NavigationGuardContext, type NavigationGuardApi } from '../../router';
 import { ApiError } from '../../types';
 import type { DebugFormResponse, JsonObject, ResourceIdentity } from '../explorer/types';
+import type { ValidatedScheduleIntent } from '../schedules/types';
 vi.mock('../../api', () => ({ api: { previewRun: vi.fn(), submitRun: vi.fn(), getDeclaredConfiguration: vi.fn(), getPackageManifest: vi.fn(), getDebugForm: vi.fn(), getJobReplayEditorDraft: vi.fn(), createJobReplayDraft: vi.fn(), rerunJob: vi.fn() } }));
 vi.mock('../code/CodeEditor', () => ({ CodeEditor: ({ label, value, readOnly, onChange }: { label: string; value: string; readOnly?: boolean; onChange?: (value: string) => void }) => <textarea aria-label={label} value={value} readOnly={readOnly} onChange={e => onChange?.(e.target.value)} /> }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement; let root: Root;
-const onAccepted = vi.fn(); const onSchedule = vi.fn(() => true); const release = vi.fn();
+const onAccepted = vi.fn(); const onSchedule = vi.fn((_intent: ValidatedScheduleIntent) => true); const release = vi.fn();
 const guard = { registerUnsavedChanges: vi.fn(() => release) } as unknown as NavigationGuardApi;
 beforeEach(async () => {
   vi.clearAllMocks(); vi.mocked(api.previewRun).mockResolvedValue({ draftId: 'R123', preview: { selectedCaseIds: ['cases.default.C1'] },
@@ -34,6 +35,14 @@ async function change(label: string, value: string) {
   const element = control(label); const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value')!.set!;
   await act(async () => { setter.call(element, value); element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); });
 }
+async function changeTextarea(label: string, value: string) {
+  const element=textarea(label);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(element, value);
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+function textarea(label: string) { return [...host.querySelectorAll('label')].find(item=>item.textContent?.startsWith(label))!.querySelector('textarea')!; }
 async function click(name: string) { const button = [...host.querySelectorAll('button')].find(item => item.textContent === name)!; await act(async () => button.click()); }
 async function settleDebugForm(milliseconds = 220) { await act(async () => { await new Promise(resolve => window.setTimeout(resolve, milliseconds)); }); }
 async function renderTarget(type: 'template' | 'flow' | 'tool', resourceId = 'resource-id', logicalId = 'payment.flow', environment = 'SIT') {
@@ -267,4 +276,77 @@ it('offers Batch RUN as the initial mode from the Explorer route', async () => {
   expect(host.querySelector('[aria-label="Case selection"]')).not.toBeNull();
   await click('Validate');
   expect(api.previewRun).toHaveBeenCalledWith(expect.objectContaining({ selection: { all: true } }));
+});
+
+it('surfaces Native Suite all-versus-selected Case selection as a v2 draft', async () => {
+  await change('Target type', 'native-suite');
+  expect(host.querySelector('textarea[aria-label="Case selection"]')).toBeNull();
+  await changeTextarea('Definition IDs', 'payments.transfer');
+  await click('Validate');
+  expect(api.previewRun).toHaveBeenLastCalledWith({ schemaVersion: 'att-execution/v2', executionType: 'run', packageId: 'payments',
+    target: { type: 'nativeSuite', definitionIds: ['payments.transfer'], selection: { all: true } }, options: { debug: false } });
+
+  await change('Suite selection', 'selected');
+  await changeTextarea('Definition IDs', 'payments.transfer\npayments.refund');
+  await changeTextarea('Qualified Case IDs', 'payments.transfer.customerA\npayments.refund.refund1');
+  await click('Validate');
+  expect(api.previewRun).toHaveBeenLastCalledWith({ schemaVersion: 'att-execution/v2', executionType: 'run', packageId: 'payments',
+    target: { type: 'nativeSuite', definitionIds: ['payments.transfer', 'payments.refund'], selection: { qualifiedCaseIds: ['payments.transfer.customerA', 'payments.refund.refund1'] } }, options: { debug: false } });
+});
+
+it('surfaces Native Suite rerun-failed as an exclusive v2 selector', async () => {
+  await change('Target type', 'native-suite');
+  await changeTextarea('Definition IDs', 'payments.transfer');
+  await change('Suite selection', 'failed');
+  await click('Validate');
+  expect(api.previewRun).toHaveBeenLastCalledWith({ schemaVersion: 'att-execution/v2', executionType: 'run', packageId: 'payments',
+    target: { type: 'nativeSuite', definitionIds: ['payments.transfer'], selection: { rerunFailed: true } }, options: { debug: false } });
+});
+
+it('schedules the validated Native Suite draft without projecting it as a resource target', async () => {
+  await change('Target type', 'native-suite');
+  await changeTextarea('Definition IDs', 'payments.transfer');
+  await click('Validate'); await click('Schedule…');
+  expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ packageId: 'payments', draftId: 'R123', executionType: 'run' }));
+  expect(onSchedule.mock.calls.at(-1)?.[0]).not.toHaveProperty('target');
+  expect(api.submitRun).not.toHaveBeenCalled();
+});
+
+it('clears Native Suite tags when the Package changes', async () => {
+  await change('Target type','native-suite');
+  await changeTextarea('Definition IDs','payments.transfer');
+  await changeTextarea('Tags','smoke');
+  await changeTextarea('Exclude Tags','destructive');
+  await change('Package ID','ledger');
+  expect(textarea('Tags').value).toBe('');
+  expect(textarea('Exclude Tags').value).toBe('');
+});
+
+async function renderNativeSuiteReplay(selection: JsonObject) {
+  vi.mocked(api.getJobReplayEditorDraft).mockResolvedValue({
+    schemaVersion:'att-job-replay-draft/v1',draftRef:'R0123456789ABCDEF0123456789ABCDEF',sourceJobId:'J0123456789ABCDEF',packageId:'payments',executionType:'run',sourcePolicy:'current',
+    originalRevision:'a'.repeat(64),currentRevision:'b'.repeat(64),configuration:{environment:'SIT',environmentOrigin:'package'},expiresAt:new Date(Date.now()+60000).toISOString(),missingFields:[],
+    definition:{schemaVersion:'att-execution/v2',executionType:'run',packageId:'payments',environment:'SIT',target:{type:'nativeSuite',definitionIds:['payments.transfer'],selection},options:{debug:false}},
+  });
+  vi.mocked(api.createJobReplayDraft).mockResolvedValue({jobId:'J0123456789ABCDEF',available:true,sourcePolicy:'current',intentId:'intent',draftId:'R123',
+    preview:{draftId:'R123',preview:{selectedCaseIds:['payments.transfer.customerA']},expiresAt:new Date(Date.now()+60000).toISOString()}});
+  await act(async()=>root.render(<NavigationGuardContext.Provider value={guard}><RunPage key="native-suite-replay" packageId="payments" replayDraftId="R0123456789ABCDEF0123456789ABCDEF" replaySourceJobId="J0123456789ABCDEF" onAccepted={onAccepted} onSchedule={onSchedule} schedulingEnabled /></NavigationGuardContext.Provider>));
+}
+
+const nativeSuiteReplayFixtures: Array<{name:string;selection:JsonObject;mode:string;tags:string;excludeTags:string}> = [
+  {name:'rerun failed',selection:{rerunFailed:true},mode:'failed',tags:'',excludeTags:''},
+  {name:'tag-only',selection:{tags:['smoke']},mode:'tags',tags:'smoke',excludeTags:''},
+  {name:'include and exclude tags',selection:{tags:['smoke','critical'],excludeTags:['destructive']},mode:'tags',tags:'smoke\ncritical',excludeTags:'destructive'},
+  {name:'exclude tags from all Cases',selection:{all:true,excludeTags:['destructive']},mode:'all',tags:'',excludeTags:'destructive'},
+];
+it.each(nativeSuiteReplayFixtures)('restores and submits Native Suite replay $name selectors', async fixture => {
+  await renderNativeSuiteReplay(fixture.selection);
+  expect((control('Suite selection') as HTMLSelectElement).value).toBe(fixture.mode);
+  expect((textarea('Tags')).value).toBe(fixture.tags);
+  expect((textarea('Exclude Tags')).value).toBe(fixture.excludeTags);
+  await click('Validate');
+  expect(api.createJobReplayDraft).toHaveBeenCalledWith('J0123456789ABCDEF',expect.objectContaining({overrides:expect.objectContaining({
+    target:{type:'nativeSuite',definitionIds:['payments.transfer'],selection:fixture.selection},
+  })}));
+  expect(api.previewRun).not.toHaveBeenCalled();
 });
