@@ -102,6 +102,51 @@ class ChangeSetPublisherTest {
         } finally { publisher.close(); }
     }
 
+    @Test void sameDraftCustomFlowRootMoveKeepsDescriptorSemanticsAndRewritesPayloadRefs() throws Exception {
+        ChangeSetPublisher publisher = publisher(acceptingValidator(), allowingGate());
+        try {
+            String manifest = "schemaVersion: att-package/v2\nresources:\n  flowRoot: custom-flows\n";
+            String flow = "schemaVersion: att-flow/v3.6\nid: payments.offline.v1\nname: Offline\n"
+                    + "description: Custom root move fixture.\n"
+                    + "actions:\n  body:\n    type: assign\n    expression: '&{custom-flows/payments/payload.txt}'\n";
+            // Place the Flow under custom-flows before the Package declares that root.
+            Map<String, Object> orphan = stagePackage(publisher, Arrays.asList(
+                    ChangeSetPublisher.OperationInput.create("custom-flows/payments/flow.yaml", bytes(flow)),
+                    ChangeSetPublisher.OperationInput.create("custom-flows/payments/payload.txt", bytes("body\n"))));
+            String orphanId = String.valueOf(orphan.get("changeSetId"));
+            validateReview(publisher, orphanId);
+            publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, orphanId);
+
+            // Same Draft introduces resources.flowRoot and relocates the descriptor under that root.
+            Map<String, Object> introduced = stagePackage(publisher, Arrays.asList(
+                    ChangeSetPublisher.OperationInput.create("package.yaml", bytes(manifest)),
+                    ChangeSetPublisher.OperationInput.move(
+                            "custom-flows/payments/flow.yaml", "custom-flows/payments-v2/flow.yaml")));
+            @SuppressWarnings("unchecked") List<String> introducedCategories = (List<String>) introduced.get("categories");
+            assertTrue(introducedCategories.contains("FLOW"), String.valueOf(introducedCategories));
+            assertFalse(introducedCategories.contains("FILE"), String.valueOf(introducedCategories));
+            boolean sawDescriptorMove = ((List<?>) introduced.get("changedFiles")).stream().map(Map.class::cast)
+                    .anyMatch(row -> "custom-flows/payments/flow.yaml".equals(row.get("path"))
+                            && "custom-flows/payments-v2/flow.yaml".equals(row.get("targetPath")));
+            assertTrue(sawDescriptorMove, String.valueOf(introduced.get("changedFiles")));
+            String introducedId = String.valueOf(introduced.get("changeSetId"));
+            validateReview(publisher, introducedId);
+            publisher.publish(ChangeSetPublisher.PACKAGE_SOURCE, "owner", "owner", false, introducedId);
+
+            Map<String, Object> movedPayload = stagePackage(publisher, Arrays.asList(
+                    ChangeSetPublisher.OperationInput.move(
+                            "custom-flows/payments/payload.txt", "custom-flows/payments/moved.txt")));
+            @SuppressWarnings("unchecked") List<String> moveCategories = (List<String>) movedPayload.get("categories");
+            assertTrue(moveCategories.contains("FLOW"), String.valueOf(moveCategories));
+            Map<?, ?> rewritten = ((List<?>) movedPayload.get("changedFiles")).stream().map(Map.class::cast)
+                    .filter(row -> "custom-flows/payments-v2/flow.yaml".equals(row.get("path"))).findFirst()
+                    .orElseThrow(() -> new AssertionError("Custom-root Flow descriptor was not rewritten: "
+                            + movedPayload.get("changedFiles")));
+            assertTrue(rewritten.get("contentDiff").toString().contains("&{custom-flows/payments/moved.txt}"),
+                    String.valueOf(rewritten.get("contentDiff")));
+        } finally { publisher.close(); }
+    }
+
     @Test void sourceHistoryReturnsSafeDiffsAndStagesRestoreAsANewCurrentChangeSet() throws Exception {
         ChangeSetPublisher publisher=publisher(acceptingValidator(),allowingGate());
         try {

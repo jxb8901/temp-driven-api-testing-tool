@@ -895,7 +895,7 @@ public final class WorkerMain {
         att.testcase.TestCaseSuiteResolver resolver=new att.testcase.TestCaseSuiteResolver(
                 att.validation.SchemaFiles.resolve(root,"att-testcase-v1.schema.json"));
         att.testcase.TestCaseSuiteResolutionResult resolution=resolver.resolve(root,request.registeredPackageId,
-                effective.templatesRoot(),effective.testcasesRoot(),request.nativeSuiteDefinitionIds,
+                effective.flowRoot(),effective.templatesRoot(),effective.testcasesRoot(),request.nativeSuiteDefinitionIds,
                 request.nativeSuiteQualifiedCaseIds,request.nativeSuiteTags,request.nativeSuiteExcludeTags,
                 bool(request.nativeSuiteAll),()->Thread.currentThread().isInterrupted());
         if(resolution.truncated())throw new IllegalArgumentException("Native Suite selection is truncated; narrow the source before execution");

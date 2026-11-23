@@ -1126,7 +1126,7 @@ final class ChangeSetPublisher implements AutoCloseable {
                                           Map<String, String> expected, List<Diff> diffs, List<Move> moves) throws Exception {
         if (!PACKAGE_SOURCE.equals(scope.domain) || moves.isEmpty()) return;
         for (Move move : moves) {
-            if (isDescriptor(scope.root, move.source)) continue;
+            if (isDescriptor(scope.root, move.source, changes)) continue;
             List<String> descriptors = descriptorPaths(scope.root, changes);
             for (String descriptor : descriptors) {
                 byte[] current = candidateBytes(scope.root, changes, descriptor);
