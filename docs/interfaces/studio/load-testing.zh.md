@@ -118,4 +118,4 @@ LOAD 到達 terminal 狀態且授權的 artifact archive 已就緒後，**Correl
 
 Provenance 欄位會分開標示 LOAD target 和所選 workload，以及 SUT source、target、profile、metric、unit、collection window、effective step、可用 instance 數量、所選 sample 數量、sample coverage、最新所選 sample 時間及其相對於 requested collection-window end 的差距。Manifest 更新時間會與 sample 時間分開標示。選取 workload 不代表共享主機 CPU、JVM、database 或 MQ 數值屬於該 workload。圖表只供時間上的對照；時間重疊不代表因果關係、判定或根因。
 
-可部署的 4.3.1 Package-local 結構位於 [Package-local SUT Metrics 範例](../../../examples/package-local-sut-metrics/README.md)；現有定義的移轉方式請參閱[遷移指南](../../guides/sut-metrics-config-migration.zh.md)。較舊的 [`examples/load/sut-metrics/`](../../../examples/load/sut-metrics/) 檔案展示全域 v1 定義及 binding 格式。
+可部署的 4.3.1 Package-local 結構位於 [Package-local SUT Metrics 範例](../../../examples/package-local-sut-metrics/README.md)；現有定義的移轉方式請參閱[遷移指南](../../guides/sut-metrics-config-migration.zh.md)。舊的 Settings catalog 和 v1 composite profile 已封存在 [`examples/legacy/sut-metrics/`](../../../examples/legacy/sut-metrics/README.zh.md)。它們不會在 Settings 註冊，也不是目前的 LOAD 範例。

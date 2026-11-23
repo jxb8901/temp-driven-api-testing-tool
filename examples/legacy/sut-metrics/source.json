@@ -2,7 +2,7 @@
   "schemaVersion": "att-sut-metrics-source/v1",
   "id": "prom-main",
   "name": "Main Prometheus",
-  "url": "https://prometheus.example.internal",
+  "url": "https://prometheus.example.invalid",
   "apiPath": "/api/v1/query_range",
   "tls": { "verify": true },
   "auth": { "mode": "NONE" },
