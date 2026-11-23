@@ -48,6 +48,7 @@ The Quick Start is a current 4.3.1 workflow. Snapshot generation is explicit aut
 | Review schemas and versioned contracts | [Generated Reference Manual](reference.md) · [繁體中文 Reference](reference.zh.md) |
 | Build and package ATT | [CI and packaging operations](reference/ci-packaging-operations.md) |
 | Understand Engine execution flow | [Runtime execution design](system-design/runtime-execution.md) |
+| Compare legacy Stages with Native Flows | [Template–Flow–Stage compatibility matrix](system-design/template-flow-stage-compatibility.md) · [繁體中文版](system-design/template-flow-stage-compatibility.zh.md) |
 | Diagnose capacity limits and truncation | [Limits Reference](operations/limits-reference.md) · [繁體中文容量參考](operations/limits-reference.zh.md) · [Internal limits design](system-design/internal-limits-diagnostics.md) |
 | Design high-resolution LOAD history retention | [LOAD time-series retention follow-up for #299](system-design/load-time-series-retention.md) · [繁體中文設計](system-design/load-time-series-retention.zh.md) |
 

@@ -3,9 +3,10 @@
 - **狀態：** Proposed（提案中，尚未接受為已實作契約）
 - **日期：** 2026-11-20
 - **適用範圍：** ATT 下一代 Test Authoring；非 4.4.1 已發佈功能；本文定義的是提案，不表示可供目前 runtime 使用
-- **Native Case schema：** S01 凍結 `att-testcase/v1` 欄位與身份契約；resolution／execution 仍未實作
+- **Native Case schema：** att-testcase/v1 已啟用；S03 inline resolution 及 RUN 已在 4.5.0 development-candidate 線實作，部署驗收仍待完成
 - **相關工作：** [Issue #388](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/388)、[Source Management #233](https://github.com/jxb8901/temp-driven-api-testing-tool/issues/233)、[PR #386](https://github.com/jxb8901/temp-driven-api-testing-tool/pull/386)
 - **英文主文件：** [ADR-0001](0001-flow-centric-testcase-resolution.md)
+- **S10 相容性證據：** [Template–Flow–Stage 矩陣及 golden fixture](../system-design/template-flow-stage-compatibility.zh.md)
 
 > **架構決策：** Test Case Definition 綁定 Flow、Data Source 及 Resolution Rules；長期模型可解析出 **0..m 個 Resolved Test Cases**，但零案例必須在 RUN 前成為驗證錯誤。RUN／LOAD 對選定的 Cases 執行。**產生案例與執行案例是不同的生命週期。**
 
@@ -15,7 +16,7 @@
 
 目前 `att-flow/v3.6` 已具備有序 Actions 與巢狀 Flow；Debug 可利用 `att-debug/v1.2` 的 Input 獨立執行 Flow；LOAD 已能重複執行 Flow、Template、Tool Target。因此下一代模型應**重用 Flow**，而不是另外發明 Steps 執行語言。
 
-本文記錄架構方向及分階段實作範圍。S03 已在 4.5.0 開發候選版登錄 `att-testcase/v1`，並沿用既有 Flow infrastructure 實作 inline Definition discovery、resolution 和 RUN。Excel resolution、Testdata／Generator、LOAD target、Studio 編輯及 Debug interoperability 仍屬後續工作。
+本文記錄架構方向及分階段實作範圍。S03 已在 4.5.0 development candidate 登錄 att-testcase/v1，並沿用既有 Flow infrastructure 實作 inline Definition discovery、resolution 和 RUN；部署驗收仍待完成。S10/#398 加入配對相容性 fixture，並在[相容性矩陣](../system-design/template-flow-stage-compatibility.zh.md)記錄 Stage input、event 及 evidence 的已知差異。Excel resolution、Testdata／Generator、LOAD target、Studio 編輯及 Debug interoperability 仍屬後續工作。
 
 ## 決策
 
@@ -188,7 +189,7 @@ View／Validate／Preview 不可改動 Source、產生有副作用的 Legacy Sna
 
 **成本：** 需要新 Definition Schema、Resolver、穩定 ID 規則、擴展／容量限制、來源溯源、跨 RUN／LOAD／Debug 的兼容處理。
 
-現有 **XLSX + Sidecar + XML Snapshot**、多 Stage Case、Template Target、CLI、Job／Schedule、報告必須繼續可用。Stage 的 `required`、`runWhen`、`onFailure`、Scope／Input Overlay、Rollback／Cleanup 和 Nested Flow Scope **不能假設等同普通 Flow Action**。未驗證等價前應保留 Legacy Adapter／Execution Path。
+現有 **XLSX + Sidecar + XML Snapshot**、多 Stage Case、Template Target、CLI、Job／Schedule、報告必須繼續可用。Stage 的 required、runWhen、onFailure、Scope／Input Overlay、Rollback／Cleanup 和 Nested Flow Scope **不能假設等同普通 Flow Action**。S10 fixture 只證明一種明確的失敗／rollback／cleanup 對應方式，並揭示 Stage-only input overlay 和輸出結構差異。未驗證相容前應保留 Legacy Adapter／Execution Path。
 
 必須重用 4.4.1 的 Package Source／Change Sets／Validate／Review／Publish／Revision／History／Restore 及不可變 Job Source Snapshot，不另建平行發佈系統。
 
@@ -201,7 +202,7 @@ View／Validate／Preview 不可改動 Source、產生有副作用的 Legacy Sna
 3. Eager 與決定性 bounded/lazy Resolution，以及何時固定選定 Target 集合。
 4. 若跨 Definition 使用持久 Suite selection，其表示方式。
 5. 將已選 Case Target 映射到既有 LOAD workload/mix，同時保持直接 Flow／Template／Tool 行為。
-6. Stage scope/failure/cleanup 與 Flow Action 語義的精確兼容性，以及 Template 到 Flow 的轉換。
+6. Stage scope/failure/cleanup 與 Flow Action 語義的精確兼容性，以及 Template 到 Flow 的轉換（見[S10 矩陣](../system-design/template-flow-stage-compatibility.zh.md)）。
 7. Debug 轉換為 Case、敏感 input evidence 及可選 Excel report template 的細節。
 
 狀態保持 **Proposed**，待架構評審及首階段實作契約確定後才轉為 **Accepted**。
